@@ -9,5 +9,5 @@ cc_binary(
     name = "example_american_option",
     srcs = ["example_american_option.c"],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
-    deps = ["//src:pde_solver"],
+    deps = ["//src:american_option"],
 )
