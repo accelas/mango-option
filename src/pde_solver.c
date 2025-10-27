@@ -1,8 +1,8 @@
 #include "pde_solver.h"
+#include "pde_trace.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <stdio.h>
 
 // Apply boundary conditions
 static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
@@ -64,7 +64,7 @@ static void evaluate_spatial_operator(PDESolver *solver, double t, const double 
 // Solve implicit system: (I - coeff*dt*L)*u_new = rhs
 // Uses fixed-point iteration for nonlinear cases
 static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
-                               const double *rhs, double *u_new) {
+                               const double *rhs, double *u_new, size_t step) {
     const size_t n = solver->grid.n_points;
     const size_t max_iter = solver->trbdf2_config.max_iter;
     const double tol = solver->trbdf2_config.tolerance;
@@ -113,11 +113,18 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         // Use relative tolerance if norm is significant, otherwise absolute
         double rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
 
+        // Trace iteration progress
+        PDE_TRACE_IMPLICIT_ITER(step, iter, rel_error, tol);
+
         if (rel_error < tol || error < tol) {
+            // Trace successful convergence
+            PDE_TRACE_IMPLICIT_CONVERGED(step, iter, rel_error);
             return 0; // Success
         }
     }
 
+    // Trace convergence failure
+    PDE_TRACE_IMPLICIT_FAILED(step, t, max_iter);
     return -1; // Failed to converge
 }
 
@@ -236,7 +243,8 @@ void pde_solver_initialize(PDESolver *solver) {
     apply_boundary_conditions(solver, solver->time.t_start, solver->u_current);
 }
 
-int pde_solver_step(PDESolver *solver, double t_current) {
+// Internal version with step tracking for tracing
+static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t step) {
     const double dt = solver->time.dt;
     const double gamma = solver->trbdf2_config.gamma;
     const size_t n = solver->grid.n_points;
@@ -258,7 +266,7 @@ int pde_solver_step(PDESolver *solver, double t_current) {
 
     // Solve implicit equation for stage 1
     int status = solve_implicit_step(solver, t_current + gamma * dt,
-                                     gamma * dt / 2.0, solver->rhs, solver->u_stage);
+                                     gamma * dt / 2.0, solver->rhs, solver->u_stage, step);
     if (status != 0) {
         return status;
     }
@@ -279,7 +287,7 @@ int pde_solver_step(PDESolver *solver, double t_current) {
 
     // Solve implicit equation for stage 2
     status = solve_implicit_step(solver, t_current + dt, coeff,
-                                solver->rhs, solver->u_next);
+                                solver->rhs, solver->u_next, step);
 
     if (status == 0) {
         // Update current solution
@@ -289,27 +297,36 @@ int pde_solver_step(PDESolver *solver, double t_current) {
     return status;
 }
 
+int pde_solver_step(PDESolver *solver, double t_current) {
+    // Public API: call internal version with step=0 (not tracked)
+    return pde_solver_step_internal(solver, t_current, 0);
+}
+
 int pde_solver_solve(PDESolver *solver) {
     double t = solver->time.t_start;
 
-    printf("Starting PDE solve from t=%.6f to t=%.6f with dt=%.6f\n",
-           solver->time.t_start, solver->time.t_end, solver->time.dt);
+    // Trace solver start
+    PDE_TRACE_SOLVER_START(solver->time.t_start, solver->time.t_end,
+                           solver->time.dt, solver->time.n_steps);
 
     for (size_t step = 0; step < solver->time.n_steps; step++) {
-        int status = pde_solver_step(solver, t);
+        // Use internal version with step tracking for better tracing
+        int status = pde_solver_step_internal(solver, t, step);
         if (status != 0) {
-            fprintf(stderr, "Error: Failed to converge at step %zu, t=%.6f\n", step, t);
+            // Note: convergence failure already traced in solve_implicit_step
             return status;
         }
 
         t += solver->time.dt;
 
+        // Trace progress periodically (every 10%)
         if (step % (solver->time.n_steps / 10 + 1) == 0) {
-            printf("Progress: step %zu/%zu, t=%.6f\n", step, solver->time.n_steps, t);
+            PDE_TRACE_SOLVER_PROGRESS(step, solver->time.n_steps, t);
         }
     }
 
-    printf("PDE solve completed successfully.\n");
+    // Trace successful completion
+    PDE_TRACE_SOLVER_COMPLETE(solver->time.n_steps, t);
     return 0;
 }
 

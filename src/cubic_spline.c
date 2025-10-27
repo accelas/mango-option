@@ -1,7 +1,7 @@
 #include "cubic_spline.h"
 #include "tridiagonal.h"
+#include "pde_trace.h"
 #include <stdlib.h>
-#include <stdio.h>
 
 // Binary search to find interval containing x_eval
 static size_t find_interval(const double *x, size_t n, double x_eval) {
@@ -27,7 +27,8 @@ static size_t find_interval(const double *x, size_t n, double x_eval) {
 
 CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points) {
     if (n_points < 2) {
-        fprintf(stderr, "Error: Need at least 2 points for spline interpolation\n");
+        // Trace error condition
+        PDE_TRACE_SPLINE_ERROR(n_points, 2);
         return nullptr;
     }
 
