@@ -249,6 +249,9 @@ int main(void) {
     printf("\nExample 2: American Put Option (no dividends)\n");
     printf("----------------------------------------------\n");
 
+    // Create new grid (ownership was transferred to previous solver)
+    grid = pde_create_grid(-0.7, 0.7, 141);
+
     OptionData put_data = {
         .strike = 100.0,
         .volatility = 0.2,
@@ -277,7 +280,7 @@ int main(void) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership was transferred to last solver, no need to free
 
     printf("\nAll examples completed!\n");
     printf("\nNote: For American options:\n");

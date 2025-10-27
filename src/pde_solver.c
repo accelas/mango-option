@@ -192,17 +192,16 @@ BoundaryConfig pde_default_boundary_config(void) {
 
 // Core API
 
-PDESolver* pde_solver_create(const SpatialGrid *grid,
+PDESolver* pde_solver_create(SpatialGrid *grid,
                               const TimeDomain *time,
                               const BoundaryConfig *bc_config,
                               const TRBDF2Config *trbdf2_config,
                               const PDECallbacks *callbacks) {
     PDESolver *solver = malloc(sizeof(PDESolver));
 
-    // Copy grid (deep copy)
+    // Take ownership of grid (shallow copy, transfer ownership)
     solver->grid = *grid;
-    solver->grid.x = malloc(grid->n_points * sizeof(double));
-    memcpy(solver->grid.x, grid->x, grid->n_points * sizeof(double));
+    grid->x = nullptr;  // Prevent double-free, ownership transferred to solver
 
     solver->time = *time;
     solver->bc_config = *bc_config;

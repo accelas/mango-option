@@ -190,6 +190,9 @@ int main(void) {
     printf("\nExample 2: Heat equation with jump in diffusion coefficient\n");
     printf("-----------------------------------------------------------\n");
 
+    // Create new grid (ownership was transferred to previous solver)
+    grid = pde_create_grid(0.0, 1.0, 101);
+
     callbacks.spatial_operator = heat_spatial_operator_with_jump;
     callbacks.jump_condition = heat_jump_condition;
 
@@ -207,6 +210,9 @@ int main(void) {
     printf("\nExample 3: Heat equation with obstacle condition\n");
     printf("------------------------------------------------\n");
 
+    // Create new grid (ownership was transferred to previous solver)
+    grid = pde_create_grid(0.0, 1.0, 101);
+
     callbacks.spatial_operator = heat_spatial_operator;
     callbacks.jump_condition = nullptr;
     callbacks.obstacle = obstacle_condition;
@@ -220,7 +226,7 @@ int main(void) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership was transferred to first solver, no need to free
 
     printf("\nAll examples completed!\n");
     return 0;

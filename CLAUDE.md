@@ -103,7 +103,13 @@ Uses fixed-point iteration with under-relaxation (ω = 0.7) to solve implicit sy
 
 ### Memory Management
 
-Single workspace buffer allocation for optimal performance:
+**Ownership Transfer:**
+- `pde_solver_create()` takes ownership of the grid
+- After creation, `grid.x` is set to `nullptr` to prevent double-free
+- Grid is freed when `pde_solver_destroy()` is called
+- `pde_free_grid()` is only needed if grid is created but never passed to a solver
+
+**Single Workspace Buffer:**
 - All solver arrays allocated from one contiguous buffer (10n doubles)
 - 64-byte alignment for AVX-512 SIMD vectorization
 - Better cache locality with sequential memory layout
@@ -138,6 +144,31 @@ Natural cubic splines allow evaluation of solutions at arbitrary off-grid points
 3. Set up spatial grid and time domain
 4. Configure boundary conditions and TR-BDF2 parameters
 5. Create solver, initialize, and solve
+
+**Typical usage pattern:**
+```c
+// Create grid (will transfer ownership to solver)
+SpatialGrid grid = pde_create_grid(0.0, 1.0, 101);
+
+// Setup time domain and callbacks
+TimeDomain time = {/* ... */};
+PDECallbacks callbacks = {/* ... */};
+
+// Create solver (takes ownership of grid)
+PDESolver *solver = pde_solver_create(&grid, &time, &bc_config,
+                                      &trbdf2_config, &callbacks);
+
+pde_solver_initialize(solver);
+pde_solver_solve(solver);
+
+// Cleanup (frees both solver and grid)
+pde_solver_destroy(solver);
+// Note: No pde_free_grid() needed - ownership was transferred
+
+// For multiple solvers, create a new grid each time
+grid = pde_create_grid(0.0, 1.0, 101);
+solver = pde_solver_create(&grid, ...);  // Takes ownership again
+```
 
 See `examples/example_heat_equation.c` for complete examples including:
 - Basic heat equation
