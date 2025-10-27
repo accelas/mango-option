@@ -164,7 +164,8 @@ typedef struct {
     size_t n_points;      // Number of data points
     const double *x;      // Grid points (not owned)
     const double *y;      // Function values (not owned)
-    double *coeffs_a;     // Spline coefficients
+    double *workspace;    // Single buffer for all coefficients
+    double *coeffs_a;     // Spline coefficients (sliced from workspace)
     double *coeffs_b;
     double *coeffs_c;
     double *coeffs_d;
