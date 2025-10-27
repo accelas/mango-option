@@ -59,26 +59,32 @@ iv_calc/
 
 ## Core Architecture
 
-### Callback-Based Design
+### Callback-Based Design (Vectorized)
 
-The solver uses a callback architecture to maximize flexibility:
+The solver uses a vectorized callback architecture for maximum efficiency and flexibility. All callbacks operate on entire arrays to minimize function call overhead and enable SIMD vectorization.
 
-1. **Initial Condition**: `double (*)(double x, void *user_data)`
-   - Defines u(x, t=0)
+1. **Initial Condition**: `void (*)(const double *x, size_t n, double *u0, void *user_data)`
+   - Computes u(x, t=0) for all grid points
+   - Vectorized: processes entire array in one call
 
-2. **Boundary Conditions**: `double (*)(double t, void *user_data)`
-   - Supports Dirichlet, Neumann, and Robin boundary conditions
+2. **Boundary Conditions**: `double (*)(double t, void *user_data)` (scalar)
+   - Returns boundary value at time t
+   - Supports Dirichlet (u=g), Neumann (∂u/∂x=g), Robin (a·u + b·∂u/∂x=g)
    - Separate callbacks for left and right boundaries
 
-3. **Spatial Operator**: `double (*)(const double *x, double t, const double *u, size_t idx, size_t n_points, void *user_data)`
-   - Defines the spatial discretization L(u) in du/dt = L(u)
-   - User implements finite difference stencils
+3. **Spatial Operator**: `void (*)(const double *x, double t, const double *u, size_t n, double *Lu, void *user_data)`
+   - Computes L(u) for PDE ∂u/∂t = L(u)
+   - Vectorized: returns Lu for all grid points
+   - User implements finite difference stencils (e.g., ∂²u/∂x²)
 
 4. **Jump Condition** (optional): `bool (*)(double x, double *jump_value, void *user_data)`
    - Handles discontinuous coefficients at interfaces
+   - Scalar callback for interface location queries
 
-5. **Obstacle Condition** (optional): `double (*)(double x, double t, void *user_data)`
-   - Enforces u(x,t) >= ψ(x,t) for variational inequalities
+5. **Obstacle Condition** (optional): `void (*)(const double *x, double t, size_t n, double *ψ, void *user_data)`
+   - Computes obstacle ψ(x,t) for all grid points
+   - Enforces u(x,t) ≥ ψ(x,t) for variational inequalities
+   - Vectorized for efficiency
 
 ### TR-BDF2 Time Stepping
 
@@ -94,6 +100,27 @@ This scheme provides:
 ### Implicit Solver
 
 Uses fixed-point iteration with under-relaxation (ω = 0.7) to solve implicit systems. Convergence criteria use relative error with default tolerance of 1e-6.
+
+### Memory Management
+
+Single workspace buffer allocation for optimal performance:
+- All solver arrays allocated from one contiguous buffer (10n doubles)
+- 64-byte alignment for AVX-512 SIMD vectorization
+- Better cache locality with sequential memory layout
+- Zero malloc overhead during time stepping
+- Arrays: u_current, u_next, u_stage, rhs, matrix_{diag,upper,lower}, u_old, Lu, u_temp
+
+### SIMD Vectorization
+
+OpenMP SIMD pragmas on hot loops for automatic vectorization:
+```c
+#pragma omp simd
+for (size_t i = 1; i < n - 1; i++) {
+    Lu[i] = D * (u[i-1] - 2.0*u[i] + u[i+1]) / (dx*dx);
+}
+```
+
+Enables compiler to generate AVX2/AVX-512 instructions for parallel computation.
 
 ### Cubic Spline Interpolation
 
@@ -117,18 +144,33 @@ See `examples/example_heat_equation.c` for complete examples including:
 - Jump conditions (discontinuous diffusion coefficients)
 - Obstacle conditions (American option pricing)
 
-### Implementing Spatial Operators
+### Implementing Spatial Operators (Vectorized)
 
-For second-order spatial derivatives (e.g., diffusion):
+For second-order spatial derivatives (e.g., diffusion, ∂²u/∂x²):
 ```c
-// d²u/dx² using central differences
-double d2u_dx2 = (u[idx-1] - 2.0*u[idx] + u[idx+1]) / (dx*dx);
+// Vectorized heat equation: L(u) = D·∂²u/∂x²
+void heat_operator(const double *x, double t, const double *u,
+                   size_t n, double *Lu, void *user_data) {
+    const double dx = x[1] - x[0];
+    const double D = *(double*)user_data;
+    const double dx2_inv = 1.0 / (dx * dx);
+
+    Lu[0] = Lu[n-1] = 0.0;  // Boundaries
+
+    #pragma omp simd
+    for (size_t i = 1; i < n - 1; i++) {
+        Lu[i] = D * (u[i-1] - 2.0*u[i] + u[i+1]) * dx2_inv;
+    }
+}
 ```
 
-For first-order derivatives (e.g., advection):
+For first-order derivatives (e.g., advection, ∂u/∂x):
 ```c
-// du/dx using upwind scheme
-double du_dx = (u[idx] - u[idx-1]) / dx;  // for positive velocity
+// Vectorized advection: L(u) = -v·∂u/∂x (upwind for v > 0)
+#pragma omp simd
+for (size_t i = 1; i < n - 1; i++) {
+    Lu[i] = -velocity * (u[i] - u[i-1]) / dx;
+}
 ```
 
 ### Adding Tests

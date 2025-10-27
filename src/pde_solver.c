@@ -65,7 +65,8 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
 
     // Apply obstacle condition if provided
     if (solver->callbacks.obstacle != nullptr) {
-        double *psi = malloc(n * sizeof(double));
+        // Reuse workspace array for psi (no allocation overhead)
+        double *psi = solver->u_temp;
         solver->callbacks.obstacle(solver->grid.x, t, n, psi, solver->callbacks.user_data);
 
         for (size_t i = 0; i < n; i++) {
@@ -73,7 +74,6 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
                 u[i] = psi[i];
             }
         }
-        free(psi);
     }
 }
 
@@ -99,10 +99,10 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
     memcpy(u_new, rhs, n * sizeof(double));
     apply_boundary_conditions(solver, t, u_new);
 
-    // Fixed-point iteration with relaxation
-    double *u_old = malloc(n * sizeof(double));
-    double *Lu = malloc(n * sizeof(double));
-    double *u_temp = malloc(n * sizeof(double));
+    // Use pre-allocated workspace arrays (no malloc overhead)
+    double *u_old = solver->u_old;
+    double *Lu = solver->Lu;
+    double *u_temp = solver->u_temp;
     const double omega = 0.7;  // Relaxation parameter (under-relaxation)
 
     for (size_t iter = 0; iter < max_iter; iter++) {
@@ -112,11 +112,13 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         evaluate_spatial_operator(solver, t, u_old, Lu);
 
         // u_temp = rhs + coeff_dt * L(u_old)
+        #pragma omp simd
         for (size_t i = 0; i < n; i++) {
             u_temp[i] = rhs[i] + coeff_dt * Lu[i];
         }
 
         // Apply under-relaxation: u_new = omega * u_temp + (1-omega) * u_old
+        #pragma omp simd
         for (size_t i = 0; i < n; i++) {
             u_new[i] = omega * u_temp[i] + (1.0 - omega) * u_old[i];
         }
@@ -138,18 +140,10 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         double rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
 
         if (rel_error < tol || error < tol) {
-            free(u_old);
-            free(Lu);
-            free(u_temp);
             return 0; // Success
         }
     }
 
-    // If we get here, check if we're close enough
-    // Sometimes very small changes aren't converging but solution is reasonable
-    free(u_old);
-    free(Lu);
-    free(u_temp);
     return -1; // Failed to converge
 }
 
@@ -215,16 +209,38 @@ PDESolver* pde_solver_create(const SpatialGrid *grid,
     solver->trbdf2_config = *trbdf2_config;
     solver->callbacks = *callbacks;
 
-    // Allocate solution arrays
+    // Allocate single workspace buffer for all arrays (better cache locality)
+    // Need 10 arrays of size n:
+    //   - Solution: u_current, u_next, u_stage, rhs
+    //   - Matrix: matrix_diag, matrix_upper, matrix_lower
+    //   - Temps: u_old, Lu, u_temp
     const size_t n = grid->n_points;
-    solver->u_current = malloc(n * sizeof(double));
-    solver->u_next = malloc(n * sizeof(double));
-    solver->u_stage = malloc(n * sizeof(double));
-    solver->rhs = malloc(n * sizeof(double));
+    const size_t workspace_size = 10 * n;
 
-    solver->matrix_diag = malloc(n * sizeof(double));
-    solver->matrix_upper = malloc(n * sizeof(double));
-    solver->matrix_lower = malloc(n * sizeof(double));
+    // Use aligned allocation for SIMD vectorization (64-byte alignment for AVX-512)
+    // Each array starts at aligned boundary by padding n to alignment
+    const size_t alignment = 64;  // Cache line and AVX-512 alignment
+    const size_t n_aligned = ((n * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
+    const size_t workspace_aligned_size = 10 * n_aligned;
+
+    solver->workspace = aligned_alloc(alignment, workspace_aligned_size * sizeof(double));
+    if (solver->workspace == nullptr) {
+        // Fallback to regular malloc if aligned_alloc fails
+        solver->workspace = malloc(workspace_size * sizeof(double));
+    }
+
+    // Slice workspace into individual arrays (each aligned)
+    size_t offset = 0;
+    solver->u_current = solver->workspace + offset; offset += n_aligned;
+    solver->u_next = solver->workspace + offset; offset += n_aligned;
+    solver->u_stage = solver->workspace + offset; offset += n_aligned;
+    solver->rhs = solver->workspace + offset; offset += n_aligned;
+    solver->matrix_diag = solver->workspace + offset; offset += n_aligned;
+    solver->matrix_upper = solver->workspace + offset; offset += n_aligned;
+    solver->matrix_lower = solver->workspace + offset; offset += n_aligned;
+    solver->u_old = solver->workspace + offset; offset += n_aligned;
+    solver->Lu = solver->workspace + offset; offset += n_aligned;
+    solver->u_temp = solver->workspace + offset; offset += n_aligned;
 
     return solver;
 }
@@ -233,13 +249,7 @@ void pde_solver_destroy(PDESolver *solver) {
     if (solver == nullptr) return;
 
     pde_free_grid(&solver->grid);
-    free(solver->u_current);
-    free(solver->u_next);
-    free(solver->u_stage);
-    free(solver->rhs);
-    free(solver->matrix_diag);
-    free(solver->matrix_upper);
-    free(solver->matrix_lower);
+    free(solver->workspace);  // Single free for all arrays
     free(solver);
 }
 
@@ -259,14 +269,16 @@ int pde_solver_step(PDESolver *solver, double t_current) {
     const size_t n = solver->grid.n_points;
 
     // TR-BDF2 scheme
-    // Stage 1: Trapezoidal rule from t_n to t_n + gamma*dt
-    // u* = u^n + (gamma*dt/2) * [L(u^n) + L(u*)]
-    // Rearranging: u* - (gamma*dt/2)*L(u*) = u^n + (gamma*dt/2)*L(u^n)
+    // Stage 1: Trapezoidal rule from t_n to t_n + γ·dt
+    // u* = u^n + (γ·dt/2) · [L(u^n) + L(u*)]
+    // Rearranging: u* - (γ·dt/2)·L(u*) = u^n + (γ·dt/2)·L(u^n)
 
-    double *Lu_n = malloc(n * sizeof(double));
+    // Reuse workspace Lu array (no allocation overhead)
+    double *Lu_n = solver->Lu;
     evaluate_spatial_operator(solver, t_current, solver->u_current, Lu_n);
 
     // RHS for stage 1
+    #pragma omp simd
     for (size_t i = 0; i < n; i++) {
         solver->rhs[i] = solver->u_current[i] + (gamma * dt / 2.0) * Lu_n[i];
     }
@@ -275,18 +287,18 @@ int pde_solver_step(PDESolver *solver, double t_current) {
     int status = solve_implicit_step(solver, t_current + gamma * dt,
                                      gamma * dt / 2.0, solver->rhs, solver->u_stage);
     if (status != 0) {
-        free(Lu_n);
         return status;
     }
 
     // Stage 2: BDF2 from t_n to t_n+1
-    // (1+2*alpha) * u^{n+1} - (1+alpha)*u* + alpha*u^n = (1-alpha)*dt * L(u^{n+1})
-    // where alpha = 1 - gamma
+    // (1+2·α)·u^{n+1} - (1+α)·u* + α·u^n = (1-α)·dt·L(u^{n+1})
+    // where α = 1 - γ
 
     const double alpha = 1.0 - gamma;
     const double coeff = (1.0 - alpha) * dt / (1.0 + 2.0 * alpha);
 
     // RHS for stage 2
+    #pragma omp simd
     for (size_t i = 0; i < n; i++) {
         solver->rhs[i] = ((1.0 + alpha) * solver->u_stage[i] - alpha * solver->u_current[i]) /
                         (1.0 + 2.0 * alpha);
@@ -295,8 +307,6 @@ int pde_solver_step(PDESolver *solver, double t_current) {
     // Solve implicit equation for stage 2
     status = solve_implicit_step(solver, t_current + dt, coeff,
                                 solver->rhs, solver->u_next);
-
-    free(Lu_n);
 
     if (status == 0) {
         // Update current solution

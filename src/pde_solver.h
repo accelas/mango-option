@@ -95,16 +95,24 @@ struct PDESolver {
     TRBDF2Config trbdf2_config;
     PDECallbacks callbacks;
 
-    // Solution storage
+    // Single workspace buffer for all arrays (better cache locality)
+    double *workspace;
+
+    // Solution storage (sliced from workspace)
     double *u_current;    // u^n
     double *u_next;       // u^{n+1}
     double *u_stage;      // Intermediate stage for TR-BDF2
     double *rhs;          // Right-hand side vector
 
-    // Working arrays for linear system
+    // Working arrays for linear system (sliced from workspace)
     double *matrix_diag;
     double *matrix_upper;
     double *matrix_lower;
+
+    // Temporary arrays for implicit solver (sliced from workspace)
+    double *u_old;        // Previous iteration in fixed-point
+    double *Lu;           // Spatial operator result
+    double *u_temp;       // Temporary for relaxation
 };
 
 // Core API functions

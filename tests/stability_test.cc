@@ -26,17 +26,17 @@ struct AdvectionData {
 
 // Stiff reaction-diffusion: du/dt = D*d²u/dx² - k*u
 static void stiff_initial(const double *x, size_t n_points,
-                         double *u0, void *user_data) {
+                         double *u0, [[maybe_unused]] void *user_data) {
     for (size_t i = 0; i < n_points; i++) {
         u0[i] = std::sin(M_PI * x[i]);
     }
 }
 
-static double zero_bc(double t, void *user_data) {
+static double zero_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
-static void stiff_operator(const double *x, double t, const double *u,
+static void stiff_operator(const double *x, [[maybe_unused]] double t, const double *u,
                           size_t n_points, double *Lu, void *user_data) {
     StiffData *data = static_cast<StiffData*>(user_data);
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
@@ -203,18 +203,18 @@ TEST_F(StabilityTest, MaximumPrinciple) {
 
 // Test 4: Mass conservation for closed system
 static void conservation_initial(const double *x, size_t n_points,
-                                double *u0, void *user_data) {
+                                double *u0, [[maybe_unused]] void *user_data) {
     for (size_t i = 0; i < n_points; i++) {
         u0[i] = std::exp(-50.0 * std::pow(x[i] - 0.5, 2));
     }
 }
 
-static double neumann_zero(double t, void *user_data) {
+static double neumann_zero([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;  // Zero flux
 }
 
-static void diffusion_only(const double *x, double t, const double *u,
-                           size_t n_points, double *Lu, void *user_data) {
+static void diffusion_only(const double *x, [[maybe_unused]] double t, const double *u,
+                           size_t n_points, double *Lu, [[maybe_unused]] void *user_data) {
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
     const double dx2_inv = 1.0 / (dx * dx);
 
@@ -341,7 +341,7 @@ TEST_F(StabilityTest, NonNegativityPreservation) {
 
     // Start with non-negative initial condition
     auto nonneg_initial = [](const double *x, size_t n_points,
-                            double *u0, void *user_data) -> void {
+                            double *u0, [[maybe_unused]] void *user_data) -> void {
         for (size_t i = 0; i < n_points; i++) {
             u0[i] = std::exp(-10.0 * std::pow(x[i] - 0.5, 2));
         }

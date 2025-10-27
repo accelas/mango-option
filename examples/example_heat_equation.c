@@ -14,7 +14,7 @@ typedef struct {
 
 // Initial condition: Gaussian profile (vectorized)
 static void heat_initial_condition(const double *x, size_t n_points,
-                                   double *u0, void *user_data) {
+                                   double *u0, [[maybe_unused]] void *user_data) {
     const double x0 = 0.5;
     const double sigma = 0.1;
 
@@ -24,18 +24,18 @@ static void heat_initial_condition(const double *x, size_t n_points,
 }
 
 // Left boundary: u(0, t) = 0
-static double heat_left_boundary(double t, void *user_data) {
+static double heat_left_boundary([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
 // Right boundary: u(1, t) = 0
-static double heat_right_boundary(double t, void *user_data) {
+static double heat_right_boundary([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
 // Spatial operator for heat equation: D * d²u/dx² (vectorized)
 // Using central finite differences: (u[i-1] - 2*u[i] + u[i+1]) / dx²
-static void heat_spatial_operator(const double *x, double t, const double *u,
+static void heat_spatial_operator(const double *x, [[maybe_unused]] double t, const double *u,
                                   size_t n_points, double *Lu, void *user_data) {
     HeatEquationData *data = (HeatEquationData *)user_data;
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
@@ -46,7 +46,8 @@ static void heat_spatial_operator(const double *x, double t, const double *u,
     Lu[0] = 0.0;
     Lu[n_points - 1] = 0.0;
 
-    // Interior points - vectorized computation
+    // Interior points - vectorized computation with SIMD
+    #pragma omp simd
     for (size_t i = 1; i < n_points - 1; i++) {
         double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
         Lu[i] = D * d2u_dx2;
@@ -54,7 +55,7 @@ static void heat_spatial_operator(const double *x, double t, const double *u,
 }
 
 // Example 2: Jump condition - different diffusion coefficients (vectorized)
-static void heat_spatial_operator_with_jump(const double *x, double t, const double *u,
+static void heat_spatial_operator_with_jump(const double *x, [[maybe_unused]] double t, const double *u,
                                             size_t n_points, double *Lu, void *user_data) {
     HeatEquationData *data = (HeatEquationData *)user_data;
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
@@ -92,8 +93,8 @@ static bool heat_jump_condition(double x, double *jump_value, void *user_data) {
 }
 
 // Example 3: Obstacle condition (American option pricing) (vectorized)
-static void obstacle_condition(const double *x, double t, size_t n_points,
-                              double *psi, void *user_data) {
+static void obstacle_condition(const double *x, [[maybe_unused]] double t, size_t n_points,
+                              double *psi, [[maybe_unused]] void *user_data) {
     // Example: minimum value is the payoff function max(x - 0.5, 0)
     for (size_t i = 0; i < n_points; i++) {
         psi[i] = fmax(x[i] - 0.5, 0.0);
