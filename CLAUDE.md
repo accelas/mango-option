@@ -272,36 +272,42 @@ Use USDT probes for:
 
 ### Available Probe Categories
 
-See `src/pde_trace.h` for complete probe definitions:
+See `src/ivcalc_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
 
-1. **Solver Lifecycle**: `PDE_TRACE_SOLVER_START`, `PDE_TRACE_SOLVER_PROGRESS`, `PDE_TRACE_SOLVER_COMPLETE`
-2. **Convergence**: `PDE_TRACE_IMPLICIT_ITER`, `PDE_TRACE_IMPLICIT_CONVERGED`, `PDE_TRACE_IMPLICIT_FAILED`
-3. **Errors**: `PDE_TRACE_SPLINE_ERROR`
-4. **Performance**: `PDE_TRACE_STEP_START`, `PDE_TRACE_STEP_END`, `PDE_TRACE_SPATIAL_OP_START`, `PDE_TRACE_SPATIAL_OP_END`
+1. **Algorithm Lifecycle** (General): `IVCALC_TRACE_ALGO_START`, `IVCALC_TRACE_ALGO_PROGRESS`, `IVCALC_TRACE_ALGO_COMPLETE`
+2. **Convergence Tracking** (General): `IVCALC_TRACE_CONVERGENCE_ITER`, `IVCALC_TRACE_CONVERGENCE_SUCCESS`, `IVCALC_TRACE_CONVERGENCE_FAILED`
+3. **Validation/Errors** (General): `IVCALC_TRACE_VALIDATION_ERROR`, `IVCALC_TRACE_RUNTIME_ERROR`
+4. **PDE Solver**: `IVCALC_TRACE_PDE_START`, `IVCALC_TRACE_PDE_PROGRESS`, `IVCALC_TRACE_PDE_COMPLETE`, etc.
+5. **Implied Volatility**: `IVCALC_TRACE_IV_START`, `IVCALC_TRACE_IV_COMPLETE`, `IVCALC_TRACE_IV_VALIDATION_ERROR`
+6. **American Options**: `IVCALC_TRACE_OPTION_START`, `IVCALC_TRACE_OPTION_COMPLETE`
+7. **Brent's Method**: `IVCALC_TRACE_BRENT_START`, `IVCALC_TRACE_BRENT_ITER`, `IVCALC_TRACE_BRENT_COMPLETE`
+8. **Cubic Spline**: `IVCALC_TRACE_SPLINE_ERROR`
+
+Each module has access to both general-purpose probes (for common patterns like convergence) and module-specific probes.
 
 ### Adding New USDT Probes
 
 When adding new library functionality that needs logging:
 
-1. **Define probe in `src/pde_trace.h`**:
+1. **Define probe in `src/ivcalc_trace.h`**:
    ```c
-   #define PDE_TRACE_MY_EVENT(param1, param2) \
-       DTRACE_PROBE2(PDE_PROVIDER, my_event, param1, param2)
+   #define IVCALC_TRACE_MY_EVENT(module_id, param1, param2) \
+       DTRACE_PROBE3(IVCALC_PROVIDER, my_event, module_id, param1, param2)
    ```
 
-2. **Document probe in `src/pde_trace.d`**:
+2. **Document probe in `src/ivcalc_trace.d`**:
    ```c
    /* Fired when my event occurs */
-   probe my_event(type1 param1, type2 param2);
+   probe my_event(int module_id, double param1, double param2);
    ```
 
 3. **Use probe in source code**:
    ```c
-   #include "pde_trace.h"
+   #include "ivcalc_trace.h"
 
    void my_function() {
        // ... code ...
-       PDE_TRACE_MY_EVENT(value1, value2);
+       IVCALC_TRACE_MY_EVENT(MODULE_MY_MODULE, value1, value2);
        // ... more code ...
    }
    ```
@@ -313,26 +319,37 @@ When adding new library functionality that needs logging:
 Standard build (probes are no-ops):
 ```bash
 bazel build //src:pde_solver
+bazel build //src:american_option
+bazel build //src:implied_volatility
 ```
 
 USDT-enabled build (requires systemtap-sdt-dev):
 ```bash
 bazel build //src:pde_solver_usdt
+bazel build //src:american_option_usdt
+bazel build //src:implied_volatility_usdt
 ```
 
 ### Tracing Examples
 
-Monitor solver execution:
+Monitor all algorithms across the library:
 ```bash
-sudo bpftrace -e 'usdt:./example:pde:solver_start {
-    printf("Solver starting: t=[%f, %f], dt=%f\n", arg0, arg1, arg2);
+sudo bpftrace -e 'usdt:./lib*.so:ivcalc:algo_start {
+    printf("Module %d starting\n", arg0);
 }'
 ```
 
-Detect convergence failures:
+Track convergence across all modules:
 ```bash
-sudo bpftrace -e 'usdt:./example:pde:implicit_failed {
-    printf("Convergence failure at step %d, t=%f\n", arg0, arg1);
+sudo bpftrace -e 'usdt:./lib*.so:ivcalc:convergence_failed {
+    printf("Module %d: convergence failure at step %d\n", arg0, arg1);
+}'
+```
+
+Monitor implied volatility calculations:
+```bash
+sudo bpftrace -e 'usdt:./lib*.so:ivcalc:iv_complete {
+    printf("IV=%.4f, iterations=%d, converged=%d\n", arg0, arg1, arg2);
 }'
 ```
 

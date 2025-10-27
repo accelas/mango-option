@@ -1,5 +1,5 @@
 #include "pde_solver.h"
-#include "pde_trace.h"
+#include "ivcalc_trace.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -114,17 +114,17 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         double rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
 
         // Trace iteration progress
-        PDE_TRACE_IMPLICIT_ITER(step, iter, rel_error, tol);
+        IVCALC_TRACE_PDE_IMPLICIT_ITER(step, iter, rel_error, tol);
 
         if (rel_error < tol || error < tol) {
             // Trace successful convergence
-            PDE_TRACE_IMPLICIT_CONVERGED(step, iter, rel_error);
+            IVCALC_TRACE_PDE_IMPLICIT_CONVERGED(step, iter, rel_error);
             return 0; // Success
         }
     }
 
     // Trace convergence failure
-    PDE_TRACE_IMPLICIT_FAILED(step, t, max_iter);
+    IVCALC_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, rel_error);
     return -1; // Failed to converge
 }
 
@@ -306,7 +306,7 @@ int pde_solver_solve(PDESolver *solver) {
     double t = solver->time.t_start;
 
     // Trace solver start
-    PDE_TRACE_SOLVER_START(solver->time.t_start, solver->time.t_end,
+    IVCALC_TRACE_PDE_START(solver->time.t_start, solver->time.t_end,
                            solver->time.dt, solver->time.n_steps);
 
     for (size_t step = 0; step < solver->time.n_steps; step++) {
@@ -321,12 +321,12 @@ int pde_solver_solve(PDESolver *solver) {
 
         // Trace progress periodically (every 10%)
         if (step % (solver->time.n_steps / 10 + 1) == 0) {
-            PDE_TRACE_SOLVER_PROGRESS(step, solver->time.n_steps, t);
+            IVCALC_TRACE_PDE_PROGRESS(step, solver->time.n_steps, t);
         }
     }
 
     // Trace successful completion
-    PDE_TRACE_SOLVER_COMPLETE(solver->time.n_steps, t);
+    IVCALC_TRACE_PDE_COMPLETE(solver->time.n_steps, t);
     return 0;
 }
 
