@@ -1,0 +1,7 @@
+cc_library(
+    name = "pde_solver",
+    srcs = ["pde_solver.c"],
+    hdrs = ["pde_solver.h"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    visibility = ["//visibility:public"],
+)

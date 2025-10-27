@@ -1,0 +1,6 @@
+cc_binary(
+    name = "example_heat_equation",
+    srcs = ["example_heat_equation.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra"],
+    deps = ["//src:pde_solver"],
+)

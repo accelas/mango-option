@@ -1,0 +1,29 @@
+cc_test(
+    name = "pde_solver_test",
+    srcs = ["pde_solver_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "cubic_spline_test",
+    srcs = ["cubic_spline_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "stability_test",
+    srcs = ["stability_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+)
