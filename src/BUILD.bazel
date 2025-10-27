@@ -1,7 +1,16 @@
 cc_library(
+    name = "cubic_spline",
+    srcs = ["cubic_spline.c"],
+    hdrs = ["cubic_spline.h", "tridiagonal.h"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pde_solver",
     srcs = ["pde_solver.c"],
     hdrs = ["pde_solver.h"],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
+    deps = [":cubic_spline"],
     visibility = ["//visibility:public"],
 )
