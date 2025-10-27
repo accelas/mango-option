@@ -135,7 +135,7 @@ TEST_F(PDESolverTest, SteadyStateConvergence) {
     EXPECT_LT(max_error, 0.01);
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test data for heat equation
@@ -228,7 +228,7 @@ TEST_F(PDESolverTest, HeatEquationProperties) {
     EXPECT_NEAR(u[grid.n_points - 1], 0.0, 1e-10);
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test obstacle condition
@@ -279,7 +279,7 @@ TEST_F(PDESolverTest, ObstacleCondition) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 int main(int argc, char **argv) {

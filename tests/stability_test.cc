@@ -97,7 +97,7 @@ TEST_F(StabilityTest, StiffEquationStability) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test 2: Fine grid stability
@@ -143,7 +143,7 @@ TEST_F(StabilityTest, FineGridStability) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test 3: Maximum principle for heat equation
@@ -198,7 +198,7 @@ TEST_F(StabilityTest, MaximumPrinciple) {
     EXPECT_LE(max_final, max_initial + 1e-10);
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test 4: Mass conservation for closed system
@@ -285,7 +285,7 @@ TEST_F(StabilityTest, MassConservation) {
     EXPECT_NEAR(mass_final / mass_initial, 1.0, 0.01);
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test 5: Long-time stability
@@ -332,7 +332,7 @@ TEST_F(StabilityTest, LongTimeStability) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test 6: Non-negative preservation for suitable problems
@@ -385,7 +385,7 @@ TEST_F(StabilityTest, NonNegativityPreservation) {
     }
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 // Test 7: Convergence iteration test
@@ -426,7 +426,7 @@ TEST_F(StabilityTest, ConvergenceIterations) {
     EXPECT_EQ(status, 0);
 
     pde_solver_destroy(solver);
-    pde_free_grid(&grid);
+    // Note: grid ownership transferred to solver
 }
 
 int main(int argc, char **argv) {

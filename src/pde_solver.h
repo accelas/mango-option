@@ -118,7 +118,8 @@ struct PDESolver {
 // Core API functions
 
 // Create and initialize solver
-PDESolver* pde_solver_create(const SpatialGrid *grid,
+// Note: Takes ownership of grid - grid.x will be set to nullptr after this call
+PDESolver* pde_solver_create(SpatialGrid *grid,
                               const TimeDomain *time,
                               const BoundaryConfig *bc_config,
                               const TRBDF2Config *trbdf2_config,
