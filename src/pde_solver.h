@@ -32,25 +32,32 @@ typedef struct {
 typedef struct PDESolver PDESolver;
 typedef struct PDECallbacks PDECallbacks;
 
-// Callback function types
-// Initial condition: u(x, t=0)
-typedef double (*InitialConditionFunc)(double x, void *user_data);
+// Callback function types - All callbacks operate on entire vectors for efficiency
+
+// Initial condition: u(x, t=0) for all grid points
+// Parameters: x (grid points), n_points (grid size), u0 (output array), user_data
+typedef void (*InitialConditionFunc)(const double *x, size_t n_points,
+                                     double *u0, void *user_data);
 
 // Boundary condition: value at boundary for time t
 typedef double (*BoundaryConditionFunc)(double t, void *user_data);
 
 // Spatial operator: L(u) in the PDE du/dt = L(u)
-// Computes the spatial discretization at interior points
-// Parameters: x, t, u (solution array), idx (current point), user_data
-typedef double (*SpatialOperatorFunc)(const double *x, double t, const double *u,
-                                      size_t idx, size_t n_points, void *user_data);
+// Computes the spatial discretization for all points
+// Parameters: x (grid), t (time), u (solution), n_points (size),
+//             Lu (output array), user_data
+typedef void (*SpatialOperatorFunc)(const double *x, double t, const double *u,
+                                    size_t n_points, double *Lu, void *user_data);
 
 // Jump condition: for discontinuous coefficients at interfaces
 // Returns true if there's a jump at position x, and sets jump value
 typedef bool (*JumpConditionFunc)(double x, double *jump_value, void *user_data);
 
 // Obstacle condition: u(x,t) >= psi(x,t) for variational inequalities
-typedef double (*ObstacleFunc)(double x, double t, void *user_data);
+// Computes obstacle values for all grid points
+// Parameters: x (grid), t (time), n_points (size), psi (output), user_data
+typedef void (*ObstacleFunc)(const double *x, double t, size_t n_points,
+                             double *psi, void *user_data);
 
 // Callback structure
 struct PDECallbacks {

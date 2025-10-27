@@ -56,8 +56,11 @@ struct SteadyStateData {
 // Steady state: d²u/dx² = u - 1, with u(0)=u(1)=0
 // Analytical solution: u(x) = 1 - sinh(x)/sinh(1)
 
-static double steady_initial(double x, void *user_data) {
-    return 0.0; // Start from zero
+static void steady_initial(const double *x, size_t n_points,
+                          double *u0, void *user_data) {
+    for (size_t i = 0; i < n_points; i++) {
+        u0[i] = 0.0; // Start from zero
+    }
 }
 
 static double steady_left_bc(double t, void *user_data) {
@@ -68,17 +71,19 @@ static double steady_right_bc(double t, void *user_data) {
     return 0.0;
 }
 
-static double steady_spatial_op(const double *x, double t, const double *u,
-                               size_t idx, size_t n_points, void *user_data) {
-    if (idx == 0 || idx == n_points - 1) {
-        return 0.0;
-    }
-
+static void steady_spatial_op(const double *x, double t, const double *u,
+                              size_t n_points, double *Lu, void *user_data) {
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
-    double d2u_dx2 = (u[idx - 1] - 2.0 * u[idx] + u[idx + 1]) / (dx * dx);
+    const double dx2_inv = 1.0 / (dx * dx);
+
+    Lu[0] = 0.0;
+    Lu[n_points - 1] = 0.0;
 
     // du/dt = d²u/dx² - u + 1
-    return d2u_dx2 - u[idx] + 1.0;
+    for (size_t i = 1; i < n_points - 1; i++) {
+        double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
+        Lu[i] = d2u_dx2 - u[i] + 1.0;
+    }
 }
 
 // Test steady-state convergence
@@ -138,26 +143,31 @@ struct HeatData {
     double diffusion;
 };
 
-static double heat_initial(double x, void *user_data) {
+static void heat_initial(const double *x, size_t n_points,
+                        double *u0, void *user_data) {
     // Gaussian initial condition
-    return std::exp(-std::pow(x - 0.5, 2) / 0.02);
+    for (size_t i = 0; i < n_points; i++) {
+        u0[i] = std::exp(-std::pow(x[i] - 0.5, 2) / 0.02);
+    }
 }
 
 static double heat_zero_bc(double t, void *user_data) {
     return 0.0;
 }
 
-static double heat_diffusion_op(const double *x, double t, const double *u,
-                                size_t idx, size_t n_points, void *user_data) {
-    if (idx == 0 || idx == n_points - 1) {
-        return 0.0;
-    }
-
+static void heat_diffusion_op(const double *x, double t, const double *u,
+                              size_t n_points, double *Lu, void *user_data) {
     HeatData *data = static_cast<HeatData*>(user_data);
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
-    double d2u_dx2 = (u[idx - 1] - 2.0 * u[idx] + u[idx + 1]) / (dx * dx);
+    const double dx2_inv = 1.0 / (dx * dx);
 
-    return data->diffusion * d2u_dx2;
+    Lu[0] = 0.0;
+    Lu[n_points - 1] = 0.0;
+
+    for (size_t i = 1; i < n_points - 1; i++) {
+        double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
+        Lu[i] = data->diffusion * d2u_dx2;
+    }
 }
 
 // Test heat equation properties
@@ -222,8 +232,11 @@ TEST_F(PDESolverTest, HeatEquationProperties) {
 }
 
 // Test obstacle condition
-static double obstacle_func(double x, double t, void *user_data) {
-    return 0.2; // Minimum value
+static void obstacle_func(const double *x, double t, size_t n_points,
+                         double *psi, void *user_data) {
+    for (size_t i = 0; i < n_points; i++) {
+        psi[i] = 0.2; // Minimum value
+    }
 }
 
 TEST_F(PDESolverTest, ObstacleCondition) {

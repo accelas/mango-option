@@ -25,28 +25,31 @@ struct AdvectionData {
 };
 
 // Stiff reaction-diffusion: du/dt = D*d²u/dx² - k*u
-static double stiff_initial(double x, void *user_data) {
-    return std::sin(M_PI * x);
+static void stiff_initial(const double *x, size_t n_points,
+                         double *u0, void *user_data) {
+    for (size_t i = 0; i < n_points; i++) {
+        u0[i] = std::sin(M_PI * x[i]);
+    }
 }
 
 static double zero_bc(double t, void *user_data) {
     return 0.0;
 }
 
-static double stiff_operator(const double *x, double t, const double *u,
-                             size_t idx, size_t n_points, void *user_data) {
-    if (idx == 0 || idx == n_points - 1) {
-        return 0.0;
-    }
-
+static void stiff_operator(const double *x, double t, const double *u,
+                          size_t n_points, double *Lu, void *user_data) {
     StiffData *data = static_cast<StiffData*>(user_data);
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
+    const double dx2_inv = 1.0 / (dx * dx);
 
-    // Diffusion term
-    double d2u_dx2 = (u[idx - 1] - 2.0 * u[idx] + u[idx + 1]) / (dx * dx);
+    Lu[0] = 0.0;
+    Lu[n_points - 1] = 0.0;
 
-    // Reaction term
-    return data->diffusion * d2u_dx2 - data->reaction_rate * u[idx];
+    // Diffusion + reaction terms
+    for (size_t i = 1; i < n_points - 1; i++) {
+        double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
+        Lu[i] = data->diffusion * d2u_dx2 - data->reaction_rate * u[i];
+    }
 }
 
 // Test 1: Stiff equation stability
@@ -199,24 +202,29 @@ TEST_F(StabilityTest, MaximumPrinciple) {
 }
 
 // Test 4: Mass conservation for closed system
-static double conservation_initial(double x, void *user_data) {
-    return std::exp(-50.0 * std::pow(x - 0.5, 2));
+static void conservation_initial(const double *x, size_t n_points,
+                                double *u0, void *user_data) {
+    for (size_t i = 0; i < n_points; i++) {
+        u0[i] = std::exp(-50.0 * std::pow(x[i] - 0.5, 2));
+    }
 }
 
 static double neumann_zero(double t, void *user_data) {
     return 0.0;  // Zero flux
 }
 
-static double diffusion_only(const double *x, double t, const double *u,
-                             size_t idx, size_t n_points, void *user_data) {
-    if (idx == 0 || idx == n_points - 1) {
-        return 0.0;
-    }
-
+static void diffusion_only(const double *x, double t, const double *u,
+                           size_t n_points, double *Lu, void *user_data) {
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
-    double d2u_dx2 = (u[idx - 1] - 2.0 * u[idx] + u[idx + 1]) / (dx * dx);
+    const double dx2_inv = 1.0 / (dx * dx);
 
-    return 0.1 * d2u_dx2;
+    Lu[0] = 0.0;
+    Lu[n_points - 1] = 0.0;
+
+    for (size_t i = 1; i < n_points - 1; i++) {
+        double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
+        Lu[i] = 0.1 * d2u_dx2;
+    }
 }
 
 TEST_F(StabilityTest, MassConservation) {
@@ -332,8 +340,11 @@ TEST_F(StabilityTest, NonNegativityPreservation) {
     StiffData data = {0.1, 0.5};
 
     // Start with non-negative initial condition
-    auto nonneg_initial = [](double x, void *user_data) -> double {
-        return std::exp(-10.0 * std::pow(x - 0.5, 2));
+    auto nonneg_initial = [](const double *x, size_t n_points,
+                            double *u0, void *user_data) -> void {
+        for (size_t i = 0; i < n_points; i++) {
+            u0[i] = std::exp(-10.0 * std::pow(x[i] - 0.5, 2));
+        }
     };
 
     SpatialGrid grid = pde_create_grid(0.0, 1.0, 51);
