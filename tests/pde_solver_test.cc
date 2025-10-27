@@ -56,23 +56,23 @@ struct SteadyStateData {
 // Steady state: d²u/dx² = u - 1, with u(0)=u(1)=0
 // Analytical solution: u(x) = 1 - sinh(x)/sinh(1)
 
-static void steady_initial(const double *x, size_t n_points,
-                          double *u0, void *user_data) {
+static void steady_initial([[maybe_unused]] const double *x, size_t n_points,
+                          double *u0, [[maybe_unused]] void *user_data) {
     for (size_t i = 0; i < n_points; i++) {
         u0[i] = 0.0; // Start from zero
     }
 }
 
-static double steady_left_bc(double t, void *user_data) {
+static double steady_left_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
-static double steady_right_bc(double t, void *user_data) {
+static double steady_right_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
-static void steady_spatial_op(const double *x, double t, const double *u,
-                              size_t n_points, double *Lu, void *user_data) {
+static void steady_spatial_op(const double *x, [[maybe_unused]] double t, const double *u,
+                              size_t n_points, double *Lu, [[maybe_unused]] void *user_data) {
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
     const double dx2_inv = 1.0 / (dx * dx);
 
@@ -144,18 +144,18 @@ struct HeatData {
 };
 
 static void heat_initial(const double *x, size_t n_points,
-                        double *u0, void *user_data) {
+                        double *u0, [[maybe_unused]] void *user_data) {
     // Gaussian initial condition
     for (size_t i = 0; i < n_points; i++) {
         u0[i] = std::exp(-std::pow(x[i] - 0.5, 2) / 0.02);
     }
 }
 
-static double heat_zero_bc(double t, void *user_data) {
+static double heat_zero_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
-static void heat_diffusion_op(const double *x, double t, const double *u,
+static void heat_diffusion_op(const double *x, [[maybe_unused]] double t, const double *u,
                               size_t n_points, double *Lu, void *user_data) {
     HeatData *data = static_cast<HeatData*>(user_data);
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
@@ -232,8 +232,8 @@ TEST_F(PDESolverTest, HeatEquationProperties) {
 }
 
 // Test obstacle condition
-static void obstacle_func(const double *x, double t, size_t n_points,
-                         double *psi, void *user_data) {
+static void obstacle_func([[maybe_unused]] const double *x, [[maybe_unused]] double t, size_t n_points,
+                         double *psi, [[maybe_unused]] void *user_data) {
     for (size_t i = 0; i < n_points; i++) {
         psi[i] = 0.2; // Minimum value
     }
