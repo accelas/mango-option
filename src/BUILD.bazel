@@ -23,3 +23,11 @@ cc_library(
     deps = [":pde_solver"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "implied_volatility",
+    srcs = ["implied_volatility.c"],
+    hdrs = ["implied_volatility.h", "brent.h"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    visibility = ["//visibility:public"],
+)
