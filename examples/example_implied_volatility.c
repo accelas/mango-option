@@ -4,6 +4,9 @@
 
 int main(void) {
     printf("=== Implied Volatility Calculator Example ===\n\n");
+    printf("NOTE: All examples use implied_volatility_calculate_simple() which\n");
+    printf("      automatically determines sensible bounds for the volatility search.\n");
+    printf("      Lower bound: 0.0001 (0.01%%), Upper bound: heuristic based on market price\n\n");
 
     // Example 1: ATM Call Option
     printf("Example 1: At-The-Money Call Option\n");

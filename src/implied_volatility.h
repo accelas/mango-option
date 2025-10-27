@@ -45,8 +45,11 @@ IVResult implied_volatility_calculate(const IVParams *params,
                                      double tolerance,
                                      int max_iter);
 
-// Convenience function with default parameters
-// Searches volatility in range [0.01, 5.0] with tolerance 1e-6
+// Convenience function with automatic bound determination
+// Automatically determines sensible search bounds based on:
+//   - Lower bound: 0.0001 (0.01% volatility)
+//   - Upper bound: Heuristic based on market price and time value
+// Uses tolerance 1e-6 and max 100 iterations
 IVResult implied_volatility_calculate_simple(const IVParams *params);
 
 // Black-Scholes option pricing (used internally and exposed for testing)
