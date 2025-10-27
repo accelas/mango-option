@@ -27,3 +27,44 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "brent_test",
+    srcs = ["brent_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:implied_volatility",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "implied_volatility_test",
+    srcs = ["implied_volatility_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:implied_volatility",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "tridiagonal_test",
+    srcs = ["tridiagonal_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:cubic_spline",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "american_option_test",
+    srcs = ["american_option_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:american_option",
+        "//src:implied_volatility",
+        "@googletest//:gtest_main",
+    ],
+)

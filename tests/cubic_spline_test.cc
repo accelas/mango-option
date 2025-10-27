@@ -259,6 +259,195 @@ TEST_F(CubicSplineTest, NonUniformGrid) {
     pde_spline_destroy(spline);
 }
 
+// Stress test: Large grid
+TEST_F(CubicSplineTest, LargeGrid) {
+    const size_t n = 1000;
+    std::vector<double> x(n), y(n);
+
+    for (size_t i = 0; i < n; i++) {
+        x[i] = i / (n - 1.0);
+        y[i] = std::sin(2.0 * M_PI * x[i]);
+    }
+
+    CubicSpline *spline = pde_spline_create(x.data(), y.data(), n);
+    ASSERT_NE(spline, nullptr);
+
+    // Test at many off-grid points
+    for (int i = 0; i < 100; i++) {
+        double x_eval = (i + 0.5) / 100.0;
+        double expected = std::sin(2.0 * M_PI * x_eval);
+        double interpolated = pde_spline_eval(spline, x_eval);
+
+        EXPECT_NEAR(interpolated, expected, 1e-4);
+    }
+
+    pde_spline_destroy(spline);
+}
+
+// Stress test: Very steep gradients
+TEST_F(CubicSplineTest, SteepGradients) {
+    const size_t n = 51;
+    double x[51], y[51];
+
+    for (size_t i = 0; i < n; i++) {
+        x[i] = i * 0.02;
+        // Very steep sigmoid
+        y[i] = 1.0 / (1.0 + std::exp(-50.0 * (x[i] - 0.5)));
+    }
+
+    CubicSpline *spline = pde_spline_create(x, y, n);
+    ASSERT_NE(spline, nullptr);
+
+    // Check no oscillations or NaN
+    for (int i = 0; i < 200; i++) {
+        double x_eval = i * 0.005;
+        double result = pde_spline_eval(spline, x_eval);
+
+        EXPECT_FALSE(std::isnan(result));
+        EXPECT_FALSE(std::isinf(result));
+        EXPECT_GE(result, -0.5);  // Allow some undershoot
+        EXPECT_LE(result, 1.5);   // Allow some overshoot
+    }
+
+    pde_spline_destroy(spline);
+}
+
+// Stress test: Oscillatory function
+TEST_F(CubicSplineTest, HighFrequencyOscillation) {
+    const size_t n = 101;
+    double x[101], y[101];
+
+    for (size_t i = 0; i < n; i++) {
+        x[i] = i * 0.01;
+        y[i] = std::sin(10.0 * x[i]);
+    }
+
+    CubicSpline *spline = pde_spline_create(x, y, n);
+    ASSERT_NE(spline, nullptr);
+
+    // Test at many points
+    double max_error = 0.0;
+    for (int i = 0; i < 200; i++) {
+        double x_eval = i * 0.005;
+        double expected = std::sin(10.0 * x_eval);
+        double interpolated = pde_spline_eval(spline, x_eval);
+
+        max_error = std::max(max_error, std::abs(interpolated - expected));
+    }
+
+    // Should be reasonably accurate
+    EXPECT_LT(max_error, 0.05);
+
+    pde_spline_destroy(spline);
+}
+
+// Stress test: Discontinuous derivative
+TEST_F(CubicSplineTest, DiscontinuousDerivative) {
+    const size_t n = 11;
+    double x[11], y[11];
+
+    // |x - 0.5| has discontinuous derivative at x = 0.5
+    for (size_t i = 0; i < n; i++) {
+        x[i] = i * 0.1;
+        y[i] = std::abs(x[i] - 0.5);
+    }
+
+    CubicSpline *spline = pde_spline_create(x, y, n);
+    ASSERT_NE(spline, nullptr);
+
+    // Spline should still work, though may not capture discontinuity perfectly
+    for (int i = 0; i < 20; i++) {
+        double x_eval = i * 0.05;
+        double result = pde_spline_eval(spline, x_eval);
+
+        EXPECT_FALSE(std::isnan(result));
+        EXPECT_FALSE(std::isinf(result));
+    }
+
+    pde_spline_destroy(spline);
+}
+
+// Stress test: Very small and very large values
+TEST_F(CubicSplineTest, ExtremeValues) {
+    const size_t n = 5;
+    double x[] = {0.0, 0.25, 0.5, 0.75, 1.0};
+    double y[] = {1e-10, 1e-8, 1e10, 1e-8, 1e-10};
+
+    CubicSpline *spline = pde_spline_create(x, y, n);
+    ASSERT_NE(spline, nullptr);
+
+    // Should handle extreme range
+    for (int i = 0; i <= 10; i++) {
+        double x_eval = i * 0.1;
+        double result = pde_spline_eval(spline, x_eval);
+
+        EXPECT_FALSE(std::isnan(result));
+        EXPECT_FALSE(std::isinf(result));
+    }
+
+    pde_spline_destroy(spline);
+}
+
+// Stress test: Nearly flat function (numerical stability)
+TEST_F(CubicSplineTest, NearlyFlat) {
+    const size_t n = 11;
+    double x[11], y[11];
+
+    for (size_t i = 0; i < n; i++) {
+        x[i] = i * 0.1;
+        y[i] = 1.0 + 1e-8 * std::sin(x[i]);  // Nearly constant
+    }
+
+    CubicSpline *spline = pde_spline_create(x, y, n);
+    ASSERT_NE(spline, nullptr);
+
+    // Should remain close to constant
+    for (int i = 0; i <= 20; i++) {
+        double x_eval = i * 0.05;
+        double result = pde_spline_eval(spline, x_eval);
+
+        EXPECT_NEAR(result, 1.0, 1e-6);
+    }
+
+    pde_spline_destroy(spline);
+}
+
+// Test second derivative continuity
+TEST_F(CubicSplineTest, SecondDerivativeContinuity) {
+    // f(x) = x^3 has continuous second derivative
+    const size_t n = 11;
+    double x[11], y[11];
+
+    for (size_t i = 0; i < n; i++) {
+        x[i] = i * 0.1;
+        y[i] = x[i] * x[i] * x[i];
+    }
+
+    CubicSpline *spline = pde_spline_create(x, y, n);
+    ASSERT_NE(spline, nullptr);
+
+    // Compute second derivative by finite difference
+    auto second_deriv = [&](double t) {
+        double h = 1e-6;
+        double fm = pde_spline_eval_derivative(spline, t - h);
+        double fp = pde_spline_eval_derivative(spline, t + h);
+        return (fp - fm) / (2.0 * h);
+    };
+
+    // Check continuity across grid points
+    for (size_t i = 1; i < n - 1; i++) {
+        double left = second_deriv(x[i] - 1e-5);
+        double right = second_deriv(x[i] + 1e-5);
+        double expected = 6.0 * x[i];  // f''(x) = 6x
+
+        EXPECT_NEAR(left, expected, 1e-3);
+        EXPECT_NEAR(right, expected, 1e-3);
+        EXPECT_NEAR(left, right, 1e-4);  // Continuity
+    }
+
+    pde_spline_destroy(spline);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
