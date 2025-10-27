@@ -1,17 +1,70 @@
 cc_library(
     name = "cubic_spline",
     srcs = ["cubic_spline.c"],
-    hdrs = ["cubic_spline.h", "tridiagonal.h"],
+    hdrs = [
+        "cubic_spline.h",
+        "tridiagonal.h",
+        "pde_trace.h",
+    ],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    visibility = ["//visibility:public"],
+)
+
+# USDT-enabled version of cubic_spline
+cc_library(
+    name = "cubic_spline_usdt",
+    srcs = ["cubic_spline.c"],
+    hdrs = [
+        "cubic_spline.h",
+        "tridiagonal.h",
+        "pde_trace.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "pde_solver",
     srcs = ["pde_solver.c"],
-    hdrs = ["pde_solver.h"],
+    hdrs = [
+        "pde_solver.h",
+        "pde_trace.h",
+    ],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
     deps = [":cubic_spline"],
+    visibility = ["//visibility:public"],
+)
+
+# Configuration for USDT tracing support
+# To enable: bazel build --//src:enable_usdt //...
+config_setting(
+    name = "usdt_enabled",
+    define_values = {"enable_usdt": "true"},
+)
+
+# USDT-enabled version of pde_solver (requires systemtap-sdt-dev)
+cc_library(
+    name = "pde_solver_usdt",
+    srcs = ["pde_solver.c"],
+    hdrs = [
+        "pde_solver.h",
+        "pde_trace.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-fopenmp-simd",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    deps = [":cubic_spline_usdt"],
     visibility = ["//visibility:public"],
 )
 
