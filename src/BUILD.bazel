@@ -4,7 +4,7 @@ cc_library(
     hdrs = [
         "cubic_spline.h",
         "tridiagonal.h",
-        "pde_trace.h",
+        "ivcalc_trace.h",
     ],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
     visibility = ["//visibility:public"],
@@ -17,7 +17,7 @@ cc_library(
     hdrs = [
         "cubic_spline.h",
         "tridiagonal.h",
-        "pde_trace.h",
+        "ivcalc_trace.h",
     ],
     copts = [
         "-std=c23",
@@ -34,18 +34,11 @@ cc_library(
     srcs = ["pde_solver.c"],
     hdrs = [
         "pde_solver.h",
-        "pde_trace.h",
+        "ivcalc_trace.h",
     ],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
     deps = [":cubic_spline"],
     visibility = ["//visibility:public"],
-)
-
-# Configuration for USDT tracing support
-# To enable: bazel build --//src:enable_usdt //...
-config_setting(
-    name = "usdt_enabled",
-    define_values = {"enable_usdt": "true"},
 )
 
 # USDT-enabled version of pde_solver (requires systemtap-sdt-dev)
@@ -54,7 +47,7 @@ cc_library(
     srcs = ["pde_solver.c"],
     hdrs = [
         "pde_solver.h",
-        "pde_trace.h",
+        "ivcalc_trace.h",
     ],
     copts = [
         "-std=c23",
@@ -71,16 +64,62 @@ cc_library(
 cc_library(
     name = "american_option",
     srcs = ["american_option.c"],
-    hdrs = ["american_option.h"],
+    hdrs = [
+        "american_option.h",
+        "ivcalc_trace.h",
+    ],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
     deps = [":pde_solver"],
+    visibility = ["//visibility:public"],
+)
+
+# USDT-enabled version of american_option
+cc_library(
+    name = "american_option_usdt",
+    srcs = ["american_option.c"],
+    hdrs = [
+        "american_option.h",
+        "ivcalc_trace.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-fopenmp-simd",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    deps = [":pde_solver_usdt"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "implied_volatility",
     srcs = ["implied_volatility.c"],
-    hdrs = ["implied_volatility.h", "brent.h"],
+    hdrs = [
+        "implied_volatility.h",
+        "brent.h",
+        "ivcalc_trace.h",
+    ],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    visibility = ["//visibility:public"],
+)
+
+# USDT-enabled version of implied_volatility
+cc_library(
+    name = "implied_volatility_usdt",
+    srcs = ["implied_volatility.c"],
+    hdrs = [
+        "implied_volatility.h",
+        "brent.h",
+        "ivcalc_trace.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
     visibility = ["//visibility:public"],
 )
