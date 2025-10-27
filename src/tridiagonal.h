@@ -8,25 +8,25 @@
 // Solves: A*x = b where A is tridiagonal
 // Parameters:
 //   n: matrix size
-//   lower: lower diagonal (n elements, lower[0] unused)
-//   diag: main diagonal (n elements)
-//   upper: upper diagonal (n elements, upper[n-1] unused)
+//   lower: lower diagonal (n-1 elements): lower[0] is A[1,0], lower[i] is A[i+1,i]
+//   diag: main diagonal (n elements): diag[i] is A[i,i]
+//   upper: upper diagonal (n-1 elements): upper[0] is A[0,1], upper[i] is A[i,i+1]
 //   rhs: right-hand side vector (n elements)
 //   solution: output solution vector (n elements)
 // Time complexity: O(n), Space complexity: O(n)
 static inline void solve_tridiagonal(size_t n, const double *lower, const double *diag,
                                     const double *upper, const double *rhs, double *solution) {
-    double *c_prime = malloc(n * sizeof(double));
-    double *d_prime = malloc(n * sizeof(double));
+    double *c_prime = (double *)malloc(n * sizeof(double));
+    double *d_prime = (double *)malloc(n * sizeof(double));
 
     // Forward sweep
     c_prime[0] = upper[0] / diag[0];
     d_prime[0] = rhs[0] / diag[0];
 
     for (size_t i = 1; i < n; i++) {
-        double m = 1.0 / (diag[i] - lower[i] * c_prime[i - 1]);
+        double m = 1.0 / (diag[i] - lower[i-1] * c_prime[i - 1]);
         c_prime[i] = (i < n - 1) ? upper[i] * m : 0.0;
-        d_prime[i] = (rhs[i] - lower[i] * d_prime[i - 1]) * m;
+        d_prime[i] = (rhs[i] - lower[i-1] * d_prime[i - 1]) * m;
     }
 
     // Back substitution
