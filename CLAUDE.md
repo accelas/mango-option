@@ -131,6 +131,8 @@ Enables compiler to generate AVX2/AVX-512 instructions for parallel computation.
 ### Cubic Spline Interpolation
 
 Natural cubic splines allow evaluation of solutions at arbitrary off-grid points:
+- Single workspace buffer for all coefficient arrays (4n doubles)
+- Single temporary buffer during construction (6n doubles)
 - Uses shared tridiagonal solver for efficiency
 - Provides both function and derivative evaluation
 - Convenience function `pde_solver_interpolate()` for quick queries

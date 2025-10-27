@@ -360,14 +360,16 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     spline->x = x;  // Store pointer (not owned)
     spline->y = y;  // Store pointer (not owned)
 
-    // Allocate coefficient arrays
-    // For n points, we have n-1 intervals
-    // Each interval has coefficients: a, b, c, d
+    // Allocate single workspace buffer for all coefficient arrays
+    // Need 4 arrays of size n (a, b, c, d)
     const size_t n = n_points;
-    spline->coeffs_a = malloc(n * sizeof(double));
-    spline->coeffs_b = malloc(n * sizeof(double));
-    spline->coeffs_c = malloc(n * sizeof(double));
-    spline->coeffs_d = malloc(n * sizeof(double));
+    spline->workspace = malloc(4 * n * sizeof(double));
+
+    // Slice workspace into coefficient arrays
+    spline->coeffs_a = spline->workspace;
+    spline->coeffs_b = spline->workspace + n;
+    spline->coeffs_c = spline->workspace + 2 * n;
+    spline->coeffs_d = spline->workspace + 3 * n;
 
     // Compute spline coefficients using natural cubic spline
     // S_i(x) = a_i + b_i*(x - x_i) + c_i*(x - x_i)^2 + d_i*(x - x_i)^3
@@ -378,9 +380,18 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
         spline->coeffs_a[i] = y[i];
     }
 
-    // Set up tridiagonal system for c coefficients (second derivatives)
-    double *h = malloc((n - 1) * sizeof(double));  // Interval widths
-    double *alpha = malloc((n - 1) * sizeof(double));
+    // Allocate single temporary workspace for all temporary arrays
+    // Need: h(n-1), alpha(n-1), lower(n), diag(n), upper(n), rhs(n)
+    // Total: 2*(n-1) + 4*n = 6n - 2 doubles
+    double *temp_workspace = malloc((6 * n) * sizeof(double));
+
+    // Slice temporary workspace
+    double *h = temp_workspace;                    // n-1 (but allocate n for simplicity)
+    double *alpha = temp_workspace + n;            // n-1 (but allocate n)
+    double *lower = temp_workspace + 2 * n;
+    double *diag = temp_workspace + 3 * n;
+    double *upper = temp_workspace + 4 * n;
+    double *rhs = temp_workspace + 5 * n;
 
     for (size_t i = 0; i < n - 1; i++) {
         h[i] = x[i + 1] - x[i];
@@ -394,11 +405,6 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     // Set up tridiagonal system: A*c = rhs
     // For natural spline: c[0] = 0, c[n-1] = 0
     // Interior equations: h[i-1]*c[i-1] + 2*(h[i-1]+h[i])*c[i] + h[i]*c[i+1] = alpha[i]
-
-    double *lower = malloc(n * sizeof(double));
-    double *diag = malloc(n * sizeof(double));
-    double *upper = malloc(n * sizeof(double));
-    double *rhs = malloc(n * sizeof(double));
 
     // Boundary conditions for natural spline
     diag[0] = 1.0;
@@ -426,12 +432,8 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
         spline->coeffs_d[j] = (spline->coeffs_c[j + 1] - spline->coeffs_c[j]) / (3.0 * h[j]);
     }
 
-    free(h);
-    free(alpha);
-    free(lower);
-    free(diag);
-    free(upper);
-    free(rhs);
+    // Free temporary workspace (single free for all temporary arrays)
+    free(temp_workspace);
 
     return spline;
 }
@@ -439,10 +441,8 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
 void pde_spline_destroy(CubicSpline *spline) {
     if (spline == nullptr) return;
 
-    free(spline->coeffs_a);
-    free(spline->coeffs_b);
-    free(spline->coeffs_c);
-    free(spline->coeffs_d);
+    // Single free for all coefficient arrays
+    free(spline->workspace);
     free(spline);
 }
 
