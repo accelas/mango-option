@@ -12,11 +12,15 @@ typedef struct {
     double diffusion_right;
 } HeatEquationData;
 
-// Initial condition: Gaussian profile
-static double heat_initial_condition(double x, void *user_data) {
+// Initial condition: Gaussian profile (vectorized)
+static void heat_initial_condition(const double *x, size_t n_points,
+                                   double *u0, void *user_data) {
     const double x0 = 0.5;
     const double sigma = 0.1;
-    return exp(-pow(x - x0, 2) / (2 * sigma * sigma));
+
+    for (size_t i = 0; i < n_points; i++) {
+        u0[i] = exp(-pow(x[i] - x0, 2) / (2 * sigma * sigma));
+    }
 }
 
 // Left boundary: u(0, t) = 0
@@ -29,46 +33,52 @@ static double heat_right_boundary(double t, void *user_data) {
     return 0.0;
 }
 
-// Spatial operator for heat equation: D * d²u/dx²
+// Spatial operator for heat equation: D * d²u/dx² (vectorized)
 // Using central finite differences: (u[i-1] - 2*u[i] + u[i+1]) / dx²
-static double heat_spatial_operator(const double *x, double t, const double *u,
-                                    size_t idx, size_t n_points, void *user_data) {
+static void heat_spatial_operator(const double *x, double t, const double *u,
+                                  size_t n_points, double *Lu, void *user_data) {
     HeatEquationData *data = (HeatEquationData *)user_data;
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
     const double D = data->diffusion_coeff;
+    const double dx2_inv = 1.0 / (dx * dx);
 
-    // Handle boundaries (will be overwritten by BC, but provide reasonable values)
-    if (idx == 0 || idx == n_points - 1) {
-        return 0.0;
+    // Boundaries (will be overwritten by BC)
+    Lu[0] = 0.0;
+    Lu[n_points - 1] = 0.0;
+
+    // Interior points - vectorized computation
+    for (size_t i = 1; i < n_points - 1; i++) {
+        double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
+        Lu[i] = D * d2u_dx2;
     }
-
-    // Central difference for second derivative
-    double d2u_dx2 = (u[idx - 1] - 2.0 * u[idx] + u[idx + 1]) / (dx * dx);
-    return D * d2u_dx2;
 }
 
-// Example 2: Jump condition - different diffusion coefficients
-static double heat_spatial_operator_with_jump(const double *x, double t, const double *u,
-                                              size_t idx, size_t n_points, void *user_data) {
+// Example 2: Jump condition - different diffusion coefficients (vectorized)
+static void heat_spatial_operator_with_jump(const double *x, double t, const double *u,
+                                            size_t n_points, double *Lu, void *user_data) {
     HeatEquationData *data = (HeatEquationData *)user_data;
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
+    const double dx2_inv = 1.0 / (dx * dx);
 
-    if (idx == 0 || idx == n_points - 1) {
-        return 0.0;
+    // Boundaries
+    Lu[0] = 0.0;
+    Lu[n_points - 1] = 0.0;
+
+    // Interior points with spatially varying diffusion coefficient
+    for (size_t i = 1; i < n_points - 1; i++) {
+        // Use different diffusion coefficients based on position
+        double D_center = (x[i] < data->jump_location) ?
+                         data->diffusion_left : data->diffusion_right;
+
+        // At the jump, use harmonic mean for the interface
+        if (fabs(x[i] - data->jump_location) < dx) {
+            D_center = 2.0 * data->diffusion_left * data->diffusion_right /
+                      (data->diffusion_left + data->diffusion_right);
+        }
+
+        double d2u_dx2 = (u[i - 1] - 2.0 * u[i] + u[i + 1]) * dx2_inv;
+        Lu[i] = D_center * d2u_dx2;
     }
-
-    // Use different diffusion coefficients based on position
-    double D_left = (x[idx] < data->jump_location) ? data->diffusion_left : data->diffusion_right;
-    double D_center = D_left;
-
-    // At the jump, use harmonic mean for the interface
-    if (fabs(x[idx] - data->jump_location) < dx) {
-        D_center = 2.0 * data->diffusion_left * data->diffusion_right /
-                  (data->diffusion_left + data->diffusion_right);
-    }
-
-    double d2u_dx2 = (u[idx - 1] - 2.0 * u[idx] + u[idx + 1]) / (dx * dx);
-    return D_center * d2u_dx2;
 }
 
 // Jump condition callback
@@ -81,10 +91,13 @@ static bool heat_jump_condition(double x, double *jump_value, void *user_data) {
     return false;
 }
 
-// Example 3: Obstacle condition (American option pricing)
-static double obstacle_condition(double x, double t, void *user_data) {
+// Example 3: Obstacle condition (American option pricing) (vectorized)
+static void obstacle_condition(const double *x, double t, size_t n_points,
+                              double *psi, void *user_data) {
     // Example: minimum value is the payoff function max(x - 0.5, 0)
-    return fmax(x - 0.5, 0.0);
+    for (size_t i = 0; i < n_points; i++) {
+        psi[i] = fmax(x[i] - 0.5, 0.0);
+    }
 }
 
 // Utility: Print solution to file

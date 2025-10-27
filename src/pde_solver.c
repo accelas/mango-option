@@ -65,25 +65,26 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
 
     // Apply obstacle condition if provided
     if (solver->callbacks.obstacle != nullptr) {
+        double *psi = malloc(n * sizeof(double));
+        solver->callbacks.obstacle(solver->grid.x, t, n, psi, solver->callbacks.user_data);
+
         for (size_t i = 0; i < n; i++) {
-            double obstacle_val = solver->callbacks.obstacle(solver->grid.x[i], t,
-                                                            solver->callbacks.user_data);
-            if (u[i] < obstacle_val) {
-                u[i] = obstacle_val;
+            if (u[i] < psi[i]) {
+                u[i] = psi[i];
             }
         }
+        free(psi);
     }
 }
 
-// Evaluate spatial operator for all interior points
+// Evaluate spatial operator for all points
 static void evaluate_spatial_operator(PDESolver *solver, double t, const double *u,
                                       double *result) {
     const size_t n = solver->grid.n_points;
 
-    for (size_t i = 0; i < n; i++) {
-        result[i] = solver->callbacks.spatial_operator(solver->grid.x, t, u, i, n,
-                                                       solver->callbacks.user_data);
-    }
+    // Call vectorized spatial operator
+    solver->callbacks.spatial_operator(solver->grid.x, t, u, n, result,
+                                      solver->callbacks.user_data);
 }
 
 // Solve implicit system: (I - coeff*dt*L)*u_new = rhs
@@ -245,10 +246,9 @@ void pde_solver_destroy(PDESolver *solver) {
 void pde_solver_initialize(PDESolver *solver) {
     const size_t n = solver->grid.n_points;
 
-    for (size_t i = 0; i < n; i++) {
-        solver->u_current[i] = solver->callbacks.initial_condition(
-            solver->grid.x[i], solver->callbacks.user_data);
-    }
+    // Call vectorized initial condition
+    solver->callbacks.initial_condition(solver->grid.x, n, solver->u_current,
+                                       solver->callbacks.user_data);
 
     apply_boundary_conditions(solver, solver->time.t_start, solver->u_current);
 }
