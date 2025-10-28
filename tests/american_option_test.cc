@@ -631,6 +631,266 @@ TEST_F(AmericanOptionTest, ConsistencyTest) {
     }
 }
 
+// Test 23: Single dividend - American put
+TEST_F(AmericanOptionTest, SingleDividendPut) {
+    double dividend_times[] = {0.5};
+    double dividend_amounts[] = {2.0};
+
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 1,
+        .dividend_times = dividend_times,
+        .dividend_amounts = dividend_amounts
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    ASSERT_EQ(result.status, 0);
+    ASSERT_NE(result.solver, nullptr);
+
+    double value = american_option_get_value_at_spot(result.solver, 100.0, 100.0);
+
+    // Put value should be positive
+    EXPECT_GT(value, 0.0);
+    // Should be less than strike (max intrinsic value)
+    EXPECT_LT(value, option.strike);
+
+    pde_solver_destroy(result.solver);
+}
+
+// Test 24: Single dividend - American call
+TEST_F(AmericanOptionTest, SingleDividendCall) {
+    double dividend_times[] = {0.5};
+    double dividend_amounts[] = {2.0};
+
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 1,
+        .dividend_times = dividend_times,
+        .dividend_amounts = dividend_amounts
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    ASSERT_EQ(result.status, 0);
+    ASSERT_NE(result.solver, nullptr);
+
+    double value = american_option_get_value_at_spot(result.solver, 100.0, 100.0);
+
+    // Call value should be positive
+    EXPECT_GT(value, 0.0);
+
+    pde_solver_destroy(result.solver);
+}
+
+// Test 25: Multiple dividends
+TEST_F(AmericanOptionTest, MultipleDividends) {
+    double dividend_times[] = {0.25, 0.5, 0.75};
+    double dividend_amounts[] = {1.0, 1.5, 1.0};
+
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 3,
+        .dividend_times = dividend_times,
+        .dividend_amounts = dividend_amounts
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    ASSERT_EQ(result.status, 0);
+    ASSERT_NE(result.solver, nullptr);
+
+    double value = american_option_get_value_at_spot(result.solver, 100.0, 100.0);
+
+    // Value should be positive and less than strike
+    EXPECT_GT(value, 0.0);
+    EXPECT_LT(value, option.strike);
+
+    pde_solver_destroy(result.solver);
+}
+
+// Test 26: Dividend impact on put value (should increase)
+TEST_F(AmericanOptionTest, DividendIncreasePutValue) {
+    // First, price without dividend
+    OptionData option_no_div = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    AmericanOptionResult result_no_div = american_option_price(&option_no_div, &default_grid);
+    double value_no_div = american_option_get_value_at_spot(result_no_div.solver, 100.0, 100.0);
+
+    // Now price with dividend
+    double dividend_times[] = {0.5};
+    double dividend_amounts[] = {3.0};  // $3 dividend
+
+    OptionData option_with_div = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 1,
+        .dividend_times = dividend_times,
+        .dividend_amounts = dividend_amounts
+    };
+
+    AmericanOptionResult result_with_div = american_option_price(&option_with_div, &default_grid);
+    double value_with_div = american_option_get_value_at_spot(result_with_div.solver, 100.0, 100.0);
+
+    // Put value should increase with dividends (stock price drops)
+    EXPECT_GT(value_with_div, value_no_div);
+
+    pde_solver_destroy(result_no_div.solver);
+    pde_solver_destroy(result_with_div.solver);
+}
+
+// Test 27: Dividend impact on call value (should decrease)
+TEST_F(AmericanOptionTest, DividendDecreaseCallValue) {
+    // First, price without dividend
+    OptionData option_no_div = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    AmericanOptionResult result_no_div = american_option_price(&option_no_div, &default_grid);
+    double value_no_div = american_option_get_value_at_spot(result_no_div.solver, 100.0, 100.0);
+
+    // Now price with dividend
+    double dividend_times[] = {0.5};
+    double dividend_amounts[] = {3.0};  // $3 dividend
+
+    OptionData option_with_div = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 1,
+        .dividend_times = dividend_times,
+        .dividend_amounts = dividend_amounts
+    };
+
+    AmericanOptionResult result_with_div = american_option_price(&option_with_div, &default_grid);
+    double value_with_div = american_option_get_value_at_spot(result_with_div.solver, 100.0, 100.0);
+
+    // Call value should decrease with dividends (stock price drops)
+    EXPECT_LT(value_with_div, value_no_div);
+
+    pde_solver_destroy(result_no_div.solver);
+    pde_solver_destroy(result_with_div.solver);
+}
+
+// Test 28: Dividend timing - early vs late
+TEST_F(AmericanOptionTest, DividendTiming) {
+    // Early dividend (near expiry)
+    double dividend_times_early[] = {0.1};
+    double dividend_amounts_early[] = {2.0};
+
+    OptionData option_early = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 1,
+        .dividend_times = dividend_times_early,
+        .dividend_amounts = dividend_amounts_early
+    };
+
+    // Late dividend (far from expiry)
+    double dividend_times_late[] = {0.9};
+    double dividend_amounts_late[] = {2.0};
+
+    OptionData option_late = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 1,
+        .dividend_times = dividend_times_late,
+        .dividend_amounts = dividend_amounts_late
+    };
+
+    AmericanOptionResult result_early = american_option_price(&option_early, &default_grid);
+    AmericanOptionResult result_late = american_option_price(&option_late, &default_grid);
+
+    double value_early = american_option_get_value_at_spot(result_early.solver, 100.0, 100.0);
+    double value_late = american_option_get_value_at_spot(result_late.solver, 100.0, 100.0);
+
+    // Both should be positive
+    EXPECT_GT(value_early, 0.0);
+    EXPECT_GT(value_late, 0.0);
+
+    // Late dividend should have more impact on put value (stock drops closer to maturity)
+    EXPECT_GT(value_late, value_early);
+
+    pde_solver_destroy(result_early.solver);
+    pde_solver_destroy(result_late.solver);
+}
+
+// Test 29: Zero dividend amount (should match no-dividend case)
+TEST_F(AmericanOptionTest, ZeroDividendAmount) {
+    double dividend_times[] = {0.5};
+    double dividend_amounts[] = {0.0};  // Zero dividend
+
+    OptionData option_zero_div = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 1,
+        .dividend_times = dividend_times,
+        .dividend_amounts = dividend_amounts
+    };
+
+    OptionData option_no_div = {
+        .strike = 100.0,
+        .volatility = 0.25,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    AmericanOptionResult result_zero = american_option_price(&option_zero_div, &default_grid);
+    AmericanOptionResult result_none = american_option_price(&option_no_div, &default_grid);
+
+    double value_zero = american_option_get_value_at_spot(result_zero.solver, 100.0, 100.0);
+    double value_none = american_option_get_value_at_spot(result_none.solver, 100.0, 100.0);
+
+    // Values should be very close (within numerical error)
+    EXPECT_NEAR(value_zero, value_none, 0.01);
+
+    pde_solver_destroy(result_zero.solver);
+    pde_solver_destroy(result_none.solver);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
