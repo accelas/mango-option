@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdbool.h>
+#include "ivcalc_trace.h"
 
 // Brent's method for root finding (header-only)
 //
@@ -46,12 +47,16 @@ static inline BrentResult brent_find_root(BrentFunction f,
                                          void *user_data) {
     BrentResult result = {0.0, 0.0, 0, false};
 
+    // Trace Brent start
+    IVCALC_TRACE_BRENT_START(a, b, tolerance, max_iter);
+
     double fa = f(a, user_data);
     double fb = f(b, user_data);
 
     // Check if root is bracketed
     if (fa * fb > 0.0) {
         // Root not bracketed - return failure
+        IVCALC_TRACE_BRENT_COMPLETE(a, 0, 0);
         result.root = a;
         result.f_root = fa;
         return result;
@@ -59,12 +64,14 @@ static inline BrentResult brent_find_root(BrentFunction f,
 
     // If one endpoint is already a root
     if (fabs(fa) < tolerance) {
+        IVCALC_TRACE_BRENT_COMPLETE(a, 1, 1);
         result.root = a;
         result.f_root = fa;
         result.converged = true;
         return result;
     }
     if (fabs(fb) < tolerance) {
+        IVCALC_TRACE_BRENT_COMPLETE(b, 1, 1);
         result.root = b;
         result.f_root = fb;
         result.converged = true;
@@ -83,6 +90,9 @@ static inline BrentResult brent_find_root(BrentFunction f,
 
     for (int iter = 0; iter < max_iter; iter++) {
         result.iterations = iter + 1;
+
+        // Trace iteration
+        IVCALC_TRACE_BRENT_ITER(iter, b, fb, fabs(b - a));
 
         double s; // Candidate for next point
 
@@ -137,6 +147,7 @@ static inline BrentResult brent_find_root(BrentFunction f,
 
         // Check for convergence
         if (fabs(fb) < tolerance || fabs(b - a) < tolerance) {
+            IVCALC_TRACE_BRENT_COMPLETE(b, result.iterations, 1);
             result.root = b;
             result.f_root = fb;
             result.converged = true;
@@ -145,6 +156,7 @@ static inline BrentResult brent_find_root(BrentFunction f,
     }
 
     // Max iterations reached
+    IVCALC_TRACE_BRENT_COMPLETE(b, max_iter, 0);
     result.root = b;
     result.f_root = fb;
     result.converged = false;

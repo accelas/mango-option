@@ -1,4 +1,5 @@
 #include "implied_volatility.h"
+#include "ivcalc_trace.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -121,20 +122,28 @@ IVResult implied_volatility_calculate(const IVParams *params,
                                      int max_iter) {
     IVResult result = {0.0, 0.0, 0, false, nullptr};
 
+    // Trace calculation start
+    IVCALC_TRACE_IV_START(params->spot_price, params->strike,
+                          params->time_to_maturity, params->market_price);
+
     // Validate inputs
     if (params->spot_price <= 0.0) {
+        IVCALC_TRACE_IV_VALIDATION_ERROR(1, params->spot_price, 0.0);
         result.error = "Spot price must be positive";
         return result;
     }
     if (params->strike <= 0.0) {
+        IVCALC_TRACE_IV_VALIDATION_ERROR(2, params->strike, 0.0);
         result.error = "Strike price must be positive";
         return result;
     }
     if (params->time_to_maturity <= 0.0) {
+        IVCALC_TRACE_IV_VALIDATION_ERROR(3, params->time_to_maturity, 0.0);
         result.error = "Time to maturity must be positive";
         return result;
     }
     if (params->market_price <= 0.0) {
+        IVCALC_TRACE_IV_VALIDATION_ERROR(4, params->market_price, 0.0);
         result.error = "Market price must be positive";
         return result;
     }
@@ -144,18 +153,22 @@ IVResult implied_volatility_calculate(const IVParams *params,
     if (params->is_call) {
         intrinsic_value = fmax(params->spot_price - params->strike * exp(-params->risk_free_rate * params->time_to_maturity), 0.0);
         if (params->market_price > params->spot_price) {
+            IVCALC_TRACE_IV_VALIDATION_ERROR(5, params->market_price, params->spot_price);
             result.error = "Call price exceeds spot price (arbitrage)";
             return result;
         }
     } else {
         intrinsic_value = fmax(params->strike * exp(-params->risk_free_rate * params->time_to_maturity) - params->spot_price, 0.0);
-        if (params->market_price > params->strike * exp(-params->risk_free_rate * params->time_to_maturity)) {
+        double max_put_price = params->strike * exp(-params->risk_free_rate * params->time_to_maturity);
+        if (params->market_price > max_put_price) {
+            IVCALC_TRACE_IV_VALIDATION_ERROR(5, params->market_price, max_put_price);
             result.error = "Put price exceeds discounted strike (arbitrage)";
             return result;
         }
     }
 
     if (params->market_price < intrinsic_value - tolerance) {
+        IVCALC_TRACE_IV_VALIDATION_ERROR(5, params->market_price, intrinsic_value);
         result.error = "Market price below intrinsic value (arbitrage)";
         return result;
     }
@@ -179,6 +192,7 @@ IVResult implied_volatility_calculate(const IVParams *params,
                                               &obj_data);
 
     if (!brent_result.converged) {
+        IVCALC_TRACE_IV_COMPLETE(brent_result.root, brent_result.iterations, 0);
         result.error = "Failed to converge";
         result.implied_vol = brent_result.root;
         result.iterations = brent_result.iterations;
@@ -193,6 +207,9 @@ IVResult implied_volatility_calculate(const IVParams *params,
                                     result.implied_vol);
     result.iterations = brent_result.iterations;
     result.converged = true;
+
+    // Trace successful completion
+    IVCALC_TRACE_IV_COMPLETE(result.implied_vol, result.iterations, 1);
 
     return result;
 }

@@ -245,6 +245,122 @@ All structures use explicit create/destroy patterns:
 - `pde_spline_create()` / `pde_spline_destroy()`
 - `pde_create_grid()` / `pde_free_grid()`
 
+## USDT Tracing System
+
+**CRITICAL: Library code must NEVER use printf/fprintf for debug output.**
+
+This library uses USDT (User Statically-Defined Tracing) probes for all internal logging, debugging, and diagnostics. USDT provides zero-overhead tracing that can be dynamically enabled/disabled at runtime without recompiling.
+
+### Why USDT Instead of printf?
+
+1. **Zero overhead**: Probes compile to single NOP instructions when not actively traced
+2. **Production-safe**: Can be left in production code without performance impact
+3. **Dynamic control**: Enable/disable at runtime using bpftrace, systemtap, or perf
+4. **Structured data**: Captures typed parameters, not formatted strings
+5. **Library-appropriate**: Libraries should not pollute stdout/stderr
+
+### When to Use USDT Probes
+
+Use USDT probes for:
+- Progress tracking (solver start/progress/complete)
+- Convergence monitoring (iteration counts, errors)
+- Error conditions (validation failures, convergence failures)
+- Performance measurement (timing boundaries)
+- Debugging information
+
+**NEVER use printf, fprintf, or any console I/O in library code (`src/` directory).**
+
+### Available Probe Categories
+
+See `src/ivcalc_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
+
+1. **Algorithm Lifecycle** (General): `IVCALC_TRACE_ALGO_START`, `IVCALC_TRACE_ALGO_PROGRESS`, `IVCALC_TRACE_ALGO_COMPLETE`
+2. **Convergence Tracking** (General): `IVCALC_TRACE_CONVERGENCE_ITER`, `IVCALC_TRACE_CONVERGENCE_SUCCESS`, `IVCALC_TRACE_CONVERGENCE_FAILED`
+3. **Validation/Errors** (General): `IVCALC_TRACE_VALIDATION_ERROR`, `IVCALC_TRACE_RUNTIME_ERROR`
+4. **PDE Solver**: `IVCALC_TRACE_PDE_START`, `IVCALC_TRACE_PDE_PROGRESS`, `IVCALC_TRACE_PDE_COMPLETE`, etc.
+5. **Implied Volatility**: `IVCALC_TRACE_IV_START`, `IVCALC_TRACE_IV_COMPLETE`, `IVCALC_TRACE_IV_VALIDATION_ERROR`
+6. **American Options**: `IVCALC_TRACE_OPTION_START`, `IVCALC_TRACE_OPTION_COMPLETE`
+7. **Brent's Method**: `IVCALC_TRACE_BRENT_START`, `IVCALC_TRACE_BRENT_ITER`, `IVCALC_TRACE_BRENT_COMPLETE`
+8. **Cubic Spline**: `IVCALC_TRACE_SPLINE_ERROR`
+
+Each module has access to both general-purpose probes (for common patterns like convergence) and module-specific probes.
+
+### Adding New USDT Probes
+
+When adding new library functionality that needs logging:
+
+1. **Define probe in `src/ivcalc_trace.h`**:
+   ```c
+   #define IVCALC_TRACE_MY_EVENT(module_id, param1, param2) \
+       DTRACE_PROBE3(IVCALC_PROVIDER, my_event, module_id, param1, param2)
+   ```
+
+2. **Document probe in `src/ivcalc_trace.d`**:
+   ```c
+   /* Fired when my event occurs */
+   probe my_event(int module_id, double param1, double param2);
+   ```
+
+3. **Use probe in source code**:
+   ```c
+   #include "ivcalc_trace.h"
+
+   void my_function() {
+       // ... code ...
+       IVCALC_TRACE_MY_EVENT(MODULE_MY_MODULE, value1, value2);
+       // ... more code ...
+   }
+   ```
+
+4. **Update `TRACING.md`** with usage examples and parameter descriptions
+
+### Building with USDT
+
+Standard build (probes are no-ops):
+```bash
+bazel build //src:pde_solver
+bazel build //src:american_option
+bazel build //src:implied_volatility
+```
+
+USDT-enabled build (requires systemtap-sdt-dev):
+```bash
+bazel build //src:pde_solver_usdt
+bazel build //src:american_option_usdt
+bazel build //src:implied_volatility_usdt
+```
+
+### Tracing Examples
+
+Monitor all algorithms across the library:
+```bash
+sudo bpftrace -e 'usdt:./lib*.so:ivcalc:algo_start {
+    printf("Module %d starting\n", arg0);
+}'
+```
+
+Track convergence across all modules:
+```bash
+sudo bpftrace -e 'usdt:./lib*.so:ivcalc:convergence_failed {
+    printf("Module %d: convergence failure at step %d\n", arg0, arg1);
+}'
+```
+
+Monitor implied volatility calculations:
+```bash
+sudo bpftrace -e 'usdt:./lib*.so:ivcalc:iv_complete {
+    printf("IV=%.4f, iterations=%d, converged=%d\n", arg0, arg1, arg2);
+}'
+```
+
+For complete documentation, see `TRACING.md`.
+
+### Examples vs Library Code
+
+**Examples** (`examples/` directory) may use printf for user-facing output - they are demonstration programs, not library code.
+
+**Library code** (`src/` directory) must use USDT probes exclusively. No printf, fprintf, or stderr allowed.
+
 ## C23 Features Used
 
 - `nullptr` keyword
