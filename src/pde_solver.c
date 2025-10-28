@@ -73,7 +73,21 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
 
     // Initialize with rhs (better initial guess)
     memcpy(u_new, rhs, n * sizeof(double));
-    apply_boundary_conditions(solver, t, u_new);
+
+    // Initialize boundary values to satisfy constraints (needed for Jacobian computation)
+    if (solver->bc_config.left_type == BC_DIRICHLET) {
+        u_new[0] = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+    } else if (solver->bc_config.left_type == BC_NEUMANN) {
+        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        u_new[0] = u_new[1] - solver->grid.dx * g;
+    }
+
+    if (solver->bc_config.right_type == BC_DIRICHLET) {
+        u_new[n-1] = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+    } else if (solver->bc_config.right_type == BC_NEUMANN) {
+        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+        u_new[n-1] = u_new[n-2] + solver->grid.dx * g;
+    }
 
     // Use pre-allocated workspace arrays
     double *u_old = solver->u_old;
@@ -88,7 +102,8 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
     // For truly nonlinear problems, this could be recomputed every few iterations
     evaluate_spatial_operator(solver, t, u_new, Lu);
 
-    for (size_t i = 0; i < n; i++) {
+    // Build Jacobian matrix for interior points
+    for (size_t i = 1; i < n - 1; i++) {
         // Diagonal element: ∂L_i/∂u_i
         double u_save = u_new[i];
         u_new[i] = u_save + eps;
@@ -99,23 +114,42 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         // Build system matrix: (I - coeff_dt * J)
         diag[i] = 1.0 - coeff_dt * dLi_dui;
 
-        // Lower diagonal: ∂L_i/∂u_{i-1} (for rows i >= 1)
-        if (i >= 1) {
-            u_new[i-1] = u_new[i-1] + eps;
-            evaluate_spatial_operator(solver, t, u_new, Lu_pert);
-            double dLi_duim1 = (Lu_pert[i] - Lu[i]) / eps;
-            u_new[i-1] = u_new[i-1] - eps;
-            lower[i-1] = -coeff_dt * dLi_duim1;
-        }
+        // Lower diagonal: ∂L_i/∂u_{i-1}
+        u_new[i-1] = u_new[i-1] + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dLi_duim1 = (Lu_pert[i] - Lu[i]) / eps;
+        u_new[i-1] = u_new[i-1] - eps;
+        lower[i-1] = -coeff_dt * dLi_duim1;
 
-        // Upper diagonal: ∂L_i/∂u_{i+1} (for rows i <= n-2)
-        if (i <= n - 2) {
-            u_new[i+1] = u_new[i+1] + eps;
-            evaluate_spatial_operator(solver, t, u_new, Lu_pert);
-            double dLi_duip1 = (Lu_pert[i] - Lu[i]) / eps;
-            u_new[i+1] = u_new[i+1] - eps;
-            upper[i] = -coeff_dt * dLi_duip1;
-        }
+        // Upper diagonal: ∂L_i/∂u_{i+1}
+        u_new[i+1] = u_new[i+1] + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dLi_duip1 = (Lu_pert[i] - Lu[i]) / eps;
+        u_new[i+1] = u_new[i+1] - eps;
+        upper[i] = -coeff_dt * dLi_duip1;
+    }
+
+    // Enforce boundary conditions in the system matrix
+    // Left boundary
+    if (solver->bc_config.left_type == BC_DIRICHLET) {
+        // Row 0: u[0] = g(t)
+        diag[0] = 1.0;
+        upper[0] = 0.0;
+    } else if (solver->bc_config.left_type == BC_NEUMANN) {
+        // Row 0: u[0] - u[1] = 0 (for zero flux, du/dx = 0)
+        diag[0] = 1.0;
+        upper[0] = -1.0;
+    }
+
+    // Right boundary
+    if (solver->bc_config.right_type == BC_DIRICHLET) {
+        // Row n-1: u[n-1] = g(t)
+        diag[n-1] = 1.0;
+        lower[n-2] = 0.0;
+    } else if (solver->bc_config.right_type == BC_NEUMANN) {
+        // Row n-1: u[n-1] - u[n-2] = 0 (for zero flux, du/dx = 0)
+        diag[n-1] = 1.0;
+        lower[n-2] = -1.0;
     }
 
     for (size_t iter = 0; iter < max_iter; iter++) {
@@ -127,9 +161,34 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         // Compute residual: r = rhs - (u_old - coeff_dt * L(u_old))
         //                      = rhs - u_old + coeff_dt * L(u_old)
         double *residual = Lu_pert;  // Reuse Lu_pert as residual storage
+
+        // Interior points
         #pragma omp simd
-        for (size_t i = 0; i < n; i++) {
+        for (size_t i = 1; i < n - 1; i++) {
             residual[i] = rhs[i] - u_old[i] + coeff_dt * Lu[i];
+        }
+
+        // Boundary residuals based on BC type
+        // Left boundary
+        if (solver->bc_config.left_type == BC_DIRICHLET) {
+            double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+            residual[0] = g - u_old[0];
+        } else if (solver->bc_config.left_type == BC_NEUMANN) {
+            double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+            // For du/dx = g: u[0] - u[1] + dx*g = 0
+            const double dx = solver->grid.dx;
+            residual[0] = -u_old[0] + u_old[1] - dx * g;
+        }
+
+        // Right boundary
+        if (solver->bc_config.right_type == BC_DIRICHLET) {
+            double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+            residual[n-1] = g - u_old[n-1];
+        } else if (solver->bc_config.right_type == BC_NEUMANN) {
+            double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+            // For du/dx = g: u[n-1] - u[n-2] - dx*g = 0
+            const double dx = solver->grid.dx;
+            residual[n-1] = -u_old[n-1] + u_old[n-2] + dx * g;
         }
 
         // Solve for correction: (I - coeff_dt * J) * δu = residual
@@ -142,7 +201,16 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
             u_new[i] = u_old[i] + delta_u[i];
         }
 
-        apply_boundary_conditions(solver, t, u_new);
+        // Apply obstacle condition if provided (BCs already enforced in linear system)
+        if (solver->callbacks.obstacle != nullptr) {
+            double *psi = Lu;  // Reuse Lu workspace for psi
+            solver->callbacks.obstacle(solver->grid.x, t, n, psi, solver->callbacks.user_data);
+            for (size_t i = 0; i < n; i++) {
+                if (u_new[i] < psi[i]) {
+                    u_new[i] = psi[i];
+                }
+            }
+        }
 
         // Check convergence
         double error = 0.0;
