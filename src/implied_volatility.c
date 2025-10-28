@@ -214,8 +214,63 @@ IVResult implied_volatility_calculate(const IVParams *params,
     return result;
 }
 
+// Determine automatic bounds for volatility search
+// Uses heuristics based on option parameters and market price
+typedef struct {
+    double lower_bound;
+    double upper_bound;
+} VolatilityBounds;
+
+static VolatilityBounds determine_volatility_bounds(const IVParams *params) {
+    VolatilityBounds bounds;
+
+    // Lower bound: Use very small positive value (0.01% volatility)
+    bounds.lower_bound = 0.0001;
+
+    // Upper bound: Use heuristic based on market price and intrinsic value
+    // The idea is that higher market prices relative to intrinsic value
+    // suggest higher time value, which requires higher volatility
+
+    double intrinsic_value;
+    double forward_price = params->spot_price * exp(params->risk_free_rate * params->time_to_maturity);
+
+    if (params->is_call) {
+        intrinsic_value = fmax(forward_price - params->strike, 0.0);
+    } else {
+        intrinsic_value = fmax(params->strike - forward_price, 0.0);
+    }
+
+    // If market price is close to intrinsic (small time value), use moderate upper bound
+    // If market price is high relative to intrinsic, use higher upper bound
+    double time_value = params->market_price - intrinsic_value * exp(-params->risk_free_rate * params->time_to_maturity);
+
+    if (time_value <= 0.0) {
+        // Deep ITM or at expiry - use moderate bound
+        bounds.upper_bound = 2.0;
+    } else {
+        // Estimate implied variance from time value
+        // For ATM option: C ≈ 0.4 * S * σ * sqrt(T) (approximation)
+        // So σ ≈ C / (0.4 * S * sqrt(T))
+        double vol_estimate = params->market_price / (0.4 * params->spot_price * sqrt(params->time_to_maturity));
+
+        // Use 2x the estimate as upper bound, with reasonable min/max
+        bounds.upper_bound = fmax(2.0 * vol_estimate, 1.0);  // At least 100%
+        bounds.upper_bound = fmin(bounds.upper_bound, 10.0);  // Cap at 1000%
+    }
+
+    // Ensure upper bound is always greater than lower bound
+    if (bounds.upper_bound <= bounds.lower_bound) {
+        bounds.upper_bound = 5.0;  // Fallback to reasonable default
+    }
+
+    return bounds;
+}
+
 // Convenience function with default parameters
 IVResult implied_volatility_calculate_simple(const IVParams *params) {
-    // Search volatility in range [1%, 500%] with tolerance 1e-6
-    return implied_volatility_calculate(params, 0.01, 5.0, 1e-6, 100);
+    // Automatically determine sensible bounds based on option parameters
+    VolatilityBounds bounds = determine_volatility_bounds(params);
+
+    // Search volatility with auto-determined bounds and tolerance 1e-6
+    return implied_volatility_calculate(params, bounds.lower_bound, bounds.upper_bound, 1e-6, 100);
 }
