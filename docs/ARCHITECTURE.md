@@ -510,8 +510,6 @@ graph TD
         H["u_old<br/>Previous fixed-point iteration<br/>n doubles"]
         I["Lu<br/>Spatial operator result<br/>n doubles"]
         J["u_temp<br/>Temporary for relaxation<br/>n doubles"]
-
-        A --> B --> C --> D --> E --> F --> G --> H --> I --> J
     end
 
     style A fill:#e3f2fd
