@@ -1,4 +1,5 @@
 #include "american_option.h"
+#include "ivcalc_trace.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -179,6 +180,10 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
                                           const AmericanOptionGrid *grid_params) {
     AmericanOptionResult result = {nullptr, -1};
 
+    // Trace option pricing start
+    IVCALC_TRACE_OPTION_START(option_data->option_type, option_data->strike,
+                              option_data->volatility, option_data->time_to_maturity);
+
     // Create spatial grid in log-price coordinates: x = ln(S/K)
     SpatialGrid grid = pde_create_grid(grid_params->x_min,
                                       grid_params->x_max,
@@ -232,6 +237,10 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
 
     result.solver = solver;
     result.status = status;
+
+    // Trace option pricing completion
+    IVCALC_TRACE_OPTION_COMPLETE(status, grid_params->n_steps);
+
     return result;
 }
 
