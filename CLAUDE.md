@@ -507,12 +507,34 @@ derivative evaluation are supported for gradient-based applications.
 
 **IMPORTANT:** After completing a task and committing changes, create a GitHub Pull Request instead of pushing directly to main.
 
+### **IMPORTANT: Always Start New Work on a Fresh Branch**
+
+Before starting any new task:
+1. **Switch to main and pull latest changes**:
+   ```bash
+   git checkout main
+   git pull
+   ```
+
+2. **Create a NEW feature branch** from updated main:
+   ```bash
+   git checkout -b feature/descriptive-name
+   ```
+
+**Never continue work on an existing branch that already has an open PR.** Each task should get its own branch from the latest main.
+
 ### Standard Workflow
 
 1. **Create a feature branch** (if not already on one):
    ```bash
    git checkout -b feature/descriptive-name
    ```
+
+   Branch naming conventions:
+   - `feature/` - New features
+   - `fix/` - Bug fixes
+   - `test/` - Adding tests
+   - `docs/` - Documentation updates
 
 2. **Make changes and commit** following the commit message guidelines above
 
