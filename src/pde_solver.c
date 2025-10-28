@@ -5,6 +5,14 @@
 #include <string.h>
 #include <math.h>
 
+// GCC/Clang restrict keyword for optimization
+#ifndef __restrict__
+#define __restrict__ restrict
+#endif
+
+// SIMD alignment boundary (AVX-512 requires 64-byte alignment)
+#define SIMD_ALIGNMENT 64
+
 // Apply boundary conditions
 static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
     const size_t n = solver->grid.n_points;
@@ -53,8 +61,9 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
 }
 
 // Evaluate spatial operator for all points
-static void evaluate_spatial_operator(PDESolver *solver, double t, const double *u,
-                                      double *result) {
+static void evaluate_spatial_operator(PDESolver *solver, double t,
+                                      const double * __restrict__ u,
+                                      double * __restrict__ result) {
     const size_t n = solver->grid.n_points;
     const double dx = solver->grid.dx;
 
@@ -239,7 +248,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         // Interior points
         #pragma omp simd
         for (size_t i = 1; i < n - 1; i++) {
-            residual[i] = rhs[i] - u_old[i] + coeff_dt * Lu[i];
+            residual[i] = fma(coeff_dt, Lu[i], rhs[i] - u_old[i]);
         }
 
         // Right boundary
@@ -369,7 +378,7 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
 
     // Use aligned allocation for SIMD vectorization (64-byte alignment for AVX-512)
     // Each array starts at aligned boundary by padding n to alignment
-    const size_t alignment = 64;  // Cache line and AVX-512 alignment
+    const size_t alignment = SIMD_ALIGNMENT;
     const size_t n_aligned = ((n * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
     const size_t workspace_aligned_size = 10 * n_aligned;
 
@@ -419,23 +428,30 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
     const double gamma = solver->trbdf2_config.gamma;
     const size_t n = solver->grid.n_points;
 
+    // Hint to compiler that arrays are 64-byte aligned for SIMD
+    double *u_current = __builtin_assume_aligned(solver->u_current, SIMD_ALIGNMENT);
+    double *u_stage = __builtin_assume_aligned(solver->u_stage, SIMD_ALIGNMENT);
+    double *u_next = __builtin_assume_aligned(solver->u_next, SIMD_ALIGNMENT);
+    double *rhs = __builtin_assume_aligned(solver->rhs, SIMD_ALIGNMENT);
+
     // TR-BDF2 scheme
     // Stage 1: Trapezoidal rule from t_n to t_n + γ·dt
     // u* = u^n + (γ·dt/2) · [L(u^n) + L(u*)]
     // Rearranging: u* - (γ·dt/2)·L(u*) = u^n + (γ·dt/2)·L(u^n)
 
     // Reuse workspace Lu array (no allocation overhead)
-    double *Lu_n = solver->Lu;
-    evaluate_spatial_operator(solver, t_current, solver->u_current, Lu_n);
+    double *Lu_n = __builtin_assume_aligned(solver->Lu, SIMD_ALIGNMENT);
+    evaluate_spatial_operator(solver, t_current, u_current, Lu_n);
 
     // RHS for stage 1
+    const double gamma_dt_half = gamma * dt * 0.5;
     #pragma omp simd
     for (size_t i = 0; i < n; i++) {
-        solver->rhs[i] = solver->u_current[i] + (gamma * dt / 2.0) * Lu_n[i];
+        rhs[i] = fma(gamma_dt_half, Lu_n[i], u_current[i]);
     }
 
     // Initialize u_stage with u_current as initial guess
-    memcpy(solver->u_stage, solver->u_current, n * sizeof(double));
+    memcpy(u_stage, u_current, n * sizeof(double));
 
     // Solve implicit equation for stage 1
     int status = solve_implicit_step(solver, t_current + gamma * dt,
@@ -454,14 +470,15 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
     const double coeff = one_minus_gamma * dt / two_minus_gamma;
 
     // RHS for stage 2
+    const double inv_denom = 1.0 / denom;
+    const double neg_coeff = -(one_minus_gamma * one_minus_gamma * inv_denom);
     #pragma omp simd
     for (size_t i = 0; i < n; i++) {
-        solver->rhs[i] = solver->u_stage[i] / denom -
-                         one_minus_gamma * one_minus_gamma * solver->u_current[i] / denom;
+        rhs[i] = fma(neg_coeff, u_current[i], u_stage[i] * inv_denom);
     }
 
     // Initialize u_next with u_stage as initial guess
-    memcpy(solver->u_next, solver->u_stage, n * sizeof(double));
+    memcpy(u_next, u_stage, n * sizeof(double));
 
     // Solve implicit equation for stage 2
     status = solve_implicit_step(solver, t_current + dt, coeff,
@@ -469,7 +486,7 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
 
     if (status == 0) {
         // Update current solution
-        memcpy(solver->u_current, solver->u_next, n * sizeof(double));
+        memcpy(u_current, u_next, n * sizeof(double));
     }
 
     return status;

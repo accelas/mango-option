@@ -45,6 +45,17 @@ typedef struct {
 AmericanOptionResult american_option_price(const OptionData *option_data,
                                           const AmericanOptionGrid *grid_params);
 
+// Batch API: Price multiple American options in parallel
+// option_data: Array of n_options option specifications
+// grid_params: Grid parameters (shared across all options)
+// results: Output array of n_options results (caller allocated)
+// Returns: 0 on success, -1 on failure
+// Note: Caller must call pde_solver_destroy() on each result[i].solver
+int american_option_price_batch(const OptionData *option_data,
+                                 const AmericanOptionGrid *grid_params,
+                                 size_t n_options,
+                                 AmericanOptionResult *results);
+
 // Callback functions (exposed for advanced usage)
 // These match the PDE solver callback signatures
 
