@@ -34,6 +34,10 @@ bazel test //tests:pde_solver_test --test_output=all
 # Run example
 bazel run //examples:example_heat_equation
 
+# Run QuantLib comparison benchmark (requires libquantlib0-dev)
+bazel build //tests:quantlib_benchmark
+./bazel-bin/tests/quantlib_benchmark
+
 # Clean build artifacts
 bazel clean
 ```
@@ -42,7 +46,7 @@ bazel clean
 
 ```
 iv_calc/
-├── MODULE.bazel           # Bazel module with GoogleTest dependency
+├── MODULE.bazel           # Bazel module with GoogleTest and Benchmark dependencies
 ├── src/
 │   ├── BUILD.bazel        # Build configuration for library
 │   ├── pde_solver.h       # Public API header
@@ -54,7 +58,9 @@ iv_calc/
     ├── BUILD.bazel
     ├── pde_solver_test.cc        # Core PDE solver tests
     ├── cubic_spline_test.cc      # Interpolation tests
-    └── stability_test.cc          # Numerical stability tests
+    ├── stability_test.cc          # Numerical stability tests
+    ├── quantlib_benchmark.cc      # Performance comparison with QuantLib
+    └── BENCHMARK.md               # Benchmark documentation
 ```
 
 ## Core Architecture
