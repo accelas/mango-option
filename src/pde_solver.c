@@ -1,5 +1,6 @@
 #include "pde_solver.h"
 #include "ivcalc_trace.h"
+#include "tridiagonal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -62,23 +63,60 @@ static void evaluate_spatial_operator(PDESolver *solver, double t, const double 
 }
 
 // Solve implicit system: (I - coeff*dt*L)*u_new = rhs
-// Uses fixed-point iteration for nonlinear cases
+// Uses linearized Newton iteration with tridiagonal solver
 static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
                                const double *rhs, double *u_new, size_t step) {
     const size_t n = solver->grid.n_points;
     const size_t max_iter = solver->trbdf2_config.max_iter;
     const double tol = solver->trbdf2_config.tolerance;
+    const double eps = 1e-7;  // Finite difference epsilon (balance between truncation and roundoff error)
 
     // Initialize with rhs (better initial guess)
     memcpy(u_new, rhs, n * sizeof(double));
     apply_boundary_conditions(solver, t, u_new);
 
-    // Use pre-allocated workspace arrays (no malloc overhead)
+    // Use pre-allocated workspace arrays
     double *u_old = solver->u_old;
     double *Lu = solver->Lu;
-    double *u_temp = solver->u_temp;
-    const double omega = 0.7;  // Relaxation parameter (under-relaxation)
-    double rel_error = 0.0;  // Track relative error for convergence monitoring
+    double *Lu_pert = solver->u_temp;  // Reuse u_temp for perturbed L evaluation
+    double *diag = solver->matrix_diag;
+    double *upper = solver->matrix_upper;
+    double *lower = solver->matrix_lower;
+    double rel_error = 0.0;
+
+    // Compute Jacobian once at the beginning (assumes nearly linear operator)
+    // For truly nonlinear problems, this could be recomputed every few iterations
+    evaluate_spatial_operator(solver, t, u_new, Lu);
+
+    for (size_t i = 0; i < n; i++) {
+        // Diagonal element: ∂L_i/∂u_i
+        double u_save = u_new[i];
+        u_new[i] = u_save + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dLi_dui = (Lu_pert[i] - Lu[i]) / eps;
+        u_new[i] = u_save;
+
+        // Build system matrix: (I - coeff_dt * J)
+        diag[i] = 1.0 - coeff_dt * dLi_dui;
+
+        // Lower diagonal: ∂L_i/∂u_{i-1} (for rows i >= 1)
+        if (i >= 1) {
+            u_new[i-1] = u_new[i-1] + eps;
+            evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+            double dLi_duim1 = (Lu_pert[i] - Lu[i]) / eps;
+            u_new[i-1] = u_new[i-1] - eps;
+            lower[i-1] = -coeff_dt * dLi_duim1;
+        }
+
+        // Upper diagonal: ∂L_i/∂u_{i+1} (for rows i <= n-2)
+        if (i <= n - 2) {
+            u_new[i+1] = u_new[i+1] + eps;
+            evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+            double dLi_duip1 = (Lu_pert[i] - Lu[i]) / eps;
+            u_new[i+1] = u_new[i+1] - eps;
+            upper[i] = -coeff_dt * dLi_duip1;
+        }
+    }
 
     for (size_t iter = 0; iter < max_iter; iter++) {
         memcpy(u_old, u_new, n * sizeof(double));
@@ -86,21 +124,27 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         // Evaluate L(u_old)
         evaluate_spatial_operator(solver, t, u_old, Lu);
 
-        // u_temp = rhs + coeff_dt * L(u_old)
+        // Compute residual: r = rhs - (u_old - coeff_dt * L(u_old))
+        //                      = rhs - u_old + coeff_dt * L(u_old)
+        double *residual = Lu_pert;  // Reuse Lu_pert as residual storage
         #pragma omp simd
         for (size_t i = 0; i < n; i++) {
-            u_temp[i] = rhs[i] + coeff_dt * Lu[i];
+            residual[i] = rhs[i] - u_old[i] + coeff_dt * Lu[i];
         }
 
-        // Apply under-relaxation: u_new = omega * u_temp + (1-omega) * u_old
+        // Solve for correction: (I - coeff_dt * J) * δu = residual
+        double *delta_u = u_new;  // Use u_new to store δu temporarily
+        solve_tridiagonal(n, lower, diag, upper, residual, delta_u);
+
+        // Update: u_new = u_old + δu
         #pragma omp simd
         for (size_t i = 0; i < n; i++) {
-            u_new[i] = omega * u_temp[i] + (1.0 - omega) * u_old[i];
+            u_new[i] = u_old[i] + delta_u[i];
         }
 
         apply_boundary_conditions(solver, t, u_new);
 
-        // Check convergence using relative error
+        // Check convergence
         double error = 0.0;
         double norm = 0.0;
         for (size_t i = 0; i < n; i++) {
@@ -111,22 +155,19 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         error = sqrt(error / n);
         norm = sqrt(norm / n);
 
-        // Use relative tolerance if norm is significant, otherwise absolute
         rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
 
         // Trace iteration progress
         IVCALC_TRACE_PDE_IMPLICIT_ITER(step, iter, rel_error, tol);
 
         if (rel_error < tol || error < tol) {
-            // Trace successful convergence
             IVCALC_TRACE_PDE_IMPLICIT_CONVERGED(step, iter, rel_error);
-            return 0; // Success
+            return 0;
         }
     }
 
-    // Trace convergence failure
     IVCALC_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, rel_error);
-    return -1; // Failed to converge
+    return -1;
 }
 
 // Utility functions
@@ -156,8 +197,8 @@ void pde_free_grid(SpatialGrid *grid) {
 TRBDF2Config pde_default_trbdf2_config(void) {
     TRBDF2Config config;
     config.gamma = 2.0 - sqrt(2.0);  // ≈ 0.5858
-    config.max_iter = 100;
-    config.tolerance = 1e-6;  // Reasonable tolerance for most applications
+    config.max_iter = 20;  // Newton iteration converges quickly for linear/near-linear problems
+    config.tolerance = 1e-8;  // Tighter tolerance for better accuracy
     return config;
 }
 
