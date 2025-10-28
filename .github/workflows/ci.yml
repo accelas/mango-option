@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y git wget ca-certificates build-essential python3 systemtap-sdt-dev
+          apt-get install -y git wget ca-certificates build-essential python3 systemtap-sdt-dev libquantlib0-dev
 
       - name: Checkout code
         uses: actions/checkout@v4

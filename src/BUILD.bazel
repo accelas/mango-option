@@ -28,7 +28,9 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-march=native",
         "-fopenmp-simd",
+        "-ftree-vectorize",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
     deps = [":cubic_spline"],
@@ -47,7 +49,9 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-march=native",
         "-fopenmp-simd",
+        "-ftree-vectorize",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
     deps = [":pde_solver"],

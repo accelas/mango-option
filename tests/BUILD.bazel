@@ -68,3 +68,21 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_binary(
+    name = "quantlib_benchmark",
+    srcs = ["quantlib_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    linkopts = ["-lQuantLib"],
+    deps = [
+        "//src:american_option",
+        "//src:implied_volatility",
+        "@google_benchmark//:benchmark",
+    ],
+)
