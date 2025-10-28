@@ -461,3 +461,128 @@ The implementation shares the tridiagonal solver with the TR-BDF2
 scheme to avoid code duplication. Both spline coefficients and
 derivative evaluation are supported for gradient-based applications.
 ```
+
+## Workflow: Creating Pull Requests
+
+**IMPORTANT:** After completing a task and committing changes, create a GitHub Pull Request instead of pushing directly to main.
+
+### Standard Workflow
+
+1. **Create a feature branch** (if not already on one):
+   ```bash
+   git checkout -b feature/descriptive-name
+   ```
+
+2. **Make changes and commit** following the commit message guidelines above
+
+3. **Push the branch to GitHub**:
+   ```bash
+   git push -u origin feature/descriptive-name
+   ```
+
+4. **Create a Pull Request**:
+   ```bash
+   gh pr create --title "Brief description" --body "$(cat <<'EOF'
+   ## Summary
+   Brief description of what this PR does
+
+   ## Changes
+   - List key changes
+   - Explain technical decisions
+
+   ## Testing
+   - Describe how changes were tested
+   - Include test results if applicable
+
+   ## Related Issues
+   Fixes #issue_number (if applicable)
+
+   🤖 Generated with [Claude Code](https://claude.com/claude-code)
+   EOF
+   )"
+   ```
+
+5. **Wait for review** (or self-merge if you have permission and tests pass)
+
+### PR Title Guidelines
+
+- Follow the same style as commit messages (imperative mood, 50 chars)
+- Examples:
+  - "Fix TR-BDF2 Stage 2 coefficient calculation"
+  - "Add support for Robin boundary conditions"
+  - "Refactor Newton iteration convergence check"
+
+### PR Body Template
+
+```markdown
+## Summary
+[1-2 sentence overview of what this PR accomplishes]
+
+## Changes
+- [Key change 1]
+- [Key change 2]
+- [Key change 3]
+
+## Testing
+[How you tested these changes]
+- Bazel test results: X/Y passing
+- Manual testing performed
+- Performance impact (if any)
+
+## Related Issues
+Fixes #[issue_number]
+Closes #[issue_number]
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
+
+### When to Create a PR
+
+- **After completing a logical unit of work** (bug fix, feature, refactoring)
+- **After all tests pass** locally
+- **Before moving to the next task** (don't accumulate multiple unrelated changes)
+
+### Self-Merging
+
+If you have permission and all checks pass:
+```bash
+# Merge the PR (after tests pass)
+gh pr merge --squash --delete-branch
+
+# Return to main branch
+git checkout main
+git pull
+```
+
+### Example Complete Workflow
+
+```bash
+# Start work on a bug fix
+git checkout -b fix/trbdf2-stagnation
+
+# Make changes...
+# ... edit files ...
+
+# Test locally
+bazel test //...
+
+# Commit
+git add src/pde_solver.c
+git commit -m "Fix TR-BDF2 Stage 2 coefficients
+
+Replaced incorrect formulation with standard coefficients
+from Ascher, Ruuth, Wetton (1995).
+
+Fixes #7"
+
+# Push and create PR
+git push -u origin fix/trbdf2-stagnation
+gh pr create --title "Fix TR-BDF2 Stage 2 coefficients" --body "..."
+
+# After review/tests pass, merge
+gh pr merge --squash --delete-branch
+
+# Clean up
+git checkout main
+git pull
+```
