@@ -29,10 +29,8 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
-        "-mavx512f",
         "-fopenmp-simd",
         "-ftree-vectorize",
-        "-fopt-info-vec-optimized",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
     deps = [":cubic_spline"],
@@ -52,10 +50,8 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
-        "-mavx512f",
         "-fopenmp-simd",
         "-ftree-vectorize",
-        "-fopt-info-vec-optimized",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
     deps = [":pde_solver"],

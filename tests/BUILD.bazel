@@ -77,9 +77,7 @@ cc_binary(
         "-Wall",
         "-Wextra",
         "-march=native",
-        "-mavx512f",
         "-ftree-vectorize",
-        "-fopt-info-vec-optimized",
     ],
     linkopts = ["-lQuantLib"],
     deps = [
