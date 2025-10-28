@@ -24,6 +24,12 @@ During trading sessions, we need to:
 
 FDM is too slow for this (21.7ms × 1000 options = 21.7 seconds). Interpolation can reduce this to <1ms total.
 
+**Design Philosophy:**
+- **Strategy Pattern**: Uses dependency injection for interpolation algorithms (see `INTERPOLATION_STRATEGY_DESIGN.md`)
+- **Runtime Selection**: Switch between linear, cubic, or custom algorithms without recompilation
+- **Extensibility**: Users can implement custom interpolation strategies
+- **Consistency**: Follows existing callback-based architecture from `PDESolver`
+
 ---
 
 ## Design Alternatives and Trade-offs
@@ -297,7 +303,9 @@ double price = table->prices[idx];
 
 **Challenge:** Need efficient interpolation in 4D/5D space
 
-**Options:**
+**Architecture:** Uses **Strategy Pattern** with dependency injection to allow runtime algorithm selection. See `INTERPOLATION_STRATEGY_DESIGN.md` for complete design.
+
+**Available Strategies:**
 
 #### 3.1. Separable Multi-linear Interpolation (RECOMMENDED)
 
@@ -371,12 +379,13 @@ double price = table->prices[idx];
 **New Files:**
 ```
 src/
+├── interp_strategy.h     # Interpolation strategy interface (DI)
 ├── iv_surface.h          # IV surface API
 ├── iv_surface.c          # IV surface implementation
 ├── price_table.h         # Option price table API
 ├── price_table.c         # Price table implementation
-├── multilinear_interp.h  # Multi-dimensional interpolation
-└── multilinear_interp.c  # Interpolation implementation
+├── interp_multilinear.c  # Multi-linear strategy implementation
+└── interp_cubic.c        # Cubic spline strategy implementation
 
 examples/
 ├── example_iv_surface.c       # Build IV surface from market data
@@ -384,9 +393,11 @@ examples/
 └── example_fast_greeks.c      # Greeks calculation via interpolation
 
 tests/
+├── interp_strategy_test.cc    # Strategy interface tests
 ├── iv_surface_test.cc         # IV surface tests
 ├── price_table_test.cc        # Price table tests
-└── interp_accuracy_test.cc    # Interpolation accuracy analysis
+├── interp_accuracy_test.cc    # Interpolation accuracy analysis
+└── interp_benchmark.cc        # Strategy performance comparison
 ```
 
 **Integration Points:**
