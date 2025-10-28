@@ -1,302 +1,630 @@
-# USDT Tracing Guide for iv_calc
+# USDT Tracing Guide for ivcalc
 
-This document explains how to use User Statically-Defined Tracing (USDT) probes in the iv_calc library for dynamic debugging, performance analysis, and production monitoring.
+This document provides comprehensive documentation for using USDT (User Statically-Defined Tracing) probes in the ivcalc library.
+
+> **Quick Start:** New to tracing? Start with [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute introduction.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+- [Common Use Cases](#common-use-cases)
+- [Available Probes](#available-probes)
+- [Using bpftrace](#using-bpftrace)
+- [Helper Tool Reference](#helper-tool-reference)
+- [Script Reference](#script-reference)
+- [Advanced Topics](#advanced-topics)
+- [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-The iv_calc library includes USDT probe points that provide zero-overhead tracing capabilities. When tracing is disabled (the default), probes compile to single NOP instructions with negligible performance impact. When enabled via tracing tools, probes capture detailed runtime information without requiring library recompilation.
+The ivcalc library uses USDT probe points for zero-overhead runtime tracing. This enables:
 
-## Benefits of USDT Tracing
-
-- **Zero overhead when disabled**: Probes are NOPs when not actively traced
+- **Zero overhead when disabled**: Probes compile to single NOP instructions
 - **Dynamic enablement**: Enable/disable tracing at runtime without recompilation
-- **Production-safe**: Can be used in production environments
+- **Production-safe**: Can be used in production environments (< 1% overhead when active)
 - **Rich context**: Captures solver state, convergence metrics, and performance data
-- **Standard tooling**: Works with bpftrace, systemtap, perf, and other Linux tracing tools
+- **Standard tooling**: Works with bpftrace and other eBPF-based tools
 
-## Building with USDT Support
+### Benefits
+
+| Use Case | Benefit |
+|----------|---------|
+| **Development** | Debug convergence issues, understand algorithm behavior |
+| **Testing** | Validate solver correctness, verify convergence patterns |
+| **Performance** | Profile execution time, identify bottlenecks |
+| **Production** | Monitor solver health, detect anomalies |
+
+## Getting Started
 
 ### Prerequisites
 
-On Debian/Ubuntu systems:
 ```bash
+# Install bpftrace (Ubuntu/Debian)
+sudo apt-get install bpftrace
+
+# Install bpftrace (RHEL/Fedora)
+sudo yum install bpftrace
+
+# Optional: Install systemtap-sdt-dev for compile-time validation
 sudo apt-get install systemtap-sdt-dev
 ```
 
-On RHEL/Fedora systems:
+**Minimum versions:**
+- bpftrace: v0.12+
+- Linux kernel: 4.9+ with eBPF support
+
+### Build with USDT
+
+**USDT is enabled by default** - just build normally:
+
 ```bash
-sudo yum install systemtap-sdt-devel
+# Build examples
+bazel build //examples:example_heat_equation
+bazel build //examples:example_american_option
+bazel build //examples:example_implied_volatility
+
+# Build your own program
+bazel build //your:target
 ```
 
-### Build Commands
+The library gracefully falls back to no-op probes if `sys/sdt.h` is not available.
 
-**Standard build (USDT probes are no-ops):**
+### Verify USDT Support
+
 ```bash
-bazel build //src:pde_solver
+# Using helper tool
+sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+
+# Or manually
+readelf -n ./bazel-bin/examples/example_heat_equation | grep NT_STAPSDT
+sudo bpftrace -l 'usdt:./bazel-bin/examples/example_heat_equation:ivcalc:*'
 ```
 
-**USDT-enabled build (requires systemtap-sdt-dev):**
+## Common Use Cases
+
+### 1. Debug Convergence Failures
+
 ```bash
-bazel build //src:pde_solver_usdt
+# Alert on all failures with diagnostics
+sudo ./scripts/ivcalc-trace monitor ./my_program --preset=debug
+
+# Or directly with bpftrace
+sudo bpftrace scripts/tracing/debug_failures.bt -c './my_program'
 ```
 
-The USDT-enabled version includes fully functional probe points that can be traced with bpftrace, systemtap, or other USDT-aware tools.
+**What you get:**
+- Convergence failure alerts with error values
+- Validation error messages
+- Last known state before failure
+- Suggested fixes based on error codes
 
-## Available Probe Points
-
-### Solver Lifecycle Probes
-
-**`pde:solver_start`** - Fired when `pde_solver_solve()` begins
-- Parameters:
-  - `arg0`: t_start (starting time)
-  - `arg1`: t_end (ending time)
-  - `arg2`: dt (time step size)
-  - `arg3`: n_steps (total number of steps)
-
-**`pde:solver_progress`** - Fired periodically (every 10% of steps)
-- Parameters:
-  - `arg0`: step (current step number)
-  - `arg1`: n_steps (total steps)
-  - `arg2`: t_current (current time value)
-
-**`pde:solver_complete`** - Fired when solve completes successfully
-- Parameters:
-  - `arg0`: total_steps (steps executed)
-  - `arg1`: final_time (final time reached)
-
-### Convergence Tracking Probes
-
-**`pde:implicit_iter`** - Fired on each implicit solver iteration
-- Parameters:
-  - `arg0`: step (time step number)
-  - `arg1`: iter (iteration number)
-  - `arg2`: error (current relative error)
-  - `arg3`: tolerance (convergence threshold)
-
-**`pde:implicit_converged`** - Fired when implicit solver converges
-- Parameters:
-  - `arg0`: step (time step number)
-  - `arg1`: final_iter (iterations required)
-  - `arg2`: final_error (final error achieved)
-
-**`pde:implicit_failed`** - Fired when implicit solver fails to converge
-- Parameters:
-  - `arg0`: step (step where failure occurred)
-  - `arg1`: t_current (time value)
-  - `arg2`: max_iter (maximum iterations attempted)
-
-### Error Event Probes
-
-**`pde:spline_error`** - Fired when spline creation fails
-- Parameters:
-  - `arg0`: n_points (points provided)
-  - `arg1`: min_required (minimum required, always 2)
-
-## Using USDT Probes with bpftrace
-
-### Installation
+### 2. Monitor Convergence Behavior
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install bpftrace
-
-# RHEL/Fedora
-sudo yum install bpftrace
+# Watch convergence in real-time
+sudo bpftrace scripts/tracing/convergence_watch.bt -c './my_program'
 ```
 
-### Listing Available Probes
+**What you get:**
+- Iteration-by-iteration progress
+- Convergence rates and patterns
+- Histogram of iterations required
+- Success/failure statistics
+
+### 3. Profile Performance
 
 ```bash
-# List all probes in the library
-sudo bpftrace -l 'usdt:/path/to/libpde_solver.so:*'
-
-# Or if running an executable
-sudo bpftrace -l 'usdt:/path/to/example_heat_equation:*'
+# Comprehensive performance analysis
+sudo bpftrace scripts/tracing/performance_profile.bt -c './my_program'
 ```
 
-### Example: Monitor Solver Execution
+**What you get:**
+- Execution time per module
+- Per-step timing (PDE solver)
+- Iteration counts
+- Timing histograms
+- Slowest operations identified
+
+### 4. Deep Dive into PDE Solver
 
 ```bash
-#!/usr/bin/env bpftrace
+# Detailed PDE solver tracing
+sudo bpftrace scripts/tracing/pde_detailed.bt -c './example_heat_equation'
+```
 
-// Monitor all solver lifecycle events
-usdt:/path/to/example_heat_equation:pde:solver_start
-{
-    printf("Solver starting: t=[%.6f, %.6f], dt=%.6f, n_steps=%d\n",
+**What you get:**
+- Time stepping progress (every 10%)
+- Convergence per time step
+- Slow convergence warnings
+- Complete statistics summary
+
+### 5. Analyze Implied Volatility
+
+```bash
+# Detailed IV calculation tracing
+sudo bpftrace scripts/tracing/iv_detailed.bt -c './example_implied_volatility'
+```
+
+**What you get:**
+- Input parameters and validation
+- Brent's method iteration details
+- Convergence analysis
+- IV value distribution
+
+## Available Probes
+
+### General-Purpose Probes
+
+These work across all modules (PDE solver, American options, IV, etc.):
+
+#### Algorithm Lifecycle
+
+**`ivcalc:algo_start`**
+```c
+probe algo_start(int module_id, double param1, double param2, double param3)
+```
+- Fired when any algorithm begins execution
+- `module_id`: 1=PDE, 2=AmOption, 3=IV, 4=Brent, 5=Spline
+- `param1-3`: Module-specific parameters
+
+**`ivcalc:algo_progress`**
+```c
+probe algo_progress(int module_id, size_t current, size_t total, double metric)
+```
+- Fired periodically during execution (e.g., every 10% for PDE solver)
+- `current/total`: Progress counter
+- `metric`: Current value (e.g., current time, current iteration)
+
+**`ivcalc:algo_complete`**
+```c
+probe algo_complete(int module_id, size_t iterations, double final_metric)
+```
+- Fired when algorithm completes successfully
+
+#### Convergence Tracking
+
+**`ivcalc:convergence_iter`**
+```c
+probe convergence_iter(int module_id, size_t step, size_t iter, double error, double tolerance)
+```
+- Fired on each iteration of convergence loop
+- `step`: Outer step (time step for PDE, 0 for others)
+- `iter`: Current iteration number
+- `error`: Current error metric
+- `tolerance`: Convergence threshold
+
+**`ivcalc:convergence_success`**
+```c
+probe convergence_success(int module_id, size_t step, size_t final_iter, double final_error)
+```
+- Fired when convergence is achieved
+
+**`ivcalc:convergence_failed`**
+```c
+probe convergence_failed(int module_id, size_t step, size_t max_iter, double final_error)
+```
+- Fired when convergence fails
+
+#### Validation and Errors
+
+**`ivcalc:validation_error`**
+```c
+probe validation_error(int module_id, int error_code, double param1, double param2)
+```
+- Fired when input validation fails
+- Error codes vary by module (see module-specific sections)
+
+**`ivcalc:runtime_error`**
+```c
+probe runtime_error(int module_id, int error_code, double context)
+```
+- Fired on runtime errors
+
+### Module-Specific Probes
+
+#### Implied Volatility
+
+**`ivcalc:iv_start`**
+```c
+probe iv_start(double spot, double strike, double time_to_maturity, double market_price)
+```
+
+**`ivcalc:iv_complete`**
+```c
+probe iv_complete(double implied_vol, int iterations, int converged)
+```
+- `converged`: 1 if successful, 0 if failed
+
+**IV Validation Error Codes:**
+- 1: Spot price must be positive
+- 2: Strike price must be positive
+- 3: Time to maturity must be positive
+- 4: Market price must be positive
+- 5: Arbitrage bounds violated
+
+#### Brent's Method
+
+**`ivcalc:brent_iter`**
+```c
+probe brent_iter(int iter, double x, double fx, double interval_width)
+```
+
+#### American Options
+
+**`ivcalc:option_start`**
+```c
+probe option_start(int option_type, double strike, double volatility, double time_to_maturity)
+```
+- `option_type`: 0=call, 1=put
+
+**`ivcalc:option_complete`**
+```c
+probe option_complete(int status, int iterations)
+```
+- `status`: 0=success, -1=failure
+
+### Module IDs
+
+```c
+#define MODULE_PDE_SOLVER       1
+#define MODULE_AMERICAN_OPTION  2
+#define MODULE_IMPLIED_VOL      3
+#define MODULE_BRENT_ROOT       4
+#define MODULE_CUBIC_SPLINE     5
+```
+
+## Using bpftrace
+
+### Basic Syntax
+
+```bash
+# Run with program
+sudo bpftrace script.bt -c './program'
+
+# Attach to running process
+sudo bpftrace script.bt -p <PID>
+
+# One-liner
+sudo bpftrace -e 'usdt:./program:ivcalc:convergence_failed { printf("FAIL\n"); }'
+```
+
+### Example Scripts
+
+**Monitor all convergence failures:**
+
+```bash
+sudo bpftrace -e '
+usdt::ivcalc:convergence_failed {
+    printf("Module %d failed at step %d after %d iterations (error=%.2e)\n",
+           arg0, arg1, arg2, arg3);
+}'
+-c './my_program'
+```
+
+**Count iterations per module:**
+
+```bash
+sudo bpftrace -e '
+usdt::ivcalc:convergence_success { @iters[arg0] = hist(arg2); }
+END { print(@iters); }
+'
+-c './my_program'
+```
+
+**Measure algorithm duration:**
+
+```bash
+sudo bpftrace -e '
+usdt::ivcalc:algo_start { @start[arg0] = nsecs; }
+usdt::ivcalc:algo_complete /@start[arg0]/ {
+    $duration_ms = (nsecs - @start[arg0]) / 1000000;
+    printf("Module %d: %u ms\n", arg0, $duration_ms);
+    delete(@start[arg0]);
+}
+'
+-c './my_program'
+```
+
+## Helper Tool Reference
+
+The `ivcalc-trace` helper tool simplifies common tracing tasks.
+
+### Commands
+
+```bash
+# List all USDT probes
+sudo ./scripts/ivcalc-trace list <binary>
+
+# Validate USDT support
+sudo ./scripts/ivcalc-trace check <binary>
+
+# Monitor with preset
+sudo ./scripts/ivcalc-trace monitor <binary> --preset=<name>
+
+# Run specific script
+sudo ./scripts/ivcalc-trace run <script.bt> <binary>
+```
+
+### Monitor Presets
+
+| Preset | Script | Purpose |
+|--------|--------|---------|
+| `all` | `monitor_all.bt` | High-level overview (default) |
+| `convergence` | `convergence_watch.bt` | Convergence tracking |
+| `debug` | `debug_failures.bt` | Error diagnostics |
+| `performance` | `performance_profile.bt` | Performance analysis |
+| `pde` | `pde_detailed.bt` | PDE solver deep dive |
+| `iv` | `iv_detailed.bt` | IV calculation deep dive |
+
+### Examples
+
+```bash
+# Quick monitoring
+sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation
+
+# Debug convergence
+sudo ./scripts/ivcalc-trace monitor ./my_program --preset=debug
+
+# Performance profiling
+sudo ./scripts/ivcalc-trace monitor ./my_program --preset=performance
+
+# Run custom script
+sudo ./scripts/ivcalc-trace run my_custom.bt ./my_program
+
+# Pass arguments to binary
+sudo ./scripts/ivcalc-trace monitor ./my_program -- --my-arg value
+```
+
+## Script Reference
+
+All scripts are in `scripts/tracing/`. See [scripts/tracing/README.md](scripts/tracing/README.md) for details.
+
+### Script Summary
+
+| Script | Description | Best For |
+|--------|-------------|----------|
+| `monitor_all.bt` | Dashboard of all activity | General monitoring |
+| `convergence_watch.bt` | Real-time convergence | Tuning parameters |
+| `debug_failures.bt` | Alert on errors | Debugging issues |
+| `performance_profile.bt` | Timing and statistics | Performance optimization |
+| `pde_detailed.bt` | PDE solver details | PDE-specific work |
+| `iv_detailed.bt` | IV calculation details | IV-specific work |
+
+## Advanced Topics
+
+### Filtering by Module
+
+```bash
+# Only trace PDE solver (module_id == 1)
+sudo bpftrace -e '
+usdt::ivcalc:convergence_iter /arg0 == 1/ {
+    printf("PDE iter %d: error=%.2e\n", arg2, arg3);
+}
+'
+-c './program'
+```
+
+### Combining Multiple Probes
+
+```bash
+sudo bpftrace -e '
+BEGIN { printf("Tracking solver lifecycle...\n"); }
+
+usdt::ivcalc:algo_start {
+    @start = nsecs;
+    printf("Started\n");
+}
+
+usdt::ivcalc:convergence_failed {
+    printf("Convergence failed!\n");
+}
+
+usdt::ivcalc:algo_complete {
+    printf("Completed in %u ms\n", (nsecs - @start) / 1000000);
+}
+'
+-c './program'
+```
+
+### Output to JSON
+
+```bash
+# Save structured output
+sudo bpftrace -e '
+usdt::ivcalc:convergence_success {
+    printf("{\"module\":%d,\"step\":%d,\"iters\":%d,\"error\":%.2e}\n",
            arg0, arg1, arg2, arg3);
 }
-
-usdt:/path/to/example_heat_equation:pde:solver_progress
-{
-    printf("Progress: step %d/%d (%.1f%%), t=%.6f\n",
-           arg0, arg1, (arg0 * 100.0) / arg1, arg2);
-}
-
-usdt:/path/to/example_heat_equation:pde:solver_complete
-{
-    printf("Solver completed: %d steps, final time=%.6f\n",
-           arg0, arg1);
-}
+'
+-c './program' > output.jsonl
 ```
 
-### Example: Convergence Analysis
+### Attach to Running Process
 
 ```bash
-#!/usr/bin/env bpftrace
+# Find PID
+ps aux | grep my_program
 
-BEGIN {
-    printf("Monitoring convergence behavior...\n");
-}
-
-// Track iterations per step
-usdt:/path/to/example_heat_equation:pde:implicit_converged
-{
-    @iters[arg0] = arg1;  // step -> iterations
-    @error[arg0] = arg2;  // step -> final error
-}
-
-// Detect convergence failures
-usdt:/path/to/example_heat_equation:pde:implicit_failed
-{
-    printf("CONVERGENCE FAILURE at step %d, t=%.6f, max_iter=%d\n",
-           arg0, arg1, arg2);
-}
-
-END {
-    printf("\nConvergence Statistics:\n");
-    print(@iters);
-    print(@error);
-}
+# Attach (non-invasive, no restart needed)
+sudo bpftrace scripts/tracing/monitor_all.bt -p 12345
 ```
 
-### Example: Performance Profiling
+### Performance Impact
 
+When tracing is **disabled** (no bpftrace attached):
+- Overhead: < 0.01% (single NOP instruction per probe)
+- Binary size: +few KB for USDT notes
+- Runtime: No measurable impact
+
+When tracing is **enabled** (bpftrace attached):
+- Overhead: 0.1% - 1% depending on probe frequency
+- Memory: ~10MB for bpftrace process
+- Safe for production use
+
+## Troubleshooting
+
+### No Probes Found
+
+**Symptom:** `bpftrace -l` shows no probes
+
+**Solutions:**
+
+1. Check if binary has USDT notes:
+   ```bash
+   readelf -n ./binary | grep NT_STAPSDT
+   ```
+
+2. If missing, ensure systemtap-sdt-dev is installed:
+   ```bash
+   sudo apt-get install systemtap-sdt-dev
+   bazel clean
+   bazel build //your:target
+   ```
+
+3. Verify build includes `-DHAVE_SYSTEMTAP_SDT` (should be automatic)
+
+### Permission Denied
+
+**Symptom:** `Error: Permission denied`
+
+**Solution:** bpftrace requires root:
 ```bash
-#!/usr/bin/env bpftrace
-
-BEGIN {
-    printf("Profiling solver performance...\n");
-}
-
-// Measure time per step
-usdt:/path/to/example_heat_equation:pde:solver_progress
-{
-    if (@last_step_time) {
-        $dt = nsecs - @last_step_time;
-        @step_times = hist($dt);
-        @total_time += $dt;
-        @step_count++;
-    }
-    @last_step_time = nsecs;
-}
-
-END {
-    printf("\nPerformance Report:\n");
-    printf("Total steps: %d\n", @step_count);
-    printf("Average time per step: %d ns\n", @total_time / @step_count);
-    printf("\nTime distribution (nanoseconds):\n");
-    print(@step_times);
-}
+sudo bpftrace script.bt -c './program'
 ```
 
-### Example: Real-time Convergence Monitoring
+### Probes Don't Fire
 
+**Symptom:** Script runs but shows no output
+
+**Possible causes:**
+
+1. Program exits too quickly - add delays or increase work
+2. Wrong probe names - verify with `bpftrace -l`
+3. Filtering too aggressive - remove predicates
+4. Program doesn't reach traced code paths
+
+**Debug:**
 ```bash
-#!/usr/bin/env bpftrace
+# List probes in binary
+sudo bpftrace -l 'usdt:./binary:ivcalc:*'
 
-// Watch convergence in real-time
-usdt:/path/to/example_heat_equation:pde:implicit_iter
-{
-    if (arg2 < arg3 * 2.0) {  // If error < 2*tolerance
-        printf("Step %d, iter %d: error=%.2e (converging)\n",
-               arg0, arg1, arg2);
-    }
-}
+# Add verbose output
+sudo bpftrace -v script.bt -c './program'
 ```
 
-## Using USDT Probes with SystemTap
+### bpftrace Version Too Old
 
-```stap
-probe process("/path/to/libpde_solver.so").mark("solver_start") {
-    printf("Solver starting: t=[%f, %f], dt=%f, steps=%d\n",
-           $arg1, $arg2, $arg3, $arg4)
-}
+**Symptom:** Syntax errors or missing features
 
-probe process("/path/to/libpde_solver.so").mark("implicit_failed") {
-    printf("CONVERGENCE FAILURE at step %d, t=%f\n", $arg1, $arg2)
-}
+**Solution:** Upgrade bpftrace:
+```bash
+# Check version
+bpftrace --version
+
+# Need v0.12+
+sudo apt-get update
+sudo apt-get install bpftrace
 ```
+
+### Script Shows Garbage Data
+
+**Symptom:** Nonsensical values in output
+
+**Causes:**
+- Incorrect `argN` indexing (args are 0-indexed)
+- Type mismatch between probe definition and script
+- Binary/script version mismatch
+
+**Solution:** Verify probe signatures in `src/ivcalc_trace.h`
 
 ## Best Practices
 
-### Development and Debugging
+### Development
 
-1. **Use standard build during development** - The no-op probes have zero overhead
-2. **Enable USDT build for debugging** - Switch to `pde_solver_usdt` when you need tracing
-3. **Monitor convergence issues** - Use `implicit_failed` probe to catch numerical problems
-4. **Profile performance** - Use progress probes to identify slow operations
+1. **Start simple**: Use `monitor_all.bt` first
+2. **Add detail**: Move to specific scripts as needed
+3. **Custom scripts**: Copy and modify existing scripts
+4. **Version control**: Save useful custom scripts
 
-### Production Monitoring
+### Production
 
-1. **Deploy with USDT enabled** - The overhead is negligible (<1%)
-2. **Selective tracing** - Only enable probes when needed
-3. **Automated alerts** - Monitor `implicit_failed` for convergence issues
-4. **Performance baselines** - Track average iterations and step times
+1. **Enable USDT**: Deploy with USDT-enabled binaries (negligible overhead)
+2. **Selective tracing**: Only trace when investigating issues
+3. **Automated alerts**: Monitor convergence failures
+4. **Performance baselines**: Track iteration counts over time
 
-### Troubleshooting
+### Performance
 
-**Problem**: `bpftrace -l` shows no probes
-
-**Solution**:
-- Ensure you built with `//src:pde_solver_usdt` target
-- Check that systemtap-sdt-dev was installed during build
-- Verify binary has USDT notes: `readelf -n <binary> | grep NT_STAPSDT`
-
-**Problem**: Permission denied when running bpftrace
-
-**Solution**: USDT tracing requires elevated privileges:
-```bash
-sudo bpftrace <script>
-```
-
-**Problem**: Probes fire but show garbage data
-
-**Solution**: Ensure argument types match probe definitions in `pde_trace.h`. Check that you're using the correct `argN` for each parameter.
-
-## Integration with Existing Tools
-
-### perf
-
-```bash
-# Record USDT events
-sudo perf record -e sdt_pde:* ./example_heat_equation
-
-# Analyze recording
-sudo perf script
-```
-
-### LTTng (via SDT)
-
-```bash
-# List USDT probes
-lttng list --userspace
-
-# Enable tracing
-lttng create pde-trace
-lttng enable-event --userspace sdt_pde:*
-lttng start
-```
+1. **Limit output**: Use predicates to filter probes
+2. **Sample**: Trace every Nth iteration for high-frequency probes
+3. **Short runs**: Trace for limited duration
+4. **Export data**: Save to file for offline analysis
 
 ## Further Reading
 
+- [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) - 5-minute getting started
+- [scripts/tracing/README.md](scripts/tracing/README.md) - Script reference
+- [src/ivcalc_trace.h](src/ivcalc_trace.h) - Probe definitions
 - [bpftrace documentation](https://github.com/iovisor/bpftrace)
-- [SystemTap USDT guide](https://sourceware.org/systemtap/wiki/UserSpaceProbeImplementation)
-- [Linux USDT probes](https://lwn.net/Articles/753601/)
-- [sys/sdt.h documentation](https://sourceware.org/systemtap/wiki/AddingUserSpaceProbingToApps)
+- [USDT probes](https://lwn.net/Articles/753601/)
+
+## Examples Gallery
+
+Complete working examples for common scenarios.
+
+### Example 1: Find Slowest Time Steps
+
+```bash
+sudo bpftrace -e '
+usdt::ivcalc:convergence_success /arg0 == 1/ {
+    @iters_per_step[arg1] = arg2;
+}
+
+END {
+    print(@iters_per_step);
+}
+' -c './example_heat_equation'
+```
+
+### Example 2: Alert on Slow Convergence
+
+```bash
+sudo bpftrace -e '
+usdt::ivcalc:convergence_iter {
+    if (arg2 > 50) {  # More than 50 iterations
+        printf("SLOW: module=%d, step=%d, iter=%d, error=%.2e\n",
+               arg0, arg1, arg2, arg3);
+    }
+}
+' -c './my_program'
+```
+
+### Example 3: Measure Time Per Step
+
+```bash
+sudo bpftrace -e '
+usdt::ivcalc:algo_progress /arg0 == 1/ {
+    if (@last_time > 0) {
+        $dt = (nsecs - @last_time) / 1000;
+        @step_times = hist($dt);
+    }
+    @last_time = nsecs;
+}
+
+END { print(@step_times); }
+' -c './example_heat_equation'
+```
 
 ## Support
 
-For issues or questions about USDT tracing in iv_calc:
-1. Check that probes are present: `readelf -n <binary> | grep -A4 NT_STAPSDT`
-2. Verify bpftrace/systemtap installation
-3. Review probe definitions in `src/pde_trace.h` and `src/pde_trace.d`
+For issues or questions:
+
+1. Check [Troubleshooting](#troubleshooting) section
+2. Verify probe definitions in `src/ivcalc_trace.h`
+3. Review example scripts in `scripts/tracing/`
+4. Consult bpftrace documentation
+
+---
+
+**Happy Tracing!** 🔍
