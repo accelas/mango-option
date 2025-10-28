@@ -891,6 +891,200 @@ TEST_F(AmericanOptionTest, ZeroDividendAmount) {
     pde_solver_destroy(result_none.solver);
 }
 
+// Regression test: Call option right boundary condition should be non-zero
+// This test verifies the fix for the TODO in american_option.c:84-86
+TEST_F(AmericanOptionTest, CallRightBoundaryConditionNonZero) {
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    ASSERT_EQ(result.status, 0);
+    ASSERT_NE(result.solver, nullptr);
+
+    // Get the solution at the right boundary
+    const double *solution = pde_solver_get_solution(result.solver);
+    const double *grid = pde_solver_get_grid(result.solver);
+    size_t n_points = default_grid.n_points;
+
+    double boundary_value = solution[n_points - 1];
+    double x_max = grid[n_points - 1];
+
+    // For American call at x_max, the value should be approximately S_max - K*exp(-r*T)
+    // where S_max = K*exp(x_max)
+    double S_max = option.strike * std::exp(x_max);
+    double expected_boundary = S_max - option.strike * std::exp(-option.risk_free_rate * option.time_to_maturity);
+
+    // Boundary value should be positive and close to expected European call value
+    EXPECT_GT(boundary_value, 0.0) << "Right boundary should be non-zero for call options";
+    EXPECT_NEAR(boundary_value, expected_boundary, 1.0) << "Boundary value should match European call formula";
+
+    pde_solver_destroy(result.solver);
+}
+
+// Regression test: Put option right boundary should be zero
+TEST_F(AmericanOptionTest, PutRightBoundaryConditionZero) {
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    ASSERT_EQ(result.status, 0);
+    ASSERT_NE(result.solver, nullptr);
+
+    // Get the solution at the right boundary
+    const double *solution = pde_solver_get_solution(result.solver);
+    size_t n_points = default_grid.n_points;
+
+    double boundary_value = solution[n_points - 1];
+
+    // For put options, right boundary (S→∞) should be very close to zero
+    EXPECT_NEAR(boundary_value, 0.0, 0.01) << "Right boundary should be near zero for put options";
+
+    pde_solver_destroy(result.solver);
+}
+
+// Regression test: Call option boundary should decrease as time-to-maturity decreases
+TEST_F(AmericanOptionTest, CallBoundaryTimeEvolution) {
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    std::vector<double> maturities = {0.25, 0.5, 1.0, 2.0};
+    std::vector<double> boundary_values;
+
+    for (double T : maturities) {
+        option.time_to_maturity = T;
+
+        AmericanOptionGrid grid = default_grid;
+        grid.n_steps = static_cast<size_t>(T * 1000);
+
+        AmericanOptionResult result = american_option_price(&option, &grid);
+        ASSERT_EQ(result.status, 0);
+
+        const double *solution = pde_solver_get_solution(result.solver);
+        const double *x_grid = pde_solver_get_grid(result.solver);
+        size_t n_points = grid.n_points;
+
+        // Calculate expected boundary value: S_max - K*exp(-r*T)
+        double x_max = x_grid[n_points - 1];
+        double S_max = option.strike * std::exp(x_max);
+        double expected = S_max - option.strike * std::exp(-option.risk_free_rate * T);
+
+        double actual = solution[n_points - 1];
+        boundary_values.push_back(actual);
+
+        // Verify boundary value is close to expected
+        EXPECT_NEAR(actual, expected, 1.0) << "Boundary mismatch at T=" << T;
+
+        pde_solver_destroy(result.solver);
+    }
+
+    // Boundary values should increase with time to maturity
+    // (as K*exp(-r*T) decreases, S_max - K*exp(-r*T) increases)
+    for (size_t i = 1; i < boundary_values.size(); i++) {
+        EXPECT_GT(boundary_values[i], boundary_values[i-1])
+            << "Boundary should increase with time to maturity";
+    }
+}
+
+// Regression test: Call option value at high spot should match intrinsic value
+TEST_F(AmericanOptionTest, CallHighSpotMatchesIntrinsic) {
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    ASSERT_EQ(result.status, 0);
+
+    // Test at spot price near the boundary (high S)
+    const double *grid = pde_solver_get_grid(result.solver);
+    size_t n_points = default_grid.n_points;
+    double x_max = grid[n_points - 1];
+    double S_high = option.strike * std::exp(x_max * 0.95); // 95% of max
+
+    double value = american_option_get_value_at_spot(result.solver, S_high, option.strike);
+    double intrinsic = S_high - option.strike;
+
+    // For call with no dividends at high S, American value should be close to intrinsic
+    // (early exercise not optimal, but obstacle enforces V ≥ intrinsic)
+    EXPECT_GE(value, intrinsic - 0.1) << "Call value should be at least intrinsic value";
+
+    // Should also be reasonable (not too far above intrinsic for no-dividend call)
+    double time_value = value - intrinsic;
+    EXPECT_LT(time_value, 10.0) << "Time value should be reasonable for deep ITM call";
+
+    pde_solver_destroy(result.solver);
+}
+
+// Regression test: Compare call option with different grid extents
+TEST_F(AmericanOptionTest, CallOptionGridExtentSensitivity) {
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    // Standard grid
+    AmericanOptionGrid grid1 = default_grid;
+    grid1.x_max = 0.7;  // ln(2.0)
+
+    // Wider grid
+    AmericanOptionGrid grid2 = default_grid;
+    grid2.x_max = 1.0;  // ln(2.718...)
+
+    AmericanOptionResult result1 = american_option_price(&option, &grid1);
+    AmericanOptionResult result2 = american_option_price(&option, &grid2);
+
+    ASSERT_EQ(result1.status, 0);
+    ASSERT_EQ(result2.status, 0);
+
+    // Get ATM values
+    double value1 = american_option_get_value_at_spot(result1.solver, 100.0, 100.0);
+    double value2 = american_option_get_value_at_spot(result2.solver, 100.0, 100.0);
+
+    // ATM values should be similar regardless of grid extent
+    // (the fix ensures proper boundary conditions in both cases)
+    EXPECT_NEAR(value1, value2, 0.5)
+        << "ATM call value should be insensitive to grid extent with correct boundary conditions";
+
+    pde_solver_destroy(result1.solver);
+    pde_solver_destroy(result2.solver);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
