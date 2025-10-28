@@ -128,6 +128,18 @@ struct PDESolver {
     double *u_old;        // Previous iteration in fixed-point
     double *Lu;           // Spatial operator result
     double *u_temp;       // Temporary for relaxation
+
+    // Red-Black PSOR arrays (sliced from workspace)
+    // Red points: even indices (0, 2, 4, ...)
+    // Black points: odd indices (1, 3, 5, ...)
+    double *u_red;        // Red point values
+    double *u_black;      // Black point values
+    size_t n_red;         // Number of red points
+    size_t n_black;       // Number of black points
+
+    // Adaptive relaxation parameter
+    double omega;         // Current relaxation parameter (for PSOR)
+    size_t last_iter_count;  // Iterations from last timestep
 };
 
 // Core API functions

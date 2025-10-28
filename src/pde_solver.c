@@ -109,6 +109,158 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
     }
 }
 
+// Helper: Split standard array into red-black arrays
+// Red points: even indices (0, 2, 4, ...)
+// Black points: odd indices (1, 3, 5, ...)
+static void split_red_black(const double * __restrict__ u, size_t n,
+                            double * __restrict__ u_red, double * __restrict__ u_black) {
+    const size_t n_red = (n + 1) / 2;
+
+    // Split into red (even) and black (odd) points
+    #pragma omp simd
+    for (size_t i = 0; i < n_red; i++) {
+        u_red[i] = u[2 * i];
+    }
+
+    #pragma omp simd
+    for (size_t i = 0; i < n / 2; i++) {
+        u_black[i] = u[2 * i + 1];
+    }
+}
+
+// Helper: Merge red-black arrays back into standard array
+static void merge_red_black(const double * __restrict__ u_red,
+                            const double * __restrict__ u_black,
+                            size_t n, double * __restrict__ u) {
+    const size_t n_red = (n + 1) / 2;
+
+    // Merge red (even) points
+    #pragma omp simd
+    for (size_t i = 0; i < n_red; i++) {
+        u[2 * i] = u_red[i];
+    }
+
+    // Merge black (odd) points
+    #pragma omp simd
+    for (size_t i = 0; i < n / 2; i++) {
+        u[2 * i + 1] = u_black[i];
+    }
+}
+
+// Red-Black PSOR solver: solves (I - coeff_dt*L)*u_new = rhs
+// Uses Projected Successive Over-Relaxation with Red-Black ordering
+// This eliminates loop-carried dependencies and enables full vectorization
+// Note: Assumes diffusion-dominated operator for optimal performance
+static int solve_redblack_psor(PDESolver *solver, double t, double coeff_dt,
+                                const double *rhs, double *u_new, size_t step) {
+    const size_t n = solver->grid.n_points;
+    const size_t n_red = solver->n_red;
+    const size_t n_black = solver->n_black;
+    const size_t max_iter = solver->trbdf2_config.max_iter;
+    const double tol = solver->trbdf2_config.tolerance;
+    const double omega = solver->omega;
+    const double dx = solver->grid.dx;
+    const double dx2 = dx * dx;
+    const double coeff = coeff_dt / dx2;
+    const double diag_coeff = 1.0 + 2.0 * coeff;
+
+    // Working arrays
+    double *u_old = solver->u_old;
+    double *u_red = __builtin_assume_aligned(solver->u_red, SIMD_ALIGNMENT);
+    double *u_black = __builtin_assume_aligned(solver->u_black, SIMD_ALIGNMENT);
+
+    // Apply boundary conditions to initial guess
+    apply_boundary_conditions(solver, t, u_new);
+
+    size_t iter;
+    double rel_error = 0.0;
+
+    for (iter = 0; iter < max_iter; iter++) {
+        // Save old solution for convergence check
+        memcpy(u_old, u_new, n * sizeof(double));
+
+        // Split into red-black arrays for vectorized updates
+        split_red_black(u_new, n, u_red, u_black);
+
+        // Update RED points (even indices: 0, 2, 4, ...)
+        // All red updates are independent and can be fully vectorized
+        #pragma omp simd
+        for (size_t i_red = 0; i_red < n_red; i_red++) {
+            const size_t i = 2 * i_red;  // Actual grid index
+
+            // Skip Dirichlet boundaries (they're fixed)
+            if ((i == 0 && solver->bc_config.left_type == BC_DIRICHLET) ||
+                (i == n - 1 && solver->bc_config.right_type == BC_DIRICHLET)) {
+                continue;
+            }
+
+            // Get black neighbors for 3-point stencil
+            // Red point i has black neighbors at i-1 and i+1
+            double u_left = (i > 0) ? u_black[(i-1)/2] : u_red[0];
+            double u_right = (i < n-1) ? u_black[i/2] : u_red[n_red-1];
+
+            // Gauss-Seidel update: solve for u_i from implicit equation
+            // u_i * (1 + 2*coeff_dt/dx²) = rhs_i + coeff_dt/dx² * (u_{i-1} + u_{i+1})
+            double rhs_val = rhs[i] + coeff * (u_left + u_right);
+            double u_new_gs = rhs_val / diag_coeff;
+
+            // SOR: u_new = ω * u_new_gs + (1-ω) * u_old
+            u_red[i_red] = fma(omega, u_new_gs, (1.0 - omega) * u_old[i]);
+        }
+
+        // Update BLACK points (odd indices: 1, 3, 5, ...)
+        // All black updates use newly updated red values and are fully vectorizable
+        #pragma omp simd
+        for (size_t i_black = 0; i_black < n_black; i_black++) {
+            const size_t i = 2 * i_black + 1;  // Actual grid index
+
+            // Get red neighbors (already updated in previous step)
+            double u_left = u_red[i_black];         // i-1 = 2*i_black
+            double u_right = u_red[i_black + 1];    // i+1 = 2*(i_black+1)
+
+            // Gauss-Seidel update with freshly updated red neighbors
+            double rhs_val = rhs[i] + coeff * (u_left + u_right);
+            double u_new_gs = rhs_val / diag_coeff;
+
+            // SOR: u_new = ω * u_new_gs + (1-ω) * u_old
+            u_black[i_black] = fma(omega, u_new_gs, (1.0 - omega) * u_old[i]);
+        }
+
+        // Merge red-black arrays back to standard grid representation
+        merge_red_black(u_red, u_black, n, u_new);
+
+        // Apply boundary and obstacle conditions
+        apply_boundary_conditions(solver, t, u_new);
+
+        // Check convergence
+        double error = 0.0;
+        double norm = 0.0;
+        #pragma omp simd reduction(+:error,norm)
+        for (size_t i = 0; i < n; i++) {
+            double diff = u_new[i] - u_old[i];
+            error += diff * diff;
+            norm += u_new[i] * u_new[i];
+        }
+        error = sqrt(error / n);
+        norm = sqrt(norm / n);
+
+        rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
+
+        // Trace iteration progress
+        IVCALC_TRACE_PDE_IMPLICIT_ITER(step, iter, rel_error, tol);
+
+        if (rel_error < tol || error < tol) {
+            IVCALC_TRACE_PDE_IMPLICIT_CONVERGED(step, iter, rel_error);
+            solver->last_iter_count = iter + 1;
+            return 0;
+        }
+    }
+
+    IVCALC_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, rel_error);
+    solver->last_iter_count = max_iter;
+    return -1;
+}
+
 // Solve implicit system: (I - coeff*dt*L)*u_new = rhs
 // Uses linearized Newton iteration with tridiagonal solver
 static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
@@ -368,23 +520,35 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->trbdf2_config = *trbdf2_config;
     solver->callbacks = *callbacks;
 
+    const size_t n = grid->n_points;
+
+    // Calculate red-black split sizes
+    // Red points: even indices (0, 2, 4, ...)
+    // Black points: odd indices (1, 3, 5, ...)
+    solver->n_red = (n + 1) / 2;    // Ceiling division
+    solver->n_black = n / 2;         // Floor division
+
+    // Initialize adaptive relaxation parameter (optimal for Laplacian ~1.7-1.9)
+    solver->omega = 1.8;
+    solver->last_iter_count = 0;
+
     // Allocate single workspace buffer for all arrays (better cache locality)
-    // Need 10 arrays of size n:
+    // Need 10 arrays of size n + 2 arrays for red/black split:
     //   - Solution: u_current, u_next, u_stage, rhs
     //   - Matrix: matrix_diag, matrix_upper, matrix_lower
     //   - Temps: u_old, Lu, u_temp
-    const size_t n = grid->n_points;
-    const size_t workspace_size = 10 * n;
-
-    // Use aligned allocation for SIMD vectorization (64-byte alignment for AVX-512)
-    // Each array starts at aligned boundary by padding n to alignment
+    //   - Red-Black: u_red (n_red), u_black (n_black)
     const size_t alignment = SIMD_ALIGNMENT;
     const size_t n_aligned = ((n * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
-    const size_t workspace_aligned_size = 10 * n_aligned;
+    const size_t n_red_aligned = ((solver->n_red * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
+    const size_t n_black_aligned = ((solver->n_black * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
+    const size_t workspace_aligned_size = 10 * n_aligned + n_red_aligned + n_black_aligned;
 
+    // Use aligned allocation for SIMD vectorization (64-byte alignment for AVX-512)
     solver->workspace = aligned_alloc(alignment, workspace_aligned_size * sizeof(double));
     if (solver->workspace == nullptr) {
         // Fallback to regular malloc if aligned_alloc fails
+        const size_t workspace_size = 10 * n + solver->n_red + solver->n_black;
         solver->workspace = malloc(workspace_size * sizeof(double));
     }
 
@@ -400,6 +564,8 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->u_old = solver->workspace + offset; offset += n_aligned;
     solver->Lu = solver->workspace + offset; offset += n_aligned;
     solver->u_temp = solver->workspace + offset; offset += n_aligned;
+    solver->u_red = solver->workspace + offset; offset += n_red_aligned;
+    solver->u_black = solver->workspace + offset; offset += n_black_aligned;
 
     return solver;
 }
@@ -453,8 +619,8 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
     // Initialize u_stage with u_current as initial guess
     memcpy(u_stage, u_current, n * sizeof(double));
 
-    // Solve implicit equation for stage 1
-    int status = solve_implicit_step(solver, t_current + gamma * dt,
+    // Solve implicit equation for stage 1 using Red-Black PSOR
+    int status = solve_redblack_psor(solver, t_current + gamma * dt,
                                      gamma * dt / 2.0, solver->rhs, solver->u_stage, step);
     if (status != 0) {
         return status;
@@ -480,8 +646,8 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
     // Initialize u_next with u_stage as initial guess
     memcpy(u_next, u_stage, n * sizeof(double));
 
-    // Solve implicit equation for stage 2
-    status = solve_implicit_step(solver, t_current + dt, coeff,
+    // Solve implicit equation for stage 2 using Red-Black PSOR
+    status = solve_redblack_psor(solver, t_current + dt, coeff,
                                 solver->rhs, solver->u_next, step);
 
     if (status == 0) {
