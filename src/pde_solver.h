@@ -52,6 +52,7 @@ typedef void (*SpatialOperatorFunc)(const double *x, double t, const double *u,
 
 // Jump condition: for discontinuous coefficients at interfaces
 // Returns true if there's a jump at position x, and sets jump value
+// Note: Currently unused by solver, kept for backward compatibility
 typedef bool (*JumpConditionFunc)(double x, double *jump_value, void *user_data);
 
 // Obstacle condition: u(x,t) >= psi(x,t) for variational inequalities
@@ -60,14 +61,27 @@ typedef bool (*JumpConditionFunc)(double x, double *jump_value, void *user_data)
 typedef void (*ObstacleFunc)(const double *x, double t, size_t n_points,
                              double *psi, void *user_data);
 
+// Temporal event: Handle time-based events (e.g., dividend payments)
+// Called by solver when crossing registered event times
+// Parameters: t (current time after events), x (grid points), n_points (size),
+//             u (solution - writable), event_indices (indices of events that occurred),
+//             n_events_triggered (number of events), user_data
+// Note: Callback can modify u in-place to apply event effects
+typedef void (*TemporalEventFunc)(double t, const double *x, size_t n_points,
+                                   double *u, const size_t *event_indices,
+                                   size_t n_events_triggered, void *user_data);
+
 // Callback structure
 struct PDECallbacks {
     InitialConditionFunc initial_condition;
     BoundaryConditionFunc left_boundary;
     BoundaryConditionFunc right_boundary;
     SpatialOperatorFunc spatial_operator;
-    JumpConditionFunc jump_condition;      // Optional, can be NULL
+    JumpConditionFunc jump_condition;      // Optional, can be NULL (unused)
     ObstacleFunc obstacle;                 // Optional, can be NULL
+    TemporalEventFunc temporal_event;      // Optional, can be NULL
+    size_t n_temporal_events;              // Number of temporal events
+    double *temporal_event_times;          // Event times (must be sorted ascending)
     void *user_data;                       // User-provided context data
 };
 
