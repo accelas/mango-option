@@ -1,0 +1,177 @@
+#!/usr/bin/env bpftrace
+/*
+ * iv_detailed.bt - Detailed implied volatility tracing
+ *
+ * Deep dive into IV calculation including:
+ * - Input parameters and validation
+ * - Brent's method convergence
+ * - Success/failure analysis
+ *
+ * Usage:
+ *   sudo bpftrace iv_detailed.bt -c './example_implied_volatility'
+ */
+
+BEGIN
+{
+    printf("Detailed Implied Volatility Tracing...\n");
+    printf("================================================================================\n\n");
+}
+
+/* IV calculation starts */
+usdt::ivcalc:iv_start
+{
+    printf("IV Calculation Starting\n");
+    printf("  Spot price: %.4f\n", arg0);
+    printf("  Strike: %.4f\n", arg1);
+    printf("  Time to maturity: %.4f years\n", arg2);
+    printf("  Market price: %.4f\n", arg3);
+    printf("  Moneyness (S/K): %.4f\n", arg0 / arg1);
+    printf("\n");
+
+    @iv_start = nsecs;
+    @spot = arg0;
+    @strike = arg1;
+    @ttm = arg2;
+    @market_price = arg3;
+    @iv_count++;
+}
+
+/* Validation errors */
+usdt::ivcalc:validation_error
+/arg0 == 3/  /* MODULE_IMPLIED_VOL */
+{
+    printf("\033[31mValidation Error\033[0m\n");
+
+    if (arg1 == 1) {
+        printf("  Type: Spot price must be positive\n");
+        printf("  Value: %.4f\n", arg2);
+    } else if (arg1 == 2) {
+        printf("  Type: Strike price must be positive\n");
+        printf("  Value: %.4f\n", arg2);
+    } else if (arg1 == 3) {
+        printf("  Type: Time to maturity must be positive\n");
+        printf("  Value: %.4f\n", arg2);
+    } else if (arg1 == 4) {
+        printf("  Type: Market price must be positive\n");
+        printf("  Value: %.4f\n", arg2);
+    } else if (arg1 == 5) {
+        printf("  Type: Arbitrage bounds violated\n");
+        printf("  Market price: %.4f\n", arg2);
+        printf("  Bound: %.4f\n", arg3);
+    }
+    printf("\n");
+
+    @validation_errors++;
+}
+
+/* Brent's method starts */
+usdt::ivcalc:algo_start
+/arg0 == 4/  /* MODULE_BRENT_ROOT */
+{
+    printf("Brent's Method Starting\n");
+    printf("  Max iterations: %d\n", arg1);
+    printf("  Tolerance: %.2e\n", arg2);
+    printf("  Search interval: %.2e\n", arg3);
+    printf("\n");
+}
+
+/* Brent iterations */
+usdt::ivcalc:brent_iter
+{
+    $iter = arg0;
+    $x = arg1;
+    $fx = arg2;
+    $width = arg3;
+
+    // Print every 5th iteration or when close to convergence
+    if ($iter % 5 == 0 || $width < 0.001 || $fx < 0.0001) {
+        printf("  [Iter %2d] x=%.6f, f(x)=%+.4e, bracket_width=%.2e\n",
+               $iter, $x, $fx, $width);
+    }
+
+    @brent_iters = count();
+    @bracket_widths = hist($width);
+}
+
+/* IV calculation completes */
+usdt::ivcalc:iv_complete
+{
+    $duration_us = (nsecs - @iv_start) / 1000;
+    $iv = arg0;
+    $iters = arg1;
+    $converged = arg2;
+
+    printf("\n");
+    if ($converged) {
+        printf("\033[32mIV Calculation Succeeded\033[0m\n");
+        printf("  Implied volatility: %.4f (%.2f%%)\n", $iv, $iv * 100.0);
+        printf("  Iterations: %d\n", $iters);
+        printf("  Time: %u μs\n", $duration_us);
+
+        @success_count++;
+        @iv_values = hist($iv * 100);  // Convert to percentage
+        @iteration_counts = hist($iters);
+    } else {
+        printf("\033[31mIV Calculation Failed\033[0m\n");
+        printf("  Last estimate: %.4f\n", $iv);
+        printf("  Iterations: %d\n", $iters);
+        printf("  Time: %u μs\n", $duration_us);
+
+        @failure_count++;
+    }
+
+    @total_time += $duration_us;
+    printf("\n");
+}
+
+END
+{
+    printf("================================================================================\n");
+    printf("=== Implied Volatility Statistics ===\n\n");
+
+    printf("Total calculations: %d\n", @iv_count);
+    printf("Successful: %d\n", @success_count);
+    printf("Failed: %d\n", @failure_count);
+    printf("Validation errors: %d\n", @validation_errors);
+
+    if (@iv_count > 0) {
+        printf("Average time per calculation: %u μs\n",
+               @total_time / @iv_count);
+    }
+
+    if (@success_count > 0) {
+        printf("\nIV values (percentage):\n");
+        print(@iv_values);
+
+        printf("\nIterations required:\n");
+        print(@iteration_counts);
+    }
+
+    if (@brent_iters > 0) {
+        printf("\nTotal Brent iterations: %d\n", @brent_iters);
+        printf("Bracket width progression:\n");
+        print(@bracket_widths);
+    }
+
+    if (@failure_count > 0) {
+        printf("\n\033[33mWarning: %d calculations failed to converge\033[0m\n",
+               @failure_count);
+    } else if (@iv_count > 0) {
+        printf("\n\033[32m✓ All IV calculations converged successfully\033[0m\n");
+    }
+
+    clear(@iv_start);
+    clear(@spot);
+    clear(@strike);
+    clear(@ttm);
+    clear(@market_price);
+    clear(@iv_count);
+    clear(@success_count);
+    clear(@failure_count);
+    clear(@validation_errors);
+    clear(@total_time);
+    clear(@brent_iters);
+    clear(@iv_values);
+    clear(@iteration_counts);
+    clear(@bracket_widths);
+}

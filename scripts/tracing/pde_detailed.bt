@@ -1,0 +1,171 @@
+#!/usr/bin/env bpftrace
+/*
+ * pde_detailed.bt - Detailed PDE solver tracing
+ *
+ * Deep dive into PDE solver behavior including:
+ * - Time stepping progress
+ * - Implicit solver convergence per step
+ * - Convergence patterns and anomalies
+ *
+ * Usage:
+ *   sudo bpftrace pde_detailed.bt -c './example_heat_equation'
+ */
+
+BEGIN
+{
+    printf("Detailed PDE solver tracing...\n");
+    printf("================================================================================\n\n");
+}
+
+/* PDE solver starts */
+usdt::ivcalc:algo_start
+/arg0 == 1/  /* MODULE_PDE_SOLVER */
+{
+    printf("PDE Solver Starting\n");
+    printf("  Time domain: [%.6f, %.6f]\n", arg2, arg2 + arg3);
+    printf("  Time step dt: %.6e\n", arg1);
+    printf("  Total steps: %d\n", arg0);
+    printf("\n");
+
+    @solve_start = nsecs;
+    @expected_steps = arg0;
+}
+
+/* Track progress through time steps */
+usdt::ivcalc:algo_progress
+/arg0 == 1/  /* PDE solver */
+{
+    $step = arg1;
+    $total = arg2;
+    $t = arg3;
+    $percent = ($step * 100) / $total;
+
+    printf("[Step %5d/%d] t=%.6f (%.1f%% complete)\n",
+           $step, $total, $t, $percent);
+
+    @steps_completed = $step;
+}
+
+/* Monitor implicit solver convergence per time step */
+usdt::ivcalc:convergence_iter
+/arg0 == 1/  /* PDE solver */
+{
+    $step = arg1;
+    $iter = arg2;
+    $error = arg3;
+    $tolerance = arg4;
+
+    // Track iterations per step
+    @iters_per_step[arg1] = arg2;
+
+    // Warn if converging slowly
+    if (arg2 > 20 && arg3 > arg4 * 10.0) {
+        printf("  [Step %d] Slow convergence: iter=%d, error=%.2e (tol=%.2e)\n",
+               $step, $iter, $error, $tolerance);
+    }
+}
+
+/* Implicit solver converged */
+usdt::ivcalc:convergence_success
+/arg0 == 1/
+{
+    $step = arg1;
+    $iters = arg2;
+    $error = arg3;
+
+    printf("  [Step %d] Converged in %d iterations (error=%.2e)\n",
+           $step, $iters, $error);
+
+    // Statistics
+    @convergence_count++;
+    @total_iters += $iters;
+    @iteration_histogram = hist($iters);
+    @error_histogram = hist($error);
+
+    // Track max iterations required
+    if ($iters > @max_iters) {
+        @max_iters = $iters;
+        @max_iters_step = $step;
+    }
+}
+
+/* Implicit solver failed */
+usdt::ivcalc:convergence_failed
+/arg0 == 1/
+{
+    $step = arg1;
+    $max_iter = arg2;
+    $error = arg3;
+
+    printf("  \033[31m[Step %d] CONVERGENCE FAILED after %d iterations (error=%.2e)\033[0m\n",
+           $step, $max_iter, $error);
+
+    @failure_count++;
+    @failed_at_step[$step] = 1;
+}
+
+/* PDE solver completes */
+usdt::ivcalc:algo_complete
+/arg0 == 1/
+{
+    $duration_ms = (nsecs - @solve_start) / 1000000;
+    $steps = arg1;
+    $final_time = arg2;
+
+    printf("\n");
+    printf("PDE Solver Completed\n");
+    printf("  Total time steps: %d\n", $steps);
+    printf("  Final time: %.6f\n", $final_time);
+    printf("  Wall clock time: %u ms\n", $duration_ms);
+    printf("\n");
+}
+
+END
+{
+    printf("\n================================================================================\n");
+    printf("=== PDE Solver Statistics ===\n\n");
+
+    if (@convergence_count > 0) {
+        printf("Convergence summary:\n");
+        printf("  Successful: %d\n", @convergence_count);
+        printf("  Failed: %d\n", @failure_count);
+        printf("  Average iterations per step: %d\n",
+               @total_iters / @convergence_count);
+        printf("  Max iterations: %d (at step %d)\n", @max_iters, @max_iters_step);
+
+        printf("\nIterations per step distribution:\n");
+        print(@iteration_histogram);
+
+        printf("\nFinal error distribution:\n");
+        print(@error_histogram);
+    }
+
+    if (@failure_count > 0) {
+        printf("\n\033[33mWarning: %d convergence failures detected\033[0m\n",
+               @failure_count);
+        printf("Failed steps: ");
+        print(@failed_at_step);
+    }
+
+    if (@steps_completed > 0 && @expected_steps > 0) {
+        if (@steps_completed == @expected_steps) {
+            printf("\n\033[32m✓ All time steps completed successfully\033[0m\n");
+        } else {
+            printf("\n\033[33mWarning: Only %d/%d steps completed\033[0m\n",
+                   @steps_completed, @expected_steps);
+        }
+    }
+
+    clear(@solve_start);
+    clear(@expected_steps);
+    clear(@steps_completed);
+    clear(@iters_per_step);
+    clear(@convergence_count);
+    clear(@failure_count);
+    clear(@total_iters);
+    clear(@max_iters);
+    clear(@max_iters_step);
+    clear(@iteration_histogram);
+    clear(@error_histogram);
+    clear(@failed_at_step);
+}

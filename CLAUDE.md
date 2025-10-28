@@ -270,6 +270,14 @@ Use USDT probes for:
 
 **NEVER use printf, fprintf, or any console I/O in library code (`src/` directory).**
 
+### Tracing Tool: bpftrace
+
+This library uses **bpftrace** as the primary tracing tool. bpftrace is:
+- Modern, built on eBPF
+- Easy to use (awk-like syntax)
+- No compilation needed for scripts
+- Perfect for our use case (monitoring, debugging, performance)
+
 ### Available Probe Categories
 
 See `src/ivcalc_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
@@ -295,13 +303,7 @@ When adding new library functionality that needs logging:
        DTRACE_PROBE3(IVCALC_PROVIDER, my_event, module_id, param1, param2)
    ```
 
-2. **Document probe in `src/ivcalc_trace.d`**:
-   ```c
-   /* Fired when my event occurs */
-   probe my_event(int module_id, double param1, double param2);
-   ```
-
-3. **Use probe in source code**:
+2. **Use probe in source code**:
    ```c
    #include "ivcalc_trace.h"
 
@@ -312,48 +314,87 @@ When adding new library functionality that needs logging:
    }
    ```
 
-4. **Update `TRACING.md`** with usage examples and parameter descriptions
+3. **Update `TRACING.md`** with usage examples and parameter descriptions
+4. **Add bpftrace script** in `scripts/tracing/` if the probe is commonly used
 
 ### Building with USDT
 
-Standard build (probes are no-ops):
+**USDT is enabled by default!** Just build normally:
+
 ```bash
 bazel build //src:pde_solver
-bazel build //src:american_option
-bazel build //src:implied_volatility
+bazel build //examples:example_heat_equation
+bazel build //examples:example_american_option
 ```
 
-USDT-enabled build (requires systemtap-sdt-dev):
+The library gracefully falls back to no-op probes if `systemtap-sdt-dev` is not installed. For best results, install it:
+
 ```bash
-bazel build //src:pde_solver_usdt
-bazel build //src:american_option_usdt
-bazel build //src:implied_volatility_usdt
+# Ubuntu/Debian
+sudo apt-get install systemtap-sdt-dev
+
+# Then rebuild
+bazel clean
+bazel build //...
 ```
 
-### Tracing Examples
+### Using bpftrace to Monitor Execution
 
-Monitor all algorithms across the library:
+**Quick Start** - Use the ready-made scripts:
+
 ```bash
-sudo bpftrace -e 'usdt:./lib*.so:ivcalc:algo_start {
-    printf("Module %d starting\n", arg0);
-}'
+# Monitor all library activity
+sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation
+
+# Watch convergence behavior
+sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+
+# Debug failures
+sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+
+# Profile performance
+sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
 ```
 
-Track convergence across all modules:
+**Available presets:** `all` (default), `convergence`, `debug`, `performance`, `pde`, `iv`
+
+**Available scripts** in `scripts/tracing/`:
+- `monitor_all.bt` - High-level overview of all activity
+- `convergence_watch.bt` - Real-time convergence monitoring
+- `debug_failures.bt` - Alert on errors and failures
+- `performance_profile.bt` - Timing and performance analysis
+- `pde_detailed.bt` - Deep dive into PDE solver
+- `iv_detailed.bt` - Deep dive into IV calculations
+
+**Direct bpftrace usage:**
+
 ```bash
-sudo bpftrace -e 'usdt:./lib*.so:ivcalc:convergence_failed {
-    printf("Module %d: convergence failure at step %d\n", arg0, arg1);
-}'
+# Use pre-made scripts
+sudo bpftrace scripts/tracing/monitor_all.bt -c './bazel-bin/examples/example_heat_equation'
+
+# Or write custom one-liners
+sudo bpftrace -e 'usdt::ivcalc:convergence_failed {
+    printf("Module %d failed at step %d\n", arg0, arg1);
+}' -c './my_program'
 ```
 
-Monitor implied volatility calculations:
+**Helper tool commands:**
+
 ```bash
-sudo bpftrace -e 'usdt:./lib*.so:ivcalc:iv_complete {
-    printf("IV=%.4f, iterations=%d, converged=%d\n", arg0, arg1, arg2);
-}'
+# Check if binary has USDT support
+sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+
+# List all available probes
+sudo ./scripts/ivcalc-trace list ./bazel-bin/examples/example_heat_equation
+
+# Run specific script
+sudo ./scripts/ivcalc-trace run convergence_watch.bt ./my_program
 ```
 
-For complete documentation, see `TRACING.md`.
+For complete documentation, see:
+- [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) - 5-minute getting started guide
+- [TRACING.md](TRACING.md) - Comprehensive tracing documentation
+- [scripts/tracing/README.md](scripts/tracing/README.md) - Script reference
 
 ### Examples vs Library Code
 

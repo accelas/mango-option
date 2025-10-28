@@ -1,0 +1,153 @@
+#!/usr/bin/env bpftrace
+/*
+ * performance_profile.bt - Profile performance and timing
+ *
+ * Measures execution time, iteration counts, and throughput for all modules.
+ * Useful for performance tuning and identifying bottlenecks.
+ *
+ * Usage:
+ *   sudo bpftrace performance_profile.bt -c './example_program'
+ */
+
+BEGIN
+{
+    printf("Profiling ivcalc library performance...\n");
+    printf("Collecting timing and iteration statistics...\n\n");
+}
+
+/* Track algorithm start times */
+usdt::ivcalc:algo_start
+{
+    @algo_start[arg0] = nsecs;
+}
+
+/* Measure algorithm duration on completion */
+usdt::ivcalc:algo_complete
+{
+    if (@algo_start[arg0] > 0) {
+        $duration_ns = nsecs - @algo_start[arg0];
+        $duration_ms = $duration_ns / 1000000;
+        $iterations = arg1;
+
+        // Per-module timing histograms
+        @duration_by_module[arg0] = hist($duration_ms);
+        @iterations_by_module[arg0] = hist($iterations);
+
+        // Overall statistics
+        @total_duration += $duration_ns;
+        @total_iterations += $iterations;
+        @algo_count++;
+
+        // Track slowest operations
+        if ($duration_ms > @slowest_duration) {
+            @slowest_duration = $duration_ms;
+            @slowest_module = arg0;
+        }
+    }
+}
+
+/* Track PDE solver progress for step timing */
+usdt::ivcalc:algo_progress
+/arg0 == 1/  /* PDE solver */
+{
+    if (@last_progress_time > 0) {
+        $step_duration_us = (nsecs - @last_progress_time) / 1000;
+        @pde_step_times = hist($step_duration_us);
+    }
+    @last_progress_time = nsecs;
+}
+
+/* Track convergence performance */
+usdt::ivcalc:convergence_success
+{
+    @convergence_iters[arg0] = hist(arg2);
+    @convergence_errors[arg0] = hist(arg3);
+}
+
+/* Count Brent iterations */
+usdt::ivcalc:brent_iter
+{
+    @brent_iter_count++;
+}
+
+END
+{
+    printf("\n=== Performance Summary ===\n\n");
+
+    printf("Total execution time: %u ms\n", @total_duration / 1000000);
+    printf("Total algorithms executed: %d\n", @algo_count);
+    printf("Total iterations: %d\n", @total_iterations);
+
+    if (@algo_count > 0) {
+        printf("Average duration per algorithm: %u ms\n",
+               (@total_duration / @algo_count) / 1000000);
+    }
+
+    if (@slowest_duration > 0) {
+        if (@slowest_module == 1) { @mod_name = "PDE_SOLVER"; }
+        else if (@slowest_module == 2) { @mod_name = "AMERICAN_OPTION"; }
+        else if (@slowest_module == 3) { @mod_name = "IMPLIED_VOL"; }
+        else if (@slowest_module == 4) { @mod_name = "BRENT_ROOT"; }
+        printf("\nSlowest operation: %s (%u ms)\n",
+               str(@mod_name), @slowest_duration);
+    }
+
+    // Per-module breakdowns
+    if (@duration_by_module[1]) {
+        printf("\n--- PDE Solver Performance ---\n");
+        printf("Execution time distribution (ms):\n");
+        print(@duration_by_module[1]);
+
+        if (@iterations_by_module[1]) {
+            printf("\nTime steps executed:\n");
+            print(@iterations_by_module[1]);
+        }
+
+        if (@pde_step_times) {
+            printf("\nPer-step timing (microseconds):\n");
+            print(@pde_step_times);
+        }
+
+        if (@convergence_iters[1]) {
+            printf("\nConvergence iterations per step:\n");
+            print(@convergence_iters[1]);
+        }
+    }
+
+    if (@duration_by_module[2]) {
+        printf("\n--- American Option Performance ---\n");
+        printf("Execution time distribution (ms):\n");
+        print(@duration_by_module[2]);
+    }
+
+    if (@duration_by_module[3]) {
+        printf("\n--- Implied Volatility Performance ---\n");
+        printf("Execution time distribution (ms):\n");
+        print(@duration_by_module[3]);
+
+        if (@convergence_iters[3]) {
+            printf("\nBrent iterations required:\n");
+            print(@convergence_iters[3]);
+        }
+    }
+
+    if (@brent_iter_count > 0) {
+        printf("\nTotal Brent method iterations: %d\n", @brent_iter_count);
+    }
+
+    // Cleanup
+    clear(@algo_start);
+    clear(@duration_by_module);
+    clear(@iterations_by_module);
+    clear(@convergence_iters);
+    clear(@convergence_errors);
+    clear(@pde_step_times);
+    clear(@total_duration);
+    clear(@total_iterations);
+    clear(@algo_count);
+    clear(@slowest_duration);
+    clear(@slowest_module);
+    clear(@mod_name);
+    clear(@last_progress_time);
+    clear(@brent_iter_count);
+}
