@@ -1,5 +1,6 @@
 #include "american_option.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 // American Option Pricing using Black-Scholes PDE
@@ -123,6 +124,56 @@ void american_option_obstacle(const double *x, [[maybe_unused]] double t,
     }
 }
 
+// Forward declaration for dividend solver
+static int american_option_solve_with_dividends(PDESolver *solver,
+                                               const OptionData *option_data);
+
+// Discrete dividend adjustment: Handle stock price jump when dividend is paid
+// When dividend D is paid, stock price jumps from S to S - D
+// In log-price coordinates x = ln(S/K):
+//   S_old = K*exp(x) => S_new = K*exp(x) - D
+//   x_new = ln((K*exp(x) - D)/K) = ln(exp(x) - D/K)
+void american_option_apply_dividend(const double *x_grid, size_t n_points,
+                                   const double *V_old, double *V_new,
+                                   double dividend, double strike) {
+
+    // When crossing a dividend in the solver (backward in calendar time):
+    // V_old: computed with post-dividend stock prices (after div was paid in calendar time)
+    // V_new: should use pre-dividend stock prices (before div was paid in calendar time)
+    //
+    // For each grid point representing pre-dividend stock price S_pre:
+    // Find the corresponding post-dividend price S_post = S_pre - D
+    // and interpolate V_old at that point
+    for (size_t i = 0; i < n_points; i++) {
+        // Pre-dividend: x = ln(S_pre/K), S_pre = K*exp(x)
+        double S_pre = strike * exp(x_grid[i]);
+
+        // Post-dividend: S_post = S_pre - D (stock drops by dividend amount)
+        double S_post = S_pre - dividend;
+
+        // Post-dividend log-price: x_post = ln(S_post/K)
+        double x_post = log(S_post / strike);
+
+        // Interpolate V from old grid (post-dividend) to find V(x_post)
+        // Linear interpolation
+        if (x_post <= x_grid[0]) {
+            V_new[i] = V_old[0];
+        } else if (x_post >= x_grid[n_points - 1]) {
+            V_new[i] = V_old[n_points - 1];
+        } else {
+            // Find bracketing indices
+            size_t j = 0;
+            while (j < n_points - 1 && x_grid[j + 1] < x_post) {
+                j++;
+            }
+
+            // Linear interpolation
+            double alpha = (x_post - x_grid[j]) / (x_grid[j + 1] - x_grid[j]);
+            V_new[i] = (1.0 - alpha) * V_old[j] + alpha * V_old[j + 1];
+        }
+    }
+}
+
 // High-level API to price American options
 AmericanOptionResult american_option_price(const OptionData *option_data,
                                           const AmericanOptionGrid *grid_params) {
@@ -166,11 +217,122 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     }
 
     pde_solver_initialize(solver);
-    int status = pde_solver_solve(solver);
+
+    // Handle discrete dividends if present
+    int status = 0;
+    if (option_data->n_dividends > 0 && option_data->dividend_times != nullptr &&
+        option_data->dividend_amounts != nullptr) {
+        // Solve with dividend handling
+        // Note: grid ownership was transferred to solver, use solver->grid
+        status = american_option_solve_with_dividends(solver, option_data);
+    } else {
+        // Standard solve without dividends
+        status = pde_solver_solve(solver);
+    }
 
     result.solver = solver;
     result.status = status;
     return result;
+}
+
+// Solve PDE with discrete dividend handling
+// Dividends cause stock price jumps that require solution interpolation
+static int american_option_solve_with_dividends(PDESolver *solver,
+                                               const OptionData *option_data) {
+    // Get grid from solver (ownership was transferred during pde_solver_create)
+    const size_t n_points = solver->grid.n_points;
+    const double *x_grid = solver->grid.x;
+
+    // Convert dividend times from calendar time to solver time
+    // Calendar time: time from now
+    // Solver time: time-to-maturity (t=0 is maturity, t=T is now)
+    // Conversion: t_solver = T - t_calendar
+    const double T = option_data->time_to_maturity;
+    double *div_times_solver = (double *)malloc(option_data->n_dividends * sizeof(double));
+    if (div_times_solver == nullptr) {
+        return -1;
+    }
+
+    // Create array of dividend indices sorted by solver time
+    size_t *div_order = (size_t *)malloc(option_data->n_dividends * sizeof(size_t));
+    if (div_order == nullptr) {
+        free(div_times_solver);
+        return -1;
+    }
+
+    for (size_t i = 0; i < option_data->n_dividends; i++) {
+        div_times_solver[i] = T - option_data->dividend_times[i];
+        div_order[i] = i;
+    }
+
+    // Sort dividends by solver time (ascending order)
+    for (size_t i = 0; i < option_data->n_dividends; i++) {
+        for (size_t j = i + 1; j < option_data->n_dividends; j++) {
+            if (div_times_solver[div_order[j]] < div_times_solver[div_order[i]]) {
+                size_t temp = div_order[i];
+                div_order[i] = div_order[j];
+                div_order[j] = temp;
+            }
+        }
+    }
+
+    // Allocate workspace for dividend adjustment
+    double *V_temp = (double *)malloc(n_points * sizeof(double));
+    if (V_temp == nullptr) {
+        free(div_times_solver);
+        free(div_order);
+        return -1;
+    }
+
+    double t = solver->time.t_start;
+    size_t div_idx = 0;  // Current dividend index
+    int status = 0;
+
+    const double dt = solver->time.dt;
+    const size_t n_steps = solver->time.n_steps;
+
+    for (size_t step = 0; step < n_steps; step++) {
+        // Take one time step
+        status = pde_solver_step(solver, t);
+        if (status != 0) {
+            free(V_temp);
+            free(div_times_solver);
+            free(div_order);
+            return status;
+        }
+
+        t += dt;
+
+        // After stepping, check if we crossed any dividend dates
+        // Dividends between previous time and current time need to be applied
+        double t_prev = t - dt;
+        while (div_idx < option_data->n_dividends) {
+            size_t idx = div_order[div_idx];
+            if (div_times_solver[idx] > t_prev && div_times_solver[idx] <= t) {
+                // Apply dividend jump to current solution
+                const double *V_current = pde_solver_get_solution(solver);
+                american_option_apply_dividend(x_grid, n_points, V_current, V_temp,
+                                             option_data->dividend_amounts[idx],
+                                             option_data->strike);
+
+                // Copy adjusted solution back
+                double *V_writable = solver->u_current;
+                for (size_t i = 0; i < n_points; i++) {
+                    V_writable[i] = V_temp[i];
+                }
+
+                div_idx++;
+            } else {
+                // Dividend not in this time interval, stop checking
+                break;
+            }
+        }
+    }
+
+    free(V_temp);
+    free(div_times_solver);
+    free(div_order);
+    return status;
 }
 
 // Utility: Get option value at specific spot price

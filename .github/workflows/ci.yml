@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git wget ca-certificates build-essential python3
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Bazelisk binary
+        id: cache-bazelisk
+        uses: actions/cache@v4
+        with:
+          path: ~/.bazelisk-cache
+          key: bazelisk-binary-${{ runner.os }}
+
+      - name: Install Bazelisk
+        if: steps.cache-bazelisk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.bazelisk-cache
+          wget -q https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O ~/.bazelisk-cache/bazelisk
+          chmod +x ~/.bazelisk-cache/bazelisk
+
+      - name: Setup Bazelisk in PATH
+        run: |
+          ln -sf ~/.bazelisk-cache/bazelisk /usr/local/bin/bazel
+
+      - name: Cache Bazel versions
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazelisk
+          key: bazel-version-${{ hashFiles('.bazelversion') }}
+
+      - name: Cache Bazel build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel
+          key: debian-trixie-bazel-build-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'WORKSPACE', '**/*.bazel', '**/*.bzl') }}
+          restore-keys: |
+            debian-trixie-bazel-build-${{ hashFiles('.bazelversion') }}
+            debian-trixie-bazel-build-
+
+      - name: Build all targets
+        run: bazel build //...
+
+      - name: Run all tests
+        run: bazel test //... --test_output=errors
+
+      - name: Display test results
+        if: always()
+        run: |
+          if [ -d "bazel-testlogs" ]; then
+            echo "Test results:"
+            find bazel-testlogs -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \;
+          fi
