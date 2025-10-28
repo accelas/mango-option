@@ -5,41 +5,276 @@
 #include <string.h>
 #include <math.h>
 
-// Apply boundary conditions
-static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
+// Forward declarations
+static void evaluate_spatial_operator(PDESolver *solver, double t, const double *u,
+                                      double *result);
+
+// ============================================================================
+// Boundary Condition Handlers - Dirichlet
+// ============================================================================
+
+static void bc_dirichlet_apply(PDESolver *solver, double t, double *u, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    const double g = is_left ?
+        solver->callbacks.left_boundary(t, solver->callbacks.user_data) :
+        solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+    u[idx] = g;
+}
+
+static void bc_dirichlet_eval_operator(PDESolver *solver, double t, const double *u,
+                                       double *Lu, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    // Dirichlet BC: boundary point not evolved by PDE
+    Lu[idx] = 0.0;
+}
+
+static void bc_dirichlet_assemble_jacobian(PDESolver *solver, double t,
+                                           const double *u_new, const double *Lu,
+                                           double coeff_dt, double *diag,
+                                           double *upper, double *lower, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    // Row i: u_i = g (identity equation)
+    diag[idx] = 1.0;
+    if (is_left) {
+        upper[idx] = 0.0;
+    } else {
+        lower[idx - 1] = 0.0;
+    }
+}
+
+static void bc_dirichlet_compute_residual(PDESolver *solver, const double *rhs,
+                                          const double *u_old, const double *u_new,
+                                          const double *Lu, double coeff_dt,
+                                          double *residual, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    const double g = is_left ?
+        solver->callbacks.left_boundary(rhs[idx], solver->callbacks.user_data) :
+        solver->callbacks.right_boundary(rhs[idx], solver->callbacks.user_data);
+    residual[idx] = u_new[idx] - g;
+}
+
+// ============================================================================
+// Boundary Condition Handlers - Neumann
+// ============================================================================
+
+static void bc_neumann_apply(PDESolver *solver, double t, double *u, bool is_left) {
+    const double dx = solver->grid.dx;
+    const double g = is_left ?
+        solver->callbacks.left_boundary(t, solver->callbacks.user_data) :
+        solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+
+    if (is_left) {
+        // du/dx = g => u[0] = u[1] - dx*g
+        u[0] = u[1] - dx * g;
+    } else {
+        // du/dx = g => u[n-1] = u[n-2] + dx*g
+        const size_t n = solver->grid.n_points;
+        u[n - 1] = u[n - 2] + dx * g;
+    }
+}
+
+static void bc_neumann_eval_operator(PDESolver *solver, double t, const double *u,
+                                     double *Lu, bool is_left) {
+    const size_t n = solver->grid.n_points;
+    const double dx = solver->grid.dx;
+    const double g = is_left ?
+        solver->callbacks.left_boundary(t, solver->callbacks.user_data) :
+        solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+
+    // Call user spatial operator for all points first
+    solver->callbacks.spatial_operator(solver->grid.x, t, u, n, Lu,
+                                      solver->callbacks.user_data);
+
+    // Override boundary with ghost point method
+    if (is_left) {
+        // Estimate diffusion coefficient from interior point
+        if (n >= 3 && fabs(u[0] - 2.0*u[1] + u[2]) > 1e-12) {
+            const double D_estimate = Lu[1] * dx * dx / (u[0] - 2.0*u[1] + u[2]);
+            // Ghost point: u_{-1} = u_1 - 2*dx*g
+            // L(u)_0 = D * (u_{-1} - 2*u_0 + u_1) / dx^2
+            //        = D * (2*u_1 - 2*u_0 - 2*dx*g) / dx^2
+            Lu[0] = D_estimate * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
+        }
+    } else {
+        // Right boundary ghost point method
+        if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
+            const double D_estimate = Lu[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
+            // Ghost point: u_n = u_{n-2} + 2*dx*g
+            Lu[n-1] = D_estimate * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
+        }
+    }
+}
+
+static void bc_neumann_assemble_jacobian(PDESolver *solver, double t,
+                                         const double *u_new, const double *Lu,
+                                         double coeff_dt, double *diag,
+                                         double *upper, double *lower, bool is_left) {
+    const size_t n = solver->grid.n_points;
+    const double eps = 1e-7;
+    double *Lu_pert = solver->u_temp;
+
+    if (is_left) {
+        // Perturb u[0]
+        double u_save = u_new[0];
+        double *u_mut = (double *)u_new;  // Cast away const for perturbation
+        u_mut[0] = u_save + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        const double dL0_du0 = (Lu_pert[0] - Lu[0]) / eps;
+        u_mut[0] = u_save;
+
+        // Perturb u[1]
+        u_mut[1] = u_new[1] + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        const double dL0_du1 = (Lu_pert[0] - Lu[0]) / eps;
+        u_mut[1] = u_new[1];
+
+        diag[0] = 1.0 - coeff_dt * dL0_du0;
+        upper[0] = -coeff_dt * dL0_du1;
+    } else {
+        // Perturb u[n-2]
+        double *u_mut = (double *)u_new;
+        double u_save_nm2 = u_new[n-2];
+        u_mut[n-2] = u_save_nm2 + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        const double dLn_dunm2 = (Lu_pert[n-1] - Lu[n-1]) / eps;
+        u_mut[n-2] = u_save_nm2;
+
+        // Perturb u[n-1]
+        double u_save_nm1 = u_new[n-1];
+        u_mut[n-1] = u_save_nm1 + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        const double dLn_dunm1 = (Lu_pert[n-1] - Lu[n-1]) / eps;
+        u_mut[n-1] = u_save_nm1;
+
+        lower[n-2] = -coeff_dt * dLn_dunm2;
+        diag[n-1] = 1.0 - coeff_dt * dLn_dunm1;
+    }
+}
+
+static void bc_neumann_compute_residual(PDESolver *solver, const double *rhs,
+                                        const double *u_old, const double *u_new,
+                                        const double *Lu, double coeff_dt,
+                                        double *residual, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    // Use PDE residual (same as interior)
+    residual[idx] = rhs[idx] - u_old[idx] + coeff_dt * Lu[idx];
+}
+
+// ============================================================================
+// Boundary Condition Handlers - Robin
+// ============================================================================
+
+static void bc_robin_apply(PDESolver *solver, double t, double *u, bool is_left) {
+    const double dx = solver->grid.dx;
+    const double g = is_left ?
+        solver->callbacks.left_boundary(t, solver->callbacks.user_data) :
+        solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+
+    if (is_left) {
+        const double a = solver->bc_config.left_robin_a;
+        const double b = solver->bc_config.left_robin_b;
+        // a*u + b*du/dx = g
+        u[0] = (g - b * (u[1] - u[0]) / dx) / a;
+    } else {
+        const size_t n = solver->grid.n_points;
+        const double a = solver->bc_config.right_robin_a;
+        const double b = solver->bc_config.right_robin_b;
+        u[n - 1] = (g - b * (u[n - 1] - u[n - 2]) / dx) / a;
+    }
+}
+
+static void bc_robin_eval_operator(PDESolver *solver, double t, const double *u,
+                                   double *Lu, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    // Robin BC: boundary point not evolved by PDE
+    Lu[idx] = 0.0;
+}
+
+static void bc_robin_assemble_jacobian(PDESolver *solver, double t,
+                                       const double *u_new, const double *Lu,
+                                       double coeff_dt, double *diag,
+                                       double *upper, double *lower, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
     const size_t n = solver->grid.n_points;
     const double dx = solver->grid.dx;
 
-    // Left boundary
-    if (solver->bc_config.left_type == BC_DIRICHLET) {
-        u[0] = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
-    } else if (solver->bc_config.left_type == BC_NEUMANN) {
-        // du/dx = g => u[0] = u[1] - dx*g (first-order)
-        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
-        u[0] = u[1] - dx * g;
-    } else if (solver->bc_config.left_type == BC_ROBIN) {
-        // a*u + b*du/dx = g
-        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
-        double a = solver->bc_config.left_robin_a;
-        double b = solver->bc_config.left_robin_b;
-        u[0] = (g - b * (u[1] - u[0]) / dx) / a;
+    if (is_left) {
+        const double a = solver->bc_config.left_robin_a;
+        const double b = solver->bc_config.left_robin_b;
+        // a*u[0] + b*(u[1]-u[0])/dx = g
+        diag[0] = a + b/dx;
+        upper[0] = -b/dx;
+    } else {
+        const double a = solver->bc_config.right_robin_a;
+        const double b = solver->bc_config.right_robin_b;
+        // a*u[n-1] + b*(u[n-1]-u[n-2])/dx = g
+        lower[n-2] = -b/dx;
+        diag[n-1] = a + b/dx;
     }
+}
 
-    // Right boundary
-    if (solver->bc_config.right_type == BC_DIRICHLET) {
-        u[n - 1] = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
-    } else if (solver->bc_config.right_type == BC_NEUMANN) {
-        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
-        u[n - 1] = u[n - 2] + dx * g;
-    } else if (solver->bc_config.right_type == BC_ROBIN) {
-        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
-        double a = solver->bc_config.right_robin_a;
-        double b = solver->bc_config.right_robin_b;
-        u[n - 1] = (g - b * (u[n - 1] - u[n - 2]) / dx) / a;
+static void bc_robin_compute_residual(PDESolver *solver, const double *rhs,
+                                      const double *u_old, const double *u_new,
+                                      const double *Lu, double coeff_dt,
+                                      double *residual, bool is_left) {
+    const size_t idx = is_left ? 0 : solver->grid.n_points - 1;
+    const size_t n = solver->grid.n_points;
+    const double dx = solver->grid.dx;
+    const double g = is_left ?
+        solver->callbacks.left_boundary(rhs[idx], solver->callbacks.user_data) :
+        solver->callbacks.right_boundary(rhs[idx], solver->callbacks.user_data);
+
+    if (is_left) {
+        const double a = solver->bc_config.left_robin_a;
+        const double b = solver->bc_config.left_robin_b;
+        residual[0] = a * u_new[0] + b * (u_new[1] - u_new[0]) / dx - g;
+    } else {
+        const double a = solver->bc_config.right_robin_a;
+        const double b = solver->bc_config.right_robin_b;
+        residual[n-1] = a * u_new[n-1] + b * (u_new[n-1] - u_new[n-2]) / dx - g;
     }
+}
+
+// ============================================================================
+// BC Handler Structures
+// ============================================================================
+
+static const BCHandler dirichlet_handler = {
+    .apply = bc_dirichlet_apply,
+    .eval_operator = bc_dirichlet_eval_operator,
+    .assemble_jacobian = bc_dirichlet_assemble_jacobian,
+    .compute_residual = bc_dirichlet_compute_residual
+};
+
+static const BCHandler neumann_handler = {
+    .apply = bc_neumann_apply,
+    .eval_operator = bc_neumann_eval_operator,
+    .assemble_jacobian = bc_neumann_assemble_jacobian,
+    .compute_residual = bc_neumann_compute_residual
+};
+
+static const BCHandler robin_handler = {
+    .apply = bc_robin_apply,
+    .eval_operator = bc_robin_eval_operator,
+    .assemble_jacobian = bc_robin_assemble_jacobian,
+    .compute_residual = bc_robin_compute_residual
+};
+
+// ============================================================================
+// Original Functions (to be refactored)
+// ============================================================================
+
+// Apply boundary conditions using handler dispatch
+static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
+    // Apply left boundary condition
+    solver->left_bc_handler->apply(solver, t, u, true);
+
+    // Apply right boundary condition
+    solver->right_bc_handler->apply(solver, t, u, false);
 
     // Apply obstacle condition if provided
     if (solver->callbacks.obstacle != nullptr) {
+        const size_t n = solver->grid.n_points;
         // Reuse workspace array for psi (no allocation overhead)
         double *psi = solver->u_temp;
         solver->callbacks.obstacle(solver->grid.x, t, n, psi, solver->callbacks.user_data);
@@ -358,6 +593,31 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->bc_config = *bc_config;
     solver->trbdf2_config = *trbdf2_config;
     solver->callbacks = *callbacks;
+
+    // Initialize BC handlers based on boundary types
+    switch (bc_config->left_type) {
+        case BC_DIRICHLET:
+            solver->left_bc_handler = &dirichlet_handler;
+            break;
+        case BC_NEUMANN:
+            solver->left_bc_handler = &neumann_handler;
+            break;
+        case BC_ROBIN:
+            solver->left_bc_handler = &robin_handler;
+            break;
+    }
+
+    switch (bc_config->right_type) {
+        case BC_DIRICHLET:
+            solver->right_bc_handler = &dirichlet_handler;
+            break;
+        case BC_NEUMANN:
+            solver->right_bc_handler = &neumann_handler;
+            break;
+        case BC_ROBIN:
+            solver->right_bc_handler = &robin_handler;
+            break;
+    }
 
     // Allocate single workspace buffer for all arrays (better cache locality)
     // Need 10 arrays of size n:

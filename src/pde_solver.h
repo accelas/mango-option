@@ -88,6 +88,30 @@ typedef struct {
     double tolerance;  // Convergence tolerance
 } TRBDF2Config;
 
+// Forward declare for BC handlers
+typedef struct BCHandler BCHandler;
+
+// Boundary condition handler function types
+typedef void (*BCApplyFunc)(PDESolver *solver, double t, double *u, bool is_left);
+typedef void (*BCEvalOperatorFunc)(PDESolver *solver, double t, const double *u,
+                                   double *Lu, bool is_left);
+typedef void (*BCAssembleJacobianFunc)(PDESolver *solver, double t,
+                                       const double *u_new, const double *Lu,
+                                       double coeff_dt, double *diag,
+                                       double *upper, double *lower, bool is_left);
+typedef void (*BCComputeResidualFunc)(PDESolver *solver, const double *rhs,
+                                      const double *u_old, const double *u_new,
+                                      const double *Lu, double coeff_dt,
+                                      double *residual, bool is_left);
+
+// Boundary condition handler abstraction
+struct BCHandler {
+    BCApplyFunc apply;
+    BCEvalOperatorFunc eval_operator;
+    BCAssembleJacobianFunc assemble_jacobian;
+    BCComputeResidualFunc compute_residual;
+};
+
 // Main PDE solver structure
 struct PDESolver {
     SpatialGrid grid;
@@ -95,6 +119,10 @@ struct PDESolver {
     BoundaryConfig bc_config;
     TRBDF2Config trbdf2_config;
     PDECallbacks callbacks;
+
+    // Boundary condition handlers
+    const BCHandler *left_bc_handler;
+    const BCHandler *right_bc_handler;
 
     // Single workspace buffer for all arrays (better cache locality)
     double *workspace;
