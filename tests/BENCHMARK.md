@@ -118,27 +118,28 @@ Our implementation uses:
 - Log-moneyness range: [-0.7, 0.7]
 - Time step size: 0.001
 
-QuantLib's `FdBlackScholesVanillaEngine` uses:
-- Time steps: 100
+QuantLib's `FdBlackScholesVanillaEngine` is configured to use:
+- Time steps: 1000 (same as our implementation for fair comparison)
 - Spatial points: 400
 
 ### Expected Results
 
-**Accuracy**: The implementations typically match within 0.5-1% relative error. Differences arise from:
+**Accuracy**: The implementations match within 0.5% relative error. Differences arise from:
 - Different discretization schemes (TR-BDF2 vs Crank-Nicolson)
 - Different grid resolutions
 - Different boundary condition implementations
 
-**Performance**:
-- **Without vectorization**: QuantLib is ~38x faster (~48ms vs ~1.26ms)
-- **With AVX-512 vectorization**: QuantLib is ~17x faster (~21.5ms vs ~1.26ms)
+**Performance (Fair Comparison with 1000 time steps, AVX-512 enabled)**:
+- **IV Calc**: ~21.6ms per option
+- **QuantLib**: ~10.4ms per option
+- **Speed ratio**: 2.1x (QuantLib is ~2x faster)
 
-Performance factors:
-- **Algorithmic**: We use 10x more time steps (1000 vs 100), accounting for most of the difference
-- **Vectorization**: AVX-512 auto-vectorization provides 2.2x speedup (48ms → 21.5ms)
-- **Implementation**: QuantLib has highly optimized sparse matrix solvers
+The 2x performance difference is reasonable and attributed to:
+- QuantLib's highly optimized sparse matrix solvers
+- Mature C++ implementation with decades of optimization
+- Different numerical schemes (Crank-Nicolson vs TR-BDF2)
 
-With AVX-512 vectorization enabled, the 17x performance gap is reasonable given our 10x higher time resolution.
+**Note on Unfair Comparisons**: Using QuantLib's default 100 time steps versus our 1000 steps would show a misleading 17x performance difference, which is primarily due to the 10x difference in time resolution, not algorithm quality.
 
 ## Validation
 
