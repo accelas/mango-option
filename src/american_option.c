@@ -351,3 +351,29 @@ double american_option_get_value_at_spot(const PDESolver *solver,
     double x = log(spot_price / strike);
     return pde_solver_interpolate(solver, x);
 }
+
+// Batch API: Price multiple American options in parallel
+int american_option_price_batch(const OptionData *option_data,
+                                 const AmericanOptionGrid *grid_params,
+                                 size_t n_options,
+                                 AmericanOptionResult *results) {
+    if (option_data == nullptr || grid_params == nullptr ||
+        results == nullptr || n_options == 0) {
+        return -1;
+    }
+
+    // Use OpenMP to price options in parallel
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t i = 0; i < n_options; i++) {
+        results[i] = american_option_price(&option_data[i], grid_params);
+    }
+
+    // Check if any pricing failed
+    for (size_t i = 0; i < n_options; i++) {
+        if (results[i].status != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
