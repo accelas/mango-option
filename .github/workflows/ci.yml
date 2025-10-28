@@ -14,8 +14,15 @@ jobs:
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
 
     steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git wget ca-certificates build-essential python3
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -24,15 +31,15 @@ jobs:
         with:
           path: |
             ~/.cache/bazel
-          key: ${{ runner.os }}-bazel-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'WORKSPACE') }}
+          key: debian-trixie-bazel-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'WORKSPACE') }}
           restore-keys: |
-            ${{ runner.os }}-bazel-
+            debian-trixie-bazel-
 
       - name: Install Bazelisk
         run: |
           wget -q https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
           chmod +x bazelisk-linux-amd64
-          sudo mv bazelisk-linux-amd64 /usr/local/bin/bazel
+          mv bazelisk-linux-amd64 /usr/local/bin/bazel
 
       - name: Build all targets
         run: bazel build //...
