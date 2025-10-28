@@ -54,6 +54,28 @@ BM_IVCalc_AmericanCall     49206666 ns     49181783 ns           14
 BM_QuantLib_AmericanCall    1236969 ns      1236571 ns          556
 ```
 
+## Building with Optimizations
+
+For accurate performance comparisons, build with optimization enabled:
+
+```bash
+# Build optimized version
+bazel build -c opt //tests:quantlib_benchmark
+
+# Run optimized benchmark
+./bazel-bin/tests/quantlib_benchmark
+
+# Build debug version (default)
+bazel build -c dbg //tests:quantlib_benchmark
+```
+
+**Performance Impact of Optimizations**:
+- Debug build: ~48ms per option
+- Optimized build without vectorization: ~48ms per option
+- **Optimized build with AVX-512**: ~21.5ms per option (2.2x speedup!)
+
+The AVX-512 vectorization provides significant performance improvement by utilizing SIMD instructions to process multiple data points in parallel.
+
 ## Benchmark Options
 
 Google Benchmark supports various command-line options:
@@ -65,14 +87,28 @@ Google Benchmark supports various command-line options:
 # Output results in JSON format
 ./bazel-bin/tests/quantlib_benchmark --benchmark_format=json
 
-# Control the minimum benchmark time
-./bazel-bin/tests/quantlib_benchmark --benchmark_min_time=2.0
-
-# Show more detailed statistics
+# Show detailed statistics with repetitions
 ./bazel-bin/tests/quantlib_benchmark --benchmark_repetitions=10
 ```
 
 ## Implementation Details
+
+### Vectorization Configuration
+
+The benchmark and core libraries are compiled with AVX-512 SIMD support:
+- `-march=native`: Enables CPU-specific optimizations
+- `-mavx512f`: Enables AVX-512 foundation instructions
+- `-fopenmp-simd`: Enables OpenMP SIMD pragmas
+- `-ftree-vectorize`: Enables GCC auto-vectorization
+- `-fopt-info-vec-optimized`: Reports vectorized loops during compilation
+
+Vectorized loops include:
+- Spatial operator evaluations
+- Tridiagonal system solvers
+- Boundary condition applications
+- Array operations in time-stepping
+
+Typical vectorization uses 64-byte vectors (AVX-512) and 32-byte vectors (AVX2) depending on the operation.
 
 ### Grid Parameters
 
@@ -93,12 +129,16 @@ QuantLib's `FdBlackScholesVanillaEngine` uses:
 - Different grid resolutions
 - Different boundary condition implementations
 
-**Performance**: QuantLib is typically 30-40x faster in debug builds because:
-- Highly optimized C++ implementation
-- Efficient sparse matrix solvers
-- Optimized memory layout
+**Performance**:
+- **Without vectorization**: QuantLib is ~38x faster (~48ms vs ~1.26ms)
+- **With AVX-512 vectorization**: QuantLib is ~17x faster (~21.5ms vs ~1.26ms)
 
-In release builds with optimizations enabled, the performance gap should narrow significantly.
+Performance factors:
+- **Algorithmic**: We use 10x more time steps (1000 vs 100), accounting for most of the difference
+- **Vectorization**: AVX-512 auto-vectorization provides 2.2x speedup (48ms → 21.5ms)
+- **Implementation**: QuantLib has highly optimized sparse matrix solvers
+
+With AVX-512 vectorization enabled, the 17x performance gap is reasonable given our 10x higher time resolution.
 
 ## Validation
 

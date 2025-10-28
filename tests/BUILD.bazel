@@ -72,7 +72,15 @@ cc_test(
 cc_binary(
     name = "quantlib_benchmark",
     srcs = ["quantlib_benchmark.cc"],
-    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+        "-mavx512f",
+        "-ftree-vectorize",
+        "-fopt-info-vec-optimized",
+    ],
     linkopts = ["-lQuantLib"],
     deps = [
         "//src:american_option",
