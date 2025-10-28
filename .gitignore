@@ -1,0 +1,43 @@
+# Bazel build artifacts
+bazel-*
+MODULE.bazel.lock
+
+# Compiled binaries and object files
+*.o
+*.out
+*.exe
+*_debug
+*_test
+jacobian_debug
+mass_balance_analysis
+mass_conservation_debug
+mass_debug_step
+minimal_newton_test
+neumann_mass_debug
+neumann_mass_full
+newton_debug
+steady_state_debug
+verify_analytical
+verify_newton
+
+# Data output files
+*.dat
+
+# bpftrace scripts (temporary debugging)
+trace_*.bt
+
+# Editor and IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
