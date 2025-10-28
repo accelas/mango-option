@@ -511,7 +511,7 @@ graph TD
         I["Lu<br/>Spatial operator result<br/>n doubles"]
         J["u_temp<br/>Temporary for relaxation<br/>n doubles"]
 
-        A ~~~ B ~~~ C ~~~ D ~~~ E ~~~ F ~~~ G ~~~ H ~~~ I ~~~ J
+        A --> B --> C --> D --> E --> F --> G --> H --> I --> J
     end
 
     style A fill:#e3f2fd
