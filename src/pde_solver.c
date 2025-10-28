@@ -56,10 +56,48 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
 static void evaluate_spatial_operator(PDESolver *solver, double t, const double *u,
                                       double *result) {
     const size_t n = solver->grid.n_points;
+    const double dx = solver->grid.dx;
 
     // Call vectorized spatial operator
     solver->callbacks.spatial_operator(solver->grid.x, t, u, n, result,
                                       solver->callbacks.user_data);
+
+    // Apply ghost point method for Neumann boundaries
+    // The user's callback may set Lu[0] = Lu[n-1] = 0, but for conservation
+    // we need to compute L(u) properly at boundaries using ghost points
+
+    if (solver->bc_config.left_type == BC_NEUMANN) {
+        // Ghost point: u_{-1} = u_1 (for zero flux du/dx = 0)
+        // More generally: u_{-1} = u_1 - 2*dx*g where du/dx = g
+        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+
+        // Estimate diffusion coefficient from interior point
+        // L(u)_1 ≈ D * (u_0 - 2*u_1 + u_2) / dx² for diffusion
+        // We'll use finite differences to estimate the stencil coefficient
+        if (n >= 3 && fabs(u[0] - 2.0*u[1] + u[2]) > 1e-12) {
+            double D_estimate = result[1] * dx * dx / (u[0] - 2.0*u[1] + u[2]);
+            // Ghost point stencil: L(u)_0 = D * (u_{-1} - 2*u_0 + u_1) / dx²
+            //                             = D * (u_1 - 2*dx*g - 2*u_0 + u_1) / dx²
+            //                             = D * (2*u_1 - 2*u_0 - 2*dx*g) / dx²
+            result[0] = D_estimate * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
+        } else {
+            // Fallback for edge cases
+            result[0] = 0.0;
+        }
+    }
+
+    if (solver->bc_config.right_type == BC_NEUMANN) {
+        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+
+        if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
+            double D_estimate = result[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
+            // Ghost point: u_n = u_{n-2} + 2*dx*g
+            // L(u)_{n-1} = D * (u_{n-2} - 2*u_{n-1} + u_n) / dx²
+            result[n-1] = D_estimate * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
+        } else {
+            result[n-1] = 0.0;
+        }
+    }
 }
 
 // Solve implicit system: (I - coeff*dt*L)*u_new = rhs
@@ -102,7 +140,34 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
     // For truly nonlinear problems, this could be recomputed every few iterations
     evaluate_spatial_operator(solver, t, u_new, Lu);
 
-    // Build Jacobian matrix for interior points
+    // Build Jacobian matrix using finite differences
+    // For Neumann BC, we now apply the PDE at ALL points (including boundaries)
+    // using ghost point method
+
+    // Left boundary (i = 0)
+    if (solver->bc_config.left_type == BC_DIRICHLET) {
+        // Row 0: u[0] = g(t) (algebraic constraint)
+        diag[0] = 1.0;
+        upper[0] = 0.0;
+    } else if (solver->bc_config.left_type == BC_NEUMANN) {
+        // Row 0: PDE with ghost point stencil
+        // Compute Jacobian entries via finite differences
+        double u_save = u_new[0];
+        u_new[0] = u_save + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dL0_du0 = (Lu_pert[0] - Lu[0]) / eps;
+        u_new[0] = u_save;
+
+        u_new[1] = u_new[1] + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dL0_du1 = (Lu_pert[0] - Lu[0]) / eps;
+        u_new[1] = u_new[1] - eps;
+
+        diag[0] = 1.0 - coeff_dt * dL0_du0;
+        upper[0] = -coeff_dt * dL0_du1;
+    }
+
+    // Interior points (i = 1 to n-2)
     for (size_t i = 1; i < n - 1; i++) {
         // Diagonal element: ∂L_i/∂u_i
         double u_save = u_new[i];
@@ -129,27 +194,26 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         upper[i] = -coeff_dt * dLi_duip1;
     }
 
-    // Enforce boundary conditions in the system matrix
-    // Left boundary
-    if (solver->bc_config.left_type == BC_DIRICHLET) {
-        // Row 0: u[0] = g(t)
-        diag[0] = 1.0;
-        upper[0] = 0.0;
-    } else if (solver->bc_config.left_type == BC_NEUMANN) {
-        // Row 0: u[0] - u[1] = 0 (for zero flux, du/dx = 0)
-        diag[0] = 1.0;
-        upper[0] = -1.0;
-    }
-
-    // Right boundary
+    // Right boundary (i = n-1)
     if (solver->bc_config.right_type == BC_DIRICHLET) {
-        // Row n-1: u[n-1] = g(t)
+        // Row n-1: u[n-1] = g(t) (algebraic constraint)
         diag[n-1] = 1.0;
         lower[n-2] = 0.0;
     } else if (solver->bc_config.right_type == BC_NEUMANN) {
-        // Row n-1: u[n-1] - u[n-2] = 0 (for zero flux, du/dx = 0)
-        diag[n-1] = 1.0;
-        lower[n-2] = -1.0;
+        // Row n-1: PDE with ghost point stencil
+        u_new[n-2] = u_new[n-2] + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dLn1_dun2 = (Lu_pert[n-1] - Lu[n-1]) / eps;
+        u_new[n-2] = u_new[n-2] - eps;
+
+        double u_save = u_new[n-1];
+        u_new[n-1] = u_save + eps;
+        evaluate_spatial_operator(solver, t, u_new, Lu_pert);
+        double dLn1_dun1 = (Lu_pert[n-1] - Lu[n-1]) / eps;
+        u_new[n-1] = u_save;
+
+        lower[n-2] = -coeff_dt * dLn1_dun2;
+        diag[n-1] = 1.0 - coeff_dt * dLn1_dun1;
     }
 
     for (size_t iter = 0; iter < max_iter; iter++) {
@@ -162,22 +226,20 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         //                      = rhs - u_old + coeff_dt * L(u_old)
         double *residual = Lu_pert;  // Reuse Lu_pert as residual storage
 
-        // Interior points
-        #pragma omp simd
-        for (size_t i = 1; i < n - 1; i++) {
-            residual[i] = rhs[i] - u_old[i] + coeff_dt * Lu[i];
-        }
-
-        // Boundary residuals based on BC type
+        // Boundary residuals - use PDE for Neumann, constraint for Dirichlet
         // Left boundary
         if (solver->bc_config.left_type == BC_DIRICHLET) {
             double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
             residual[0] = g - u_old[0];
         } else if (solver->bc_config.left_type == BC_NEUMANN) {
-            double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
-            // For du/dx = g: u[0] - u[1] + dx*g = 0
-            const double dx = solver->grid.dx;
-            residual[0] = -u_old[0] + u_old[1] - dx * g;
+            // Use PDE at boundary (same as interior)
+            residual[0] = rhs[0] - u_old[0] + coeff_dt * Lu[0];
+        }
+
+        // Interior points
+        #pragma omp simd
+        for (size_t i = 1; i < n - 1; i++) {
+            residual[i] = rhs[i] - u_old[i] + coeff_dt * Lu[i];
         }
 
         // Right boundary
@@ -185,10 +247,8 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
             double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
             residual[n-1] = g - u_old[n-1];
         } else if (solver->bc_config.right_type == BC_NEUMANN) {
-            double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
-            // For du/dx = g: u[n-1] - u[n-2] - dx*g = 0
-            const double dx = solver->grid.dx;
-            residual[n-1] = -u_old[n-1] + u_old[n-2] + dx * g;
+            // Use PDE at boundary (same as interior)
+            residual[n-1] = rhs[n-1] - u_old[n-1] + coeff_dt * Lu[n-1];
         }
 
         // Solve for correction: (I - coeff_dt * J) * δu = residual

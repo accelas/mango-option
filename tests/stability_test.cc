@@ -264,22 +264,27 @@ TEST_F(StabilityTest, MassConservation) {
 
     pde_solver_initialize(solver);
 
-    // Compute initial mass (integral of u)
+    // Compute initial mass using trapezoidal rule
+    // For ghost point method, mass is conserved with trapezoidal quadrature
     const double *u0 = pde_solver_get_solution(solver);
     double mass_initial = 0.0;
-    for (size_t i = 0; i < grid.n_points; i++) {
+    mass_initial += 0.5 * u0[0] * grid.dx;  // Half weight at left boundary
+    for (size_t i = 1; i < grid.n_points - 1; i++) {
         mass_initial += u0[i] * grid.dx;
     }
+    mass_initial += 0.5 * u0[grid.n_points - 1] * grid.dx;  // Half weight at right boundary
 
     int status = pde_solver_solve(solver);
     EXPECT_EQ(status, 0);
 
-    // Compute final mass
+    // Compute final mass using trapezoidal rule
     const double *u = pde_solver_get_solution(solver);
     double mass_final = 0.0;
-    for (size_t i = 0; i < grid.n_points; i++) {
+    mass_final += 0.5 * u[0] * grid.dx;
+    for (size_t i = 1; i < grid.n_points - 1; i++) {
         mass_final += u[i] * grid.dx;
     }
+    mass_final += 0.5 * u[grid.n_points - 1] * grid.dx;
 
     // Mass should be conserved (within numerical error)
     EXPECT_NEAR(mass_final / mass_initial, 1.0, 0.01);
