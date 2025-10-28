@@ -1,0 +1,114 @@
+#!/usr/bin/env bpftrace
+/*
+ * convergence_watch.bt - Monitor convergence behavior in real-time
+ *
+ * Tracks iteration counts, convergence rates, and failures across all modules.
+ * Useful for debugging convergence issues and tuning solver parameters.
+ *
+ * Usage:
+ *   sudo bpftrace convergence_watch.bt -c './example_program'
+ */
+
+BEGIN
+{
+    printf("Watching convergence across all modules...\n");
+    printf("%-10s %-18s %-6s %-6s %-12s %-12s %s\n",
+           "TIME", "MODULE", "STEP", "ITER", "ERROR", "TOLERANCE", "STATUS");
+    printf("-----------------------------------------------------------------------------------\n");
+}
+
+/* Track convergence iterations */
+usdt::ivcalc:convergence_iter
+{
+    // Only print every Nth iteration to avoid flooding
+    if (arg2 % 5 == 0 || arg3 < arg4 * 10.0) {
+        if (arg0 == 1) { @mod = "PDE_SOLVER"; }
+        else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
+        else if (arg0 == 3) { @mod = "IMPLIED_VOL"; }
+        else if (arg0 == 4) { @mod = "BRENT_ROOT"; }
+        else if (arg0 == 5) { @mod = "CUBIC_SPLINE"; }
+
+        printf("%-10u %-18s %-6d %-6d %-12.2e %-12.2e iterating\n",
+               elapsed / 1000000, str(@mod), arg1, arg2, arg3, arg4);
+    }
+
+    // Track iteration counts per module
+    @iter_count[arg0] = count();
+    @total_iterations++;
+}
+
+/* Convergence success */
+usdt::ivcalc:convergence_success
+{
+    if (arg0 == 1) { @mod = "PDE_SOLVER"; }
+    else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
+    else if (arg0 == 3) { @mod = "IMPLIED_VOL"; }
+    else if (arg0 == 4) { @mod = "BRENT_ROOT"; }
+    else if (arg0 == 5) { @mod = "CUBIC_SPLINE"; }
+
+    printf("%-10u %-18s %-6d %-6d %-12.2e %-12s \033[32mCONVERGED\033[0m\n",
+           elapsed / 1000000, str(@mod), arg1, arg2, arg3, "");
+
+    // Track convergence statistics
+    @iters_required[arg0] = hist(arg2);
+    @final_errors[arg0] = hist(arg3);
+    @success_count[arg0] = count();
+}
+
+/* Convergence failure */
+usdt::ivcalc:convergence_failed
+{
+    if (arg0 == 1) { @mod = "PDE_SOLVER"; }
+    else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
+    else if (arg0 == 3) { @mod = "IMPLIED_VOL"; }
+    else if (arg0 == 4) { @mod = "BRENT_ROOT"; }
+    else if (arg0 == 5) { @mod = "CUBIC_SPLINE"; }
+
+    printf("%-10u %-18s %-6d %-6d %-12.2e %-12s \033[31mFAILED\033[0m\n",
+           elapsed / 1000000, str(@mod), arg1, arg2, arg3, "");
+
+    @failure_count[arg0] = count();
+    @failed_errors[arg0] = hist(arg3);
+}
+
+END
+{
+    printf("\n=== Convergence Statistics ===\n");
+    printf("Total iterations observed: %d\n\n", @total_iterations);
+
+    if (@success_count[1] > 0) {
+        printf("PDE_SOLVER: %d successes, %d failures\n",
+               @success_count[1], @failure_count[1]);
+        if (@iters_required[1]) {
+            printf("  Iterations required:\n");
+            print(@iters_required[1]);
+        }
+    }
+
+    if (@success_count[3] > 0) {
+        printf("IMPLIED_VOL: %d successes, %d failures\n",
+               @success_count[3], @failure_count[3]);
+        if (@iters_required[3]) {
+            printf("  Iterations required:\n");
+            print(@iters_required[3]);
+        }
+    }
+
+    if (@success_count[4] > 0) {
+        printf("BRENT_ROOT: %d successes, %d failures\n",
+               @success_count[4], @failure_count[4]);
+        if (@iters_required[4]) {
+            printf("  Iterations required:\n");
+            print(@iters_required[4]);
+        }
+    }
+
+    clear(@mod);
+    clear(@iter_count);
+    clear(@iters_required);
+    clear(@final_errors);
+    clear(@failed_errors);
+    clear(@success_count);
+    clear(@failure_count);
+    clear(@total_iterations);
+}

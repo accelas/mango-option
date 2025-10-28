@@ -1,0 +1,143 @@
+#!/usr/bin/env bpftrace
+/*
+ * debug_failures.bt - Alert on all errors and failures
+ *
+ * Monitors for convergence failures, validation errors, and runtime errors.
+ * Provides detailed diagnostics to help debug issues.
+ *
+ * Usage:
+ *   sudo bpftrace debug_failures.bt -c './example_program'
+ */
+
+BEGIN
+{
+    printf("Monitoring for errors and failures...\n");
+    printf("Will alert on: convergence failures, validation errors, runtime errors\n");
+    printf("--------------------------------------------------------------------------------\n\n");
+}
+
+/* Convergence failure - detailed diagnostics */
+usdt::ivcalc:convergence_failed
+{
+    if (arg0 == 1) { @mod = "PDE_SOLVER"; }
+    else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
+    else if (arg0 == 3) { @mod = "IMPLIED_VOL"; }
+    else if (arg0 == 4) { @mod = "BRENT_ROOT"; }
+    else if (arg0 == 5) { @mod = "CUBIC_SPLINE"; }
+
+    printf("\n\033[1;31m!!! CONVERGENCE FAILURE !!!\033[0m\n");
+    printf("  Time:       %u ms\n", elapsed / 1000000);
+    printf("  Module:     %s\n", str(@mod));
+    printf("  Step:       %d\n", arg1);
+    printf("  Max iter:   %d\n", arg2);
+    printf("  Final error: %.6e\n", arg3);
+    printf("\n");
+
+    @failures++;
+}
+
+/* Validation error - detailed diagnostics */
+usdt::ivcalc:validation_error
+{
+    if (arg0 == 1) { @mod = "PDE_SOLVER"; }
+    else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
+    else if (arg0 == 3) { @mod = "IMPLIED_VOL"; }
+    else if (arg0 == 5) { @mod = "CUBIC_SPLINE"; }
+
+    printf("\n\033[1;33m!!! VALIDATION ERROR !!!\033[0m\n");
+    printf("  Time:       %u ms\n", elapsed / 1000000);
+    printf("  Module:     %s\n", str(@mod));
+    printf("  Error code: %d\n", arg1);
+    printf("  Param1:     %.6e\n", arg2);
+    printf("  Param2:     %.6e\n", arg3);
+
+    // Decode IV validation errors
+    if (arg0 == 3) {
+        if (arg1 == 1) { printf("  Details:    Spot price must be positive\n"); }
+        else if (arg1 == 2) { printf("  Details:    Strike price must be positive\n"); }
+        else if (arg1 == 3) { printf("  Details:    Time to maturity must be positive\n"); }
+        else if (arg1 == 4) { printf("  Details:    Market price must be positive\n"); }
+        else if (arg1 == 5) { printf("  Details:    Arbitrage bounds violated\n"); }
+    }
+
+    // Decode spline errors
+    if (arg0 == 5 && arg1 == 1) {
+        printf("  Details:    Insufficient points for spline (need at least %d)\n", arg3);
+    }
+
+    printf("\n");
+    @validation_errors++;
+}
+
+/* Runtime error - detailed diagnostics */
+usdt::ivcalc:runtime_error
+{
+    if (arg0 == 1) { @mod = "PDE_SOLVER"; }
+    else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
+    else if (arg0 == 3) { @mod = "IMPLIED_VOL"; }
+    else if (arg0 == 4) { @mod = "BRENT_ROOT"; }
+    else if (arg0 == 5) { @mod = "CUBIC_SPLINE"; }
+
+    printf("\n\033[1;31m!!! RUNTIME ERROR !!!\033[0m\n");
+    printf("  Time:       %u ms\n", elapsed / 1000000);
+    printf("  Module:     %s\n", str(@mod));
+    printf("  Error code: %d\n", arg1);
+    printf("  Context:    %.6e\n", arg2);
+    printf("\n");
+
+    @runtime_errors++;
+}
+
+/* Track iterations before failure for diagnostics */
+usdt::ivcalc:convergence_iter
+/arg0 == 1/  /* PDE solver */
+{
+    @last_pde_step = arg1;
+    @last_pde_iter = arg2;
+    @last_pde_error = arg3;
+}
+
+/* Show last state before PDE convergence failure */
+usdt::ivcalc:convergence_failed
+/arg0 == 1/
+{
+    printf("  Last iteration details:\n");
+    printf("    Step:  %d\n", @last_pde_step);
+    printf("    Iter:  %d\n", @last_pde_iter);
+    printf("    Error: %.6e\n", @last_pde_error);
+}
+
+END
+{
+    printf("\n=== Failure Summary ===\n");
+
+    if (@failures > 0) {
+        printf("\033[31mConvergence failures: %d\033[0m\n", @failures);
+    } else {
+        printf("\033[32mConvergence failures: 0\033[0m\n");
+    }
+
+    if (@validation_errors > 0) {
+        printf("\033[33mValidation errors: %d\033[0m\n", @validation_errors);
+    } else {
+        printf("\033[32mValidation errors: 0\033[0m\n");
+    }
+
+    if (@runtime_errors > 0) {
+        printf("\033[31mRuntime errors: %d\033[0m\n", @runtime_errors);
+    } else {
+        printf("\033[32mRuntime errors: 0\033[0m\n");
+    }
+
+    if (@failures == 0 && @validation_errors == 0 && @runtime_errors == 0) {
+        printf("\n\033[1;32m✓ No errors detected!\033[0m\n");
+    }
+
+    clear(@mod);
+    clear(@failures);
+    clear(@validation_errors);
+    clear(@runtime_errors);
+    clear(@last_pde_step);
+    clear(@last_pde_iter);
+    clear(@last_pde_error);
+}
