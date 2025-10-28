@@ -1,4 +1,5 @@
 #include "src/implied_volatility.h"
+#include "src/european_option.h"
 #include <stdio.h>
 #include <math.h>
 
