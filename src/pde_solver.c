@@ -78,6 +78,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
     double *Lu = solver->Lu;
     double *u_temp = solver->u_temp;
     const double omega = 0.7;  // Relaxation parameter (under-relaxation)
+    double rel_error = 0.0;  // Track relative error for convergence monitoring
 
     for (size_t iter = 0; iter < max_iter; iter++) {
         memcpy(u_old, u_new, n * sizeof(double));
@@ -111,7 +112,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         norm = sqrt(norm / n);
 
         // Use relative tolerance if norm is significant, otherwise absolute
-        double rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
+        rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
 
         // Trace iteration progress
         IVCALC_TRACE_PDE_IMPLICIT_ITER(step, iter, rel_error, tol);
