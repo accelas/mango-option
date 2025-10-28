@@ -71,8 +71,8 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
     const double tol = solver->trbdf2_config.tolerance;
     const double eps = 1e-7;  // Finite difference epsilon (balance between truncation and roundoff error)
 
-    // Initialize with rhs (better initial guess)
-    memcpy(u_new, rhs, n * sizeof(double));
+    // Note: u_new is pre-initialized by caller with appropriate initial guess
+    // (u_current for Stage 1, u_stage for Stage 2)
 
     // Initialize boundary values to satisfy constraints (needed for Jacobian computation)
     if (solver->bc_config.left_type == BC_DIRICHLET) {
@@ -374,6 +374,9 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
         solver->rhs[i] = solver->u_current[i] + (gamma * dt / 2.0) * Lu_n[i];
     }
 
+    // Initialize u_stage with u_current as initial guess
+    memcpy(solver->u_stage, solver->u_current, n * sizeof(double));
+
     // Solve implicit equation for stage 1
     int status = solve_implicit_step(solver, t_current + gamma * dt,
                                      gamma * dt / 2.0, solver->rhs, solver->u_stage, step);
@@ -382,18 +385,23 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
     }
 
     // Stage 2: BDF2 from t_n to t_n+1
-    // (1+2·α)·u^{n+1} - (1+α)·u* + α·u^n = (1-α)·dt·L(u^{n+1})
-    // where α = 1 - γ
+    // Standard TR-BDF2 formulation (Ascher, Ruuth, Wetton 1995):
+    // u^{n+1} - [(1-γ)Δt/(2-γ)]L(u^{n+1}) = [1/(γ(2-γ))]u^* - [(1-γ)²/(γ(2-γ))]u^n
 
-    const double alpha = 1.0 - gamma;
-    const double coeff = (1.0 - alpha) * dt / (1.0 + 2.0 * alpha);
+    const double one_minus_gamma = 1.0 - gamma;
+    const double two_minus_gamma = 2.0 - gamma;
+    const double denom = gamma * two_minus_gamma;
+    const double coeff = one_minus_gamma * dt / two_minus_gamma;
 
     // RHS for stage 2
     #pragma omp simd
     for (size_t i = 0; i < n; i++) {
-        solver->rhs[i] = ((1.0 + alpha) * solver->u_stage[i] - alpha * solver->u_current[i]) /
-                        (1.0 + 2.0 * alpha);
+        solver->rhs[i] = solver->u_stage[i] / denom -
+                         one_minus_gamma * one_minus_gamma * solver->u_current[i] / denom;
     }
+
+    // Initialize u_next with u_stage as initial guess
+    memcpy(solver->u_next, solver->u_stage, n * sizeof(double));
 
     // Solve implicit equation for stage 2
     status = solve_implicit_step(solver, t_current + dt, coeff,
