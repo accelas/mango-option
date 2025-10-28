@@ -4,6 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Extended user data structure that includes grid boundaries
+// This is needed for boundary conditions that depend on spatial location
+typedef struct {
+    const OptionData *option_data;
+    double x_min;
+    double x_max;
+} ExtendedOptionData;
+
 // American Option Pricing using Black-Scholes PDE
 //
 // Black-Scholes PDE in backward time τ = T - t (time to maturity):
@@ -23,7 +31,8 @@
 // At maturity, American = European = max(S - K, 0) for call
 void american_option_terminal_condition(const double *x, size_t n_points,
                                        double *V, void *user_data) {
-    OptionData *data = (OptionData *)user_data;
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+    const OptionData *data = ext_data->option_data;
     const double K = data->strike;
 
     for (size_t i = 0; i < n_points; i++) {
@@ -40,7 +49,8 @@ void american_option_terminal_condition(const double *x, size_t n_points,
 
 // Left boundary condition (S → 0, x → -∞)
 double american_option_left_boundary(double t, void *user_data) {
-    OptionData *data = (OptionData *)user_data;
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+    const OptionData *data = ext_data->option_data;
     // In our time mapping: t represents time-to-maturity τ
     const double tau = t;
 
@@ -54,15 +64,22 @@ double american_option_left_boundary(double t, void *user_data) {
 }
 
 // Right boundary condition (S → ∞, x → ∞)
-double american_option_right_boundary([[maybe_unused]] double t, void *user_data) {
-    OptionData *data = (OptionData *)user_data;
+double american_option_right_boundary(double t, void *user_data) {
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+    const OptionData *data = ext_data->option_data;
+    const double x_max = ext_data->x_max;
+    // In our time mapping: t represents time-to-maturity τ
+    const double tau = t;
 
     if (data->option_type == OPTION_CALL) {
-        // For call at large S: V ≈ S - K*exp(-r*τ)
-        // But for American options with no dividends, V ≈ S (never exercise early)
-        // At the grid boundary, we approximate V = S_max - K
-        // This will be enforced by the obstacle condition anyway
-        return 0.0; // Will be overridden by obstacle
+        // For call at large S: V(x_max, τ) ≈ S_max - K*exp(-r*τ)
+        // where S_max = K*exp(x_max)
+        // This is the European call value at the boundary, which equals the
+        // American call value for options with no dividends (early exercise never optimal)
+        const double K = data->strike;
+        const double r = data->risk_free_rate;
+        const double S_max = K * exp(x_max);
+        return S_max - K * exp(-r * tau);
     } else {
         // For put: V(S→∞, τ) = 0 (worthless when S is very large)
         return 0.0;
@@ -74,16 +91,16 @@ double american_option_right_boundary([[maybe_unused]] double t, void *user_data
 void american_option_spatial_operator(const double *x, [[maybe_unused]] double t,
                                      const double *V, size_t n_points,
                                      double *LV, void *user_data) {
-    OptionData *data = (OptionData *)user_data;
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+    const OptionData *data = ext_data->option_data;
     const double sigma = data->volatility;
     const double r = data->risk_free_rate;
     const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
     const double dx_inv = 1.0 / dx;
     const double dx2_inv = 1.0 / (dx * dx);
 
-    // TODO: Fix time mapping - current implementation has issues
-    // The correct formulation requires careful mapping between calendar time
-    // and time-to-maturity for backward parabolic PDE
+    // Black-Scholes PDE coefficients in log-price coordinates
+    // The solver time t represents time-to-maturity τ
     const double coeff_2nd = 0.5 * sigma * sigma;         // (1/2)σ²
     const double coeff_1st = r - 0.5 * sigma * sigma;     // r - σ²/2
     const double coeff_0th = -r;                          // -r
@@ -109,7 +126,8 @@ void american_option_spatial_operator(const double *x, [[maybe_unused]] double t
 // V(S,t) ≥ intrinsic_value(S)
 void american_option_obstacle(const double *x, [[maybe_unused]] double t,
                              size_t n_points, double *obstacle, void *user_data) {
-    OptionData *data = (OptionData *)user_data;
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+    const OptionData *data = ext_data->option_data;
     const double K = data->strike;
 
     #pragma omp simd
@@ -229,6 +247,13 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
         }
     }
 
+    // Create extended user data to pass grid boundaries to callbacks
+    ExtendedOptionData ext_data = {
+        .option_data = option_data,
+        .x_min = grid_params->x_min,
+        .x_max = grid_params->x_max
+    };
+
     // Setup callbacks
     PDECallbacks callbacks = {
         .initial_condition = american_option_terminal_condition,
@@ -240,7 +265,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
         .temporal_event = nullptr,
         .n_temporal_events = 0,
         .temporal_event_times = nullptr,
-        .user_data = (void *)option_data
+        .user_data = (void *)&ext_data
     };
 
     // Enable temporal event callback for discrete dividends
@@ -290,7 +315,8 @@ static void american_option_dividend_event(double t, const double *x_grid,
                                            size_t n_events_triggered,
                                            void *user_data) {
     (void)t; // Unused: time is implicit in event indices
-    OptionData *option_data = (OptionData *)user_data;
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+    const OptionData *option_data = ext_data->option_data;
 
     // Allocate workspace for dividend adjustment
     double *V_temp = (double *)malloc(n_points * sizeof(double));
