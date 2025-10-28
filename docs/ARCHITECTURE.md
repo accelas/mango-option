@@ -1,5 +1,7 @@
 # IV Calculation and Option Pricing Architecture Analysis
 
+> **Note:** For an overview of the problem domain and project motivation, see [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md).
+
 ## Executive Summary
 
 The iv_calc codebase implements a complete suite for implied volatility (IV) calculation and American option pricing. It uses a **callback-based, vectorized architecture** with:
@@ -16,41 +18,32 @@ The iv_calc codebase implements a complete suite for implied volatility (IV) cal
 
 ### Three Main Components
 
-```
-┌─────────────────────────────────────┐
-│   Implied Volatility Calculator     │
-│  (implied_volatility.c/.h)          │
-│  - Black-Scholes pricing            │
-│  - IV search via Brent's method     │
-└─────────────────────────────────────┘
-                    │
-                    └─→ Uses: Brent's root finder
-                    │
-                    └─→ Uses: Black-Scholes pricing
+```mermaid
+graph TD
+    IV[Implied Volatility Calculator<br/>implied_volatility.c/.h<br/>- Black-Scholes pricing<br/>- IV search via Brent's method]
 
-┌─────────────────────────────────────┐
-│   American Option Pricer            │
-│  (american_option.c/.h)             │
-│  - Black-Scholes PDE setup          │
-│  - Log-price transformation         │
-│  - Obstacle conditions              │
-│  - Dividend event handling          │
-└─────────────────────────────────────┘
-                    │
-                    └─→ Uses: PDE Solver
+    AO[American Option Pricer<br/>american_option.c/.h<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
 
-┌─────────────────────────────────────┐
-│   PDE Solver (FDM Engine)           │
-│  (pde_solver.c/.h)                  │
-│  - TR-BDF2 time-stepping            │
-│  - Implicit solver (fixed-point)    │
-│  - Callback-based architecture      │
-│  - Single workspace buffer          │
-└─────────────────────────────────────┘
-                    │
-                    └─→ Uses: Cubic spline for interpolation
-                    │
-                    └─→ Uses: Tridiagonal solver
+    PDE[PDE Solver FDM Engine<br/>pde_solver.c/.h<br/>- TR-BDF2 time-stepping<br/>- Implicit solver fixed-point<br/>- Callback-based architecture<br/>- Single workspace buffer]
+
+    BRENT[Brent's Root Finder]
+    BS[Black-Scholes Pricing]
+    SPLINE[Cubic Spline Interpolation]
+    TRI[Tridiagonal Solver]
+
+    IV --> BRENT
+    IV --> BS
+    AO --> PDE
+    PDE --> SPLINE
+    PDE --> TRI
+
+    style IV fill:#e1f5ff
+    style AO fill:#fff4e1
+    style PDE fill:#ffe1f5
+    style BRENT fill:#f0f0f0
+    style BS fill:#f0f0f0
+    style SPLINE fill:#f0f0f0
+    style TRI fill:#f0f0f0
 ```
 
 ---
@@ -502,29 +495,35 @@ A two-stage implicit scheme combining:
 
 ### Memory Management (Single Buffer Architecture)
 
-```
-Workspace (10n doubles):
-┌─────────────────────┐
-│  u_current (u^n)    │  Current time step solution
-├─────────────────────┤
-│  u_next (u^{n+1})   │  Next time step solution
-├─────────────────────┤
-│  u_stage            │  Intermediate stage solution
-├─────────────────────┤
-│  rhs                │  Right-hand side vector
-├─────────────────────┤
-│  matrix_diag        │  Tridiagonal matrix diagonal
-├─────────────────────┤
-│  matrix_upper       │  Tridiagonal matrix upper diagonal
-├─────────────────────┤
-│  matrix_lower       │  Tridiagonal matrix lower diagonal
-├─────────────────────┤
-│  u_old              │  Previous fixed-point iteration
-├─────────────────────┤
-│  Lu                 │  Spatial operator result
-├─────────────────────┤
-│  u_temp             │  Temporary for relaxation
-└─────────────────────┘
+**Workspace (10n doubles, contiguous allocation):**
+
+```mermaid
+graph TB
+    subgraph "Workspace Buffer (10n doubles, 64-byte aligned)"
+        A["u_current (u^n)<br/>Current time step solution<br/>n doubles"]
+        B["u_next (u^(n+1))<br/>Next time step solution<br/>n doubles"]
+        C["u_stage<br/>Intermediate stage solution<br/>n doubles"]
+        D["rhs<br/>Right-hand side vector<br/>n doubles"]
+        E["matrix_diag<br/>Tridiagonal matrix diagonal<br/>n doubles"]
+        F["matrix_upper<br/>Tridiagonal matrix upper diagonal<br/>n doubles"]
+        G["matrix_lower<br/>Tridiagonal matrix lower diagonal<br/>n doubles"]
+        H["u_old<br/>Previous fixed-point iteration<br/>n doubles"]
+        I["Lu<br/>Spatial operator result<br/>n doubles"]
+        J["u_temp<br/>Temporary for relaxation<br/>n doubles"]
+    end
+
+    A --> B --> C --> D --> E --> F --> G --> H --> I --> J
+
+    style A fill:#e3f2fd
+    style B fill:#e3f2fd
+    style C fill:#fff3e0
+    style D fill:#fff3e0
+    style E fill:#f3e5f5
+    style F fill:#f3e5f5
+    style G fill:#f3e5f5
+    style H fill:#e8f5e9
+    style I fill:#e8f5e9
+    style J fill:#e8f5e9
 ```
 
 **Advantages**:
@@ -770,44 +769,44 @@ Returns: Array of implied volatilities
 
 ## Data Flow Diagram
 
-```
-                    ┌──────────────────────┐
-                    │  Option Parameters   │
-                    │ (S, K, T, r, σ, div)│
-                    └──────────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    │                   │
-                    ↓                   ↓
-        ┌──────────────────┐  ┌──────────────────┐
-        │ American Pricing │  │ European Pricing │
-        │   (PDE Solve)    │  │  (Black-Scholes) │
-        └────────┬─────────┘  └────────┬─────────┘
-                 │                     │
-                 │ Option Value        │ Theoretical Price
-                 │ at All Spots        │
-                 │                     │
-        ┌────────┴─────────┐          │
-        │ Cubic Spline     │          │
-        │ Interpolation    │          │
-        └────────┬─────────┘          │
-                 │                     │
-                 └────────┬────────────┘
-                          │
-                  Option Value at S=K
-                          │
-                    ┌─────┴──────┐
-                    │            │
-                 vs │            │ (from market)
-         BS Price  │            │ Market Price
-                    │            │
-                    ↓            ↓
-                  ┌───────────┐
-                  │Brent Root │
-                  │  Finder   │
-                  └─────┬─────┘
-                        │
-                 Implied Volatility
+```mermaid
+graph TD
+    PARAMS["Option Parameters<br/>(S, K, T, r, σ, div)"]
+
+    AMERICAN["American Pricing<br/>(PDE Solve)"]
+    EUROPEAN["European Pricing<br/>(Black-Scholes)"]
+
+    SPLINE["Cubic Spline<br/>Interpolation"]
+
+    VALUE["Option Value at S=K"]
+
+    MARKET["Market Price<br/>(from market)"]
+
+    BRENT["Brent Root Finder"]
+
+    IV["Implied Volatility"]
+
+    PARAMS --> AMERICAN
+    PARAMS --> EUROPEAN
+
+    AMERICAN -->|"Option Value<br/>at All Spots"| SPLINE
+    SPLINE --> VALUE
+
+    EUROPEAN -->|"Theoretical Price"| VALUE
+
+    VALUE -->|"BS Price vs"| BRENT
+    MARKET --> BRENT
+
+    BRENT --> IV
+
+    style PARAMS fill:#e3f2fd
+    style AMERICAN fill:#fff3e0
+    style EUROPEAN fill:#f3e5f5
+    style SPLINE fill:#e8f5e9
+    style VALUE fill:#fce4ec
+    style MARKET fill:#ffebee
+    style BRENT fill:#fff9c4
+    style IV fill:#c8e6c9
 ```
 
 ---

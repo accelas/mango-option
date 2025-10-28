@@ -383,10 +383,11 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 
 ## Further Reading
 
-- **Architecture**: `IV_ARCHITECTURE_ANALYSIS.md`
-- **Benchmarks**: `tests/BENCHMARK.md`
-- **Optimization Plan**: `docs/FASTVOL_ANALYSIS_AND_PLAN.md`
-- **Examples**: `examples/example_*.c`
-- **Tests**: `tests/*_test.cc`
-- **Tracing**: `TRACING.md`, `TRACING_QUICKSTART.md`
+- **Overview**: `docs/PROJECT_OVERVIEW.md` - Problem domain and project motivation
+- **Architecture**: `docs/ARCHITECTURE.md` - Detailed technical architecture
+- **Benchmarks**: `tests/BENCHMARK.md` - Performance comparisons
+- **Optimization Plan**: `docs/FASTVOL_ANALYSIS_AND_PLAN.md` - Future improvements
+- **Examples**: `examples/example_*.c` - Usage examples
+- **Tests**: `tests/*_test.cc` - Test suite
+- **Tracing**: `TRACING.md`, `TRACING_QUICKSTART.md` - USDT tracing guide
 
