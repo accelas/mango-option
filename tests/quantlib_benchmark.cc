@@ -107,8 +107,9 @@ static void BM_QuantLib_AmericanPut(benchmark::State& state) {
 
     for (auto _ : state) {
         // Create fresh engine for each iteration
+        // Using 1000 time steps to match our implementation (fair comparison)
         ext::shared_ptr<PricingEngine> engine(
-            new FdBlackScholesVanillaEngine(stochProcess, 100, 400)
+            new FdBlackScholesVanillaEngine(stochProcess, 1000, 400)
         );
         option.setPricingEngine(engine);
         Real value = option.NPV();
@@ -195,8 +196,9 @@ static void BM_QuantLib_AmericanCall(benchmark::State& state) {
     VanillaOption option(payoff, exercise);
 
     for (auto _ : state) {
+        // Using 1000 time steps to match our implementation (fair comparison)
         ext::shared_ptr<PricingEngine> engine(
-            new FdBlackScholesVanillaEngine(stochProcess, 100, 400)
+            new FdBlackScholesVanillaEngine(stochProcess, 1000, 400)
         );
         option.setPricingEngine(engine);
         Real value = option.NPV();
@@ -270,8 +272,9 @@ static void CompareImplementations() {
     );
 
     VanillaOption ql_option(payoff, exercise);
+    // Using 1000 time steps to match our implementation for fair comparison
     ext::shared_ptr<PricingEngine> engine(
-        new FdBlackScholesVanillaEngine(stochProcess, 100, 400)
+        new FdBlackScholesVanillaEngine(stochProcess, 1000, 400)
     );
     ql_option.setPricingEngine(engine);
     Real ql_value = ql_option.NPV();
