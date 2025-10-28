@@ -499,12 +499,15 @@ int pde_solver_step(PDESolver *solver, double t_current) {
 
 int pde_solver_solve(PDESolver *solver) {
     double t = solver->time.t_start;
+    size_t next_event_idx = 0; // Track next event to check
 
     // Trace solver start
     IVCALC_TRACE_PDE_START(solver->time.t_start, solver->time.t_end,
                            solver->time.dt, solver->time.n_steps);
 
     for (size_t step = 0; step < solver->time.n_steps; step++) {
+        double t_prev = t;
+
         // Use internal version with step tracking for better tracing
         int status = pde_solver_step_internal(solver, t, step);
         if (status != 0) {
@@ -513,6 +516,43 @@ int pde_solver_solve(PDESolver *solver) {
         }
 
         t += solver->time.dt;
+
+        // Handle temporal events if callback is provided and events are registered
+        if (solver->callbacks.temporal_event != nullptr &&
+            solver->callbacks.n_temporal_events > 0 &&
+            solver->callbacks.temporal_event_times != nullptr) {
+
+            // Collect all events that occurred in (t_prev, t]
+            size_t events_triggered[16]; // Static array for up to 16 events per step
+            size_t n_triggered = 0;
+
+            while (next_event_idx < solver->callbacks.n_temporal_events &&
+                   n_triggered < 16) {
+                double event_time = solver->callbacks.temporal_event_times[next_event_idx];
+
+                // Check if event occurred in this time step
+                if (event_time > t_prev && event_time <= t) {
+                    events_triggered[n_triggered++] = next_event_idx;
+                    next_event_idx++;
+                } else if (event_time > t) {
+                    // Event is in the future, stop checking
+                    break;
+                } else {
+                    // Event is in the past (shouldn't happen if sorted), skip it
+                    next_event_idx++;
+                }
+            }
+
+            // Call callback if any events were triggered
+            if (n_triggered > 0) {
+                solver->callbacks.temporal_event(t, solver->grid.x,
+                                                solver->grid.n_points,
+                                                solver->u_current,
+                                                events_triggered,
+                                                n_triggered,
+                                                solver->callbacks.user_data);
+            }
+        }
 
         // Trace progress periodically (every 10%)
         if (step % (solver->time.n_steps / 10 + 1) == 0) {

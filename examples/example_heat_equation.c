@@ -155,6 +155,9 @@ int main(void) {
         .spatial_operator = heat_spatial_operator,
         .jump_condition = nullptr,
         .obstacle = nullptr,
+        .temporal_event = nullptr,
+        .n_temporal_events = 0,
+        .temporal_event_times = nullptr,
         .user_data = &heat_data
     };
 
