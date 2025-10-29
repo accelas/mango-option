@@ -49,10 +49,11 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     spline->coeffs_d = spline->workspace + 3 * n;
 
     // Compute spline coefficients using natural cubic spline
-    // S_i(x) = a_i + b_i*(x - x_i) + c_i*(x - x_i)^2 + d_i*(x - x_i)^3
-    // for x in [x_i, x_{i+1}]
+    // Sᵢ(x) = aᵢ + bᵢ·(x - xᵢ) + cᵢ·(x - xᵢ)² + dᵢ·(x - xᵢ)³
+    // for x ∈ [xᵢ, xᵢ₊₁]
 
-    // a_i = y_i
+    // aᵢ = yᵢ
+    #pragma omp simd
     for (size_t i = 0; i < n; i++) {
         spline->coeffs_a[i] = y[i];
     }
@@ -70,10 +71,12 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     double *upper = temp_workspace + 4 * n;
     double *rhs = temp_workspace + 5 * n;
 
+    #pragma omp simd
     for (size_t i = 0; i < n - 1; i++) {
         h[i] = x[i + 1] - x[i];
     }
 
+    #pragma omp simd
     for (size_t i = 1; i < n - 1; i++) {
         alpha[i] = (3.0 / h[i]) * (y[i + 1] - y[i]) -
                    (3.0 / h[i - 1]) * (y[i] - y[i - 1]);
@@ -104,6 +107,7 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     solve_tridiagonal(n, lower, diag, upper, rhs, spline->coeffs_c, NULL);
 
     // Compute b and d coefficients from c
+    #pragma omp simd
     for (size_t j = 0; j < n - 1; j++) {
         spline->coeffs_b[j] = (y[j + 1] - y[j]) / h[j] -
                              h[j] * (spline->coeffs_c[j + 1] + 2.0 * spline->coeffs_c[j]) / 3.0;
@@ -129,7 +133,7 @@ double pde_spline_eval(const CubicSpline *spline, double x_eval) {
     size_t i = find_interval(spline->x, spline->n_points, x_eval);
 
     // Evaluate spline in interval i
-    // S_i(x) = a_i + b_i*(x - x_i) + c_i*(x - x_i)^2 + d_i*(x - x_i)^3
+    // Sᵢ(x) = aᵢ + bᵢ·(x - xᵢ) + cᵢ·(x - xᵢ)² + dᵢ·(x - xᵢ)³
     double dx = x_eval - spline->x[i];
     double result = spline->coeffs_a[i] +
                    spline->coeffs_b[i] * dx +
@@ -143,7 +147,7 @@ double pde_spline_eval_derivative(const CubicSpline *spline, double x_eval) {
     // Find the interval containing x_eval
     size_t i = find_interval(spline->x, spline->n_points, x_eval);
 
-    // Evaluate derivative: S'_i(x) = b_i + 2*c_i*(x - x_i) + 3*d_i*(x - x_i)^2
+    // Evaluate derivative: S'ᵢ(x) = bᵢ + 2·cᵢ·(x - xᵢ) + 3·dᵢ·(x - xᵢ)²
     double dx = x_eval - spline->x[i];
     double result = spline->coeffs_b[i] +
                    2.0 * spline->coeffs_c[i] * dx +
