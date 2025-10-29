@@ -86,6 +86,7 @@ cc_test(
     copts = ["-std=c++17", "-Wall", "-Wextra"],
     deps = [
         "//src:interp_multilinear",
+        "//src:interp_cubic",
         "//src:iv_surface",
         "//src:price_table",
         "@googletest//:gtest_main",

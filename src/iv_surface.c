@@ -110,6 +110,11 @@ int iv_surface_set(IVSurface *surface, const double *iv_data) {
     size_t n_points = surface->n_moneyness * surface->n_maturity;
     memcpy(surface->iv_surface, iv_data, n_points * sizeof(double));
 
+    // Pre-compute interpolation coefficients if supported
+    if (surface->strategy && surface->strategy->precompute && surface->interp_context) {
+        surface->strategy->precompute(surface, surface->interp_context);
+    }
+
     return 0;
 }
 
