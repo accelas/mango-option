@@ -343,6 +343,7 @@ double price = table->prices[idx];
 **Cons:**
 - ❌ Not smooth (only C0 continuous)
 - ❌ Can't extrapolate (must clamp to grid bounds)
+- ❌ Second derivatives (gamma) are approximately zero within cells - cannot accurately capture curvature. For accurate gamma calculations, cubic spline interpolation would be needed.
 
 #### 3.2. Tensor-Product Cubic Splines
 
@@ -834,9 +835,10 @@ Similar to industry standard (hybrid interpolation + FDM), but with:
    - Handle discrete dividends explicitly?
 
 4. **Greeks Calculation:**
-   - Finite differences on interpolated prices?
-   - Store pre-computed Greeks in tables?
-   - Analytical Greeks from spline derivatives?
+   - Finite differences on interpolated prices? ✓ Implemented
+   - **Note:** Gamma (second derivative) is approximately zero for multilinear interpolation within cells, as it is piecewise linear. For accurate gamma, cubic spline interpolation or storing pre-computed Greeks would be needed.
+   - Store pre-computed Greeks in tables? (Future work)
+   - Analytical Greeks from spline derivatives? (Requires cubic spline strategy)
 
 5. **Error Bounds:**
    - Can we provide theoretical error bounds?
