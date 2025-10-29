@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-This directory contains performance benchmarks for the iv_calc library. **Benchmarks are NOT run in CI** to keep CI fast and focused on correctness testing.
+This directory contains performance benchmarks for the mango-iv library. **Benchmarks are NOT run in CI** to keep CI fast and focused on correctness testing.
 
 ## Available Benchmarks
 
