@@ -144,24 +144,29 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     }
 
     // 4D multilinear interpolation: 15 lerps
-    // Stage 1: Interpolate along moneyness (8 → 4)
+    // Stage 1: Interpolate along moneyness (16 → 8)
+    // Pair values[i] with values[i+8] (dm bit has weight 8)
     double v_m[8];
     for (int i = 0; i < 8; i++) {
-        v_m[i] = lerp(m0, m1, values[i*2], values[i*2 + 1], moneyness);
+        v_m[i] = lerp(m0, m1, values[i], values[i + 8], moneyness);
     }
 
-    // Stage 2: Interpolate along maturity (4 → 2)
+    // Stage 2: Interpolate along maturity (8 → 4)
+    // Pair v_m[i] with v_m[i+4] (dtau bit has weight 4)
     double v_tau[4];
     for (int i = 0; i < 4; i++) {
-        v_tau[i] = lerp(tau0, tau1, v_m[i*2], v_m[i*2 + 1], maturity);
+        v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 4], maturity);
     }
 
-    // Stage 3: Interpolate along volatility (2 → 1)
+    // Stage 3: Interpolate along volatility (4 → 2)
+    // Pair v_tau[i] with v_tau[i+2] (dsigma bit has weight 2)
     double v_sigma[2];
-    v_sigma[0] = lerp(sigma0, sigma1, v_tau[0], v_tau[1], volatility);
-    v_sigma[1] = lerp(sigma0, sigma1, v_tau[2], v_tau[3], volatility);
+    for (int i = 0; i < 2; i++) {
+        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 2], volatility);
+    }
 
-    // Stage 4: Interpolate along rate (1 → final)
+    // Stage 4: Interpolate along rate (2 → 1)
+    // Pair v_sigma[0] with v_sigma[1] (dr bit has weight 1)
     double result = lerp(r0, r1, v_sigma[0], v_sigma[1], rate);
 
     return result;
@@ -215,30 +220,36 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     }
 
     // 5D multilinear interpolation: 31 lerps
-    // Stage 1: Interpolate along moneyness (16 → 8)
+    // Stage 1: Interpolate along moneyness (32 → 16)
+    // Pair values[i] with values[i+16] (dm bit has weight 16)
     double v_m[16];
     for (int i = 0; i < 16; i++) {
-        v_m[i] = lerp(m0, m1, values[i*2], values[i*2 + 1], moneyness);
+        v_m[i] = lerp(m0, m1, values[i], values[i + 16], moneyness);
     }
 
-    // Stage 2: Interpolate along maturity (8 → 4)
+    // Stage 2: Interpolate along maturity (16 → 8)
+    // Pair v_m[i] with v_m[i+8] (dtau bit has weight 8)
     double v_tau[8];
     for (int i = 0; i < 8; i++) {
-        v_tau[i] = lerp(tau0, tau1, v_m[i*2], v_m[i*2 + 1], maturity);
+        v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 8], maturity);
     }
 
-    // Stage 3: Interpolate along volatility (4 → 2)
+    // Stage 3: Interpolate along volatility (8 → 4)
+    // Pair v_tau[i] with v_tau[i+4] (dsigma bit has weight 4)
     double v_sigma[4];
     for (int i = 0; i < 4; i++) {
-        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i*2], v_tau[i*2 + 1], volatility);
+        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 4], volatility);
     }
 
-    // Stage 4: Interpolate along rate (2 → 1)
+    // Stage 4: Interpolate along rate (4 → 2)
+    // Pair v_sigma[i] with v_sigma[i+2] (dr bit has weight 2)
     double v_r[2];
-    v_r[0] = lerp(r0, r1, v_sigma[0], v_sigma[1], rate);
-    v_r[1] = lerp(r0, r1, v_sigma[2], v_sigma[3], rate);
+    for (int i = 0; i < 2; i++) {
+        v_r[i] = lerp(r0, r1, v_sigma[i], v_sigma[i + 2], rate);
+    }
 
-    // Stage 5: Interpolate along dividend (1 → final)
+    // Stage 5: Interpolate along dividend (2 → 1)
+    // Pair v_r[0] with v_r[1] (dq bit has weight 1)
     double result = lerp(q0, q1, v_r[0], v_r[1], dividend);
 
     return result;
