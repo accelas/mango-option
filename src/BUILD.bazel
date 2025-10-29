@@ -60,6 +60,19 @@ cc_library(
 )
 
 cc_library(
+    name = "european_option",
+    srcs = ["european_option.c"],
+    hdrs = ["european_option.h"],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "implied_volatility",
     srcs = ["implied_volatility.c"],
     hdrs = [
@@ -74,5 +87,6 @@ cc_library(
         "-O3",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
+    deps = [":european_option"],
     visibility = ["//visibility:public"],
 )

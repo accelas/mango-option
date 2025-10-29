@@ -52,12 +52,4 @@ IVResult implied_volatility_calculate(const IVParams *params,
 // Uses tolerance 1e-6 and max 100 iterations
 IVResult implied_volatility_calculate_simple(const IVParams *params);
 
-// Black-Scholes option pricing (used internally and exposed for testing)
-double black_scholes_price(double spot, double strike, double time_to_maturity,
-                           double risk_free_rate, double volatility, bool is_call);
-
-// Calculate option vega (sensitivity to volatility)
-double black_scholes_vega(double spot, double strike, double time_to_maturity,
-                          double risk_free_rate, double volatility);
-
 #endif // IMPLIED_VOLATILITY_H

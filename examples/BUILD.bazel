@@ -23,5 +23,8 @@ cc_binary(
     name = "example_implied_volatility",
     srcs = ["example_implied_volatility.c"],
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
-    deps = ["//src:implied_volatility"],
+    deps = [
+        "//src:implied_volatility",
+        "//src:european_option",
+    ],
 )

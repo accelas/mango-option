@@ -4,6 +4,7 @@
 
 extern "C" {
 #include "../src/implied_volatility.h"
+#include "../src/european_option.h"
 }
 
 // Test fixture for implied volatility tests
