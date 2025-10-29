@@ -199,7 +199,7 @@ void american_option_apply_dividend(const double *x_grid, size_t n_points,
 // High-level API to price American options
 AmericanOptionResult american_option_price(const OptionData *option_data,
                                           const AmericanOptionGrid *grid_params) {
-    AmericanOptionResult result = {nullptr, -1};
+    AmericanOptionResult result = {nullptr, -1, nullptr};
 
     // Trace option pricing start
     IVCALC_TRACE_OPTION_START(option_data->option_type, option_data->strike,
@@ -248,11 +248,18 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     }
 
     // Create extended user data to pass grid boundaries to callbacks
-    ExtendedOptionData ext_data = {
-        .option_data = option_data,
-        .x_min = grid_params->x_min,
-        .x_max = grid_params->x_max
-    };
+    // Allocate dynamically to ensure lifetime extends beyond solver creation
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)malloc(sizeof(ExtendedOptionData));
+    if (ext_data == nullptr) {
+        if (div_times_solver != nullptr) {
+            free(div_times_solver);
+        }
+        return result;
+    }
+
+    ext_data->option_data = option_data;
+    ext_data->x_min = grid_params->x_min;
+    ext_data->x_max = grid_params->x_max;
 
     // Setup callbacks
     PDECallbacks callbacks = {
@@ -265,7 +272,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
         .temporal_event = nullptr,
         .n_temporal_events = 0,
         .temporal_event_times = nullptr,
-        .user_data = (void *)&ext_data
+        .user_data = (void *)ext_data
     };
 
     // Enable temporal event callback for discrete dividends
@@ -295,6 +302,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
 
     result.solver = solver;
     result.status = status;
+    result.internal_data = (void *)ext_data;  // Store for cleanup
 
     // Clean up dividend time array
     if (div_times_solver != nullptr) {
@@ -305,6 +313,27 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     IVCALC_TRACE_OPTION_COMPLETE(status, grid_params->n_steps);
 
     return result;
+}
+
+// Free resources associated with AmericanOptionResult
+void american_option_free_result(AmericanOptionResult *result) {
+    if (result == nullptr) {
+        return;
+    }
+
+    // Free the solver
+    if (result->solver != nullptr) {
+        pde_solver_destroy(result->solver);
+        result->solver = nullptr;
+    }
+
+    // Free the extended option data
+    if (result->internal_data != nullptr) {
+        free(result->internal_data);
+        result->internal_data = nullptr;
+    }
+
+    result->status = -1;
 }
 
 // Temporal event callback for discrete dividends
