@@ -80,6 +80,10 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
         // More generally: u_{-1} = u_1 - 2*dx*g where du/dx = g
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
 
+        // ASSUMPTION: This method assumes a pure diffusion operator L(u) = D·∂²u/∂x²
+        // For advection-diffusion or nonlinear operators, the coefficient estimation
+        // may not be accurate. Consider making D an explicit parameter if needed.
+        //
         // Estimate diffusion coefficient from interior point
         // L(u)_1 ≈ D * (u_0 - 2*u_1 + u_2) / dx² for diffusion
         // We'll use finite differences to estimate the stencil coefficient
@@ -98,6 +102,7 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
     if (solver->bc_config.right_type == BC_NEUMANN) {
         double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
 
+        // ASSUMPTION: Same as left boundary - assumes pure diffusion operator
         if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
             double D_estimate = result[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
             // Ghost point: u_n = u_{n-2} + 2*dx*g
@@ -262,7 +267,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
 
         // Solve for correction: (I - coeff_dt * J) * δu = residual
         double *delta_u = u_new;  // Use u_new to store δu temporarily
-        solve_tridiagonal(n, lower, diag, upper, residual, delta_u);
+        solve_tridiagonal(n, lower, diag, upper, residual, delta_u, solver->tridiag_workspace);
 
         // Update: u_new = u_old + δu
         #pragma omp simd
@@ -368,24 +373,43 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->trbdf2_config = *trbdf2_config;
     solver->callbacks = *callbacks;
 
+    // Validate Robin boundary condition coefficients
+    if (bc_config->left_type == BC_ROBIN && fabs(bc_config->left_robin_a) < 1e-15) {
+        IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 1, bc_config->left_robin_a, 1e-15);
+        free(solver);
+        return nullptr;
+    }
+    if (bc_config->right_type == BC_ROBIN && fabs(bc_config->right_robin_a) < 1e-15) {
+        IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 2, bc_config->right_robin_a, 1e-15);
+        free(solver);
+        return nullptr;
+    }
+
     // Allocate single workspace buffer for all arrays (better cache locality)
-    // Need 10 arrays of size n:
-    //   - Solution: u_current, u_next, u_stage, rhs
-    //   - Matrix: matrix_diag, matrix_upper, matrix_lower
-    //   - Temps: u_old, Lu, u_temp
+    // Need arrays totaling 12n doubles:
+    //   - Solution: u_current, u_next, u_stage, rhs (4n)
+    //   - Matrix: matrix_diag, matrix_upper, matrix_lower (3n)
+    //   - Temps: u_old, Lu, u_temp (3n)
+    //   - Tridiagonal workspace: c_prime, d_prime (2n)
     const size_t n = grid->n_points;
-    const size_t workspace_size = 10 * n;
+    const size_t workspace_size = 12 * n;
 
     // Use aligned allocation for SIMD vectorization (64-byte alignment for AVX-512)
     // Each array starts at aligned boundary by padding n to alignment
     const size_t alignment = SIMD_ALIGNMENT;
     const size_t n_aligned = ((n * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
-    const size_t workspace_aligned_size = 10 * n_aligned;
+    const size_t workspace_aligned_size = 12 * n_aligned;
 
     solver->workspace = aligned_alloc(alignment, workspace_aligned_size * sizeof(double));
     if (solver->workspace == nullptr) {
         // Fallback to regular malloc if aligned_alloc fails
         solver->workspace = malloc(workspace_size * sizeof(double));
+        if (solver->workspace == nullptr) {
+            // Both allocations failed
+            IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 0, workspace_size, 0.0);
+            free(solver);
+            return nullptr;
+        }
     }
 
     // Slice workspace into individual arrays (each aligned)
@@ -400,6 +424,7 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->u_old = solver->workspace + offset; offset += n_aligned;
     solver->Lu = solver->workspace + offset; offset += n_aligned;
     solver->u_temp = solver->workspace + offset; offset += n_aligned;
+    solver->tridiag_workspace = solver->workspace + offset; offset += 2 * n_aligned;  // 2n for c_prime + d_prime
 
     return solver;
 }

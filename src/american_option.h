@@ -35,15 +35,20 @@ typedef struct {
 
 // Result structure
 typedef struct {
-    PDESolver *solver;       // PDE solver (caller must destroy)
+    PDESolver *solver;       // PDE solver (caller must destroy with american_option_free_result)
     int status;              // 0 = success, -1 = failure
+    void *internal_data;     // Internal data (do not access directly)
 } AmericanOptionResult;
 
 // High-level API to price American options
 // Returns a solver with the solution
-// Caller must call pde_solver_destroy() on result.solver
+// Caller must call american_option_free_result() on result to clean up
 AmericanOptionResult american_option_price(const OptionData *option_data,
                                           const AmericanOptionGrid *grid_params);
+
+// Free resources associated with AmericanOptionResult
+// This frees both the solver and internal data structures
+void american_option_free_result(AmericanOptionResult *result);
 
 // Batch API: Price multiple American options in parallel
 // option_data: Array of n_options option specifications

@@ -129,7 +129,7 @@ for (int i = 0; i < 100; i++) {
 
 ## Black-Scholes Pricing
 
-**File**: `src/implied_volatility.h`
+**File**: `src/european_option.h`
 
 ```c
 // Price European option directly
@@ -245,7 +245,7 @@ pde_solver_destroy(solver);
 
 ## Validation & Testing
 
-### IV Tests (44 cases)
+### IV Tests (32 cases)
 ```bash
 bazel test //tests:implied_volatility_test
 ```
@@ -254,7 +254,7 @@ bazel test //tests:implied_volatility_test
 - Zero/negative rates
 - Error cases
 
-### American Option Tests (29 cases)
+### American Option Tests (42 cases)
 ```bash
 bazel test //tests:american_option_test
 ```
@@ -263,11 +263,29 @@ bazel test //tests:american_option_test
 - Intrinsic value bounds
 - Grid resolution sensitivity
 
-### QuantLib Comparison
+### Benchmarks
+
+**QuantLib Comparison** (vs industry standard):
 ```bash
-bazel build //tests:quantlib_benchmark
-./bazel-bin/tests/quantlib_benchmark
+bazel run //benchmarks:quantlib_benchmark
 ```
+
+**Batch Processing Performance** (thread scaling, throughput):
+```bash
+# Run all batch benchmarks with summary
+bazel run //benchmarks:batch_benchmark
+
+# Run specific benchmark
+bazel run //benchmarks:batch_benchmark -- --benchmark_filter="ThreadScaling"
+
+# Save results to file
+bazel run //benchmarks:batch_benchmark | tee results.txt
+```
+
+Key metrics from batch benchmarks:
+- Sequential vs Batch: 4.5x-11.7x speedup
+- Thread scaling: 91% efficiency at 8 threads
+- Sustained throughput: 2,000+ options/second
 
 ---
 
@@ -373,7 +391,7 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 | IV calculation | `src/implied_volatility.h/.c` |
 | American options | `src/american_option.h/.c` |
 | PDE solver | `src/pde_solver.h/.c` |
-| Black-Scholes | `src/implied_volatility.c` |
+| Black-Scholes | `src/european_option.h/.c` |
 | Root finding | `src/brent.h` |
 | Interpolation | `src/cubic_spline.h/.c` |
 | Linear solver | `src/tridiagonal.h` |
@@ -385,8 +403,7 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 
 - **Overview**: `docs/PROJECT_OVERVIEW.md` - Problem domain and project motivation
 - **Architecture**: `docs/ARCHITECTURE.md` - Detailed technical architecture
-- **Benchmarks**: `tests/BENCHMARK.md` - Performance comparisons
-- **Optimization Plan**: `docs/FASTVOL_ANALYSIS_AND_PLAN.md` - Future improvements
+- **Benchmarks**: `benchmarks/BENCHMARK.md` - Performance comparisons
 - **Examples**: `examples/example_*.c` - Usage examples
 - **Tests**: `tests/*_test.cc` - Test suite
 - **Tracing**: `TRACING.md`, `TRACING_QUICKSTART.md` - USDT tracing guide

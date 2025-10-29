@@ -100,7 +100,8 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     rhs[n - 1] = 0.0;
 
     // Solve tridiagonal system using shared solver
-    solve_tridiagonal(n, lower, diag, upper, rhs, spline->coeffs_c);
+    // Pass NULL for workspace (not in hot path, allocation is acceptable)
+    solve_tridiagonal(n, lower, diag, upper, rhs, spline->coeffs_c, NULL);
 
     // Compute b and d coefficients from c
     for (size_t j = 0; j < n - 1; j++) {

@@ -282,6 +282,109 @@ TEST_F(PDESolverTest, ObstacleCondition) {
     // Note: grid ownership transferred to solver
 }
 
+// Negative test: Invalid Robin BC coefficient (division by zero)
+TEST_F(PDESolverTest, InvalidRobinCoefficient) {
+    SpatialGrid grid = pde_create_grid(0.0, 1.0, 11);
+    TimeDomain time = {.t_start = 0.0, .t_end = 1.0, .dt = 0.01, .n_steps = 100};
+
+    BoundaryConfig bc = pde_default_boundary_config();
+    bc.left_type = BC_ROBIN;
+    bc.left_robin_a = 0.0;  // Invalid - would cause division by zero
+    bc.left_robin_b = 1.0;
+
+    TRBDF2Config trbdf2 = pde_default_trbdf2_config();
+
+    SteadyStateData data = {1.0};
+    PDECallbacks callbacks = {
+        .initial_condition = steady_initial,
+        .left_boundary = steady_left_bc,
+        .right_boundary = steady_right_bc,
+        .spatial_operator = steady_spatial_op,
+        .jump_condition = nullptr,
+        .obstacle = nullptr,
+        .user_data = &data
+    };
+
+    // Should return nullptr due to invalid Robin coefficient
+    PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
+    EXPECT_EQ(solver, nullptr);
+
+    // Grid not transferred if creation failed, need to free it
+    if (grid.x != nullptr) {
+        pde_free_grid(&grid);
+    }
+}
+
+// Negative test: Very small grid (n < 3)
+TEST_F(PDESolverTest, TooSmallGrid) {
+    SpatialGrid grid = pde_create_grid(0.0, 1.0, 2);
+    TimeDomain time = {.t_start = 0.0, .t_end = 1.0, .dt = 0.01, .n_steps = 100};
+
+    BoundaryConfig bc = pde_default_boundary_config();
+    TRBDF2Config trbdf2 = pde_default_trbdf2_config();
+
+    SteadyStateData data = {1.0};
+    PDECallbacks callbacks = {
+        .initial_condition = steady_initial,
+        .left_boundary = steady_left_bc,
+        .right_boundary = steady_right_bc,
+        .spatial_operator = steady_spatial_op,
+        .jump_condition = nullptr,
+        .obstacle = nullptr,
+        .user_data = &data
+    };
+
+    // Should handle gracefully (may return nullptr or work with degraded accuracy)
+    PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
+
+    if (solver != nullptr) {
+        // If solver created, it should at least not crash
+        pde_solver_initialize(solver);
+        [[maybe_unused]] int status = pde_solver_solve(solver);
+        // May converge or not, but shouldn't crash
+        pde_solver_destroy(solver);
+    } else {
+        // Grid not transferred if creation failed
+        if (grid.x != nullptr) {
+            pde_free_grid(&grid);
+        }
+    }
+}
+
+// Negative test: Negative time step
+TEST_F(PDESolverTest, NegativeTimeStep) {
+    SpatialGrid grid = pde_create_grid(0.0, 1.0, 11);
+    TimeDomain time = {.t_start = 0.0, .t_end = 1.0, .dt = -0.01, .n_steps = 100};  // Negative dt
+
+    BoundaryConfig bc = pde_default_boundary_config();
+    TRBDF2Config trbdf2 = pde_default_trbdf2_config();
+
+    SteadyStateData data = {1.0};
+    PDECallbacks callbacks = {
+        .initial_condition = steady_initial,
+        .left_boundary = steady_left_bc,
+        .right_boundary = steady_right_bc,
+        .spatial_operator = steady_spatial_op,
+        .jump_condition = nullptr,
+        .obstacle = nullptr,
+        .user_data = &data
+    };
+
+    PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
+
+    if (solver != nullptr) {
+        pde_solver_initialize(solver);
+        // Should handle gracefully (may fail to solve or time-reverse)
+        [[maybe_unused]] int status = pde_solver_solve(solver);
+        // Just verify it doesn't crash
+        pde_solver_destroy(solver);
+    } else {
+        if (grid.x != nullptr) {
+            pde_free_grid(&grid);
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
