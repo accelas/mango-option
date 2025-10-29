@@ -67,7 +67,7 @@ int main() {
 
     if (result_no_div.status != 0 || result_no_div.solver == NULL) {
         printf("Error: Failed to solve no-dividend case\n");
-        pde_solver_destroy(result.solver);
+        american_option_free_result(&result);
         return 1;
     }
 
@@ -96,8 +96,8 @@ int main() {
     printf("  around ex-dividend dates.\n");
 
     // Cleanup
-    pde_solver_destroy(result.solver);
-    pde_solver_destroy(result_no_div.solver);
+    american_option_free_result(&result);
+    american_option_free_result(&result_no_div);
 
     return 0;
 }
