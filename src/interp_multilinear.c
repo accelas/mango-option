@@ -29,7 +29,7 @@ static void multilinear_destroy_context(InterpContext context);
 
 const InterpolationStrategy INTERP_MULTILINEAR = {
     .name = "multilinear",
-    .description = "Separable multi-linear interpolation (fast, C0 continuous)",
+    .description = "Separable multi-linear interpolation (fast, C⁰ continuous)",
     .interpolate_2d = multilinear_interpolate_2d,
     .interpolate_4d = multilinear_interpolate_4d,
     .interpolate_5d = multilinear_interpolate_5d,
@@ -72,8 +72,7 @@ double lerp(double x0, double x1, double y0, double y1, double x) {
 
 static double multilinear_interpolate_2d(const IVSurface *surface,
                                           double moneyness, double maturity,
-                                          InterpContext context) {
-    (void)context;  // Unused for stateless strategy
+                                          [[maybe_unused]] InterpContext context) {
 
     // Find bracketing indices
     size_t i_m = find_bracket(surface->moneyness_grid, surface->n_moneyness, moneyness);
@@ -92,7 +91,7 @@ static double multilinear_interpolate_2d(const IVSurface *surface,
     double v11 = surface->iv_surface[(i_tau + 1) * surface->n_moneyness + (i_m + 1)];
 
     // Bilinear interpolation:
-    // 1. Interpolate along moneyness at tau0 and tau1
+    // 1. Interpolate along moneyness at τ₀ and τ₁
     double v_tau0 = lerp(m0, m1, v00, v10, moneyness);
     double v_tau1 = lerp(m0, m1, v01, v11, moneyness);
 
@@ -107,8 +106,7 @@ static double multilinear_interpolate_2d(const IVSurface *surface,
 static double multilinear_interpolate_4d(const OptionPriceTable *table,
                                           double moneyness, double maturity,
                                           double volatility, double rate,
-                                          InterpContext context) {
-    (void)context;  // Unused
+                                          [[maybe_unused]] InterpContext context) {
 
     // Find bracketing indices for each dimension
     size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, moneyness);
@@ -147,6 +145,7 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     // Stage 1: Interpolate along moneyness (16 → 8)
     // Pair values[i] with values[i+8] (dm bit has weight 8)
     double v_m[8];
+    #pragma omp simd
     for (int i = 0; i < 8; i++) {
         v_m[i] = lerp(m0, m1, values[i], values[i + 8], moneyness);
     }
@@ -154,6 +153,7 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     // Stage 2: Interpolate along maturity (8 → 4)
     // Pair v_m[i] with v_m[i+4] (dtau bit has weight 4)
     double v_tau[4];
+    #pragma omp simd
     for (int i = 0; i < 4; i++) {
         v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 4], maturity);
     }
@@ -161,6 +161,7 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     // Stage 3: Interpolate along volatility (4 → 2)
     // Pair v_tau[i] with v_tau[i+2] (dsigma bit has weight 2)
     double v_sigma[2];
+    #pragma omp simd
     for (int i = 0; i < 2; i++) {
         v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 2], volatility);
     }
@@ -178,8 +179,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
                                           double moneyness, double maturity,
                                           double volatility, double rate,
                                           double dividend,
-                                          InterpContext context) {
-    (void)context;  // Unused
+                                          [[maybe_unused]] InterpContext context) {
 
     // Find bracketing indices for each dimension
     size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, moneyness);
@@ -223,6 +223,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     // Stage 1: Interpolate along moneyness (32 → 16)
     // Pair values[i] with values[i+16] (dm bit has weight 16)
     double v_m[16];
+    #pragma omp simd
     for (int i = 0; i < 16; i++) {
         v_m[i] = lerp(m0, m1, values[i], values[i + 16], moneyness);
     }
@@ -230,6 +231,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     // Stage 2: Interpolate along maturity (16 → 8)
     // Pair v_m[i] with v_m[i+8] (dtau bit has weight 8)
     double v_tau[8];
+    #pragma omp simd
     for (int i = 0; i < 8; i++) {
         v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 8], maturity);
     }
@@ -237,6 +239,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     // Stage 3: Interpolate along volatility (8 → 4)
     // Pair v_tau[i] with v_tau[i+4] (dsigma bit has weight 4)
     double v_sigma[4];
+    #pragma omp simd
     for (int i = 0; i < 4; i++) {
         v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 4], volatility);
     }
@@ -244,6 +247,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     // Stage 4: Interpolate along rate (4 → 2)
     // Pair v_sigma[i] with v_sigma[i+2] (dr bit has weight 2)
     double v_r[2];
+    #pragma omp simd
     for (int i = 0; i < 2; i++) {
         v_r[i] = lerp(r0, r1, v_sigma[i], v_sigma[i + 2], rate);
     }
@@ -257,13 +261,11 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
 
 // ---------- Context Management ----------
 
-static InterpContext multilinear_create_context(size_t dimensions,
-                                                  const size_t *grid_sizes) {
-    (void)dimensions;
-    (void)grid_sizes;
+static InterpContext multilinear_create_context([[maybe_unused]] size_t dimensions,
+                                                  [[maybe_unused]] const size_t *grid_sizes) {
     return NULL;  // Multilinear is stateless, no context needed
 }
 
-static void multilinear_destroy_context(InterpContext context) {
-    (void)context;  // No-op
+static void multilinear_destroy_context([[maybe_unused]] InterpContext context) {
+    // No-op
 }
