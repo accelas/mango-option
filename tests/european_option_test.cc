@@ -450,11 +450,13 @@ TEST_F(EuropeanOptionTest, ThetaNegativeForLongOptions) {
     double sigma = 0.2;
 
     double call_theta = black_scholes_theta(spot, strike, T, r, sigma, true);
-    double put_theta = black_scholes_theta(spot, strike, T, r, sigma, false);
 
-    // For most options, theta is negative
+    // For most options, theta is negative (time decay)
     EXPECT_LT(call_theta, 0.0);
-    // Put theta can be positive for deep ITM European puts, but typically negative
+
+    // Put theta can be positive for deep ITM European puts, but typically negative for ATM
+    double put_theta = black_scholes_theta(spot, strike, T, r, sigma, false);
+    EXPECT_LT(put_theta, 0.0);
 }
 
 TEST_F(EuropeanOptionTest, ThetaNumericalVerification) {
