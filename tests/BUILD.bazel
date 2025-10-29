@@ -97,3 +97,23 @@ cc_binary(
         "@google_benchmark//:benchmark",
     ],
 )
+
+cc_binary(
+    name = "batch_benchmark",
+    srcs = ["batch_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp-simd",
+    ],
+    linkopts = ["-lgomp"],
+    deps = [
+        "//src:american_option",
+        "//src:implied_volatility",
+        "//src:european_option",
+        "@google_benchmark//:benchmark",
+    ],
+)
