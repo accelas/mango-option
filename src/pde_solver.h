@@ -128,6 +128,9 @@ struct PDESolver {
     double *u_old;        // Previous iteration in fixed-point
     double *Lu;           // Spatial operator result
     double *u_temp;       // Temporary for relaxation
+
+    // Workspace for tridiagonal solver (2n doubles, sliced from workspace)
+    double *tridiag_workspace;  // c_prime and d_prime arrays for Thomas algorithm
 };
 
 // Core API functions

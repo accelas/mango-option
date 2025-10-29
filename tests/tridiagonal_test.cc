@@ -47,7 +47,7 @@ TEST_F(TridiagonalTest, Size2System) {
     std::vector<double> rhs = {3.0, 4.0};
     std::vector<double> solution(2);
 
-    solve_tridiagonal(2, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(2, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     EXPECT_NEAR(solution[0], 1.0, tolerance);
     EXPECT_NEAR(solution[1], 1.0, tolerance);
@@ -66,7 +66,7 @@ TEST_F(TridiagonalTest, Size3System) {
     std::vector<double> rhs = {5.0, 6.0, 5.0};
     std::vector<double> solution(3);
 
-    solve_tridiagonal(3, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(3, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     EXPECT_NEAR(solution[0], 2.0, tolerance);
     EXPECT_NEAR(solution[1], 1.0, tolerance);
@@ -82,7 +82,7 @@ TEST_F(TridiagonalTest, DiagonalMatrix) {
     std::vector<double> rhs = {4.0, 9.0, 12.0, 15.0, 18.0};
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Solution should be rhs[i] / diag[i]
     for (size_t i = 0; i < n; i++) {
@@ -99,7 +99,7 @@ TEST_F(TridiagonalTest, IdentityMatrix) {
     std::vector<double> rhs = {1.0, 2.0, 3.0, 4.0, 5.0};
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Solution should equal rhs
     for (size_t i = 0; i < n; i++) {
@@ -117,7 +117,7 @@ TEST_F(TridiagonalTest, SymmetricPositiveDefinite) {
     std::vector<double> rhs(n, 1.0);
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify: A*x = b
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
@@ -142,7 +142,7 @@ TEST_F(TridiagonalTest, AnalyticalSolution) {
 
     // Solve system
     std::vector<double> solution(n);
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Should recover x_true
     for (size_t i = 0; i < n; i++) {
@@ -159,7 +159,7 @@ TEST_F(TridiagonalTest, LargeSystem) {
     std::vector<double> rhs(n, 1.0);
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify residual is small
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
@@ -185,7 +185,7 @@ TEST_F(TridiagonalTest, NonUniformCoefficients) {
 
     // Solve
     std::vector<double> solution(n);
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify
     for (size_t i = 0; i < n; i++) {
@@ -204,7 +204,7 @@ TEST_F(TridiagonalTest, NegativeCoefficients) {
     std::vector<double> rhs = matvec_tridiagonal(lower, diag, upper, x_true);
 
     std::vector<double> solution(n);
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     for (size_t i = 0; i < n; i++) {
         EXPECT_NEAR(solution[i], x_true[i], tolerance);
@@ -220,7 +220,7 @@ TEST_F(TridiagonalTest, DiagonallyDominant) {
     std::vector<double> rhs(n, 1.0);
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify solution
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
@@ -244,7 +244,7 @@ TEST_F(TridiagonalTest, OscillatingRHS) {
     }
 
     std::vector<double> solution(n);
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
@@ -263,7 +263,7 @@ TEST_F(TridiagonalTest, SmallOffDiagonals) {
     std::vector<double> rhs = {1.0, 2.0, 3.0, 4.0, 5.0};
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Should be close to diagonal solution (relaxed tolerance for numerical precision)
     for (size_t i = 0; i < n; i++) {
@@ -280,7 +280,7 @@ TEST_F(TridiagonalTest, LargeDiagonal) {
     std::vector<double> rhs = {1e10, 2e10, 3e10, 4e10, 5e10};
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Should be close to rhs/diag ≈ [1, 2, 3, 4, 5] (relaxed for numerical precision)
     for (size_t i = 0; i < n; i++) {
@@ -297,7 +297,7 @@ TEST_F(TridiagonalTest, ZeroRHS) {
     std::vector<double> rhs(n, 0.0);
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Solution should be zero
     for (size_t i = 0; i < n; i++) {
@@ -316,8 +316,8 @@ TEST_F(TridiagonalTest, MultipleConsistentSolves) {
     std::vector<double> solution1(n);
     std::vector<double> solution2(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution1.data());
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution2.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution1.data(), nullptr);
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution2.data(), nullptr);
 
     // Solutions should be identical
     for (size_t i = 0; i < n; i++) {
@@ -339,7 +339,7 @@ TEST_F(TridiagonalTest, HeatEquationMatrix) {
     std::vector<double> rhs(n, 1.0);
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
@@ -373,7 +373,7 @@ TEST_F(TridiagonalTest, BlackScholesMatrix) {
     std::vector<double> rhs(n, 1.0);
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify no NaN or Inf
     for (size_t i = 0; i < n; i++) {
@@ -393,7 +393,7 @@ TEST_F(TridiagonalTest, WeaklyDiagonallyDominant) {
     std::vector<double> rhs = matvec_tridiagonal(lower, diag, upper, x_true);
 
     std::vector<double> solution(n);
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     for (size_t i = 0; i < n; i++) {
         EXPECT_NEAR(solution[i], x_true[i], 1e-8);
@@ -409,7 +409,7 @@ TEST_F(TridiagonalTest, NearSingular) {
     std::vector<double> rhs = {1.0, 0.0, 0.0, 0.0, 1.0};
     std::vector<double> solution(n);
 
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify residual
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
@@ -432,7 +432,7 @@ TEST_F(TridiagonalTest, AlternatingRHS) {
     }
 
     std::vector<double> solution(n);
-    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data());
+    solve_tridiagonal(n, lower.data(), diag.data(), upper.data(), rhs.data(), solution.data(), nullptr);
 
     // Verify
     std::vector<double> b_check = matvec_tridiagonal(lower, diag, upper, solution);
