@@ -262,7 +262,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
 
         // Solve for correction: (I - coeff_dt * J) * δu = residual
         double *delta_u = u_new;  // Use u_new to store δu temporarily
-        solve_tridiagonal(n, lower, diag, upper, residual, delta_u);
+        solve_tridiagonal(n, lower, diag, upper, residual, delta_u, solver->tridiag_workspace);
 
         // Update: u_new = u_old + δu
         #pragma omp simd
@@ -369,18 +369,19 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->callbacks = *callbacks;
 
     // Allocate single workspace buffer for all arrays (better cache locality)
-    // Need 10 arrays of size n:
-    //   - Solution: u_current, u_next, u_stage, rhs
-    //   - Matrix: matrix_diag, matrix_upper, matrix_lower
-    //   - Temps: u_old, Lu, u_temp
+    // Need arrays totaling 12n doubles:
+    //   - Solution: u_current, u_next, u_stage, rhs (4n)
+    //   - Matrix: matrix_diag, matrix_upper, matrix_lower (3n)
+    //   - Temps: u_old, Lu, u_temp (3n)
+    //   - Tridiagonal workspace: c_prime, d_prime (2n)
     const size_t n = grid->n_points;
-    const size_t workspace_size = 10 * n;
+    const size_t workspace_size = 12 * n;
 
     // Use aligned allocation for SIMD vectorization (64-byte alignment for AVX-512)
     // Each array starts at aligned boundary by padding n to alignment
     const size_t alignment = SIMD_ALIGNMENT;
     const size_t n_aligned = ((n * sizeof(double) + alignment - 1) / alignment) * alignment / sizeof(double);
-    const size_t workspace_aligned_size = 10 * n_aligned;
+    const size_t workspace_aligned_size = 12 * n_aligned;
 
     solver->workspace = aligned_alloc(alignment, workspace_aligned_size * sizeof(double));
     if (solver->workspace == nullptr) {
@@ -400,6 +401,7 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->u_old = solver->workspace + offset; offset += n_aligned;
     solver->Lu = solver->workspace + offset; offset += n_aligned;
     solver->u_temp = solver->workspace + offset; offset += n_aligned;
+    solver->tridiag_workspace = solver->workspace + offset; offset += 2 * n_aligned;  // 2n for c_prime + d_prime
 
     return solver;
 }
