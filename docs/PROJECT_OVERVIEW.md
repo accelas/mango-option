@@ -133,7 +133,7 @@ pde_solver_solve(solver);
 - **Callback-based**: User defines initial/boundary conditions, spatial operators
 - **Vectorized**: OpenMP SIMD pragmas for automatic vectorization
 - **Flexible**: Solve any parabolic PDE (heat equation, diffusion, etc.)
-- **Memory-efficient**: Single contiguous workspace (10n doubles)
+- **Memory-efficient**: Single contiguous workspace (12n doubles)
 - **Use case**: Research, custom derivatives, exotic options
 
 ### Key Design Principles
@@ -151,7 +151,7 @@ pde_solver_solve(solver);
 
 3. **Correctness First**
    - Well-established methods (Black-Scholes, TR-BDF2, Brent's)
-   - Comprehensive test suite (73+ test cases)
+   - Comprehensive test suite (80+ test cases)
    - Validated against QuantLib benchmarks
    - Clear documentation of limitations
 
@@ -183,8 +183,6 @@ pde_solver_solve(solver);
 
 ### Planned Performance (Interpolation-based)
 
-**See:** `docs/INTERPOLATION_ENGINE_DESIGN.md`
-
 | Operation | Current | Planned | Speedup |
 |-----------|---------|---------|---------|
 | American option price | 21.7ms | 500ns | **43,400x** |
@@ -213,17 +211,18 @@ iv_calc/
 │   └── example_heat_equation.c
 │
 ├── tests/                         # Comprehensive test suite
-│   ├── implied_volatility_test.cc # 44 test cases
-│   ├── american_option_test.cc    # 29 test cases
-│   ├── pde_solver_test.cc         # Core solver tests
+│   ├── implied_volatility_test.cc # 32 test cases
+│   ├── american_option_test.cc    # 42 test cases
+│   └── pde_solver_test.cc         # Core solver tests
+│
+├── benchmarks/                    # Performance benchmarks (not run in CI)
+│   ├── batch_benchmark.cc         # Batch processing benchmarks
 │   └── quantlib_benchmark.cc      # QuantLib comparison
 │
 ├── docs/                          # Design documentation
 │   ├── PROJECT_OVERVIEW.md        # This file (problem & solution)
 │   ├── ARCHITECTURE.md            # Detailed technical architecture
-│   ├── QUICK_REFERENCE.md         # Developer quick-start
-│   ├── INTERPOLATION_ENGINE_DESIGN.md # Future performance work
-│   └── FASTVOL_ANALYSIS_AND_PLAN.md   # Optimization roadmap
+│   └── QUICK_REFERENCE.md         # Developer quick-start
 │
 ├── scripts/                       # Utilities
 │   ├── ivcalc-trace               # USDT tracing helper
@@ -323,7 +322,7 @@ printf("American put price: %.4f\n", price);
 1. **Read the architecture**: `docs/ARCHITECTURE.md`
 2. **Quick reference**: `docs/QUICK_REFERENCE.md`
 3. **Try examples**: `examples/example_*.c`
-4. **Run benchmarks**: `bazel run //tests:quantlib_benchmark`
+4. **Run benchmarks**: `bazel run //benchmarks:quantlib_benchmark`
 5. **Learn tracing**: `TRACING_QUICKSTART.md`
 
 ---
@@ -376,7 +375,7 @@ printf("American put price: %.4f\n", price);
 
 This project welcomes contributions! Areas of interest:
 
-1. **Performance**: Implement optimizations from `docs/FASTVOL_ANALYSIS_AND_PLAN.md`
+1. **Performance**: Implement optimizations (SIMD, cache-blocking, algorithm improvements)
 2. **Features**: Add exotic options, new PDE schemes
 3. **Testing**: More test cases, edge cases, stress tests
 4. **Documentation**: Tutorials, explanations, examples

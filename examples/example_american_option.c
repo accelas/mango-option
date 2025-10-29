@@ -76,7 +76,7 @@ int main(void) {
         printf("Solver failed to converge for American Call\n");
     }
 
-    pde_solver_destroy(call_result.solver);
+    american_option_free_result(&call_result);
 
     // Example 2: American Put Option (no dividends)
     printf("\nExample 2: American Put Option (no dividends)\n");
@@ -107,7 +107,7 @@ int main(void) {
         printf("Solver failed to converge for American Put\n");
     }
 
-    pde_solver_destroy(put_result.solver);
+    american_option_free_result(&put_result);
 
     printf("\nAll examples completed!\n");
     printf("\nNote: For American options:\n");

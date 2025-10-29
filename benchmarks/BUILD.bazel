@@ -1,0 +1,49 @@
+# Benchmarks - NOT run in CI
+#
+# These are performance benchmarks that should be run manually.
+# They are cc_binary (not cc_test) so they won't be included in `bazel test //...`
+#
+# To run benchmarks:
+#   bazel build //benchmarks:all
+#   ./bazel-bin/benchmarks/batch_benchmark
+#   ./bazel-bin/benchmarks/quantlib_benchmark
+
+cc_binary(
+    name = "batch_benchmark",
+    srcs = ["batch_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp-simd",
+    ],
+    linkopts = ["-lgomp"],
+    deps = [
+        "//src:american_option",
+        "//src:implied_volatility",
+        "//src:european_option",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "quantlib_benchmark",
+    srcs = ["quantlib_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    linkopts = ["-lQuantLib"],
+    deps = [
+        "//src:american_option",
+        "//src:implied_volatility",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
