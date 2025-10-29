@@ -47,3 +47,23 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "interpolation_benchmark",
+    srcs = ["interpolation_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    deps = [
+        "//src:iv_surface",
+        "//src:interp_multilinear",
+        "//src:interp_cubic",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
