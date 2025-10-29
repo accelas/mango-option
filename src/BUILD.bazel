@@ -90,3 +90,65 @@ cc_library(
     deps = [":european_option"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "interp_multilinear",
+    srcs = ["interp_multilinear.c"],
+    hdrs = [
+        "interp_multilinear.h",
+        "interp_strategy.h",
+        "iv_surface.h",
+        "price_table.h",
+        "american_option.h",
+        "pde_solver.h",
+        "ivcalc_trace.h",
+        "cubic_spline.h",
+        "tridiagonal.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_surface",
+    srcs = ["iv_surface.c"],
+    hdrs = [
+        "iv_surface.h",
+        "interp_strategy.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    deps = [":interp_multilinear"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table",
+    srcs = ["price_table.c"],
+    hdrs = [
+        "price_table.h",
+        "interp_strategy.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    deps = [
+        ":interp_multilinear",
+        ":american_option",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -28,3 +28,13 @@ cc_binary(
         "//src:european_option",
     ],
 )
+
+cc_binary(
+    name = "example_interpolation_engine",
+    srcs = ["example_interpolation_engine.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//src:iv_surface",
+        "//src:price_table",
+    ],
+)
