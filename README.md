@@ -1,4 +1,4 @@
-# iv_calc
+# mango-iv
 
 **Research-grade numerical library for option pricing and implied volatility calculation**
 
@@ -6,9 +6,9 @@
 
 ---
 
-## What is iv_calc?
+## What is mango-iv?
 
-**iv_calc** is a C23-based library that solves two fundamental problems in quantitative finance:
+**mango-iv** is a C23-based library that solves two fundamental problems in quantitative finance:
 
 1. **Option Pricing**: Calculate fair prices for European and American options
 2. **Implied Volatility**: Invert market prices to extract implied volatility
@@ -186,7 +186,7 @@ See `examples/` for complete working programs.
 ## Architecture
 
 ```
-iv_calc/
+mango-iv/
 ├── src/                           # Core library
 │   ├── implied_volatility.{h,c}   # IV calculation + Black-Scholes
 │   ├── american_option.{h,c}      # American option pricing
@@ -263,7 +263,7 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 
 ---
 
-## Who Should Use iv_calc?
+## Who Should Use mango-iv?
 
 ### ✅ Good Fit
 
@@ -277,14 +277,14 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 
 - **High-frequency trading**: Use optimized libraries (QuantLib, proprietary solutions)
 - **Production systems**: Consider mature, battle-tested solutions
-- **GPU acceleration needed**: iv_calc is CPU-only (for now)
+- **GPU acceleration needed**: mango-iv is CPU-only (for now)
 - **Exotic options**: Limited support (barriers, Asians not yet implemented)
 
 ---
 
 ## Comparison to Other Libraries
 
-| Feature | iv_calc | QuantLib | PyQL | Bloomberg API |
+| Feature | mango-iv | QuantLib | PyQL | Bloomberg API |
 |---------|---------|----------|------|---------------|
 | **Language** | C23 | C++17 | Python | C++/Python |
 | **License** | Open-source | BSD | BSD | Proprietary |
@@ -296,7 +296,7 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 | **Documentation** | ✅ Extensive | ⚠️ Patchy | ⚠️ Limited | ✅ Commercial |
 | **Performance** | 2.1x slower | Baseline | Slow (Python) | Fast (optimized) |
 
-**iv_calc's niche:** Research-grade flexibility with production-conscious design.
+**mango-iv's niche:** Research-grade flexibility with production-conscious design.
 
 ---
 
