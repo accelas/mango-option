@@ -35,6 +35,7 @@ void american_option_terminal_condition(const double *x, size_t n_points,
     const OptionData *data = ext_data->option_data;
     const double K = data->strike;
 
+    #pragma omp simd
     for (size_t i = 0; i < n_points; i++) {
         // x = ln(S/K), so S = K*exp(x)
         double S = K * exp(x[i]);
@@ -231,6 +232,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
         }
 
         const double T = option_data->time_to_maturity;
+        #pragma omp simd
         for (size_t i = 0; i < option_data->n_dividends; i++) {
             div_times_solver[i] = T - option_data->dividend_times[i];
         }
@@ -338,12 +340,12 @@ void american_option_free_result(AmericanOptionResult *result) {
 
 // Temporal event callback for discrete dividends
 // Called by solver when dividend events are crossed
-static void american_option_dividend_event(double t, const double *x_grid,
+static void american_option_dividend_event([[maybe_unused]] double t,
+                                           const double *x_grid,
                                            size_t n_points, double *V,
                                            const size_t *event_indices,
                                            size_t n_events_triggered,
                                            void *user_data) {
-    (void)t; // Unused: time is implicit in event indices
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *option_data = ext_data->option_data;
 
@@ -363,6 +365,7 @@ static void american_option_dividend_event(double t, const double *x_grid,
                                       option_data->strike);
 
         // Copy adjusted solution back
+        #pragma omp simd
         for (size_t j = 0; j < n_points; j++) {
             V[j] = V_temp[j];
         }
