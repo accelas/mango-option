@@ -80,6 +80,10 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
         // More generally: u_{-1} = u_1 - 2*dx*g where du/dx = g
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
 
+        // ASSUMPTION: This method assumes a pure diffusion operator L(u) = D·∂²u/∂x²
+        // For advection-diffusion or nonlinear operators, the coefficient estimation
+        // may not be accurate. Consider making D an explicit parameter if needed.
+        //
         // Estimate diffusion coefficient from interior point
         // L(u)_1 ≈ D * (u_0 - 2*u_1 + u_2) / dx² for diffusion
         // We'll use finite differences to estimate the stencil coefficient
@@ -98,6 +102,7 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
     if (solver->bc_config.right_type == BC_NEUMANN) {
         double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
 
+        // ASSUMPTION: Same as left boundary - assumes pure diffusion operator
         if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
             double D_estimate = result[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
             // Ghost point: u_n = u_{n-2} + 2*dx*g
@@ -368,6 +373,18 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     solver->trbdf2_config = *trbdf2_config;
     solver->callbacks = *callbacks;
 
+    // Validate Robin boundary condition coefficients
+    if (bc_config->left_type == BC_ROBIN && fabs(bc_config->left_robin_a) < 1e-15) {
+        IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 1, bc_config->left_robin_a, 1e-15);
+        free(solver);
+        return nullptr;
+    }
+    if (bc_config->right_type == BC_ROBIN && fabs(bc_config->right_robin_a) < 1e-15) {
+        IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 2, bc_config->right_robin_a, 1e-15);
+        free(solver);
+        return nullptr;
+    }
+
     // Allocate single workspace buffer for all arrays (better cache locality)
     // Need arrays totaling 12n doubles:
     //   - Solution: u_current, u_next, u_stage, rhs (4n)
@@ -387,6 +404,12 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     if (solver->workspace == nullptr) {
         // Fallback to regular malloc if aligned_alloc fails
         solver->workspace = malloc(workspace_size * sizeof(double));
+        if (solver->workspace == nullptr) {
+            // Both allocations failed
+            IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 0, workspace_size, 0.0);
+            free(solver);
+            return nullptr;
+        }
     }
 
     // Slice workspace into individual arrays (each aligned)

@@ -1089,6 +1089,225 @@ TEST_F(AmericanOptionTest, CallOptionGridExtentSensitivity) {
     american_option_free_result(&result2);
 }
 
+// Batch processing tests
+
+// Test batch processing with small batch
+TEST_F(AmericanOptionTest, BatchProcessingSmall) {
+    const size_t n_options = 5;
+    OptionData options[n_options];
+    AmericanOptionResult results[n_options] = {{nullptr, -1, nullptr}};
+
+    // Create 5 similar options with varying strikes
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 90.0 + i * 5.0,  // 90, 95, 100, 105, 110
+            .volatility = 0.25,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = OPTION_PUT,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    // Batch price
+    int status = american_option_price_batch(options, &default_grid, n_options, results);
+    EXPECT_EQ(status, 0);
+
+    // Verify all options priced successfully
+    for (size_t i = 0; i < n_options; i++) {
+        EXPECT_EQ(results[i].status, 0);
+        EXPECT_NE(results[i].solver, nullptr);
+
+        double value = american_option_get_value_at_spot(results[i].solver, 100.0, options[i].strike);
+        EXPECT_GT(value, 0.0);
+        EXPECT_LT(value, 100.0);
+
+        pde_solver_destroy(results[i].solver);
+    }
+}
+
+// Test batch processing with medium batch
+TEST_F(AmericanOptionTest, BatchProcessingMedium) {
+    const size_t n_options = 25;
+    std::vector<OptionData> options(n_options);
+    std::vector<AmericanOptionResult> results(n_options, {nullptr, -1, nullptr});
+
+    // Create options with varying volatilities
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 100.0,
+            .volatility = 0.1 + i * 0.02,  // 0.1 to 0.58
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = OPTION_CALL,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    // Batch price
+    int status = american_option_price_batch(options.data(), &default_grid, n_options, results.data());
+    EXPECT_EQ(status, 0);
+
+    // Verify all options priced successfully and monotonicity in volatility
+    double prev_value = 0.0;
+    for (size_t i = 0; i < n_options; i++) {
+        EXPECT_EQ(results[i].status, 0);
+        EXPECT_NE(results[i].solver, nullptr);
+
+        double value = american_option_get_value_at_spot(results[i].solver, 100.0, 100.0);
+        EXPECT_GT(value, 0.0);
+
+        // Values should increase with volatility
+        if (i > 0) {
+            EXPECT_GT(value, prev_value);
+        }
+        prev_value = value;
+
+        pde_solver_destroy(results[i].solver);
+    }
+}
+
+// Test batch processing consistency with sequential processing
+TEST_F(AmericanOptionTest, BatchVsSequentialConsistency) {
+    const size_t n_options = 10;
+    std::vector<OptionData> options(n_options);
+
+    // Create diverse option set
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 90.0 + i * 2.0,
+            .volatility = 0.15 + i * 0.03,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 0.5 + i * 0.15,
+            .option_type = (i % 2 == 0) ? OPTION_PUT : OPTION_CALL,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    // Price sequentially
+    std::vector<double> sequential_values(n_options);
+    for (size_t i = 0; i < n_options; i++) {
+        AmericanOptionResult result = american_option_price(&options[i], &default_grid);
+        ASSERT_EQ(result.status, 0);
+        sequential_values[i] = american_option_get_value_at_spot(result.solver, 100.0, options[i].strike);
+        american_option_free_result(&result);
+    }
+
+    // Price in batch
+    std::vector<AmericanOptionResult> batch_results(n_options, {nullptr, -1, nullptr});
+    int status = american_option_price_batch(options.data(), &default_grid, n_options, batch_results.data());
+    EXPECT_EQ(status, 0);
+
+    // Compare values
+    for (size_t i = 0; i < n_options; i++) {
+        EXPECT_EQ(batch_results[i].status, 0);
+        double batch_value = american_option_get_value_at_spot(batch_results[i].solver, 100.0, options[i].strike);
+
+        // Batch and sequential should produce identical results
+        EXPECT_DOUBLE_EQ(batch_value, sequential_values[i])
+            << "Mismatch at option " << i << ": batch=" << batch_value
+            << " sequential=" << sequential_values[i];
+
+        pde_solver_destroy(batch_results[i].solver);
+    }
+}
+
+// Test batch processing with mixed call/put options
+TEST_F(AmericanOptionTest, BatchProcessingMixedTypes) {
+    const size_t n_options = 20;
+    std::vector<OptionData> options(n_options);
+    std::vector<AmericanOptionResult> results(n_options, {nullptr, -1, nullptr});
+
+    // Alternate between call and put
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 100.0,
+            .volatility = 0.25,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = (i % 2 == 0) ? OPTION_CALL : OPTION_PUT,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    int status = american_option_price_batch(options.data(), &default_grid, n_options, results.data());
+    EXPECT_EQ(status, 0);
+
+    // Verify all options priced
+    for (size_t i = 0; i < n_options; i++) {
+        EXPECT_EQ(results[i].status, 0);
+        EXPECT_NE(results[i].solver, nullptr);
+
+        double value = american_option_get_value_at_spot(results[i].solver, 100.0, 100.0);
+        EXPECT_GT(value, 0.0);
+        EXPECT_LT(value, 100.0);
+
+        pde_solver_destroy(results[i].solver);
+    }
+}
+
+// Test batch processing with dividends
+TEST_F(AmericanOptionTest, BatchProcessingWithDividends) {
+    const size_t n_options = 8;
+    std::vector<OptionData> options(n_options);
+    std::vector<AmericanOptionResult> results(n_options, {nullptr, -1, nullptr});
+
+    double dividend_times[] = {0.5};
+    double dividend_amounts[] = {2.0};
+
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 95.0 + i * 2.0,
+            .volatility = 0.25,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = OPTION_PUT,
+            .n_dividends = 1,
+            .dividend_times = dividend_times,
+            .dividend_amounts = dividend_amounts
+        };
+    }
+
+    int status = american_option_price_batch(options.data(), &default_grid, n_options, results.data());
+    EXPECT_EQ(status, 0);
+
+    for (size_t i = 0; i < n_options; i++) {
+        EXPECT_EQ(results[i].status, 0);
+        EXPECT_NE(results[i].solver, nullptr);
+        pde_solver_destroy(results[i].solver);
+    }
+}
+
+// Negative test: batch with nullptr options array
+TEST_F(AmericanOptionTest, BatchProcessingNullOptions) {
+    AmericanOptionResult results[5];
+    int status = american_option_price_batch(nullptr, &default_grid, 5, results);
+    EXPECT_EQ(status, -1);
+}
+
+// Negative test: batch with nullptr results array
+TEST_F(AmericanOptionTest, BatchProcessingNullResults) {
+    OptionData options[5];
+    int status = american_option_price_batch(options, &default_grid, 5, nullptr);
+    EXPECT_EQ(status, -1);
+}
+
+// Negative test: batch with zero options
+TEST_F(AmericanOptionTest, BatchProcessingZeroOptions) {
+    OptionData options[5];
+    AmericanOptionResult results[5];
+    int status = american_option_price_batch(options, &default_grid, 0, results);
+    EXPECT_EQ(status, -1);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

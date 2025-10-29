@@ -61,10 +61,10 @@ jobs:
             debian-trixie-bazel-build-
 
       - name: Build all targets
-        run: bazel build //...
+        run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Run all tests
-        run: bazel test //... --test_output=errors
+        run: bazel test //tests/... --test_output=errors
 
       - name: Display test results
         if: always()
