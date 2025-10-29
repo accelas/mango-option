@@ -11,6 +11,8 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-fopenmp-simd",
+        "-ftree-vectorize",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default (gracefully falls back if sys/sdt.h missing)
     ],
     visibility = ["//visibility:public"],
@@ -111,6 +113,7 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
+        "-fopenmp-simd",
         "-ftree-vectorize",
     ],
     visibility = ["//visibility:public"],
@@ -136,6 +139,7 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
+        "-fopenmp-simd",
         "-ftree-vectorize",
     ],
     deps = [":cubic_spline"],
@@ -171,6 +175,8 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-fopenmp-simd",
+        "-ftree-vectorize",
     ],
     deps = [
         ":interp_multilinear",
