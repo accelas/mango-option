@@ -97,6 +97,7 @@ OptionPriceTable* price_table_create_with_strategy(
     }
 
     // Initialize prices to NaN
+    #pragma omp simd
     for (size_t i = 0; i < n_points; i++) {
         table->prices[i] = NAN;
     }
@@ -168,13 +169,11 @@ void price_table_destroy(OptionPriceTable *table) {
 
 // ---------- Pre-computation ----------
 
-int price_table_precompute(OptionPriceTable *table,
-                            const void *pde_solver_template) {
+int price_table_precompute([[maybe_unused]] OptionPriceTable *table,
+                            [[maybe_unused]] const void *pde_solver_template) {
     // Note: This is a placeholder for Phase 2
     // In Phase 2, we'll implement the actual FDM-based pre-computation
     // with OpenMP parallelization
-    (void)table;
-    (void)pde_solver_template;
     return -1;  // Not yet implemented
 }
 

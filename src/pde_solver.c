@@ -322,6 +322,7 @@ SpatialGrid pde_create_grid(double x_min, double x_max, size_t n_points) {
     grid.dx = (x_max - x_min) / (n_points - 1);
     grid.x = malloc(n_points * sizeof(double));
 
+    #pragma omp simd
     for (size_t i = 0; i < n_points; i++) {
         grid.x[i] = x_min + i * grid.dx;
     }

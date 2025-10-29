@@ -67,7 +67,7 @@ const InterpolationStrategy INTERP_CUBIC = {
 
 // ---------- Helper Functions ----------
 
-// Evaluate cubic polynomial: a + b*dx + c*dx^2 + d*dx^3
+// Evaluate cubic polynomial: a + b·dx + c·dx² + d·dx³
 static inline double eval_cubic(double a, double b, double c, double d, double dx) {
     return a + dx * (b + dx * (c + dx * d));
 }
@@ -80,12 +80,12 @@ static inline double eval_cubic(double a, double b, double c, double d, double d
  * Algorithm:
  * 1. For EACH maturity grid point, build cubic spline along moneyness and evaluate at query_m
  *    This gives intermediate[j] = spline_m(data[:, j], query_m) for all j
- * 2. Build cubic spline along maturity using intermediate values and evaluate at query_tau
- *    This gives result = spline_tau(intermediate, query_tau)
+ * 2. Build cubic spline along maturity using intermediate values and evaluate at query_τ
+ *    This gives result = spline_τ(intermediate, query_τ)
  *
  * This is the standard separable tensor-product approach that guarantees:
  * - On-grid points are exact (splines interpolate data exactly)
- * - C2 continuous everywhere
+ * - C² continuous everywhere
  * - Uses full grid information in each dimension
  */
 static double cubic_interpolate_2d(const IVSurface *surface,
@@ -107,6 +107,7 @@ static double cubic_interpolate_2d(const IVSurface *surface,
 
     if (coeffs) {
         // Fast path: Use pre-computed spline coefficients
+        #pragma omp simd
         for (size_t j_tau = 0; j_tau < surface->n_maturity; j_tau++) {
             intermediate_values[j_tau] = pde_spline_eval(coeffs->moneyness_splines[j_tau], moneyness);
         }
@@ -121,6 +122,7 @@ static double cubic_interpolate_2d(const IVSurface *surface,
         for (size_t j_tau = 0; j_tau < surface->n_maturity; j_tau++) {
             // Extract moneyness slice at this maturity level
             // Data layout: iv_surface[j_tau * n_moneyness + i_m] (maturity varies slowest)
+            #pragma omp simd
             for (size_t i_m = 0; i_m < surface->n_moneyness; i_m++) {
                 size_t idx = j_tau * surface->n_moneyness + i_m;
                 moneyness_slice[i_m] = surface->iv_surface[idx];
@@ -164,17 +166,12 @@ static double cubic_interpolate_2d(const IVSurface *surface,
 
 // ---------- 4D Interpolation (Price Table) ----------
 
-static double cubic_interpolate_4d(const OptionPriceTable *table,
-                                   double moneyness, double maturity,
-                                   double volatility, double rate,
-                                   InterpContext context) {
-    (void)context;
-    (void)table;
-    (void)moneyness;
-    (void)maturity;
-    (void)volatility;
-    (void)rate;
-
+static double cubic_interpolate_4d([[maybe_unused]] const OptionPriceTable *table,
+                                   [[maybe_unused]] double moneyness,
+                                   [[maybe_unused]] double maturity,
+                                   [[maybe_unused]] double volatility,
+                                   [[maybe_unused]] double rate,
+                                   [[maybe_unused]] InterpContext context) {
     // TODO: Implement 4D tensor-product cubic spline
     // For now, return NAN to indicate not implemented
     return NAN;
@@ -182,19 +179,13 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
 
 // ---------- 5D Interpolation (Price Table with Dividend) ----------
 
-static double cubic_interpolate_5d(const OptionPriceTable *table,
-                                   double moneyness, double maturity,
-                                   double volatility, double rate,
-                                   double dividend,
-                                   InterpContext context) {
-    (void)context;
-    (void)table;
-    (void)moneyness;
-    (void)maturity;
-    (void)volatility;
-    (void)rate;
-    (void)dividend;
-
+static double cubic_interpolate_5d([[maybe_unused]] const OptionPriceTable *table,
+                                   [[maybe_unused]] double moneyness,
+                                   [[maybe_unused]] double maturity,
+                                   [[maybe_unused]] double volatility,
+                                   [[maybe_unused]] double rate,
+                                   [[maybe_unused]] double dividend,
+                                   [[maybe_unused]] InterpContext context) {
     // TODO: Implement 5D tensor-product cubic spline
     return NAN;
 }
@@ -213,6 +204,7 @@ static InterpContext cubic_create_context(size_t dimensions,
         return NULL;
     }
 
+    #pragma omp simd
     for (size_t i = 0; i < dimensions; i++) {
         ctx->grid_sizes[i] = grid_sizes[i];
     }
@@ -282,6 +274,7 @@ static int cubic_precompute(const void *grid_data, InterpContext context) {
 
         for (size_t j_tau = 0; j_tau < surface->n_maturity; j_tau++) {
             // Extract moneyness slice at this maturity level
+            #pragma omp simd
             for (size_t i_m = 0; i_m < surface->n_moneyness; i_m++) {
                 size_t idx = j_tau * surface->n_moneyness + i_m;
                 moneyness_slice[i_m] = surface->iv_surface[idx];
