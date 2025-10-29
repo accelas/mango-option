@@ -1,0 +1,26 @@
+2025-10-28T23:59:28-07:00
+Running ./bazel-bin/tests/batch_benchmark
+Run on (32 X 5058 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x16)
+  L1 Instruction 32 KiB (x16)
+  L2 Unified 1024 KiB (x16)
+  L3 Unified 32768 KiB (x2)
+Load Average: 0.68, 1.56, 1.00
+***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+----------------------------------------------------------------------------------------------------------
+Benchmark                                                Time             CPU   Iterations UserCounters...
+----------------------------------------------------------------------------------------------------------
+BM_AmericanOption_ThreadScaling/1/real_time            706 ms          706 ms            4 items_per_second=141.546/s 1_threads
+BM_AmericanOption_ThreadScaling/2/real_time            358 ms          357 ms            8 items_per_second=279.478/s 2_threads
+BM_AmericanOption_ThreadScaling/4/real_time            179 ms          179 ms           16 items_per_second=557.765/s 4_threads
+BM_AmericanOption_ThreadScaling/8/real_time           97.0 ms         95.8 ms           29 items_per_second=1.03131k/s 8_threads
+BM_AmericanOption_ThreadScaling/16/real_time          62.1 ms         60.3 ms           44 items_per_second=1.61155k/s 16_threads
+BM_AmericanOption_ThreadScaling/32/real_time          60.6 ms         57.0 ms           42 items_per_second=1.64883k/s 32_threads
+BM_AmericanOption_ThreadEfficiency/1/real_time         463 ms          463 ms            6 items_per_second=138.235/s
+BM_AmericanOption_ThreadEfficiency/2/real_time         233 ms          233 ms           12 items_per_second=274.88/s
+BM_AmericanOption_ThreadEfficiency/4/real_time         118 ms          118 ms           24 items_per_second=543.635/s
+BM_AmericanOption_ThreadEfficiency/8/real_time        62.4 ms         62.4 ms           45 items_per_second=1.02485k/s
+BM_AmericanOption_ThreadEfficiency/16/real_time       39.6 ms         39.5 ms           69 items_per_second=1.61529k/s
+BM_AmericanOption_ThreadEfficiency/32/real_time       41.4 ms         39.2 ms           68 items_per_second=1.54569k/s

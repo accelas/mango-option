@@ -25,7 +25,7 @@ During trading sessions, we need to:
 FDM is too slow for this (21.7ms × 1000 options = 21.7 seconds). Interpolation can reduce this to <1ms total.
 
 **Design Philosophy:**
-- **Strategy Pattern**: Uses dependency injection for interpolation algorithms (see `INTERPOLATION_STRATEGY_DESIGN.md`)
+- **Strategy Pattern**: Uses dependency injection for interpolation algorithms (see `notes/INTERPOLATION_STRATEGY_DESIGN.md`)
 - **Runtime Selection**: Switch between linear, cubic, or custom algorithms without recompilation
 - **Extensibility**: Users can implement custom interpolation strategies
 - **Consistency**: Follows existing callback-based architecture from `PDESolver`
@@ -303,7 +303,7 @@ double price = table->prices[idx];
 
 **Challenge:** Need efficient interpolation in 4D/5D space
 
-**Architecture:** Uses **Strategy Pattern** with dependency injection to allow runtime algorithm selection. See `INTERPOLATION_STRATEGY_DESIGN.md` for complete design.
+**Architecture:** Uses **Strategy Pattern** with dependency injection to allow runtime algorithm selection. See `notes/INTERPOLATION_STRATEGY_DESIGN.md` for complete design.
 
 **Available Strategies:**
 
