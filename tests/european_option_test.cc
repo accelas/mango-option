@@ -58,8 +58,8 @@ TEST_F(EuropeanOptionTest, ITMCallPricing) {
     double intrinsic_value = spot - strike;
     EXPECT_GT(call_price, intrinsic_value);
 
-    // Known value
-    EXPECT_NEAR(call_price, 16.7246, 0.001);
+    // Known value (verified with Black-Scholes formula)
+    EXPECT_NEAR(call_price, 17.663, 0.001);
 }
 
 TEST_F(EuropeanOptionTest, OTMPutPricing) {
@@ -76,8 +76,8 @@ TEST_F(EuropeanOptionTest, OTMPutPricing) {
     EXPECT_LT(put_price, strike);
     EXPECT_GT(put_price, 0.0);
 
-    // Known value
-    EXPECT_NEAR(put_price, 1.8478, 0.001);
+    // Known value (verified with Black-Scholes formula)
+    EXPECT_NEAR(put_price, 2.786, 0.001);
 }
 
 TEST_F(EuropeanOptionTest, PutCallParity) {
@@ -212,6 +212,7 @@ TEST_F(EuropeanOptionTest, PutDeltaRange) {
 
 TEST_F(EuropeanOptionTest, ATMDelta) {
     // ATM options should have delta around 0.5 for calls, -0.5 for puts
+    // Note: With r=0.05 and T=1.0, ATM is slightly shifted due to drift
     double spot = 100.0;
     double strike = 100.0;
     double T = 1.0;
@@ -221,8 +222,10 @@ TEST_F(EuropeanOptionTest, ATMDelta) {
     double call_delta = black_scholes_delta(spot, strike, T, r, sigma, true);
     double put_delta = black_scholes_delta(spot, strike, T, r, sigma, false);
 
-    EXPECT_NEAR(call_delta, 0.5, 0.1);  // Approximately 0.5
-    EXPECT_NEAR(put_delta, -0.5, 0.1);  // Approximately -0.5
+    // Delta is affected by drift term (r*T), so tolerance needs to account for this
+    // For r=0.05, T=1.0: d1 = 0.35, N(d1) ≈ 0.637
+    EXPECT_NEAR(call_delta, 0.637, 0.01);
+    EXPECT_NEAR(put_delta, -0.363, 0.01);
 }
 
 TEST_F(EuropeanOptionTest, DeepITMCallDelta) {
@@ -254,18 +257,20 @@ TEST_F(EuropeanOptionTest, DeepOTMPutDelta) {
 }
 
 TEST_F(EuropeanOptionTest, DeltaAtExpiration) {
-    // At expiration, delta is 1 for ITM call, 0 for OTM
+    // At expiration, delta is 1 for ITM call, 0 for OTM put
     double spot = 110.0;
     double strike = 100.0;
     double T = 0.0;
     double r = 0.05;
     double sigma = 0.2;
 
+    // ITM call at expiration: delta = 1
     double call_delta = black_scholes_delta(spot, strike, T, r, sigma, true);
     EXPECT_NEAR(call_delta, 1.0, tolerance);
 
+    // OTM put at expiration: delta = 0 (not -1, since spot > strike)
     double put_delta = black_scholes_delta(spot, strike, T, r, sigma, false);
-    EXPECT_NEAR(put_delta, -1.0, tolerance);
+    EXPECT_NEAR(put_delta, 0.0, tolerance);
 }
 
 TEST_F(EuropeanOptionTest, DeltaNumericalVerification) {
@@ -469,7 +474,8 @@ TEST_F(EuropeanOptionTest, ThetaNumericalVerification) {
     double price_later = black_scholes_price(spot, strike, T + h, r, sigma, true);
     double numerical_theta = -(price_later - price_now) / h;
 
-    EXPECT_NEAR(theta, numerical_theta, loose_tolerance);
+    // Use larger tolerance due to numerical differentiation error with daily step
+    EXPECT_NEAR(theta, numerical_theta, 0.01);
 }
 
 TEST_F(EuropeanOptionTest, ThetaZeroAtExpiration) {
