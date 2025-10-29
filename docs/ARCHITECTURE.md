@@ -784,6 +784,235 @@ pde_spline_destroy(spline);
 
 ---
 
+## Component 5: Interpolation Engine (Fast Lookup)
+
+### Purpose
+
+Provides sub-microsecond option pricing and IV lookups via pre-computed interpolation tables, achieving **40,000x speedup** over FDM for real-time queries during trading sessions.
+
+### File Locations
+
+```
+src/
+├── interp_strategy.h      # Strategy pattern interface for interpolation algorithms
+├── interp_multilinear.{h,c}  # Multi-linear interpolation strategy
+├── iv_surface.{h,c}       # 2D implied volatility surface (~100ns queries)
+└── price_table.{h,c}      # 4D/5D option price table (~500ns queries)
+
+examples/
+└── example_interpolation.c  # IV surface and price table usage
+
+tests/
+└── interpolation_test.cc    # Unit tests for all interpolation components
+```
+
+### Core Data Structures
+
+#### IV Surface (2D Interpolation)
+
+```c
+typedef struct {
+    size_t n_moneyness;          // Grid dimension
+    size_t n_maturity;
+    double *moneyness_grid;       // Moneyness values (S/K)
+    double *maturity_grid;        // Time to maturity (years)
+    double *iv_values;            // Implied volatilities (flattened 2D array)
+
+    const InterpolationStrategy *strategy;  // Runtime algorithm selection
+    InterpContext interp_context;           // Strategy-specific context
+
+    char underlying[32];          // "SPX", "NDX", etc.
+    time_t last_update;
+} IVSurface;
+```
+
+**Memory footprint**: ~12KB per surface (50 × 30 grid)
+
+#### Option Price Table (4D/5D Interpolation)
+
+```c
+typedef struct {
+    // Grid dimensions
+    size_t n_moneyness, n_maturity, n_volatility, n_rate, n_dividend;
+    double *moneyness_grid, *maturity_grid, *volatility_grid;
+    double *rate_grid, *dividend_grid;
+
+    double *prices;              // Pre-computed option prices (flattened array)
+
+    // Fast indexing strides (pre-computed)
+    size_t stride_m, stride_tau, stride_sigma, stride_r, stride_q;
+
+    const InterpolationStrategy *strategy;  // Runtime algorithm selection
+    InterpContext interp_context;
+
+    OptionType type;             // CALL or PUT
+    ExerciseType exercise;       // EUROPEAN or AMERICAN
+    char underlying[32];
+    time_t generation_time;
+} OptionPriceTable;
+```
+
+**Memory footprint**: ~2.4MB per table (4D: 50×30×20×10 grid)
+
+### Interpolation Strategy Pattern
+
+Uses **dependency injection** for runtime algorithm selection without recompilation:
+
+```c
+typedef struct {
+    const char *name;
+    const char *description;
+
+    // Callbacks for different dimensions
+    double (*interpolate_2d)(const IVSurface*, double m, double tau, InterpContext);
+    double (*interpolate_4d)(const OptionPriceTable*, double m, double tau,
+                             double sigma, double r, InterpContext);
+    double (*interpolate_5d)(const OptionPriceTable*, double m, double tau,
+                             double sigma, double r, double q, InterpContext);
+
+    // Context management
+    InterpContext (*create_context)(size_t dimensions, const size_t *grid_sizes);
+    void (*destroy_context)(InterpContext);
+
+    // Optional pre-computation
+    int (*precompute)(void *table, InterpContext);
+} InterpolationStrategy;
+```
+
+**Available strategies**:
+- `INTERP_MULTILINEAR`: Fast separable multi-linear interpolation (C0 continuous, ~100ns)
+- `INTERP_CUBIC`: Tensor-product cubic splines (C2 continuous, ~500ns) - *future work*
+
+### Key Functions
+
+#### IV Surface API
+
+```c
+// Create/destroy
+IVSurface* iv_surface_create(const double *moneyness, size_t n_m,
+                              const double *maturity, size_t n_tau);
+IVSurface* iv_surface_create_with_strategy(/* ... */, const InterpolationStrategy*);
+void iv_surface_destroy(IVSurface *surface);
+
+// Data manipulation
+int iv_surface_set(IVSurface *surface, size_t i_m, size_t i_tau, double iv);
+int iv_surface_set_all(IVSurface *surface, const double *iv_data);
+double iv_surface_get(const IVSurface *surface, size_t i_m, size_t i_tau);
+
+// Fast interpolation (main query interface)
+double iv_surface_interpolate(const IVSurface *surface, double moneyness, double maturity);
+
+// I/O
+int iv_surface_save(const IVSurface *surface, const char *filename);
+IVSurface* iv_surface_load(const char *filename);
+```
+
+#### Price Table API
+
+```c
+// Create/destroy
+OptionPriceTable* price_table_create(
+    const double *moneyness, size_t n_m,
+    const double *maturity, size_t n_tau,
+    const double *volatility, size_t n_sigma,
+    const double *rate, size_t n_r,
+    const double *dividend, size_t n_q,  // Pass NULL for 4D mode
+    OptionType type, ExerciseType exercise);
+
+void price_table_destroy(OptionPriceTable *table);
+
+// Data manipulation
+int price_table_set(OptionPriceTable *table, size_t i_m, size_t i_tau,
+                    size_t i_sigma, size_t i_r, size_t i_q, double price);
+double price_table_get(const OptionPriceTable *table, /* ... */);
+
+// Fast interpolation (main query interface)
+double price_table_interpolate_4d(const OptionPriceTable *table,
+                                   double moneyness, double maturity,
+                                   double volatility, double rate);
+double price_table_interpolate_5d(const OptionPriceTable *table,
+                                   double moneyness, double maturity,
+                                   double volatility, double rate, double dividend);
+
+// Greeks via finite differences on interpolated values
+OptionGreeks price_table_greeks_4d(const OptionPriceTable *table, /* ... */);
+OptionGreeks price_table_greeks_5d(const OptionPriceTable *table, /* ... */);
+
+// I/O
+int price_table_save(const OptionPriceTable *table, const char *filename);
+OptionPriceTable* price_table_load(const char *filename);
+```
+
+### Multi-linear Interpolation Algorithm
+
+**Method**: Separable tensor-product linear interpolation
+
+**4D Algorithm** (for price tables):
+1. Find bracketing grid indices for each dimension via binary search
+2. Extract 2^4 = 16 hypercube corner values
+3. Perform recursive linear interpolation:
+   - Stage 1: 8 interpolations along moneyness (16→8)
+   - Stage 2: 4 interpolations along maturity (8→4)
+   - Stage 3: 2 interpolations along volatility (4→2)
+   - Stage 4: 1 interpolation along rate (2→1)
+   - Total: 15 linear interpolations
+
+**Complexity**:
+- Time: O(d log n + 2^d) where d=dimensions, n=grid size per dimension
+- Space: O(1) - no temporary arrays needed
+- 4D example: ~31 operations (16 lookups + 15 lerps)
+
+**Key Implementation Detail**: Dimension ordering matters! Interpolation must proceed from most significant dimension (largest stride) to least significant to maintain correctness.
+
+### Performance Characteristics
+
+**Query Performance**:
+- **IV Surface (2D)**: <100ns per query
+- **Price Table (4D)**: ~500ns per query
+- **FDM (American option)**: 21.7ms per query
+- **Speedup**: 40,000x faster than FDM
+
+**Throughput**:
+- Single-threaded: >2M prices/second (vs 46/sec for FDM)
+- Memory-bandwidth limited (not compute-bound)
+
+**Accuracy**:
+- On-grid points: Exact (machine precision)
+- Off-grid points: Typically <0.5% relative error for smooth functions
+- Delta: Accurate (first derivatives preserved by linear interpolation)
+- Gamma: **Approximately zero** (second derivatives vanish for piecewise linear functions)
+
+**Important Limitation**: Multi-linear interpolation is C0 continuous (continuous but not smooth). Second derivatives (gamma) are approximately zero within grid cells. For accurate gamma calculations, either:
+1. Use cubic spline interpolation (future work), or
+2. Store pre-computed Greeks in separate tables
+
+### Integration with Existing Components
+
+The interpolation engine **complements** rather than replaces the FDM solver:
+
+1. **Pre-computation**: Uses `american_option_price_batch()` with OpenMP to populate price tables
+2. **Runtime**: Queries use fast interpolation; falls back to FDM for out-of-range parameters
+3. **Workflow**:
+   - **Offline**: Pre-compute tables during downtime (minutes to hours)
+   - **Online**: Fast lookups during trading (sub-microsecond)
+
+### Design Rationale
+
+**Strategy Pattern Benefits**:
+- Runtime algorithm selection (no recompilation)
+- Easy to benchmark different strategies
+- Users can implement custom interpolation algorithms
+- Extensible for future enhancements (cubic splines, RBF, etc.)
+
+**Hybrid Approach** (IV Surface + Price Table):
+- IV surfaces (2D): Extremely fast, tiny memory, good for market data fitting
+- Price tables (4D/5D): Direct pricing given IV, includes American options
+- Both: Maximum flexibility for different use cases
+
+For complete design rationale and implementation roadmap, see `docs/notes/INTERPOLATION_ENGINE_DESIGN.md`.
+
+---
+
 ## Integration Architecture
 
 ### Workflow 1: Single IV Calculation
@@ -1134,8 +1363,11 @@ bazel build //benchmarks:quantlib_benchmark
 | **Black-Scholes** | European option pricing | implied_volatility.c | `black_scholes_price()`, `black_scholes_vega()` |
 | **American Option** | American option pricing | american_option.{h,c} | `american_option_price()`, `american_option_price_batch()` |
 | **PDE Solver** | FDM time-stepping engine | pde_solver.{h,c} | `pde_solver_create()`, `pde_solver_solve()`, `pde_solver_destroy()` |
+| **IV Surface** | Fast 2D IV interpolation (~100ns) | iv_surface.{h,c} | `iv_surface_create()`, `iv_surface_interpolate()` |
+| **Price Table** | Fast 4D/5D price lookup (~500ns) | price_table.{h,c} | `price_table_create()`, `price_table_interpolate_4d()`, `price_table_greeks_4d()` |
+| **Multilinear Interpolation** | N-dimensional linear interpolation | interp_multilinear.{h,c}, interp_strategy.h | `INTERP_MULTILINEAR` strategy |
 | **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
-| **Cubic Spline** | Off-grid interpolation | cubic_spline.{h,c} | `pde_spline_create()`, `pde_spline_eval()` |
+| **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()`, `pde_spline_eval()` |
 | **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
 | **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `IVCALC_TRACE_*` macros |
 
