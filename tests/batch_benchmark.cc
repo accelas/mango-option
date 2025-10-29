@@ -1,6 +1,7 @@
 #include <benchmark/benchmark.h>
 #include <vector>
 #include <cmath>
+#include <omp.h>
 
 extern "C" {
 #include "../src/american_option.h"
@@ -251,6 +252,148 @@ static void BM_AmericanOption_TimeSteps(benchmark::State& state) {
     state.SetLabel(std::to_string(n_steps) + "_steps");
 }
 
+// Benchmark: Thread scalability - fixed batch size, varying thread count
+static void BM_AmericanOption_ThreadScaling(benchmark::State& state) {
+    const size_t n_threads = state.range(0);
+    const size_t n_options = 100;  // Fixed batch size
+
+    // Set OpenMP thread count
+    omp_set_num_threads(n_threads);
+
+    // Setup options
+    std::vector<OptionData> options(n_options);
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 95.0 + i * 0.1,
+            .volatility = 0.2 + i * 0.003,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = (i % 2 == 0) ? OPTION_PUT : OPTION_CALL,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 101,
+        .dt = 0.001,
+        .n_steps = 500
+    };
+
+    std::vector<AmericanOptionResult> results(n_options);
+
+    // Benchmark loop
+    for (auto _ : state) {
+        int status = american_option_price_batch(options.data(), &grid, n_options, results.data());
+        benchmark::DoNotOptimize(status);
+
+        // Cleanup
+        for (size_t i = 0; i < n_options; i++) {
+            if (results[i].status == 0 && results[i].solver != nullptr) {
+                pde_solver_destroy(results[i].solver);
+            }
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations() * n_options);
+    state.SetLabel(std::to_string(n_threads) + "_threads");
+}
+
+// Benchmark: Thread efficiency - measure parallel efficiency
+// Parallel efficiency = (Sequential time) / (Parallel time * num_threads)
+static void BM_AmericanOption_ThreadEfficiency(benchmark::State& state) {
+    const size_t n_threads = state.range(0);
+    const size_t n_options = 64;  // Sweet spot from scaling benchmark
+
+    omp_set_num_threads(n_threads);
+
+    std::vector<OptionData> options(n_options);
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 100.0,
+            .volatility = 0.25,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = OPTION_PUT,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 101,
+        .dt = 0.001,
+        .n_steps = 500
+    };
+
+    std::vector<AmericanOptionResult> results(n_options);
+
+    for (auto _ : state) {
+        int status = american_option_price_batch(options.data(), &grid, n_options, results.data());
+        benchmark::DoNotOptimize(status);
+
+        for (size_t i = 0; i < n_options; i++) {
+            if (results[i].status == 0 && results[i].solver != nullptr) {
+                pde_solver_destroy(results[i].solver);
+            }
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations() * n_options);
+}
+
+// Benchmark: Large batch with optimal thread count
+static void BM_AmericanOption_LargeBatch(benchmark::State& state) {
+    const size_t n_options = state.range(0);
+
+    // Use all available cores
+    omp_set_num_threads(omp_get_max_threads());
+
+    std::vector<OptionData> options(n_options);
+    for (size_t i = 0; i < n_options; i++) {
+        options[i] = (OptionData){
+            .strike = 90.0 + (i % 50) * 0.5,  // Vary strikes
+            .volatility = 0.15 + (i % 30) * 0.01,  // Vary vols
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 0.5 + (i % 20) * 0.1,  // Vary maturities
+            .option_type = (i % 2 == 0) ? OPTION_PUT : OPTION_CALL,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+    }
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 101,
+        .dt = 0.001,
+        .n_steps = 500
+    };
+
+    std::vector<AmericanOptionResult> results(n_options);
+
+    for (auto _ : state) {
+        int status = american_option_price_batch(options.data(), &grid, n_options, results.data());
+        benchmark::DoNotOptimize(status);
+
+        for (size_t i = 0; i < n_options; i++) {
+            if (results[i].status == 0 && results[i].solver != nullptr) {
+                pde_solver_destroy(results[i].solver);
+            }
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations() * n_options);
+    state.SetLabel("all_cores");
+}
+
 // Register benchmarks with various batch sizes
 
 // Sequential vs Batch comparison (10, 25, 50, 100 options)
@@ -273,5 +416,23 @@ BENCHMARK(BM_AmericanOption_BatchScaling)
 BENCHMARK(BM_AmericanOption_TimeSteps)
     ->Arg(250)->Arg(500)->Arg(1000)->Arg(2000)
     ->Unit(benchmark::kMillisecond);
+
+// Thread scaling: 100 options with 1, 2, 4, 8, 16, 32 threads
+BENCHMARK(BM_AmericanOption_ThreadScaling)
+    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+// Thread efficiency: 64 options with varying threads
+BENCHMARK(BM_AmericanOption_ThreadEfficiency)
+    ->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(32)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+// Large batch: 500, 1000, 2000 options with all cores
+BENCHMARK(BM_AmericanOption_LargeBatch)
+    ->Arg(500)->Arg(1000)->Arg(2000)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
 
 BENCHMARK_MAIN();
