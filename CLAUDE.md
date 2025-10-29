@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**iv_calc** is a C23-based PDE (Partial Differential Equation) solver using the finite difference method with TR-BDF2 (Two-stage Runge-Kutta with backward differentiation formula) time-stepping scheme. The project emphasizes flexibility through callback-based architecture, allowing users to define custom initial conditions, boundary conditions, jump conditions, and obstacle constraints.
+**mango-iv** is a C23-based PDE (Partial Differential Equation) solver using the finite difference method with TR-BDF2 (Two-stage Runge-Kutta with backward differentiation formula) time-stepping scheme. The project emphasizes flexibility through callback-based architecture, allowing users to define custom initial conditions, boundary conditions, jump conditions, and obstacle constraints.
 
 ## Build System
 
@@ -45,7 +45,7 @@ bazel clean
 ## Project Structure
 
 ```
-iv_calc/
+mango-iv/
 ├── MODULE.bazel           # Bazel module with GoogleTest and Benchmark dependencies
 ├── src/
 │   ├── BUILD.bazel        # Build configuration for library

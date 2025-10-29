@@ -1,4 +1,4 @@
-# Project Overview: iv_calc
+# Project Overview: mango-iv
 
 ## The Problem: Option Pricing and Implied Volatility
 
@@ -77,11 +77,11 @@ An **option** is a financial derivative that gives the holder the right (but not
 
 ---
 
-## The Solution: iv_calc
+## The Solution: mango-iv
 
-**iv_calc** is a research-grade numerical library for option pricing and implied volatility calculation, designed to balance **performance**, **flexibility**, and **correctness**.
+**mango-iv** is a research-grade numerical library for option pricing and implied volatility calculation, designed to balance **performance**, **flexibility**, and **correctness**.
 
-### What iv_calc Provides
+### What mango-iv Provides
 
 #### 1. **Black-Scholes Pricing (European Options)**
 
@@ -196,7 +196,7 @@ pde_solver_solve(solver);
 ## Project Structure
 
 ```
-iv_calc/
+mango-iv/
 ├── src/                           # Core library
 │   ├── implied_volatility.{h,c}   # IV calculation + Black-Scholes
 │   ├── american_option.{h,c}      # American option pricing
@@ -236,7 +236,7 @@ iv_calc/
 
 ---
 
-## Who Should Use iv_calc?
+## Who Should Use mango-iv?
 
 ### ✅ Good Fit
 
@@ -250,7 +250,7 @@ iv_calc/
 
 - **High-frequency trading**: Use optimized libraries (QuantLib, proprietary)
 - **Production systems**: Consider mature, battle-tested solutions
-- **GPU acceleration needed**: iv_calc is CPU-only (for now)
+- **GPU acceleration needed**: mango-iv is CPU-only (for now)
 - **Exotic options**: Limited support (barriers, Asians not yet implemented)
 
 ---
@@ -329,7 +329,7 @@ printf("American put price: %.4f\n", price);
 
 ## Comparison to Other Libraries
 
-| Feature | iv_calc | QuantLib | PyQL | Bloomberg API |
+| Feature | mango-iv | QuantLib | PyQL | Bloomberg API |
 |---------|---------|----------|------|---------------|
 | **Language** | C23 | C++17 | Python | C++/Python |
 | **License** | Open-source | BSD | BSD | Proprietary |
@@ -342,7 +342,7 @@ printf("American put price: %.4f\n", price);
 | **Performance** | 2.1x slower | Baseline | Slow (Python) | Fast (optimized) |
 | **Exotic options** | ❌ Limited | ✅ Extensive | ✅ Via QuantLib | ✅ Extensive |
 
-**iv_calc's niche:** Research-grade flexibility with production-conscious design, optimized for learning and prototyping rather than maximum performance.
+**mango-iv's niche:** Research-grade flexibility with production-conscious design, optimized for learning and prototyping rather than maximum performance.
 
 ---
 
