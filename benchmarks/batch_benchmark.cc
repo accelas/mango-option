@@ -441,7 +441,7 @@ int main(int argc, char** argv) {
     benchmark::Initialize(&argc, argv);
 
     std::cout << "\n" << std::string(80, '=') << "\n";
-    std::cout << "iv_calc Batch Processing Benchmarks\n";
+    std::cout << "mango-iv Batch Processing Benchmarks\n";
     std::cout << std::string(80, '=') << "\n\n";
 
     std::cout << "System Information:\n";
