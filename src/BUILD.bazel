@@ -97,6 +97,13 @@ cc_library(
     hdrs = [
         "interp_multilinear.h",
         "interp_strategy.h",
+        "iv_surface.h",
+        "price_table.h",
+        "american_option.h",
+        "pde_solver.h",
+        "ivcalc_trace.h",
+        "cubic_spline.h",
+        "tridiagonal.h",
     ],
     copts = [
         "-std=c23",
