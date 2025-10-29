@@ -16,6 +16,7 @@
 
 extern "C" {
 #include "../src/interp_multilinear.h"
+#include "../src/interp_cubic.h"
 #include "../src/iv_surface.h"
 #include "../src/price_table.h"
 }
@@ -39,6 +40,16 @@ static double test_function_2d(double x, double y) {
 
 static double test_function_4d(double w, double x, double y, double z) {
     return 1.0 + w + 2.0*x + 3.0*y + 4.0*z + 0.1*w*x*y*z;
+}
+
+// Smooth test function for cubic interpolation (quadratic)
+static double smooth_function_2d(double x, double y) {
+    return 1.0 + x + 2.0*y + 0.5*x*x + 0.3*y*y + 0.2*x*y;
+}
+
+// Very smooth test function (sinusoidal)
+static double sinusoidal_2d(double x, double y) {
+    return std::sin(M_PI * x) * std::cos(M_PI * y);
 }
 
 // ============================================================================
@@ -393,6 +404,243 @@ TEST_F(PriceTableTest, SaveLoad) {
 
     price_table_destroy(loaded);
     remove(filename);
+}
+
+// ============================================================================
+// Cubic Interpolation Tests (2D)
+// ============================================================================
+
+class CubicInterpolation2DTest : public ::testing::Test {
+protected:
+    IVSurface *surface_multilinear_ = nullptr;
+    IVSurface *surface_cubic_ = nullptr;
+    std::vector<double> moneyness_;
+    std::vector<double> maturity_;
+
+    const size_t n_m_ = 10;
+    const size_t n_tau_ = 8;
+
+    void SetUp() override {
+        moneyness_ = linspace(0.8, 1.2, n_m_);
+        maturity_ = linspace(0.1, 2.0, n_tau_);
+
+        // Create surface with multilinear strategy
+        surface_multilinear_ = iv_surface_create(moneyness_.data(), n_m_,
+                                                  maturity_.data(), n_tau_);
+        ASSERT_NE(surface_multilinear_, nullptr);
+
+        // Create surface with cubic strategy
+        surface_cubic_ = iv_surface_create_with_strategy(
+            moneyness_.data(), n_m_,
+            maturity_.data(), n_tau_,
+            &INTERP_CUBIC);
+        ASSERT_NE(surface_cubic_, nullptr);
+    }
+
+    void TearDown() override {
+        if (surface_multilinear_) {
+            iv_surface_destroy(surface_multilinear_);
+        }
+        if (surface_cubic_) {
+            iv_surface_destroy(surface_cubic_);
+        }
+    }
+
+    // Populate surfaces with test function
+    void populate_surfaces(double (*func)(double, double)) {
+        for (size_t i_m = 0; i_m < n_m_; i_m++) {
+            for (size_t i_tau = 0; i_tau < n_tau_; i_tau++) {
+                double m = moneyness_[i_m];
+                double tau = maturity_[i_tau];
+                double value = func(m, tau);
+
+                iv_surface_set_point(surface_multilinear_, i_m, i_tau, value);
+                iv_surface_set_point(surface_cubic_, i_m, i_tau, value);
+            }
+        }
+    }
+};
+
+TEST_F(CubicInterpolation2DTest, BasicFunctionality) {
+    // Test that cubic interpolation can be created and used
+    EXPECT_NE(surface_cubic_, nullptr);
+    EXPECT_EQ(surface_cubic_->n_moneyness, n_m_);
+    EXPECT_EQ(surface_cubic_->n_maturity, n_tau_);
+}
+
+TEST_F(CubicInterpolation2DTest, OnGridPointsExact) {
+    // Populate with smooth quadratic function
+    populate_surfaces(smooth_function_2d);
+
+    // Debug: check one specific grid point in detail
+    size_t test_i = 5;
+    size_t test_j = 4;
+    double test_m = moneyness_[test_i];
+    double test_tau = maturity_[test_j];
+    double test_expected = smooth_function_2d(test_m, test_tau);
+    double test_result = iv_surface_interpolate(surface_cubic_, test_m, test_tau);
+
+    std::cout << "Debug grid point (" << test_i << ", " << test_j << "):" << std::endl;
+    std::cout << "  Coordinates: (" << test_m << ", " << test_tau << ")" << std::endl;
+    std::cout << "  Expected (from function): " << test_expected << std::endl;
+    std::cout << "  Result (from cubic): " << test_result << std::endl;
+    std::cout << "  Error: " << std::abs(test_result - test_expected) << std::endl;
+
+    // Also check what's stored in the surface
+    size_t stored_idx = test_i * surface_cubic_->n_maturity + test_j;
+    double stored_value = surface_cubic_->iv_surface[stored_idx];
+    std::cout << "  Stored value in surface: " << stored_value << std::endl;
+
+    // Test on-grid points (should be exact for both strategies)
+    int failures = 0;
+    for (size_t i_m = 0; i_m < n_m_; i_m++) {
+        for (size_t i_tau = 0; i_tau < n_tau_; i_tau++) {
+            double m = moneyness_[i_m];
+            double tau = maturity_[i_tau];
+            double expected = smooth_function_2d(m, tau);
+
+            double result = iv_surface_interpolate(surface_cubic_, m, tau);
+            if (std::abs(result - expected) > 1e-8) {
+                failures++;
+                if (failures <= 3) {  // Only print first few failures
+                    std::cout << "Failed at (" << i_m << "," << i_tau << "): "
+                              << "result=" << result << ", expected=" << expected
+                              << ", error=" << std::abs(result - expected) << std::endl;
+                }
+            }
+        }
+    }
+
+    std::cout << "Total failures: " << failures << " out of " << (n_m_ * n_tau_) << std::endl;
+
+    // Only fail test if there are actual failures
+    EXPECT_EQ(failures, 0) << "Cubic interpolation not exact at grid points!";
+}
+
+TEST_F(CubicInterpolation2DTest, OffGridAccuracy) {
+    // Populate with smooth quadratic function
+    populate_surfaces(smooth_function_2d);
+
+    // Test off-grid points - cubic should be more accurate than multilinear
+    std::vector<double> test_points_m = {0.85, 0.95, 1.05, 1.15};
+    std::vector<double> test_points_tau = {0.25, 0.75, 1.25, 1.75};
+
+    double total_error_cubic = 0.0;
+    double total_error_multilinear = 0.0;
+    int count = 0;
+
+    for (double m : test_points_m) {
+        for (double tau : test_points_tau) {
+            double expected = smooth_function_2d(m, tau);
+            double result_cubic = iv_surface_interpolate(surface_cubic_, m, tau);
+            double result_multilinear = iv_surface_interpolate(surface_multilinear_, m, tau);
+
+            double error_cubic = std::abs(result_cubic - expected);
+            double error_multilinear = std::abs(result_multilinear - expected);
+
+            total_error_cubic += error_cubic;
+            total_error_multilinear += error_multilinear;
+            count++;
+
+            // Cubic should be more accurate for smooth functions
+            EXPECT_LT(error_cubic, error_multilinear * 1.2)  // Allow 20% tolerance
+                << "Cubic not better at (" << m << ", " << tau << "): "
+                << "cubic_error=" << error_cubic
+                << ", multilinear_error=" << error_multilinear;
+        }
+    }
+
+    double avg_error_cubic = total_error_cubic / count;
+    double avg_error_multilinear = total_error_multilinear / count;
+
+    // On average, cubic should be significantly better
+    EXPECT_LT(avg_error_cubic, avg_error_multilinear * 0.5)
+        << "Average cubic error: " << avg_error_cubic
+        << ", Average multilinear error: " << avg_error_multilinear;
+}
+
+TEST_F(CubicInterpolation2DTest, SmoothFunctionAccuracy) {
+    // Test with sinusoidal function (very smooth, C-infinity)
+    populate_surfaces(sinusoidal_2d);
+
+    // Sample at many off-grid points
+    const int n_samples = 20;
+    double max_error = 0.0;
+
+    for (int i = 0; i < n_samples; i++) {
+        for (int j = 0; j < n_samples; j++) {
+            double m = 0.8 + (0.4 * i) / (n_samples - 1);
+            double tau = 0.1 + (1.9 * j) / (n_samples - 1);
+
+            double expected = sinusoidal_2d(m, tau);
+            double result = iv_surface_interpolate(surface_cubic_, m, tau);
+            double error = std::abs(result - expected);
+
+            max_error = std::max(max_error, error);
+
+            // Should be very accurate for smooth functions
+            EXPECT_LT(error, 0.05)  // 5% relative error
+                << "Large error at (" << m << ", " << tau << "): "
+                << "result=" << result << ", expected=" << expected;
+        }
+    }
+
+    // Report maximum error
+    std::cout << "Maximum cubic interpolation error on sin(x)*cos(y): "
+              << max_error << std::endl;
+}
+
+TEST_F(CubicInterpolation2DTest, BoundaryBehavior) {
+    // Test behavior at grid boundaries
+    populate_surfaces(smooth_function_2d);
+
+    // Test at exact boundaries
+    double m_min = moneyness_[0];
+    double m_max = moneyness_[n_m_ - 1];
+    double tau_min = maturity_[0];
+    double tau_max = maturity_[n_tau_ - 1];
+
+    // Corner points
+    EXPECT_NEAR(iv_surface_interpolate(surface_cubic_, m_min, tau_min),
+                smooth_function_2d(m_min, tau_min), 1e-8);
+    EXPECT_NEAR(iv_surface_interpolate(surface_cubic_, m_max, tau_max),
+                smooth_function_2d(m_max, tau_max), 1e-8);
+    EXPECT_NEAR(iv_surface_interpolate(surface_cubic_, m_min, tau_max),
+                smooth_function_2d(m_min, tau_max), 1e-8);
+    EXPECT_NEAR(iv_surface_interpolate(surface_cubic_, m_max, tau_min),
+                smooth_function_2d(m_max, tau_min), 1e-8);
+
+    // Slightly inside boundaries (should not extrapolate)
+    double epsilon = 1e-6;
+    double result_inside = iv_surface_interpolate(surface_cubic_,
+                                                   m_min + epsilon,
+                                                   tau_min + epsilon);
+    EXPECT_TRUE(std::isfinite(result_inside));
+}
+
+TEST_F(CubicInterpolation2DTest, ComparisonWithMultilinear) {
+    // Direct comparison: both strategies on same data
+    populate_surfaces(smooth_function_2d);
+
+    double m_test = 1.0;
+    double tau_test = 1.0;
+
+    double result_cubic = iv_surface_interpolate(surface_cubic_, m_test, tau_test);
+    double result_multilinear = iv_surface_interpolate(surface_multilinear_, m_test, tau_test);
+    double expected = smooth_function_2d(m_test, tau_test);
+
+    double error_cubic = std::abs(result_cubic - expected);
+    double error_multilinear = std::abs(result_multilinear - expected);
+
+    std::cout << "At (1.0, 1.0) for quadratic function:" << std::endl;
+    std::cout << "  Expected: " << expected << std::endl;
+    std::cout << "  Cubic result: " << result_cubic
+              << " (error: " << error_cubic << ")" << std::endl;
+    std::cout << "  Multilinear result: " << result_multilinear
+              << " (error: " << error_multilinear << ")" << std::endl;
+
+    // Both should be reasonable, but cubic should be better
+    EXPECT_LT(error_cubic, error_multilinear);
 }
 
 // ============================================================================
