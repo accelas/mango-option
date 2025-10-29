@@ -4,7 +4,7 @@
 
 ## Executive Summary
 
-The iv_calc codebase implements a complete suite for implied volatility (IV) calculation and American option pricing. It uses a **callback-based, vectorized architecture** with:
+The mango-iv codebase implements a complete suite for implied volatility (IV) calculation and American option pricing. It uses a **callback-based, vectorized architecture** with:
 
 - **Black-Scholes formula** for European option pricing (basis for IV calculation)
 - **TR-BDF2 PDE solver** for American option pricing via finite difference method
@@ -1147,7 +1147,7 @@ graph TD
 
 From benchmark:
 - **QuantLib**: 10.4 ms per option (mature, highly optimized)
-- **iv_calc**: 21.6 ms per option (research, opportunities for optimization)
+- **mango-iv**: 21.6 ms per option (research, opportunities for optimization)
 - **Ratio**: 2.1x (reasonable; different algorithms, grid resolution)
 
 ### Optimization Opportunities
@@ -1375,7 +1375,7 @@ bazel build //benchmarks:quantlib_benchmark
 
 ## Conclusion
 
-The iv_calc codebase implements a complete, production-ready suite for implied volatility calculation and American option pricing. The architecture prioritizes:
+The mango-iv codebase implements a complete, production-ready suite for implied volatility calculation and American option pricing. The architecture prioritizes:
 
 1. **Mathematical correctness** (Black-Scholes, TR-BDF2, obstacle conditions)
 2. **Flexibility** (callback-based design, custom PDEs)

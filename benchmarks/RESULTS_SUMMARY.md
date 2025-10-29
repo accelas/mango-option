@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-The iv_calc batch processing API demonstrates **excellent parallelization** with near-linear scaling up to 8 threads (91% efficiency) and sustained throughput of **2,000+ options/second** at scale. Thread-safety is verified across all configurations with no data races or crashes.
+The mango-iv batch processing API demonstrates **excellent parallelization** with near-linear scaling up to 8 threads (91% efficiency) and sustained throughput of **2,000+ options/second** at scale. Thread-safety is verified across all configurations with no data races or crashes.
 
 **Key Findings:**
 - **4.5x-11.7x wall-time speedup** with batch processing
@@ -426,7 +426,7 @@ Implication: IV calculation bottleneck is PDE solve for American options
 
 ## Conclusion
 
-The iv_calc batch processing implementation delivers **excellent parallel performance** with:
+The mango-iv batch processing implementation delivers **excellent parallel performance** with:
 
 ✅ **Near-linear scaling** up to 8 threads (91-98% efficiency)
 ✅ **11.7x speedup** for batch processing vs sequential

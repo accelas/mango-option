@@ -1,8 +1,8 @@
-# FastVol Analysis and Optimization Plan for iv_calc
+# FastVol Analysis and Optimization Plan for mango-iv
 
 ## Executive Summary
 
-After analyzing the fastvol repository (https://github.com/vgalanti/fastvol), I've identified several CPU optimization techniques that could significantly improve iv_calc's performance. Fastvol achieves impressive speeds through memory optimization, algorithmic improvements, and careful SIMD utilization.
+After analyzing the fastvol repository (https://github.com/vgalanti/fastvol), I've identified several CPU optimization techniques that could significantly improve mango-iv's performance. Fastvol achieves impressive speeds through memory optimization, algorithmic improvements, and careful SIMD utilization.
 
 ---
 
@@ -142,7 +142,7 @@ for (size_t i = 0; i < batch_size; i++) {
 
 ---
 
-## Performance Comparison: FastVol vs iv_calc
+## Performance Comparison: FastVol vs mango-iv
 
 ### FastVol Benchmarks (CPU, fp64)
 
@@ -173,7 +173,7 @@ Even accounting for batch vs scalar differences:
 
 ---
 
-## Optimization Plan for iv_calc
+## Optimization Plan for mango-iv
 
 Based on fastvol analysis, here's a prioritized plan with estimated impact:
 
@@ -466,12 +466,12 @@ This would bring us much closer to fastvol's performance levels (~140 µs for co
 
 Current benchmark:
 - QuantLib: 10.4 ms
-- iv_calc: 21.7 ms
+- mango-iv: 21.7 ms
 - Ratio: 2.1x slower
 
 After optimizations:
 - QuantLib: 10.4 ms
-- iv_calc (optimized): 2-3 ms
+- mango-iv (optimized): 2-3 ms
 - Ratio: **3-5x FASTER than QuantLib** 🎯
 
 ---
