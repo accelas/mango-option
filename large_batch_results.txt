@@ -1,0 +1,17 @@
+2025-10-29T00:00:16-07:00
+Running ./bazel-bin/tests/batch_benchmark
+Run on (32 X 5058 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x16)
+  L1 Instruction 32 KiB (x16)
+  L2 Unified 1024 KiB (x16)
+  L3 Unified 32768 KiB (x2)
+Load Average: 7.30, 3.15, 1.56
+***WARNING*** CPU scaling is enabled, the benchmark real time measurements may be noisy and will incur extra overhead.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+------------------------------------------------------------------------------------------------------
+Benchmark                                            Time             CPU   Iterations UserCounters...
+------------------------------------------------------------------------------------------------------
+BM_AmericanOption_LargeBatch/500/real_time         253 ms          249 ms           11 items_per_second=1.97957k/s all_cores
+BM_AmericanOption_LargeBatch/1000/real_time        497 ms          493 ms            6 items_per_second=2.01203k/s all_cores
+BM_AmericanOption_LargeBatch/2000/real_time        991 ms          990 ms            3 items_per_second=2.0187k/s all_cores
