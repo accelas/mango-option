@@ -20,30 +20,31 @@ The iv_calc codebase implements a complete suite for implied volatility (IV) cal
 
 ```mermaid
 graph TD
-    IV[Implied Volatility Calculator<br/>implied_volatility.c/.h<br/>- Black-Scholes pricing<br/>- IV search via Brent's method]
+    IV[Implied Volatility Calculator<br/>implied_volatility.c/.h<br/>- IV search via Brent's method]
+
+    EO[European Option Pricer<br/>european_option.c/.h<br/>- Black-Scholes pricing<br/>- Black-Scholes vega]
 
     AO[American Option Pricer<br/>american_option.c/.h<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
 
     PDE[PDE Solver FDM Engine<br/>pde_solver.c/.h<br/>- TR-BDF2 time-stepping<br/>- Implicit solver fixed-point<br/>- Callback-based architecture<br/>- Single workspace buffer]
 
     BRENT[Brent's Root Finder]
-    BS[Black-Scholes Pricing]
     SPLINE[Cubic Spline Interpolation]
     TRI[Tridiagonal Solver]
 
     IV --> BRENT
-    IV --> BS
+    IV --> EO
     AO --> PDE
     PDE --> SPLINE
     PDE --> TRI
 
-    style IV fill:#e1f5ff
-    style AO fill:#fff4e1
-    style PDE fill:#ffe1f5
-    style BRENT fill:#f0f0f0
-    style BS fill:#f0f0f0
-    style SPLINE fill:#f0f0f0
-    style TRI fill:#f0f0f0
+    style IV fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
+    style EO fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style AO fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
+    style PDE fill:#ffe1f5,stroke:#333,stroke-width:2px,color:#000
+    style BRENT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style SPLINE fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style TRI fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -79,9 +80,13 @@ typedef struct {
 } IVResult;
 ```
 
+### Dependencies
+
+The implied volatility calculator depends on the **European Option** module (`european_option.{h,c}`) for Black-Scholes pricing functions. These functions are described below but are implemented in the separate `european_option` module.
+
 ### Key Functions
 
-#### 1. **Black-Scholes Option Pricing**
+#### 1. **Black-Scholes Option Pricing** (from `european_option.h`)
 ```c
 double black_scholes_price(double spot, double strike, 
                            double time_to_maturity,
@@ -99,7 +104,7 @@ double black_scholes_price(double spot, double strike,
 
 **Performance**: O(1) with high precision
 
-#### 2. **Black-Scholes Vega**
+#### 2. **Black-Scholes Vega** (from `european_option.h`)
 ```c
 double black_scholes_vega(double spot, double strike, 
                           double time_to_maturity,
@@ -179,7 +184,7 @@ From `implied_volatility_test.cc`:
 - ✅ Numerical stability at small prices
 - ✅ Convergence consistency (deterministic)
 
-**Test Result**: 44 comprehensive test cases, all passing
+**Test Result**: 32 comprehensive test cases, all passing
 
 ### Performance Characteristics
 
@@ -430,7 +435,7 @@ From `american_option_test.cc`:
 - ✅ Dividend impact on puts (increases value)
 - ✅ Zero dividend amounts (should match no-dividend case)
 
-**Test Result**: 29 test cases covering comprehensive scenarios
+**Test Result**: 42 test cases covering comprehensive scenarios
 
 ### Performance Characteristics
 
@@ -440,7 +445,7 @@ From `american_option_test.cc`:
 | Typical | 141×1000 | 1000 | 21-22 ms |
 | Fine | 201×2000 | 2000 | 80-100 ms |
 
-**Comparison to QuantLib** (from BENCHMARK.md):
+**Comparison to QuantLib** (from benchmarks/BENCHMARK.md):
 - IV Calc: 21.6 ms per option
 - QuantLib: 10.4 ms per option
 - Ratio: 2.1x slower (reasonable for research code)
@@ -450,17 +455,6 @@ From `american_option_test.cc`:
 - ✅ Single contiguous workspace buffer
 - ✅ Minimal malloc during solve
 - ✅ OpenMP parallel batch processing
-
-### Known Issues
-
-**From american_option.c, Line 82-86**:
-```c
-// TODO: Fix time mapping - current implementation has issues
-// The correct formulation requires careful mapping between calendar time
-// and time-to-maturity for backward parabolic PDE
-```
-
-**Status**: Tests acknowledge implementation issues but verify solver completes without crashing. The mathematical formulation in comments is correct, but the actual time stepping may not perfectly align with backward PDE theory.
 
 ---
 
@@ -495,33 +489,37 @@ A two-stage implicit scheme combining:
 
 ### Memory Management (Single Buffer Architecture)
 
-**Workspace (10n doubles, contiguous allocation):**
+**Workspace (12n doubles, contiguous allocation):**
+
+All arrays allocated from single 64-byte aligned buffer:
 
 ```mermaid
-graph TD
-    subgraph "Workspace Buffer (10n doubles, 64-byte aligned)"
-        A["u_current (u^n)<br/>Current time step solution<br/>n doubles"]
-        B["u_next (u^(n+1))<br/>Next time step solution<br/>n doubles"]
-        C["u_stage<br/>Intermediate stage solution<br/>n doubles"]
-        D["rhs<br/>Right-hand side vector<br/>n doubles"]
-        E["matrix_diag<br/>Tridiagonal matrix diagonal<br/>n doubles"]
-        F["matrix_upper<br/>Tridiagonal matrix upper diagonal<br/>n doubles"]
-        G["matrix_lower<br/>Tridiagonal matrix lower diagonal<br/>n doubles"]
-        H["u_old<br/>Previous fixed-point iteration<br/>n doubles"]
-        I["Lu<br/>Spatial operator result<br/>n doubles"]
-        J["u_temp<br/>Temporary for relaxation<br/>n doubles"]
-    end
+graph LR
+    A["u_current<br/>n doubles"]
+    B["u_next<br/>n doubles"]
+    C["u_stage<br/>n doubles"]
+    D["rhs<br/>n doubles"]
+    E["matrix_diag<br/>n doubles"]
+    F["matrix_upper<br/>n doubles"]
+    G["matrix_lower<br/>n doubles"]
+    H["u_old<br/>n doubles"]
+    I["Lu<br/>n doubles"]
+    J["u_temp<br/>n doubles"]
+    K["tridiag_workspace<br/>2n doubles"]
 
-    style A fill:#e3f2fd
-    style B fill:#e3f2fd
-    style C fill:#fff3e0
-    style D fill:#fff3e0
-    style E fill:#f3e5f5
-    style F fill:#f3e5f5
-    style G fill:#f3e5f5
-    style H fill:#e8f5e9
-    style I fill:#e8f5e9
-    style J fill:#e8f5e9
+    A --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K
+
+    style A fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style I fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style J fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style K fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
 ```
 
 **Advantages**:
@@ -797,14 +795,14 @@ graph TD
 
     BRENT --> IV
 
-    style PARAMS fill:#e3f2fd
-    style AMERICAN fill:#fff3e0
-    style EUROPEAN fill:#f3e5f5
-    style SPLINE fill:#e8f5e9
-    style VALUE fill:#fce4ec
-    style MARKET fill:#ffebee
-    style BRENT fill:#fff9c4
-    style IV fill:#c8e6c9
+    style PARAMS fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style AMERICAN fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style EUROPEAN fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style SPLINE fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style VALUE fill:#fce4ec,stroke:#333,stroke-width:2px,color:#000
+    style MARKET fill:#ffebee,stroke:#333,stroke-width:2px,color:#000
+    style BRENT fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
+    style IV fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -1038,9 +1036,9 @@ bazel test //tests:american_option_test
 # Run PDE solver tests
 bazel test //tests:pde_solver_test
 
-# Compare with QuantLib
-bazel build //tests:quantlib_benchmark
-./bazel-bin/tests/quantlib_benchmark
+# Compare with QuantLib (requires libquantlib0-dev)
+bazel build //benchmarks:quantlib_benchmark
+./bazel-bin/benchmarks/quantlib_benchmark
 ```
 
 ---
