@@ -557,6 +557,42 @@ typedef void (*TemporalEventFunc)(double t, const double *x,
                                   void *user_data);
 ```
 
+### Temporal Event System
+
+The solver supports **temporal events** for handling discrete discontinuities in time (e.g., dividend payments, regime changes).
+
+**Registration**:
+```c
+PDECallbacks callbacks = {
+    // ... other callbacks ...
+    .temporal_event = my_event_handler,
+    .n_temporal_events = 2,
+    .temporal_event_times = (double[]){0.25, 0.75},  // Event times in [t_start, t_end]
+    .user_data = &my_data
+};
+```
+
+**How it works**:
+1. Solver maintains sorted list of event times
+2. During time-stepping, checks if current step crosses an event
+3. When event triggered:
+   - Solver completes step to exact event time
+   - Calls `temporal_event` callback with solution array
+   - Callback modifies solution in-place (e.g., applies dividend jump)
+   - Solver continues from modified state
+
+**Example use case - Dividend payments**:
+```c
+void dividend_event(double t, const double *x, size_t n, double *u,
+                    const size_t *event_indices, size_t n_events, void *data) {
+    // Apply stock price jump from dividend payment
+    // Interpolate option value to new grid after S → S - D
+    american_option_apply_dividend(x, n, u, u, dividend_amount, strike);
+}
+```
+
+**Thread safety**: Each solver instance has independent event state; batch processing with temporal events is safe.
+
 ### Core Functions
 
 #### 1. **Solver Creation**
@@ -621,6 +657,53 @@ typedef enum {
     BC_ROBIN                    // a·u + b·∂u/∂x = g(t)
 } BoundaryType;
 ```
+
+### Boundary Condition Implementation
+
+#### Dirichlet Boundaries
+Direct assignment of boundary values:
+```c
+u[0] = left_boundary(t);      // Left boundary
+u[n-1] = right_boundary(t);   // Right boundary
+```
+
+#### Neumann Boundaries (Ghost Point Method)
+For ∂u/∂x = g at boundaries, the solver uses the **ghost point method** to properly compute the spatial operator at boundary points while maintaining conservation properties.
+
+**Left boundary** (x = x_min):
+- Creates virtual point u_{-1} outside domain
+- Ghost point relation: u_{-1} = u_1 - 2·dx·g (from centered difference)
+- Estimates diffusion coefficient D from interior stencil
+- Computes: L(u)_0 = D·(2u_1 - 2u_0 - 2·dx·g) / dx²
+
+**Right boundary** (x = x_max):
+- Creates virtual point u_n outside domain
+- Ghost point relation: u_n = u_{n-2} + 2·dx·g
+- Estimates diffusion coefficient D from interior stencil
+- Computes: L(u)_{n-1} = D·(2u_{n-2} - 2u_{n-1} + 2·dx·g) / dx²
+
+**Assumption**: Ghost point method assumes pure diffusion operator L(u) = D·∂²u/∂x². For advection-diffusion or nonlinear operators, coefficient estimation may not be accurate. See `pde_solver.c` lines 83-86, 105.
+
+#### Robin Boundaries
+For a·u + b·∂u/∂x = g at boundaries:
+- Modified matrix entries in tridiagonal system
+- Incorporates both value and derivative conditions
+- Coefficients a, b validated to prevent division by zero (a ≠ 0)
+
+### Performance Optimizations
+
+#### Zero-Allocation Tridiagonal Solver
+The tridiagonal solver (Thomas algorithm) uses pre-allocated workspace from the PDESolver's 12n buffer:
+- **Workspace**: 2n doubles for c_prime and d_prime arrays
+- **Benefit**: Eliminates malloc/free overhead in hot path
+- **Impact**: Called once per Newton iteration per timestep (~5-10% speedup)
+- **Backward compatibility**: Accepts NULL workspace pointer (allocates internally for standalone use)
+
+#### SIMD Vectorization
+Key loops marked with `#pragma omp simd` for automatic vectorization:
+- Spatial operator evaluation
+- Tridiagonal forward/backward sweeps
+- Fixed-point iteration updates
 
 ### Test Coverage
 
