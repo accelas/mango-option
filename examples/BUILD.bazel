@@ -38,3 +38,13 @@ cc_binary(
         "//src:price_table",
     ],
 )
+
+cc_binary(
+    name = "test_cubic_4d_5d",
+    srcs = ["test_cubic_4d_5d.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//src:interp_cubic",
+        "//src:price_table",
+    ],
+)
