@@ -88,4 +88,13 @@ double cubic_interpolate_2d_workspace(const IVSurface *surface,
                                        double moneyness, double maturity,
                                        CubicInterpWorkspace workspace);
 
+// Forward declaration for OptionPriceTable
+typedef struct OptionPriceTable OptionPriceTable;
+
+// Workspace-based 4D interpolation (zero malloc)
+double cubic_interpolate_4d_workspace(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       CubicInterpWorkspace workspace);
+
 #endif // IVCALC_INTERP_CUBIC_H

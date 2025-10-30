@@ -3,6 +3,7 @@
 extern "C" {
 #include "../src/interp_cubic.h"
 #include "../src/iv_surface.h"
+#include "../src/price_table.h"
 }
 
 TEST(InterpolationWorkspace, CalculateRequiredSize2D) {
@@ -137,4 +138,46 @@ TEST(InterpolationWorkspace, Interpolate2DWorkspaceBoundary) {
 
     delete[] buffer;
     iv_surface_destroy(surface);
+}
+
+TEST(InterpolationWorkspace, Interpolate4DWithWorkspace) {
+    // Create 4D price table
+    double moneyness[] = {0.9, 1.0, 1.1};
+    double maturity[] = {0.5, 1.0};
+    double volatility[] = {0.15, 0.20, 0.25};
+    double rate[] = {0.01, 0.03};
+
+    OptionPriceTable *table = price_table_create(
+        moneyness, 3, maturity, 2, volatility, 3, rate, 2,
+        NULL, 0, OPTION_CALL, AMERICAN);
+    ASSERT_NE(table, nullptr);
+
+    // Set prices (simple linear combination for testing)
+    for (size_t i_m = 0; i_m < 3; i_m++) {
+        for (size_t i_tau = 0; i_tau < 2; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < 3; i_sigma++) {
+                for (size_t i_r = 0; i_r < 2; i_r++) {
+                    double price = 10.0 + moneyness[i_m] + maturity[i_tau] +
+                                   volatility[i_sigma] + rate[i_r];
+                    price_table_set(table, i_m, i_tau, i_sigma, i_r, 0, price);
+                }
+            }
+        }
+    }
+
+    // Allocate workspace
+    size_t ws_size = cubic_interp_workspace_size_4d(3, 2, 3, 2);
+    double *buffer = new double[ws_size];
+    CubicInterpWorkspace workspace;
+    cubic_interp_workspace_init(&workspace, buffer, 3, 2, 3, 2, 0);
+
+    // Query with workspace
+    double result_ws = cubic_interpolate_4d_workspace(table, 0.95, 0.75, 0.18, 0.02, workspace);
+    double result_malloc = price_table_interpolate_4d(table, 0.95, 0.75, 0.18, 0.02);
+
+    // Results should match
+    EXPECT_NEAR(result_ws, result_malloc, 1e-10);
+
+    delete[] buffer;
+    price_table_destroy(table);
 }
