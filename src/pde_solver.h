@@ -77,6 +77,8 @@ struct PDECallbacks {
     BoundaryConditionFunc left_boundary;
     BoundaryConditionFunc right_boundary;
     SpatialOperatorFunc spatial_operator;
+    double diffusion_coeff;                // Diffusion coefficient D for L(u)=D·∂²u/∂x²
+                                           // Required for Neumann BC; set to NAN if variable/not applicable
     JumpConditionFunc jump_condition;      // Optional, can be NULL (unused)
     ObstacleFunc obstacle;                 // Optional, can be NULL
     TemporalEventFunc temporal_event;      // Optional, can be NULL

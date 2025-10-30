@@ -269,6 +269,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
         .left_boundary = american_option_left_boundary,
         .right_boundary = american_option_right_boundary,
         .spatial_operator = american_option_spatial_operator,
+        .diffusion_coeff = 0.5 * option_data->volatility * option_data->volatility,  // σ²/2 for Black-Scholes
         .jump_condition = nullptr,
         .obstacle = american_option_obstacle,
         .temporal_event = nullptr,
