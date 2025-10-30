@@ -121,7 +121,10 @@ cc_library(
 
 cc_library(
     name = "interp_cubic",
-    srcs = ["interp_cubic.c"],
+    srcs = [
+        "interp_cubic.c",
+        "interp_cubic_workspace.c",
+    ],
     hdrs = [
         "interp_cubic.h",
         "interp_strategy.h",
