@@ -79,37 +79,48 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
         // Ghost point: u_{-1} = u_1 (for zero flux du/dx = 0)
         // More generally: u_{-1} = u_1 - 2*dx*g where du/dx = g
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        double D = solver->callbacks.diffusion_coeff;
 
-        // ASSUMPTION: This method assumes a pure diffusion operator L(u) = D·∂²u/∂x²
-        // For advection-diffusion or nonlinear operators, the coefficient estimation
-        // may not be accurate. Consider making D an explicit parameter if needed.
-        //
-        // Estimate diffusion coefficient from interior point
-        // L(u)_1 ≈ D * (u_0 - 2*u_1 + u_2) / dx² for diffusion
-        // We'll use finite differences to estimate the stencil coefficient
-        if (n >= 3 && fabs(u[0] - 2.0*u[1] + u[2]) > 1e-12) {
-            double D_estimate = result[1] * dx * dx / (u[0] - 2.0*u[1] + u[2]);
+        // Check if explicit diffusion coefficient is provided
+        if (!isnan(D)) {
+            // Use explicit diffusion coefficient (pure diffusion operator L(u) = D·∂²u/∂x²)
             // Ghost point stencil: L(u)_0 = D * (u_{-1} - 2*u_0 + u_1) / dx²
             //                             = D * (u_1 - 2*dx*g - 2*u_0 + u_1) / dx²
             //                             = D * (2*u_1 - 2*u_0 - 2*dx*g) / dx²
-            result[0] = D_estimate * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
+            result[0] = D * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
         } else {
-            // Fallback for edge cases
-            result[0] = 0.0;
+            // Fall back to estimation for variable/non-constant diffusion
+            // ASSUMPTION: This assumes pure diffusion operator L(u) = D·∂²u/∂x²
+            // For advection-diffusion or nonlinear operators, this may be inaccurate
+            if (n >= 3 && fabs(u[0] - 2.0*u[1] + u[2]) > 1e-12) {
+                double D_estimate = result[1] * dx * dx / (u[0] - 2.0*u[1] + u[2]);
+                result[0] = D_estimate * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
+            } else {
+                // Fallback for edge cases
+                result[0] = 0.0;
+            }
         }
     }
 
     if (solver->bc_config.right_type == BC_NEUMANN) {
         double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+        double D = solver->callbacks.diffusion_coeff;
 
-        // ASSUMPTION: Same as left boundary - assumes pure diffusion operator
-        if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
-            double D_estimate = result[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
+        // Check if explicit diffusion coefficient is provided
+        if (!isnan(D)) {
+            // Use explicit diffusion coefficient (pure diffusion operator L(u) = D·∂²u/∂x²)
             // Ghost point: u_n = u_{n-2} + 2*dx*g
             // L(u)_{n-1} = D * (u_{n-2} - 2*u_{n-1} + u_n) / dx²
-            result[n-1] = D_estimate * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
+            result[n-1] = D * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
         } else {
-            result[n-1] = 0.0;
+            // Fall back to estimation for variable/non-constant diffusion
+            // ASSUMPTION: Same as left boundary - assumes pure diffusion operator
+            if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
+                double D_estimate = result[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
+                result[n-1] = D_estimate * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
+            } else {
+                result[n-1] = 0.0;
+            }
         }
     }
 }

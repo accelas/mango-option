@@ -153,6 +153,7 @@ int main(void) {
         .left_boundary = heat_left_boundary,
         .right_boundary = heat_right_boundary,
         .spatial_operator = heat_spatial_operator,
+        .diffusion_coeff = heat_data.diffusion_coeff,  // Constant diffusion coefficient
         .jump_condition = nullptr,
         .obstacle = nullptr,
         .temporal_event = nullptr,
@@ -197,6 +198,7 @@ int main(void) {
     grid = pde_create_grid(0.0, 1.0, 101);
 
     callbacks.spatial_operator = heat_spatial_operator_with_jump;
+    callbacks.diffusion_coeff = NAN;  // Variable diffusion, use estimation
     callbacks.jump_condition = heat_jump_condition;
 
     solver = pde_solver_create(&grid, &time, &bc_config, &trbdf2_config, &callbacks);
@@ -217,6 +219,7 @@ int main(void) {
     grid = pde_create_grid(0.0, 1.0, 101);
 
     callbacks.spatial_operator = heat_spatial_operator;
+    callbacks.diffusion_coeff = heat_data.diffusion_coeff;  // Restore constant diffusion
     callbacks.jump_condition = nullptr;
     callbacks.obstacle = obstacle_condition;
 
