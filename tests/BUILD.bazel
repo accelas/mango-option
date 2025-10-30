@@ -104,3 +104,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "interpolation_workspace_test",
+    srcs = ["interpolation_workspace_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:interp_cubic",
+        "//src:iv_surface",
+        "//src:price_table",
+        "@googletest//:gtest_main",
+    ],
+)

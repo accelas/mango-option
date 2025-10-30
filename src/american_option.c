@@ -149,7 +149,8 @@ static void american_option_dividend_event(double t, const double *x_grid,
                                            size_t n_points, double *V,
                                            const size_t *event_indices,
                                            size_t n_events_triggered,
-                                           void *user_data);
+                                           void *user_data,
+                                           double *workspace);
 
 // Discrete dividend adjustment: Handle stock price jump when dividend is paid
 // When dividend D is paid, stock price jumps from S to S - D
@@ -346,15 +347,14 @@ static void american_option_dividend_event([[maybe_unused]] double t,
                                            size_t n_points, double *V,
                                            const size_t *event_indices,
                                            size_t n_events_triggered,
-                                           void *user_data) {
+                                           void *user_data,
+                                           double *workspace) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *option_data = ext_data->option_data;
 
-    // Allocate workspace for dividend adjustment
-    double *V_temp = (double *)malloc(n_points * sizeof(double));
-    if (V_temp == nullptr) {
-        return; // Allocation failed, skip dividend handling
-    }
+    // Use workspace instead of malloc
+    // workspace already allocated by solver (n_points doubles)
+    double *V_temp = workspace;  // No malloc needed!
 
     // Apply each triggered dividend
     for (size_t i = 0; i < n_events_triggered; i++) {
@@ -372,8 +372,7 @@ static void american_option_dividend_event([[maybe_unused]] double t,
         }
     }
 
-    // Clean up workspace
-    free(V_temp);
+    // No free needed - workspace managed by solver
 }
 
 // Utility: Get option value at specific spot price
