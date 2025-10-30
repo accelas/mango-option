@@ -29,6 +29,33 @@ typedef struct {
     CubicSpline **moneyness_splines;  // Array of n_maturity splines
 } Cubic2DCoeffs;
 
+/**
+ * Pre-computed coefficients for 4D interpolation
+ * Stores one spline per (tau, sigma, r) combination (varying moneyness)
+ * Uses flat array with index = j_tau * (n_sigma * n_r) + j_sigma * n_r + j_r
+ */
+typedef struct {
+    size_t n_maturity;
+    size_t n_volatility;
+    size_t n_rate;
+    const double *moneyness_grid;   // Not owned, points to table grid
+    CubicSpline **moneyness_splines;  // Flat array of n_tau * n_sigma * n_r spline pointers
+} Cubic4DCoeffs;
+
+/**
+ * Pre-computed coefficients for 5D interpolation
+ * Stores one spline per (tau, sigma, r, q) combination (varying moneyness)
+ * Uses flat array with index = j_tau * (n_sigma * n_r * n_q) + j_sigma * (n_r * n_q) + j_r * n_q + j_q
+ */
+typedef struct {
+    size_t n_maturity;
+    size_t n_volatility;
+    size_t n_rate;
+    size_t n_dividend;
+    const double *moneyness_grid;   // Not owned, points to table grid
+    CubicSpline **moneyness_splines;  // Flat array of n_tau * n_sigma * n_r * n_q spline pointers
+} Cubic5DCoeffs;
+
 // Forward declarations
 static double cubic_interpolate_2d(const IVSurface *surface,
                                    double moneyness, double maturity,
@@ -184,12 +211,16 @@ static double cubic_interpolate_2d(const IVSurface *surface,
 static double cubic_interpolate_4d(const OptionPriceTable *table,
                                    double moneyness, double maturity,
                                    double volatility, double rate,
-                                   [[maybe_unused]] InterpContext context) {
+                                   InterpContext context) {
     // Need at least 2 points in each dimension for cubic splines
     if (table->n_moneyness < 2 || table->n_maturity < 2 ||
         table->n_volatility < 2 || table->n_rate < 2) {
         return NAN;
     }
+
+    // Check if we have pre-computed coefficients
+    CubicContext *ctx = (CubicContext*)context;
+    Cubic4DCoeffs *coeffs = (ctx && ctx->coefficients) ? (Cubic4DCoeffs*)ctx->coefficients : NULL;
 
     // Stage 1: Interpolate along moneyness for each (tau, sigma, r) combination
     // Result: intermediate1[j_tau][j_sigma][j_r]
@@ -197,43 +228,61 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     double *intermediate1 = malloc(n1 * sizeof(double));
     if (!intermediate1) return NAN;
 
-    double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
-    if (!moneyness_slice) {
-        free(intermediate1);
-        return NAN;
-    }
-
-    for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
-        for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
-            for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
-                // Extract moneyness slice: fix (tau, sigma, r), vary moneyness
-                for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
-                    size_t idx = i_m * table->stride_m
-                               + j_tau * table->stride_tau
-                               + j_sigma * table->stride_sigma
-                               + j_r * table->stride_r;
-                    moneyness_slice[i_m] = table->prices[idx];
+    if (coeffs) {
+        // Fast path: Use pre-computed spline coefficients
+        for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                    size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
+                                + j_sigma * table->n_rate
+                                + j_r;
+                    size_t spline_idx = j_tau * (coeffs->n_volatility * coeffs->n_rate)
+                                      + j_sigma * coeffs->n_rate
+                                      + j_r;
+                    intermediate1[idx1] = pde_spline_eval(coeffs->moneyness_splines[spline_idx], moneyness);
                 }
-
-                // Build cubic spline along moneyness and evaluate at query point
-                CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
-                                                           moneyness_slice,
-                                                           table->n_moneyness);
-                if (!m_spline) {
-                    free(intermediate1);
-                    free(moneyness_slice);
-                    return NAN;
-                }
-
-                size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
-                            + j_sigma * table->n_rate
-                            + j_r;
-                intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
-                pde_spline_destroy(m_spline);
             }
         }
+    } else {
+        // Slow path: Compute splines on-the-fly
+        double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
+        if (!moneyness_slice) {
+            free(intermediate1);
+            return NAN;
+        }
+
+        for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                    // Extract moneyness slice: fix (tau, sigma, r), vary moneyness
+                    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                        size_t idx = i_m * table->stride_m
+                                   + j_tau * table->stride_tau
+                                   + j_sigma * table->stride_sigma
+                                   + j_r * table->stride_r;
+                        moneyness_slice[i_m] = table->prices[idx];
+                    }
+
+                    // Build cubic spline along moneyness and evaluate at query point
+                    CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
+                                                               moneyness_slice,
+                                                               table->n_moneyness);
+                    if (!m_spline) {
+                        free(intermediate1);
+                        free(moneyness_slice);
+                        return NAN;
+                    }
+
+                    size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
+                                + j_sigma * table->n_rate
+                                + j_r;
+                    intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
+                    pde_spline_destroy(m_spline);
+                }
+            }
+        }
+        free(moneyness_slice);
     }
-    free(moneyness_slice);
 
     // Stage 2: Interpolate along maturity for each (sigma, r) combination
     // Result: intermediate2[j_sigma][j_r]
@@ -356,12 +405,16 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                                    double moneyness, double maturity,
                                    double volatility, double rate,
                                    double dividend,
-                                   [[maybe_unused]] InterpContext context) {
+                                   InterpContext context) {
     // Need at least 2 points in each dimension for cubic splines
     if (table->n_moneyness < 2 || table->n_maturity < 2 ||
         table->n_volatility < 2 || table->n_rate < 2 || table->n_dividend < 2) {
         return NAN;
     }
+
+    // Check if we have pre-computed coefficients
+    CubicContext *ctx = (CubicContext*)context;
+    Cubic5DCoeffs *coeffs = (ctx && ctx->coefficients) ? (Cubic5DCoeffs*)ctx->coefficients : NULL;
 
     // Stage 1: Interpolate along moneyness for each (tau, sigma, r, q) combination
     // Result: intermediate1[j_tau][j_sigma][j_r][j_q]
@@ -369,47 +422,69 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     double *intermediate1 = malloc(n1 * sizeof(double));
     if (!intermediate1) return NAN;
 
-    double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
-    if (!moneyness_slice) {
-        free(intermediate1);
-        return NAN;
-    }
-
-    for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
-        for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
-            for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
-                for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
-                    // Extract moneyness slice: fix (tau, sigma, r, q), vary moneyness
-                    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
-                        size_t idx = i_m * table->stride_m
-                                   + j_tau * table->stride_tau
-                                   + j_sigma * table->stride_sigma
-                                   + j_r * table->stride_r
-                                   + j_q * table->stride_q;
-                        moneyness_slice[i_m] = table->prices[idx];
+    if (coeffs) {
+        // Fast path: Use pre-computed spline coefficients
+        for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                    for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+                        size_t idx1 = j_tau * (table->n_volatility * table->n_rate * table->n_dividend)
+                                    + j_sigma * (table->n_rate * table->n_dividend)
+                                    + j_r * table->n_dividend
+                                    + j_q;
+                        size_t spline_idx = j_tau * (coeffs->n_volatility * coeffs->n_rate * coeffs->n_dividend)
+                                          + j_sigma * (coeffs->n_rate * coeffs->n_dividend)
+                                          + j_r * coeffs->n_dividend
+                                          + j_q;
+                        intermediate1[idx1] = pde_spline_eval(coeffs->moneyness_splines[spline_idx], moneyness);
                     }
-
-                    // Build cubic spline along moneyness and evaluate
-                    CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
-                                                               moneyness_slice,
-                                                               table->n_moneyness);
-                    if (!m_spline) {
-                        free(intermediate1);
-                        free(moneyness_slice);
-                        return NAN;
-                    }
-
-                    size_t idx1 = j_tau * (table->n_volatility * table->n_rate * table->n_dividend)
-                                + j_sigma * (table->n_rate * table->n_dividend)
-                                + j_r * table->n_dividend
-                                + j_q;
-                    intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
-                    pde_spline_destroy(m_spline);
                 }
             }
         }
+    } else {
+        // Slow path: Compute splines on-the-fly
+        double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
+        if (!moneyness_slice) {
+            free(intermediate1);
+            return NAN;
+        }
+
+        for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                    for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+                        // Extract moneyness slice: fix (tau, sigma, r, q), vary moneyness
+                        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                            size_t idx = i_m * table->stride_m
+                                       + j_tau * table->stride_tau
+                                       + j_sigma * table->stride_sigma
+                                       + j_r * table->stride_r
+                                       + j_q * table->stride_q;
+                            moneyness_slice[i_m] = table->prices[idx];
+                        }
+
+                        // Build cubic spline along moneyness and evaluate
+                        CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
+                                                                   moneyness_slice,
+                                                                   table->n_moneyness);
+                        if (!m_spline) {
+                            free(intermediate1);
+                            free(moneyness_slice);
+                            return NAN;
+                        }
+
+                        size_t idx1 = j_tau * (table->n_volatility * table->n_rate * table->n_dividend)
+                                    + j_sigma * (table->n_rate * table->n_dividend)
+                                    + j_r * table->n_dividend
+                                    + j_q;
+                        intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
+                        pde_spline_destroy(m_spline);
+                    }
+                }
+            }
+        }
+        free(moneyness_slice);
     }
-    free(moneyness_slice);
 
     // Stage 2: Interpolate along maturity for each (sigma, r, q) combination
     // Result: intermediate2[j_sigma][j_r][j_q]
@@ -602,7 +677,28 @@ static void cubic_destroy_context(InterpContext context) {
             }
             free(coeffs);
         }
-        // TODO: Add cleanup for 4D and 5D when implemented
+        else if (ctx->dimensions == 4) {
+            Cubic4DCoeffs *coeffs = (Cubic4DCoeffs*)ctx->coefficients;
+            if (coeffs->moneyness_splines) {
+                size_t n_splines = coeffs->n_maturity * coeffs->n_volatility * coeffs->n_rate;
+                for (size_t i = 0; i < n_splines; i++) {
+                    pde_spline_destroy(coeffs->moneyness_splines[i]);
+                }
+                free(coeffs->moneyness_splines);
+            }
+            free(coeffs);
+        }
+        else if (ctx->dimensions == 5) {
+            Cubic5DCoeffs *coeffs = (Cubic5DCoeffs*)ctx->coefficients;
+            if (coeffs->moneyness_splines) {
+                size_t n_splines = coeffs->n_maturity * coeffs->n_volatility * coeffs->n_rate * coeffs->n_dividend;
+                for (size_t i = 0; i < n_splines; i++) {
+                    pde_spline_destroy(coeffs->moneyness_splines[i]);
+                }
+                free(coeffs->moneyness_splines);
+            }
+            free(coeffs);
+        }
     }
 
     free(ctx->grid_sizes);
@@ -672,6 +768,162 @@ static int cubic_precompute(const void *grid_data, InterpContext context) {
         return 0;
     }
 
-    // 4D and 5D not yet implemented
+    else if (ctx->dimensions == 4) {
+        // Pre-compute splines for 4D price table
+        const OptionPriceTable *table = (const OptionPriceTable*)grid_data;
+
+        if (table->n_moneyness < 2 || table->n_maturity < 2 ||
+            table->n_volatility < 2 || table->n_rate < 2) {
+            return -1;
+        }
+
+        // Allocate 4D coefficients structure
+        Cubic4DCoeffs *coeffs = malloc(sizeof(Cubic4DCoeffs));
+        if (!coeffs) return -1;
+
+        coeffs->n_maturity = table->n_maturity;
+        coeffs->n_volatility = table->n_volatility;
+        coeffs->n_rate = table->n_rate;
+        coeffs->moneyness_grid = table->moneyness_grid;
+
+        // Allocate flat array of spline pointers
+        size_t n_splines = table->n_maturity * table->n_volatility * table->n_rate;
+        coeffs->moneyness_splines = malloc(n_splines * sizeof(CubicSpline*));
+        if (!coeffs->moneyness_splines) {
+            free(coeffs);
+            return -1;
+        }
+
+        // Pre-compute a spline for each (tau, sigma, r) combination
+        double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
+        if (!moneyness_slice) {
+            free(coeffs->moneyness_splines);
+            free(coeffs);
+            return -1;
+        }
+
+        for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                    // Extract moneyness slice: fix (tau, sigma, r), vary moneyness
+                    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                        size_t idx = i_m * table->stride_m
+                                   + j_tau * table->stride_tau
+                                   + j_sigma * table->stride_sigma
+                                   + j_r * table->stride_r;
+                        moneyness_slice[i_m] = table->prices[idx];
+                    }
+
+                    // Calculate flat array index
+                    size_t spline_idx = j_tau * (table->n_volatility * table->n_rate)
+                                      + j_sigma * table->n_rate
+                                      + j_r;
+
+                    // Create and store spline for this slice
+                    coeffs->moneyness_splines[spline_idx] =
+                        pde_spline_create(table->moneyness_grid,
+                                         moneyness_slice,
+                                         table->n_moneyness);
+
+                    if (!coeffs->moneyness_splines[spline_idx]) {
+                        // Cleanup on error - destroy all previously created splines
+                        for (size_t k = 0; k < spline_idx; k++) {
+                            pde_spline_destroy(coeffs->moneyness_splines[k]);
+                        }
+                        free(moneyness_slice);
+                        free(coeffs->moneyness_splines);
+                        free(coeffs);
+                        return -1;
+                    }
+                }
+            }
+        }
+
+        free(moneyness_slice);
+        ctx->coefficients = coeffs;
+        return 0;
+    }
+    else if (ctx->dimensions == 5) {
+        // Pre-compute splines for 5D price table
+        const OptionPriceTable *table = (const OptionPriceTable*)grid_data;
+
+        if (table->n_moneyness < 2 || table->n_maturity < 2 ||
+            table->n_volatility < 2 || table->n_rate < 2 || table->n_dividend < 2) {
+            return -1;
+        }
+
+        // Allocate 5D coefficients structure
+        Cubic5DCoeffs *coeffs = malloc(sizeof(Cubic5DCoeffs));
+        if (!coeffs) return -1;
+
+        coeffs->n_maturity = table->n_maturity;
+        coeffs->n_volatility = table->n_volatility;
+        coeffs->n_rate = table->n_rate;
+        coeffs->n_dividend = table->n_dividend;
+        coeffs->moneyness_grid = table->moneyness_grid;
+
+        // Allocate flat array of spline pointers
+        size_t n_splines = table->n_maturity * table->n_volatility * table->n_rate * table->n_dividend;
+        coeffs->moneyness_splines = malloc(n_splines * sizeof(CubicSpline*));
+        if (!coeffs->moneyness_splines) {
+            free(coeffs);
+            return -1;
+        }
+
+        // Pre-compute a spline for each (tau, sigma, r, q) combination
+        double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
+        if (!moneyness_slice) {
+            free(coeffs->moneyness_splines);
+            free(coeffs);
+            return -1;
+        }
+
+        for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                    for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+                        // Extract moneyness slice: fix (tau, sigma, r, q), vary moneyness
+                        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                            size_t idx = i_m * table->stride_m
+                                       + j_tau * table->stride_tau
+                                       + j_sigma * table->stride_sigma
+                                       + j_r * table->stride_r
+                                       + j_q * table->stride_q;
+                            moneyness_slice[i_m] = table->prices[idx];
+                        }
+
+                        // Calculate flat array index
+                        size_t spline_idx = j_tau * (table->n_volatility * table->n_rate * table->n_dividend)
+                                          + j_sigma * (table->n_rate * table->n_dividend)
+                                          + j_r * table->n_dividend
+                                          + j_q;
+
+                        // Create and store spline for this slice
+                        coeffs->moneyness_splines[spline_idx] =
+                            pde_spline_create(table->moneyness_grid,
+                                             moneyness_slice,
+                                             table->n_moneyness);
+
+                        if (!coeffs->moneyness_splines[spline_idx]) {
+                            // Cleanup on error - destroy all previously created splines
+                            for (size_t k = 0; k < spline_idx; k++) {
+                                pde_spline_destroy(coeffs->moneyness_splines[k]);
+                            }
+                            free(moneyness_slice);
+                            free(coeffs->moneyness_splines);
+                            free(coeffs);
+                            return -1;
+                        }
+                    }
+                }
+            }
+        }
+
+        free(moneyness_slice);
+        ctx->coefficients = coeffs;
+        return 0;
+    }
+
+    // Unknown dimension
     return -1;
 }
