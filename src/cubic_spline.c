@@ -25,28 +25,28 @@ static size_t find_interval(const double *x, size_t n, double x_eval) {
     return left;
 }
 
-CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points) {
-    if (n_points < 2) {
+// Initialize cubic spline with caller-provided workspace (zero-malloc version)
+int pde_spline_init(CubicSpline *spline, const double *x, const double *y,
+                    size_t n_points, double *workspace, double *temp_workspace) {
+    if (n_points < 2 || spline == nullptr || workspace == nullptr || temp_workspace == nullptr) {
         // Trace error condition
         IVCALC_TRACE_SPLINE_ERROR(n_points, 2);
-        return nullptr;
+        return -1;
     }
 
-    CubicSpline *spline = malloc(sizeof(CubicSpline));
+    const size_t n = n_points;
+
+    // Initialize spline structure
     spline->n_points = n_points;
     spline->x = x;  // Store pointer (not owned)
     spline->y = y;  // Store pointer (not owned)
-
-    // Allocate single workspace buffer for all coefficient arrays
-    // Need 4 arrays of size n (a, b, c, d)
-    const size_t n = n_points;
-    spline->workspace = malloc(4 * n * sizeof(double));
+    spline->workspace = workspace;  // Store pointer (not owned - managed by caller)
 
     // Slice workspace into coefficient arrays
-    spline->coeffs_a = spline->workspace;
-    spline->coeffs_b = spline->workspace + n;
-    spline->coeffs_c = spline->workspace + 2 * n;
-    spline->coeffs_d = spline->workspace + 3 * n;
+    spline->coeffs_a = workspace;
+    spline->coeffs_b = workspace + n;
+    spline->coeffs_c = workspace + 2 * n;
+    spline->coeffs_d = workspace + 3 * n;
 
     // Compute spline coefficients using natural cubic spline
     // Sᵢ(x) = aᵢ + bᵢ·(x - xᵢ) + cᵢ·(x - xᵢ)² + dᵢ·(x - xᵢ)³
@@ -58,14 +58,10 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
         spline->coeffs_a[i] = y[i];
     }
 
-    // Allocate single temporary workspace for all temporary arrays
-    // Need: h(n-1), alpha(n-1), lower(n), diag(n), upper(n), rhs(n)
-    // Total: 2*(n-1) + 4*n = 6n - 2 doubles
-    double *temp_workspace = malloc((6 * n) * sizeof(double));
-
     // Slice temporary workspace
-    double *h = temp_workspace;                    // n-1 (but allocate n for simplicity)
-    double *alpha = temp_workspace + n;            // n-1 (but allocate n)
+    // Need: h(n), alpha(n), lower(n), diag(n), upper(n), rhs(n)
+    double *h = temp_workspace;
+    double *alpha = temp_workspace + n;
     double *lower = temp_workspace + 2 * n;
     double *diag = temp_workspace + 3 * n;
     double *upper = temp_workspace + 4 * n;
@@ -103,8 +99,9 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
     rhs[n - 1] = 0.0;
 
     // Solve tridiagonal system using shared solver
-    // Pass NULL for workspace (not in hot path, allocation is acceptable)
-    solve_tridiagonal(n, lower, diag, upper, rhs, spline->coeffs_c, NULL);
+    // Pass NULL for now - will optimize workspace reuse in next iteration
+    // TODO: Allocate 8n temp workspace and use last 2n for tridiagonal solver
+    solve_tridiagonal(n, lower, diag, upper, rhs, spline->coeffs_c, nullptr);
 
     // Compute b and d coefficients from c
     #pragma omp simd
@@ -114,8 +111,51 @@ CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points
         spline->coeffs_d[j] = (spline->coeffs_c[j + 1] - spline->coeffs_c[j]) / (3.0 * h[j]);
     }
 
-    // Free temporary workspace (single free for all temporary arrays)
+    return 0;
+}
+
+// Create and compute cubic spline interpolation (malloc-based)
+CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points) {
+    if (n_points < 2) {
+        // Trace error condition
+        IVCALC_TRACE_SPLINE_ERROR(n_points, 2);
+        return nullptr;
+    }
+
+    const size_t n = n_points;
+
+    // Allocate spline structure
+    CubicSpline *spline = malloc(sizeof(CubicSpline));
+    if (spline == nullptr) {
+        return nullptr;
+    }
+
+    // Allocate workspace for coefficients (4n doubles)
+    double *workspace = malloc(4 * n * sizeof(double));
+    if (workspace == nullptr) {
+        free(spline);
+        return nullptr;
+    }
+
+    // Allocate temporary workspace (6n doubles)
+    double *temp_workspace = malloc(6 * n * sizeof(double));
+    if (temp_workspace == nullptr) {
+        free(workspace);
+        free(spline);
+        return nullptr;
+    }
+
+    // Initialize using workspace-based function
+    int result = pde_spline_init(spline, x, y, n_points, workspace, temp_workspace);
+
+    // Free temporary workspace (no longer needed after initialization)
     free(temp_workspace);
+
+    if (result != 0) {
+        free(workspace);
+        free(spline);
+        return nullptr;
+    }
 
     return spline;
 }
