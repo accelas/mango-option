@@ -35,7 +35,11 @@ typedef struct {
 
 // ---------- Helper Functions ----------
 
-// Helper: Convert flat index to multi-dimensional indices
+/**
+ * Convert flat index to multi-dimensional grid indices.
+ * Maps a linear array index to (moneyness, maturity, volatility, rate, dividend)
+ * indices based on the table's stride configuration.
+ */
 static void unflatten_index(size_t idx, const OptionPriceTable *table,
                            size_t *i_m, size_t *i_tau, size_t *i_sigma,
                            size_t *i_r, size_t *i_q) {
@@ -56,21 +60,33 @@ static void unflatten_index(size_t idx, const OptionPriceTable *table,
     *i_q = remaining;
 }
 
-// Helper: Convert grid point to OptionData
-// Note: Moneyness (m) will be handled separately when extracting price
+/**
+ * Convert grid point indices to OptionData structure.
+ * Extracts grid values at the specified indices and constructs an option
+ * with fixed reference strike K_ref = 100.0.
+ *
+ * Moneyness scaling approach:
+ * - All precomputed prices use K_ref = 100.0 as the strike
+ * - Moneyness m = S/K is stored in the grid
+ * - Actual spot price S will be computed when needed: S = m * K_ref
+ * - This allows one table to serve all strikes via moneyness interpolation
+ */
 static OptionData grid_point_to_option(const OptionPriceTable *table,
                                        size_t i_m, size_t i_tau,
                                        size_t i_sigma, size_t i_r,
                                        size_t i_q) {
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
 
+    double m = table->moneyness_grid[i_m];
     double tau = table->maturity_grid[i_tau];
     double sigma = table->volatility_grid[i_sigma];
     double r = table->rate_grid[i_r];
+    double q = (table->n_dividend > 0) ? table->dividend_grid[i_q] : 0.0;
 
-    // Suppress unused variable warnings for now (will be used in Task 2)
-    (void)i_m;
-    (void)i_q;
+    // Note: Moneyness m is extracted but not yet used
+    // Spot price calculation S = m * K_ref will be performed in Task 2
+    (void)m;
+    (void)q;
 
     OptionData option = {
         .strike = K_ref,
@@ -86,7 +102,11 @@ static OptionData grid_point_to_option(const OptionPriceTable *table,
     return option;
 }
 
-// Helper: Get batch size from environment or default
+/**
+ * Get batch size for parallel computation from environment variable.
+ * Defaults to 100 if IVCALC_PRECOMPUTE_BATCH_SIZE is not set or invalid.
+ * Valid range: 1 to 100000.
+ */
 static size_t get_batch_size(void) {
     size_t batch_size = 100;  // Default
 
