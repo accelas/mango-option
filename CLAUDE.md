@@ -83,11 +83,18 @@ The solver uses a vectorized callback architecture for maximum efficiency and fl
    - Vectorized: returns Lu for all grid points
    - User implements finite difference stencils (e.g., ∂²u/∂x²)
 
-4. **Jump Condition** (optional): `bool (*)(double x, double *jump_value, void *user_data)`
+4. **Diffusion Coefficient** (scalar field): `double diffusion_coeff`
+   - Explicit diffusion coefficient D for pure diffusion operators L(u) = D·∂²u/∂x²
+   - **Required for Neumann boundary conditions** to ensure accurate ghost point method
+   - Set to `NAN` if diffusion is variable/spatially-varying (falls back to estimation)
+   - For Black-Scholes: D = σ²/2 (half the variance)
+   - Improves numerical stability and removes estimation errors
+
+5. **Jump Condition** (optional): `bool (*)(double x, double *jump_value, void *user_data)`
    - Handles discontinuous coefficients at interfaces
    - Scalar callback for interface location queries
 
-5. **Obstacle Condition** (optional): `void (*)(const double *x, double t, size_t n, double *ψ, void *user_data)`
+6. **Obstacle Condition** (optional): `void (*)(const double *x, double t, size_t n, double *ψ, void *user_data)`
    - Computes obstacle ψ(x,t) for all grid points
    - Enforces u(x,t) ≥ ψ(x,t) for variational inequalities
    - Vectorized for efficiency
@@ -426,6 +433,7 @@ PDECallbacks callbacks = {
     .left_boundary = my_left_bc,
     .right_boundary = my_right_bc,
     .spatial_operator = my_spatial_op,
+    .diffusion_coeff = 0.1,  // For constant diffusion; set to NAN if variable
     .user_data = &my_data
 };
 BoundaryConfig bc = pde_default_boundary_config();
