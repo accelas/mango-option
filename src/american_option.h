@@ -4,6 +4,10 @@
 #include "pde_solver.h"
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Option type enumeration
 typedef enum {
     OPTION_CALL,
@@ -81,5 +85,9 @@ void american_option_obstacle(const double *x, double t, size_t n_points,
 // x_spot: log-moneyness ln(S/K)
 double american_option_get_value_at_spot(const PDESolver *solver, double spot_price,
                                         double strike);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // AMERICAN_OPTION_H
