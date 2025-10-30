@@ -127,10 +127,25 @@ static double cubic_interpolate_2d(const IVSurface *surface,
     CubicContext *ctx = (CubicContext*)context;
     Cubic2DCoeffs *coeffs = (ctx && ctx->coefficients) ? (Cubic2DCoeffs*)ctx->coefficients : NULL;
 
+    // Allocate workspaces for zero-malloc spline creation (slow path only)
+    size_t max_grid_size = surface->n_moneyness > surface->n_maturity ?
+                          surface->n_moneyness : surface->n_maturity;
+    double *spline_coeff_workspace = malloc(4 * max_grid_size * sizeof(double));
+    double *spline_temp_workspace = malloc(6 * max_grid_size * sizeof(double));
+    if (!spline_coeff_workspace || !spline_temp_workspace) {
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
+        return NAN;
+    }
+
     // Step 1: For each maturity grid point, interpolate along moneyness at query point
     // This gives us intermediate_values[j] for all j in [0, n_maturity)
     double *intermediate_values = malloc(surface->n_maturity * sizeof(double));
-    if (!intermediate_values) return NAN;
+    if (!intermediate_values) {
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
+        return NAN;
+    }
 
     if (coeffs) {
         // Fast path: Use pre-computed spline coefficients
@@ -139,12 +154,16 @@ static double cubic_interpolate_2d(const IVSurface *surface,
             intermediate_values[j_tau] = pde_spline_eval(coeffs->moneyness_splines[j_tau], moneyness);
         }
     } else {
-        // Slow path: Compute splines on-the-fly
+        // Slow path: Compute splines on-the-fly using workspace-based API
         double *moneyness_slice = malloc(surface->n_moneyness * sizeof(double));
         if (!moneyness_slice) {
             free(intermediate_values);
+            free(spline_coeff_workspace);
+            free(spline_temp_workspace);
             return NAN;
         }
+
+        CubicSpline m_spline;  // Stack-allocated
 
         for (size_t j_tau = 0; j_tau < surface->n_maturity; j_tau++) {
             // Extract moneyness slice at this maturity level
@@ -155,38 +174,45 @@ static double cubic_interpolate_2d(const IVSurface *surface,
                 moneyness_slice[i_m] = surface->iv_surface[idx];
             }
 
-            // Build cubic spline along moneyness using this slice
-            CubicSpline *m_spline = pde_spline_create(surface->moneyness_grid,
-                                                        moneyness_slice,
-                                                        surface->n_moneyness);
-            if (!m_spline) {
+            // Initialize cubic spline using workspace (zero-malloc)
+            int result = pde_spline_init(&m_spline, surface->moneyness_grid,
+                                         moneyness_slice, surface->n_moneyness,
+                                         spline_coeff_workspace, spline_temp_workspace);
+            if (result != 0) {
                 free(intermediate_values);
                 free(moneyness_slice);
+                free(spline_coeff_workspace);
+                free(spline_temp_workspace);
                 return NAN;
             }
 
             // Evaluate at query moneyness
-            intermediate_values[j_tau] = pde_spline_eval(m_spline, moneyness);
-            pde_spline_destroy(m_spline);
+            intermediate_values[j_tau] = pde_spline_eval(&m_spline, moneyness);
+            // No destroy needed - workspace is reused
         }
 
         free(moneyness_slice);
     }
 
     // Step 2: Build cubic spline along maturity using intermediate values
-    CubicSpline *tau_spline = pde_spline_create(surface->maturity_grid,
-                                                  intermediate_values,
-                                                  surface->n_maturity);
-    if (!tau_spline) {
+    CubicSpline tau_spline;  // Stack-allocated
+    int result_init = pde_spline_init(&tau_spline, surface->maturity_grid,
+                                      intermediate_values, surface->n_maturity,
+                                      spline_coeff_workspace, spline_temp_workspace);
+    if (result_init != 0) {
         free(intermediate_values);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
     // Evaluate at query maturity
-    double result = pde_spline_eval(tau_spline, maturity);
+    double result = pde_spline_eval(&tau_spline, maturity);
+    // No destroy needed - workspace managed by caller
 
-    pde_spline_destroy(tau_spline);
     free(intermediate_values);
+    free(spline_coeff_workspace);
+    free(spline_temp_workspace);
 
     return result;
 }
@@ -222,11 +248,31 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     CubicContext *ctx = (CubicContext*)context;
     Cubic4DCoeffs *coeffs = (ctx && ctx->coefficients) ? (Cubic4DCoeffs*)ctx->coefficients : NULL;
 
+    // Allocate workspaces for zero-malloc spline creation (slow path only)
+    // Find maximum grid size across all dimensions
+    size_t max_grid_size = table->n_moneyness;
+    if (table->n_maturity > max_grid_size) max_grid_size = table->n_maturity;
+    if (table->n_volatility > max_grid_size) max_grid_size = table->n_volatility;
+    if (table->n_rate > max_grid_size) max_grid_size = table->n_rate;
+
+    // Allocate workspaces once for the entire interpolation
+    double *spline_coeff_workspace = malloc(4 * max_grid_size * sizeof(double));
+    double *spline_temp_workspace = malloc(6 * max_grid_size * sizeof(double));
+    if (!spline_coeff_workspace || !spline_temp_workspace) {
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
+        return NAN;
+    }
+
     // Stage 1: Interpolate along moneyness for each (tau, sigma, r) combination
     // Result: intermediate1[j_tau][j_sigma][j_r]
     size_t n1 = table->n_maturity * table->n_volatility * table->n_rate;
     double *intermediate1 = malloc(n1 * sizeof(double));
-    if (!intermediate1) return NAN;
+    if (!intermediate1) {
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
+        return NAN;
+    }
 
     if (coeffs) {
         // Fast path: Use pre-computed spline coefficients
@@ -244,12 +290,16 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
             }
         }
     } else {
-        // Slow path: Compute splines on-the-fly
+        // Slow path: Compute splines on-the-fly using workspace-based API
         double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
         if (!moneyness_slice) {
             free(intermediate1);
+            free(spline_coeff_workspace);
+            free(spline_temp_workspace);
             return NAN;
         }
+
+        CubicSpline m_spline;  // Stack-allocated spline structure
 
         for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
             for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
@@ -263,21 +313,23 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
                         moneyness_slice[i_m] = table->prices[idx];
                     }
 
-                    // Build cubic spline along moneyness and evaluate at query point
-                    CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
-                                                               moneyness_slice,
-                                                               table->n_moneyness);
-                    if (!m_spline) {
+                    // Initialize cubic spline using workspace (zero-malloc)
+                    int result = pde_spline_init(&m_spline, table->moneyness_grid,
+                                                  moneyness_slice, table->n_moneyness,
+                                                  spline_coeff_workspace, spline_temp_workspace);
+                    if (result != 0) {
                         free(intermediate1);
                         free(moneyness_slice);
+                        free(spline_coeff_workspace);
+                        free(spline_temp_workspace);
                         return NAN;
                     }
 
                     size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
                                 + j_sigma * table->n_rate
                                 + j_r;
-                    intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
-                    pde_spline_destroy(m_spline);
+                    intermediate1[idx1] = pde_spline_eval(&m_spline, moneyness);
+                    // No destroy needed - workspace is reused
                 }
             }
         }
@@ -290,6 +342,8 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     double *intermediate2 = malloc(n2 * sizeof(double));
     if (!intermediate2) {
         free(intermediate1);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
@@ -297,8 +351,12 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     if (!maturity_slice) {
         free(intermediate1);
         free(intermediate2);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
+
+    CubicSpline tau_spline;  // Stack-allocated
 
     for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
         for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
@@ -310,20 +368,22 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
                 maturity_slice[j_tau] = intermediate1[idx1];
             }
 
-            // Build cubic spline along maturity and evaluate
-            CubicSpline *tau_spline = pde_spline_create(table->maturity_grid,
-                                                         maturity_slice,
-                                                         table->n_maturity);
-            if (!tau_spline) {
+            // Initialize cubic spline using workspace (zero-malloc)
+            int result = pde_spline_init(&tau_spline, table->maturity_grid,
+                                         maturity_slice, table->n_maturity,
+                                         spline_coeff_workspace, spline_temp_workspace);
+            if (result != 0) {
                 free(intermediate1);
                 free(intermediate2);
                 free(maturity_slice);
+                free(spline_coeff_workspace);
+                free(spline_temp_workspace);
                 return NAN;
             }
 
             size_t idx2 = j_sigma * table->n_rate + j_r;
-            intermediate2[idx2] = pde_spline_eval(tau_spline, maturity);
-            pde_spline_destroy(tau_spline);
+            intermediate2[idx2] = pde_spline_eval(&tau_spline, maturity);
+            // No destroy needed - workspace is reused
         }
     }
     free(intermediate1);
@@ -334,6 +394,8 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     double *intermediate3 = malloc(table->n_rate * sizeof(double));
     if (!intermediate3) {
         free(intermediate2);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
@@ -341,8 +403,12 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     if (!volatility_slice) {
         free(intermediate2);
         free(intermediate3);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
+
+    CubicSpline sigma_spline;  // Stack-allocated
 
     for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
         // Extract volatility slice from intermediate2: fix r, vary sigma
@@ -351,35 +417,43 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
             volatility_slice[j_sigma] = intermediate2[idx2];
         }
 
-        // Build cubic spline along volatility and evaluate
-        CubicSpline *sigma_spline = pde_spline_create(table->volatility_grid,
-                                                       volatility_slice,
-                                                       table->n_volatility);
-        if (!sigma_spline) {
+        // Initialize cubic spline using workspace (zero-malloc)
+        int result_init = pde_spline_init(&sigma_spline, table->volatility_grid,
+                                          volatility_slice, table->n_volatility,
+                                          spline_coeff_workspace, spline_temp_workspace);
+        if (result_init != 0) {
             free(intermediate2);
             free(intermediate3);
             free(volatility_slice);
+            free(spline_coeff_workspace);
+            free(spline_temp_workspace);
             return NAN;
         }
 
-        intermediate3[j_r] = pde_spline_eval(sigma_spline, volatility);
-        pde_spline_destroy(sigma_spline);
+        intermediate3[j_r] = pde_spline_eval(&sigma_spline, volatility);
+        // No destroy needed - workspace is reused
     }
     free(intermediate2);
     free(volatility_slice);
 
     // Stage 4: Final interpolation along rate
-    CubicSpline *r_spline = pde_spline_create(table->rate_grid,
-                                               intermediate3,
-                                               table->n_rate);
-    if (!r_spline) {
+    CubicSpline r_spline;  // Stack-allocated
+    int result_init = pde_spline_init(&r_spline, table->rate_grid,
+                                      intermediate3, table->n_rate,
+                                      spline_coeff_workspace, spline_temp_workspace);
+    if (result_init != 0) {
         free(intermediate3);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
-    double result = pde_spline_eval(r_spline, rate);
-    pde_spline_destroy(r_spline);
+    double result = pde_spline_eval(&r_spline, rate);
+    // No destroy needed - workspace managed by caller
+
     free(intermediate3);
+    free(spline_coeff_workspace);
+    free(spline_temp_workspace);
 
     return result;
 }
@@ -416,11 +490,32 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     CubicContext *ctx = (CubicContext*)context;
     Cubic5DCoeffs *coeffs = (ctx && ctx->coefficients) ? (Cubic5DCoeffs*)ctx->coefficients : NULL;
 
+    // Allocate workspaces for zero-malloc spline creation (slow path only)
+    // Find maximum grid size across all dimensions
+    size_t max_grid_size = table->n_moneyness;
+    if (table->n_maturity > max_grid_size) max_grid_size = table->n_maturity;
+    if (table->n_volatility > max_grid_size) max_grid_size = table->n_volatility;
+    if (table->n_rate > max_grid_size) max_grid_size = table->n_rate;
+    if (table->n_dividend > max_grid_size) max_grid_size = table->n_dividend;
+
+    // Allocate workspaces once for the entire interpolation
+    double *spline_coeff_workspace = malloc(4 * max_grid_size * sizeof(double));
+    double *spline_temp_workspace = malloc(6 * max_grid_size * sizeof(double));
+    if (!spline_coeff_workspace || !spline_temp_workspace) {
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
+        return NAN;
+    }
+
     // Stage 1: Interpolate along moneyness for each (tau, sigma, r, q) combination
     // Result: intermediate1[j_tau][j_sigma][j_r][j_q]
     size_t n1 = table->n_maturity * table->n_volatility * table->n_rate * table->n_dividend;
     double *intermediate1 = malloc(n1 * sizeof(double));
-    if (!intermediate1) return NAN;
+    if (!intermediate1) {
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
+        return NAN;
+    }
 
     if (coeffs) {
         // Fast path: Use pre-computed spline coefficients
@@ -442,12 +537,16 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
             }
         }
     } else {
-        // Slow path: Compute splines on-the-fly
+        // Slow path: Compute splines on-the-fly using workspace-based API
         double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
         if (!moneyness_slice) {
             free(intermediate1);
+            free(spline_coeff_workspace);
+            free(spline_temp_workspace);
             return NAN;
         }
+
+        CubicSpline m_spline;  // Stack-allocated spline structure
 
         for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
             for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
@@ -463,13 +562,15 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                             moneyness_slice[i_m] = table->prices[idx];
                         }
 
-                        // Build cubic spline along moneyness and evaluate
-                        CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
-                                                                   moneyness_slice,
-                                                                   table->n_moneyness);
-                        if (!m_spline) {
+                        // Initialize cubic spline using workspace (zero-malloc)
+                        int result = pde_spline_init(&m_spline, table->moneyness_grid,
+                                                      moneyness_slice, table->n_moneyness,
+                                                      spline_coeff_workspace, spline_temp_workspace);
+                        if (result != 0) {
                             free(intermediate1);
                             free(moneyness_slice);
+                            free(spline_coeff_workspace);
+                            free(spline_temp_workspace);
                             return NAN;
                         }
 
@@ -477,8 +578,8 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                                     + j_sigma * (table->n_rate * table->n_dividend)
                                     + j_r * table->n_dividend
                                     + j_q;
-                        intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
-                        pde_spline_destroy(m_spline);
+                        intermediate1[idx1] = pde_spline_eval(&m_spline, moneyness);
+                        // No destroy needed - workspace is reused
                     }
                 }
             }
@@ -492,6 +593,8 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     double *intermediate2 = malloc(n2 * sizeof(double));
     if (!intermediate2) {
         free(intermediate1);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
@@ -499,8 +602,12 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     if (!maturity_slice) {
         free(intermediate1);
         free(intermediate2);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
+
+    CubicSpline tau_spline;  // Stack-allocated
 
     for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
         for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
@@ -514,22 +621,24 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                     maturity_slice[j_tau] = intermediate1[idx1];
                 }
 
-                // Build cubic spline along maturity and evaluate
-                CubicSpline *tau_spline = pde_spline_create(table->maturity_grid,
-                                                             maturity_slice,
-                                                             table->n_maturity);
-                if (!tau_spline) {
+                // Initialize cubic spline using workspace (zero-malloc)
+                int result = pde_spline_init(&tau_spline, table->maturity_grid,
+                                             maturity_slice, table->n_maturity,
+                                             spline_coeff_workspace, spline_temp_workspace);
+                if (result != 0) {
                     free(intermediate1);
                     free(intermediate2);
                     free(maturity_slice);
+                    free(spline_coeff_workspace);
+                    free(spline_temp_workspace);
                     return NAN;
                 }
 
                 size_t idx2 = j_sigma * (table->n_rate * table->n_dividend)
                             + j_r * table->n_dividend
                             + j_q;
-                intermediate2[idx2] = pde_spline_eval(tau_spline, maturity);
-                pde_spline_destroy(tau_spline);
+                intermediate2[idx2] = pde_spline_eval(&tau_spline, maturity);
+                // No destroy needed - workspace is reused
             }
         }
     }
@@ -542,6 +651,8 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     double *intermediate3 = malloc(n3 * sizeof(double));
     if (!intermediate3) {
         free(intermediate2);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
@@ -549,8 +660,12 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     if (!volatility_slice) {
         free(intermediate2);
         free(intermediate3);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
+
+    CubicSpline sigma_spline;  // Stack-allocated
 
     for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
         for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
@@ -562,20 +677,22 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                 volatility_slice[j_sigma] = intermediate2[idx2];
             }
 
-            // Build cubic spline along volatility and evaluate
-            CubicSpline *sigma_spline = pde_spline_create(table->volatility_grid,
-                                                           volatility_slice,
-                                                           table->n_volatility);
-            if (!sigma_spline) {
+            // Initialize cubic spline using workspace (zero-malloc)
+            int result_init = pde_spline_init(&sigma_spline, table->volatility_grid,
+                                              volatility_slice, table->n_volatility,
+                                              spline_coeff_workspace, spline_temp_workspace);
+            if (result_init != 0) {
                 free(intermediate2);
                 free(intermediate3);
                 free(volatility_slice);
+                free(spline_coeff_workspace);
+                free(spline_temp_workspace);
                 return NAN;
             }
 
             size_t idx3 = j_r * table->n_dividend + j_q;
-            intermediate3[idx3] = pde_spline_eval(sigma_spline, volatility);
-            pde_spline_destroy(sigma_spline);
+            intermediate3[idx3] = pde_spline_eval(&sigma_spline, volatility);
+            // No destroy needed - workspace is reused
         }
     }
     free(intermediate2);
@@ -586,6 +703,8 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     double *intermediate4 = malloc(table->n_dividend * sizeof(double));
     if (!intermediate4) {
         free(intermediate3);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
@@ -593,8 +712,12 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     if (!rate_slice) {
         free(intermediate3);
         free(intermediate4);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
+
+    CubicSpline r_spline;  // Stack-allocated
 
     for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
         // Extract rate slice from intermediate3: fix q, vary r
@@ -603,35 +726,43 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
             rate_slice[j_r] = intermediate3[idx3];
         }
 
-        // Build cubic spline along rate and evaluate
-        CubicSpline *r_spline = pde_spline_create(table->rate_grid,
-                                                   rate_slice,
-                                                   table->n_rate);
-        if (!r_spline) {
+        // Initialize cubic spline using workspace (zero-malloc)
+        int result_init = pde_spline_init(&r_spline, table->rate_grid,
+                                          rate_slice, table->n_rate,
+                                          spline_coeff_workspace, spline_temp_workspace);
+        if (result_init != 0) {
             free(intermediate3);
             free(intermediate4);
             free(rate_slice);
+            free(spline_coeff_workspace);
+            free(spline_temp_workspace);
             return NAN;
         }
 
-        intermediate4[j_q] = pde_spline_eval(r_spline, rate);
-        pde_spline_destroy(r_spline);
+        intermediate4[j_q] = pde_spline_eval(&r_spline, rate);
+        // No destroy needed - workspace is reused
     }
     free(intermediate3);
     free(rate_slice);
 
     // Stage 5: Final interpolation along dividend
-    CubicSpline *q_spline = pde_spline_create(table->dividend_grid,
-                                               intermediate4,
-                                               table->n_dividend);
-    if (!q_spline) {
+    CubicSpline q_spline;  // Stack-allocated
+    int result_init = pde_spline_init(&q_spline, table->dividend_grid,
+                                      intermediate4, table->n_dividend,
+                                      spline_coeff_workspace, spline_temp_workspace);
+    if (result_init != 0) {
         free(intermediate4);
+        free(spline_coeff_workspace);
+        free(spline_temp_workspace);
         return NAN;
     }
 
-    double result = pde_spline_eval(q_spline, dividend);
-    pde_spline_destroy(q_spline);
+    double result = pde_spline_eval(&q_spline, dividend);
+    // No destroy needed - workspace managed by caller
+
     free(intermediate4);
+    free(spline_coeff_workspace);
+    free(spline_temp_workspace);
 
     return result;
 }
