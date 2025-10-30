@@ -48,3 +48,13 @@ cc_binary(
         "//src:price_table",
     ],
 )
+
+cc_binary(
+    name = "example_precompute_table",
+    srcs = ["example_precompute_table.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+    ],
+)
