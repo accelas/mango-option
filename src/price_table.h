@@ -166,15 +166,14 @@ void price_table_destroy(OptionPriceTable *table);
  * Progress can be monitored via USDT probes.
  *
  * @param table: price table to fill
- * @param pde_solver_template: template PDESolver for option pricing
- *                             (will be copied for each grid point)
+ * @param grid: Grid parameters for American option pricing
  * @return 0 on success, -1 on error
  *
  * Performance: ~50ms per option × parallelism factor
  *   Example: 300,000 grid points × 50ms ÷ 16 cores = ~15 minutes
  */
 int price_table_precompute(OptionPriceTable *table,
-                            const void *pde_solver_template);
+                            const AmericanOptionGrid *grid);
 
 // ---------- Data Access ----------
 
