@@ -594,11 +594,12 @@ typedef void (*ObstacleFunc)(const double *x, double t, size_t n_points,
                              double *psi, void *user_data);
 
 // Temporal events: Handle time-based events (dividends, etc.)
+// workspace parameter provides n_points doubles for temporary storage (zero malloc)
 typedef void (*TemporalEventFunc)(double t, const double *x,
                                   size_t n_points, double *u,
                                   const size_t *event_indices,
                                   size_t n_events_triggered,
-                                  void *user_data);
+                                  void *user_data, double *workspace);
 ```
 
 ### Temporal Event System
@@ -824,7 +825,75 @@ double derivative = pde_spline_eval_derivative(&spline, x_eval);
 
 **Implementation Note**: Both APIs share the same evaluation functions (`pde_spline_eval`, `pde_spline_eval_derivative`). The workspace-based API was added in PR #36 to eliminate malloc overhead in multi-dimensional interpolation hot paths.
 
-### 4.3 Tridiagonal Solver
+### 4.3 Workspace-Based Interpolation API
+
+**Added in PR #37** - Extends workspace pattern to multi-dimensional interpolation queries.
+
+**Files**: `src/interp_cubic.h`, `src/interp_cubic_workspace.c`
+
+**Problem**: Even with precomputed spline coefficients, slow-path queries (off-precomputed-grid) performed excessive malloc/free:
+- 2D interpolation: 4 malloc/free per query
+- 4D interpolation: 8 malloc/free per query
+- 5D interpolation: 10 malloc/free per query
+- Dividend event handler: 1 malloc/free per event
+
+**Solution**: Workspace-based interpolation functions that accept caller-provided buffers, eliminating all hot path allocations.
+
+**API**:
+```c
+// Calculate workspace size (once per table dimensions)
+size_t ws_size = cubic_interp_workspace_size_4d(n_m, n_tau, n_sigma, n_r);
+
+// Allocate workspace (once, reuse across millions of queries)
+double *buffer = malloc(ws_size * sizeof(double));
+CubicInterpWorkspace workspace;
+cubic_interp_workspace_init(&workspace, buffer, n_m, n_tau, n_sigma, n_r, 0);
+
+// Query with zero malloc (can be called millions of times)
+for (int i = 0; i < 1000000; i++) {
+    double price = cubic_interpolate_4d_workspace(table, m[i], tau[i],
+                                                    sigma[i], r[i], workspace);
+}
+
+// Cleanup
+free(buffer);
+```
+
+**Workspace Structure**:
+```c
+typedef struct {
+    double *spline_coeff_workspace;   // 4 * max_grid_size (reused across stages)
+    double *spline_temp_workspace;    // 6 * max_grid_size (reused across stages)
+    double *intermediate_arrays;      // Stage results (dimension-dependent)
+    double *slice_buffers;            // max_grid_size (slice extraction)
+    size_t max_grid_size;             // Largest dimension
+    size_t total_size;                // Total doubles allocated
+} CubicInterpWorkspace;
+```
+
+**Workspace Sizing Functions**:
+- `cubic_interp_workspace_size_2d(n_m, n_tau)` - 2D IV surface queries
+- `cubic_interp_workspace_size_4d(n_m, n_tau, n_sigma, n_r)` - 4D price tables
+- `cubic_interp_workspace_size_5d(n_m, n_tau, n_sigma, n_r, n_q)` - 5D with dividends
+
+**Zero-Malloc Query Functions**:
+- `cubic_interpolate_2d_workspace(surface, m, tau, workspace)` - 2D queries
+- `cubic_interpolate_4d_workspace(table, m, tau, sigma, r, workspace)` - 4D queries
+- `cubic_interpolate_5d_workspace(table, m, tau, sigma, r, q, workspace)` - 5D queries
+
+**Performance**: 100% elimination of malloc in interpolation hot paths.
+
+**Integration with Temporal Events**: The PDE solver provides workspace to temporal event callbacks via the `workspace` parameter, enabling zero-malloc dividend handling during American option pricing.
+
+**Memory Requirements** (typical 4D table: 50×30×20×10):
+- Spline workspace: 10 × 50 = 500 doubles (reused across stages)
+- Intermediate arrays: (30×20×10) + (20×10) + 10 = 6,210 doubles
+- Slice buffer: 50 doubles
+- **Total**: 6,760 doubles (~54KB per workspace)
+
+**Usage Pattern**: Allocate workspace once per table configuration, reuse across all queries. For multi-threaded scenarios, each thread maintains its own workspace to avoid contention.
+
+### 4.4 Tridiagonal Solver
 
 **File**: `src/tridiagonal.h`
 
@@ -834,7 +903,7 @@ double derivative = pde_spline_eval_derivative(&spline, x_eval);
   - TR-BDF2 implicit solver
   - Cubic spline coefficient calculation
 
-### 4.4 USDT Tracing System
+### 4.5 USDT Tracing System
 
 **File**: `src/ivcalc_trace.h`
 

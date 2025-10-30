@@ -65,11 +65,13 @@ typedef void (*ObstacleFunc)(const double *x, double t, size_t n_points,
 // Called by solver when crossing registered event times
 // Parameters: t (current time after events), x (grid points), n_points (size),
 //             u (solution - writable), event_indices (indices of events that occurred),
-//             n_events_triggered (number of events), user_data
+//             n_events_triggered (number of events), user_data,
+//             workspace (n_points doubles for temporary storage)
 // Note: Callback can modify u in-place to apply event effects
 typedef void (*TemporalEventFunc)(double t, const double *x, size_t n_points,
                                    double *u, const size_t *event_indices,
-                                   size_t n_events_triggered, void *user_data);
+                                   size_t n_events_triggered, void *user_data,
+                                   double *workspace);
 
 // Callback structure
 struct PDECallbacks {
