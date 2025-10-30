@@ -97,4 +97,11 @@ double cubic_interpolate_4d_workspace(const OptionPriceTable *table,
                                        double volatility, double rate,
                                        CubicInterpWorkspace workspace);
 
+// Workspace-based 5D interpolation (zero malloc)
+double cubic_interpolate_5d_workspace(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       double dividend,
+                                       CubicInterpWorkspace workspace);
+
 #endif // IVCALC_INTERP_CUBIC_H

@@ -181,3 +181,48 @@ TEST(InterpolationWorkspace, Interpolate4DWithWorkspace) {
     delete[] buffer;
     price_table_destroy(table);
 }
+
+TEST(InterpolationWorkspace, Interpolate5DWithWorkspace) {
+    // Create 5D price table (smaller grid for faster test)
+    double moneyness[] = {0.9, 1.0, 1.1};
+    double maturity[] = {0.5, 1.0};
+    double volatility[] = {0.15, 0.20};
+    double rate[] = {0.01, 0.03};
+    double dividend[] = {0.0, 0.02};
+
+    OptionPriceTable *table = price_table_create(
+        moneyness, 3, maturity, 2, volatility, 2, rate, 2,
+        dividend, 2, OPTION_CALL, AMERICAN);
+    ASSERT_NE(table, nullptr);
+
+    // Set prices
+    for (size_t i_m = 0; i_m < 3; i_m++) {
+        for (size_t i_tau = 0; i_tau < 2; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < 2; i_sigma++) {
+                for (size_t i_r = 0; i_r < 2; i_r++) {
+                    for (size_t i_q = 0; i_q < 2; i_q++) {
+                        double price = 10.0 + moneyness[i_m] + maturity[i_tau] +
+                                       volatility[i_sigma] + rate[i_r] + dividend[i_q];
+                        price_table_set(table, i_m, i_tau, i_sigma, i_r, i_q, price);
+                    }
+                }
+            }
+        }
+    }
+
+    // Allocate workspace
+    size_t ws_size = cubic_interp_workspace_size_5d(3, 2, 2, 2, 2);
+    double *buffer = new double[ws_size];
+    CubicInterpWorkspace workspace;
+    cubic_interp_workspace_init(&workspace, buffer, 3, 2, 2, 2, 2);
+
+    // Query with workspace
+    double result_ws = cubic_interpolate_5d_workspace(table, 0.95, 0.75, 0.18, 0.02, 0.01, workspace);
+    double result_malloc = price_table_interpolate_5d(table, 0.95, 0.75, 0.18, 0.02, 0.01);
+
+    // Results should match
+    EXPECT_NEAR(result_ws, result_malloc, 1e-10);
+
+    delete[] buffer;
+    price_table_destroy(table);
+}

@@ -240,6 +240,122 @@ double cubic_interpolate_4d_workspace(const OptionPriceTable *table,
     return pde_spline_eval(&r_spline, rate);
 }
 
+// Workspace-based 5D cubic interpolation (zero malloc version)
+double cubic_interpolate_5d_workspace(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       double dividend,
+                                       CubicInterpWorkspace workspace) {
+    if (table == NULL || table->n_dividend == 0) {
+        return NAN;
+    }
+
+    const size_t n_m = table->n_moneyness;
+    const size_t n_tau = table->n_maturity;
+    const size_t n_sigma = table->n_volatility;
+    const size_t n_r = table->n_rate;
+    const size_t n_q = table->n_dividend;
+
+    // Slice workspace into intermediate arrays
+    const size_t n1 = n_tau * n_sigma * n_r * n_q;
+    const size_t n2 = n_sigma * n_r * n_q;
+    const size_t n3 = n_r * n_q;
+
+    double *intermediate1 = workspace.intermediate_arrays;
+    double *intermediate2 = intermediate1 + n1;
+    double *intermediate3 = intermediate2 + n2;
+    double *intermediate4 = intermediate3 + n3;
+    double *slice = workspace.slice_buffers;
+
+    // Stage 1: Moneyness (n_tau × n_sigma × n_r × n_q splines)
+    for (size_t j = 0; j < n_tau; j++) {
+        for (size_t k = 0; k < n_sigma; k++) {
+            for (size_t l = 0; l < n_r; l++) {
+                for (size_t m = 0; m < n_q; m++) {
+                    // Extract moneyness slice
+                    for (size_t i = 0; i < n_m; i++) {
+                        size_t idx = i * table->stride_m + j * table->stride_tau +
+                                     k * table->stride_sigma + l * table->stride_r +
+                                     m * table->stride_q;
+                        slice[i] = table->prices[idx];
+                    }
+
+                    CubicSpline spline;
+                    int ret = pde_spline_init(&spline, table->moneyness_grid, slice, n_m,
+                                              workspace.spline_coeff_workspace,
+                                              workspace.spline_temp_workspace);
+                    if (ret != 0) return NAN;
+
+                    size_t idx1 = j * n_sigma * n_r * n_q + k * n_r * n_q + l * n_q + m;
+                    intermediate1[idx1] = pde_spline_eval(&spline, moneyness);
+                }
+            }
+        }
+    }
+
+    // Stage 2: Maturity (n_sigma × n_r × n_q splines)
+    for (size_t k = 0; k < n_sigma; k++) {
+        for (size_t l = 0; l < n_r; l++) {
+            for (size_t m = 0; m < n_q; m++) {
+                for (size_t j = 0; j < n_tau; j++) {
+                    slice[j] = intermediate1[j * n_sigma * n_r * n_q + k * n_r * n_q + l * n_q + m];
+                }
+
+                CubicSpline spline;
+                int ret = pde_spline_init(&spline, table->maturity_grid, slice, n_tau,
+                                          workspace.spline_coeff_workspace,
+                                          workspace.spline_temp_workspace);
+                if (ret != 0) return NAN;
+
+                size_t idx2 = k * n_r * n_q + l * n_q + m;
+                intermediate2[idx2] = pde_spline_eval(&spline, maturity);
+            }
+        }
+    }
+
+    // Stage 3: Volatility (n_r × n_q splines)
+    for (size_t l = 0; l < n_r; l++) {
+        for (size_t m = 0; m < n_q; m++) {
+            for (size_t k = 0; k < n_sigma; k++) {
+                slice[k] = intermediate2[k * n_r * n_q + l * n_q + m];
+            }
+
+            CubicSpline spline;
+            int ret = pde_spline_init(&spline, table->volatility_grid, slice, n_sigma,
+                                      workspace.spline_coeff_workspace,
+                                      workspace.spline_temp_workspace);
+            if (ret != 0) return NAN;
+
+            size_t idx3 = l * n_q + m;
+            intermediate3[idx3] = pde_spline_eval(&spline, volatility);
+        }
+    }
+
+    // Stage 4: Rate (n_q splines)
+    for (size_t m = 0; m < n_q; m++) {
+        for (size_t l = 0; l < n_r; l++) {
+            slice[l] = intermediate3[l * n_q + m];
+        }
+
+        CubicSpline spline;
+        int ret = pde_spline_init(&spline, table->rate_grid, slice, n_r,
+                                  workspace.spline_coeff_workspace,
+                                  workspace.spline_temp_workspace);
+        if (ret != 0) return NAN;
+
+        intermediate4[m] = pde_spline_eval(&spline, rate);
+    }
+
+    // Stage 5: Dividend (final)
+    CubicSpline q_spline;
+    int ret = pde_spline_init(&q_spline, table->dividend_grid, intermediate4, n_q,
+                              workspace.spline_coeff_workspace,
+                              workspace.spline_temp_workspace);
+    if (ret != 0) return NAN;
+
+    return pde_spline_eval(&q_spline, dividend);
+}
+
 /**
  * Proper tensor-product cubic spline interpolation
  *
