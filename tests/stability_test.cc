@@ -242,6 +242,7 @@ TEST_F(StabilityTest, MassConservation) {
         .left_boundary = neumann_zero,
         .right_boundary = neumann_zero,
         .spatial_operator = diffusion_only,
+        .diffusion_coeff = 0.1,  // Matches diffusion_only operator
         .jump_condition = nullptr,
         .obstacle = nullptr,
         .user_data = nullptr
