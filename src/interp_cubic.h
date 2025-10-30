@@ -2,6 +2,7 @@
 #define IVCALC_INTERP_CUBIC_H
 
 #include "interp_strategy.h"
+#include <stddef.h>
 
 /**
  * @file interp_cubic.h
@@ -37,5 +38,45 @@
 
 // Global strategy instance
 extern const InterpolationStrategy INTERP_CUBIC;
+
+// Workspace structure for cubic interpolation queries
+// This eliminates all malloc calls in hot path by using caller-provided buffers
+typedef struct {
+    // Spline computation workspace (reused across all stages)
+    double *spline_coeff_workspace;  // 4 * max_grid_size doubles
+    double *spline_temp_workspace;   // 6 * max_grid_size doubles
+
+    // Intermediate arrays for tensor-product interpolation
+    double *intermediate_arrays;     // Sum of all intermediate array sizes
+
+    // Slice extraction buffers
+    double *slice_buffers;           // max_grid_size doubles
+
+    // Internal bookkeeping (do not modify)
+    size_t max_grid_size;
+    size_t total_size;
+} CubicInterpWorkspace;
+
+// Calculate required workspace size for 2D interpolation
+// Returns total number of doubles needed
+size_t cubic_interp_workspace_size_2d(size_t n_moneyness, size_t n_maturity);
+
+// Calculate required workspace size for 4D interpolation
+size_t cubic_interp_workspace_size_4d(size_t n_moneyness, size_t n_maturity,
+                                       size_t n_volatility, size_t n_rate);
+
+// Calculate required workspace size for 5D interpolation
+size_t cubic_interp_workspace_size_5d(size_t n_moneyness, size_t n_maturity,
+                                       size_t n_volatility, size_t n_rate,
+                                       size_t n_dividend);
+
+// Initialize workspace from caller-provided buffer
+// buffer must have at least cubic_interp_workspace_size_*() doubles allocated
+// Returns 0 on success, -1 on error
+int cubic_interp_workspace_init(CubicInterpWorkspace *workspace,
+                                 double *buffer,
+                                 size_t n_moneyness, size_t n_maturity,
+                                 size_t n_volatility, size_t n_rate,
+                                 size_t n_dividend);
 
 #endif // IVCALC_INTERP_CUBIC_H
