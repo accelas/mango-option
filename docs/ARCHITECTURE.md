@@ -52,10 +52,10 @@ graph TD
 ## Component 1: Implied Volatility Calculation
 
 ### File Locations
-- **Header**: `/home/user/mango-iv/src/implied_volatility.h`
-- **Implementation**: `/home/user/mango-iv/src/implied_volatility.c`
-- **Tests**: `/home/user/mango-iv/tests/implied_volatility_test.cc`
-- **Example**: `/home/user/mango-iv/examples/example_implied_volatility.c`
+- **Header**: `src/implied_volatility.h`
+- **Implementation**: `src/implied_volatility.c`
+- **Tests**: `tests/implied_volatility_test.cc`
+- **Example**: `examples/example_implied_volatility.c`
 
 ### Core Data Structures
 
@@ -104,16 +104,55 @@ double black_scholes_price(double spot, double strike,
 
 **Performance**: O(1) with high precision
 
-#### 2. **Black-Scholes Vega** (from `european_option.h`)
+#### 2. **Black-Scholes Greeks** (from `european_option.h`)
+
+The `european_option` module provides analytical Greeks calculations:
+
+**Vega** (∂V/∂σ):
 ```c
-double black_scholes_vega(double spot, double strike, 
+double black_scholes_vega(double spot, double strike,
                           double time_to_maturity,
                           double risk_free_rate, double volatility)
 ```
-
-**Formula**: Vega = S·φ(d₁)·√T where φ is the standard normal PDF
+- Formula: Vega = S·φ(d₁)·√T where φ is the standard normal PDF
 - Same for calls and puts
 - Used by Brent's method for convergence diagnostics
+
+**Delta** (∂V/∂S):
+```c
+double black_scholes_delta(double spot, double strike,
+                           double time_to_maturity,
+                           double risk_free_rate, double volatility, bool is_call)
+```
+- For calls: Δ = N(d₁)
+- For puts: Δ = N(d₁) - 1
+
+**Gamma** (∂²V/∂S²):
+```c
+double black_scholes_gamma(double spot, double strike,
+                           double time_to_maturity,
+                           double risk_free_rate, double volatility)
+```
+- Same for calls and puts
+- Γ = φ(d₁) / (S·σ·√T)
+
+**Theta** (∂V/∂t):
+```c
+double black_scholes_theta(double spot, double strike,
+                           double time_to_maturity,
+                           double risk_free_rate, double volatility, bool is_call)
+```
+- Measures time decay (typically negative)
+- Different formulas for calls and puts
+
+**Rho** (∂V/∂r):
+```c
+double black_scholes_rho(double spot, double strike,
+                         double time_to_maturity,
+                         double risk_free_rate, double volatility, bool is_call)
+```
+- Sensitivity to risk-free rate changes
+- Different formulas for calls and puts
 
 #### 3. **Main IV Calculation Function**
 ```c
@@ -203,12 +242,12 @@ From `implied_volatility_test.cc`:
 ## Component 2: American Option Pricing
 
 ### File Locations
-- **Header**: `/home/user/mango-iv/src/american_option.h`
-- **Implementation**: `/home/user/mango-iv/src/american_option.c`
-- **Tests**: `/home/user/mango-iv/tests/american_option_test.cc`
-- **Examples**: 
-  - `/home/user/mango-iv/examples/example_american_option.c`
-  - `/home/user/mango-iv/examples/example_american_option_dividend.c`
+- **Header**: `src/american_option.h`
+- **Implementation**: `src/american_option.c`
+- **Tests**: `tests/american_option_test.cc`
+- **Examples**:
+  - `examples/example_american_option.c`
+  - `examples/example_american_option_dividend.c`
 
 ### Core Data Structures
 
@@ -240,8 +279,9 @@ typedef struct {
 } AmericanOptionGrid;
 
 typedef struct {
-    PDESolver *solver;              // PDE solver (caller must destroy)
+    PDESolver *solver;              // PDE solver (caller must destroy with american_option_free_result)
     int status;                     // 0 = success, -1 = failure
+    void *internal_data;            // Internal data (do not access directly)
 } AmericanOptionResult;
 ```
 
@@ -321,6 +361,8 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
 6. Solves using TR-BDF2 scheme
 7. Returns solver with solution
 
+**Cleanup**: Call `american_option_free_result()` to free both the solver and internal data structures
+
 #### 2. **Batch Processing API**
 ```c
 int american_option_price_batch(const OptionData *option_data,
@@ -334,6 +376,8 @@ int american_option_price_batch(const OptionData *option_data,
 - Each thread prices one option independently
 - Significant wall-time speedup (10-60x on multi-core)
 - Enables vectorized IV recovery
+
+**Cleanup**: Call `american_option_free_result()` on each result to free resources
 
 #### 3. **Callback Functions** (Vectorized)
 
@@ -461,10 +505,10 @@ From `american_option_test.cc`:
 ## Component 3: PDE Solver (Finite Difference Method Engine)
 
 ### File Locations
-- **Header**: `/home/user/mango-iv/src/pde_solver.h`
-- **Implementation**: `/home/user/mango-iv/src/pde_solver.c`
-- **Tests**: `/home/user/mango-iv/tests/pde_solver_test.cc`
-- **Example**: `/home/user/mango-iv/examples/example_heat_equation.c`
+- **Header**: `src/pde_solver.h`
+- **Implementation**: `src/pde_solver.c`
+- **Tests**: `tests/pde_solver_test.cc`
+- **Example**: `examples/example_heat_equation.c`
 
 ### Overview
 
@@ -724,7 +768,7 @@ From `pde_solver_test.cc`:
 
 ### 4.1 Brent's Root Finder
 
-**File**: `/home/user/mango-iv/src/brent.h` (header-only, inline)
+**File**: `src/brent.h` (header-only, inline)
 
 **Algorithm**: Combines bisection, secant method, and inverse quadratic interpolation
 - **Guaranteed convergence** if root is bracketed
@@ -736,26 +780,53 @@ From `pde_solver_test.cc`:
 
 ### 4.2 Cubic Spline Interpolation
 
-**File**: `/home/user/mango-iv/src/cubic_spline.h` and `.c`
+**File**: `src/cubic_spline.h` and `.c`
 
 **Purpose**: Evaluate PDE solution at arbitrary off-grid points
 
 **Method**: Natural cubic splines with:
 - Quadratic system solve via shared tridiagonal solver
-- Single workspace buffer (4n doubles for coefficients, 6n for temporary)
+- Two API variants: malloc-based and workspace-based
 - Function and derivative evaluation
 
-**Usage**:
+**Malloc-Based API** (convenience):
 ```c
 CubicSpline *spline = pde_spline_create(x_grid, solution, n_points);
 double value_at_x = pde_spline_eval(spline, x_eval);
 double derivative = pde_spline_eval_derivative(spline, x_eval);
 pde_spline_destroy(spline);
 ```
+- Allocates workspace internally (4n doubles for coefficients, 6n for temporary)
+- Convenient for one-off interpolation queries
+- Simple ownership model
+
+**Workspace-Based API** (zero-malloc, performance-critical):
+```c
+CubicSpline spline;  // Stack-allocated
+double workspace[4 * n_points];
+double temp_workspace[6 * n_points];
+
+pde_spline_init(&spline, x_grid, solution, n_points, workspace, temp_workspace);
+double value_at_x = pde_spline_eval(&spline, x_eval);
+double derivative = pde_spline_eval_derivative(&spline, x_eval);
+// No destroy needed - workspace managed by caller
+```
+- Zero heap allocation (workspace provided by caller)
+- Ideal for hot paths with repeated spline creation/destruction
+- Used by 4D/5D interpolation engine for **99.9% malloc reduction**
+- Workspace requirements: 10n doubles total (4n + 6n)
+- Can reuse temp_workspace across multiple `pde_spline_init()` calls
+
+**Performance Impact**:
+- 2D interpolation: 2 mallocs → 2 workspace-only allocations
+- 4D interpolation: ~15 mallocs → 2 workspace-only allocations (87% reduction)
+- 5D interpolation: ~1,873 mallocs → 2 workspace-only allocations (99.9% reduction)
+
+**Implementation Note**: Both APIs share the same evaluation functions (`pde_spline_eval`, `pde_spline_eval_derivative`). The workspace-based API was added in PR #36 to eliminate malloc overhead in multi-dimensional interpolation hot paths.
 
 ### 4.3 Tridiagonal Solver
 
-**File**: `/home/user/mango-iv/src/tridiagonal.h`
+**File**: `src/tridiagonal.h`
 
 **Method**: Thomas algorithm (TDMA - Tridiagonal Matrix Algorithm)
 - **Time complexity**: O(n)
@@ -765,7 +836,7 @@ pde_spline_destroy(spline);
 
 ### 4.4 USDT Tracing System
 
-**File**: `/home/user/mango-iv/src/ivcalc_trace.h`
+**File**: `src/ivcalc_trace.h`
 
 **Purpose**: Zero-overhead diagnostic tracing for profiling and debugging
 
@@ -1297,7 +1368,7 @@ AmericanOptionResult result = american_option_price(&option, &grid);
 if (result.status == 0) {
     double value = american_option_get_value_at_spot(result.solver, 100.0, 100.0);
     printf("Value: %.4f\n", value);
-    pde_solver_destroy(result.solver);
+    american_option_free_result(&result);
 }
 ```
 
@@ -1320,7 +1391,7 @@ int status = american_option_price_batch(options, &grid, 100, results);
 for (size_t i = 0; i < 100; i++) {
     if (results[i].status == 0) {
         // Use result
-        pde_solver_destroy(results[i].solver);
+        american_option_free_result(&results[i]);
     }
 }
 ```
@@ -1360,14 +1431,14 @@ bazel build //benchmarks:quantlib_benchmark
 | Component | Purpose | Files | API |
 |-----------|---------|-------|-----|
 | **Implied Volatility** | IV from option price | implied_volatility.{h,c} | `implied_volatility_calculate()`, `implied_volatility_calculate_simple()` |
-| **Black-Scholes** | European option pricing | implied_volatility.c | `black_scholes_price()`, `black_scholes_vega()` |
-| **American Option** | American option pricing | american_option.{h,c} | `american_option_price()`, `american_option_price_batch()` |
+| **Black-Scholes** | European option pricing & Greeks | european_option.{h,c} | `black_scholes_price()`, `black_scholes_vega()`, `black_scholes_delta()`, `black_scholes_gamma()`, `black_scholes_theta()`, `black_scholes_rho()` |
+| **American Option** | American option pricing | american_option.{h,c} | `american_option_price()`, `american_option_price_batch()`, `american_option_free_result()` |
 | **PDE Solver** | FDM time-stepping engine | pde_solver.{h,c} | `pde_solver_create()`, `pde_solver_solve()`, `pde_solver_destroy()` |
 | **IV Surface** | Fast 2D IV interpolation (~100ns) | iv_surface.{h,c} | `iv_surface_create()`, `iv_surface_interpolate()` |
 | **Price Table** | Fast 4D/5D price lookup (~500ns) | price_table.{h,c} | `price_table_create()`, `price_table_interpolate_4d()`, `price_table_greeks_4d()` |
 | **Multilinear Interpolation** | N-dimensional linear interpolation | interp_multilinear.{h,c}, interp_strategy.h | `INTERP_MULTILINEAR` strategy |
 | **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
-| **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()`, `pde_spline_eval()` |
+| **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()` (malloc), `pde_spline_init()` (workspace), `pde_spline_eval()` |
 | **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
 | **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `IVCALC_TRACE_*` macros |
 
