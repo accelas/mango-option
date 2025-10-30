@@ -112,6 +112,7 @@ cc_test(
     deps = [
         "//src:interp_cubic",
         "//src:iv_surface",
+        "//src:price_table",
         "@googletest//:gtest_main",
     ],
 )
