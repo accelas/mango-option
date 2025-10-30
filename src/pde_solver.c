@@ -587,7 +587,8 @@ int pde_solver_solve(PDESolver *solver) {
                                                 solver->u_current,
                                                 events_triggered,
                                                 n_triggered,
-                                                solver->callbacks.user_data);
+                                                solver->callbacks.user_data,
+                                                solver->u_temp);  // Reuse u_temp as workspace
             }
         }
 

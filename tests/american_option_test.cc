@@ -1089,6 +1089,43 @@ TEST_F(AmericanOptionTest, CallOptionGridExtentSensitivity) {
     american_option_free_result(&result2);
 }
 
+// Test that dividend events use workspace instead of malloc
+TEST_F(AmericanOptionTest, DividendEventUsesWorkspace) {
+    // Test that dividend events don't allocate memory
+    // We can't directly test malloc calls, but we can verify behavior is correct
+
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 2,
+        .dividend_times = new double[2]{0.25, 0.75},
+        .dividend_amounts = new double[2]{2.0, 2.0}
+    };
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 101,
+        .dt = 0.001,
+        .n_steps = 1000
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &grid);
+    ASSERT_EQ(result.status, 0);
+
+    // Verify option was priced successfully with dividends
+    double value = american_option_get_value_at_spot(result.solver, 100.0, 100.0);
+    EXPECT_GT(value, 0.0);
+    EXPECT_LT(value, 100.0); // Call value should be reasonable
+
+    american_option_free_result(&result);
+    delete[] option.dividend_times;
+    delete[] option.dividend_amounts;
+}
+
 // Batch processing tests
 
 // Test batch processing with small batch
