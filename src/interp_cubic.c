@@ -166,28 +166,399 @@ static double cubic_interpolate_2d(const IVSurface *surface,
 
 // ---------- 4D Interpolation (Price Table) ----------
 
-static double cubic_interpolate_4d([[maybe_unused]] const OptionPriceTable *table,
-                                   [[maybe_unused]] double moneyness,
-                                   [[maybe_unused]] double maturity,
-                                   [[maybe_unused]] double volatility,
-                                   [[maybe_unused]] double rate,
+/**
+ * 4D tensor-product cubic spline interpolation
+ *
+ * Algorithm (separable tensor-product):
+ * 1. For each (maturity, volatility, rate) combo: interpolate along moneyness
+ *    → Gives n_tau × n_sigma × n_r intermediate values
+ * 2. For each (volatility, rate) combo: interpolate along maturity
+ *    → Gives n_sigma × n_r intermediate values
+ * 3. For each rate: interpolate along volatility
+ *    → Gives n_r intermediate values
+ * 4. Interpolate along rate
+ *    → Gives final result
+ *
+ * This is C² continuous and allows accurate computation of second derivatives (gamma, volga, etc.)
+ */
+static double cubic_interpolate_4d(const OptionPriceTable *table,
+                                   double moneyness, double maturity,
+                                   double volatility, double rate,
                                    [[maybe_unused]] InterpContext context) {
-    // TODO: Implement 4D tensor-product cubic spline
-    // For now, return NAN to indicate not implemented
-    return NAN;
+    // Need at least 2 points in each dimension for cubic splines
+    if (table->n_moneyness < 2 || table->n_maturity < 2 ||
+        table->n_volatility < 2 || table->n_rate < 2) {
+        return NAN;
+    }
+
+    // Stage 1: Interpolate along moneyness for each (tau, sigma, r) combination
+    // Result: intermediate1[j_tau][j_sigma][j_r]
+    size_t n1 = table->n_maturity * table->n_volatility * table->n_rate;
+    double *intermediate1 = malloc(n1 * sizeof(double));
+    if (!intermediate1) return NAN;
+
+    double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
+    if (!moneyness_slice) {
+        free(intermediate1);
+        return NAN;
+    }
+
+    for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+        for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+            for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                // Extract moneyness slice: fix (tau, sigma, r), vary moneyness
+                for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                    size_t idx = i_m * table->stride_m
+                               + j_tau * table->stride_tau
+                               + j_sigma * table->stride_sigma
+                               + j_r * table->stride_r;
+                    moneyness_slice[i_m] = table->prices[idx];
+                }
+
+                // Build cubic spline along moneyness and evaluate at query point
+                CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
+                                                           moneyness_slice,
+                                                           table->n_moneyness);
+                if (!m_spline) {
+                    free(intermediate1);
+                    free(moneyness_slice);
+                    return NAN;
+                }
+
+                size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
+                            + j_sigma * table->n_rate
+                            + j_r;
+                intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
+                pde_spline_destroy(m_spline);
+            }
+        }
+    }
+    free(moneyness_slice);
+
+    // Stage 2: Interpolate along maturity for each (sigma, r) combination
+    // Result: intermediate2[j_sigma][j_r]
+    size_t n2 = table->n_volatility * table->n_rate;
+    double *intermediate2 = malloc(n2 * sizeof(double));
+    if (!intermediate2) {
+        free(intermediate1);
+        return NAN;
+    }
+
+    double *maturity_slice = malloc(table->n_maturity * sizeof(double));
+    if (!maturity_slice) {
+        free(intermediate1);
+        free(intermediate2);
+        return NAN;
+    }
+
+    for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+        for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+            // Extract maturity slice from intermediate1: fix (sigma, r), vary tau
+            for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+                size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
+                            + j_sigma * table->n_rate
+                            + j_r;
+                maturity_slice[j_tau] = intermediate1[idx1];
+            }
+
+            // Build cubic spline along maturity and evaluate
+            CubicSpline *tau_spline = pde_spline_create(table->maturity_grid,
+                                                         maturity_slice,
+                                                         table->n_maturity);
+            if (!tau_spline) {
+                free(intermediate1);
+                free(intermediate2);
+                free(maturity_slice);
+                return NAN;
+            }
+
+            size_t idx2 = j_sigma * table->n_rate + j_r;
+            intermediate2[idx2] = pde_spline_eval(tau_spline, maturity);
+            pde_spline_destroy(tau_spline);
+        }
+    }
+    free(intermediate1);
+    free(maturity_slice);
+
+    // Stage 3: Interpolate along volatility for each rate
+    // Result: intermediate3[j_r]
+    double *intermediate3 = malloc(table->n_rate * sizeof(double));
+    if (!intermediate3) {
+        free(intermediate2);
+        return NAN;
+    }
+
+    double *volatility_slice = malloc(table->n_volatility * sizeof(double));
+    if (!volatility_slice) {
+        free(intermediate2);
+        free(intermediate3);
+        return NAN;
+    }
+
+    for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+        // Extract volatility slice from intermediate2: fix r, vary sigma
+        for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+            size_t idx2 = j_sigma * table->n_rate + j_r;
+            volatility_slice[j_sigma] = intermediate2[idx2];
+        }
+
+        // Build cubic spline along volatility and evaluate
+        CubicSpline *sigma_spline = pde_spline_create(table->volatility_grid,
+                                                       volatility_slice,
+                                                       table->n_volatility);
+        if (!sigma_spline) {
+            free(intermediate2);
+            free(intermediate3);
+            free(volatility_slice);
+            return NAN;
+        }
+
+        intermediate3[j_r] = pde_spline_eval(sigma_spline, volatility);
+        pde_spline_destroy(sigma_spline);
+    }
+    free(intermediate2);
+    free(volatility_slice);
+
+    // Stage 4: Final interpolation along rate
+    CubicSpline *r_spline = pde_spline_create(table->rate_grid,
+                                               intermediate3,
+                                               table->n_rate);
+    if (!r_spline) {
+        free(intermediate3);
+        return NAN;
+    }
+
+    double result = pde_spline_eval(r_spline, rate);
+    pde_spline_destroy(r_spline);
+    free(intermediate3);
+
+    return result;
 }
 
 // ---------- 5D Interpolation (Price Table with Dividend) ----------
 
-static double cubic_interpolate_5d([[maybe_unused]] const OptionPriceTable *table,
-                                   [[maybe_unused]] double moneyness,
-                                   [[maybe_unused]] double maturity,
-                                   [[maybe_unused]] double volatility,
-                                   [[maybe_unused]] double rate,
-                                   [[maybe_unused]] double dividend,
+/**
+ * 5D tensor-product cubic spline interpolation
+ *
+ * Algorithm (separable tensor-product):
+ * 1. For each (maturity, volatility, rate, dividend) combo: interpolate along moneyness
+ *    → Gives n_tau × n_sigma × n_r × n_q intermediate values
+ * 2. For each (volatility, rate, dividend) combo: interpolate along maturity
+ *    → Gives n_sigma × n_r × n_q intermediate values
+ * 3. For each (rate, dividend) combo: interpolate along volatility
+ *    → Gives n_r × n_q intermediate values
+ * 4. For each dividend: interpolate along rate
+ *    → Gives n_q intermediate values
+ * 5. Interpolate along dividend
+ *    → Gives final result
+ */
+static double cubic_interpolate_5d(const OptionPriceTable *table,
+                                   double moneyness, double maturity,
+                                   double volatility, double rate,
+                                   double dividend,
                                    [[maybe_unused]] InterpContext context) {
-    // TODO: Implement 5D tensor-product cubic spline
-    return NAN;
+    // Need at least 2 points in each dimension for cubic splines
+    if (table->n_moneyness < 2 || table->n_maturity < 2 ||
+        table->n_volatility < 2 || table->n_rate < 2 || table->n_dividend < 2) {
+        return NAN;
+    }
+
+    // Stage 1: Interpolate along moneyness for each (tau, sigma, r, q) combination
+    // Result: intermediate1[j_tau][j_sigma][j_r][j_q]
+    size_t n1 = table->n_maturity * table->n_volatility * table->n_rate * table->n_dividend;
+    double *intermediate1 = malloc(n1 * sizeof(double));
+    if (!intermediate1) return NAN;
+
+    double *moneyness_slice = malloc(table->n_moneyness * sizeof(double));
+    if (!moneyness_slice) {
+        free(intermediate1);
+        return NAN;
+    }
+
+    for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+        for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+            for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+                for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+                    // Extract moneyness slice: fix (tau, sigma, r, q), vary moneyness
+                    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                        size_t idx = i_m * table->stride_m
+                                   + j_tau * table->stride_tau
+                                   + j_sigma * table->stride_sigma
+                                   + j_r * table->stride_r
+                                   + j_q * table->stride_q;
+                        moneyness_slice[i_m] = table->prices[idx];
+                    }
+
+                    // Build cubic spline along moneyness and evaluate
+                    CubicSpline *m_spline = pde_spline_create(table->moneyness_grid,
+                                                               moneyness_slice,
+                                                               table->n_moneyness);
+                    if (!m_spline) {
+                        free(intermediate1);
+                        free(moneyness_slice);
+                        return NAN;
+                    }
+
+                    size_t idx1 = j_tau * (table->n_volatility * table->n_rate * table->n_dividend)
+                                + j_sigma * (table->n_rate * table->n_dividend)
+                                + j_r * table->n_dividend
+                                + j_q;
+                    intermediate1[idx1] = pde_spline_eval(m_spline, moneyness);
+                    pde_spline_destroy(m_spline);
+                }
+            }
+        }
+    }
+    free(moneyness_slice);
+
+    // Stage 2: Interpolate along maturity for each (sigma, r, q) combination
+    // Result: intermediate2[j_sigma][j_r][j_q]
+    size_t n2 = table->n_volatility * table->n_rate * table->n_dividend;
+    double *intermediate2 = malloc(n2 * sizeof(double));
+    if (!intermediate2) {
+        free(intermediate1);
+        return NAN;
+    }
+
+    double *maturity_slice = malloc(table->n_maturity * sizeof(double));
+    if (!maturity_slice) {
+        free(intermediate1);
+        free(intermediate2);
+        return NAN;
+    }
+
+    for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+        for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+            for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+                // Extract maturity slice from intermediate1: fix (sigma, r, q), vary tau
+                for (size_t j_tau = 0; j_tau < table->n_maturity; j_tau++) {
+                    size_t idx1 = j_tau * (table->n_volatility * table->n_rate * table->n_dividend)
+                                + j_sigma * (table->n_rate * table->n_dividend)
+                                + j_r * table->n_dividend
+                                + j_q;
+                    maturity_slice[j_tau] = intermediate1[idx1];
+                }
+
+                // Build cubic spline along maturity and evaluate
+                CubicSpline *tau_spline = pde_spline_create(table->maturity_grid,
+                                                             maturity_slice,
+                                                             table->n_maturity);
+                if (!tau_spline) {
+                    free(intermediate1);
+                    free(intermediate2);
+                    free(maturity_slice);
+                    return NAN;
+                }
+
+                size_t idx2 = j_sigma * (table->n_rate * table->n_dividend)
+                            + j_r * table->n_dividend
+                            + j_q;
+                intermediate2[idx2] = pde_spline_eval(tau_spline, maturity);
+                pde_spline_destroy(tau_spline);
+            }
+        }
+    }
+    free(intermediate1);
+    free(maturity_slice);
+
+    // Stage 3: Interpolate along volatility for each (r, q) combination
+    // Result: intermediate3[j_r][j_q]
+    size_t n3 = table->n_rate * table->n_dividend;
+    double *intermediate3 = malloc(n3 * sizeof(double));
+    if (!intermediate3) {
+        free(intermediate2);
+        return NAN;
+    }
+
+    double *volatility_slice = malloc(table->n_volatility * sizeof(double));
+    if (!volatility_slice) {
+        free(intermediate2);
+        free(intermediate3);
+        return NAN;
+    }
+
+    for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+        for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+            // Extract volatility slice from intermediate2: fix (r, q), vary sigma
+            for (size_t j_sigma = 0; j_sigma < table->n_volatility; j_sigma++) {
+                size_t idx2 = j_sigma * (table->n_rate * table->n_dividend)
+                            + j_r * table->n_dividend
+                            + j_q;
+                volatility_slice[j_sigma] = intermediate2[idx2];
+            }
+
+            // Build cubic spline along volatility and evaluate
+            CubicSpline *sigma_spline = pde_spline_create(table->volatility_grid,
+                                                           volatility_slice,
+                                                           table->n_volatility);
+            if (!sigma_spline) {
+                free(intermediate2);
+                free(intermediate3);
+                free(volatility_slice);
+                return NAN;
+            }
+
+            size_t idx3 = j_r * table->n_dividend + j_q;
+            intermediate3[idx3] = pde_spline_eval(sigma_spline, volatility);
+            pde_spline_destroy(sigma_spline);
+        }
+    }
+    free(intermediate2);
+    free(volatility_slice);
+
+    // Stage 4: Interpolate along rate for each dividend
+    // Result: intermediate4[j_q]
+    double *intermediate4 = malloc(table->n_dividend * sizeof(double));
+    if (!intermediate4) {
+        free(intermediate3);
+        return NAN;
+    }
+
+    double *rate_slice = malloc(table->n_rate * sizeof(double));
+    if (!rate_slice) {
+        free(intermediate3);
+        free(intermediate4);
+        return NAN;
+    }
+
+    for (size_t j_q = 0; j_q < table->n_dividend; j_q++) {
+        // Extract rate slice from intermediate3: fix q, vary r
+        for (size_t j_r = 0; j_r < table->n_rate; j_r++) {
+            size_t idx3 = j_r * table->n_dividend + j_q;
+            rate_slice[j_r] = intermediate3[idx3];
+        }
+
+        // Build cubic spline along rate and evaluate
+        CubicSpline *r_spline = pde_spline_create(table->rate_grid,
+                                                   rate_slice,
+                                                   table->n_rate);
+        if (!r_spline) {
+            free(intermediate3);
+            free(intermediate4);
+            free(rate_slice);
+            return NAN;
+        }
+
+        intermediate4[j_q] = pde_spline_eval(r_spline, rate);
+        pde_spline_destroy(r_spline);
+    }
+    free(intermediate3);
+    free(rate_slice);
+
+    // Stage 5: Final interpolation along dividend
+    CubicSpline *q_spline = pde_spline_create(table->dividend_grid,
+                                               intermediate4,
+                                               table->n_dividend);
+    if (!q_spline) {
+        free(intermediate4);
+        return NAN;
+    }
+
+    double result = pde_spline_eval(q_spline, dividend);
+    pde_spline_destroy(q_spline);
+    free(intermediate4);
+
+    return result;
 }
 
 // ---------- Context Management ----------
