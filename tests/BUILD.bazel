@@ -92,3 +92,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "cubic_interp_4d_5d_test",
+    srcs = ["cubic_interp_4d_5d_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:interp_cubic",
+        "//src:interp_multilinear",
+        "//src:price_table",
+        "@googletest//:gtest_main",
+    ],
+)
