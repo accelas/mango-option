@@ -7,6 +7,10 @@
 #include "interp_strategy.h"
 #include "american_option.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * Exercise type enumeration
  */
@@ -299,5 +303,9 @@ int price_table_save(const OptionPriceTable *table, const char *filename);
  *       Call price_table_set_strategy() to change after loading
  */
 OptionPriceTable* price_table_load(const char *filename);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // IVCALC_PRICE_TABLE_H
