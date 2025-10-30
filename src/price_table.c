@@ -1,10 +1,17 @@
 #include "price_table.h"
+#include "american_option.h"
 #include "interp_multilinear.h"
+#include "ivcalc_trace.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
@@ -25,6 +32,74 @@ typedef struct {
     time_t generation_time;
     uint8_t padding[128];  // Reserved for future use
 } PriceTableHeader;
+
+// ---------- Helper Functions ----------
+
+// Helper: Convert flat index to multi-dimensional indices
+static void unflatten_index(size_t idx, const OptionPriceTable *table,
+                           size_t *i_m, size_t *i_tau, size_t *i_sigma,
+                           size_t *i_r, size_t *i_q) {
+    size_t remaining = idx;
+
+    *i_m = remaining / table->stride_m;
+    remaining %= table->stride_m;
+
+    *i_tau = remaining / table->stride_tau;
+    remaining %= table->stride_tau;
+
+    *i_sigma = remaining / table->stride_sigma;
+    remaining %= table->stride_sigma;
+
+    *i_r = remaining / table->stride_r;
+    remaining %= table->stride_r;
+
+    *i_q = remaining;
+}
+
+// Helper: Convert grid point to OptionData
+// Note: Moneyness (m) will be handled separately when extracting price
+static OptionData grid_point_to_option(const OptionPriceTable *table,
+                                       size_t i_m, size_t i_tau,
+                                       size_t i_sigma, size_t i_r,
+                                       size_t i_q) {
+    const double K_ref = 100.0;  // Reference strike for moneyness scaling
+
+    double tau = table->maturity_grid[i_tau];
+    double sigma = table->volatility_grid[i_sigma];
+    double r = table->rate_grid[i_r];
+
+    // Suppress unused variable warnings for now (will be used in Task 2)
+    (void)i_m;
+    (void)i_q;
+
+    OptionData option = {
+        .strike = K_ref,
+        .volatility = sigma,
+        .risk_free_rate = r,
+        .time_to_maturity = tau,
+        .option_type = table->type,
+        .n_dividends = 0,
+        .dividend_times = NULL,
+        .dividend_amounts = NULL
+    };
+
+    return option;
+}
+
+// Helper: Get batch size from environment or default
+static size_t get_batch_size(void) {
+    size_t batch_size = 100;  // Default
+
+    char *env_batch = getenv("IVCALC_PRECOMPUTE_BATCH_SIZE");
+    if (env_batch) {
+        long val = atol(env_batch);
+        if (val >= 1 && val <= 100000) {
+            batch_size = (size_t)val;
+        }
+    }
+
+    return batch_size;
+}
 
 // ---------- Creation and Destruction ----------
 
