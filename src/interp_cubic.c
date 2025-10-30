@@ -101,6 +101,53 @@ static inline double eval_cubic(double a, double b, double c, double d, double d
 
 // ---------- 2D Interpolation (IV Surface) ----------
 
+// Workspace-based 2D cubic interpolation (zero malloc version)
+double cubic_interpolate_2d_workspace(const IVSurface *surface,
+                                       double moneyness, double maturity,
+                                       CubicInterpWorkspace workspace) {
+    if (surface == NULL) {
+        return NAN;
+    }
+
+    const size_t n_m = surface->n_moneyness;
+    const size_t n_tau = surface->n_maturity;
+
+    // Use workspace slices
+    double *intermediate_values = workspace.intermediate_arrays;  // n_tau doubles
+    double *moneyness_slice = workspace.slice_buffers;           // n_m doubles
+
+    // Stage 1: Interpolate along moneyness for each maturity point
+    for (size_t j_tau = 0; j_tau < n_tau; j_tau++) {
+        // Extract moneyness slice at this maturity
+        for (size_t i_m = 0; i_m < n_m; i_m++) {
+            moneyness_slice[i_m] = surface->iv_surface[j_tau * n_m + i_m];
+        }
+
+        // Create spline using workspace (zero malloc)
+        CubicSpline m_spline;
+        int ret = pde_spline_init(&m_spline, surface->moneyness_grid, moneyness_slice,
+                                  n_m, workspace.spline_coeff_workspace,
+                                  workspace.spline_temp_workspace);
+        if (ret != 0) {
+            return NAN;
+        }
+
+        // Evaluate at query moneyness
+        intermediate_values[j_tau] = pde_spline_eval(&m_spline, moneyness);
+    }
+
+    // Stage 2: Interpolate along maturity using intermediate values
+    CubicSpline tau_spline;
+    int ret = pde_spline_init(&tau_spline, surface->maturity_grid, intermediate_values,
+                              n_tau, workspace.spline_coeff_workspace,
+                              workspace.spline_temp_workspace);
+    if (ret != 0) {
+        return NAN;
+    }
+
+    return pde_spline_eval(&tau_spline, maturity);
+}
+
 /**
  * Proper tensor-product cubic spline interpolation
  *

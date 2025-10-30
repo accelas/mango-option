@@ -79,4 +79,13 @@ int cubic_interp_workspace_init(CubicInterpWorkspace *workspace,
                                  size_t n_volatility, size_t n_rate,
                                  size_t n_dividend);
 
+// Forward declaration
+typedef struct IVSurface IVSurface;
+
+// Workspace-based 2D interpolation (zero malloc)
+// Returns interpolated value or NAN on error
+double cubic_interpolate_2d_workspace(const IVSurface *surface,
+                                       double moneyness, double maturity,
+                                       CubicInterpWorkspace workspace);
+
 #endif // IVCALC_INTERP_CUBIC_H
