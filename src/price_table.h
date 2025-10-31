@@ -88,8 +88,8 @@ typedef enum {
  * - No impact on point queries (both layouts have similar performance)
  *
  * Recommendations:
- * - Use LAYOUT_M_INNER when using cubic interpolation (slice-based)
- * - Use LAYOUT_M_OUTER for multilinear interpolation (point-based, default)
+ * - Use LAYOUT_M_INNER when using cubic interpolation (slice-based, recommended)
+ * - Use LAYOUT_M_OUTER for compatibility with older code (point-based)
  * - Memory usage and computation are identical for both layouts
  */
 typedef enum {
@@ -200,8 +200,8 @@ void transform_query_to_grid(
  * @param n_q: number of dividend points (0 for 4D mode)
  * @param type: CALL or PUT
  * @param exercise: EUROPEAN or AMERICAN
- * @param strategy: interpolation strategy (e.g., &INTERP_MULTILINEAR)
- *                  If NULL, defaults to multilinear
+ * @param strategy: interpolation strategy (e.g., &INTERP_CUBIC)
+ *                  If NULL, defaults to cubic
  * @return newly created table, or NULL on error
  *
  * Note: Takes ownership of grid arrays (caller should not free them)
@@ -217,7 +217,7 @@ OptionPriceTable* price_table_create_with_strategy(
     const InterpolationStrategy *strategy);
 
 /**
- * Create option price table with default (multilinear) interpolation
+ * Create option price table with default (cubic) interpolation
  */
 OptionPriceTable* price_table_create(
     const double *moneyness, size_t n_m,
@@ -242,13 +242,13 @@ OptionPriceTable* price_table_create(
  *
  * Usage examples:
  * @code
- *   // For multilinear interpolation (default, best compatibility):
+ *   // For basic usage (raw coordinates):
  *   table = price_table_create_ex(..., COORD_RAW, LAYOUT_M_OUTER);
  *
- *   // For production (best accuracy):
+ *   // For production (best accuracy with log-sqrt transform):
  *   table = price_table_create_ex(..., COORD_LOG_SQRT, LAYOUT_M_OUTER);
  *
- *   // For cubic interpolation (best accuracy + performance):
+ *   // For optimal performance (log-sqrt + optimized layout):
  *   table = price_table_create_ex(..., COORD_LOG_SQRT, LAYOUT_M_INNER);
  * @endcode
  *
@@ -355,7 +355,7 @@ int price_table_build_interpolation(OptionPriceTable *table);
  * @return interpolated option price
  *
  * Note: If query is outside grid bounds, clamps to boundary
- * Performance: ~200-500ns (multilinear), ~1-2µs (cubic)
+ * Performance: ~500ns for 4D cubic interpolation
  */
 double price_table_interpolate_4d(const OptionPriceTable *table,
                                    double moneyness, double maturity,
@@ -463,8 +463,8 @@ int price_table_save(const OptionPriceTable *table, const char *filename);
  * @param filename: input file path
  * @return loaded table, or NULL on error
  *
- * Note: Always loads with default (multilinear) strategy
- *       Call price_table_set_strategy() to change after loading
+ * Note: Always loads with default (cubic) strategy
+ *       Call price_table_set_strategy() to change if needed
  */
 OptionPriceTable* price_table_load(const char *filename);
 

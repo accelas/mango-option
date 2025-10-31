@@ -20,7 +20,7 @@
  * - Binary save/load for persistence
  *
  * Typical Usage:
- *   // Create surface with default (multilinear) interpolation
+ *   // Create surface with default (cubic) interpolation
  *   IVSurface *surface = iv_surface_create(moneyness, n_m, maturity, n_tau);
  *
  *   // Set IV data
@@ -70,8 +70,8 @@ typedef struct IVSurface {
  * @param n_m: number of moneyness points
  * @param maturity: array of maturity values (must be sorted)
  * @param n_tau: number of maturity points
- * @param strategy: interpolation strategy (e.g., &INTERP_MULTILINEAR)
- *                  If NULL, defaults to multilinear
+ * @param strategy: interpolation strategy (e.g., &INTERP_CUBIC)
+ *                  If NULL, defaults to cubic
  * @return newly created surface, or NULL on error
  *
  * Note: Takes ownership of grid arrays (caller should not free them)
@@ -82,7 +82,7 @@ IVSurface* iv_surface_create_with_strategy(
     const InterpolationStrategy *strategy);
 
 /**
- * Create IV surface with default (multilinear) interpolation
+ * Create IV surface with default (cubic) interpolation
  */
 IVSurface* iv_surface_create(
     const double *moneyness, size_t n_m,
@@ -194,8 +194,8 @@ int iv_surface_save(const IVSurface *surface, const char *filename);
  * @param filename: input file path
  * @return loaded surface, or NULL on error
  *
- * Note: Always loads with default (multilinear) strategy
- *       Call iv_surface_set_strategy() to change after loading
+ * Note: Always loads with default (cubic) strategy
+ *       Call iv_surface_set_strategy() to change if needed
  */
 IVSurface* iv_surface_load(const char *filename);
 

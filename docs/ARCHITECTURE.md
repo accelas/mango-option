@@ -935,7 +935,7 @@ Provides sub-microsecond option pricing and IV lookups via pre-computed interpol
 ```
 src/
 ├── interp_strategy.h      # Strategy pattern interface for interpolation algorithms
-├── interp_multilinear.{h,c}  # Multi-linear interpolation strategy
+├── interp_cubic.{h,c}     # Cubic spline interpolation strategy
 ├── iv_surface.{h,c}       # 2D implied volatility surface (~100ns queries)
 └── price_table.{h,c}      # 4D/5D option price table (~500ns queries)
 
@@ -945,6 +945,54 @@ examples/
 tests/
 └── interpolation_test.cc    # Unit tests for all interpolation components
 ```
+
+### Architecture Overview
+
+```mermaid
+graph TD
+    USER[User Query<br/>m, τ, σ, r]
+
+    TRANSFORM[Coordinate Transform<br/>Raw → Grid Space<br/>COORD_LOG_SQRT]
+
+    STRATEGY[Interpolation Strategy<br/>INTERP_CUBIC]
+
+    PRECOMP[Precomputed Spline<br/>Coefficients<br/>~10MB for 4D table]
+
+    STAGE1[Stage 1: Moneyness<br/>Evaluate splines along m<br/>for each τ,σ,r]
+
+    STAGE2[Stage 2: Maturity<br/>Build & evaluate splines along τ<br/>for each σ,r]
+
+    STAGE3[Stage 3: Volatility<br/>Build & evaluate splines along σ<br/>for each r]
+
+    STAGE4[Stage 4: Rate<br/>Build & evaluate spline along r<br/>→ final result]
+
+    RESULT[Interpolated Price<br/>~500ns total]
+
+    USER --> TRANSFORM
+    TRANSFORM --> STRATEGY
+    STRATEGY --> PRECOMP
+    PRECOMP --> STAGE1
+    STAGE1 --> STAGE2
+    STAGE2 --> STAGE3
+    STAGE3 --> STAGE4
+    STAGE4 --> RESULT
+
+    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style TRANSFORM fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style STRATEGY fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style PRECOMP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style STAGE1 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE2 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE3 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE4 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Key Features**:
+- **Strategy Pattern**: Runtime selection of interpolation algorithm (cubic splines)
+- **Coordinate Transforms**: Log-sqrt transforms for better interpolation accuracy
+- **Tensor-Product**: Separable stages reduce complexity from O(n^4) to O(n)
+- **Precomputation**: Spline coefficients computed once, reused for millions of queries
 
 ### Core Data Structures
 
@@ -994,6 +1042,50 @@ typedef struct {
 
 **Memory footprint**: ~2.4MB per table (4D: 50×30×20×10 grid)
 
+### Memory Layout Options
+
+The price table supports different memory layouts for cache optimization:
+
+```mermaid
+graph TD
+    TABLE[OptionPriceTable<br/>4D Array: m×τ×σ×r]
+
+    OUTER[LAYOUT_M_OUTER<br/>m, τ, σ, r<br/>Default ordering]
+
+    INNER[LAYOUT_M_INNER<br/>r, σ, τ, m<br/>Recommended for cubic]
+
+    POINT_QUERY[Point Query<br/>table.m.tau.sigma.r<br/>~Equal performance]
+
+    SLICE_OUTER[Slice Extraction OUTER<br/>Extract all m for fixed τ,σ,r<br/>Scattered memory access<br/>~30x slower]
+
+    SLICE_INNER[Slice Extraction INNER<br/>Extract all m for fixed τ,σ,r<br/>Contiguous memory access<br/>~30x faster]
+
+    TABLE --> OUTER
+    TABLE --> INNER
+
+    OUTER --> POINT_QUERY
+    INNER --> POINT_QUERY
+
+    OUTER --> SLICE_OUTER
+    INNER --> SLICE_INNER
+
+    style TABLE fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style OUTER fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style INNER fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style POINT_QUERY fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+    style SLICE_OUTER fill:#ffcdd2,stroke:#333,stroke-width:2px,color:#000
+    style SLICE_INNER fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Layout Comparison**:
+- **LAYOUT_M_OUTER** [m][τ][σ][r]: Good for point queries, compatible with older code
+- **LAYOUT_M_INNER** [r][σ][τ][m]: Optimized for cubic interpolation (slice-based)
+  - 64-byte cache lines hold 8 consecutive moneyness values
+  - ~30x faster moneyness slice extraction
+  - Same memory usage, same point query performance
+
+**Why it matters for cubic**: Precomputation creates splines along moneyness dimension for each (τ,σ,r) combination. LAYOUT_M_INNER makes these slices contiguous in memory, dramatically improving cache performance during precomputation.
+
 ### Interpolation Strategy Pattern
 
 Uses **dependency injection** for runtime algorithm selection without recompilation:
@@ -1020,8 +1112,11 @@ typedef struct {
 ```
 
 **Available strategies**:
-- `INTERP_MULTILINEAR`: Fast separable multi-linear interpolation (C0 continuous, ~100ns)
-- `INTERP_CUBIC`: Tensor-product cubic splines (C2 continuous, ~500ns) - *future work*
+- `INTERP_CUBIC`: Tensor-product cubic splines (C² continuous, ~500ns for 4D)
+  - Provides accurate second derivatives (gamma, vega-convexity, etc.)
+  - Handles coordinate transformations (COORD_LOG_SQRT, COORD_LOG_VARIANCE)
+  - Requires precomputation of spline coefficients
+  - Minimum 2 points per dimension required
 
 ### Key Functions
 
@@ -1083,26 +1178,72 @@ int price_table_save(const OptionPriceTable *table, const char *filename);
 OptionPriceTable* price_table_load(const char *filename);
 ```
 
-### Multi-linear Interpolation Algorithm
+### Cubic Spline Interpolation Algorithm
 
-**Method**: Separable tensor-product linear interpolation
+**Method**: Tensor-product cubic spline interpolation with separable stages
 
 **4D Algorithm** (for price tables):
-1. Find bracketing grid indices for each dimension via binary search
-2. Extract 2^4 = 16 hypercube corner values
-3. Perform recursive linear interpolation:
-   - Stage 1: 8 interpolations along moneyness (16→8)
-   - Stage 2: 4 interpolations along maturity (8→4)
-   - Stage 3: 2 interpolations along volatility (4→2)
-   - Stage 4: 1 interpolation along rate (2→1)
-   - Total: 15 linear interpolations
+1. **Precomputation** (done once after filling table):
+   - For each combination of (τ, σ, r): create cubic spline in moneyness dimension
+   - Stores spline coefficients for all slices
+   - Enables O(1) evaluation along first dimension
+
+2. **Query** (per interpolation request):
+   - Stage 1: Evaluate moneyness splines for all (τ, σ, r) combinations → intermediate values
+   - Stage 2: Create and evaluate maturity splines for each (σ, r) → intermediate values
+   - Stage 3: Create and evaluate volatility splines for each r → intermediate values
+   - Stage 4: Create and evaluate rate spline → final result
+
+3. **Coordinate Transformation**:
+   - Query coordinates transformed from raw to grid space before interpolation
+   - Supports COORD_RAW, COORD_LOG_SQRT, COORD_LOG_VARIANCE
+
+```mermaid
+graph LR
+    RAW["User Query<br/>m=1.05, τ=0.25"]
+
+    COORD_RAW["COORD_RAW<br/>Identity<br/>m'=1.05, τ'=0.25"]
+
+    COORD_LOG_SQRT["COORD_LOG_SQRT<br/>m'=ln(m)<br/>τ'=√τ<br/>m'=0.049, τ'=0.5"]
+
+    COORD_LOG_VAR["COORD_LOG_VARIANCE<br/>m'=ln(m)<br/>σ'²=σ²·τ<br/>Better for vol surfaces"]
+
+    INTERP["Cubic Spline<br/>Interpolation<br/>in Grid Space"]
+
+    RESULT["Interpolated<br/>Price"]
+
+    RAW --> COORD_RAW
+    RAW --> COORD_LOG_SQRT
+    RAW --> COORD_LOG_VAR
+
+    COORD_RAW --> INTERP
+    COORD_LOG_SQRT --> INTERP
+    COORD_LOG_VAR --> INTERP
+
+    INTERP --> RESULT
+
+    style RAW fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style COORD_RAW fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style COORD_LOG_SQRT fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style COORD_LOG_VAR fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style INTERP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Why coordinate transforms?**
+- **Log-moneyness**: ln(m) spreads out ATM region where most trading occurs
+- **Square-root time**: √τ linearizes time decay near expiry
+- **Better interpolation**: Transformed coordinates are more linear, reducing interpolation error
 
 **Complexity**:
-- Time: O(d log n + 2^d) where d=dimensions, n=grid size per dimension
-- Space: O(1) - no temporary arrays needed
-- 4D example: ~31 operations (16 lookups + 15 lerps)
+- Precomputation: O(n_τ × n_σ × n_r × n_m) cubic spline setups
+- Query time: O(n_τ × n_σ × n_r) spline evaluations per query
+- Space: O(n_τ × n_σ × n_r × n_m) for spline coefficients (4x price array size)
 
-**Key Implementation Detail**: Dimension ordering matters! Interpolation must proceed from most significant dimension (largest stride) to least significant to maintain correctness.
+**Key Features**:
+- C² continuous (smooth second derivatives)
+- Accurate Greeks (gamma, vega-convexity, etc.)
+- Requires ≥2 points in each dimension
 
 ### Performance Characteristics
 
@@ -1119,12 +1260,14 @@ OptionPriceTable* price_table_load(const char *filename);
 **Accuracy**:
 - On-grid points: Exact (machine precision)
 - Off-grid points: Typically <0.5% relative error for smooth functions
-- Delta: Accurate (first derivatives preserved by linear interpolation)
-- Gamma: **Approximately zero** (second derivatives vanish for piecewise linear functions)
+- **Delta**: Accurate (first derivatives from cubic splines)
+- **Gamma**: Accurate (second derivatives continuous, C² property)
+- **Vega/Theta/Rho**: Accurate via finite differences on interpolated values
 
-**Important Limitation**: Multi-linear interpolation is C0 continuous (continuous but not smooth). Second derivatives (gamma) are approximately zero within grid cells. For accurate gamma calculations, either:
-1. Use cubic spline interpolation (future work), or
-2. Store pre-computed Greeks in separate tables
+**Advantages of Cubic**:
+- C² continuous interpolation (smooth second derivatives)
+- Accurate Greeks without storing separate tables
+- Better approximation of smooth functions between grid points
 
 ### Integration with Existing Components
 
@@ -1505,7 +1648,7 @@ bazel build //benchmarks:quantlib_benchmark
 | **PDE Solver** | FDM time-stepping engine | pde_solver.{h,c} | `pde_solver_create()`, `pde_solver_solve()`, `pde_solver_destroy()` |
 | **IV Surface** | Fast 2D IV interpolation (~100ns) | iv_surface.{h,c} | `iv_surface_create()`, `iv_surface_interpolate()` |
 | **Price Table** | Fast 4D/5D price lookup (~500ns) | price_table.{h,c} | `price_table_create()`, `price_table_interpolate_4d()`, `price_table_greeks_4d()` |
-| **Multilinear Interpolation** | N-dimensional linear interpolation | interp_multilinear.{h,c}, interp_strategy.h | `INTERP_MULTILINEAR` strategy |
+| **Cubic Interpolation** | N-dimensional cubic spline interpolation | interp_cubic.{h,c}, interp_cubic_workspace.c, interp_strategy.h | `INTERP_CUBIC` strategy |
 | **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
 | **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()` (malloc), `pde_spline_init()` (workspace), `pde_spline_eval()` |
 | **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
