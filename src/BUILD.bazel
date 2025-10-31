@@ -102,7 +102,10 @@ cc_library(
         "-O3",
         "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
-    deps = [":european_option"],
+    deps = [
+        ":american_option",
+        ":lets_be_rational",
+    ],
     visibility = ["//visibility:public"],
 )
 
