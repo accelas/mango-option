@@ -18,7 +18,7 @@ BEGIN
 }
 
 /* PDE solver starts */
-usdt::ivcalc:algo_start
+usdt::mango:algo_start
 /arg0 == 1/  /* MODULE_PDE_SOLVER */
 {
     printf("PDE Solver Starting\n");
@@ -32,7 +32,7 @@ usdt::ivcalc:algo_start
 }
 
 /* Track progress through time steps */
-usdt::ivcalc:algo_progress
+usdt::mango:algo_progress
 /arg0 == 1/  /* PDE solver */
 {
     $step = arg1;
@@ -47,7 +47,7 @@ usdt::ivcalc:algo_progress
 }
 
 /* Monitor implicit solver convergence per time step */
-usdt::ivcalc:convergence_iter
+usdt::mango:convergence_iter
 /arg0 == 1/  /* PDE solver */
 {
     $step = arg1;
@@ -66,7 +66,7 @@ usdt::ivcalc:convergence_iter
 }
 
 /* Implicit solver converged */
-usdt::ivcalc:convergence_success
+usdt::mango:convergence_success
 /arg0 == 1/
 {
     $step = arg1;
@@ -90,7 +90,7 @@ usdt::ivcalc:convergence_success
 }
 
 /* Implicit solver failed */
-usdt::ivcalc:convergence_failed
+usdt::mango:convergence_failed
 /arg0 == 1/
 {
     $step = arg1;
@@ -105,7 +105,7 @@ usdt::ivcalc:convergence_failed
 }
 
 /* PDE solver completes */
-usdt::ivcalc:algo_complete
+usdt::mango:algo_complete
 /arg0 == 1/
 {
     $duration_ms = (nsecs - @solve_start) / 1000000;

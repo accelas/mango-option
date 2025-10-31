@@ -311,15 +311,15 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         rel_error = (norm > 1e-12) ? error / (norm + 1e-12) : error;
 
         // Trace iteration progress
-        IVCALC_TRACE_PDE_IMPLICIT_ITER(step, iter, rel_error, tol);
+        MANGO_TRACE_PDE_IMPLICIT_ITER(step, iter, rel_error, tol);
 
         if (rel_error < tol || error < tol) {
-            IVCALC_TRACE_PDE_IMPLICIT_CONVERGED(step, iter, rel_error);
+            MANGO_TRACE_PDE_IMPLICIT_CONVERGED(step, iter, rel_error);
             return 0;
         }
     }
 
-    IVCALC_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, rel_error);
+    MANGO_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, rel_error);
     return -1;
 }
 
@@ -387,12 +387,12 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
 
     // Validate Robin boundary condition coefficients
     if (bc_config->left_type == BC_ROBIN && fabs(bc_config->left_robin_a) < 1e-15) {
-        IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 1, bc_config->left_robin_a, 1e-15);
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 1, bc_config->left_robin_a, 1e-15);
         free(solver);
         return nullptr;
     }
     if (bc_config->right_type == BC_ROBIN && fabs(bc_config->right_robin_a) < 1e-15) {
-        IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 2, bc_config->right_robin_a, 1e-15);
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 2, bc_config->right_robin_a, 1e-15);
         free(solver);
         return nullptr;
     }
@@ -418,7 +418,7 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
         solver->workspace = malloc(workspace_size * sizeof(double));
         if (solver->workspace == nullptr) {
             // Both allocations failed
-            IVCALC_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 0, workspace_size, 0.0);
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 0, workspace_size, 0.0);
             free(solver);
             return nullptr;
         }
@@ -539,7 +539,7 @@ int pde_solver_solve(PDESolver *solver) {
     size_t next_event_idx = 0; // Track next event to check
 
     // Trace solver start
-    IVCALC_TRACE_PDE_START(solver->time.t_start, solver->time.t_end,
+    MANGO_TRACE_PDE_START(solver->time.t_start, solver->time.t_end,
                            solver->time.dt, solver->time.n_steps);
 
     for (size_t step = 0; step < solver->time.n_steps; step++) {
@@ -594,12 +594,12 @@ int pde_solver_solve(PDESolver *solver) {
 
         // Trace progress periodically (every 10%)
         if (step % (solver->time.n_steps / 10 + 1) == 0) {
-            IVCALC_TRACE_PDE_PROGRESS(step, solver->time.n_steps, t);
+            MANGO_TRACE_PDE_PROGRESS(step, solver->time.n_steps, t);
         }
     }
 
     // Trace successful completion
-    IVCALC_TRACE_PDE_COMPLETE(solver->time.n_steps, t);
+    MANGO_TRACE_PDE_COMPLETE(solver->time.n_steps, t);
     return 0;
 }
 

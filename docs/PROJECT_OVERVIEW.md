@@ -207,7 +207,7 @@ mango-iv/
 │   ├── pde_solver.{h,c}           # General PDE solver (FDM)
 │   ├── cubic_spline.{h,c}         # Interpolation
 │   ├── brent.h                    # Root-finding
-│   └── ivcalc_trace.h             # USDT tracing probes
+│   └── mango_trace.h             # USDT tracing probes
 │
 ├── examples/                      # Demonstration programs
 │   ├── example_implied_volatility.c
@@ -230,7 +230,7 @@ mango-iv/
 │   └── QUICK_REFERENCE.md         # Developer quick-start
 │
 ├── scripts/                       # Utilities
-│   ├── ivcalc-trace               # USDT tracing helper
+│   ├── mango-trace               # USDT tracing helper
 │   └── tracing/                   # bpftrace scripts
 │
 ├── CLAUDE.md                      # Instructions for Claude Code

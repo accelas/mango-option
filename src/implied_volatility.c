@@ -52,27 +52,27 @@ IVResult calculate_iv(const IVParams *params,
     IVResult result = {0.0, 0.0, 0, false, NULL};
 
     // Trace calculation start
-    IVCALC_TRACE_IV_START(params->spot_price, params->strike,
+    MANGO_TRACE_IV_START(params->spot_price, params->strike,
                           params->time_to_maturity, params->market_price);
 
     // Validate inputs
     if (params->spot_price <= 0.0) {
-        IVCALC_TRACE_IV_VALIDATION_ERROR(1, params->spot_price, 0.0);
+        MANGO_TRACE_IV_VALIDATION_ERROR(1, params->spot_price, 0.0);
         result.error = "Spot price must be positive";
         return result;
     }
     if (params->strike <= 0.0) {
-        IVCALC_TRACE_IV_VALIDATION_ERROR(2, params->strike, 0.0);
+        MANGO_TRACE_IV_VALIDATION_ERROR(2, params->strike, 0.0);
         result.error = "Strike price must be positive";
         return result;
     }
     if (params->time_to_maturity <= 0.0) {
-        IVCALC_TRACE_IV_VALIDATION_ERROR(3, params->time_to_maturity, 0.0);
+        MANGO_TRACE_IV_VALIDATION_ERROR(3, params->time_to_maturity, 0.0);
         result.error = "Time to maturity must be positive";
         return result;
     }
     if (params->market_price <= 0.0) {
-        IVCALC_TRACE_IV_VALIDATION_ERROR(4, params->market_price, 0.0);
+        MANGO_TRACE_IV_VALIDATION_ERROR(4, params->market_price, 0.0);
         result.error = "Market price must be positive";
         return result;
     }
@@ -82,21 +82,21 @@ IVResult calculate_iv(const IVParams *params,
     if (params->is_call) {
         intrinsic_value = fmax(params->spot_price - params->strike, 0.0);
         if (params->market_price > params->spot_price) {
-            IVCALC_TRACE_IV_VALIDATION_ERROR(5, params->market_price, params->spot_price);
+            MANGO_TRACE_IV_VALIDATION_ERROR(5, params->market_price, params->spot_price);
             result.error = "Call price exceeds spot price (arbitrage)";
             return result;
         }
     } else {
         intrinsic_value = fmax(params->strike - params->spot_price, 0.0);
         if (params->market_price > params->strike) {
-            IVCALC_TRACE_IV_VALIDATION_ERROR(5, params->market_price, params->strike);
+            MANGO_TRACE_IV_VALIDATION_ERROR(5, params->market_price, params->strike);
             result.error = "Put price exceeds strike (arbitrage)";
             return result;
         }
     }
 
     if (params->market_price < intrinsic_value - tolerance) {
-        IVCALC_TRACE_IV_VALIDATION_ERROR(5, params->market_price, intrinsic_value);
+        MANGO_TRACE_IV_VALIDATION_ERROR(5, params->market_price, intrinsic_value);
         result.error = "Market price below intrinsic value (arbitrage)";
         return result;
     }
@@ -134,11 +134,11 @@ IVResult calculate_iv(const IVParams *params,
         result.converged = true;
         result.vega = 0.0;  // Could compute via finite differences if needed
 
-        IVCALC_TRACE_IV_COMPLETE(result.implied_vol, result.iterations, 1);
+        MANGO_TRACE_IV_COMPLETE(result.implied_vol, result.iterations, 1);
     } else {
         result.error = "Failed to converge";
         result.iterations = brent_result.iterations;
-        IVCALC_TRACE_CONVERGENCE_FAILED(MODULE_IMPLIED_VOL, brent_result.iterations, max_iter, 0.0);
+        MANGO_TRACE_CONVERGENCE_FAILED(MODULE_IMPLIED_VOL, brent_result.iterations, max_iter, 0.0);
     }
 
     return result;

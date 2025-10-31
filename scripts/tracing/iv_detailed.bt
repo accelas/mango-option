@@ -18,7 +18,7 @@ BEGIN
 }
 
 /* IV calculation starts */
-usdt::ivcalc:iv_start
+usdt::mango:iv_start
 {
     printf("IV Calculation Starting\n");
     printf("  Spot price: %.4f\n", arg0);
@@ -37,7 +37,7 @@ usdt::ivcalc:iv_start
 }
 
 /* Validation errors */
-usdt::ivcalc:validation_error
+usdt::mango:validation_error
 /arg0 == 3/  /* MODULE_IMPLIED_VOL */
 {
     printf("\033[31mValidation Error\033[0m\n");
@@ -65,7 +65,7 @@ usdt::ivcalc:validation_error
 }
 
 /* Brent's method starts */
-usdt::ivcalc:algo_start
+usdt::mango:algo_start
 /arg0 == 4/  /* MODULE_BRENT_ROOT */
 {
     printf("Brent's Method Starting\n");
@@ -76,7 +76,7 @@ usdt::ivcalc:algo_start
 }
 
 /* Brent iterations */
-usdt::ivcalc:brent_iter
+usdt::mango:brent_iter
 {
     $iter = arg0;
     $x = arg1;
@@ -94,7 +94,7 @@ usdt::ivcalc:brent_iter
 }
 
 /* IV calculation completes */
-usdt::ivcalc:iv_complete
+usdt::mango:iv_complete
 {
     $duration_us = (nsecs - @iv_start) / 1000;
     $iv = arg0;
