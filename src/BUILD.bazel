@@ -94,32 +94,6 @@ cc_library(
 )
 
 cc_library(
-    name = "interp_multilinear",
-    srcs = ["interp_multilinear.c"],
-    hdrs = [
-        "interp_multilinear.h",
-        "interp_strategy.h",
-        "iv_surface.h",
-        "price_table.h",
-        "american_option.h",
-        "pde_solver.h",
-        "ivcalc_trace.h",
-        "cubic_spline.h",
-        "tridiagonal.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "interp_cubic",
     srcs = [
         "interp_cubic.c",
@@ -162,7 +136,7 @@ cc_library(
         "-Wextra",
         "-O3",
     ],
-    deps = [":interp_multilinear"],
+    deps = [":interp_cubic", ":cubic_spline"],
     visibility = ["//visibility:public"],
 )
 
@@ -182,7 +156,8 @@ cc_library(
         "-ftree-vectorize",
     ],
     deps = [
-        ":interp_multilinear",
+        ":interp_cubic",
+        ":cubic_spline",
         ":american_option",
     ],
     visibility = ["//visibility:public"],
