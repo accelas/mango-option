@@ -9,6 +9,25 @@
 #   ./bazel-bin/benchmarks/quantlib_benchmark
 
 cc_binary(
+    name = "american_iv_benchmark",
+    srcs = ["american_iv_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    deps = [
+        "//src:implied_volatility",
+        "//src:american_option",
+        "//src:lets_be_rational",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "batch_benchmark",
     srcs = ["batch_benchmark.cc"],
     copts = [
@@ -23,7 +42,7 @@ cc_binary(
     deps = [
         "//src:american_option",
         "//src:implied_volatility",
-        "//src:european_option",
+        "//src:lets_be_rational",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
