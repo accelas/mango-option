@@ -468,56 +468,112 @@ int price_table_precompute(OptionPriceTable *table,
     IVCALC_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
 
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
+    size_t completed = 0;
 
-    // Process in batches
-    for (size_t batch_start = 0; batch_start < n_total; batch_start += batch_size) {
-        size_t batch_count = min(batch_size, n_total - batch_start);
+    // Process each maturity separately with adaptive time steps
+    for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+        double tau = table->maturity_grid[i_tau];
 
-        // Fill batch with grid points
-        for (size_t i = 0; i < batch_count; i++) {
-            size_t idx = batch_start + i;
-            size_t i_m, i_tau, i_sigma, i_r, i_q;
-            unflatten_index(idx, table, &i_m, &i_tau, &i_sigma, &i_r, &i_q);
+        // Create adaptive grid for this maturity
+        AmericanOptionGrid adaptive_grid = *grid;  // Copy base grid
+        adaptive_grid.n_steps = (size_t)(tau / grid->dt);  // Adaptive time steps
+        if (adaptive_grid.n_steps < 10) adaptive_grid.n_steps = 10;  // Minimum steps
 
-            batch_options[i] = grid_point_to_option(table, i_m, i_tau,
-                                                     i_sigma, i_r, i_q);
+        // Calculate points for this maturity slice
+        size_t points_per_maturity = table->n_moneyness * table->n_volatility * table->n_rate;
+        if (table->n_dividend > 0) {
+            points_per_maturity *= table->n_dividend;
         }
 
-        // Solve batch (OpenMP parallelization inside batch API)
-        int status = american_option_price_batch(batch_options, grid,
-                                                  batch_count, batch_results);
-        if (status != 0) {
-            free(batch_options);
-            free(batch_results);
-            IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, batch_start);
-            return -1;
-        }
+        // Process this maturity slice in batches
+        for (size_t slice_start = 0; slice_start < points_per_maturity; slice_start += batch_size) {
+            size_t batch_count = min(batch_size, points_per_maturity - slice_start);
 
-        // Store results in table and free solvers
-        for (size_t i = 0; i < batch_count; i++) {
-            size_t idx = batch_start + i;
-            size_t i_m, i_tau, i_sigma, i_r, i_q;
-            unflatten_index(idx, table, &i_m, &i_tau, &i_sigma, &i_r, &i_q);
+            // Fill batch with points from this maturity slice
+            for (size_t i = 0; i < batch_count; i++) {
+                size_t slice_idx = slice_start + i;
 
-            // Extract moneyness for this grid point
-            double m = table->moneyness_grid[i_m];
-            double spot_price = m * K_ref;
+                // Decompose slice index into other dimensions
+                size_t i_m, i_sigma, i_r, i_q;
+                if (table->n_dividend > 0) {
+                    size_t per_dividend = table->n_moneyness * table->n_volatility * table->n_rate;
+                    i_q = slice_idx / per_dividend;
+                    slice_idx %= per_dividend;
+                } else {
+                    i_q = 0;
+                }
 
-            // Extract price at the spot price
-            double price = american_option_get_value_at_spot(
-                batch_results[i].solver, spot_price, K_ref);
+                size_t per_rate = table->n_moneyness * table->n_volatility;
+                i_r = slice_idx / per_rate;
+                slice_idx %= per_rate;
 
-            table->prices[idx] = price;
+                size_t per_sigma = table->n_moneyness;
+                i_sigma = slice_idx / per_sigma;
+                i_m = slice_idx % per_sigma;
 
-            // Free the solver
-            pde_solver_destroy(batch_results[i].solver);
-        }
+                batch_options[i] = grid_point_to_option(table, i_m, i_tau,
+                                                         i_sigma, i_r, i_q);
+            }
 
-        // Progress tracking (every 10 batches)
-        if ((batch_start / batch_size) % 10 == 0) {
-            IVCALC_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
-                                       batch_start + batch_count, n_total,
-                                       (double)(batch_start + batch_count) / (double)n_total);
+            // Solve batch with maturity-specific grid
+            int status = american_option_price_batch(batch_options, &adaptive_grid,
+                                                      batch_count, batch_results);
+            if (status != 0) {
+                free(batch_options);
+                free(batch_results);
+                IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, completed);
+                return -1;
+            }
+
+            // Store results in table and free solvers
+            for (size_t i = 0; i < batch_count; i++) {
+                size_t slice_idx = slice_start + i;
+
+                // Reconstruct global index
+                size_t i_m, i_sigma, i_r, i_q;
+                if (table->n_dividend > 0) {
+                    size_t per_dividend = table->n_moneyness * table->n_volatility * table->n_rate;
+                    i_q = slice_idx / per_dividend;
+                    slice_idx %= per_dividend;
+                } else {
+                    i_q = 0;
+                }
+
+                size_t per_rate = table->n_moneyness * table->n_volatility;
+                i_r = slice_idx / per_rate;
+                slice_idx %= per_rate;
+
+                size_t per_sigma = table->n_moneyness;
+                i_sigma = slice_idx / per_sigma;
+                i_m = slice_idx % per_sigma;
+
+                // Calculate global index
+                size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                           + i_sigma * table->stride_sigma + i_r * table->stride_r
+                           + i_q * table->stride_q;
+
+                // Extract moneyness for this grid point
+                double m = table->moneyness_grid[i_m];
+                double spot_price = m * K_ref;
+
+                // Extract price at the spot price
+                double price = american_option_get_value_at_spot(
+                    batch_results[i].solver, spot_price, K_ref);
+
+                table->prices[idx] = price;
+
+                // Free the solver
+                pde_solver_destroy(batch_results[i].solver);
+            }
+
+            completed += batch_count;
+
+            // Progress tracking (every 10 batches)
+            if ((completed / batch_size) % 10 == 0) {
+                IVCALC_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
+                                           completed, n_total,
+                                           (double)completed / (double)n_total);
+            }
         }
     }
 
