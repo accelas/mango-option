@@ -57,6 +57,30 @@ typedef enum {
  */
 
 /**
+ * Coordinate system for grid interpretation
+ *
+ * User API always accepts raw coordinates (m, T, σ, r, q).
+ * Grid storage uses transformed coordinates for numerical stability.
+ */
+typedef enum {
+    COORD_RAW,           // m, T, σ, r, q (current behavior, default)
+    COORD_LOG_SQRT,      // log(m), sqrt(T), σ, r, q (recommended)
+    COORD_LOG_VARIANCE,  // log(m), σ²T, r, q (future: collapsed dimensions)
+} CoordinateSystem;
+
+/**
+ * Memory layout for price array
+ *
+ * Determines dimension ordering in flattened array.
+ * LAYOUT_M_INNER optimizes for moneyness slice extraction (cubic interpolation).
+ */
+typedef enum {
+    LAYOUT_M_OUTER,      // [m][tau][sigma][r][q] (current behavior, default)
+    LAYOUT_M_INNER,      // [r][sigma][tau][m] (cache-optimized)
+    LAYOUT_BLOCKED,      // Future: cache-oblivious tiled layout
+} MemoryLayout;
+
+/**
  * Option Price Table data structure
  *
  * Memory layout: row-major with fastest-to-slowest dimensions:
@@ -88,6 +112,10 @@ typedef struct OptionPriceTable {
     ExerciseType exercise;      // EUROPEAN or AMERICAN
     char underlying[32];        // Underlying symbol
     time_t generation_time;     // When table was computed
+
+    // Transformation configuration (NEW)
+    CoordinateSystem coord_system;  // How to interpret grid values
+    MemoryLayout memory_layout;     // How prices are stored physically
 
     // Pre-computed strides for fast indexing
     size_t stride_m;            // = n_tau * n_sigma * n_r * n_q
