@@ -202,7 +202,7 @@ mango-iv/
 │   ├── iv_surface.{h,c}           # 2D implied volatility surfaces
 │   ├── brent.h                    # Brent's method (root-finding)
 │   ├── tridiagonal.h              # Tridiagonal solver
-│   └── ivcalc_trace.h             # USDT tracing probes
+│   └── mango_trace.h             # USDT tracing probes
 │
 ├── examples/                      # Demonstration programs
 │   ├── example_implied_volatility.c
@@ -236,7 +236,7 @@ mango-iv/
 │   └── QUICK_REFERENCE.md         # Developer quick-start
 │
 ├── scripts/                       # Utilities
-│   ├── ivcalc-trace               # USDT tracing helper
+│   ├── mango-trace               # USDT tracing helper
 │   └── tracing/                   # bpftrace scripts
 │
 ├── CLAUDE.md                      # Instructions for Claude Code
@@ -260,13 +260,13 @@ The library includes **zero-overhead tracing** via USDT (User Statically-Defined
 
 ```bash
 # Monitor all library activity
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_american_option
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_american_option
 
 # Watch convergence behavior
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=convergence
+sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
 
 # Debug failures
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=debug
+sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 ```
 
 Tracing provides:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bpftrace
 /*
- * monitor_all.bt - Monitor all ivcalc library activity
+ * monitor_all.bt - Monitor all mango library activity
  *
  * This script provides a high-level overview of all library operations.
  * Shows algorithm starts, completions, and any errors/failures.
@@ -12,14 +12,14 @@
 
 BEGIN
 {
-    printf("Monitoring ivcalc library activity...\n");
+    printf("Monitoring mango library activity...\n");
     printf("%-10s %-20s %s\n", "TIME", "MODULE", "EVENT");
     printf("-----------------------------------------------------------\n");
 }
 
 /* Module name lookup */
-usdt::ivcalc:algo_start,
-usdt::ivcalc:algo_complete
+usdt::mango:algo_start,
+usdt::mango:algo_complete
 {
     if (arg0 == 1) { @module_name = "PDE_SOLVER"; }
     else if (arg0 == 2) { @module_name = "AMERICAN_OPTION"; }
@@ -30,14 +30,14 @@ usdt::ivcalc:algo_complete
 }
 
 /* Algorithm lifecycle */
-usdt::ivcalc:algo_start
+usdt::mango:algo_start
 {
     printf("%-10u %-20s START\n", elapsed / 1000000, str(@module_name));
     @start_time[arg0] = nsecs;
     @algo_count++;
 }
 
-usdt::ivcalc:algo_complete
+usdt::mango:algo_complete
 {
     $duration_ms = (nsecs - @start_time[arg0]) / 1000000;
     printf("%-10u %-20s COMPLETE (iterations=%d, duration=%u ms)\n",
@@ -46,7 +46,7 @@ usdt::ivcalc:algo_complete
 }
 
 /* Convergence failures - ALERT */
-usdt::ivcalc:convergence_failed
+usdt::mango:convergence_failed
 {
     if (arg0 == 1) { @module_name = "PDE_SOLVER"; }
     else if (arg0 == 2) { @module_name = "AMERICAN_OPTION"; }
@@ -60,7 +60,7 @@ usdt::ivcalc:convergence_failed
 }
 
 /* Validation errors */
-usdt::ivcalc:validation_error
+usdt::mango:validation_error
 {
     if (arg0 == 1) { @module_name = "PDE_SOLVER"; }
     else if (arg0 == 2) { @module_name = "AMERICAN_OPTION"; }
@@ -74,7 +74,7 @@ usdt::ivcalc:validation_error
 }
 
 /* Runtime errors */
-usdt::ivcalc:runtime_error
+usdt::mango:runtime_error
 {
     if (arg0 == 1) { @module_name = "PDE_SOLVER"; }
     else if (arg0 == 2) { @module_name = "AMERICAN_OPTION"; }

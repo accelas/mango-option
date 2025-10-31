@@ -1,6 +1,6 @@
 /**
  * @file ivcalc_trace.h
- * @brief USDT (User Statically-Defined Tracing) probes for iv_calc library
+ * @brief USDT (User Statically-Defined Tracing) probes for mango library
  *
  * This header provides zero-overhead tracing points that can be dynamically
  * enabled at runtime using tools like bpftrace, systemtap, or perf.
@@ -14,10 +14,10 @@
  *
  * Example usage with bpftrace:
  *   # Trace all algorithm executions
- *   sudo bpftrace -e 'usdt:./lib*.so:ivcalc:algo_* { ... }'
+ *   sudo bpftrace -e 'usdt:./lib*.so:mango:algo_* { ... }'
  *
  *   # Monitor convergence across all modules
- *   sudo bpftrace -e 'usdt:./lib*.so:ivcalc:convergence_failed { ... }'
+ *   sudo bpftrace -e 'usdt:./lib*.so:mango:convergence_failed { ... }'
  */
 
 #ifndef IVCALC_TRACE_H
@@ -45,9 +45,9 @@
 #endif
 
 /**
- * Provider name for all iv_calc library probes
+ * Provider name for all mango library probes
  */
-#define IVCALC_PROVIDER ivcalc
+#define MANGO_PROVIDER mango
 
 /**
  * Module identifiers for multi-module tracing
@@ -73,8 +73,8 @@
  * @param param2: Module-specific parameter (e.g., dt, tolerance)
  * @param param3: Module-specific parameter
  */
-#define IVCALC_TRACE_ALGO_START(module_id, param1, param2, param3) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, algo_start, module_id, param1, param2, param3)
+#define MANGO_TRACE_ALGO_START(module_id, param1, param2, param3) \
+    DTRACE_PROBE4(MANGO_PROVIDER, algo_start, module_id, param1, param2, param3)
 
 /**
  * Fired periodically during algorithm execution to report progress
@@ -83,8 +83,8 @@
  * @param total: Total work (e.g., total steps, max iterations)
  * @param metric: Progress metric (e.g., current time, current error)
  */
-#define IVCALC_TRACE_ALGO_PROGRESS(module_id, current, total, metric) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, algo_progress, module_id, current, total, metric)
+#define MANGO_TRACE_ALGO_PROGRESS(module_id, current, total, metric) \
+    DTRACE_PROBE4(MANGO_PROVIDER, algo_progress, module_id, current, total, metric)
 
 /**
  * Fired when an algorithm completes successfully
@@ -92,8 +92,8 @@
  * @param iterations: Number of iterations/steps completed
  * @param final_metric: Final metric value (e.g., final time, final error)
  */
-#define IVCALC_TRACE_ALGO_COMPLETE(module_id, iterations, final_metric) \
-    DTRACE_PROBE3(IVCALC_PROVIDER, algo_complete, module_id, iterations, final_metric)
+#define MANGO_TRACE_ALGO_COMPLETE(module_id, iterations, final_metric) \
+    DTRACE_PROBE3(MANGO_PROVIDER, algo_complete, module_id, iterations, final_metric)
 
 /**
  * ============================================================================
@@ -110,8 +110,8 @@
  * @param error: Current error metric
  * @param tolerance: Convergence threshold
  */
-#define IVCALC_TRACE_CONVERGENCE_ITER(module_id, step, iter, error, tolerance) \
-    DTRACE_PROBE5(IVCALC_PROVIDER, convergence_iter, module_id, step, iter, error, tolerance)
+#define MANGO_TRACE_CONVERGENCE_ITER(module_id, step, iter, error, tolerance) \
+    DTRACE_PROBE5(MANGO_PROVIDER, convergence_iter, module_id, step, iter, error, tolerance)
 
 /**
  * Fired when convergence is achieved
@@ -120,8 +120,8 @@
  * @param final_iter: Number of iterations required
  * @param final_error: Final error achieved
  */
-#define IVCALC_TRACE_CONVERGENCE_SUCCESS(module_id, step, final_iter, final_error) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, convergence_success, module_id, step, final_iter, final_error)
+#define MANGO_TRACE_CONVERGENCE_SUCCESS(module_id, step, final_iter, final_error) \
+    DTRACE_PROBE4(MANGO_PROVIDER, convergence_success, module_id, step, final_iter, final_error)
 
 /**
  * Fired when convergence fails
@@ -130,8 +130,8 @@
  * @param max_iter: Maximum iterations attempted
  * @param final_error: Final error at failure
  */
-#define IVCALC_TRACE_CONVERGENCE_FAILED(module_id, step, max_iter, final_error) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, convergence_failed, module_id, step, max_iter, final_error)
+#define MANGO_TRACE_CONVERGENCE_FAILED(module_id, step, max_iter, final_error) \
+    DTRACE_PROBE4(MANGO_PROVIDER, convergence_failed, module_id, step, max_iter, final_error)
 
 /**
  * ============================================================================
@@ -147,8 +147,8 @@
  * @param param1: Relevant parameter value
  * @param param2: Relevant parameter value or threshold
  */
-#define IVCALC_TRACE_VALIDATION_ERROR(module_id, error_code, param1, param2) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, validation_error, module_id, error_code, param1, param2)
+#define MANGO_TRACE_VALIDATION_ERROR(module_id, error_code, param1, param2) \
+    DTRACE_PROBE4(MANGO_PROVIDER, validation_error, module_id, error_code, param1, param2)
 
 /**
  * Fired when a runtime error occurs
@@ -156,8 +156,8 @@
  * @param error_code: Error code
  * @param context: Context value (e.g., step number, iteration)
  */
-#define IVCALC_TRACE_RUNTIME_ERROR(module_id, error_code, context) \
-    DTRACE_PROBE3(IVCALC_PROVIDER, runtime_error, module_id, error_code, context)
+#define MANGO_TRACE_RUNTIME_ERROR(module_id, error_code, context) \
+    DTRACE_PROBE3(MANGO_PROVIDER, runtime_error, module_id, error_code, context)
 
 /**
  * ============================================================================
@@ -172,8 +172,8 @@
  * @param dt: Time step size
  * @param n_steps: Total number of steps
  */
-#define IVCALC_TRACE_PDE_START(t_start, t_end, dt, n_steps) \
-    IVCALC_TRACE_ALGO_START(MODULE_PDE_SOLVER, n_steps, dt, (t_end - t_start))
+#define MANGO_TRACE_PDE_START(t_start, t_end, dt, n_steps) \
+    MANGO_TRACE_ALGO_START(MODULE_PDE_SOLVER, n_steps, dt, (t_end - t_start))
 
 /**
  * Fired during PDE solve progress
@@ -181,34 +181,34 @@
  * @param n_steps: Total steps
  * @param t_current: Current time
  */
-#define IVCALC_TRACE_PDE_PROGRESS(step, n_steps, t_current) \
-    IVCALC_TRACE_ALGO_PROGRESS(MODULE_PDE_SOLVER, step, n_steps, t_current)
+#define MANGO_TRACE_PDE_PROGRESS(step, n_steps, t_current) \
+    MANGO_TRACE_ALGO_PROGRESS(MODULE_PDE_SOLVER, step, n_steps, t_current)
 
 /**
  * Fired when PDE solve completes
  * @param total_steps: Total steps executed
  * @param final_time: Final time reached
  */
-#define IVCALC_TRACE_PDE_COMPLETE(total_steps, final_time) \
-    IVCALC_TRACE_ALGO_COMPLETE(MODULE_PDE_SOLVER, total_steps, final_time)
+#define MANGO_TRACE_PDE_COMPLETE(total_steps, final_time) \
+    MANGO_TRACE_ALGO_COMPLETE(MODULE_PDE_SOLVER, total_steps, final_time)
 
 /**
  * PDE implicit solver iteration
  */
-#define IVCALC_TRACE_PDE_IMPLICIT_ITER(step, iter, error, tolerance) \
-    IVCALC_TRACE_CONVERGENCE_ITER(MODULE_PDE_SOLVER, step, iter, error, tolerance)
+#define MANGO_TRACE_PDE_IMPLICIT_ITER(step, iter, error, tolerance) \
+    MANGO_TRACE_CONVERGENCE_ITER(MODULE_PDE_SOLVER, step, iter, error, tolerance)
 
 /**
  * PDE implicit solver converged
  */
-#define IVCALC_TRACE_PDE_IMPLICIT_CONVERGED(step, final_iter, final_error) \
-    IVCALC_TRACE_CONVERGENCE_SUCCESS(MODULE_PDE_SOLVER, step, final_iter, final_error)
+#define MANGO_TRACE_PDE_IMPLICIT_CONVERGED(step, final_iter, final_error) \
+    MANGO_TRACE_CONVERGENCE_SUCCESS(MODULE_PDE_SOLVER, step, final_iter, final_error)
 
 /**
  * PDE implicit solver failed to converge
  */
-#define IVCALC_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, final_error) \
-    IVCALC_TRACE_CONVERGENCE_FAILED(MODULE_PDE_SOLVER, step, max_iter, final_error)
+#define MANGO_TRACE_PDE_IMPLICIT_FAILED(step, max_iter, final_error) \
+    MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PDE_SOLVER, step, max_iter, final_error)
 
 /**
  * ============================================================================
@@ -223,8 +223,8 @@
  * @param time_to_maturity: Time to expiration
  * @param market_price: Market price
  */
-#define IVCALC_TRACE_IV_START(spot, strike, time_to_maturity, market_price) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, iv_start, spot, strike, time_to_maturity, market_price)
+#define MANGO_TRACE_IV_START(spot, strike, time_to_maturity, market_price) \
+    DTRACE_PROBE4(MANGO_PROVIDER, iv_start, spot, strike, time_to_maturity, market_price)
 
 /**
  * Fired when IV calculation completes
@@ -232,8 +232,8 @@
  * @param iterations: Number of iterations
  * @param converged: 1 if converged, 0 if failed
  */
-#define IVCALC_TRACE_IV_COMPLETE(implied_vol, iterations, converged) \
-    DTRACE_PROBE3(IVCALC_PROVIDER, iv_complete, implied_vol, iterations, converged)
+#define MANGO_TRACE_IV_COMPLETE(implied_vol, iterations, converged) \
+    DTRACE_PROBE3(MANGO_PROVIDER, iv_complete, implied_vol, iterations, converged)
 
 /**
  * Fired when IV validation fails (arbitrage bounds, etc.)
@@ -241,8 +241,8 @@
  * @param param1: Relevant parameter
  * @param param2: Threshold or bound
  */
-#define IVCALC_TRACE_IV_VALIDATION_ERROR(error_code, param1, param2) \
-    IVCALC_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, error_code, param1, param2)
+#define MANGO_TRACE_IV_VALIDATION_ERROR(error_code, param1, param2) \
+    MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, error_code, param1, param2)
 
 /**
  * ============================================================================
@@ -257,8 +257,8 @@
  * @param tolerance: Convergence tolerance
  * @param max_iter: Maximum iterations
  */
-#define IVCALC_TRACE_BRENT_START(a, b, tolerance, max_iter) \
-    IVCALC_TRACE_ALGO_START(MODULE_BRENT_ROOT, max_iter, tolerance, (b - a))
+#define MANGO_TRACE_BRENT_START(a, b, tolerance, max_iter) \
+    MANGO_TRACE_ALGO_START(MODULE_BRENT_ROOT, max_iter, tolerance, (b - a))
 
 /**
  * Fired on each Brent iteration
@@ -267,8 +267,8 @@
  * @param fx: Function value at x
  * @param interval_width: Current bracket width
  */
-#define IVCALC_TRACE_BRENT_ITER(iter, x, fx, interval_width) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, brent_iter, iter, x, fx, interval_width)
+#define MANGO_TRACE_BRENT_ITER(iter, x, fx, interval_width) \
+    DTRACE_PROBE4(MANGO_PROVIDER, brent_iter, iter, x, fx, interval_width)
 
 /**
  * Fired when root finding completes
@@ -276,8 +276,8 @@
  * @param iterations: Number of iterations
  * @param converged: 1 if converged, 0 if failed
  */
-#define IVCALC_TRACE_BRENT_COMPLETE(root, iterations, converged) \
-    IVCALC_TRACE_ALGO_COMPLETE(MODULE_BRENT_ROOT, iterations, root)
+#define MANGO_TRACE_BRENT_COMPLETE(root, iterations, converged) \
+    MANGO_TRACE_ALGO_COMPLETE(MODULE_BRENT_ROOT, iterations, root)
 
 /**
  * ============================================================================
@@ -292,16 +292,16 @@
  * @param volatility: Volatility
  * @param time_to_maturity: Time to maturity
  */
-#define IVCALC_TRACE_OPTION_START(option_type, strike, volatility, time_to_maturity) \
-    DTRACE_PROBE4(IVCALC_PROVIDER, option_start, option_type, strike, volatility, time_to_maturity)
+#define MANGO_TRACE_OPTION_START(option_type, strike, volatility, time_to_maturity) \
+    DTRACE_PROBE4(MANGO_PROVIDER, option_start, option_type, strike, volatility, time_to_maturity)
 
 /**
  * Fired when option pricing completes
  * @param status: 0=success, -1=failure
  * @param iterations: Number of PDE steps
  */
-#define IVCALC_TRACE_OPTION_COMPLETE(status, iterations) \
-    DTRACE_PROBE2(IVCALC_PROVIDER, option_complete, status, iterations)
+#define MANGO_TRACE_OPTION_COMPLETE(status, iterations) \
+    DTRACE_PROBE2(MANGO_PROVIDER, option_complete, status, iterations)
 
 /**
  * ============================================================================
@@ -314,7 +314,7 @@
  * @param n_points: Points provided
  * @param min_required: Minimum required
  */
-#define IVCALC_TRACE_SPLINE_ERROR(n_points, min_required) \
-    IVCALC_TRACE_VALIDATION_ERROR(MODULE_CUBIC_SPLINE, 1, n_points, min_required)
+#define MANGO_TRACE_SPLINE_ERROR(n_points, min_required) \
+    MANGO_TRACE_VALIDATION_ERROR(MODULE_CUBIC_SPLINE, 1, n_points, min_required)
 
 #endif // IVCALC_TRACE_H

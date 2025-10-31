@@ -118,13 +118,13 @@ static OptionData grid_point_to_option(const OptionPriceTable *table,
 
 /**
  * Get batch size for parallel computation from environment variable.
- * Defaults to 100 if IVCALC_PRECOMPUTE_BATCH_SIZE is not set or invalid.
+ * Defaults to 100 if MANGO_PRECOMPUTE_BATCH_SIZE is not set or invalid.
  * Valid range: 1 to 100000.
  */
 static size_t get_batch_size(void) {
     size_t batch_size = 100;  // Default
 
-    char *env_batch = getenv("IVCALC_PRECOMPUTE_BATCH_SIZE");
+    char *env_batch = getenv("MANGO_PRECOMPUTE_BATCH_SIZE");
     if (env_batch) {
         long val = atol(env_batch);
         if (val >= 1 && val <= 100000) {
@@ -448,7 +448,7 @@ int price_table_precompute(OptionPriceTable *table,
         return -1;
     }
 
-    IVCALC_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
+    MANGO_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
 
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
     size_t completed = 0;
@@ -504,7 +504,7 @@ int price_table_precompute(OptionPriceTable *table,
             if (status != 0) {
                 free(batch_options);
                 free(batch_results);
-                IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, completed);
+                MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, completed);
                 return -1;
             }
 
@@ -553,14 +553,14 @@ int price_table_precompute(OptionPriceTable *table,
 
             // Progress tracking (every 10 batches)
             if ((completed / batch_size) % 10 == 0) {
-                IVCALC_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
+                MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
                                            completed, n_total,
                                            (double)completed / (double)n_total);
             }
         }
     }
 
-    IVCALC_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
+    MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
 
     free(batch_options);
     free(batch_results);
@@ -572,7 +572,7 @@ int price_table_precompute(OptionPriceTable *table,
     if (table->strategy && table->strategy->precompute && table->interp_context) {
         int precompute_status = table->strategy->precompute(table, table->interp_context);
         if (precompute_status != 0) {
-            IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, precompute_status, 0);
+            MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, precompute_status, 0);
             return -1;
         }
     }

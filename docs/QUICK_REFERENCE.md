@@ -311,15 +311,15 @@ The library includes USDT probes for zero-overhead tracing.
 
 ```bash
 # List available probes
-readelf -x .stapsdt.base ./binary | grep ivcalc
+readelf -x .stapsdt.base ./binary | grep mango
 
 # Simple trace with bpftrace
-sudo bpftrace -e 'usdt::ivcalc:convergence_iter { 
+sudo bpftrace -e 'usdt::mango:convergence_iter { 
     printf("Module %d, step %d, error %g\n", arg0, arg1, arg2);
 }'
 
 # Or use provided scripts
-sudo ./scripts/ivcalc-trace monitor ./binary --preset=convergence
+sudo ./scripts/mango-trace monitor ./binary --preset=convergence
 ```
 
 ---
@@ -419,7 +419,7 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 | Root finding | `src/brent.h` |
 | Interpolation | `src/cubic_spline.h/.c` |
 | Linear solver | `src/tridiagonal.h` |
-| Tracing | `src/ivcalc_trace.h` |
+| Tracing | `src/mango_trace.h` |
 
 ---
 

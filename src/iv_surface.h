@@ -1,5 +1,5 @@
-#ifndef IVCALC_IV_SURFACE_H
-#define IVCALC_IV_SURFACE_H
+#ifndef MANGO_IV_SURFACE_H
+#define MANGO_IV_SURFACE_H
 
 #include <stddef.h>
 #include <time.h>
@@ -199,4 +199,4 @@ int iv_surface_save(const IVSurface *surface, const char *filename);
  */
 IVSurface* iv_surface_load(const char *filename);
 
-#endif // IVCALC_IV_SURFACE_H
+#endif // MANGO_IV_SURFACE_H

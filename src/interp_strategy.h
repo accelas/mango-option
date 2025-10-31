@@ -1,5 +1,5 @@
-#ifndef IVCALC_INTERP_STRATEGY_H
-#define IVCALC_INTERP_STRATEGY_H
+#ifndef MANGO_INTERP_STRATEGY_H
+#define MANGO_INTERP_STRATEGY_H
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -125,4 +125,4 @@ struct InterpolationStrategy {
     int (*precompute)(const void *grid_data, InterpContext context);
 };
 
-#endif // IVCALC_INTERP_STRATEGY_H
+#endif // MANGO_INTERP_STRATEGY_H

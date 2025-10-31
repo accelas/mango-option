@@ -1,6 +1,6 @@
-# ivcalc Tracing Scripts
+# mango Tracing Scripts
 
-This directory contains ready-to-use bpftrace scripts for monitoring and debugging the ivcalc library.
+This directory contains ready-to-use bpftrace scripts for monitoring and debugging the mango library.
 
 ## Quick Start
 
@@ -149,7 +149,7 @@ sudo bpftrace performance_profile.bt -c './example' > trace_output.txt
 
 **No probes found:**
 - Ensure binary was built with USDT support (should be default)
-- Verify probes exist: `sudo bpftrace -l 'usdt:./your_binary:ivcalc:*'`
+- Verify probes exist: `sudo bpftrace -l 'usdt:./your_binary:mango:*'`
 
 **Permission denied:**
 - bpftrace requires root privileges: use `sudo`

@@ -1,6 +1,6 @@
-# USDT Tracing Guide for ivcalc
+# USDT Tracing Guide for mango
 
-This document provides comprehensive documentation for using USDT (User Statically-Defined Tracing) probes in the ivcalc library.
+This document provides comprehensive documentation for using USDT (User Statically-Defined Tracing) probes in the mango library.
 
 > **Quick Start:** New to tracing? Start with [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute introduction.
 
@@ -18,7 +18,7 @@ This document provides comprehensive documentation for using USDT (User Statical
 
 ## Overview
 
-The ivcalc library uses USDT probe points for zero-overhead runtime tracing. This enables:
+The mango library uses USDT probe points for zero-overhead runtime tracing. This enables:
 
 - **Zero overhead when disabled**: Probes compile to single NOP instructions
 - **Dynamic enablement**: Enable/disable tracing at runtime without recompilation
@@ -74,11 +74,11 @@ The library gracefully falls back to no-op probes if `sys/sdt.h` is not availabl
 
 ```bash
 # Using helper tool
-sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
 
 # Or manually
 readelf -n ./bazel-bin/examples/example_heat_equation | grep NT_STAPSDT
-sudo bpftrace -l 'usdt:./bazel-bin/examples/example_heat_equation:ivcalc:*'
+sudo bpftrace -l 'usdt:./bazel-bin/examples/example_heat_equation:mango:*'
 ```
 
 ## Common Use Cases
@@ -87,7 +87,7 @@ sudo bpftrace -l 'usdt:./bazel-bin/examples/example_heat_equation:ivcalc:*'
 
 ```bash
 # Alert on all failures with diagnostics
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=debug
+sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 
 # Or directly with bpftrace
 sudo bpftrace scripts/tracing/debug_failures.bt -c './my_program'
@@ -160,7 +160,7 @@ These work across all modules (PDE solver, American options, IV, etc.):
 
 #### Algorithm Lifecycle
 
-**`ivcalc:algo_start`**
+**`mango:algo_start`**
 ```c
 probe algo_start(int module_id, double param1, double param2, double param3)
 ```
@@ -168,7 +168,7 @@ probe algo_start(int module_id, double param1, double param2, double param3)
 - `module_id`: 1=PDE, 2=AmOption, 3=IV, 4=Brent, 5=Spline
 - `param1-3`: Module-specific parameters
 
-**`ivcalc:algo_progress`**
+**`mango:algo_progress`**
 ```c
 probe algo_progress(int module_id, size_t current, size_t total, double metric)
 ```
@@ -176,7 +176,7 @@ probe algo_progress(int module_id, size_t current, size_t total, double metric)
 - `current/total`: Progress counter
 - `metric`: Current value (e.g., current time, current iteration)
 
-**`ivcalc:algo_complete`**
+**`mango:algo_complete`**
 ```c
 probe algo_complete(int module_id, size_t iterations, double final_metric)
 ```
@@ -184,7 +184,7 @@ probe algo_complete(int module_id, size_t iterations, double final_metric)
 
 #### Convergence Tracking
 
-**`ivcalc:convergence_iter`**
+**`mango:convergence_iter`**
 ```c
 probe convergence_iter(int module_id, size_t step, size_t iter, double error, double tolerance)
 ```
@@ -194,13 +194,13 @@ probe convergence_iter(int module_id, size_t step, size_t iter, double error, do
 - `error`: Current error metric
 - `tolerance`: Convergence threshold
 
-**`ivcalc:convergence_success`**
+**`mango:convergence_success`**
 ```c
 probe convergence_success(int module_id, size_t step, size_t final_iter, double final_error)
 ```
 - Fired when convergence is achieved
 
-**`ivcalc:convergence_failed`**
+**`mango:convergence_failed`**
 ```c
 probe convergence_failed(int module_id, size_t step, size_t max_iter, double final_error)
 ```
@@ -208,14 +208,14 @@ probe convergence_failed(int module_id, size_t step, size_t max_iter, double fin
 
 #### Validation and Errors
 
-**`ivcalc:validation_error`**
+**`mango:validation_error`**
 ```c
 probe validation_error(int module_id, int error_code, double param1, double param2)
 ```
 - Fired when input validation fails
 - Error codes vary by module (see module-specific sections)
 
-**`ivcalc:runtime_error`**
+**`mango:runtime_error`**
 ```c
 probe runtime_error(int module_id, int error_code, double context)
 ```
@@ -225,12 +225,12 @@ probe runtime_error(int module_id, int error_code, double context)
 
 #### Implied Volatility
 
-**`ivcalc:iv_start`**
+**`mango:iv_start`**
 ```c
 probe iv_start(double spot, double strike, double time_to_maturity, double market_price)
 ```
 
-**`ivcalc:iv_complete`**
+**`mango:iv_complete`**
 ```c
 probe iv_complete(double implied_vol, int iterations, int converged)
 ```
@@ -245,20 +245,20 @@ probe iv_complete(double implied_vol, int iterations, int converged)
 
 #### Brent's Method
 
-**`ivcalc:brent_iter`**
+**`mango:brent_iter`**
 ```c
 probe brent_iter(int iter, double x, double fx, double interval_width)
 ```
 
 #### American Options
 
-**`ivcalc:option_start`**
+**`mango:option_start`**
 ```c
 probe option_start(int option_type, double strike, double volatility, double time_to_maturity)
 ```
 - `option_type`: 0=call, 1=put
 
-**`ivcalc:option_complete`**
+**`mango:option_complete`**
 ```c
 probe option_complete(int status, int iterations)
 ```
@@ -286,7 +286,7 @@ sudo bpftrace script.bt -c './program'
 sudo bpftrace script.bt -p <PID>
 
 # One-liner
-sudo bpftrace -e 'usdt:./program:ivcalc:convergence_failed { printf("FAIL\n"); }'
+sudo bpftrace -e 'usdt:./program:mango:convergence_failed { printf("FAIL\n"); }'
 ```
 
 ### Example Scripts
@@ -295,7 +295,7 @@ sudo bpftrace -e 'usdt:./program:ivcalc:convergence_failed { printf("FAIL\n"); }
 
 ```bash
 sudo bpftrace -e '
-usdt::ivcalc:convergence_failed {
+usdt::mango:convergence_failed {
     printf("Module %d failed at step %d after %d iterations (error=%.2e)\n",
            arg0, arg1, arg2, arg3);
 }'
@@ -306,7 +306,7 @@ usdt::ivcalc:convergence_failed {
 
 ```bash
 sudo bpftrace -e '
-usdt::ivcalc:convergence_success { @iters[arg0] = hist(arg2); }
+usdt::mango:convergence_success { @iters[arg0] = hist(arg2); }
 END { print(@iters); }
 '
 -c './my_program'
@@ -316,8 +316,8 @@ END { print(@iters); }
 
 ```bash
 sudo bpftrace -e '
-usdt::ivcalc:algo_start { @start[arg0] = nsecs; }
-usdt::ivcalc:algo_complete /@start[arg0]/ {
+usdt::mango:algo_start { @start[arg0] = nsecs; }
+usdt::mango:algo_complete /@start[arg0]/ {
     $duration_ms = (nsecs - @start[arg0]) / 1000000;
     printf("Module %d: %u ms\n", arg0, $duration_ms);
     delete(@start[arg0]);
@@ -328,22 +328,22 @@ usdt::ivcalc:algo_complete /@start[arg0]/ {
 
 ## Helper Tool Reference
 
-The `ivcalc-trace` helper tool simplifies common tracing tasks.
+The `mango-trace` helper tool simplifies common tracing tasks.
 
 ### Commands
 
 ```bash
 # List all USDT probes
-sudo ./scripts/ivcalc-trace list <binary>
+sudo ./scripts/mango-trace list <binary>
 
 # Validate USDT support
-sudo ./scripts/ivcalc-trace check <binary>
+sudo ./scripts/mango-trace check <binary>
 
 # Monitor with preset
-sudo ./scripts/ivcalc-trace monitor <binary> --preset=<name>
+sudo ./scripts/mango-trace monitor <binary> --preset=<name>
 
 # Run specific script
-sudo ./scripts/ivcalc-trace run <script.bt> <binary>
+sudo ./scripts/mango-trace run <script.bt> <binary>
 ```
 
 ### Monitor Presets
@@ -361,19 +361,19 @@ sudo ./scripts/ivcalc-trace run <script.bt> <binary>
 
 ```bash
 # Quick monitoring
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation
 
 # Debug convergence
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=debug
+sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 
 # Performance profiling
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=performance
+sudo ./scripts/mango-trace monitor ./my_program --preset=performance
 
 # Run custom script
-sudo ./scripts/ivcalc-trace run my_custom.bt ./my_program
+sudo ./scripts/mango-trace run my_custom.bt ./my_program
 
 # Pass arguments to binary
-sudo ./scripts/ivcalc-trace monitor ./my_program -- --my-arg value
+sudo ./scripts/mango-trace monitor ./my_program -- --my-arg value
 ```
 
 ## Script Reference
@@ -398,7 +398,7 @@ All scripts are in `scripts/tracing/`. See [scripts/tracing/README.md](scripts/t
 ```bash
 # Only trace PDE solver (module_id == 1)
 sudo bpftrace -e '
-usdt::ivcalc:convergence_iter /arg0 == 1/ {
+usdt::mango:convergence_iter /arg0 == 1/ {
     printf("PDE iter %d: error=%.2e\n", arg2, arg3);
 }
 '
@@ -411,16 +411,16 @@ usdt::ivcalc:convergence_iter /arg0 == 1/ {
 sudo bpftrace -e '
 BEGIN { printf("Tracking solver lifecycle...\n"); }
 
-usdt::ivcalc:algo_start {
+usdt::mango:algo_start {
     @start = nsecs;
     printf("Started\n");
 }
 
-usdt::ivcalc:convergence_failed {
+usdt::mango:convergence_failed {
     printf("Convergence failed!\n");
 }
 
-usdt::ivcalc:algo_complete {
+usdt::mango:algo_complete {
     printf("Completed in %u ms\n", (nsecs - @start) / 1000000);
 }
 '
@@ -432,7 +432,7 @@ usdt::ivcalc:algo_complete {
 ```bash
 # Save structured output
 sudo bpftrace -e '
-usdt::ivcalc:convergence_success {
+usdt::mango:convergence_success {
     printf("{\"module\":%d,\"step\":%d,\"iters\":%d,\"error\":%.2e}\n",
            arg0, arg1, arg2, arg3);
 }
@@ -507,7 +507,7 @@ sudo bpftrace script.bt -c './program'
 **Debug:**
 ```bash
 # List probes in binary
-sudo bpftrace -l 'usdt:./binary:ivcalc:*'
+sudo bpftrace -l 'usdt:./binary:mango:*'
 
 # Add verbose output
 sudo bpftrace -v script.bt -c './program'
@@ -536,7 +536,7 @@ sudo apt-get install bpftrace
 - Type mismatch between probe definition and script
 - Binary/script version mismatch
 
-**Solution:** Verify probe signatures in `src/ivcalc_trace.h`
+**Solution:** Verify probe signatures in `src/mango_trace.h`
 
 ## Best Practices
 
@@ -565,7 +565,7 @@ sudo apt-get install bpftrace
 
 - [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) - 5-minute getting started
 - [scripts/tracing/README.md](scripts/tracing/README.md) - Script reference
-- [src/ivcalc_trace.h](src/ivcalc_trace.h) - Probe definitions
+- [src/mango_trace.h](src/mango_trace.h) - Probe definitions
 - [bpftrace documentation](https://github.com/iovisor/bpftrace)
 - [USDT probes](https://lwn.net/Articles/753601/)
 
@@ -577,7 +577,7 @@ Complete working examples for common scenarios.
 
 ```bash
 sudo bpftrace -e '
-usdt::ivcalc:convergence_success /arg0 == 1/ {
+usdt::mango:convergence_success /arg0 == 1/ {
     @iters_per_step[arg1] = arg2;
 }
 
@@ -591,7 +591,7 @@ END {
 
 ```bash
 sudo bpftrace -e '
-usdt::ivcalc:convergence_iter {
+usdt::mango:convergence_iter {
     if (arg2 > 50) {  # More than 50 iterations
         printf("SLOW: module=%d, step=%d, iter=%d, error=%.2e\n",
                arg0, arg1, arg2, arg3);
@@ -604,7 +604,7 @@ usdt::ivcalc:convergence_iter {
 
 ```bash
 sudo bpftrace -e '
-usdt::ivcalc:algo_progress /arg0 == 1/ {
+usdt::mango:algo_progress /arg0 == 1/ {
     if (@last_time > 0) {
         $dt = (nsecs - @last_time) / 1000;
         @step_times = hist($dt);
@@ -621,7 +621,7 @@ END { print(@step_times); }
 For issues or questions:
 
 1. Check [Troubleshooting](#troubleshooting) section
-2. Verify probe definitions in `src/ivcalc_trace.h`
+2. Verify probe definitions in `src/mango_trace.h`
 3. Review example scripts in `scripts/tracing/`
 4. Consult bpftrace documentation
 

@@ -1,6 +1,6 @@
 # USDT Tracing Quick Start (5 Minutes)
 
-Get started with zero-overhead tracing of the ivcalc library in under 5 minutes.
+Get started with zero-overhead tracing of the mango library in under 5 minutes.
 
 ## What is USDT Tracing?
 
@@ -43,13 +43,13 @@ The binaries automatically include USDT probes (gracefully falls back if systemt
 
 ```bash
 # Check if probes are present
-sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
 ```
 
 Expected output:
 ```
 ✓ USDT notes found in binary
-✓ Found 15 ivcalc probes
+✓ Found 15 mango probes
 ✓ bpftrace can attach to probes
 
 USDT support: OK
@@ -61,16 +61,16 @@ USDT support: OK
 
 ```bash
 # Monitor all library activity
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation
 
 # Watch convergence behavior
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
 
 # Debug failures
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
 
 # Profile performance
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
 ```
 
 **Option B: Use bpftrace directly**
@@ -88,7 +88,7 @@ sudo bpftrace scripts/tracing/convergence_watch.bt -c './bazel-bin/examples/exam
 ### Debug Convergence Issues
 
 ```bash
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
 ```
 
 Shows:
@@ -146,16 +146,16 @@ All scripts are in `scripts/tracing/`:
 
 ```bash
 # List all available probes
-sudo ./scripts/ivcalc-trace list ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace list ./bazel-bin/examples/example_heat_equation
 
 # Validate USDT support
-sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
 
 # Monitor with preset
-sudo ./scripts/ivcalc-trace monitor <binary> --preset=<name>
+sudo ./scripts/mango-trace monitor <binary> --preset=<name>
 
 # Run specific script
-sudo ./scripts/ivcalc-trace run convergence_watch.bt <binary>
+sudo ./scripts/mango-trace run convergence_watch.bt <binary>
 ```
 
 ## Attach to Running Process
@@ -196,7 +196,7 @@ bazel build //examples:example_heat_equation
 
 Solution: bpftrace requires root privileges
 ```bash
-sudo ./scripts/ivcalc-trace monitor <binary>
+sudo ./scripts/mango-trace monitor <binary>
 ```
 
 **Problem: "bpftrace: command not found"**
@@ -224,11 +224,11 @@ sudo yum install bpftrace
 bazel build //examples:example_heat_equation
 
 # 2. Check USDT
-sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
 # ✓ USDT support: OK
 
 # 3. Monitor
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
 
 # Output shows:
 # - Convergence iterations per step
@@ -239,7 +239,7 @@ sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation -
 
 ## That's It!
 
-You're now tracing the ivcalc library. Use the scripts to:
+You're now tracing the mango library. Use the scripts to:
 - ✅ Debug convergence issues
 - ✅ Profile performance
 - ✅ Monitor production systems

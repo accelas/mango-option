@@ -17,7 +17,7 @@ BEGIN
 }
 
 /* Convergence failure - detailed diagnostics */
-usdt::ivcalc:convergence_failed
+usdt::mango:convergence_failed
 {
     if (arg0 == 1) { @mod = "PDE_SOLVER"; }
     else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
@@ -37,7 +37,7 @@ usdt::ivcalc:convergence_failed
 }
 
 /* Validation error - detailed diagnostics */
-usdt::ivcalc:validation_error
+usdt::mango:validation_error
 {
     if (arg0 == 1) { @mod = "PDE_SOLVER"; }
     else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
@@ -70,7 +70,7 @@ usdt::ivcalc:validation_error
 }
 
 /* Runtime error - detailed diagnostics */
-usdt::ivcalc:runtime_error
+usdt::mango:runtime_error
 {
     if (arg0 == 1) { @mod = "PDE_SOLVER"; }
     else if (arg0 == 2) { @mod = "AMERICAN_OPTION"; }
@@ -89,7 +89,7 @@ usdt::ivcalc:runtime_error
 }
 
 /* Track iterations before failure for diagnostics */
-usdt::ivcalc:convergence_iter
+usdt::mango:convergence_iter
 /arg0 == 1/  /* PDE solver */
 {
     @last_pde_step = arg1;
@@ -98,7 +98,7 @@ usdt::ivcalc:convergence_iter
 }
 
 /* Show last state before PDE convergence failure */
-usdt::ivcalc:convergence_failed
+usdt::mango:convergence_failed
 /arg0 == 1/
 {
     printf("  Last iteration details:\n");

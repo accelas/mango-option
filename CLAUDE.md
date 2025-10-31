@@ -293,16 +293,16 @@ This library uses **bpftrace** as the primary tracing tool. bpftrace is:
 
 ### Available Probe Categories
 
-See `src/ivcalc_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
+See `src/mango_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
 
-1. **Algorithm Lifecycle** (General): `IVCALC_TRACE_ALGO_START`, `IVCALC_TRACE_ALGO_PROGRESS`, `IVCALC_TRACE_ALGO_COMPLETE`
-2. **Convergence Tracking** (General): `IVCALC_TRACE_CONVERGENCE_ITER`, `IVCALC_TRACE_CONVERGENCE_SUCCESS`, `IVCALC_TRACE_CONVERGENCE_FAILED`
-3. **Validation/Errors** (General): `IVCALC_TRACE_VALIDATION_ERROR`, `IVCALC_TRACE_RUNTIME_ERROR`
-4. **PDE Solver**: `IVCALC_TRACE_PDE_START`, `IVCALC_TRACE_PDE_PROGRESS`, `IVCALC_TRACE_PDE_COMPLETE`, etc.
-5. **Implied Volatility**: `IVCALC_TRACE_IV_START`, `IVCALC_TRACE_IV_COMPLETE`, `IVCALC_TRACE_IV_VALIDATION_ERROR`
-6. **American Options**: `IVCALC_TRACE_OPTION_START`, `IVCALC_TRACE_OPTION_COMPLETE`
-7. **Brent's Method**: `IVCALC_TRACE_BRENT_START`, `IVCALC_TRACE_BRENT_ITER`, `IVCALC_TRACE_BRENT_COMPLETE`
-8. **Cubic Spline**: `IVCALC_TRACE_SPLINE_ERROR`
+1. **Algorithm Lifecycle** (General): `MANGO_TRACE_ALGO_START`, `MANGO_TRACE_ALGO_PROGRESS`, `MANGO_TRACE_ALGO_COMPLETE`
+2. **Convergence Tracking** (General): `MANGO_TRACE_CONVERGENCE_ITER`, `MANGO_TRACE_CONVERGENCE_SUCCESS`, `MANGO_TRACE_CONVERGENCE_FAILED`
+3. **Validation/Errors** (General): `MANGO_TRACE_VALIDATION_ERROR`, `MANGO_TRACE_RUNTIME_ERROR`
+4. **PDE Solver**: `MANGO_TRACE_PDE_START`, `MANGO_TRACE_PDE_PROGRESS`, `MANGO_TRACE_PDE_COMPLETE`, etc.
+5. **Implied Volatility**: `MANGO_TRACE_IV_START`, `MANGO_TRACE_IV_COMPLETE`, `MANGO_TRACE_IV_VALIDATION_ERROR`
+6. **American Options**: `MANGO_TRACE_OPTION_START`, `MANGO_TRACE_OPTION_COMPLETE`
+7. **Brent's Method**: `MANGO_TRACE_BRENT_START`, `MANGO_TRACE_BRENT_ITER`, `MANGO_TRACE_BRENT_COMPLETE`
+8. **Cubic Spline**: `MANGO_TRACE_SPLINE_ERROR`
 
 Each module has access to both general-purpose probes (for common patterns like convergence) and module-specific probes.
 
@@ -310,19 +310,19 @@ Each module has access to both general-purpose probes (for common patterns like 
 
 When adding new library functionality that needs logging:
 
-1. **Define probe in `src/ivcalc_trace.h`**:
+1. **Define probe in `src/mango_trace.h`**:
    ```c
-   #define IVCALC_TRACE_MY_EVENT(module_id, param1, param2) \
-       DTRACE_PROBE3(IVCALC_PROVIDER, my_event, module_id, param1, param2)
+   #define MANGO_TRACE_MY_EVENT(module_id, param1, param2) \
+       DTRACE_PROBE3(MANGO_PROVIDER, my_event, module_id, param1, param2)
    ```
 
 2. **Use probe in source code**:
    ```c
-   #include "ivcalc_trace.h"
+   #include "mango_trace.h"
 
    void my_function() {
        // ... code ...
-       IVCALC_TRACE_MY_EVENT(MODULE_MY_MODULE, value1, value2);
+       MANGO_TRACE_MY_EVENT(MODULE_MY_MODULE, value1, value2);
        // ... more code ...
    }
    ```
@@ -357,16 +357,16 @@ bazel build //...
 
 ```bash
 # Monitor all library activity
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation
 
 # Watch convergence behavior
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
 
 # Debug failures
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
 
 # Profile performance
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
 ```
 
 **Available presets:** `all` (default), `convergence`, `debug`, `performance`, `pde`, `iv`
@@ -386,7 +386,7 @@ sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation -
 sudo bpftrace scripts/tracing/monitor_all.bt -c './bazel-bin/examples/example_heat_equation'
 
 # Or write custom one-liners
-sudo bpftrace -e 'usdt::ivcalc:convergence_failed {
+sudo bpftrace -e 'usdt::mango:convergence_failed {
     printf("Module %d failed at step %d\n", arg0, arg1);
 }' -c './my_program'
 ```
@@ -395,13 +395,13 @@ sudo bpftrace -e 'usdt::ivcalc:convergence_failed {
 
 ```bash
 # Check if binary has USDT support
-sudo ./scripts/ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
 
 # List all available probes
-sudo ./scripts/ivcalc-trace list ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace list ./bazel-bin/examples/example_heat_equation
 
 # Run specific script
-sudo ./scripts/ivcalc-trace run convergence_watch.bt ./my_program
+sudo ./scripts/mango-trace run convergence_watch.bt ./my_program
 ```
 
 For complete documentation, see:
@@ -495,7 +495,7 @@ AmericanOptionGrid grid = {
 };
 
 // Optionally tune batch size (default: 100)
-setenv("IVCALC_PRECOMPUTE_BATCH_SIZE", "200", 1);
+setenv("MANGO_PRECOMPUTE_BATCH_SIZE", "200", 1);
 
 // Compute all prices (uses OpenMP parallelization)
 int status = price_table_precompute(table, &grid);
@@ -552,7 +552,7 @@ price_table_destroy(table);
 
 ### Environment Variables
 
-- **IVCALC_PRECOMPUTE_BATCH_SIZE**: Batch size for pre-computation (default: 100)
+- **MANGO_PRECOMPUTE_BATCH_SIZE**: Batch size for pre-computation (default: 100)
   - Range: 1-100000
   - Larger batches: better throughput, more memory
   - Smaller batches: more frequent progress updates, less memory
@@ -563,7 +563,7 @@ price_table_destroy(table);
 Monitor pre-computation progress with USDT probes:
 ```bash
 # Watch progress during pre-computation
-sudo bpftrace -e 'usdt::ivcalc:algo_progress /arg0 == 4/ {
+sudo bpftrace -e 'usdt::mango:algo_progress /arg0 == 4/ {
     printf("Price table: %d%% complete\n", arg2);
 }' -c './my_precompute_program'
 ```
