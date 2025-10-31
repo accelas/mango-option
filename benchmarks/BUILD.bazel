@@ -67,3 +67,24 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "precompute_vs_fdm_benchmark",
+    srcs = ["precompute_vs_fdm_benchmark.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp-simd",
+    ],
+    linkopts = ["-lgomp"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
