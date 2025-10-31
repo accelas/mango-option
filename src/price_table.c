@@ -36,6 +36,41 @@ typedef struct {
 // ---------- Helper Functions ----------
 
 /**
+ * Transform user coordinates to grid coordinates
+ *
+ * @param coord_system: Which transformation to apply
+ * @param m_raw, tau_raw, sigma_raw, r_raw: User-provided raw coordinates
+ * @param m_grid, tau_grid, sigma_grid, r_grid: [OUT] Grid coordinates
+ */
+void transform_query_to_grid(
+    CoordinateSystem coord_system,
+    double m_raw, double tau_raw, double sigma_raw, double r_raw,
+    double *m_grid, double *tau_grid, double *sigma_grid, double *r_grid)
+{
+    switch (coord_system) {
+        case COORD_RAW:
+            *m_grid = m_raw;
+            *tau_grid = tau_raw;
+            break;
+
+        case COORD_LOG_SQRT:
+            *m_grid = log(m_raw);
+            *tau_grid = sqrt(tau_raw);
+            break;
+
+        case COORD_LOG_VARIANCE:
+            // Future implementation
+            *m_grid = log(m_raw);
+            *tau_grid = sigma_raw * sigma_raw * tau_raw;  // w = σ²T
+            break;
+    }
+
+    // Volatility and rate always stay raw
+    *sigma_grid = sigma_raw;
+    *r_grid = r_raw;
+}
+
+/**
  * Convert flat index to multi-dimensional grid indices.
  * Maps a linear array index to (moneyness, maturity, volatility, rate, dividend)
  * indices based on the table's stride configuration.
