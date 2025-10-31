@@ -2,6 +2,7 @@
 #include "iv_surface.h"
 #include "price_table.h"
 #include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 // Forward declarations
@@ -40,6 +41,12 @@ const InterpolationStrategy INTERP_MULTILINEAR = {
 
 // ---------- Helper Functions ----------
 
+// Check if query is within grid bounds (with small tolerance for rounding)
+static bool is_within_bounds(double query, const double *grid, size_t n) {
+    const double tolerance = 1e-10;  // Small tolerance for floating point
+    return (query >= grid[0] - tolerance && query <= grid[n-1] + tolerance);
+}
+
 size_t find_bracket(const double *grid, size_t n, double query) {
     // Handle boundary cases
     if (query <= grid[0]) return 0;
@@ -73,6 +80,12 @@ double lerp(double x0, double x1, double y0, double y1, double x) {
 static double multilinear_interpolate_2d(const IVSurface *surface,
                                           double moneyness, double maturity,
                                           [[maybe_unused]] InterpContext context) {
+
+    // Validate query point is within grid bounds
+    if (!is_within_bounds(moneyness, surface->moneyness_grid, surface->n_moneyness) ||
+        !is_within_bounds(maturity, surface->maturity_grid, surface->n_maturity)) {
+        return NAN;  // Query point outside grid coverage
+    }
 
     // Find bracketing indices
     size_t i_m = find_bracket(surface->moneyness_grid, surface->n_moneyness, moneyness);
@@ -113,6 +126,14 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     transform_query_to_grid(table->coord_system,
                             moneyness, maturity, volatility, rate,
                             &m_grid, &tau_grid, &sigma_grid, &r_grid);
+
+    // Validate transformed query point is within grid bounds
+    if (!is_within_bounds(m_grid, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(tau_grid, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(sigma_grid, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(r_grid, table->rate_grid, table->n_rate)) {
+        return NAN;  // Query point outside grid coverage
+    }
 
     // Find bracketing indices for each dimension
     size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, m_grid);
@@ -192,6 +213,15 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     transform_query_to_grid(table->coord_system,
                             moneyness, maturity, volatility, rate,
                             &m_grid, &tau_grid, &sigma_grid, &r_grid);
+
+    // Validate transformed query point is within grid bounds
+    if (!is_within_bounds(m_grid, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(tau_grid, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(sigma_grid, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(r_grid, table->rate_grid, table->n_rate) ||
+        !is_within_bounds(dividend, table->dividend_grid, table->n_dividend)) {
+        return NAN;  // Query point outside grid coverage
+    }
 
     // Find bracketing indices for each dimension
     size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, m_grid);

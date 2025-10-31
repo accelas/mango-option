@@ -3,6 +3,7 @@
 #include "price_table.h"
 #include "cubic_spline.h"
 #include <stdlib.h>
+#include <stdbool.h>
 #include <math.h>
 
 /**
@@ -93,6 +94,12 @@ const InterpolationStrategy INTERP_CUBIC = {
 };
 
 // ---------- Helper Functions ----------
+
+// Check if query is within grid bounds (with small tolerance for rounding)
+static bool is_within_bounds(double query, const double *grid, size_t n) {
+    const double tolerance = 1e-10;  // Small tolerance for floating point
+    return (query >= grid[0] - tolerance && query <= grid[n-1] + tolerance);
+}
 
 // Evaluate cubic polynomial: a + b·dx + c·dx² + d·dx³
 static inline double eval_cubic(double a, double b, double c, double d, double dx) {
@@ -378,6 +385,12 @@ static double cubic_interpolate_2d(const IVSurface *surface,
         return NAN;
     }
 
+    // Validate query point is within grid bounds
+    if (!is_within_bounds(moneyness, surface->moneyness_grid, surface->n_moneyness) ||
+        !is_within_bounds(maturity, surface->maturity_grid, surface->n_maturity)) {
+        return NAN;  // Query point outside grid coverage
+    }
+
     // Check if we have pre-computed coefficients
     CubicContext *ctx = (CubicContext*)context;
     Cubic2DCoeffs *coeffs = (ctx && ctx->coefficients) ? (Cubic2DCoeffs*)ctx->coefficients : NULL;
@@ -497,6 +510,14 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
     if (table->n_moneyness < 2 || table->n_maturity < 2 ||
         table->n_volatility < 2 || table->n_rate < 2) {
         return NAN;
+    }
+
+    // Validate query point is within grid bounds
+    if (!is_within_bounds(moneyness, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(maturity, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(volatility, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(rate, table->rate_grid, table->n_rate)) {
+        return NAN;  // Query point outside grid coverage
     }
 
     // Check if we have pre-computed coefficients
@@ -739,6 +760,15 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
     if (table->n_moneyness < 2 || table->n_maturity < 2 ||
         table->n_volatility < 2 || table->n_rate < 2 || table->n_dividend < 2) {
         return NAN;
+    }
+
+    // Validate query point is within grid bounds
+    if (!is_within_bounds(moneyness, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(maturity, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(volatility, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(rate, table->rate_grid, table->n_rate) ||
+        !is_within_bounds(dividend, table->dividend_grid, table->n_dividend)) {
+        return NAN;  // Query point outside grid coverage
     }
 
     // Check if we have pre-computed coefficients

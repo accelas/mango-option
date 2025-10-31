@@ -90,6 +90,27 @@ cc_binary(
 )
 
 cc_binary(
+    name = "accuracy_comparison",
+    srcs = ["accuracy_comparison.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp-simd",
+    ],
+    linkopts = ["-lgomp", "-lQuantLib"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "//src:interp_cubic",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "cache_benchmark",
     srcs = ["cache_benchmark.cc"],
     copts = [
