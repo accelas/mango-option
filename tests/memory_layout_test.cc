@@ -42,3 +42,51 @@ TEST(StrideCalculationTest, LayoutMInner) {
 
     price_table_destroy(table);
 }
+
+TEST(SliceExtractionTest, MoneynessSliceContiguous) {
+    OptionPriceTable *table = create_test_table(LAYOUT_M_INNER);
+
+    // Populate some test data
+    for (size_t i = 0; i < 3; i++) {
+        price_table_set(table, i, 0, 0, 0, 0, 100.0 + i);
+    }
+
+    double slice[3];
+    bool contiguous;
+    int fixed[] = {-1, 0, 0, 0, 0};  // Vary moneyness, fix others
+
+    int status = price_table_extract_slice(
+        table, SLICE_DIM_MONEYNESS, fixed, slice, &contiguous);
+
+    EXPECT_EQ(status, 0);
+    EXPECT_TRUE(contiguous);  // LAYOUT_M_INNER → stride_m = 1
+    EXPECT_DOUBLE_EQ(slice[0], 100.0);
+    EXPECT_DOUBLE_EQ(slice[1], 101.0);
+    EXPECT_DOUBLE_EQ(slice[2], 102.0);
+
+    price_table_destroy(table);
+}
+
+TEST(SliceExtractionTest, MoneynessSliceStrided) {
+    OptionPriceTable *table = create_test_table(LAYOUT_M_OUTER);
+
+    // Populate test data
+    for (size_t i = 0; i < 3; i++) {
+        price_table_set(table, i, 0, 0, 0, 0, 200.0 + i);
+    }
+
+    double slice[3];
+    bool contiguous;
+    int fixed[] = {-1, 0, 0, 0, 0};
+
+    int status = price_table_extract_slice(
+        table, SLICE_DIM_MONEYNESS, fixed, slice, &contiguous);
+
+    EXPECT_EQ(status, 0);
+    EXPECT_FALSE(contiguous);  // LAYOUT_M_OUTER → stride_m = 8
+    EXPECT_DOUBLE_EQ(slice[0], 200.0);
+    EXPECT_DOUBLE_EQ(slice[1], 201.0);
+    EXPECT_DOUBLE_EQ(slice[2], 202.0);
+
+    price_table_destroy(table);
+}

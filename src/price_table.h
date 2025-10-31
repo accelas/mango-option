@@ -140,6 +140,17 @@ typedef struct OptionGreeks {
     double rho;         // ∂V/∂r
 } OptionGreeks;
 
+/**
+ * Dimension selection for slice extraction
+ */
+typedef enum {
+    SLICE_DIM_MONEYNESS = 0,
+    SLICE_DIM_MATURITY = 1,
+    SLICE_DIM_VOLATILITY = 2,
+    SLICE_DIM_RATE = 3,
+    SLICE_DIM_DIVIDEND = 4,
+} SliceDimension;
+
 // ---------- Creation and Destruction ----------
 
 /**
@@ -325,6 +336,27 @@ OptionGreeks price_table_greeks_5d(const OptionPriceTable *table,
  */
 int price_table_set_strategy(OptionPriceTable *table,
                               const InterpolationStrategy *strategy);
+
+/**
+ * Extract 1D slice along specified dimension
+ *
+ * @param table: Price table
+ * @param dimension: Which dimension to extract
+ * @param fixed_indices: Array[5] of indices for other dimensions (-1 to vary)
+ * @param out_slice: Output buffer (user-provided, size = n_<dimension>)
+ * @param is_contiguous: [OUT] True if zero-copy, false if strided copy
+ * @return 0 on success, -1 on error
+ *
+ * Example: Extract moneyness slice at (tau=5, sigma=3, r=2)
+ *   int fixed[] = {-1, 5, 3, 2, 0};
+ *   price_table_extract_slice(table, SLICE_DIM_MONEYNESS, fixed, slice, &contiguous);
+ */
+int price_table_extract_slice(
+    const OptionPriceTable *table,
+    SliceDimension dimension,
+    const int *fixed_indices,
+    double *out_slice,
+    bool *is_contiguous);
 
 // ---------- Metadata ----------
 

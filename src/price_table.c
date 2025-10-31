@@ -693,6 +693,68 @@ OptionGreeks price_table_greeks_5d(const OptionPriceTable *table,
     return greeks;
 }
 
+int price_table_extract_slice(
+    const OptionPriceTable *table,
+    SliceDimension dimension,
+    const int *fixed_indices,
+    double *out_slice,
+    bool *is_contiguous)
+{
+    if (!table || !fixed_indices || !out_slice || !is_contiguous) {
+        return -1;
+    }
+
+    size_t slice_stride, slice_length;
+
+    // Determine stride and length for requested dimension
+    switch (dimension) {
+        case SLICE_DIM_MONEYNESS:
+            slice_stride = table->stride_m;
+            slice_length = table->n_moneyness;
+            break;
+        case SLICE_DIM_MATURITY:
+            slice_stride = table->stride_tau;
+            slice_length = table->n_maturity;
+            break;
+        case SLICE_DIM_VOLATILITY:
+            slice_stride = table->stride_sigma;
+            slice_length = table->n_volatility;
+            break;
+        case SLICE_DIM_RATE:
+            slice_stride = table->stride_r;
+            slice_length = table->n_rate;
+            break;
+        case SLICE_DIM_DIVIDEND:
+            if (table->n_dividend == 0) return -1;
+            slice_stride = table->stride_q;
+            slice_length = table->n_dividend;
+            break;
+        default:
+            return -1;
+    }
+
+    // Calculate base offset from fixed indices
+    size_t base_idx = 0;
+    if (fixed_indices[0] >= 0) base_idx += fixed_indices[0] * table->stride_m;
+    if (fixed_indices[1] >= 0) base_idx += fixed_indices[1] * table->stride_tau;
+    if (fixed_indices[2] >= 0) base_idx += fixed_indices[2] * table->stride_sigma;
+    if (fixed_indices[3] >= 0) base_idx += fixed_indices[3] * table->stride_r;
+    if (fixed_indices[4] >= 0) base_idx += fixed_indices[4] * table->stride_q;
+
+    // Extract: zero-copy if contiguous, strided copy otherwise
+    if (slice_stride == 1) {
+        *is_contiguous = true;
+        memcpy(out_slice, &table->prices[base_idx], slice_length * sizeof(double));
+    } else {
+        *is_contiguous = false;
+        for (size_t i = 0; i < slice_length; i++) {
+            out_slice[i] = table->prices[base_idx + i * slice_stride];
+        }
+    }
+
+    return 0;
+}
+
 int price_table_set_strategy(OptionPriceTable *table,
                               const InterpolationStrategy *strategy) {
     if (!table || !strategy) return -1;
