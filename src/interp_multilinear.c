@@ -121,19 +121,25 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
                                           double volatility, double rate,
                                           [[maybe_unused]] InterpContext context) {
 
-    // Validate query point is within grid bounds
-    if (!is_within_bounds(moneyness, table->moneyness_grid, table->n_moneyness) ||
-        !is_within_bounds(maturity, table->maturity_grid, table->n_maturity) ||
-        !is_within_bounds(volatility, table->volatility_grid, table->n_volatility) ||
-        !is_within_bounds(rate, table->rate_grid, table->n_rate)) {
+    // Transform query to grid coordinates
+    double m_grid, tau_grid, sigma_grid, r_grid;
+    transform_query_to_grid(table->coord_system,
+                            moneyness, maturity, volatility, rate,
+                            &m_grid, &tau_grid, &sigma_grid, &r_grid);
+
+    // Validate transformed query point is within grid bounds
+    if (!is_within_bounds(m_grid, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(tau_grid, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(sigma_grid, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(r_grid, table->rate_grid, table->n_rate)) {
         return NAN;  // Query point outside grid coverage
     }
 
     // Find bracketing indices for each dimension
-    size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, moneyness);
-    size_t i_tau = find_bracket(table->maturity_grid, table->n_maturity, maturity);
-    size_t i_sigma = find_bracket(table->volatility_grid, table->n_volatility, volatility);
-    size_t i_r = find_bracket(table->rate_grid, table->n_rate, rate);
+    size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, m_grid);
+    size_t i_tau = find_bracket(table->maturity_grid, table->n_maturity, tau_grid);
+    size_t i_sigma = find_bracket(table->volatility_grid, table->n_volatility, sigma_grid);
+    size_t i_r = find_bracket(table->rate_grid, table->n_rate, r_grid);
 
     // Get grid values
     double m0 = table->moneyness_grid[i_m];
@@ -168,7 +174,7 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     double v_m[8];
     #pragma omp simd
     for (int i = 0; i < 8; i++) {
-        v_m[i] = lerp(m0, m1, values[i], values[i + 8], moneyness);
+        v_m[i] = lerp(m0, m1, values[i], values[i + 8], m_grid);
     }
 
     // Stage 2: Interpolate along maturity (8 → 4)
@@ -176,7 +182,7 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     double v_tau[4];
     #pragma omp simd
     for (int i = 0; i < 4; i++) {
-        v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 4], maturity);
+        v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 4], tau_grid);
     }
 
     // Stage 3: Interpolate along volatility (4 → 2)
@@ -184,12 +190,12 @@ static double multilinear_interpolate_4d(const OptionPriceTable *table,
     double v_sigma[2];
     #pragma omp simd
     for (int i = 0; i < 2; i++) {
-        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 2], volatility);
+        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 2], sigma_grid);
     }
 
     // Stage 4: Interpolate along rate (2 → 1)
     // Pair v_sigma[0] with v_sigma[1] (dr bit has weight 1)
-    double result = lerp(r0, r1, v_sigma[0], v_sigma[1], rate);
+    double result = lerp(r0, r1, v_sigma[0], v_sigma[1], r_grid);
 
     return result;
 }
@@ -202,20 +208,26 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
                                           double dividend,
                                           [[maybe_unused]] InterpContext context) {
 
-    // Validate query point is within grid bounds
-    if (!is_within_bounds(moneyness, table->moneyness_grid, table->n_moneyness) ||
-        !is_within_bounds(maturity, table->maturity_grid, table->n_maturity) ||
-        !is_within_bounds(volatility, table->volatility_grid, table->n_volatility) ||
-        !is_within_bounds(rate, table->rate_grid, table->n_rate) ||
+    // Transform query to grid coordinates
+    double m_grid, tau_grid, sigma_grid, r_grid;
+    transform_query_to_grid(table->coord_system,
+                            moneyness, maturity, volatility, rate,
+                            &m_grid, &tau_grid, &sigma_grid, &r_grid);
+
+    // Validate transformed query point is within grid bounds
+    if (!is_within_bounds(m_grid, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(tau_grid, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(sigma_grid, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(r_grid, table->rate_grid, table->n_rate) ||
         !is_within_bounds(dividend, table->dividend_grid, table->n_dividend)) {
         return NAN;  // Query point outside grid coverage
     }
 
     // Find bracketing indices for each dimension
-    size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, moneyness);
-    size_t i_tau = find_bracket(table->maturity_grid, table->n_maturity, maturity);
-    size_t i_sigma = find_bracket(table->volatility_grid, table->n_volatility, volatility);
-    size_t i_r = find_bracket(table->rate_grid, table->n_rate, rate);
+    size_t i_m = find_bracket(table->moneyness_grid, table->n_moneyness, m_grid);
+    size_t i_tau = find_bracket(table->maturity_grid, table->n_maturity, tau_grid);
+    size_t i_sigma = find_bracket(table->volatility_grid, table->n_volatility, sigma_grid);
+    size_t i_r = find_bracket(table->rate_grid, table->n_rate, r_grid);
     size_t i_q = find_bracket(table->dividend_grid, table->n_dividend, dividend);
 
     // Get grid values
@@ -255,7 +267,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     double v_m[16];
     #pragma omp simd
     for (int i = 0; i < 16; i++) {
-        v_m[i] = lerp(m0, m1, values[i], values[i + 16], moneyness);
+        v_m[i] = lerp(m0, m1, values[i], values[i + 16], m_grid);
     }
 
     // Stage 2: Interpolate along maturity (16 → 8)
@@ -263,7 +275,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     double v_tau[8];
     #pragma omp simd
     for (int i = 0; i < 8; i++) {
-        v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 8], maturity);
+        v_tau[i] = lerp(tau0, tau1, v_m[i], v_m[i + 8], tau_grid);
     }
 
     // Stage 3: Interpolate along volatility (8 → 4)
@@ -271,7 +283,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     double v_sigma[4];
     #pragma omp simd
     for (int i = 0; i < 4; i++) {
-        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 4], volatility);
+        v_sigma[i] = lerp(sigma0, sigma1, v_tau[i], v_tau[i + 4], sigma_grid);
     }
 
     // Stage 4: Interpolate along rate (4 → 2)
@@ -279,7 +291,7 @@ static double multilinear_interpolate_5d(const OptionPriceTable *table,
     double v_r[2];
     #pragma omp simd
     for (int i = 0; i < 2; i++) {
-        v_r[i] = lerp(r0, r1, v_sigma[i], v_sigma[i + 2], rate);
+        v_r[i] = lerp(r0, r1, v_sigma[i], v_sigma[i + 2], r_grid);
     }
 
     // Stage 5: Interpolate along dividend (2 → 1)

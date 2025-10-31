@@ -15,9 +15,9 @@
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
-#define PRICE_TABLE_VERSION 1
+#define PRICE_TABLE_VERSION 2          // Version 2: adds coord_system and memory_layout
 
-// File header structure
+// File header structure (Version 2)
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -30,10 +30,47 @@ typedef struct {
     ExerciseType exercise;
     char underlying[32];
     time_t generation_time;
-    uint8_t padding[128];  // Reserved for future use
+    CoordinateSystem coord_system;    // Version 2+: coordinate transformation
+    MemoryLayout memory_layout;       // Version 2+: memory layout strategy
+    uint8_t padding[120];             // Reserved for future use (reduced from 128)
 } PriceTableHeader;
 
 // ---------- Helper Functions ----------
+
+/**
+ * Transform user coordinates to grid coordinates
+ *
+ * @param coord_system: Which transformation to apply
+ * @param m_raw, tau_raw, sigma_raw, r_raw: User-provided raw coordinates
+ * @param m_grid, tau_grid, sigma_grid, r_grid: [OUT] Grid coordinates
+ */
+void transform_query_to_grid(
+    CoordinateSystem coord_system,
+    double m_raw, double tau_raw, double sigma_raw, double r_raw,
+    double *m_grid, double *tau_grid, double *sigma_grid, double *r_grid)
+{
+    switch (coord_system) {
+        case COORD_RAW:
+            *m_grid = m_raw;
+            *tau_grid = tau_raw;
+            break;
+
+        case COORD_LOG_SQRT:
+            *m_grid = log(m_raw);
+            *tau_grid = sqrt(tau_raw);
+            break;
+
+        case COORD_LOG_VARIANCE:
+            // Future implementation
+            *m_grid = log(m_raw);
+            *tau_grid = sigma_raw * sigma_raw * tau_raw;  // w = σ²T
+            break;
+    }
+
+    // Volatility and rate always stay raw
+    *sigma_grid = sigma_raw;
+    *r_grid = r_raw;
+}
 
 /**
  * Convert flat index to multi-dimensional grid indices.
@@ -125,6 +162,57 @@ static size_t get_batch_size(void) {
 
 // ---------- Creation and Destruction ----------
 
+/**
+ * Compute strides based on memory layout
+ */
+static void compute_strides(OptionPriceTable *table) {
+    size_t n_m = table->n_moneyness;
+    size_t n_tau = table->n_maturity;
+    size_t n_sigma = table->n_volatility;
+    size_t n_r = table->n_rate;
+    size_t n_q = table->n_dividend > 0 ? table->n_dividend : 1;
+
+    switch (table->memory_layout) {
+        case LAYOUT_M_OUTER:  // Current: [m][tau][sigma][r][q]
+            if (table->n_dividend > 0) {
+                table->stride_q = 1;
+                table->stride_r = n_q;
+                table->stride_sigma = n_r * n_q;
+                table->stride_tau = n_sigma * n_r * n_q;
+                table->stride_m = n_tau * n_sigma * n_r * n_q;
+            } else {
+                table->stride_q = 0;
+                table->stride_r = 1;
+                table->stride_sigma = n_r;
+                table->stride_tau = n_sigma * n_r;
+                table->stride_m = n_tau * n_sigma * n_r;
+            }
+            break;
+
+        case LAYOUT_M_INNER:  // Optimized: [q][r][sigma][tau][m]
+            if (table->n_dividend > 0) {
+                table->stride_m = 1;
+                table->stride_tau = n_m;
+                table->stride_sigma = n_tau * n_m;
+                table->stride_r = n_sigma * n_tau * n_m;
+                table->stride_q = n_r * n_sigma * n_tau * n_m;
+            } else {
+                table->stride_m = 1;
+                table->stride_tau = n_m;
+                table->stride_sigma = n_tau * n_m;
+                table->stride_r = n_sigma * n_tau * n_m;
+                table->stride_q = 0;
+            }
+            break;
+
+        case LAYOUT_BLOCKED:
+            // Future: fall back to M_INNER for now
+            table->memory_layout = LAYOUT_M_INNER;
+            compute_strides(table);  // Recursive call
+            break;
+    }
+}
+
 OptionPriceTable* price_table_create_with_strategy(
     const double *moneyness, size_t n_m,
     const double *maturity, size_t n_tau,
@@ -205,22 +293,12 @@ OptionPriceTable* price_table_create_with_strategy(
     memset(table->underlying, 0, sizeof(table->underlying));
     table->generation_time = time(NULL);
 
-    // Compute strides for fast indexing
-    if (n_q > 0) {
-        // 5D mode
-        table->stride_q = 1;
-        table->stride_r = n_q;
-        table->stride_sigma = n_r * n_q;
-        table->stride_tau = n_sigma * n_r * n_q;
-        table->stride_m = n_tau * n_sigma * n_r * n_q;
-    } else {
-        // 4D mode
-        table->stride_q = 0;
-        table->stride_r = 1;
-        table->stride_sigma = n_r;
-        table->stride_tau = n_sigma * n_r;
-        table->stride_m = n_tau * n_sigma * n_r;
-    }
+    // Set transformation config (defaults for backward compatibility)
+    table->coord_system = COORD_RAW;
+    table->memory_layout = LAYOUT_M_OUTER;
+
+    // Compute strides based on layout
+    compute_strides(table);
 
     // Set strategy
     table->strategy = strategy;
@@ -234,6 +312,97 @@ OptionPriceTable* price_table_create_with_strategy(
     return table;
 }
 
+OptionPriceTable* price_table_create_ex(
+    const double *moneyness, size_t n_m,
+    const double *maturity, size_t n_tau,
+    const double *volatility, size_t n_sigma,
+    const double *rate, size_t n_r,
+    const double *dividend, size_t n_q,
+    OptionType type, ExerciseType exercise,
+    CoordinateSystem coord_system,
+    MemoryLayout memory_layout)
+{
+    // Validation
+    if (!moneyness || !maturity || !volatility || !rate) return NULL;
+    if (n_m == 0 || n_tau == 0 || n_sigma == 0 || n_r == 0) return NULL;
+
+    OptionPriceTable *table = calloc(1, sizeof(OptionPriceTable));
+    if (!table) return NULL;
+
+    // Set dimensions
+    table->n_moneyness = n_m;
+    table->n_maturity = n_tau;
+    table->n_volatility = n_sigma;
+    table->n_rate = n_r;
+    table->n_dividend = n_q;
+
+    // Set transformation config
+    table->coord_system = coord_system;
+    table->memory_layout = memory_layout;
+
+    // Allocate grids
+    table->moneyness_grid = malloc(n_m * sizeof(double));
+    table->maturity_grid = malloc(n_tau * sizeof(double));
+    table->volatility_grid = malloc(n_sigma * sizeof(double));
+    table->rate_grid = malloc(n_r * sizeof(double));
+    table->dividend_grid = n_q > 0 ? malloc(n_q * sizeof(double)) : NULL;
+
+    if (!table->moneyness_grid || !table->maturity_grid ||
+        !table->volatility_grid || !table->rate_grid ||
+        (n_q > 0 && !table->dividend_grid)) {
+        free(table->moneyness_grid);
+        free(table->maturity_grid);
+        free(table->volatility_grid);
+        free(table->rate_grid);
+        free(table->dividend_grid);
+        free(table);
+        return NULL;
+    }
+
+    // Copy grids
+    memcpy(table->moneyness_grid, moneyness, n_m * sizeof(double));
+    memcpy(table->maturity_grid, maturity, n_tau * sizeof(double));
+    memcpy(table->volatility_grid, volatility, n_sigma * sizeof(double));
+    memcpy(table->rate_grid, rate, n_r * sizeof(double));
+    if (n_q > 0) {
+        memcpy(table->dividend_grid, dividend, n_q * sizeof(double));
+    }
+
+    // Allocate prices array
+    size_t n_total = n_m * n_tau * n_sigma * n_r * (n_q > 0 ? n_q : 1);
+    table->prices = malloc(n_total * sizeof(double));
+    if (!table->prices) {
+        free(table->moneyness_grid);
+        free(table->maturity_grid);
+        free(table->volatility_grid);
+        free(table->rate_grid);
+        free(table->dividend_grid);
+        free(table);
+        return NULL;
+    }
+
+    // Initialize prices to NAN
+    #pragma omp simd
+    for (size_t i = 0; i < n_total; i++) {
+        table->prices[i] = NAN;
+    }
+
+    // Set metadata
+    table->type = type;
+    table->exercise = exercise;
+    memset(table->underlying, 0, sizeof(table->underlying));
+    table->generation_time = time(NULL);
+
+    // Compute strides based on layout
+    compute_strides(table);
+
+    // Set interpolation strategy to multilinear (default)
+    table->strategy = &INTERP_MULTILINEAR;
+    table->interp_context = NULL;
+
+    return table;
+}
+
 OptionPriceTable* price_table_create(
     const double *moneyness, size_t n_m,
     const double *maturity, size_t n_tau,
@@ -241,9 +410,14 @@ OptionPriceTable* price_table_create(
     const double *rate, size_t n_r,
     const double *dividend, size_t n_q,
     OptionType type, ExerciseType exercise) {
-    return price_table_create_with_strategy(
-        moneyness, n_m, maturity, n_tau, volatility, n_sigma,
-        rate, n_r, dividend, n_q, type, exercise, &INTERP_MULTILINEAR);
+    // Delegate to _ex with default settings
+    return price_table_create_ex(
+        moneyness, n_m, maturity, n_tau,
+        volatility, n_sigma, rate, n_r,
+        dividend, n_q, type, exercise,
+        COORD_RAW,      // Default: no transformation
+        LAYOUT_M_OUTER  // Default: current layout
+    );
 }
 
 void price_table_destroy(OptionPriceTable *table) {
@@ -577,6 +751,68 @@ OptionGreeks price_table_greeks_5d(const OptionPriceTable *table,
     return greeks;
 }
 
+int price_table_extract_slice(
+    const OptionPriceTable *table,
+    SliceDimension dimension,
+    const int *fixed_indices,
+    double *out_slice,
+    bool *is_contiguous)
+{
+    if (!table || !fixed_indices || !out_slice || !is_contiguous) {
+        return -1;
+    }
+
+    size_t slice_stride, slice_length;
+
+    // Determine stride and length for requested dimension
+    switch (dimension) {
+        case SLICE_DIM_MONEYNESS:
+            slice_stride = table->stride_m;
+            slice_length = table->n_moneyness;
+            break;
+        case SLICE_DIM_MATURITY:
+            slice_stride = table->stride_tau;
+            slice_length = table->n_maturity;
+            break;
+        case SLICE_DIM_VOLATILITY:
+            slice_stride = table->stride_sigma;
+            slice_length = table->n_volatility;
+            break;
+        case SLICE_DIM_RATE:
+            slice_stride = table->stride_r;
+            slice_length = table->n_rate;
+            break;
+        case SLICE_DIM_DIVIDEND:
+            if (table->n_dividend == 0) return -1;
+            slice_stride = table->stride_q;
+            slice_length = table->n_dividend;
+            break;
+        default:
+            return -1;
+    }
+
+    // Calculate base offset from fixed indices
+    size_t base_idx = 0;
+    if (fixed_indices[0] >= 0) base_idx += fixed_indices[0] * table->stride_m;
+    if (fixed_indices[1] >= 0) base_idx += fixed_indices[1] * table->stride_tau;
+    if (fixed_indices[2] >= 0) base_idx += fixed_indices[2] * table->stride_sigma;
+    if (fixed_indices[3] >= 0) base_idx += fixed_indices[3] * table->stride_r;
+    if (fixed_indices[4] >= 0) base_idx += fixed_indices[4] * table->stride_q;
+
+    // Extract: zero-copy if contiguous, strided copy otherwise
+    if (slice_stride == 1) {
+        *is_contiguous = true;
+        memcpy(out_slice, &table->prices[base_idx], slice_length * sizeof(double));
+    } else {
+        *is_contiguous = false;
+        for (size_t i = 0; i < slice_length; i++) {
+            out_slice[i] = table->prices[base_idx + i * slice_stride];
+        }
+    }
+
+    return 0;
+}
+
 int price_table_set_strategy(OptionPriceTable *table,
                               const InterpolationStrategy *strategy) {
     if (!table || !strategy) return -1;
@@ -639,7 +875,9 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         .n_dividend = table->n_dividend,
         .type = table->type,
         .exercise = table->exercise,
-        .generation_time = table->generation_time
+        .generation_time = table->generation_time,
+        .coord_system = table->coord_system,
+        .memory_layout = table->memory_layout
     };
     memcpy(header.underlying, table->underlying, sizeof(header.underlying));
 
@@ -690,10 +928,20 @@ OptionPriceTable* price_table_load(const char *filename) {
     }
 
     // Validate magic and version
-    if (header.magic != PRICE_TABLE_MAGIC || header.version != PRICE_TABLE_VERSION) {
+    if (header.magic != PRICE_TABLE_MAGIC) {
         fclose(fp);
         return NULL;
     }
+
+    // Support version 1 (without coord_system/memory_layout) and version 2
+    if (header.version != 1 && header.version != 2) {
+        fclose(fp);
+        return NULL;
+    }
+
+    // For version 1, use default values; for version 2, use header values
+    CoordinateSystem coord_system = (header.version >= 2) ? header.coord_system : COORD_RAW;
+    MemoryLayout memory_layout = (header.version >= 2) ? header.memory_layout : LAYOUT_M_OUTER;
 
     // Allocate grid arrays
     double *moneyness = malloc(header.n_moneyness * sizeof(double));
@@ -739,14 +987,15 @@ OptionPriceTable* price_table_load(const char *filename) {
         }
     }
 
-    // Create table
-    OptionPriceTable *table = price_table_create(
+    // Create table with coordinate system and memory layout
+    OptionPriceTable *table = price_table_create_ex(
         moneyness, header.n_moneyness,
         maturity, header.n_maturity,
         volatility, header.n_volatility,
         rate, header.n_rate,
         dividend, header.n_dividend,
-        header.type, header.exercise);
+        header.type, header.exercise,
+        coord_system, memory_layout);
 
     free(moneyness);
     free(maturity);

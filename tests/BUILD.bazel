@@ -128,3 +128,25 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "coordinate_transform_test",
+    size = "small",
+    srcs = ["coordinate_transform_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:price_table",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "memory_layout_test",
+    size = "small",
+    srcs = ["memory_layout_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:price_table",
+        "@googletest//:gtest_main",
+    ],
+)
