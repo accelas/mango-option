@@ -7,6 +7,10 @@
 #include "interp_strategy.h"
 #include "american_option.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * Exercise type enumeration
  */
@@ -160,21 +164,43 @@ void price_table_destroy(OptionPriceTable *table);
 // ---------- Pre-computation ----------
 
 /**
- * Pre-compute all option prices using FDM solver
+ * Pre-compute option prices for all grid points
  *
- * Parallelizes computation across all grid points using OpenMP.
- * Progress can be monitored via USDT probes.
+ * Populates the price table by computing option prices at each grid point
+ * using the FDM solver via american_option_price_batch(). Uses batch
+ * processing with configurable batch size (environment variable
+ * IVCALC_PRECOMPUTE_BATCH_SIZE, default 100).
  *
- * @param table: price table to fill
- * @param pde_solver_template: template PDESolver for option pricing
- *                             (will be copied for each grid point)
- * @return 0 on success, -1 on error
+ * Performance:
+ * - 300K grid points: ~15-20 minutes on 16-core machine
+ * - Throughput: ~300 options/second with parallelization
+ * - Memory: ~10 KB per batch (default batch_size=100)
  *
- * Performance: ~50ms per option × parallelism factor
- *   Example: 300,000 grid points × 50ms ÷ 16 cores = ~15 minutes
+ * Progress tracking via USDT probes (MODULE_PRICE_TABLE):
+ * - ALGO_START: Start of pre-computation
+ * - ALGO_PROGRESS: Every 10 batches
+ * - ALGO_COMPLETE: Completion
+ * - RUNTIME_ERROR: Batch computation failures
+ *
+ * @param table: Option price table to populate (must have allocated prices array)
+ * @param grid: Spatial/temporal discretization for FDM solver
+ * @return 0 on success, -1 on error (NULL inputs, allocation failure, batch failure)
+ *
+ * Environment variables:
+ * - IVCALC_PRECOMPUTE_BATCH_SIZE: Batch size (1-100000, default 100)
+ *
+ * Example:
+ * @code
+ *   OptionPriceTable *table = price_table_create(...);
+ *   AmericanOptionGrid grid = { .n_space = 101, .n_time = 1000, .S_max = 200.0 };
+ *   int status = price_table_precompute(table, &grid);
+ *   if (status == 0) {
+ *       price_table_save(table, "table.bin");
+ *   }
+ * @endcode
  */
 int price_table_precompute(OptionPriceTable *table,
-                            const void *pde_solver_template);
+                            const AmericanOptionGrid *grid);
 
 // ---------- Data Access ----------
 
@@ -300,5 +326,9 @@ int price_table_save(const OptionPriceTable *table, const char *filename);
  *       Call price_table_set_strategy() to change after loading
  */
 OptionPriceTable* price_table_load(const char *filename);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // IVCALC_PRICE_TABLE_H

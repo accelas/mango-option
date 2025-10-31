@@ -116,3 +116,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "price_table_test",
+    size = "small",
+    srcs = ["price_table_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+)

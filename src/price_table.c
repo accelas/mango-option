@@ -1,10 +1,17 @@
 #include "price_table.h"
+#include "american_option.h"
 #include "interp_multilinear.h"
+#include "ivcalc_trace.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
@@ -25,6 +32,96 @@ typedef struct {
     time_t generation_time;
     uint8_t padding[128];  // Reserved for future use
 } PriceTableHeader;
+
+// ---------- Helper Functions ----------
+
+/**
+ * Convert flat index to multi-dimensional grid indices.
+ * Maps a linear array index to (moneyness, maturity, volatility, rate, dividend)
+ * indices based on the table's stride configuration.
+ */
+static void unflatten_index(size_t idx, const OptionPriceTable *table,
+                           size_t *i_m, size_t *i_tau, size_t *i_sigma,
+                           size_t *i_r, size_t *i_q) {
+    size_t remaining = idx;
+
+    *i_m = remaining / table->stride_m;
+    remaining %= table->stride_m;
+
+    *i_tau = remaining / table->stride_tau;
+    remaining %= table->stride_tau;
+
+    *i_sigma = remaining / table->stride_sigma;
+    remaining %= table->stride_sigma;
+
+    *i_r = remaining / table->stride_r;
+    remaining %= table->stride_r;
+
+    *i_q = remaining;
+}
+
+/**
+ * Convert grid point indices to OptionData structure.
+ * Extracts grid values at the specified indices and constructs an option
+ * with fixed reference strike K_ref = 100.0.
+ *
+ * Moneyness scaling approach:
+ * - All precomputed prices use K_ref = 100.0 as the strike
+ * - Moneyness m = S/K is stored in the grid
+ * - Actual spot price S will be computed when needed: S = m * K_ref
+ * - This allows one table to serve all strikes via moneyness interpolation
+ *
+ * Note: For continuous dividend yield, we pass it via a dummy discrete
+ * dividend at t=0 with amount corresponding to the yield effect.
+ * This is a simplification that works for the current implementation.
+ */
+static OptionData grid_point_to_option(const OptionPriceTable *table,
+                                       size_t i_m, size_t i_tau,
+                                       size_t i_sigma, size_t i_r,
+                                       size_t i_q) {
+    const double K_ref = 100.0;  // Reference strike for moneyness scaling
+
+    double tau = table->maturity_grid[i_tau];
+    double sigma = table->volatility_grid[i_sigma];
+    double r = table->rate_grid[i_r];
+
+    // Note: moneyness (m) and dividend (q) are not used in OptionData here
+    // They will be used when extracting the price at the specific spot
+    (void)i_m;  // Suppress unused parameter warning
+    (void)i_q;
+
+    OptionData option = {
+        .strike = K_ref,
+        .volatility = sigma,
+        .risk_free_rate = r,
+        .time_to_maturity = tau,
+        .option_type = table->type,
+        .n_dividends = 0,
+        .dividend_times = NULL,
+        .dividend_amounts = NULL
+    };
+
+    return option;
+}
+
+/**
+ * Get batch size for parallel computation from environment variable.
+ * Defaults to 100 if IVCALC_PRECOMPUTE_BATCH_SIZE is not set or invalid.
+ * Valid range: 1 to 100000.
+ */
+static size_t get_batch_size(void) {
+    size_t batch_size = 100;  // Default
+
+    char *env_batch = getenv("IVCALC_PRECOMPUTE_BATCH_SIZE");
+    if (env_batch) {
+        long val = atol(env_batch);
+        if (val >= 1 && val <= 100000) {
+            batch_size = (size_t)val;
+        }
+    }
+
+    return batch_size;
+}
 
 // ---------- Creation and Destruction ----------
 
@@ -169,12 +266,96 @@ void price_table_destroy(OptionPriceTable *table) {
 
 // ---------- Pre-computation ----------
 
-int price_table_precompute([[maybe_unused]] OptionPriceTable *table,
-                            [[maybe_unused]] const void *pde_solver_template) {
-    // Note: This is a placeholder for Phase 2
-    // In Phase 2, we'll implement the actual FDM-based pre-computation
-    // with OpenMP parallelization
-    return -1;  // Not yet implemented
+int price_table_precompute(OptionPriceTable *table,
+                            const AmericanOptionGrid *grid) {
+    if (!table || !grid || !table->prices) {
+        return -1;
+    }
+
+    // Calculate total grid points
+    size_t n_total = table->n_moneyness * table->n_maturity *
+                     table->n_volatility * table->n_rate;
+    if (table->n_dividend > 0) {
+        n_total *= table->n_dividend;
+    }
+
+    size_t batch_size = get_batch_size();
+
+    // Allocate batch arrays
+    OptionData *batch_options = malloc(batch_size * sizeof(OptionData));
+    AmericanOptionResult *batch_results = malloc(batch_size * sizeof(AmericanOptionResult));
+
+    if (!batch_options || !batch_results) {
+        free(batch_options);
+        free(batch_results);
+        return -1;
+    }
+
+    IVCALC_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
+
+    const double K_ref = 100.0;  // Reference strike for moneyness scaling
+
+    // Process in batches
+    for (size_t batch_start = 0; batch_start < n_total; batch_start += batch_size) {
+        size_t batch_count = min(batch_size, n_total - batch_start);
+
+        // Fill batch with grid points
+        for (size_t i = 0; i < batch_count; i++) {
+            size_t idx = batch_start + i;
+            size_t i_m, i_tau, i_sigma, i_r, i_q;
+            unflatten_index(idx, table, &i_m, &i_tau, &i_sigma, &i_r, &i_q);
+
+            batch_options[i] = grid_point_to_option(table, i_m, i_tau,
+                                                     i_sigma, i_r, i_q);
+        }
+
+        // Solve batch (OpenMP parallelization inside batch API)
+        int status = american_option_price_batch(batch_options, grid,
+                                                  batch_count, batch_results);
+        if (status != 0) {
+            free(batch_options);
+            free(batch_results);
+            IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, batch_start);
+            return -1;
+        }
+
+        // Store results in table and free solvers
+        for (size_t i = 0; i < batch_count; i++) {
+            size_t idx = batch_start + i;
+            size_t i_m, i_tau, i_sigma, i_r, i_q;
+            unflatten_index(idx, table, &i_m, &i_tau, &i_sigma, &i_r, &i_q);
+
+            // Extract moneyness for this grid point
+            double m = table->moneyness_grid[i_m];
+            double spot_price = m * K_ref;
+
+            // Extract price at the spot price
+            double price = american_option_get_value_at_spot(
+                batch_results[i].solver, spot_price, K_ref);
+
+            table->prices[idx] = price;
+
+            // Free the solver
+            pde_solver_destroy(batch_results[i].solver);
+        }
+
+        // Progress tracking (every 10 batches)
+        if ((batch_start / batch_size) % 10 == 0) {
+            IVCALC_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
+                                       batch_start + batch_count, n_total,
+                                       (double)(batch_start + batch_count) / (double)n_total);
+        }
+    }
+
+    IVCALC_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
+
+    free(batch_options);
+    free(batch_results);
+
+    // Mark table with generation timestamp
+    table->generation_time = time(NULL);
+
+    return 0;
 }
 
 // ---------- Data Access ----------
