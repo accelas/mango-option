@@ -130,6 +130,19 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_slow_test",
+    size = "large",
+    srcs = ["price_table_slow_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],  # Too slow for CI/CD (precomputes 1200 grid points)
+)
+
+cc_test(
     name = "coordinate_transform_test",
     size = "small",
     srcs = ["coordinate_transform_test.cc"],
