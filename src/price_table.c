@@ -1,6 +1,6 @@
 #include "price_table.h"
 #include "american_option.h"
-#include "interp_multilinear.h"
+#include "interp_cubic.h"
 #include "ivcalc_trace.h"
 #include <stdlib.h>
 #include <stdint.h>
@@ -201,9 +201,9 @@ OptionPriceTable* price_table_create_with_strategy(
     if (n_m == 0 || n_tau == 0 || n_sigma == 0 || n_r == 0) return NULL;
     if (n_q > 0 && !dividend) return NULL;
 
-    // Default to multilinear if no strategy specified
+    // Default to cubic if no strategy specified
     if (!strategy) {
-        strategy = &INTERP_MULTILINEAR;
+        strategy = &INTERP_CUBIC;
     }
 
     OptionPriceTable *table = malloc(sizeof(OptionPriceTable));
@@ -371,9 +371,17 @@ OptionPriceTable* price_table_create_ex(
     // Compute strides based on layout
     compute_strides(table);
 
-    // Set interpolation strategy to multilinear (default)
-    table->strategy = &INTERP_MULTILINEAR;
+    // Set interpolation strategy to cubic (default)
+    table->strategy = &INTERP_CUBIC;
+    size_t dimensions = (table->n_dividend > 0) ? 5 : 4;
+    size_t grid_sizes[5] = {
+        table->n_moneyness, table->n_maturity, table->n_volatility,
+        table->n_rate, table->n_dividend
+    };
     table->interp_context = NULL;
+    if (table->strategy->create_context) {
+        table->interp_context = table->strategy->create_context(dimensions, grid_sizes);
+    }
 
     return table;
 }
@@ -560,6 +568,15 @@ int price_table_precompute(OptionPriceTable *table,
     // Mark table with generation timestamp
     table->generation_time = time(NULL);
 
+    // Trigger interpolation strategy precomputation (e.g., cubic spline coefficients)
+    if (table->strategy && table->strategy->precompute && table->interp_context) {
+        int precompute_status = table->strategy->precompute(table, table->interp_context);
+        if (precompute_status != 0) {
+            IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, precompute_status, 0);
+            return -1;
+        }
+    }
+
     return 0;
 }
 
@@ -601,6 +618,20 @@ int price_table_set(OptionPriceTable *table,
                + i_q * table->stride_q;
 
     table->prices[idx] = price;
+    return 0;
+}
+
+int price_table_build_interpolation(OptionPriceTable *table) {
+    if (!table) return -1;
+
+    // Trigger interpolation strategy precomputation (e.g., cubic spline coefficients)
+    if (table->strategy && table->strategy->precompute && table->interp_context) {
+        int status = table->strategy->precompute(table, table->interp_context);
+        if (status != 0) {
+            return -1;
+        }
+    }
+
     return 0;
 }
 

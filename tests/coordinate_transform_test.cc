@@ -77,6 +77,10 @@ TEST(IntegrationTest, InterpolationUsesTransform) {
         }
     }
 
+    // Build interpolation structures (cubic spline coefficients)
+    int status = price_table_build_interpolation(table);
+    ASSERT_EQ(status, 0);
+
     // Query with RAW coordinates (user API)
     double price = price_table_interpolate_4d(table,
         1.05,   // Raw moneyness (not log!)
