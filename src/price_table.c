@@ -15,9 +15,9 @@
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
-#define PRICE_TABLE_VERSION 1
+#define PRICE_TABLE_VERSION 2          // Version 2: adds coord_system and memory_layout
 
-// File header structure
+// File header structure (Version 2)
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -30,7 +30,9 @@ typedef struct {
     ExerciseType exercise;
     char underlying[32];
     time_t generation_time;
-    uint8_t padding[128];  // Reserved for future use
+    CoordinateSystem coord_system;    // Version 2+: coordinate transformation
+    MemoryLayout memory_layout;       // Version 2+: memory layout strategy
+    uint8_t padding[120];             // Reserved for future use (reduced from 128)
 } PriceTableHeader;
 
 // ---------- Helper Functions ----------
@@ -817,7 +819,9 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         .n_dividend = table->n_dividend,
         .type = table->type,
         .exercise = table->exercise,
-        .generation_time = table->generation_time
+        .generation_time = table->generation_time,
+        .coord_system = table->coord_system,
+        .memory_layout = table->memory_layout
     };
     memcpy(header.underlying, table->underlying, sizeof(header.underlying));
 
@@ -868,10 +872,20 @@ OptionPriceTable* price_table_load(const char *filename) {
     }
 
     // Validate magic and version
-    if (header.magic != PRICE_TABLE_MAGIC || header.version != PRICE_TABLE_VERSION) {
+    if (header.magic != PRICE_TABLE_MAGIC) {
         fclose(fp);
         return NULL;
     }
+
+    // Support version 1 (without coord_system/memory_layout) and version 2
+    if (header.version != 1 && header.version != 2) {
+        fclose(fp);
+        return NULL;
+    }
+
+    // For version 1, use default values; for version 2, use header values
+    CoordinateSystem coord_system = (header.version >= 2) ? header.coord_system : COORD_RAW;
+    MemoryLayout memory_layout = (header.version >= 2) ? header.memory_layout : LAYOUT_M_OUTER;
 
     // Allocate grid arrays
     double *moneyness = malloc(header.n_moneyness * sizeof(double));
@@ -917,14 +931,15 @@ OptionPriceTable* price_table_load(const char *filename) {
         }
     }
 
-    // Create table
-    OptionPriceTable *table = price_table_create(
+    // Create table with coordinate system and memory layout
+    OptionPriceTable *table = price_table_create_ex(
         moneyness, header.n_moneyness,
         maturity, header.n_maturity,
         volatility, header.n_volatility,
         rate, header.n_rate,
         dividend, header.n_dividend,
-        header.type, header.exercise);
+        header.type, header.exercise,
+        coord_system, memory_layout);
 
     free(moneyness);
     free(maturity);
