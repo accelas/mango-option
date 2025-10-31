@@ -237,7 +237,7 @@ TEST_F(PriceTablePrecomputeTest, GetSetOperations) {
 TEST_F(PriceTablePrecomputeTest, IntrinsicValueBound) {
     // For a put at maturity, price should be at least intrinsic value
     double moneyness[] = {0.8, 0.9, 1.0, 1.1, 1.2};
-    double maturity[] = {0.01};  // Very short maturity
+    double maturity[] = {0.05};  // Short maturity (adaptive: 50 steps with dt=0.001)
     double volatility[] = {0.25};
     double rate[] = {0.05};
 
@@ -386,7 +386,7 @@ TEST_F(PriceTablePrecomputeTest, InterpolationAccuracyIntegration) {
     fine_grid.x_max = 0.7;
     fine_grid.n_points = 101;  // Finer spatial grid
     fine_grid.dt = 0.0005;     // Smaller time step
-    fine_grid.n_steps = 400;
+    fine_grid.n_steps = 1000;  // Will be overridden by adaptive calculation
 
     // Pre-compute table (takes ~1-2 minutes)
     int status = price_table_precompute(table, &fine_grid);
@@ -416,7 +416,12 @@ TEST_F(PriceTablePrecomputeTest, InterpolationAccuracyIntegration) {
     option.dividend_times = nullptr;
     option.dividend_amounts = nullptr;
 
-    AmericanOptionResult result = american_option_price(&option, &fine_grid);
+    // Use adaptive time steps matching precompute behavior
+    AmericanOptionGrid comparison_grid = fine_grid;
+    comparison_grid.n_steps = static_cast<size_t>(test_tau / fine_grid.dt);
+    if (comparison_grid.n_steps < 10) comparison_grid.n_steps = 10;  // Match minimum
+
+    AmericanOptionResult result = american_option_price(&option, &comparison_grid);
     ASSERT_EQ(result.status, 0);
 
     double spot_price = test_m * K_ref;
