@@ -189,21 +189,44 @@ See `examples/` for complete working programs.
 mango-iv/
 ├── src/                           # Core library
 │   ├── implied_volatility.{h,c}   # IV calculation + Black-Scholes
-│   ├── american_option.{h,c}      # American option pricing
-│   ├── pde_solver.{h,c}           # General PDE solver (FDM)
-│   ├── cubic_spline.{h,c}         # Interpolation
-│   ├── brent.{h,c}                # Root-finding
+│   ├── european_option.{h,c}      # European option pricing (Black-Scholes)
+│   ├── american_option.{h,c}      # American option pricing (FDM)
+│   ├── pde_solver.{h,c}           # General PDE solver (TR-BDF2)
+│   ├── cubic_spline.{h,c}         # 1D cubic spline interpolation
+│   ├── interp_strategy.h          # Interpolation strategy pattern
+│   ├── interp_cubic.{h,c}         # Multi-dimensional cubic interpolation
+│   ├── interp_cubic_workspace.c   # Workspace management for cubic splines
+│   ├── price_table.{h,c}          # 4D/5D option price tables
+│   ├── iv_surface.{h,c}           # 2D implied volatility surfaces
+│   ├── brent.h                    # Brent's method (root-finding)
+│   ├── tridiagonal.h              # Tridiagonal solver
 │   └── ivcalc_trace.h             # USDT tracing probes
 │
 ├── examples/                      # Demonstration programs
 │   ├── example_implied_volatility.c
 │   ├── example_american_option.c
-│   └── example_heat_equation.c
+│   ├── example_american_option_dividend.c
+│   ├── example_heat_equation.c
+│   ├── example_interpolation_engine.c
+│   ├── example_precompute_table.c
+│   └── test_cubic_4d_5d.c
 │
 ├── tests/                         # Comprehensive test suite
-│   ├── implied_volatility_test.cc # 32 test cases
-│   ├── american_option_test.cc    # 42 test cases
-│   └── pde_solver_test.cc         # Core solver tests
+│   ├── implied_volatility_test.cc # IV calculation tests
+│   ├── european_option_test.cc    # Black-Scholes tests
+│   ├── american_option_test.cc    # American option tests
+│   ├── pde_solver_test.cc         # Core PDE solver tests
+│   ├── cubic_spline_test.cc       # 1D spline tests
+│   ├── interpolation_test.cc      # Multi-dimensional interpolation tests
+│   ├── interpolation_workspace_test.cc
+│   ├── cubic_interp_4d_5d_test.cc
+│   ├── price_table_test.cc        # Price table tests
+│   ├── price_table_slow_test.cc   # Long-running table tests
+│   ├── coordinate_transform_test.cc
+│   ├── memory_layout_test.cc
+│   ├── brent_test.cc              # Root-finding tests
+│   ├── tridiagonal_test.cc        # Linear solver tests
+│   └── stability_test.cc          # Numerical stability tests
 │
 ├── docs/                          # Documentation
 │   ├── PROJECT_OVERVIEW.md        # Problem domain & motivation
