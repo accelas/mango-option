@@ -2,38 +2,39 @@
 
 ## Three Main APIs
 
-### 1. Implied Volatility (European Options)
+### 1. American Implied Volatility
 
 **File**: `src/implied_volatility.h`
 
 ```c
 #include "src/implied_volatility.h"
 
-// Simple usage (auto-determines bounds)
+// Simple usage (auto-determines bounds via Let's Be Rational)
 IVParams params = {
     .spot_price = 100.0,
     .strike = 100.0,
     .time_to_maturity = 1.0,
     .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = true
+    .market_price = 6.08,  // American put market price
+    .is_call = false
 };
 
-IVResult result = implied_volatility_calculate_simple(&params);
+IVResult result = calculate_iv_simple(&params);
 
 if (result.converged) {
-    printf("IV: %.4f, Iterations: %d\n", result.implied_vol, result.iterations);
+    printf("American IV: %.4f (%.1f%%), Iterations: %d\n",
+           result.implied_vol, result.implied_vol * 100, result.iterations);
 } else {
     printf("Error: %s\n", result.error);
 }
 ```
 
 **Key Points**:
+- **FDM-based**: Each Brent iteration solves full American option PDE (~21ms)
+- **Performance**: ~145ms per calculation (5-8 Brent iterations)
+- **Auto-bounds**: Uses Let's Be Rational to estimate European IV, then 1.5× for upper bound
+- **Validates input** for arbitrage
 - Works for calls and puts
-- Uses Brent's method for root finding
-- Auto-bounds: [0.0001, adaptive upper bound]
-- Validates input for arbitrage
-- Returns vega for sensitivity
 
 ---
 
@@ -127,24 +128,30 @@ for (int i = 0; i < 100; i++) {
 
 ---
 
-## Black-Scholes Pricing
+## Let's Be Rational (European IV Estimation)
 
-**File**: `src/european_option.h`
+**File**: `src/lets_be_rational.h`
 
 ```c
-// Price European option directly
-double price = black_scholes_price(
+// Estimate European IV (used for American IV bounds)
+LBRResult result = lbr_implied_volatility(
     100.0,   // spot
     100.0,   // strike
     1.0,     // time_to_maturity
     0.05,    // risk_free_rate
-    0.2,     // volatility
+    10.45,   // market_price
     true     // is_call
 );
 
-// Get sensitivity (vega)
-double vega = black_scholes_vega(100.0, 100.0, 1.0, 0.05, 0.2);
+if (result.converged) {
+    printf("European IV: %.4f\n", result.implied_vol);
+}
 ```
+
+**Key Points**:
+- **Fast**: ~781ns per calculation (20-30 bisection iterations)
+- **Purpose**: Provides upper bounds for American IV calculation
+- Uses Black-Scholes pricing with Abramowitz & Stegun normal CDF
 
 ---
 
@@ -214,10 +221,11 @@ pde_solver_destroy(solver);
 
 ## Performance Notes
 
-### IV Calculation
-- **Time**: <1 µs per call (typical)
-- **Bottleneck**: Usually the option pricing, not IV solver
-- **Iterations**: 8-15 typically
+### American IV Calculation
+- **Time**: ~145ms per call (FDM-based)
+- **Bottleneck**: American option pricing in each Brent iteration (~21ms × 5-8 iterations)
+- **Brent iterations**: 5-8 typically
+- **Let's Be Rational** (bounds): ~781ns
 
 ### American Option (Single)
 - **Time**: 21.7 ms (default grid)
@@ -245,14 +253,22 @@ pde_solver_destroy(solver);
 
 ## Validation & Testing
 
-### IV Tests (32 cases)
+### American IV Tests (9 cases)
 ```bash
 bazel test //tests:implied_volatility_test
 ```
-- ATM, OTM, ITM scenarios
-- Extreme volatility (5% to 300%)
-- Zero/negative rates
-- Error cases
+- American put/call IV recovery (ATM, OTM, ITM)
+- Input validation and arbitrage detection
+- Grid configuration validation
+- Convergence with default settings
+
+### Let's Be Rational Tests (4 cases)
+```bash
+bazel test //tests:lets_be_rational_test
+```
+- ATM/OTM European IV estimation
+- Invalid input handling
+- Near-expiry edge cases
 
 ### American Option Tests (42 cases)
 ```bash
@@ -310,10 +326,11 @@ sudo ./scripts/ivcalc-trace monitor ./binary --preset=convergence
 
 ## Common Patterns
 
-### Pattern: IV Surface Generation
+### Pattern: American IV Surface Generation
 
 ```c
-// Generate IV surface for calls across strikes and maturities
+// Generate American IV surface for puts across strikes and maturities
+// Note: ~145ms per IV calc, so this will be slow for large surfaces
 for (int i = 0; i < n_strikes; i++) {
     for (int j = 0; j < n_maturities; j++) {
         IVParams params = {
@@ -322,38 +339,44 @@ for (int i = 0; i < n_strikes; i++) {
             .time_to_maturity = maturities[j],
             .risk_free_rate = 0.05,
             .market_price = market_prices[i][j],
-            .is_call = true
+            .is_call = false
         };
-        
-        IVResult result = implied_volatility_calculate_simple(&params);
+
+        IVResult result = calculate_iv_simple(&params);
         if (result.converged) {
             iv_surface[i][j] = result.implied_vol;
         }
     }
 }
+// Typical: 50 strikes × 20 maturities × 145ms = ~2.4 minutes
 ```
 
 ### Pattern: Early Exercise Premium
 
 ```c
-// European vs American comparison
-OptionData european = option;  // Copy option
+// American vs European IV comparison
+IVParams params = {
+    .spot_price = 100.0,
+    .strike = 100.0,
+    .time_to_maturity = 1.0,
+    .risk_free_rate = 0.05,
+    .market_price = 6.08,  // American put market price
+    .is_call = false
+};
 
-// Get European price (Black-Scholes)
-double european_price = black_scholes_price(
-    european.strike, european.strike,
-    european.time_to_maturity, european.risk_free_rate,
-    european.volatility, european.option_type == OPTION_CALL
+// Get European IV estimate (fast)
+LBRResult euro_result = lbr_implied_volatility(
+    params.spot_price, params.strike, params.time_to_maturity,
+    params.risk_free_rate, params.market_price, params.is_call
 );
 
-// Get American price (PDE)
-AmericanOptionResult american_result = american_option_price(&option, &grid);
-double american_price = american_option_get_value_at_spot(
-    american_result.solver, option.strike, option.strike
-);
+// Get American IV (slow, FDM-based)
+IVResult american_result = calculate_iv_simple(&params);
 
-// Early exercise premium
-double premium = american_price - european_price;
+// Compare: American IV typically lower than European IV for same price
+// (American option worth more → requires less IV to match same price)
+printf("European IV estimate: %.4f\n", euro_result.implied_vol);
+printf("American IV: %.4f\n", american_result.implied_vol);
 ```
 
 ### Pattern: Sensitivity Analysis (Greeks)
@@ -375,10 +398,11 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 
 | Issue | Cause | Solution |
 |---|---|---|
-| IV fails to converge | Bounds too tight | Use `implied_volatility_calculate()` with wider bounds |
+| IV fails to converge | Bounds too tight or FDM issues | Use `calculate_iv()` with custom bounds and grid |
 | IV returns error "arbitrage" | Invalid market price | Check price vs intrinsic value |
+| IV calculation slow | FDM bottleneck | Normal for American IV (~145ms), use coarser grid for testing |
 | American solver fails | Grid too coarse | Increase `n_points` and/or reduce `dt` |
-| American solver slow | Grid too fine | Try coarser grid first |
+| American solver slow | Grid too fine | Try coarser grid first (101 points, 500 steps) |
 | Memory error on batch | Too many options | Reduce batch size or grid resolution |
 | Results inconsistent | Floating point | Use deterministic grids, fixed seed |
 
@@ -388,10 +412,10 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 
 | Purpose | File |
 |---|---|
-| IV calculation | `src/implied_volatility.h/.c` |
+| American IV calculation | `src/implied_volatility.h/.c` |
+| Let's Be Rational (European IV) | `src/lets_be_rational.h/.c` |
 | American options | `src/american_option.h/.c` |
 | PDE solver | `src/pde_solver.h/.c` |
-| Black-Scholes | `src/european_option.h/.c` |
 | Root finding | `src/brent.h` |
 | Interpolation | `src/cubic_spline.h/.c` |
 | Linear solver | `src/tridiagonal.h` |
