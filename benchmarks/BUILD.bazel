@@ -23,7 +23,7 @@ cc_binary(
     deps = [
         "//src:american_option",
         "//src:implied_volatility",
-        "//src:european_option",
+        "//src:lets_be_rational",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
