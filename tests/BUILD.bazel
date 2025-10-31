@@ -64,7 +64,7 @@ cc_test(
     copts = ["-std=c++17", "-Wall", "-Wextra"],
     deps = [
         "//src:implied_volatility",
-        "//src:european_option",
+        "//src:american_option",
         "@googletest//:gtest_main",
     ],
 )
