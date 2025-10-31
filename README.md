@@ -311,8 +311,9 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 - ✅ QuantLib benchmarks
 
 ### Near-Term (v0.2-0.3)
-- 🚧 Interpolation-based pricing engine (40,000x speedup planned)
-- 🚧 CPU optimizations (AVX-512, FMA, restrict)
+- ✅ Cubic spline interpolation (C² continuous, accurate Greeks)
+- ✅ Coordinate transformation support (log-sqrt, log-variance)
+- 🚧 Price table pre-computation (40,000x speedup planned)
 - 🚧 Greeks calculation via finite differences
 - 🚧 Volatility surface calibration
 
