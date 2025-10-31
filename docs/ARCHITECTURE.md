@@ -946,6 +946,54 @@ tests/
 └── interpolation_test.cc    # Unit tests for all interpolation components
 ```
 
+### Architecture Overview
+
+```mermaid
+graph TD
+    USER[User Query<br/>m, τ, σ, r]
+
+    TRANSFORM[Coordinate Transform<br/>Raw → Grid Space<br/>COORD_LOG_SQRT]
+
+    STRATEGY[Interpolation Strategy<br/>INTERP_CUBIC]
+
+    PRECOMP[Precomputed Spline<br/>Coefficients<br/>~10MB for 4D table]
+
+    STAGE1[Stage 1: Moneyness<br/>Evaluate splines along m<br/>for each τ,σ,r]
+
+    STAGE2[Stage 2: Maturity<br/>Build & evaluate splines along τ<br/>for each σ,r]
+
+    STAGE3[Stage 3: Volatility<br/>Build & evaluate splines along σ<br/>for each r]
+
+    STAGE4[Stage 4: Rate<br/>Build & evaluate spline along r<br/>→ final result]
+
+    RESULT[Interpolated Price<br/>~500ns total]
+
+    USER --> TRANSFORM
+    TRANSFORM --> STRATEGY
+    STRATEGY --> PRECOMP
+    PRECOMP --> STAGE1
+    STAGE1 --> STAGE2
+    STAGE2 --> STAGE3
+    STAGE3 --> STAGE4
+    STAGE4 --> RESULT
+
+    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style TRANSFORM fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style STRATEGY fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style PRECOMP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style STAGE1 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE2 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE3 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE4 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Key Features**:
+- **Strategy Pattern**: Runtime selection of interpolation algorithm (cubic splines)
+- **Coordinate Transforms**: Log-sqrt transforms for better interpolation accuracy
+- **Tensor-Product**: Separable stages reduce complexity from O(n^4) to O(n)
+- **Precomputation**: Spline coefficients computed once, reused for millions of queries
+
 ### Core Data Structures
 
 #### IV Surface (2D Interpolation)
@@ -993,6 +1041,50 @@ typedef struct {
 ```
 
 **Memory footprint**: ~2.4MB per table (4D: 50×30×20×10 grid)
+
+### Memory Layout Options
+
+The price table supports different memory layouts for cache optimization:
+
+```mermaid
+graph TD
+    TABLE[OptionPriceTable<br/>4D Array: m×τ×σ×r]
+
+    OUTER[LAYOUT_M_OUTER<br/>m, τ, σ, r<br/>Default ordering]
+
+    INNER[LAYOUT_M_INNER<br/>r, σ, τ, m<br/>Recommended for cubic]
+
+    POINT_QUERY[Point Query<br/>table.m.tau.sigma.r<br/>~Equal performance]
+
+    SLICE_OUTER[Slice Extraction OUTER<br/>Extract all m for fixed τ,σ,r<br/>Scattered memory access<br/>~30x slower]
+
+    SLICE_INNER[Slice Extraction INNER<br/>Extract all m for fixed τ,σ,r<br/>Contiguous memory access<br/>~30x faster]
+
+    TABLE --> OUTER
+    TABLE --> INNER
+
+    OUTER --> POINT_QUERY
+    INNER --> POINT_QUERY
+
+    OUTER --> SLICE_OUTER
+    INNER --> SLICE_INNER
+
+    style TABLE fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style OUTER fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style INNER fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style POINT_QUERY fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+    style SLICE_OUTER fill:#ffcdd2,stroke:#333,stroke-width:2px,color:#000
+    style SLICE_INNER fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Layout Comparison**:
+- **LAYOUT_M_OUTER** [m][τ][σ][r]: Good for point queries, compatible with older code
+- **LAYOUT_M_INNER** [r][σ][τ][m]: Optimized for cubic interpolation (slice-based)
+  - 64-byte cache lines hold 8 consecutive moneyness values
+  - ~30x faster moneyness slice extraction
+  - Same memory usage, same point query performance
+
+**Why it matters for cubic**: Precomputation creates splines along moneyness dimension for each (τ,σ,r) combination. LAYOUT_M_INNER makes these slices contiguous in memory, dramatically improving cache performance during precomputation.
 
 ### Interpolation Strategy Pattern
 
@@ -1105,6 +1197,43 @@ OptionPriceTable* price_table_load(const char *filename);
 3. **Coordinate Transformation**:
    - Query coordinates transformed from raw to grid space before interpolation
    - Supports COORD_RAW, COORD_LOG_SQRT, COORD_LOG_VARIANCE
+
+```mermaid
+graph LR
+    RAW["User Query<br/>m=1.05, τ=0.25"]
+
+    COORD_RAW["COORD_RAW<br/>Identity<br/>m'=1.05, τ'=0.25"]
+
+    COORD_LOG_SQRT["COORD_LOG_SQRT<br/>m'=ln(m)<br/>τ'=√τ<br/>m'=0.049, τ'=0.5"]
+
+    COORD_LOG_VAR["COORD_LOG_VARIANCE<br/>m'=ln(m)<br/>σ'²=σ²·τ<br/>Better for vol surfaces"]
+
+    INTERP["Cubic Spline<br/>Interpolation<br/>in Grid Space"]
+
+    RESULT["Interpolated<br/>Price"]
+
+    RAW --> COORD_RAW
+    RAW --> COORD_LOG_SQRT
+    RAW --> COORD_LOG_VAR
+
+    COORD_RAW --> INTERP
+    COORD_LOG_SQRT --> INTERP
+    COORD_LOG_VAR --> INTERP
+
+    INTERP --> RESULT
+
+    style RAW fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style COORD_RAW fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style COORD_LOG_SQRT fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style COORD_LOG_VAR fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style INTERP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Why coordinate transforms?**
+- **Log-moneyness**: ln(m) spreads out ATM region where most trading occurs
+- **Square-root time**: √τ linearizes time decay near expiry
+- **Better interpolation**: Transformed coordinates are more linear, reducing interpolation error
 
 **Complexity**:
 - Precomputation: O(n_τ × n_σ × n_r × n_m) cubic spline setups
