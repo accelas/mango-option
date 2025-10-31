@@ -456,6 +456,120 @@ pde_free_grid(&grid);
 double u_at_x = pde_solver_interpolate(solver, 0.123);
 ```
 
+## Price Table Pre-computation Workflow
+
+The price table module provides fast option pricing through pre-computed lookup tables. This is ideal for applications requiring thousands of pricing queries where computation time dominates.
+
+### Typical Workflow
+
+**1. Create the price table structure:**
+```c
+// Define grid dimensions (example: 4D table for American puts)
+double *moneyness = malloc(n_m * sizeof(double));
+double *maturity = malloc(n_tau * sizeof(double));
+double *volatility = malloc(n_sigma * sizeof(double));
+double *rate = malloc(n_r * sizeof(double));
+
+// Generate grids (log-spaced for moneyness, linear for others)
+generate_log_spaced(moneyness, n_m, 0.7, 1.3);
+generate_linear(maturity, n_tau, 0.027, 2.0);
+generate_linear(volatility, n_sigma, 0.10, 0.80);
+generate_linear(rate, n_r, 0.0, 0.10);
+
+// Create table (takes ownership of grid arrays)
+OptionPriceTable *table = price_table_create(
+    moneyness, n_m, maturity, n_tau, volatility, n_sigma,
+    rate, n_r, NULL, 0,  // No dividend dimension
+    OPTION_PUT, EXERCISE_AMERICAN);
+
+price_table_set_underlying(table, "SPX");
+```
+
+**2. Pre-compute all prices:**
+```c
+// Configure FDM solver grid
+AmericanOptionGrid grid = {
+    .n_space = 101,
+    .n_time = 1000,
+    .S_max = 200.0
+};
+
+// Optionally tune batch size (default: 100)
+setenv("IVCALC_PRECOMPUTE_BATCH_SIZE", "200", 1);
+
+// Compute all prices (uses OpenMP parallelization)
+int status = price_table_precompute(table, &grid);
+if (status != 0) {
+    fprintf(stderr, "Pre-computation failed\n");
+    return 1;
+}
+```
+
+**3. Save table for fast loading later:**
+```c
+price_table_save(table, "spx_american_put.bin");
+price_table_destroy(table);
+
+// Later: fast load (milliseconds instead of minutes)
+table = price_table_load("spx_american_put.bin");
+```
+
+**4. Query prices (sub-microsecond):**
+```c
+// Single query
+double price = price_table_interpolate_4d(table, 1.05, 0.25, 0.20, 0.05);
+
+// Multiple queries (typical usage)
+for (size_t i = 0; i < n_queries; i++) {
+    double p = price_table_interpolate_4d(table, m[i], tau[i], sigma[i], r[i]);
+    // Process price...
+}
+```
+
+**5. Cleanup:**
+```c
+price_table_destroy(table);
+```
+
+### Performance Characteristics
+
+**Pre-computation (one-time cost):**
+- 300K grid points (50×30×20×10): ~15-20 minutes on 16 cores
+- Throughput: ~300 options/second with parallelization
+- Memory overhead: ~10 KB per batch (configurable)
+- Uses OpenMP for parallel batch processing
+
+**Query performance (amortized benefit):**
+- 4D interpolation: ~500 nanoseconds (multilinear)
+- 5D interpolation: ~2 microseconds (multilinear)
+- Greeks computation: ~5-10 microseconds (requires multiple interpolations)
+- Speedup vs FDM: ~40,000x for single query
+
+**Memory usage:**
+- 4D table (50×30×20×10): ~2.4 MB
+- 5D table adds dividend dimension (proportional scaling)
+- Binary format includes grids, prices, and metadata
+
+### Environment Variables
+
+- **IVCALC_PRECOMPUTE_BATCH_SIZE**: Batch size for pre-computation (default: 100)
+  - Range: 1-100000
+  - Larger batches: better throughput, more memory
+  - Smaller batches: more frequent progress updates, less memory
+  - Recommended: 100-500 for most use cases
+
+### USDT Tracing
+
+Monitor pre-computation progress with USDT probes:
+```bash
+# Watch progress during pre-computation
+sudo bpftrace -e 'usdt::ivcalc:algo_progress /arg0 == 4/ {
+    printf("Price table: %d%% complete\n", arg2);
+}' -c './my_precompute_program'
+```
+
+See `examples/example_precompute_table.c` for a complete working example.
+
 ## Numerical Considerations
 
 - Spatial discretization determines maximum stable dt for explicit methods

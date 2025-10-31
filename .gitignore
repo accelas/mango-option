@@ -11,3 +11,4 @@ bazel-*
 # OS generated files
 .DS_Store
 Thumbs.db
+.worktrees/
