@@ -185,6 +185,19 @@ OptionPriceTable* price_table_create(
     OptionType type, ExerciseType exercise);
 
 /**
+ * Extended creation with coordinate system and memory layout control
+ */
+OptionPriceTable* price_table_create_ex(
+    const double *moneyness, size_t n_m,
+    const double *maturity, size_t n_tau,
+    const double *volatility, size_t n_sigma,
+    const double *rate, size_t n_r,
+    const double *dividend, size_t n_q,
+    OptionType type, ExerciseType exercise,
+    CoordinateSystem coord_system,
+    MemoryLayout memory_layout);
+
+/**
  * Destroy option price table and free all resources
  */
 void price_table_destroy(OptionPriceTable *table);
