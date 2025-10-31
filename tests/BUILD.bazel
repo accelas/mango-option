@@ -49,6 +49,16 @@ cc_test(
 )
 
 cc_test(
+    name = "lets_be_rational_test",
+    srcs = ["lets_be_rational_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:lets_be_rational",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "implied_volatility_test",
     srcs = ["implied_volatility_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
