@@ -151,6 +151,20 @@ typedef enum {
     SLICE_DIM_DIVIDEND = 4,
 } SliceDimension;
 
+// ---------- Internal Functions (exposed for interpolation) ----------
+
+/**
+ * Transform user coordinates to grid coordinates
+ *
+ * Internal function exposed for use by interpolation strategies.
+ * User API always accepts raw coordinates; this transforms them
+ * to grid space based on the table's coordinate system.
+ */
+void transform_query_to_grid(
+    CoordinateSystem coord_system,
+    double m_raw, double tau_raw, double sigma_raw, double r_raw,
+    double *m_grid, double *tau_grid, double *sigma_grid, double *r_grid);
+
 // ---------- Creation and Destruction ----------
 
 /**

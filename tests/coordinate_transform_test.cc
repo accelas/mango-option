@@ -52,3 +52,39 @@ TEST(TransformTest, ZeroMoneynessHandling) {
 
     EXPECT_TRUE(std::isinf(m_grid));  // log(0) = -inf
 }
+
+TEST(IntegrationTest, InterpolationUsesTransform) {
+    // Create table with COORD_LOG_SQRT
+    double m_grid[] = {log(0.9), log(1.0), log(1.1)};  // Pre-transformed
+    double tau_grid[] = {sqrt(0.25), sqrt(0.5)};       // Pre-transformed
+    double sigma[] = {0.2, 0.3};
+    double r[] = {0.02, 0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m_grid, 3, tau_grid, 2, sigma, 2, r, 2, nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_LOG_SQRT, LAYOUT_M_OUTER);
+
+    // Populate with test values
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 2; j++) {
+            for (size_t k = 0; k < 2; k++) {
+                for (size_t l = 0; l < 2; l++) {
+                    price_table_set(table, i, j, k, l, 0,
+                        10.0 * i + j + 0.1 * k + 0.01 * l);
+                }
+            }
+        }
+    }
+
+    // Query with RAW coordinates (user API)
+    double price = price_table_interpolate_4d(table,
+        1.05,   // Raw moneyness (not log!)
+        0.4,    // Raw maturity (not sqrt!)
+        0.25, 0.03);
+
+    EXPECT_FALSE(std::isnan(price));
+    EXPECT_GT(price, 0.0);
+
+    price_table_destroy(table);
+}
