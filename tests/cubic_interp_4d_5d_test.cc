@@ -18,7 +18,6 @@
 
 extern "C" {
 #include "../src/interp_cubic.h"
-#include "../src/interp_multilinear.h"
 #include "../src/price_table.h"
 }
 
@@ -517,113 +516,6 @@ TEST_F(CubicErrorHandlingTest, NullPointerHandling) {
 
     result = price_table_interpolate_5d(nullptr, 1.0, 0.5, 0.25, 0.05, 0.02);
     EXPECT_TRUE(std::isnan(result));
-}
-
-// ============================================================================
-// Comparison Tests: Cubic vs Multilinear
-// ============================================================================
-
-class CubicVsMultilinearTest : public ::testing::Test {
-protected:
-    OptionPriceTable *cubic_table_ = nullptr;
-    OptionPriceTable *multilinear_table_ = nullptr;
-    std::vector<double> moneyness_;
-    std::vector<double> maturity_;
-    std::vector<double> volatility_;
-    std::vector<double> rate_;
-
-    const size_t n_m_ = 8;
-    const size_t n_tau_ = 6;
-    const size_t n_sigma_ = 5;
-    const size_t n_r_ = 4;
-
-    void SetUp() override {
-        moneyness_ = linspace(0.8, 1.2, n_m_);
-        maturity_ = linspace(0.1, 2.0, n_tau_);
-        volatility_ = linspace(0.1, 0.5, n_sigma_);
-        rate_ = linspace(0.0, 0.1, n_r_);
-
-        cubic_table_ = price_table_create_with_strategy(
-            moneyness_.data(), n_m_,
-            maturity_.data(), n_tau_,
-            volatility_.data(), n_sigma_,
-            rate_.data(), n_r_,
-            nullptr, 0,
-            OPTION_PUT, AMERICAN,
-            &INTERP_CUBIC);
-
-        multilinear_table_ = price_table_create_with_strategy(
-            moneyness_.data(), n_m_,
-            maturity_.data(), n_tau_,
-            volatility_.data(), n_sigma_,
-            rate_.data(), n_r_,
-            nullptr, 0,
-            OPTION_PUT, AMERICAN,
-            &INTERP_MULTILINEAR);
-
-        ASSERT_NE(cubic_table_, nullptr);
-        ASSERT_NE(multilinear_table_, nullptr);
-
-        // Populate both with same data
-        for (size_t i_m = 0; i_m < n_m_; i_m++) {
-            for (size_t i_tau = 0; i_tau < n_tau_; i_tau++) {
-                for (size_t i_sigma = 0; i_sigma < n_sigma_; i_sigma++) {
-                    for (size_t i_r = 0; i_r < n_r_; i_r++) {
-                        double value = quadratic_4d(moneyness_[i_m], maturity_[i_tau],
-                                                    volatility_[i_sigma], rate_[i_r]);
-                        price_table_set(cubic_table_, i_m, i_tau, i_sigma, i_r, 0, value);
-                        price_table_set(multilinear_table_, i_m, i_tau, i_sigma, i_r, 0, value);
-                    }
-                }
-            }
-        }
-    }
-
-    void TearDown() override {
-        if (cubic_table_) price_table_destroy(cubic_table_);
-        if (multilinear_table_) price_table_destroy(multilinear_table_);
-    }
-};
-
-TEST_F(CubicVsMultilinearTest, SmoothFunctionAccuracy) {
-    // For smooth functions, cubic should be more accurate than multilinear
-    std::vector<double> test_m = {0.85, 0.95, 1.05, 1.15};
-    std::vector<double> test_tau = {0.3, 0.7, 1.2, 1.8};
-    std::vector<double> test_sigma = {0.15, 0.25, 0.35, 0.45};
-    std::vector<double> test_r = {0.02, 0.05, 0.08};
-
-    double total_error_cubic = 0.0;
-    double total_error_multilinear = 0.0;
-    int count = 0;
-
-    for (double m : test_m) {
-        for (double tau : test_tau) {
-            for (double sigma : test_sigma) {
-                for (double r : test_r) {
-                    double expected = quadratic_4d(m, tau, sigma, r);
-                    double result_cubic = price_table_interpolate_4d(cubic_table_, m, tau, sigma, r);
-                    double result_ml = price_table_interpolate_4d(multilinear_table_, m, tau, sigma, r);
-
-                    double error_cubic = std::abs(result_cubic - expected);
-                    double error_ml = std::abs(result_ml - expected);
-
-                    total_error_cubic += error_cubic;
-                    total_error_multilinear += error_ml;
-                    count++;
-                }
-            }
-        }
-    }
-
-    double avg_error_cubic = total_error_cubic / count;
-    double avg_error_multilinear = total_error_multilinear / count;
-
-    std::cout << "Average error - Cubic: " << avg_error_cubic
-              << ", Multilinear: " << avg_error_multilinear << std::endl;
-
-    // Cubic should be significantly more accurate for smooth functions
-    EXPECT_LT(avg_error_cubic, avg_error_multilinear * 0.8)
-        << "Cubic not better than multilinear for smooth function";
 }
 
 // ============================================================================

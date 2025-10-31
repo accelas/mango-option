@@ -332,6 +332,16 @@ int price_table_set(OptionPriceTable *table,
                     size_t i_m, size_t i_tau, size_t i_sigma,
                     size_t i_r, size_t i_q, double price);
 
+/**
+ * Build interpolation structures (e.g., cubic spline coefficients)
+ *
+ * Call this after manually populating prices with price_table_set()
+ * to prepare the table for interpolation queries.
+ *
+ * @return 0 on success, -1 on error
+ */
+int price_table_build_interpolation(OptionPriceTable *table);
+
 // ---------- Interpolation ----------
 
 /**

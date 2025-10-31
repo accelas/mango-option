@@ -80,13 +80,14 @@ TEST_F(PriceTablePrecomputeTest, SmallGrid4D) {
 
 TEST_F(PriceTablePrecomputeTest, MonotonicityInMoneyness) {
     // Put prices should generally increase as moneyness decreases (more ITM)
+    // Cubic interpolation requires ≥2 points in each dimension
     double moneyness[] = {0.90, 0.95, 1.00, 1.05, 1.10};
-    double maturity[] = {0.5};
-    double volatility[] = {0.25};
-    double rate[] = {0.05};
+    double maturity[] = {0.25, 0.5};
+    double volatility[] = {0.20, 0.25};
+    double rate[] = {0.04, 0.05};
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 5, maturity, 1, volatility, 1, rate, 1, nullptr, 0,
+        moneyness, 5, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -110,13 +111,14 @@ TEST_F(PriceTablePrecomputeTest, MonotonicityInMoneyness) {
 TEST_F(PriceTablePrecomputeTest, MonotonicityInMaturity) {
     // American option prices should increase with maturity (more time value)
     // Use OTM option to avoid early exercise boundary issues
-    double moneyness[] = {1.1};  // OTM put
+    // Cubic interpolation requires ≥2 points in each dimension
+    double moneyness[] = {1.05, 1.1};  // OTM put
     double maturity[] = {0.1, 0.25, 0.5, 1.0};
-    double volatility[] = {0.25};
-    double rate[] = {0.05};
+    double volatility[] = {0.20, 0.25};
+    double rate[] = {0.04, 0.05};
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 1, maturity, 4, volatility, 1, rate, 1, nullptr, 0,
+        moneyness, 2, maturity, 4, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -139,13 +141,14 @@ TEST_F(PriceTablePrecomputeTest, MonotonicityInMaturity) {
 
 TEST_F(PriceTablePrecomputeTest, MonotonicityInVolatility) {
     // Option prices should increase with volatility
-    double moneyness[] = {1.0};
-    double maturity[] = {0.5};
+    // Cubic interpolation requires ≥2 points in each dimension
+    double moneyness[] = {0.95, 1.0};
+    double maturity[] = {0.25, 0.5};
     double volatility[] = {0.15, 0.20, 0.25, 0.30, 0.35};
-    double rate[] = {0.05};
+    double rate[] = {0.04, 0.05};
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 1, maturity, 1, volatility, 5, rate, 1, nullptr, 0,
+        moneyness, 2, maturity, 2, volatility, 5, rate, 2, nullptr, 0,
         OPTION_CALL, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -236,13 +239,14 @@ TEST_F(PriceTablePrecomputeTest, GetSetOperations) {
 
 TEST_F(PriceTablePrecomputeTest, IntrinsicValueBound) {
     // For a put at maturity, price should be at least intrinsic value
+    // Cubic interpolation requires ≥2 points in each dimension
     double moneyness[] = {0.8, 0.9, 1.0, 1.1, 1.2};
-    double maturity[] = {0.05};  // Short maturity (adaptive: 50 steps with dt=0.001)
-    double volatility[] = {0.25};
-    double rate[] = {0.05};
+    double maturity[] = {0.05, 0.1};  // Short maturity (adaptive: 50 steps with dt=0.001)
+    double volatility[] = {0.20, 0.25};
+    double rate[] = {0.04, 0.05};
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 5, maturity, 1, volatility, 1, rate, 1, nullptr, 0,
+        moneyness, 5, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -301,13 +305,14 @@ TEST_F(PriceTablePrecomputeTest, CallPutTypeCorrectness) {
 
 TEST_F(PriceTablePrecomputeTest, InterpolationSmoothness) {
     // Create a small table and verify interpolation works
+    // Cubic interpolation requires ≥2 points in each dimension
     double moneyness[] = {0.9, 1.0, 1.1};
     double maturity[] = {0.25, 0.5};
     double volatility[] = {0.2, 0.3};
-    double rate[] = {0.05};
+    double rate[] = {0.04, 0.06};  // Need at least 2 points for cubic
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 3, maturity, 2, volatility, 2, rate, 1, nullptr, 0,
+        moneyness, 3, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table, nullptr);
