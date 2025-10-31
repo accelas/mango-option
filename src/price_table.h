@@ -1,5 +1,5 @@
-#ifndef IVCALC_PRICE_TABLE_H
-#define IVCALC_PRICE_TABLE_H
+#ifndef MANGO_PRICE_TABLE_H
+#define MANGO_PRICE_TABLE_H
 
 #include <stddef.h>
 #include <time.h>
@@ -279,7 +279,7 @@ void price_table_destroy(OptionPriceTable *table);
  * Populates the price table by computing option prices at each grid point
  * using the FDM solver via american_option_price_batch(). Uses batch
  * processing with configurable batch size (environment variable
- * IVCALC_PRECOMPUTE_BATCH_SIZE, default 100).
+ * MANGO_PRECOMPUTE_BATCH_SIZE, default 100).
  *
  * Performance:
  * - 300K grid points: ~15-20 minutes on 16-core machine
@@ -297,7 +297,7 @@ void price_table_destroy(OptionPriceTable *table);
  * @return 0 on success, -1 on error (NULL inputs, allocation failure, batch failure)
  *
  * Environment variables:
- * - IVCALC_PRECOMPUTE_BATCH_SIZE: Batch size (1-100000, default 100)
+ * - MANGO_PRECOMPUTE_BATCH_SIZE: Batch size (1-100000, default 100)
  *
  * Example:
  * @code
@@ -472,4 +472,4 @@ OptionPriceTable* price_table_load(const char *filename);
 }
 #endif
 
-#endif // IVCALC_PRICE_TABLE_H
+#endif // MANGO_PRICE_TABLE_H

@@ -1,5 +1,5 @@
-#ifndef IVCALC_INTERP_CUBIC_H
-#define IVCALC_INTERP_CUBIC_H
+#ifndef MANGO_INTERP_CUBIC_H
+#define MANGO_INTERP_CUBIC_H
 
 #include "interp_strategy.h"
 #include <stddef.h>
@@ -249,4 +249,4 @@ double cubic_interpolate_5d_workspace(const OptionPriceTable *table,
                                        double dividend,
                                        CubicInterpWorkspace workspace);
 
-#endif // IVCALC_INTERP_CUBIC_H
+#endif // MANGO_INTERP_CUBIC_H

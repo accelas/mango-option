@@ -99,7 +99,7 @@ if [[ $SKIP_BPFTRACE -eq 0 ]]; then
         SKIP_BPFTRACE=1
     else
         # Check expected probes exist
-        PROBE_COUNT=$(bpftrace -l "usdt:$HEAT_EQ_BIN:ivcalc:*" 2>/dev/null | wc -l)
+        PROBE_COUNT=$(bpftrace -l "usdt:$HEAT_EQ_BIN:mango:*" 2>/dev/null | wc -l)
 
         if [[ $PROBE_COUNT -gt 0 ]]; then
             log_success "bpftrace can list probes (found $PROBE_COUNT probes)"
@@ -117,7 +117,7 @@ if [[ $SKIP_BPFTRACE -eq 0 ]]; then
         )
 
         for probe in "${EXPECTED_PROBES[@]}"; do
-            if bpftrace -l "usdt:$HEAT_EQ_BIN:ivcalc:$probe" 2>/dev/null | grep -q "$probe"; then
+            if bpftrace -l "usdt:$HEAT_EQ_BIN:mango:$probe" 2>/dev/null | grep -q "$probe"; then
                 log_success "Found probe: $probe"
             else
                 log_error "Missing probe: $probe"
@@ -137,19 +137,19 @@ if [[ $SKIP_BPFTRACE -eq 0 ]]; then
     cat > "$TEST_SCRIPT" << 'EOF'
 BEGIN { @algo_start = 0; @algo_complete = 0; @convergence = 0; }
 
-usdt::ivcalc:algo_start /@algo_start < 5/ {
+usdt::mango:algo_start /@algo_start < 5/ {
     @algo_start++;
 }
 
-usdt::ivcalc:algo_complete /@algo_complete < 5/ {
+usdt::mango:algo_complete /@algo_complete < 5/ {
     @algo_complete++;
 }
 
-usdt::ivcalc:convergence_iter /@convergence < 10/ {
+usdt::mango:convergence_iter /@convergence < 10/ {
     @convergence++;
 }
 
-usdt::ivcalc:convergence_success {
+usdt::mango:convergence_success {
     @success = 1;
 }
 
@@ -191,21 +191,21 @@ fi
 # Test 4: Validate helper tool works
 log_info "Test 4: Validating helper tool..."
 
-if [[ ! -x "$PROJECT_ROOT/scripts/ivcalc-trace" ]]; then
-    log_error "Helper tool not executable: $PROJECT_ROOT/scripts/ivcalc-trace"
+if [[ ! -x "$PROJECT_ROOT/scripts/mango-trace" ]]; then
+    log_error "Helper tool not executable: $PROJECT_ROOT/scripts/mango-trace"
 else
     log_success "Helper tool is executable"
 
     if [[ $SKIP_BPFTRACE -eq 0 ]]; then
         # Test check command
-        if "$PROJECT_ROOT/scripts/ivcalc-trace" check "$HEAT_EQ_BIN" 2>&1 | grep -q "USDT support: OK"; then
+        if "$PROJECT_ROOT/scripts/mango-trace" check "$HEAT_EQ_BIN" 2>&1 | grep -q "USDT support: OK"; then
             log_success "Helper tool 'check' command works"
         else
             log_error "Helper tool 'check' command failed"
         fi
 
         # Test list command
-        if "$PROJECT_ROOT/scripts/ivcalc-trace" list "$HEAT_EQ_BIN" 2>&1 | grep -q "ivcalc"; then
+        if "$PROJECT_ROOT/scripts/mango-trace" list "$HEAT_EQ_BIN" 2>&1 | grep -q "mango"; then
             log_success "Helper tool 'list' command works"
         else
             log_error "Helper tool 'list' command failed"

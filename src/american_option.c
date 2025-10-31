@@ -204,7 +204,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     AmericanOptionResult result = {nullptr, -1, nullptr};
 
     // Trace option pricing start
-    IVCALC_TRACE_OPTION_START(option_data->option_type, option_data->strike,
+    MANGO_TRACE_OPTION_START(option_data->option_type, option_data->strike,
                               option_data->volatility, option_data->time_to_maturity);
 
     // Create spatial grid in log-price coordinates: x = ln(S/K)
@@ -314,7 +314,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     }
 
     // Trace option pricing completion
-    IVCALC_TRACE_OPTION_COMPLETE(status, grid_params->n_steps);
+    MANGO_TRACE_OPTION_COMPLETE(status, grid_params->n_steps);
 
     return result;
 }

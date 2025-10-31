@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# ivcalc-trace - Helper tool for tracing ivcalc library with bpftrace
+# mango-trace - Helper tool for tracing mango library with bpftrace
 #
 # Usage:
-#   ./ivcalc-trace list <binary>             - List available USDT probes
-#   ./ivcalc-trace check <binary>            - Validate USDT support
-#   ./ivcalc-trace monitor <binary> [args]   - Quick monitor with preset
-#   ./ivcalc-trace run <script> <binary>     - Run specific bpftrace script
+#   ./mango-trace list <binary>             - List available USDT probes
+#   ./mango-trace check <binary>            - Validate USDT support
+#   ./mango-trace monitor <binary> [args]   - Quick monitor with preset
+#   ./mango-trace run <script> <binary>     - Run specific bpftrace script
 #
 
 set -e
@@ -23,13 +23,13 @@ NC='\033[0m' # No Color
 
 usage() {
     cat << EOF
-ivcalc-trace - Helper tool for tracing ivcalc library
+mango-trace - Helper tool for tracing mango library
 
 Usage:
-    ivcalc-trace list <binary>                    List available USDT probes
-    ivcalc-trace check <binary>                   Validate USDT support
-    ivcalc-trace monitor <binary> [--preset=<p>]  Monitor with preset
-    ivcalc-trace run <script> <binary> [args]     Run specific script
+    mango-trace list <binary>                    List available USDT probes
+    mango-trace check <binary>                   Validate USDT support
+    mango-trace monitor <binary> [--preset=<p>]  Monitor with preset
+    mango-trace run <script> <binary> [args]     Run specific script
 
 Commands:
     list          List all USDT probes in binary
@@ -47,22 +47,22 @@ Monitor Presets:
 
 Examples:
     # Check USDT support
-    ivcalc-trace check ./bazel-bin/examples/example_heat_equation
+    mango-trace check ./bazel-bin/examples/example_heat_equation
 
     # List available probes
-    ivcalc-trace list ./bazel-bin/examples/example_heat_equation
+    mango-trace list ./bazel-bin/examples/example_heat_equation
 
     # Quick monitoring
-    ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation
+    mango-trace monitor ./bazel-bin/examples/example_heat_equation
 
     # Watch convergence
-    ivcalc-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+    mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
 
     # Run specific script
-    ivcalc-trace run convergence_watch.bt ./bazel-bin/examples/example_heat_equation
+    mango-trace run convergence_watch.bt ./bazel-bin/examples/example_heat_equation
 
     # Monitor with binary arguments
-    ivcalc-trace monitor ./my_program --preset=debug -- --my-arg value
+    mango-trace monitor ./my_program --preset=debug -- --my-arg value
 
 Requirements:
     - bpftrace (v0.12+)
@@ -112,7 +112,7 @@ list_probes() {
     echo -e "${BLUE}USDT probes in $binary:${NC}"
     echo
 
-    if ! bpftrace -l "usdt:$binary:ivcalc:*" 2>/dev/null; then
+    if ! bpftrace -l "usdt:$binary:mango:*" 2>/dev/null; then
         echo -e "${RED}No USDT probes found!${NC}"
         echo "This binary may not have been built with USDT support."
         echo "Verify with: readelf -n $binary | grep NT_STAPSDT"
@@ -136,11 +136,11 @@ check_usdt() {
         echo -e "${GREEN}✓ USDT notes found in binary${NC}"
 
         # Count probes
-        local probe_count=$(bpftrace -l "usdt:$binary:ivcalc:*" 2>/dev/null | wc -l)
-        echo -e "${GREEN}✓ Found $probe_count ivcalc probes${NC}"
+        local probe_count=$(bpftrace -l "usdt:$binary:mango:*" 2>/dev/null | wc -l)
+        echo -e "${GREEN}✓ Found $probe_count mango probes${NC}"
 
         # Check bpftrace can see them
-        if bpftrace -l "usdt:$binary:ivcalc:*" &>/dev/null; then
+        if bpftrace -l "usdt:$binary:mango:*" &>/dev/null; then
             echo -e "${GREEN}✓ bpftrace can attach to probes${NC}"
         else
             echo -e "${YELLOW}⚠ bpftrace cannot list probes (may need newer version)${NC}"

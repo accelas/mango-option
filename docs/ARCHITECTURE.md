@@ -1665,7 +1665,7 @@ bazel build //benchmarks:quantlib_benchmark
 | **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
 | **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()` (malloc), `pde_spline_init()` (workspace), `pde_spline_eval()` |
 | **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
-| **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `IVCALC_TRACE_*` macros |
+| **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `MANGO_TRACE_*` macros |
 
 ---
 
