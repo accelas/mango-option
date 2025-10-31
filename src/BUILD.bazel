@@ -75,6 +75,19 @@ cc_library(
 )
 
 cc_library(
+    name = "lets_be_rational",
+    srcs = ["lets_be_rational.c"],
+    hdrs = ["lets_be_rational.h"],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "implied_volatility",
     srcs = ["implied_volatility.c"],
     hdrs = [
