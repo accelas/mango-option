@@ -1,0 +1,7 @@
+# Bazel configuration file
+# Note: Use .bazelignore to exclude directories from analysis
+
+# Common flags
+build --color=yes
+test --color=yes
+test --test_output=errors
