@@ -1174,10 +1174,12 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         return -1;
     }
 
-    // Write vega data
-    if (fwrite(table->vegas, sizeof(double), n_points, fp) != n_points) {
-        fclose(fp);
-        return -1;
+    // Write vega data (only if allocated)
+    if (table->vegas) {
+        if (fwrite(table->vegas, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
     }
 
     fclose(fp);
@@ -1295,17 +1297,22 @@ OptionPriceTable* price_table_load(const char *filename) {
     fseek(fp, current_pos, SEEK_SET);
 
     if (end_pos - current_pos >= (long)(n_points * sizeof(double))) {
-        // Vega data exists in file
+        // Vega data exists in file - allocate and read
+        table->vegas = malloc(n_points * sizeof(double));
+        if (!table->vegas) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
         if (fread(table->vegas, sizeof(double), n_points, fp) != n_points) {
             price_table_destroy(table);
             fclose(fp);
             return NULL;
         }
     } else {
-        // Old format without vega data - initialize to NaN
-        for (size_t i = 0; i < n_points; i++) {
-            table->vegas[i] = NAN;
-        }
+        // Old format without vega data - vegas stays NULL
+        // It will be allocated if/when precompute is called
+        table->vegas = NULL;
     }
 
     // Set metadata
