@@ -12,3 +12,7 @@ bazel-*
 .DS_Store
 Thumbs.db
 .worktrees/
+
+# Test artifacts
+*_temp.bin
+test_*.bin
