@@ -58,3 +58,16 @@ cc_binary(
         "//src:american_option",
     ],
 )
+
+cc_binary(
+    name = "test_iv_accuracy",
+    srcs = ["test_iv_accuracy.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//src:implied_volatility",
+        "//src:american_option",
+        "//src:price_table",
+        "//src:grid_presets",
+        "//src:grid_transform",
+    ],
+)
