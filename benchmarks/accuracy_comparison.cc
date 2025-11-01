@@ -132,6 +132,10 @@ static OptionPriceTable* g_table = nullptr;
 void setup_precomputed_table(bool is_put) {
     std::cout << "\n========================================\n";
     std::cout << "Precomputing Price Table for Accuracy Test\n";
+<<<<<<< HEAD
+=======
+    std::cout << "Using COORD_LOG_SQRT + LAYOUT_M_INNER (FIXED)\n";
+>>>>>>> 95dbf6b (Fix COORD_LOG_SQRT reverse transformation in price extraction)
     std::cout << "========================================\n";
 
     // Create fine-grained grid for accuracy
@@ -145,15 +149,17 @@ void setup_precomputed_table(bool is_put) {
     std::vector<double> volatility(n_sigma);
     std::vector<double> rate(n_r);
 
-    // Log-spaced moneyness (wider range for better coverage)
+    // Log-spaced moneyness in LOG space (for COORD_LOG_SQRT)
     for (size_t i = 0; i < n_m; i++) {
         double t = static_cast<double>(i) / (n_m - 1);
-        moneyness[i] = 0.7 * exp(t * log(1.5 / 0.7));
+        double m_raw = 0.7 * exp(t * log(1.5 / 0.7));
+        moneyness[i] = log(m_raw);  // Store log(m) for COORD_LOG_SQRT
     }
 
-    // Linear maturity (1 month to 2.5 years - extended for better coverage)
+    // Maturity in SQRT space (for COORD_LOG_SQRT)
     for (size_t i = 0; i < n_tau; i++) {
-        maturity[i] = 0.027 + i * (2.5 - 0.027) / (n_tau - 1);
+        double tau_raw = 0.027 + i * (2.5 - 0.027) / (n_tau - 1);
+        maturity[i] = sqrt(tau_raw);  // Store sqrt(T) for COORD_LOG_SQRT
     }
 
     // Linear volatility (10% to 60%)
@@ -166,7 +172,8 @@ void setup_precomputed_table(bool is_put) {
         rate[i] = 0.0 + i * (0.10 - 0.0) / (n_r - 1);
     }
 
-    g_table = price_table_create_with_strategy(
+    // Use coordinate transforms for better accuracy (PR #41 + bug fix)
+    g_table = price_table_create_ex(
         moneyness.data(), n_m,
         maturity.data(), n_tau,
         volatility.data(), n_sigma,
@@ -174,7 +181,8 @@ void setup_precomputed_table(bool is_put) {
         nullptr, 0,
         is_put ? OPTION_PUT : OPTION_CALL,
         AMERICAN,
-        &INTERP_CUBIC);
+        COORD_LOG_SQRT,      // Use log(m) and sqrt(T) transforms
+        LAYOUT_M_INNER);     // Cache-friendly layout for cubic interpolation
 
     if (!g_table) {
         std::cerr << "Failed to create price table\n";
@@ -365,6 +373,11 @@ int main() {
     std::cout << "║                                       CONCLUSIONS                                              ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
+<<<<<<< HEAD
+=======
+    std::cout << "Configuration: COORD_LOG_SQRT + LAYOUT_M_INNER (coordinate transform bug FIXED)\n";
+    std::cout << "\n";
+>>>>>>> 95dbf6b (Fix COORD_LOG_SQRT reverse transformation in price extraction)
     std::cout << "1. FDM vs Interpolation:\n";
     std::cout << "   ✓ Interpolation preserves FDM accuracy (avg " << avg_fdm_interp_error << "% error)\n";
     std::cout << "   ✓ Errors are due to interpolation, not precomputation\n";
