@@ -23,7 +23,7 @@ typedef enum {
  * @file price_table.h
  * @brief Multi-dimensional option price table with pluggable interpolation
  *
- * Pre-computes option prices on a multi-dimensional grid for fast lookup:
+ * Pre-computes option prices and vegas on a multi-dimensional grid for fast lookup:
  * - Moneyness (m = S/K)
  * - Maturity (τ = T - t)
  * - Volatility (σ)
@@ -33,6 +33,7 @@ typedef enum {
  * Features:
  * - Sub-microsecond queries (4D: ~500ns, 5D: ~2µs)
  * - 40,000x faster than FDM solver (21.7ms → 500ns)
+ * - Vega interpolation for accurate Greeks
  * - Runtime interpolation strategy selection
  * - Parallel pre-computation via OpenMP
  * - Binary save/load for persistence
@@ -43,14 +44,17 @@ typedef enum {
  *       moneyness, n_m, maturity, n_tau, volatility, n_sigma,
  *       rate, n_r, NULL, 0, OPTION_PUT, AMERICAN);
  *
- *   // Pre-compute all option prices (uses FDM)
+ *   // Pre-compute all option prices and vegas (uses FDM)
  *   price_table_precompute(table, pde_solver_template);
  *
  *   // Save for fast loading later
  *   price_table_save(table, "spx_put_american.bin");
  *
- *   // Fast query (~500ns)
- *   double price = price_table_interpolate(table, 1.05, 0.25, 0.20, 0.05);
+ *   // Fast price query (~500ns)
+ *   double price = price_table_interpolate_4d(table, 1.05, 0.25, 0.20, 0.05);
+ *
+ *   // Fast vega query (~8ns)
+ *   double vega = price_table_interpolate_vega_4d(table, 1.05, 0.25, 0.20, 0.05);
  *
  *   // Cleanup
  *   price_table_destroy(table);
