@@ -737,7 +737,9 @@ int price_table_precompute(OptionPriceTable *table,
     }
 
     // Third pass: Compute gamma via finite differences on moneyness axis
-    // γ = ∂²V/∂m² with proper coordinate transform handling
+    // Note: γ = ∂²V/∂S², not ∂²V/∂m². Since m = S/K_ref, we have:
+    // ∂²V/∂S² = ∂²V/∂m² · (∂m/∂S)² = ∂²V/∂m² / K_ref²
+    const double K_ref_sq = K_ref * K_ref;  // 10000
 
     // Handle lower boundary (i_m == 0) with forward differences
     if (table->n_moneyness > 2) {
@@ -763,13 +765,15 @@ int price_table_precompute(OptionPriceTable *table,
                             if (!isnan(V0) && !isnan(V1) && !isnan(V2)) {
                                 double d2V = (V2 - 2*V1 + V0) / (h * h);
                                 double dV = (V1 - V0) / h;
-                                table->gammas[idx0] = (d2V - dV) / (m0 * m0);
+                                double d2V_dm2 = (d2V - dV) / (m0 * m0);
+                                table->gammas[idx0] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                             }
                         } else {
                             // Raw coordinates - direct computation
                             double h = table->moneyness_grid[1] - table->moneyness_grid[0];
                             if (!isnan(V0) && !isnan(V1) && !isnan(V2)) {
-                                table->gammas[idx0] = (V2 - 2*V1 + V0) / (h * h);
+                                double d2V_dm2 = (V2 - 2*V1 + V0) / (h * h);
+                                table->gammas[idx0] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                             }
                         }
                     }
@@ -804,13 +808,15 @@ int price_table_precompute(OptionPriceTable *table,
                                 if (!isnan(V_minus) && !isnan(V_plus)) {
                                     double d2V_dlogm2 = (V_plus - 2*V + V_minus) / (h * h);
                                     double dV_dlogm = (V_plus - V_minus) / (2 * h);
-                                    table->gammas[idx] = (d2V_dlogm2 - dV_dlogm) / (m * m);
+                                    double d2V_dm2 = (d2V_dlogm2 - dV_dlogm) / (m * m);
+                                    table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                                 }
                             } else {
                                 // Raw coordinates - direct computation
                                 double h = table->moneyness_grid[i_m+1] - table->moneyness_grid[i_m];
                                 if (!isnan(V_minus) && !isnan(V_plus)) {
-                                    table->gammas[idx] = (V_plus - 2*V + V_minus) / (h * h);
+                                    double d2V_dm2 = (V_plus - 2*V + V_minus) / (h * h);
+                                    table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                                 }
                             }
                         }
@@ -845,13 +851,15 @@ int price_table_precompute(OptionPriceTable *table,
                             if (!isnan(V) && !isnan(V1) && !isnan(V2)) {
                                 double d2V = (V - 2*V1 + V2) / (h * h);
                                 double dV = (V - V1) / h;
-                                table->gammas[idx] = (d2V - dV) / (m * m);
+                                double d2V_dm2 = (d2V - dV) / (m * m);
+                                table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                             }
                         } else {
                             // Raw coordinates - direct computation
                             double h = table->moneyness_grid[i_m_last] - table->moneyness_grid[i_m_last-1];
                             if (!isnan(V) && !isnan(V1) && !isnan(V2)) {
-                                table->gammas[idx] = (V - 2*V1 + V2) / (h * h);
+                                double d2V_dm2 = (V - 2*V1 + V2) / (h * h);
+                                table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                             }
                         }
                     }
