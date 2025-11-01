@@ -318,3 +318,137 @@ void validation_result_print(const ValidationResult *result) {
     printf("  Below 10bp:        %.1f%%\n", result->fraction_below_10bp * 100.0);
     printf("  High-error points: %zu\n", result->n_high_error);
 }
+
+// Helper: Find grid interval index for a moneyness value
+static int find_interval(const double *grid, size_t n, double value) {
+    // Binary search for interval
+    if (value < grid[0]) return -1;
+    if (value >= grid[n-1]) return (int)(n - 2);
+
+    size_t left = 0;
+    size_t right = n - 1;
+
+    while (right - left > 1) {
+        size_t mid = (left + right) / 2;
+        if (value < grid[mid]) {
+            right = mid;
+        } else {
+            left = mid;
+        }
+    }
+
+    return (int)left;  // Returns i such that grid[i] <= value < grid[i+1]
+}
+
+double* identify_refinement_points(
+    const ValidationResult *result,
+    const OptionPriceTable *table,
+    size_t *n_new_out)
+{
+    // 1. Validate inputs
+    if (!result || !table || !n_new_out) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_VALIDATION, 0, 0, 0.0);
+        return NULL;
+    }
+
+    if (result->n_high_error == 0 || table->n_moneyness < 2) {
+        *n_new_out = 0;
+        return NULL;  // Nothing to refine
+    }
+
+    const size_t n_m = table->n_moneyness;
+    const size_t n_intervals = n_m - 1;
+
+    // 2. Count high-error samples in each moneyness interval
+    size_t *interval_counts = calloc(n_intervals, sizeof(size_t));
+    double *interval_max_error = calloc(n_intervals, sizeof(double));
+
+    if (!interval_counts || !interval_max_error) {
+        free(interval_counts);
+        free(interval_max_error);
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_VALIDATION, 0, 0);
+        return NULL;
+    }
+
+    // Bin high-error points by interval
+    for (size_t i = 0; i < result->n_high_error; i++) {
+        double m = result->high_error_moneyness[i];
+        double error = result->high_error_values[i];
+
+        int interval = find_interval(table->moneyness_grid, n_m, m);
+
+        if (interval >= 0 && interval < (int)n_intervals) {
+            interval_counts[interval]++;
+
+            if (error > interval_max_error[interval]) {
+                interval_max_error[interval] = error;
+            }
+        }
+    }
+
+    // 3. Select intervals for refinement (>= 3 high-error samples)
+    const size_t min_samples_per_interval = 3;
+    const size_t max_new_points = n_m;  // At most double the grid size
+
+    double *candidate_points = malloc(n_intervals * sizeof(double));
+    size_t n_candidates = 0;
+
+    if (!candidate_points) {
+        free(interval_counts);
+        free(interval_max_error);
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_VALIDATION, 1, 0);
+        return NULL;
+    }
+
+    // Add midpoint of each high-error interval
+    for (size_t i = 0; i < n_intervals; i++) {
+        if (interval_counts[i] >= min_samples_per_interval) {
+            double m_left = table->moneyness_grid[i];
+            double m_right = table->moneyness_grid[i + 1];
+
+            // Add midpoint (geometric mean for moneyness)
+            double midpoint = sqrt(m_left * m_right);
+            candidate_points[n_candidates++] = midpoint;
+
+            if (n_candidates >= max_new_points) {
+                break;  // Limit reached
+            }
+        }
+    }
+
+    free(interval_counts);
+    free(interval_max_error);
+
+    // If no candidates, return NULL
+    if (n_candidates == 0) {
+        free(candidate_points);
+        *n_new_out = 0;
+        return NULL;
+    }
+
+    // 4. Sort candidates and remove duplicates
+    qsort(candidate_points, n_candidates, sizeof(double), compare_doubles);
+
+    // Remove duplicates with tolerance
+    const double tol = 1e-10;
+    size_t write_idx = 0;
+
+    for (size_t read_idx = 0; read_idx < n_candidates; read_idx++) {
+        // Skip if duplicate of previous value
+        if (read_idx > 0 && fabs(candidate_points[read_idx] - candidate_points[write_idx - 1]) < tol) {
+            continue;
+        }
+
+        candidate_points[write_idx++] = candidate_points[read_idx];
+    }
+
+    *n_new_out = write_idx;
+
+    // Trim to actual size
+    if (write_idx < n_candidates) {
+        double *trimmed = realloc(candidate_points, write_idx * sizeof(double));
+        return trimmed ? trimmed : candidate_points;
+    }
+
+    return candidate_points;
+}

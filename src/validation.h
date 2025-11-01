@@ -184,6 +184,55 @@ double compute_implied_volatility(
  */
 void validation_result_print(const ValidationResult *result);
 
+/**
+ * Identify moneyness refinement points based on validation errors (for adaptive refinement)
+ *
+ * Analyzes high-error points from validation and generates new moneyness grid points
+ * to add for refinement. Uses a clustering strategy to add points where errors are
+ * concentrated, inserting midpoints between existing grid points in high-error regions.
+ *
+ * @param result: Validation result containing high-error points
+ * @param table: Price table with current moneyness grid
+ * @param n_new_out: Output parameter for number of new points (set by function)
+ * @return Dynamically allocated array of new moneyness values (caller must free),
+ *         or NULL on error
+ *
+ * Strategy:
+ * 1. Bin high-error points by moneyness (using current grid intervals)
+ * 2. For bins with error concentration, add midpoint refinement
+ * 3. Limit total new points to avoid grid explosion
+ *
+ * Example (adaptive refinement loop):
+ * @code
+ *   ValidationResult result = validate_interpolation_error(table, &grid, 1000, 1.0);
+ *
+ *   if (result.p95_iv_error > 1.0) {
+ *       size_t n_new;
+ *       double *new_points = identify_refinement_points(&result, table, &n_new);
+ *
+ *       if (new_points) {
+ *           price_table_expand_grid(table, new_points, n_new);
+ *           price_table_precompute(table, &grid);  // Recompute NaN entries
+ *           free(new_points);
+ *       }
+ *   }
+ *
+ *   validation_result_free(&result);
+ * @endcode
+ *
+ * Implementation notes:
+ * - Adds at most n_moneyness new points (doubles grid size max)
+ * - Skips intervals with < 3 high-error samples (not statistically significant)
+ * - Returns sorted array of unique new points
+ *
+ * Time complexity: O(n_high_error × log(n_m))
+ * Space complexity: O(n_m)
+ */
+double* identify_refinement_points(
+    const ValidationResult *result,
+    const OptionPriceTable *table,
+    size_t *n_new_out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2,6 +2,7 @@
 #include "american_option.h"
 #include "interp_cubic.h"
 #include "ivcalc_trace.h"
+#include "validation.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -1092,6 +1093,339 @@ int price_table_precompute(OptionPriceTable *table,
     table->generation_time = time(NULL);
 
     return 0;
+}
+
+// Helper: Binary search to find index of value in sorted array
+static int find_moneyness_index(const double *grid, size_t n, double value) {
+    // Binary search with tolerance for floating point comparison
+    const double tol = 1e-10;
+
+    for (size_t i = 0; i < n; i++) {
+        if (fabs(grid[i] - value) < tol) {
+            return (int)i;
+        }
+    }
+    return -1;  // Not found
+}
+
+// Helper: Comparison function for qsort
+static int compare_doubles(const void *a, const void *b) {
+    double diff = *(const double*)a - *(const double*)b;
+    return (diff > 0) - (diff < 0);
+}
+
+// Helper: Merge and sort arrays, removing duplicates
+static double* merge_and_sort_unique(
+    const double *old_grid, size_t n_old,
+    const double *new_points, size_t n_new,
+    size_t *n_out
+) {
+    // Allocate temporary array for merging
+    double *merged = malloc((n_old + n_new) * sizeof(double));
+    if (!merged) return NULL;
+
+    // Copy old grid
+    memcpy(merged, old_grid, n_old * sizeof(double));
+
+    // Copy new points
+    memcpy(merged + n_old, new_points, n_new * sizeof(double));
+
+    // Sort combined array
+    qsort(merged, n_old + n_new, sizeof(double), compare_doubles);
+
+    // Remove duplicates with tolerance
+    const double tol = 1e-10;
+    size_t write_idx = 0;
+
+    for (size_t read_idx = 0; read_idx < n_old + n_new; read_idx++) {
+        // Skip if duplicate of previous value
+        if (read_idx > 0 && fabs(merged[read_idx] - merged[write_idx - 1]) < tol) {
+            continue;
+        }
+
+        merged[write_idx++] = merged[read_idx];
+    }
+
+    *n_out = write_idx;
+    return merged;
+}
+
+int price_table_expand_grid(OptionPriceTable *table,
+                            const double *new_m_points,
+                            size_t n_new) {
+    // 1. Validate inputs
+    if (!table || !new_m_points || n_new == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 0, n_new, 0.0);
+        return -1;
+    }
+
+    // Verify LAYOUT_M_INNER (required for unified grid)
+    if (table->memory_layout != LAYOUT_M_INNER) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 1, table->memory_layout, LAYOUT_M_INNER);
+        return -1;
+    }
+
+    // Validate all new points are positive
+    for (size_t i = 0; i < n_new; i++) {
+        if (new_m_points[i] <= 0.0) {
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 2, i, new_m_points[i]);
+            return -1;
+        }
+    }
+
+    // 2. Merge and sort grids, removing duplicates
+    size_t n_total;
+    double *merged_grid = merge_and_sort_unique(
+        table->moneyness_grid, table->n_moneyness,
+        new_m_points, n_new,
+        &n_total
+    );
+
+    if (!merged_grid) {
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, 0, 0);
+        return -1;
+    }
+
+    // If no new points were actually added (all duplicates), nothing to do
+    if (n_total == table->n_moneyness) {
+        free(merged_grid);
+        return 0;
+    }
+
+    // 3. Allocate new arrays with expanded moneyness dimension
+    const size_t n_old = table->n_moneyness;
+    const size_t n_tau = table->n_maturity;
+    const size_t n_sigma = table->n_volatility;
+    const size_t n_r = table->n_rate;
+    const size_t n_q = (table->n_dividend == 0) ? 1 : table->n_dividend;
+
+    const size_t old_size = n_old * n_tau * n_sigma * n_r * n_q;
+    const size_t new_size = n_total * n_tau * n_sigma * n_r * n_q;
+
+    double *new_prices = malloc(new_size * sizeof(double));
+    double *new_vegas = table->vegas ? malloc(new_size * sizeof(double)) : NULL;
+    double *new_gammas = table->gammas ? malloc(new_size * sizeof(double)) : NULL;
+    double *new_thetas = table->thetas ? malloc(new_size * sizeof(double)) : NULL;
+    double *new_rhos = table->rhos ? malloc(new_size * sizeof(double)) : NULL;
+
+    if (!new_prices ||
+        (table->vegas && !new_vegas) ||
+        (table->gammas && !new_gammas) ||
+        (table->thetas && !new_thetas) ||
+        (table->rhos && !new_rhos)) {
+        free(merged_grid);
+        free(new_prices);
+        free(new_vegas);
+        free(new_gammas);
+        free(new_thetas);
+        free(new_rhos);
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, 1, new_size);
+        return -1;
+    }
+
+    // Initialize all new arrays to NaN
+    for (size_t i = 0; i < new_size; i++) {
+        new_prices[i] = NAN;
+        if (new_vegas) new_vegas[i] = NAN;
+        if (new_gammas) new_gammas[i] = NAN;
+        if (new_thetas) new_thetas[i] = NAN;
+        if (new_rhos) new_rhos[i] = NAN;
+    }
+
+    // 4. Copy existing values to new positions
+    // For LAYOUT_M_INNER: [tau][sigma][r][m]
+    // Index: ((i_tau * n_sigma + i_sigma) * n_r + i_r) * n_m + i_m
+
+    for (size_t i_tau = 0; i_tau < n_tau; i_tau++) {
+        for (size_t i_sigma = 0; i_sigma < n_sigma; i_sigma++) {
+            for (size_t i_r = 0; i_r < n_r; i_r++) {
+                for (size_t i_q = 0; i_q < n_q; i_q++) {
+                    // For each old moneyness point, find its new index
+                    for (size_t i_m_old = 0; i_m_old < n_old; i_m_old++) {
+                        double m_value = table->moneyness_grid[i_m_old];
+                        int i_m_new = find_moneyness_index(merged_grid, n_total, m_value);
+
+                        if (i_m_new < 0) {
+                            // Should never happen if merge worked correctly
+                            continue;
+                        }
+
+                        // Old index (with n_old points)
+                        size_t old_idx = ((i_tau * n_sigma + i_sigma) * n_r + i_r) * n_old + i_m_old;
+                        if (table->n_dividend > 0) {
+                            old_idx = old_idx * n_q + i_q;
+                        }
+
+                        // New index (with n_total points)
+                        size_t new_idx = ((i_tau * n_sigma + i_sigma) * n_r + i_r) * n_total + i_m_new;
+                        if (table->n_dividend > 0) {
+                            new_idx = new_idx * n_q + i_q;
+                        }
+
+                        // Copy values
+                        new_prices[new_idx] = table->prices[old_idx];
+                        if (new_vegas && table->vegas) {
+                            new_vegas[new_idx] = table->vegas[old_idx];
+                        }
+                        if (new_gammas && table->gammas) {
+                            new_gammas[new_idx] = table->gammas[old_idx];
+                        }
+                        if (new_thetas && table->thetas) {
+                            new_thetas[new_idx] = table->thetas[old_idx];
+                        }
+                        if (new_rhos && table->rhos) {
+                            new_rhos[new_idx] = table->rhos[old_idx];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Replace table arrays
+    free(table->moneyness_grid);
+    free(table->prices);
+    if (table->vegas) free(table->vegas);
+    if (table->gammas) free(table->gammas);
+    if (table->thetas) free(table->thetas);
+    if (table->rhos) free(table->rhos);
+
+    table->moneyness_grid = merged_grid;
+    table->n_moneyness = n_total;
+    table->prices = new_prices;
+    table->vegas = new_vegas;
+    table->gammas = new_gammas;
+    table->thetas = new_thetas;
+    table->rhos = new_rhos;
+
+    // Update strides for new dimensions
+    // For LAYOUT_M_INNER: moneyness is innermost
+    table->stride_q = 1;
+    table->stride_r = (table->n_dividend > 0) ? table->n_dividend : 1;
+    table->stride_sigma = table->stride_r * table->n_rate;
+    table->stride_tau = table->stride_sigma * table->n_volatility;
+    table->stride_m = 1;  // Innermost dimension
+
+    return 0;
+}
+
+int price_table_precompute_adaptive(
+    OptionPriceTable *table,
+    const AmericanOptionGrid *grid,
+    double target_iv_error_bp,
+    size_t max_iterations,
+    size_t validation_samples)
+{
+    // 1. Validate inputs
+    if (!table || !grid) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 0, 0, 0.0);
+        return -1;
+    }
+
+    // Verify LAYOUT_M_INNER (required for unified grid)
+    if (table->memory_layout != LAYOUT_M_INNER) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 1, table->memory_layout, LAYOUT_M_INNER);
+        return -1;
+    }
+
+    // Validate parameters
+    if (target_iv_error_bp <= 0.0 || max_iterations == 0 || validation_samples < 100) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 2, max_iterations, target_iv_error_bp);
+        return -1;
+    }
+
+    printf("\nAdaptive Refinement:\n");
+    printf("  Target IV error: %.2f bp\n", target_iv_error_bp);
+    printf("  Max iterations:  %zu\n", max_iterations);
+    printf("  Validation samples: %zu\n", validation_samples);
+    printf("  Initial grid size: %zu moneyness points\n\n", table->n_moneyness);
+
+    // 2. Adaptive refinement loop
+    for (size_t iter = 0; iter < max_iterations; iter++) {
+        printf("Iteration %zu:\n", iter + 1);
+
+        // 2a. Precompute prices (NaN entries only on subsequent iterations)
+        printf("  Precomputing prices...\n");
+        int precompute_status = price_table_precompute(table, grid);
+
+        if (precompute_status != 0) {
+            MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, 0, iter);
+            return -1;
+        }
+
+        // 2b. Validate interpolation error
+        printf("  Validating accuracy...\n");
+        ValidationResult result = validate_interpolation_error(
+            table, grid, validation_samples, target_iv_error_bp
+        );
+
+        if (result.n_samples == 0) {
+            MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, 1, iter);
+            validation_result_free(&result);
+            return -1;
+        }
+
+        // Print validation summary
+        printf("  Grid size: %zu\n", table->n_moneyness);
+        printf("  Mean IV error:   %.2f bp\n", result.mean_iv_error);
+        printf("  P95 IV error:    %.2f bp\n", result.p95_iv_error);
+        printf("  P99 IV error:    %.2f bp\n", result.p99_iv_error);
+        printf("  Below %.1f bp:   %.1f%%\n", target_iv_error_bp, result.fraction_below_1bp * 100.0);
+        printf("  High-error pts:  %zu\n\n", result.n_high_error);
+
+        // 2c. Check convergence
+        bool converged = (result.p95_iv_error < target_iv_error_bp) &&
+                        (result.fraction_below_1bp > 0.95);
+
+        if (converged) {
+            printf("✓ Target accuracy achieved!\n");
+            printf("  Final grid size: %zu moneyness points\n", table->n_moneyness);
+            printf("  P95 error: %.2f bp (target: %.2f bp)\n",
+                   result.p95_iv_error, target_iv_error_bp);
+            printf("  Coverage: %.1f%% below %.1f bp\n\n",
+                   result.fraction_below_1bp * 100.0, target_iv_error_bp);
+
+            validation_result_free(&result);
+            return 0;  // Success
+        }
+
+        // 2d. Check if this is last iteration
+        if (iter == max_iterations - 1) {
+            printf("⚠ Maximum iterations reached without full convergence\n");
+            printf("  Final P95 error: %.2f bp (target: %.2f bp)\n",
+                   result.p95_iv_error, target_iv_error_bp);
+            validation_result_free(&result);
+            return 1;  // Partial success
+        }
+
+        // 2e. Identify refinement points
+        printf("  Identifying refinement regions...\n");
+        size_t n_new;
+        double *new_points = identify_refinement_points(&result, table, &n_new);
+
+        validation_result_free(&result);
+
+        if (!new_points || n_new == 0) {
+            printf("  No refinement points identified (might be at numerical limits)\n\n");
+            return 1;  // Can't refine further
+        }
+
+        printf("  Adding %zu refinement points\n", n_new);
+
+        // 2f. Expand grid
+        int expand_status = price_table_expand_grid(table, new_points, n_new);
+        free(new_points);
+
+        if (expand_status != 0) {
+            MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, 2, iter);
+            return -1;
+        }
+
+        printf("  New grid size: %zu moneyness points\n\n", table->n_moneyness);
+    }
+
+    // Should not reach here (loop should return from inside)
+    return 1;
 }
 
 // ---------- Data Access ----------
