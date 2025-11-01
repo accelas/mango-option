@@ -11,9 +11,9 @@ extern "C" {
 class UnifiedGridTest : public ::testing::Test {
 protected:
     AmericanOptionGrid default_grid = {
-        .n_space = 101,
-        .n_time = 500,
-        .S_max = 200.0,
+        .x_min = -0.7,      // ln(0.5) ≈ -0.7 (50% of strike)
+        .x_max = 0.7,       // ln(2.0) ≈ 0.7 (200% of strike)
+        .n_points = 101,    // Number of spatial grid points
         .dt = 0.001,
         .n_steps = 500
     };
