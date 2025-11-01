@@ -127,6 +127,28 @@ cc_library(
 )
 
 cc_library(
+    name = "validation",
+    srcs = ["validation.c"],
+    hdrs = [
+        "validation.h",
+        "ivcalc_trace.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
+    ],
+    deps = [
+        ":american_option",
+        ":implied_volatility",
+        ":price_table",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "interp_cubic",
     srcs = [
         "interp_cubic.c",

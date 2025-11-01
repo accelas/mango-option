@@ -331,6 +331,58 @@ void price_table_destroy(OptionPriceTable *table);
 int price_table_precompute(OptionPriceTable *table,
                             const AmericanOptionGrid *grid);
 
+/**
+ * Expand price table grid with additional moneyness points (for adaptive refinement)
+ *
+ * Merges new moneyness points into the existing grid, preserving existing prices
+ * and marking new points as NaN (requiring recomputation). This enables adaptive
+ * refinement workflows where high-error regions are identified and refined iteratively.
+ *
+ * @param table: Price table to expand (modified in-place)
+ * @param new_m_points: New moneyness values to add (unsorted, may contain duplicates)
+ * @param n_new: Number of new points
+ * @return 0 on success, -1 on error (allocation failure or invalid input)
+ *
+ * Implementation details:
+ * - Merges and sorts new points with existing grid
+ * - Removes duplicates (points already in grid)
+ * - Allocates new price arrays with expanded moneyness dimension
+ * - Copies existing prices to correct positions
+ * - Initializes new point prices to NaN (requires precomputation)
+ * - Updates vegas, gammas, thetas, rhos if present
+ *
+ * Memory complexity: O(n_total × n_tau × n_sigma × n_r × n_q)
+ * Time complexity: O(n_new × log(n_m) + n_total × n_tau × n_sigma × n_r × n_q)
+ *
+ * Example (adaptive refinement workflow):
+ * @code
+ *   // 1. Create table with coarse grid
+ *   OptionPriceTable *table = price_table_create(m_grid, 10, ...);
+ *   price_table_precompute(table, &grid);
+ *
+ *   // 2. Validate and identify high-error regions
+ *   ValidationResult result = validate_interpolation_error(table, &grid, 1000, 1.0);
+ *
+ *   // 3. Expand grid at high-error points
+ *   double new_points[20];
+ *   identify_refinement_points(&result, table, new_points, &n_new);
+ *   price_table_expand_grid(table, new_points, n_new);
+ *
+ *   // 4. Recompute only new points (NaN entries)
+ *   price_table_precompute(table, &grid);  // Only computes NaN entries
+ *
+ *   validation_result_free(&result);
+ * @endcode
+ *
+ * Requirements:
+ * - table must be non-NULL with LAYOUT_M_INNER layout (unified grid requirement)
+ * - new_m_points must be positive values
+ * - After expansion, caller must recompute prices via price_table_precompute()
+ */
+int price_table_expand_grid(OptionPriceTable *table,
+                            const double *new_m_points,
+                            size_t n_new);
+
 // ---------- Data Access ----------
 
 /**
