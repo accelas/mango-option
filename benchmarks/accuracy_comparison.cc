@@ -132,10 +132,7 @@ static OptionPriceTable* g_table = nullptr;
 void setup_precomputed_table(bool is_put) {
     std::cout << "\n========================================\n";
     std::cout << "Precomputing Price Table for Accuracy Test\n";
-<<<<<<< HEAD
-=======
-    std::cout << "Using COORD_LOG_SQRT + LAYOUT_M_INNER (FIXED)\n";
->>>>>>> 95dbf6b (Fix COORD_LOG_SQRT reverse transformation in price extraction)
+    std::cout << "Using INTERP_CUBIC with raw coordinates\n";
     std::cout << "========================================\n";
 
     // Create fine-grained grid for accuracy
@@ -373,11 +370,8 @@ int main() {
     std::cout << "║                                       CONCLUSIONS                                              ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
-<<<<<<< HEAD
-=======
-    std::cout << "Configuration: COORD_LOG_SQRT + LAYOUT_M_INNER (coordinate transform bug FIXED)\n";
+    std::cout << "Configuration: INTERP_CUBIC with raw coordinates (baseline)\n";
     std::cout << "\n";
->>>>>>> 95dbf6b (Fix COORD_LOG_SQRT reverse transformation in price extraction)
     std::cout << "1. FDM vs Interpolation:\n";
     std::cout << "   ✓ Interpolation preserves FDM accuracy (avg " << avg_fdm_interp_error << "% error)\n";
     std::cout << "   ✓ Errors are due to interpolation, not precomputation\n";
