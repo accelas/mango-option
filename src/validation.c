@@ -202,7 +202,7 @@ ValidationResult validate_interpolation_error(
             s->moneyness * 1.05
         };
 
-        AmericanOptionResult fdm_result = american_option_solve_on_moneyness_grid(
+        AmericanOptionResult fdm_result = american_option_solve(
             &option_data, m_grid, 3, grid_params->dt, grid_params->n_steps);
 
         if (fdm_result.status != 0) {

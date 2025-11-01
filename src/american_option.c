@@ -319,7 +319,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     return result;
 }
 
-// Solve American option on pre-allocated moneyness grid
+// Solve American option on pre-allocated moneyness grid (PRIMARY API)
 // This enables unified grid architecture where FDM solves directly on price table's grid
 // Parameters:
 //   option_data: Option parameters (strike, vol, rate, maturity)
@@ -328,7 +328,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
 //   dt: Time step for TR-BDF2 solver
 //   n_steps: Number of time steps
 // Returns: AmericanOptionResult with solver containing solution on exact m_grid
-AmericanOptionResult american_option_solve_on_moneyness_grid(
+AmericanOptionResult american_option_solve(
     const OptionData *option_data,
     const double *m_grid,
     size_t n_m,
