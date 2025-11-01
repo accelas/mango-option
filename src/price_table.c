@@ -15,9 +15,9 @@
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
-#define PRICE_TABLE_VERSION 3          // Version 3: adds gammas
+#define PRICE_TABLE_VERSION 4          // Version 4: adds thetas and rhos
 
-// File header structure (Version 3)
+// File header structure (Version 4)
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -33,7 +33,9 @@ typedef struct {
     CoordinateSystem coord_system;    // Version 2+: coordinate transformation
     MemoryLayout memory_layout;       // Version 2+: memory layout strategy
     uint8_t has_gammas;               // Version 3+: 1 if gammas present, 0 otherwise
-    uint8_t padding[119];             // Reserved for future use (reduced from 120)
+    uint8_t has_thetas;               // Version 4+: 1 if thetas present, 0 otherwise
+    uint8_t has_rhos;                 // Version 4+: 1 if rhos present, 0 otherwise
+    uint8_t padding[117];             // Reserved for future use (reduced from 119)
 } PriceTableHeader;
 
 // ---------- Helper Functions ----------
@@ -1832,7 +1834,9 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         .generation_time = table->generation_time,
         .coord_system = table->coord_system,
         .memory_layout = table->memory_layout,
-        .has_gammas = (table->gammas != NULL) ? 1 : 0
+        .has_gammas = (table->gammas != NULL) ? 1 : 0,
+        .has_thetas = (table->thetas != NULL) ? 1 : 0,
+        .has_rhos = (table->rhos != NULL) ? 1 : 0
     };
     memcpy(header.underlying, table->underlying, sizeof(header.underlying));
 
@@ -1881,6 +1885,22 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         }
     }
 
+    // Write theta data (only if allocated)
+    if (table->thetas) {
+        if (fwrite(table->thetas, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
+    // Write rho data (only if allocated)
+    if (table->rhos) {
+        if (fwrite(table->rhos, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1904,8 +1924,8 @@ OptionPriceTable* price_table_load(const char *filename) {
         return NULL;
     }
 
-    // Support version 1 (without coord_system/memory_layout), version 2, and version 3 (adds gammas)
-    if (header.version < 1 || header.version > 3) {
+    // Support version 1 (without coord_system/memory_layout), version 2, version 3 (adds gammas), and version 4 (adds theta/rho)
+    if (header.version < 1 || header.version > 4) {
         fclose(fp);
         return NULL;
     }
@@ -2032,10 +2052,43 @@ OptionPriceTable* price_table_load(const char *filename) {
         table->gammas = NULL;
     }
 
-    // Theta and rho not yet in file format - initialize to NULL
-    // Will be computed if/when precompute is called
-    table->thetas = NULL;
-    table->rhos = NULL;
+    // Load theta data (version 4+)
+    if (header.version >= 4 && header.has_thetas) {
+        table->thetas = malloc(n_points * sizeof(double));
+        if (!table->thetas) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->thetas, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Older version or no thetas - initialize to NULL
+        // Will be computed if/when precompute is called
+        table->thetas = NULL;
+    }
+
+    // Load rho data (version 4+)
+    if (header.version >= 4 && header.has_rhos) {
+        table->rhos = malloc(n_points * sizeof(double));
+        if (!table->rhos) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->rhos, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Older version or no rhos - initialize to NULL
+        // Will be computed if/when precompute is called
+        table->rhos = NULL;
+    }
 
     // Set metadata
     memcpy(table->underlying, header.underlying, sizeof(table->underlying));
