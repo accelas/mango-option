@@ -23,6 +23,7 @@ The library combines **performance**, **flexibility**, and **correctness** with 
 - **General PDE Solver** - Callback-based framework for custom parabolic PDEs
 - **Cubic Spline Interpolation** - Off-grid solution evaluation
 - **Price Table Pre-computation** - Fast lookups via interpolation (future: ~7.5µs IV)
+- **Adaptive Grid Presets** - Non-uniform spacing with 4-23× memory reduction
 - **Zero-Overhead Tracing** - USDT probes for production-safe diagnostics
 - **Batch Processing** - OpenMP parallelization for multiple calculations
 - **SIMD Vectorization** - Automatic vectorization via OpenMP pragmas
@@ -161,6 +162,59 @@ const double *solution = pde_solver_get_solution(solver);
 pde_solver_destroy(solver);
 ```
 
+### Use Grid Presets for Memory-Efficient Price Tables
+
+Grid presets provide optimized non-uniform spacing that concentrates grid points where option prices have high curvature (ATM, short maturities):
+
+```c
+#include "src/grid_presets.h"
+#include "src/price_table.h"
+
+// Get adaptive balanced preset (15K points, ~7.5× memory reduction)
+GridConfig config = grid_preset_get(
+    GRID_PRESET_ADAPTIVE_BALANCED,
+    0.7, 1.3,      // moneyness range
+    0.027, 2.0,    // maturity range (1 week to 2 years)
+    0.10, 0.80,    // volatility range
+    0.0, 0.10,     // rate range
+    0.0, 0.0);     // no dividend (4D table)
+
+// Generate all grids
+GeneratedGrids grids = grid_generate_all(&config);
+
+// Create price table with adaptive grids
+OptionPriceTable *table = price_table_create_ex(
+    grids.moneyness, grids.n_moneyness,
+    grids.maturity, grids.n_maturity,
+    grids.volatility, grids.n_volatility,
+    grids.rate, grids.n_rate,
+    nullptr, 0,
+    OPTION_PUT, AMERICAN,
+    COORD_RAW, LAYOUT_M_INNER);
+
+// Precompute all prices
+AmericanOptionGrid fdm_grid = {
+    .x_min = -0.7,
+    .x_max = 0.7,
+    .n_points = 101,
+    .dt = 0.001,
+    .n_steps = 2000
+};
+
+price_table_precompute(table, &fdm_grid);
+
+// Fast queries via interpolation
+double price = price_table_interpolate_4d(table, 1.05, 0.5, 0.20, 0.05);
+
+price_table_destroy(table);
+```
+
+**Available presets:**
+- `GRID_PRESET_ADAPTIVE_FAST`: ~5K points, rapid prototyping
+- `GRID_PRESET_ADAPTIVE_BALANCED`: ~15K points, production-ready
+- `GRID_PRESET_ADAPTIVE_ACCURATE`: ~30K points, high-accuracy
+- `GRID_PRESET_UNIFORM`: ~112K points, baseline (no concentration)
+
 See `examples/` for complete working programs.
 
 ---
@@ -200,6 +254,8 @@ mango-iv/
 │   ├── interp_cubic_workspace.c   # Workspace management for cubic splines
 │   ├── price_table.{h,c}          # 4D/5D option price tables
 │   ├── iv_surface.{h,c}           # 2D implied volatility surfaces
+│   ├── grid_generation.{h,c}      # Non-uniform grid spacing utilities
+│   ├── grid_presets.{h,c}         # Preset grid configurations
 │   ├── brent.h                    # Brent's method (root-finding)
 │   ├── tridiagonal.h              # Tridiagonal solver
 │   └── mango_trace.h             # USDT tracing probes
@@ -226,6 +282,8 @@ mango-iv/
 │   ├── price_table_slow_test.cc   # Long-running table tests
 │   ├── coordinate_transform_test.cc
 │   ├── memory_layout_test.cc
+│   ├── grid_generation_test.cc    # Grid spacing tests
+│   ├── grid_presets_test.cc       # Preset configuration tests
 │   ├── brent_test.cc              # Root-finding tests
 │   ├── tridiagonal_test.cc        # Linear solver tests
 │   └── stability_test.cc          # Numerical stability tests

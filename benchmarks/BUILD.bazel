@@ -200,3 +200,22 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "grid_spacing_accuracy",
+    srcs = ["grid_spacing_accuracy.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "//src:grid_presets",
+    ],
+    tags = ["benchmark", "manual"],
+)
