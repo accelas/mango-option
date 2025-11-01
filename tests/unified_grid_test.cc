@@ -126,11 +126,11 @@ TEST_F(UnifiedGridTest, ZeroCopyProperty) {
     EXPECT_EQ(result.status, 0);
 
     const double *solution = pde_solver_get_solution(result.solver);
+    const double *grid = pde_solver_get_grid(result.solver);
 
-    // Verify we have exactly n_m values (no interpolation overhead)
-    // We can't directly check array size, but we verify the grid structure
-    const SpatialGrid *grid = pde_solver_get_grid(result.solver);
-    EXPECT_EQ(grid->n_points, n_m);
+    // Verify zero-copy property: grid used by solver matches input grid
+    // This confirms no interpolation overhead or grid reallocation
+    EXPECT_EQ(grid, m_grid) << "Solver should use exact grid provided (zero-copy)";
 
     // Verify solution makes sense at boundaries
     // Deep ITM put (m=0.7): should be close to intrinsic value
