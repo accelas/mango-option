@@ -497,6 +497,9 @@ int price_table_precompute_adaptive(
             return -1;
         }
 
+        // Build interpolation structures (required before interpolation queries)
+        price_table_build_interpolation(table);
+
         // 2b. Validate interpolation error
         printf("  Validating accuracy...\n");
         ValidationResult result = validate_interpolation_error(
