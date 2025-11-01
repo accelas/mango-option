@@ -332,6 +332,22 @@ OptionPriceTable* price_table_create_ex(
     if (!moneyness || !maturity || !volatility || !rate) return NULL;
     if (n_m == 0 || n_tau == 0 || n_sigma == 0 || n_r == 0) return NULL;
 
+    // Cubic interpolation (default strategy) requires ≥2 points in all dimensions
+    // Users can override with a different strategy after creation if needed
+    if (n_m < 2 || n_tau < 2 || n_sigma < 2 || n_r < 2) {
+        // Error code 1: Insufficient grid dimensions for cubic interpolation
+        // param1: minimum dimension size found
+        // param2: number of insufficient dimensions
+        size_t min_dim = n_m;
+        if (n_tau < min_dim) min_dim = n_tau;
+        if (n_sigma < min_dim) min_dim = n_sigma;
+        if (n_r < min_dim) min_dim = n_r;
+        size_t n_insufficient = (n_m < 2) + (n_tau < 2) + (n_sigma < 2) + (n_r < 2);
+
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 1, (int)min_dim, (int)n_insufficient);
+        return NULL;
+    }
+
     OptionPriceTable *table = calloc(1, sizeof(OptionPriceTable));
     if (!table) return NULL;
 
