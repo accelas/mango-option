@@ -33,11 +33,11 @@ static std::vector<double> linspace(double min, double max, size_t n) {
     return result;
 }
 
-static double test_function_2d(double x, double y) {
+[[maybe_unused]] static double test_function_2d(double x, double y) {
     return 1.0 + 2.0*x + 3.0*y + 0.5*x*y;
 }
 
-static double test_function_4d(double w, double x, double y, double z) {
+[[maybe_unused]] static double test_function_4d(double w, double x, double y, double z) {
     return 1.0 + w + 2.0*x + 3.0*y + 4.0*z + 0.1*w*x*y*z;
 }
 

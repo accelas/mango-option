@@ -1332,15 +1332,15 @@ TEST_F(AmericanOptionTest, BatchProcessingNullOptions) {
 
 // Negative test: batch with nullptr results array
 TEST_F(AmericanOptionTest, BatchProcessingNullResults) {
-    OptionData options[5];
+    OptionData options[5] = {};  // Zero-initialize to avoid uninitialized warning
     int status = american_option_price_batch(options, &default_grid, 5, nullptr);
     EXPECT_EQ(status, -1);
 }
 
 // Negative test: batch with zero options
 TEST_F(AmericanOptionTest, BatchProcessingZeroOptions) {
-    OptionData options[5];
-    AmericanOptionResult results[5];
+    OptionData options[5] = {};  // Zero-initialize to avoid uninitialized warning
+    AmericanOptionResult results[5] = {};
     int status = american_option_price_batch(options, &default_grid, 0, results);
     EXPECT_EQ(status, -1);
 }

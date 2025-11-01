@@ -88,18 +88,43 @@ void transform_query_to_grid(
  * This is a simplification that works for the current implementation.
  */
 static OptionData grid_point_to_option(const OptionPriceTable *table,
-                                       size_t i_m, size_t i_tau,
+                                       [[maybe_unused]] size_t i_m,
+                                       size_t i_tau,
                                        size_t i_sigma, size_t i_r,
                                        size_t i_q) {
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
 
-    double tau = table->maturity_grid[i_tau];
+    // Reverse transform grid coordinates to raw coordinates for FDM solver
+    // Grid stores transformed values, but FDM needs raw T
+    // Note: moneyness not needed here - only used when extracting prices after solving
+    double tau;
+    switch (table->coord_system) {
+        case COORD_RAW:
+            tau = table->maturity_grid[i_tau];
+            break;
+
+        case COORD_LOG_SQRT:
+            // Grid stores sqrt(T), reverse to get T
+            tau = table->maturity_grid[i_tau] * table->maturity_grid[i_tau];
+            break;
+
+        case COORD_LOG_VARIANCE:
+            // Grid stores w = σ²T, need to extract T
+            // tau = w / σ² = maturity_grid[i_tau] / (sigma² )
+            // For now, fall back to raw (this feature is incomplete)
+            tau = table->maturity_grid[i_tau];
+            break;
+
+        default:
+            // Fallback to raw for unknown coordinate systems
+            tau = table->maturity_grid[i_tau];
+            break;
+    }
+
     double sigma = table->volatility_grid[i_sigma];
     double r = table->rate_grid[i_r];
 
-    // Note: moneyness (m) and dividend (q) are not used in OptionData here
-    // They will be used when extracting the price at the specific spot
-    (void)i_m;  // Suppress unused parameter warning
+    // Note: dividend (q) not used in OptionData here
     (void)i_q;
 
     OptionData option = {
@@ -118,13 +143,13 @@ static OptionData grid_point_to_option(const OptionPriceTable *table,
 
 /**
  * Get batch size for parallel computation from environment variable.
- * Defaults to 100 if MANGO_PRECOMPUTE_BATCH_SIZE is not set or invalid.
+ * Defaults to 100 if IVCALC_PRECOMPUTE_BATCH_SIZE is not set or invalid.
  * Valid range: 1 to 100000.
  */
 static size_t get_batch_size(void) {
     size_t batch_size = 100;  // Default
 
-    char *env_batch = getenv("MANGO_PRECOMPUTE_BATCH_SIZE");
+    char *env_batch = getenv("IVCALC_PRECOMPUTE_BATCH_SIZE");
     if (env_batch) {
         long val = atol(env_batch);
         if (val >= 1 && val <= 100000) {
@@ -373,15 +398,7 @@ OptionPriceTable* price_table_create_ex(
 
     // Set interpolation strategy to cubic (default)
     table->strategy = &INTERP_CUBIC;
-    size_t dimensions = (table->n_dividend > 0) ? 5 : 4;
-    size_t grid_sizes[5] = {
-        table->n_moneyness, table->n_maturity, table->n_volatility,
-        table->n_rate, table->n_dividend
-    };
     table->interp_context = NULL;
-    if (table->strategy->create_context) {
-        table->interp_context = table->strategy->create_context(dimensions, grid_sizes);
-    }
 
     return table;
 }
@@ -455,11 +472,29 @@ int price_table_precompute(OptionPriceTable *table,
 
     // Process each maturity separately with adaptive time steps
     for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
-        double tau = table->maturity_grid[i_tau];
+        double tau_grid = table->maturity_grid[i_tau];
+
+        // Reverse transform maturity to get raw T for time step calculation
+        double tau_raw;
+        switch (table->coord_system) {
+            case COORD_RAW:
+                tau_raw = tau_grid;
+                break;
+            case COORD_LOG_SQRT:
+                tau_raw = tau_grid * tau_grid;  // sqrt(T) → T
+                break;
+            case COORD_LOG_VARIANCE:
+                // Incomplete: need sigma to extract T from w = σ²T
+                tau_raw = tau_grid;  // Fall back
+                break;
+            default:
+                tau_raw = tau_grid;  // Fallback to raw
+                break;
+        }
 
         // Create adaptive grid for this maturity
         AmericanOptionGrid adaptive_grid = *grid;  // Copy base grid
-        adaptive_grid.n_steps = (size_t)(tau / grid->dt);  // Adaptive time steps
+        adaptive_grid.n_steps = (size_t)(tau_raw / grid->dt);  // Adaptive time steps
         if (adaptive_grid.n_steps < 10) adaptive_grid.n_steps = 10;  // Minimum steps
 
         // Calculate points for this maturity slice
@@ -536,8 +571,22 @@ int price_table_precompute(OptionPriceTable *table,
                            + i_q * table->stride_q;
 
                 // Extract moneyness for this grid point
-                double m = table->moneyness_grid[i_m];
-                double spot_price = m * K_ref;
+                // Reverse transform if using coordinate transformations
+                double m_grid = table->moneyness_grid[i_m];
+                double m_raw;
+                switch (table->coord_system) {
+                    case COORD_RAW:
+                        m_raw = m_grid;
+                        break;
+                    case COORD_LOG_SQRT:
+                    case COORD_LOG_VARIANCE:
+                        m_raw = exp(m_grid);  // Grid stores log(m), convert to m
+                        break;
+                    default:
+                        m_raw = m_grid;  // Fallback to raw
+                        break;
+                }
+                double spot_price = m_raw * K_ref;
 
                 // Extract price at the spot price
                 double price = american_option_get_value_at_spot(
@@ -567,15 +616,6 @@ int price_table_precompute(OptionPriceTable *table,
 
     // Mark table with generation timestamp
     table->generation_time = time(NULL);
-
-    // Trigger interpolation strategy precomputation (e.g., cubic spline coefficients)
-    if (table->strategy && table->strategy->precompute && table->interp_context) {
-        int precompute_status = table->strategy->precompute(table, table->interp_context);
-        if (precompute_status != 0) {
-            MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, precompute_status, 0);
-            return -1;
-        }
-    }
 
     return 0;
 }
