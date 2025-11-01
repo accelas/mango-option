@@ -269,21 +269,22 @@ ValidationResult validate_interpolation_error(
     result.fraction_below_5bp = (double)below_5bp / valid_samples;
     result.fraction_below_10bp = (double)below_10bp / valid_samples;
 
-    // Sort errors for percentiles
-    qsort(iv_errors, n_samples, sizeof(double), compare_doubles);
-
-    // Find first non-NAN error (sorted to end)
-    size_t first_valid = 0;
-    while (first_valid < n_samples && isnan(iv_errors[first_valid])) {
-        first_valid++;
+    // Compact array: remove NaN values before sorting
+    // (qsort with NaN has undefined behavior due to comparison violations)
+    size_t write_idx = 0;
+    for (size_t i = 0; i < n_samples; i++) {
+        if (!isnan(iv_errors[i])) {
+            iv_errors[write_idx++] = iv_errors[i];
+        }
     }
 
-    if (first_valid < n_samples) {
-        size_t n_valid = n_samples - first_valid;
-        result.median_iv_error = iv_errors[first_valid + n_valid / 2];
-        result.p95_iv_error = iv_errors[first_valid + (size_t)(n_valid * 0.95)];
-        result.p99_iv_error = iv_errors[first_valid + (size_t)(n_valid * 0.99)];
-        result.max_iv_error = iv_errors[n_samples - 1];
+    // Sort only valid errors for percentiles
+    if (write_idx > 0) {
+        qsort(iv_errors, write_idx, sizeof(double), compare_doubles);
+        result.median_iv_error = iv_errors[write_idx / 2];
+        result.p95_iv_error = iv_errors[(size_t)(write_idx * 0.95)];
+        result.p99_iv_error = iv_errors[(size_t)(write_idx * 0.99)];
+        result.max_iv_error = iv_errors[write_idx - 1];
     }
 
     free(samples);
