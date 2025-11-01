@@ -123,7 +123,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Disabled: requires Phase 2 completion (see issue #55)
+    tags = ["manual"],  # Disabled: mostly slow tests + known failures (issue #61)
 )
 
 cc_test(
@@ -183,7 +183,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Too slow for CI/CD (precomputes 1200 grid points)
+    tags = ["manual"],  # Disabled: precomputes 1200 grid points (~5s)
 )
 
 cc_test(

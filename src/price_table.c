@@ -342,9 +342,9 @@ OptionPriceTable* price_table_create_ex(
         if (n_tau < min_dim) min_dim = n_tau;
         if (n_sigma < min_dim) min_dim = n_sigma;
         if (n_r < min_dim) min_dim = n_r;
-        size_t n_insufficient = (n_m < 2) + (n_tau < 2) + (n_sigma < 2) + (n_r < 2);
 
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 1, (int)min_dim, (int)n_insufficient);
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 1, (int)min_dim,
+                                     (int)((n_m < 2) + (n_tau < 2) + (n_sigma < 2) + (n_r < 2)));
         return NULL;
     }
 
