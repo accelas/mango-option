@@ -64,6 +64,7 @@ jobs:
         run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Run all tests
+        shell: bash
         run: |
           # ============================================================
           # Slow Test Bypass List (easily extensible)
