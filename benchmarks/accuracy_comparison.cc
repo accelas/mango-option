@@ -4,6 +4,8 @@
 #include <cmath>
 #include <string>
 #include <chrono>
+#include <cstring>
+#include <sys/stat.h>
 
 // QuantLib includes
 #include <ql/quantlib.hpp>
@@ -128,8 +130,41 @@ double price_with_quantlib(double spot, double strike, double volatility,
 // Global precomputed table
 static OptionPriceTable* g_table = nullptr;
 
+// Default table filename
+static const char* TABLE_FILENAME = "accuracy_test_table.bin";
+
+// Check if file exists
+bool file_exists(const char* filename) {
+    struct stat buffer;
+    return (stat(filename, &buffer) == 0);
+}
+
+// Load table from file
+OptionPriceTable* load_table_from_file(const char* filename) {
+    std::cout << "\n========================================\n";
+    std::cout << "Loading precomputed table from: " << filename << "\n";
+    std::cout << "========================================\n";
+
+    OptionPriceTable* table = price_table_load(filename);
+
+    if (table) {
+        std::cout << "Table loaded successfully!\n";
+        std::cout << "  Grid: " << table->n_moneyness << "×" << table->n_maturity << "×"
+                  << table->n_volatility << "×" << table->n_rate << " = "
+                  << (table->n_moneyness * table->n_maturity * table->n_volatility * table->n_rate)
+                  << " points\n";
+        std::cout << "  Coordinate system: "
+                  << (table->coord_system == COORD_LOG_SQRT ? "COORD_LOG_SQRT" : "COORD_RAW") << "\n";
+        std::cout << "  Memory layout: "
+                  << (table->memory_layout == LAYOUT_M_INNER ? "LAYOUT_M_INNER" : "LAYOUT_M_OUTER") << "\n";
+        std::cout << "========================================\n\n";
+    }
+
+    return table;
+}
+
 // Setup precomputed table
-void setup_precomputed_table(bool is_put) {
+void setup_precomputed_table(bool is_put, const char* save_filename) {
     std::cout << "\n========================================\n";
     std::cout << "Precomputing Price Table for Accuracy Test\n";
     std::cout << "Using COORD_LOG_SQRT + LAYOUT_M_INNER (PR #41 + #48)\n";
@@ -213,6 +248,18 @@ void setup_precomputed_table(bool is_put) {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     std::cout << "Precomputation complete: " << duration.count() << " ms\n";
     std::cout << "Throughput: " << (total * 1000.0 / duration.count()) << " opts/sec\n";
+
+    // Save table to file
+    if (save_filename) {
+        std::cout << "\nSaving table to: " << save_filename << "\n";
+        int save_status = price_table_save(g_table, save_filename);
+        if (save_status == 0) {
+            std::cout << "Table saved successfully!\n";
+        } else {
+            std::cerr << "Warning: Failed to save table\n";
+        }
+    }
+
     std::cout << "========================================\n\n";
 }
 
@@ -259,11 +306,28 @@ ComparisonResult run_comparison(const TestCase& test) {
     return result;
 }
 
-int main() {
+int main(int argc, char** argv) {
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════════╗\n";
     std::cout << "║  3-Way Accuracy Comparison: FDM vs Interpolation vs QuantLib ║\n";
     std::cout << "╚═══════════════════════════════════════════════════════════════╝\n";
+
+    // Check for --precompute flag
+    bool force_precompute = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--precompute") == 0) {
+            force_precompute = true;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            std::cout << "\nUsage: " << argv[0] << " [OPTIONS]\n";
+            std::cout << "\nOptions:\n";
+            std::cout << "  --precompute    Force precomputation (ignore existing table file)\n";
+            std::cout << "  --help, -h      Show this help message\n";
+            std::cout << "\nDefault behavior:\n";
+            std::cout << "  - Loads from '" << TABLE_FILENAME << "' if it exists\n";
+            std::cout << "  - Otherwise precomputes and saves to file\n\n";
+            return 0;
+        }
+    }
 
     // Define test cases
     std::vector<TestCase> test_cases = {
@@ -291,13 +355,29 @@ int main() {
         {"ATM Put, 2Y, 25% vol",  100.0, 100.0, 0.25, 0.05, 2.00, true},
     };
 
-    // Setup precomputed table (for puts)
-    setup_precomputed_table(true);
+    // Load or precompute table (for puts)
+    if (!force_precompute && file_exists(TABLE_FILENAME)) {
+        // Load from file
+        g_table = load_table_from_file(TABLE_FILENAME);
+        if (!g_table) {
+            std::cerr << "Failed to load table from file, will precompute instead\n";
+            setup_precomputed_table(true, TABLE_FILENAME);
+        }
+    } else {
+        // Precompute and save
+        if (force_precompute && file_exists(TABLE_FILENAME)) {
+            std::cout << "\nNote: Ignoring existing table file (--precompute flag set)\n";
+        }
+        setup_precomputed_table(true, TABLE_FILENAME);
+    }
 
     if (!g_table) {
         std::cerr << "Failed to setup precomputed table, exiting\n";
         return 1;
     }
+
+    // Build interpolation structures (needed after loading)
+    price_table_build_interpolation(g_table);
 
     // Run all comparisons
     std::vector<ComparisonResult> results;
