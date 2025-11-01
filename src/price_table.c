@@ -649,71 +649,92 @@ int price_table_precompute(OptionPriceTable *table,
     }
 
     // Second pass: Compute vega via finite differences
-    // Now that all prices are computed, we can calculate vega using neighboring volatility points
-    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
-        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
-            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+    // Restructured for SIMD vectorization: handle boundary cases separately from interior points
+
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+
+    // Handle lower boundary (i_sigma == 0) with forward differences
+    if (table->n_volatility > 1) {
+        double sigma_0 = table->volatility_grid[0];
+        double sigma_1 = table->volatility_grid[1];
+        double h_forward = sigma_1 - sigma_0;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
                 for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
-                    size_t n_q_loop = table->n_dividend > 0 ? table->n_dividend : 1;
-                    for (size_t i_q = 0; i_q < n_q_loop; i_q++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
                         size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
-                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + 0 * table->stride_sigma + i_r * table->stride_r
                                    + i_q * table->stride_q;
+                        size_t idx_next = idx + table->stride_sigma;
 
-                        double vega = NAN;
+                        double price_current = table->prices[idx];
+                        double price_next = table->prices[idx_next];
 
-                        // Handle boundary cases with one-sided differences
-                        if (i_sigma == 0 && table->n_volatility > 1) {
-                            // Forward difference at lower boundary
-                            double sigma_current = table->volatility_grid[0];
-                            double sigma_next = table->volatility_grid[1];
+                        table->vegas[idx] = (!isnan(price_current) && !isnan(price_next))
+                            ? (price_next - price_current) / h_forward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
 
-                            size_t idx_next = i_m * table->stride_m + i_tau * table->stride_tau
-                                            + 1 * table->stride_sigma + i_r * table->stride_r
-                                            + i_q * table->stride_q;
+    // Handle interior points (0 < i_sigma < n-1) with centered differences (SIMD-friendly)
+    if (table->n_volatility > 2) {
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 1; i_sigma < table->n_volatility - 1; i_sigma++) {
+                    double sigma_minus = table->volatility_grid[i_sigma - 1];
+                    double sigma_plus = table->volatility_grid[i_sigma + 1];
+                    double h_centered = sigma_plus - sigma_minus;
 
-                            double price_current = table->prices[idx];
-                            double price_next = table->prices[idx_next];
-                            if (!isnan(price_current) && !isnan(price_next)) {
-                                vega = (price_next - price_current) / (sigma_next - sigma_current);
-                            }
-                        } else if (i_sigma == table->n_volatility - 1 && table->n_volatility > 1) {
-                            // Backward difference at upper boundary
-                            double sigma_current = table->volatility_grid[i_sigma];
-                            double sigma_prev = table->volatility_grid[i_sigma - 1];
-
-                            size_t idx_prev = i_m * table->stride_m + i_tau * table->stride_tau
-                                            + (i_sigma - 1) * table->stride_sigma + i_r * table->stride_r
-                                            + i_q * table->stride_q;
-
-                            double price_current = table->prices[idx];
-                            double price_prev = table->prices[idx_prev];
-                            if (!isnan(price_current) && !isnan(price_prev)) {
-                                vega = (price_current - price_prev) / (sigma_current - sigma_prev);
-                            }
-                        } else if (i_sigma > 0 && i_sigma < table->n_volatility - 1) {
-                            // Centered difference for interior points
-                            double sigma_current = table->volatility_grid[i_sigma];
-                            double sigma_minus = table->volatility_grid[i_sigma - 1];
-                            double sigma_plus = table->volatility_grid[i_sigma + 1];
-
-                            size_t idx_minus = i_m * table->stride_m + i_tau * table->stride_tau
-                                             + (i_sigma - 1) * table->stride_sigma + i_r * table->stride_r
-                                             + i_q * table->stride_q;
-                            size_t idx_plus = i_m * table->stride_m + i_tau * table->stride_tau
-                                            + (i_sigma + 1) * table->stride_sigma + i_r * table->stride_r
-                                            + i_q * table->stride_q;
+                    for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                        #pragma omp simd
+                        for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_sigma;
+                            size_t idx_plus = idx + table->stride_sigma;
 
                             double price_minus = table->prices[idx_minus];
                             double price_plus = table->prices[idx_plus];
 
-                            // Centered difference
-                            if (!isnan(price_minus) && !isnan(price_plus)) {
-                                vega = (price_plus - price_minus) / (sigma_plus - sigma_minus);
-                            }
+                            table->vegas[idx] = (!isnan(price_minus) && !isnan(price_plus))
+                                ? (price_plus - price_minus) / h_centered
+                                : NAN;
                         }
+                    }
+                }
+            }
+        }
+    }
 
-                        table->vegas[idx] = vega;
+    // Handle upper boundary (i_sigma == n-1) with backward differences
+    if (table->n_volatility > 1) {
+        size_t i_sigma_last = table->n_volatility - 1;
+        double sigma_last = table->volatility_grid[i_sigma_last];
+        double sigma_prev = table->volatility_grid[i_sigma_last - 1];
+        double h_backward = sigma_last - sigma_prev;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma_last * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_prev = idx - table->stride_sigma;
+
+                        double price_current = table->prices[idx];
+                        double price_prev = table->prices[idx_prev];
+
+                        table->vegas[idx] = (!isnan(price_current) && !isnan(price_prev))
+                            ? (price_current - price_prev) / h_backward
+                            : NAN;
                     }
                 }
             }
