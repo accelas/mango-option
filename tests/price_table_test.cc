@@ -595,3 +595,41 @@ TEST(PriceTableTest, LoadOldFormatWithoutVega) {
 
     price_table_destroy(loaded);
 }
+
+TEST(PriceTableTest, GammaGetSet) {
+    double m[] = {0.9, 1.0, 1.1};
+    double tau[] = {0.25, 0.5};
+    double sigma[] = {0.2, 0.3};
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    // Allocate gammas
+    size_t n_total = 3 * 2 * 2 * 1;
+    table->gammas = (double*)malloc(n_total * sizeof(double));
+    ASSERT_NE(table->gammas, nullptr);
+
+    // Initialize to NaN
+    for (size_t i = 0; i < n_total; i++) {
+        table->gammas[i] = NAN;
+    }
+
+    // Test set
+    int status = price_table_set_gamma(table, 1, 0, 1, 0, 0, 42.5);
+    EXPECT_EQ(status, 0);
+
+    // Test get
+    double gamma = price_table_get_gamma(table, 1, 0, 1, 0, 0);
+    EXPECT_DOUBLE_EQ(gamma, 42.5);
+
+    // Test bounds checking - out of bounds should return NaN
+    double gamma_oob = price_table_get_gamma(table, 99, 0, 0, 0, 0);
+    EXPECT_TRUE(std::isnan(gamma_oob));
+
+    price_table_destroy(table);
+}
