@@ -1198,7 +1198,6 @@ int price_table_expand_grid(OptionPriceTable *table,
     const size_t n_r = table->n_rate;
     const size_t n_q = (table->n_dividend == 0) ? 1 : table->n_dividend;
 
-    const size_t old_size = n_old * n_tau * n_sigma * n_r * n_q;
     const size_t new_size = n_total * n_tau * n_sigma * n_r * n_q;
 
     double *new_prices = malloc(new_size * sizeof(double));
