@@ -474,6 +474,18 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
+    // Allocate gamma array if not already allocated
+    if (!table->gammas) {
+        table->gammas = malloc(n_total * sizeof(double));
+        if (!table->gammas) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->gammas[i] = NAN;
+        }
+    }
+
     size_t batch_size = get_batch_size();
 
     // Allocate batch arrays
@@ -717,6 +729,130 @@ int price_table_precompute(OptionPriceTable *table,
                         table->vegas[idx] = (!isnan(price_current) && !isnan(price_prev))
                             ? (price_current - price_prev) / h_backward
                             : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Third pass: Compute gamma via finite differences on moneyness axis
+    // γ = ∂²V/∂m² with proper coordinate transform handling
+
+    // Handle lower boundary (i_m == 0) with forward differences
+    if (table->n_moneyness > 2) {
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx0 = 0 * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx1 = idx0 + table->stride_m;
+                        size_t idx2 = idx0 + 2 * table->stride_m;
+
+                        double V0 = table->prices[idx0];
+                        double V1 = table->prices[idx1];
+                        double V2 = table->prices[idx2];
+
+                        if (table->coord_system == COORD_LOG_SQRT) {
+                            // Transform from log-space to raw space
+                            double m0 = exp(table->moneyness_grid[0]);
+                            double h = table->moneyness_grid[1] - table->moneyness_grid[0];
+
+                            if (!isnan(V0) && !isnan(V1) && !isnan(V2)) {
+                                double d2V = (V2 - 2*V1 + V0) / (h * h);
+                                double dV = (V1 - V0) / h;
+                                table->gammas[idx0] = (d2V - dV) / (m0 * m0);
+                            }
+                        } else {
+                            // Raw coordinates - direct computation
+                            double h = table->moneyness_grid[1] - table->moneyness_grid[0];
+                            if (!isnan(V0) && !isnan(V1) && !isnan(V2)) {
+                                table->gammas[idx0] = (V2 - 2*V1 + V0) / (h * h);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Interior points - centered differences with SIMD vectorization
+    if (table->n_moneyness > 2) {
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        #pragma omp simd
+                        for (size_t i_m = 1; i_m < table->n_moneyness - 1; i_m++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_m;
+                            size_t idx_plus = idx + table->stride_m;
+
+                            double V_minus = table->prices[idx_minus];
+                            double V = table->prices[idx];
+                            double V_plus = table->prices[idx_plus];
+
+                            if (table->coord_system == COORD_LOG_SQRT) {
+                                // Transform from log-space to raw space
+                                double m = exp(table->moneyness_grid[i_m]);
+                                double h = table->moneyness_grid[i_m+1] - table->moneyness_grid[i_m];
+
+                                if (!isnan(V_minus) && !isnan(V_plus)) {
+                                    double d2V_dlogm2 = (V_plus - 2*V + V_minus) / (h * h);
+                                    double dV_dlogm = (V_plus - V_minus) / (2 * h);
+                                    table->gammas[idx] = (d2V_dlogm2 - dV_dlogm) / (m * m);
+                                }
+                            } else {
+                                // Raw coordinates - direct computation
+                                double h = table->moneyness_grid[i_m+1] - table->moneyness_grid[i_m];
+                                if (!isnan(V_minus) && !isnan(V_plus)) {
+                                    table->gammas[idx] = (V_plus - 2*V + V_minus) / (h * h);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Upper boundary (i_m == n_moneyness-1) with backward differences
+    if (table->n_moneyness > 2) {
+        size_t i_m_last = table->n_moneyness - 1;
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m_last * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_minus1 = idx - table->stride_m;
+                        size_t idx_minus2 = idx - 2 * table->stride_m;
+
+                        double V = table->prices[idx];
+                        double V1 = table->prices[idx_minus1];
+                        double V2 = table->prices[idx_minus2];
+
+                        if (table->coord_system == COORD_LOG_SQRT) {
+                            // Transform from log-space to raw space
+                            double m = exp(table->moneyness_grid[i_m_last]);
+                            double h = table->moneyness_grid[i_m_last] - table->moneyness_grid[i_m_last-1];
+
+                            if (!isnan(V) && !isnan(V1) && !isnan(V2)) {
+                                double d2V = (V - 2*V1 + V2) / (h * h);
+                                double dV = (V - V1) / h;
+                                table->gammas[idx] = (d2V - dV) / (m * m);
+                            }
+                        } else {
+                            // Raw coordinates - direct computation
+                            double h = table->moneyness_grid[i_m_last] - table->moneyness_grid[i_m_last-1];
+                            if (!isnan(V) && !isnan(V1) && !isnan(V2)) {
+                                table->gammas[idx] = (V - 2*V1 + V2) / (h * h);
+                            }
+                        }
                     }
                 }
             }

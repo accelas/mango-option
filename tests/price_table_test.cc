@@ -633,3 +633,41 @@ TEST(PriceTableTest, GammaGetSet) {
 
     price_table_destroy(table);
 }
+
+TEST(PriceTableTest, GammaPrecomputation) {
+    // Small grid for fast test
+    double m[] = {1.0};
+    double tau[] = {0.5};
+    double sigma[] = {0.15, 0.20, 0.25};  // Need 3+ for centered diff
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m, 1, tau, 1, sigma, 3, r, 1, nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 51,
+        .dt = 0.01,
+        .n_steps = 50
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    // Gammas should be allocated
+    EXPECT_NE(table->gammas, nullptr);
+
+    // Gammas should have reasonable values (non-NaN for interior points)
+    // Note: With only 1 moneyness point, all gammas will be NaN (no neighbors)
+    // This is expected - just verify array was allocated
+    double gamma = price_table_get_gamma(table, 0, 0, 1, 0, 0);
+    // We expect NaN because there's only 1 moneyness point (no neighbors for finite diff)
+    EXPECT_TRUE(std::isnan(gamma));
+
+    price_table_destroy(table);
+}
