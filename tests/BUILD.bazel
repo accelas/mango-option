@@ -102,6 +102,18 @@ cc_test(
 )
 
 cc_test(
+    name = "unified_grid_test",
+    srcs = ["unified_grid_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:american_option",
+        "//src:price_table",
+        "//src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "interpolation_test",
     srcs = ["interpolation_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
