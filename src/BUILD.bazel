@@ -46,6 +46,23 @@ cc_library(
 )
 
 cc_library(
+    name = "grid_transform",
+    srcs = ["grid_transform.c"],
+    hdrs = ["grid_transform.h"],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    deps = [
+        ":grid_presets",
+        ":price_table",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pde_solver",
     srcs = ["pde_solver.c"],
     hdrs = [
