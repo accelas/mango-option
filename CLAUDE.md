@@ -514,15 +514,19 @@ price_table_destroy(table);
 table = price_table_load("spx_american_put.bin");
 ```
 
-**4. Query prices (sub-microsecond):**
+**4. Query prices and vegas (sub-microsecond):**
 ```c
-// Single query
+// Single price query
 double price = price_table_interpolate_4d(table, 1.05, 0.25, 0.20, 0.05);
+
+// Single vega query (∂V/∂σ)
+double vega = price_table_interpolate_vega_4d(table, 1.05, 0.25, 0.20, 0.05);
 
 // Multiple queries (typical usage)
 for (size_t i = 0; i < n_queries; i++) {
     double p = price_table_interpolate_4d(table, m[i], tau[i], sigma[i], r[i]);
-    // Process price...
+    double v = price_table_interpolate_vega_4d(table, m[i], tau[i], sigma[i], r[i]);
+    // Process price and vega...
 }
 ```
 
@@ -530,6 +534,34 @@ for (size_t i = 0; i < n_queries; i++) {
 ```c
 price_table_destroy(table);
 ```
+
+### Vega Interpolation
+
+The price table automatically computes vega (∂V/∂σ) during precomputation using centered finite differences:
+
+```c
+// Vega is computed automatically during precomputation
+price_table_precompute(table, &grid);  // Computes both prices and vegas
+
+// Query vega at any point (4D table)
+double vega = price_table_interpolate_vega_4d(table,
+    1.05,   // moneyness
+    0.5,    // maturity
+    0.20,   // volatility
+    0.05);  // rate
+
+// For 5D tables with dividend
+double vega_5d = price_table_interpolate_vega_5d(table,
+    1.05, 0.5, 0.20, 0.05, 0.02);  // with dividend
+```
+
+**Key Points:**
+- Vega computed during precomputation (centered finite differences)
+- Same interpolation strategy as prices (cubic or multilinear)
+- ~8ns per query (same speed as price interpolation)
+- More accurate than computing vega at query time
+- Enables Newton-based IV inversion
+- Binary save/load preserves vega data
 
 ### Performance Characteristics
 

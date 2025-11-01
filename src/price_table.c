@@ -231,7 +231,7 @@ OptionPriceTable* price_table_create_with_strategy(
         strategy = &INTERP_CUBIC;
     }
 
-    OptionPriceTable *table = malloc(sizeof(OptionPriceTable));
+    OptionPriceTable *table = calloc(1, sizeof(OptionPriceTable));
     if (!table) return NULL;
 
     // Copy dimensions
@@ -286,6 +286,9 @@ OptionPriceTable* price_table_create_with_strategy(
     for (size_t i = 0; i < n_points; i++) {
         table->prices[i] = NAN;
     }
+
+    // Vega array - not allocated in create, only during precompute
+    table->vegas = NULL;
 
     // Set metadata
     table->type = type;
@@ -387,6 +390,9 @@ OptionPriceTable* price_table_create_ex(
         table->prices[i] = NAN;
     }
 
+    // Vega array - not allocated in create, only during precompute
+    table->vegas = NULL;
+
     // Set metadata
     table->type = type;
     table->exercise = exercise;
@@ -435,6 +441,7 @@ void price_table_destroy(OptionPriceTable *table) {
     free(table->rate_grid);
     free(table->dividend_grid);
     free(table->prices);
+    free(table->vegas);
     free(table);
 }
 
@@ -451,6 +458,18 @@ int price_table_precompute(OptionPriceTable *table,
                      table->n_volatility * table->n_rate;
     if (table->n_dividend > 0) {
         n_total *= table->n_dividend;
+    }
+
+    // Allocate vega array if not already allocated
+    if (!table->vegas) {
+        table->vegas = malloc(n_total * sizeof(double));
+        if (!table->vegas) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->vegas[i] = NAN;
+        }
     }
 
     size_t batch_size = get_batch_size();
@@ -609,6 +628,99 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
+    // Second pass: Compute vega via finite differences
+    // Restructured for SIMD vectorization: handle boundary cases separately from interior points
+
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+
+    // Handle lower boundary (i_sigma == 0) with forward differences
+    if (table->n_volatility > 1) {
+        double sigma_0 = table->volatility_grid[0];
+        double sigma_1 = table->volatility_grid[1];
+        double h_forward = sigma_1 - sigma_0;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + 0 * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_next = idx + table->stride_sigma;
+
+                        double price_current = table->prices[idx];
+                        double price_next = table->prices[idx_next];
+
+                        table->vegas[idx] = (!isnan(price_current) && !isnan(price_next))
+                            ? (price_next - price_current) / h_forward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle interior points (0 < i_sigma < n-1) with centered differences (SIMD-friendly)
+    if (table->n_volatility > 2) {
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 1; i_sigma < table->n_volatility - 1; i_sigma++) {
+                    double sigma_minus = table->volatility_grid[i_sigma - 1];
+                    double sigma_plus = table->volatility_grid[i_sigma + 1];
+                    double h_centered = sigma_plus - sigma_minus;
+
+                    for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                        #pragma omp simd
+                        for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_sigma;
+                            size_t idx_plus = idx + table->stride_sigma;
+
+                            double price_minus = table->prices[idx_minus];
+                            double price_plus = table->prices[idx_plus];
+
+                            table->vegas[idx] = (!isnan(price_minus) && !isnan(price_plus))
+                                ? (price_plus - price_minus) / h_centered
+                                : NAN;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle upper boundary (i_sigma == n-1) with backward differences
+    if (table->n_volatility > 1) {
+        size_t i_sigma_last = table->n_volatility - 1;
+        double sigma_last = table->volatility_grid[i_sigma_last];
+        double sigma_prev = table->volatility_grid[i_sigma_last - 1];
+        double h_backward = sigma_last - sigma_prev;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma_last * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_prev = idx - table->stride_sigma;
+
+                        double price_current = table->prices[idx];
+                        double price_prev = table->prices[idx_prev];
+
+                        table->vegas[idx] = (!isnan(price_current) && !isnan(price_prev))
+                            ? (price_current - price_prev) / h_backward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
     MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
 
     free(batch_options);
@@ -661,6 +773,47 @@ int price_table_set(OptionPriceTable *table,
     return 0;
 }
 
+double price_table_get_vega(const OptionPriceTable *table,
+                             size_t i_m, size_t i_tau, size_t i_sigma,
+                             size_t i_r, size_t i_q) {
+    if (!table || !table->vegas) return NAN;
+
+    // Bounds checking
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= (table->n_dividend > 0 ? table->n_dividend : 1)) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->vegas[idx];
+}
+
+int price_table_set_vega(OptionPriceTable *table,
+                         size_t i_m, size_t i_tau, size_t i_sigma,
+                         size_t i_r, size_t i_q, double vega) {
+    if (!table || !table->vegas) return -1;
+
+    // Bounds checking
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= (table->n_dividend > 0 ? table->n_dividend : 1)) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->vegas[idx] = vega;
+    return 0;
+}
+
 int price_table_build_interpolation(OptionPriceTable *table) {
     if (!table) return -1;
 
@@ -710,6 +863,71 @@ double price_table_interpolate_5d(const OptionPriceTable *table,
     return table->strategy->interpolate_5d(table, moneyness, maturity,
                                             volatility, rate, dividend,
                                             table->interp_context);
+}
+
+double price_table_interpolate_vega_4d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate) {
+    if (!table || !table->strategy || !table->vegas) {
+        return NAN;
+    }
+
+    if (table->n_dividend > 0) {
+        // Table is 5D, can't use 4D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports vega interpolation
+    if (!table->strategy->interpolate_4d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with vegas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->vegas;
+
+    // Use price interpolation strategy on vega data
+    double result = table->strategy->interpolate_4d(
+        table, moneyness, maturity, volatility, rate,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_vega_5d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       double dividend) {
+    if (!table || !table->strategy || !table->vegas) {
+        return NAN;
+    }
+
+    if (table->n_dividend == 0) {
+        // Table is 4D, can't use 5D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports vega interpolation
+    if (!table->strategy->interpolate_5d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with vegas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->vegas;
+
+    // Use price interpolation strategy on vega data
+    double result = table->strategy->interpolate_5d(
+        table, moneyness, maturity, volatility, rate, dividend,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
 }
 
 OptionGreeks price_table_greeks_4d(const OptionPriceTable *table,
@@ -956,6 +1174,14 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         return -1;
     }
 
+    // Write vega data (only if allocated)
+    if (table->vegas) {
+        if (fwrite(table->vegas, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1061,6 +1287,32 @@ OptionPriceTable* price_table_load(const char *filename) {
         price_table_destroy(table);
         fclose(fp);
         return NULL;
+    }
+
+    // Read vega data (if available in file)
+    // For backward compatibility, check if there's more data
+    long current_pos = ftell(fp);
+    fseek(fp, 0, SEEK_END);
+    long end_pos = ftell(fp);
+    fseek(fp, current_pos, SEEK_SET);
+
+    if (end_pos - current_pos >= (long)(n_points * sizeof(double))) {
+        // Vega data exists in file - allocate and read
+        table->vegas = malloc(n_points * sizeof(double));
+        if (!table->vegas) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->vegas, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Old format without vega data - vegas stays NULL
+        // It will be allocated if/when precompute is called
+        table->vegas = NULL;
     }
 
     // Set metadata
