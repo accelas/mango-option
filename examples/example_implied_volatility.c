@@ -14,8 +14,10 @@ int main(void) {
         .strike = 100.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 6.08,
-        .is_call = false  // Put option
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
     printf("  Spot: %.2f\n", params1.spot_price);
@@ -24,7 +26,7 @@ int main(void) {
     printf("  Rate: %.4f\n", params1.risk_free_rate);
     printf("  Market Price: %.4f\n\n", params1.market_price);
 
-    IVResult result1 = calculate_iv_simple(&params1);
+    IVResult result1 = calculate_iv_simple(&params1, NULL);
 
     if (result1.converged) {
         printf("SUCCESS!\n");
@@ -43,8 +45,10 @@ int main(void) {
         .strike = 110.0,
         .time_to_maturity = 0.5,
         .risk_free_rate = 0.03,
+        .dividend_yield = 0.0,
         .market_price = 3.0,
-        .is_call = true
+        .option_type = OPTION_CALL,
+        .exercise_type = AMERICAN
     };
 
     printf("  Spot: %.2f\n", params2.spot_price);
@@ -53,7 +57,7 @@ int main(void) {
     printf("  Rate: %.4f\n", params2.risk_free_rate);
     printf("  Market Price: %.4f\n\n", params2.market_price);
 
-    IVResult result2 = calculate_iv_simple(&params2);
+    IVResult result2 = calculate_iv_simple(&params2, NULL);
 
     if (result2.converged) {
         printf("SUCCESS!\n");
@@ -72,8 +76,10 @@ int main(void) {
         .strike = 110.0,
         .time_to_maturity = 0.25,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 11.0,
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
     printf("  Spot: %.2f\n", params3.spot_price);
@@ -82,7 +88,7 @@ int main(void) {
     printf("  Rate: %.4f\n", params3.risk_free_rate);
     printf("  Market Price: %.4f\n\n", params3.market_price);
 
-    IVResult result3 = calculate_iv_simple(&params3);
+    IVResult result3 = calculate_iv_simple(&params3, NULL);
 
     if (result3.converged) {
         printf("SUCCESS!\n");
@@ -101,8 +107,10 @@ int main(void) {
         .strike = 110.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 5.0,  // Below intrinsic (10)
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
     printf("  Spot: %.2f\n", params4.spot_price);
@@ -111,7 +119,7 @@ int main(void) {
     printf("  Rate: %.4f\n", params4.risk_free_rate);
     printf("  Market Price: %.4f\n\n", params4.market_price);
 
-    IVResult result4 = calculate_iv_simple(&params4);
+    IVResult result4 = calculate_iv_simple(&params4, NULL);
 
     if (result4.converged) {
         printf("UNEXPECTED: Converged to %.2f%%\n\n", result4.implied_vol * 100);
