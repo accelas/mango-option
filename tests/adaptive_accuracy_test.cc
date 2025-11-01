@@ -117,6 +117,7 @@ TEST_F(AdaptiveAccuracyTest, GridExpansionPreservesValues) {
     // Precompute initial prices
     int status = price_table_precompute(table, &default_grid);
     EXPECT_EQ(status, 0);
+    price_table_build_interpolation(table);
 
     // Save initial prices at key points
     double price_before_1 = price_table_interpolate_4d(table, 0.9, 0.25, 0.20, 0.05);
@@ -138,6 +139,7 @@ TEST_F(AdaptiveAccuracyTest, GridExpansionPreservesValues) {
     // Recompute (only fills NaN entries)
     status = price_table_precompute(table, &default_grid);
     EXPECT_EQ(status, 0);
+    price_table_build_interpolation(table);
 
     // Check that original prices are preserved (within numerical tolerance)
     double price_after_1 = price_table_interpolate_4d(table, 0.9, 0.25, 0.20, 0.05);
@@ -176,6 +178,7 @@ TEST_F(AdaptiveAccuracyTest, ValidationStatistics) {
     // Precompute
     int status = price_table_precompute(table, &default_grid);
     EXPECT_EQ(status, 0);
+    price_table_build_interpolation(table);
 
     // Validate with 200 samples
     ValidationResult result = validate_interpolation_error(
@@ -233,6 +236,7 @@ TEST_F(AdaptiveAccuracyTest, RefinementPointSelection) {
 
     // Precompute
     price_table_precompute(table, &default_grid);
+    price_table_build_interpolation(table);
 
     // Validate to get high-error points
     ValidationResult result = validate_interpolation_error(
