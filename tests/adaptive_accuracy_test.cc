@@ -100,7 +100,7 @@ TEST_F(AdaptiveAccuracyTest, GridExpansionPreservesValues) {
     std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
     std::vector<double> tau_grid = {0.25, 0.5};
     std::vector<double> sigma_grid = {0.20, 0.25};
-    std::vector<double> rate_grid = {0.05};
+    std::vector<double> rate_grid = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
         m_grid.data(), m_grid.size(),
@@ -217,7 +217,7 @@ TEST_F(AdaptiveAccuracyTest, RefinementPointSelection) {
     auto m_grid = create_coarse_grid();
     std::vector<double> tau_grid = {0.25, 0.5};
     std::vector<double> sigma_grid = {0.20, 0.25};
-    std::vector<double> rate_grid = {0.05};
+    std::vector<double> rate_grid = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
         m_grid.data(), m_grid.size(),
@@ -274,7 +274,7 @@ TEST_F(AdaptiveAccuracyTest, AdaptiveConvergence) {
     auto m_grid = create_coarse_grid();
     std::vector<double> tau_grid = {0.25, 0.5};
     std::vector<double> sigma_grid = {0.20, 0.25};
-    std::vector<double> rate_grid = {0.05};
+    std::vector<double> rate_grid = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
         m_grid.data(), m_grid.size(),
