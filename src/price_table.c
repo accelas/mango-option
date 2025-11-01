@@ -287,6 +287,25 @@ OptionPriceTable* price_table_create_with_strategy(
         table->prices[i] = NAN;
     }
 
+    // Allocate vega array (same size as prices)
+    table->vegas = malloc(n_points * sizeof(double));
+    if (!table->vegas) {
+        free(table->prices);
+        free(table->moneyness_grid);
+        free(table->maturity_grid);
+        free(table->volatility_grid);
+        free(table->rate_grid);
+        free(table->dividend_grid);
+        free(table);
+        return NULL;
+    }
+
+    // Initialize all vegas to NaN
+    #pragma omp simd
+    for (size_t i = 0; i < n_points; i++) {
+        table->vegas[i] = NAN;
+    }
+
     // Set metadata
     table->type = type;
     table->exercise = exercise;
@@ -387,6 +406,25 @@ OptionPriceTable* price_table_create_ex(
         table->prices[i] = NAN;
     }
 
+    // Allocate vega array (same size as prices)
+    table->vegas = malloc(n_total * sizeof(double));
+    if (!table->vegas) {
+        free(table->prices);
+        free(table->moneyness_grid);
+        free(table->maturity_grid);
+        free(table->volatility_grid);
+        free(table->rate_grid);
+        free(table->dividend_grid);
+        free(table);
+        return NULL;
+    }
+
+    // Initialize all vegas to NaN
+    #pragma omp simd
+    for (size_t i = 0; i < n_total; i++) {
+        table->vegas[i] = NAN;
+    }
+
     // Set metadata
     table->type = type;
     table->exercise = exercise;
@@ -435,6 +473,7 @@ void price_table_destroy(OptionPriceTable *table) {
     free(table->rate_grid);
     free(table->dividend_grid);
     free(table->prices);
+    free(table->vegas);
     free(table);
 }
 

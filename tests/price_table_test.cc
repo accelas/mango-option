@@ -349,3 +349,28 @@ TEST_F(PriceTablePrecomputeTest, InterpolationSmoothness) {
 
 // InterpolationAccuracyIntegration test moved to price_table_slow_test.cc
 // (marked as manual due to long precomputation time)
+
+TEST(PriceTableTest, VegaArrayAllocation) {
+    double m[] = {0.9, 1.0, 1.1};
+    double tau[] = {0.25, 0.5};
+    double sigma[] = {0.2, 0.3};
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        OPTION_CALL, AMERICAN);
+
+    ASSERT_NE(table, nullptr);
+
+    // Vega array should be allocated with same size as prices
+    ASSERT_NE(table->vegas, nullptr);
+
+    // Size should be n_m * n_tau * n_sigma * n_r
+    size_t expected_size = 3 * 2 * 2 * 1;
+    // Verify all vega values initialized to NaN
+    for (size_t i = 0; i < expected_size; i++) {
+        EXPECT_TRUE(std::isnan(table->vegas[i]));
+    }
+
+    price_table_destroy(table);
+}

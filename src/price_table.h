@@ -124,6 +124,7 @@ typedef struct OptionPriceTable {
 
     // Option prices (flattened multi-dimensional array)
     double *prices;             // n_m × n_tau × n_sigma × n_r × n_q values
+    double *vegas;              // ∂V/∂σ values (same dimensions as prices)
 
     // Metadata
     OptionType type;            // CALL or PUT
