@@ -314,3 +314,54 @@ TEST_F(ImpliedVolatilityTest, DetectsOutOfBoundsPoint) {
 
     price_table_destroy(table);
 }
+
+// Test Newton's method with precomputed table (Task 3)
+TEST_F(ImpliedVolatilityTest, NewtonMethodWithTable) {
+    // Create table and precompute
+    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> tau = {0.25, 0.5, 1.0, 1.5, 2.0};
+    std::vector<double> sigma = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40};
+    std::vector<double> r = {0.0, 0.03, 0.05, 0.07, 0.10};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 101, .dt = 0.001, .n_steps = 1000
+    };
+
+    price_table_precompute(table, &grid);
+    price_table_build_interpolation(table);
+
+    // Get a reference price at known volatility
+    double test_vol = 0.25;
+    double test_price = price_table_interpolate_4d(table, 1.0, 1.0, test_vol, 0.05);
+
+    // Now solve for IV using that price
+    IVParams params = {
+        .spot_price = 100.0,
+        .strike = 100.0,
+        .time_to_maturity = 1.0,
+        .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
+        .market_price = test_price,
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
+    };
+
+    IVResult result = calculate_iv(&params, &grid, table, 1e-6, 100);
+
+    EXPECT_TRUE(result.converged);
+    EXPECT_GT(result.iterations, 0);
+    EXPECT_LT(result.iterations, 10);  // Newton should converge quickly
+    EXPECT_NEAR(result.implied_vol, test_vol, 0.01);  // Should recover the volatility
+
+    price_table_destroy(table);
+}
