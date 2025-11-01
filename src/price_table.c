@@ -1,6 +1,6 @@
 #include "price_table.h"
 #include "american_option.h"
-#include "interp_multilinear.h"
+#include "interp_cubic.h"
 #include "ivcalc_trace.h"
 #include <stdlib.h>
 #include <stdint.h>
@@ -251,9 +251,9 @@ OptionPriceTable* price_table_create_with_strategy(
     if (n_m == 0 || n_tau == 0 || n_sigma == 0 || n_r == 0) return NULL;
     if (n_q > 0 && !dividend) return NULL;
 
-    // Default to multilinear if no strategy specified
+    // Default to cubic if no strategy specified
     if (!strategy) {
-        strategy = &INTERP_MULTILINEAR;
+        strategy = &INTERP_CUBIC;
     }
 
     OptionPriceTable *table = malloc(sizeof(OptionPriceTable));
@@ -421,8 +421,8 @@ OptionPriceTable* price_table_create_ex(
     // Compute strides based on layout
     compute_strides(table);
 
-    // Set interpolation strategy to multilinear (default)
-    table->strategy = &INTERP_MULTILINEAR;
+    // Set interpolation strategy to cubic (default)
+    table->strategy = &INTERP_CUBIC;
     table->interp_context = NULL;
 
     return table;
@@ -490,7 +490,7 @@ int price_table_precompute(OptionPriceTable *table,
         return -1;
     }
 
-    IVCALC_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
+    MANGO_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
 
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
     size_t completed = 0;
@@ -564,7 +564,7 @@ int price_table_precompute(OptionPriceTable *table,
             if (status != 0) {
                 free(batch_options);
                 free(batch_results);
-                IVCALC_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, completed);
+                MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, completed);
                 return -1;
             }
 
@@ -627,14 +627,14 @@ int price_table_precompute(OptionPriceTable *table,
 
             // Progress tracking (every 10 batches)
             if ((completed / batch_size) % 10 == 0) {
-                IVCALC_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
+                MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
                                            completed, n_total,
                                            (double)completed / (double)n_total);
             }
         }
     }
 
-    IVCALC_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
+    MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
 
     free(batch_options);
     free(batch_results);
@@ -683,6 +683,20 @@ int price_table_set(OptionPriceTable *table,
                + i_q * table->stride_q;
 
     table->prices[idx] = price;
+    return 0;
+}
+
+int price_table_build_interpolation(OptionPriceTable *table) {
+    if (!table) return -1;
+
+    // Trigger interpolation strategy precomputation (e.g., cubic spline coefficients)
+    if (table->strategy && table->strategy->precompute && table->interp_context) {
+        int status = table->strategy->precompute(table, table->interp_context);
+        if (status != 0) {
+            return -1;
+        }
+    }
+
     return 0;
 }
 
