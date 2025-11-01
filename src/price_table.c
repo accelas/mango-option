@@ -391,9 +391,11 @@ OptionPriceTable* price_table_create_ex(
         table->prices[i] = NAN;
     }
 
-    // Vega array - not allocated in create, only during precompute
+    // Greeks arrays - not allocated in create, only during precompute
     table->vegas = NULL;
     table->gammas = NULL;
+    table->thetas = NULL;
+    table->rhos = NULL;
 
     // Set metadata
     table->type = type;
@@ -445,6 +447,8 @@ void price_table_destroy(OptionPriceTable *table) {
     free(table->prices);
     free(table->vegas);
     free(table->gammas);
+    free(table->thetas);
+    free(table->rhos);
     free(table);
 }
 
@@ -1003,6 +1007,96 @@ int price_table_set_gamma(OptionPriceTable *table,
                + i_q * table->stride_q;
 
     table->gammas[idx] = gamma;
+    return 0;
+}
+
+// ========== Theta Get/Set ==========
+
+double price_table_get_theta(const OptionPriceTable *table,
+                              size_t i_m, size_t i_tau, size_t i_sigma,
+                              size_t i_r, size_t i_q) {
+    if (!table || !table->thetas) return NAN;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->thetas[idx];
+}
+
+int price_table_set_theta(OptionPriceTable *table,
+                           size_t i_m, size_t i_tau, size_t i_sigma,
+                           size_t i_r, size_t i_q, double theta) {
+    if (!table || !table->thetas) return -1;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->thetas[idx] = theta;
+    return 0;
+}
+
+// ========== Rho Get/Set ==========
+
+double price_table_get_rho(const OptionPriceTable *table,
+                            size_t i_m, size_t i_tau, size_t i_sigma,
+                            size_t i_r, size_t i_q) {
+    if (!table || !table->rhos) return NAN;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->rhos[idx];
+}
+
+int price_table_set_rho(OptionPriceTable *table,
+                         size_t i_m, size_t i_tau, size_t i_sigma,
+                         size_t i_r, size_t i_q, double rho) {
+    if (!table || !table->rhos) return -1;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->rhos[idx] = rho;
     return 0;
 }
 
@@ -1598,6 +1692,11 @@ OptionPriceTable* price_table_load(const char *filename) {
         // Older version or no gammas - initialize to NULL
         table->gammas = NULL;
     }
+
+    // Theta and rho not yet in file format - initialize to NULL
+    // Will be computed if/when precompute is called
+    table->thetas = NULL;
+    table->rhos = NULL;
 
     // Set metadata
     memcpy(table->underlying, header.underlying, sizeof(table->underlying));
