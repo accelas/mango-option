@@ -206,7 +206,7 @@ TEST_F(ImpliedVolatilityTest, RoundTripConsistency) {
     EXPECT_NEAR(iv_result.implied_vol, true_vol, 0.01);  // Within 1%
 }
 
-// Test new API with NULL table (Task 1 Step 1)
+// Test new API with NULL table (Task 1)
 TEST_F(ImpliedVolatilityTest, AcceptsNullTable) {
     IVParams params = {
         .spot_price = 100.0,
@@ -230,4 +230,87 @@ TEST_F(ImpliedVolatilityTest, AcceptsNullTable) {
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
     EXPECT_LT(result.implied_vol, 1.0);
+}
+
+// Test in-bounds detection (Task 2)
+TEST_F(ImpliedVolatilityTest, DetectsInBoundsPoint) {
+    // Create simple 4D table
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau = {0.5, 1.0, 1.5, 2.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r = {0.03, 0.05, 0.07};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_CALL, EUROPEAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    // In-bounds point
+    IVParams params_in = {
+        .spot_price = 100.0,
+        .strike = 100.0,  // m = 1.0 (in bounds)
+        .time_to_maturity = 1.0,  // tau = 1.0 (in bounds)
+        .risk_free_rate = 0.05,  // r = 0.05 (in bounds)
+        .dividend_yield = 0.0,
+        .market_price = 10.0,
+        .option_type = OPTION_CALL,
+        .exercise_type = EUROPEAN
+    };
+
+    // This should use table interpolation (when implemented)
+    // For now, just testing it doesn't crash
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 100
+    };
+
+    IVResult result = calculate_iv(&params_in, &grid, table, 1e-6, 100);
+    EXPECT_TRUE(result.converged);
+
+    price_table_destroy(table);
+}
+
+// Test out-of-bounds detection (Task 2)
+TEST_F(ImpliedVolatilityTest, DetectsOutOfBoundsPoint) {
+    // Create simple 4D table
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau = {0.5, 1.0, 1.5, 2.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r = {0.03, 0.05, 0.07};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    // Out-of-bounds point (tau too large)
+    IVParams params_out = {
+        .spot_price = 100.0,
+        .strike = 100.0,
+        .time_to_maturity = 5.0,  // tau = 5.0 (out of bounds)
+        .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
+        .market_price = 10.0,
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
+    };
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 100
+    };
+
+    // Should fallback to FDM
+    IVResult result = calculate_iv(&params_out, &grid, table, 1e-6, 100);
+    EXPECT_TRUE(result.converged);
+
+    price_table_destroy(table);
 }

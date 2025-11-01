@@ -5,6 +5,45 @@
 #include <math.h>
 #include <stdlib.h>
 
+// Check if query point is within table bounds
+static bool is_in_table_bounds(const OptionPriceTable *table, const IVParams *params) {
+    if (!table) return false;
+
+    // Calculate moneyness
+    double moneyness = params->spot_price / params->strike;
+
+    // Check all dimensions
+    if (moneyness < table->moneyness_grid[0] || moneyness > table->moneyness_grid[table->n_moneyness - 1])
+        return false;
+
+    if (params->time_to_maturity < table->maturity_grid[0] ||
+        params->time_to_maturity > table->maturity_grid[table->n_maturity - 1])
+        return false;
+
+    // For IV solving, we don't know sigma yet, so we can't check sigma bounds
+    // We'll handle this during Newton iteration
+
+    if (params->risk_free_rate < table->rate_grid[0] ||
+        params->risk_free_rate > table->rate_grid[table->n_rate - 1])
+        return false;
+
+    // Check dividend if table has dividend dimension
+    if (table->n_dividend > 0) {
+        if (params->dividend_yield < table->dividend_grid[0] ||
+            params->dividend_yield > table->dividend_grid[table->n_dividend - 1])
+            return false;
+    }
+
+    // Check option type and exercise type match
+    if (table->type != params->option_type)
+        return false;
+
+    if (table->exercise != params->exercise_type)
+        return false;
+
+    return true;
+}
+
 // Objective function for Brent's method - American option pricing
 typedef struct {
     double spot;
