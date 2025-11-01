@@ -164,3 +164,21 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "vega_accuracy",
+    srcs = ["vega_accuracy.cc"],
+    copts = [
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+    ],
+    tags = ["benchmark", "manual"],
+)
