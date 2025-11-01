@@ -1246,9 +1246,23 @@ int price_table_expand_grid(OptionPriceTable *table,
         if (new_rhos) new_rhos[i] = NAN;
     }
 
-    // 4. Copy existing values to new positions
-    // For LAYOUT_M_INNER: [tau][sigma][r][m]
-    // Index: ((i_tau * n_sigma + i_sigma) * n_r + i_r) * n_m + i_m
+    // 4. Copy existing values to new positions using stride-based indexing
+    // For LAYOUT_M_INNER: [q][r][sigma][tau][m]
+    // Use same index formula as price_table_get() for correctness
+
+    // Calculate old strides (with n_old points)
+    size_t old_stride_m = 1;
+    size_t old_stride_tau = n_old;
+    size_t old_stride_sigma = n_tau * n_old;
+    size_t old_stride_r = n_sigma * n_tau * n_old;
+    size_t old_stride_q = (table->n_dividend > 0) ? n_r * n_sigma * n_tau * n_old : 0;
+
+    // Calculate new strides (with n_total points)
+    size_t new_stride_m = 1;
+    size_t new_stride_tau = n_total;
+    size_t new_stride_sigma = n_tau * n_total;
+    size_t new_stride_r = n_sigma * n_tau * n_total;
+    size_t new_stride_q = (table->n_dividend > 0) ? n_r * n_sigma * n_tau * n_total : 0;
 
     for (size_t i_tau = 0; i_tau < n_tau; i_tau++) {
         for (size_t i_sigma = 0; i_sigma < n_sigma; i_sigma++) {
@@ -1264,17 +1278,14 @@ int price_table_expand_grid(OptionPriceTable *table,
                             continue;
                         }
 
-                        // Old index (with n_old points)
-                        size_t old_idx = ((i_tau * n_sigma + i_sigma) * n_r + i_r) * n_old + i_m_old;
-                        if (table->n_dividend > 0) {
-                            old_idx = old_idx * n_q + i_q;
-                        }
+                        // Use stride-based indexing (matches price_table_get)
+                        size_t old_idx = i_m_old * old_stride_m + i_tau * old_stride_tau
+                                       + i_sigma * old_stride_sigma + i_r * old_stride_r
+                                       + i_q * old_stride_q;
 
-                        // New index (with n_total points)
-                        size_t new_idx = ((i_tau * n_sigma + i_sigma) * n_r + i_r) * n_total + i_m_new;
-                        if (table->n_dividend > 0) {
-                            new_idx = new_idx * n_q + i_q;
-                        }
+                        size_t new_idx = i_m_new * new_stride_m + i_tau * new_stride_tau
+                                       + i_sigma * new_stride_sigma + i_r * new_stride_r
+                                       + i_q * new_stride_q;
 
                         // Copy values
                         new_prices[new_idx] = table->prices[old_idx];
