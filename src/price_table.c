@@ -648,6 +648,78 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
+    // Second pass: Compute vega via finite differences
+    // Now that all prices are computed, we can calculate vega using neighboring volatility points
+    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    size_t n_q_loop = table->n_dividend > 0 ? table->n_dividend : 1;
+                    for (size_t i_q = 0; i_q < n_q_loop; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+
+                        double vega = NAN;
+
+                        // Handle boundary cases with one-sided differences
+                        if (i_sigma == 0 && table->n_volatility > 1) {
+                            // Forward difference at lower boundary
+                            double sigma_current = table->volatility_grid[0];
+                            double sigma_next = table->volatility_grid[1];
+
+                            size_t idx_next = i_m * table->stride_m + i_tau * table->stride_tau
+                                            + 1 * table->stride_sigma + i_r * table->stride_r
+                                            + i_q * table->stride_q;
+
+                            double price_current = table->prices[idx];
+                            double price_next = table->prices[idx_next];
+                            if (!isnan(price_current) && !isnan(price_next)) {
+                                vega = (price_next - price_current) / (sigma_next - sigma_current);
+                            }
+                        } else if (i_sigma == table->n_volatility - 1 && table->n_volatility > 1) {
+                            // Backward difference at upper boundary
+                            double sigma_current = table->volatility_grid[i_sigma];
+                            double sigma_prev = table->volatility_grid[i_sigma - 1];
+
+                            size_t idx_prev = i_m * table->stride_m + i_tau * table->stride_tau
+                                            + (i_sigma - 1) * table->stride_sigma + i_r * table->stride_r
+                                            + i_q * table->stride_q;
+
+                            double price_current = table->prices[idx];
+                            double price_prev = table->prices[idx_prev];
+                            if (!isnan(price_current) && !isnan(price_prev)) {
+                                vega = (price_current - price_prev) / (sigma_current - sigma_prev);
+                            }
+                        } else if (i_sigma > 0 && i_sigma < table->n_volatility - 1) {
+                            // Centered difference for interior points
+                            double sigma_current = table->volatility_grid[i_sigma];
+                            double sigma_minus = table->volatility_grid[i_sigma - 1];
+                            double sigma_plus = table->volatility_grid[i_sigma + 1];
+
+                            size_t idx_minus = i_m * table->stride_m + i_tau * table->stride_tau
+                                             + (i_sigma - 1) * table->stride_sigma + i_r * table->stride_r
+                                             + i_q * table->stride_q;
+                            size_t idx_plus = i_m * table->stride_m + i_tau * table->stride_tau
+                                            + (i_sigma + 1) * table->stride_sigma + i_r * table->stride_r
+                                            + i_q * table->stride_q;
+
+                            double price_minus = table->prices[idx_minus];
+                            double price_plus = table->prices[idx_plus];
+
+                            // Centered difference
+                            if (!isnan(price_minus) && !isnan(price_plus)) {
+                                vega = (price_plus - price_minus) / (sigma_plus - sigma_minus);
+                            }
+                        }
+
+                        table->vegas[idx] = vega;
+                    }
+                }
+            }
+        }
+    }
+
     MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
 
     free(batch_options);

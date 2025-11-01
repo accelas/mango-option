@@ -399,3 +399,41 @@ TEST(PriceTableTest, VegaGetSet) {
 
     price_table_destroy(table);
 }
+
+TEST(PriceTableTest, VegaPrecomputation) {
+    // Small grid for fast test
+    double m[] = {1.0};
+    double tau[] = {0.5};
+    double sigma[] = {0.15, 0.20, 0.25};  // Need 3+ points for centered diff
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m, 1, tau, 1, sigma, 3, r, 1, nullptr, 0,
+        OPTION_PUT, AMERICAN);
+
+    // Precompute with coarse grid (fast test)
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 51,
+        .dt = 0.01,
+        .n_steps = 50
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    // Vega at middle volatility point should be computed
+    double vega = price_table_get_vega(table, 0, 0, 1, 0, 0);
+    EXPECT_FALSE(std::isnan(vega));
+
+    // Vega should be positive for ATM put
+    EXPECT_GT(vega, 0.0);
+
+    // Vega should be reasonably sized (raw vega, not normalized)
+    // For ATM option with S=K=100, vega can be 10-50 depending on maturity
+    EXPECT_GT(vega, 1.0);
+    EXPECT_LT(vega, 100.0);
+
+    price_table_destroy(table);
+}
