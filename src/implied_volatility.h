@@ -3,6 +3,7 @@
 
 #include "brent.h"
 #include "american_option.h"
+#include "price_table.h"
 #include <stdbool.h>
 
 // Implied Volatility Calculator for American Options using Brent's method
@@ -16,8 +17,10 @@ typedef struct {
     double strike;           // K: Strike price
     double time_to_maturity; // T: Time to expiration (years)
     double risk_free_rate;   // r: Risk-free interest rate
+    double dividend_yield;   // q: Continuous dividend yield
     double market_price;     // Market price of option
-    bool is_call;            // true for call, false for put
+    OptionType option_type;  // OPTION_CALL or OPTION_PUT
+    ExerciseType exercise_type; // EUROPEAN or AMERICAN
 } IVParams;
 
 // Result structure
@@ -29,20 +32,24 @@ typedef struct {
     const char *error;       // Error message if failed (nullptr if success)
 } IVResult;
 
-// Calculate American option implied volatility using FDM
+// Calculate American option implied volatility using FDM or table interpolation
 //
 // Parameters:
 //   params: Option parameters and market price
 //   grid_params: FDM solver grid configuration
+//   table: Optional pre-computed price table (NULL to use FDM only)
 //   tolerance: Convergence tolerance (e.g., 1e-6)
 //   max_iter: Maximum iterations (e.g., 100)
 //
 // Returns:
 //   IVResult with implied volatility and convergence status
 //
-// Performance: ~250ms per calculation (nested Brent + PDE solver)
+// Performance:
+//   - With table (in-bounds): ~10µs (Newton's method with interpolated vega)
+//   - Without table or out-of-bounds: ~250ms (Brent + FDM fallback)
 IVResult calculate_iv(const IVParams *params,
                      const AmericanOptionGrid *grid_params,
+                     const OptionPriceTable *table,
                      double tolerance, int max_iter);
 
 // Convenience function with default grid settings
@@ -53,7 +60,14 @@ IVResult calculate_iv(const IVParams *params,
 //   - dt: 0.001, n_steps: 1000
 //   - tolerance: 1e-6, max_iter: 100
 //
-// Performance: ~250ms per calculation
-IVResult calculate_iv_simple(const IVParams *params);
+// Parameters:
+//   params: Option parameters and market price
+//   table: Optional pre-computed price table (NULL to use FDM only)
+//
+// Performance:
+//   - With table (in-bounds): ~10µs
+//   - Without table: ~250ms
+IVResult calculate_iv_simple(const IVParams *params,
+                             const OptionPriceTable *table);
 
 #endif // IMPLIED_VOLATILITY_H

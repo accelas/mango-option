@@ -55,6 +55,7 @@ cc_test(
     deps = [
         "//src:implied_volatility",
         "//src:american_option",
+        "//src:price_table",
         "@googletest//:gtest_main",
     ],
 )
