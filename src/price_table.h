@@ -152,6 +152,7 @@ typedef struct OptionPriceTable {
 
     // Greeks data (added to end to preserve ABI compatibility)
     double *vegas;              // ∂V/∂σ values (same dimensions as prices)
+    double *gammas;             // ∂²V/∂S² values (same dimensions as prices)
 } OptionPriceTable;
 
 /**
@@ -423,6 +424,42 @@ double price_table_interpolate_vega_5d(const OptionPriceTable *table,
                                        double moneyness, double maturity,
                                        double volatility, double rate,
                                        double dividend);
+
+/**
+ * Interpolate gamma (∂²V/∂S²) at query point (4D)
+ *
+ * @return interpolated gamma value, or NaN if query out of bounds
+ *
+ * Example:
+ *   double gamma = price_table_interpolate_gamma_4d(table, 1.05, 0.5, 0.20, 0.05);
+ */
+double price_table_interpolate_gamma_4d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate);
+
+/**
+ * Interpolate gamma (∂²V/∂S²) at query point (5D)
+ *
+ * @return interpolated gamma value, or NaN if query out of bounds
+ */
+double price_table_interpolate_gamma_5d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate,
+                                        double dividend);
+
+/**
+ * Get gamma value at specific grid indices
+ */
+double price_table_get_gamma(const OptionPriceTable *table,
+                             size_t i_m, size_t i_tau, size_t i_sigma,
+                             size_t i_r, size_t i_q);
+
+/**
+ * Set gamma value at specific grid indices
+ */
+int price_table_set_gamma(OptionPriceTable *table,
+                          size_t i_m, size_t i_tau, size_t i_sigma,
+                          size_t i_r, size_t i_q, double gamma);
 
 /**
  * Compute Greeks via finite differences on interpolated prices

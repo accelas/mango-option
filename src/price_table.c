@@ -392,6 +392,7 @@ OptionPriceTable* price_table_create_ex(
 
     // Vega array - not allocated in create, only during precompute
     table->vegas = NULL;
+    table->gammas = NULL;
 
     // Set metadata
     table->type = type;
@@ -442,6 +443,7 @@ void price_table_destroy(OptionPriceTable *table) {
     free(table->dividend_grid);
     free(table->prices);
     free(table->vegas);
+    free(table->gammas);
     free(table);
 }
 
