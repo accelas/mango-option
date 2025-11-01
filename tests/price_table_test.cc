@@ -362,15 +362,8 @@ TEST(PriceTableTest, VegaArrayAllocation) {
 
     ASSERT_NE(table, nullptr);
 
-    // Vega array should be allocated with same size as prices
-    ASSERT_NE(table->vegas, nullptr);
-
-    // Size should be n_m * n_tau * n_sigma * n_r
-    size_t expected_size = 3 * 2 * 2 * 1;
-    // Verify all vega values initialized to NaN
-    for (size_t i = 0; i < expected_size; i++) {
-        EXPECT_TRUE(std::isnan(table->vegas[i]));
-    }
+    // Vega array is lazily allocated during precompute, initially NULL
+    EXPECT_EQ(table->vegas, nullptr);
 
     price_table_destroy(table);
 }
@@ -384,6 +377,19 @@ TEST(PriceTableTest, VegaGetSet) {
     OptionPriceTable *table = price_table_create(
         m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
         OPTION_CALL, AMERICAN);
+
+    // Vega array is allocated during precompute
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 51,
+        .dt = 0.01,
+        .n_steps = 100
+    };
+    price_table_precompute(table, &grid);
+
+    // Now vegas should be allocated
+    ASSERT_NE(table->vegas, nullptr);
 
     // Set vega at specific grid point
     int status = price_table_set_vega(table, 1, 0, 1, 0, 0, 0.42);

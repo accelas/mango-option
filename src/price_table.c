@@ -231,7 +231,7 @@ OptionPriceTable* price_table_create_with_strategy(
         strategy = &INTERP_CUBIC;
     }
 
-    OptionPriceTable *table = malloc(sizeof(OptionPriceTable));
+    OptionPriceTable *table = calloc(1, sizeof(OptionPriceTable));
     if (!table) return NULL;
 
     // Copy dimensions
@@ -287,24 +287,8 @@ OptionPriceTable* price_table_create_with_strategy(
         table->prices[i] = NAN;
     }
 
-    // Allocate vega array (same size as prices)
-    table->vegas = malloc(n_points * sizeof(double));
-    if (!table->vegas) {
-        free(table->prices);
-        free(table->moneyness_grid);
-        free(table->maturity_grid);
-        free(table->volatility_grid);
-        free(table->rate_grid);
-        free(table->dividend_grid);
-        free(table);
-        return NULL;
-    }
-
-    // Initialize all vegas to NaN
-    #pragma omp simd
-    for (size_t i = 0; i < n_points; i++) {
-        table->vegas[i] = NAN;
-    }
+    // Vega array - not allocated in create, only during precompute
+    table->vegas = NULL;
 
     // Set metadata
     table->type = type;
@@ -406,24 +390,8 @@ OptionPriceTable* price_table_create_ex(
         table->prices[i] = NAN;
     }
 
-    // Allocate vega array (same size as prices)
-    table->vegas = malloc(n_total * sizeof(double));
-    if (!table->vegas) {
-        free(table->prices);
-        free(table->moneyness_grid);
-        free(table->maturity_grid);
-        free(table->volatility_grid);
-        free(table->rate_grid);
-        free(table->dividend_grid);
-        free(table);
-        return NULL;
-    }
-
-    // Initialize all vegas to NaN
-    #pragma omp simd
-    for (size_t i = 0; i < n_total; i++) {
-        table->vegas[i] = NAN;
-    }
+    // Vega array - not allocated in create, only during precompute
+    table->vegas = NULL;
 
     // Set metadata
     table->type = type;
@@ -490,6 +458,18 @@ int price_table_precompute(OptionPriceTable *table,
                      table->n_volatility * table->n_rate;
     if (table->n_dividend > 0) {
         n_total *= table->n_dividend;
+    }
+
+    // Allocate vega array if not already allocated
+    if (!table->vegas) {
+        table->vegas = malloc(n_total * sizeof(double));
+        if (!table->vegas) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->vegas[i] = NAN;
+        }
     }
 
     size_t batch_size = get_batch_size();
