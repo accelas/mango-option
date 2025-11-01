@@ -50,6 +50,23 @@ typedef struct {
 AmericanOptionResult american_option_price(const OptionData *option_data,
                                           const AmericanOptionGrid *grid_params);
 
+// Solve American option on pre-allocated moneyness grid (unified grid architecture)
+// This enables zero-copy operation where FDM solves directly on price table's grid
+// Parameters:
+//   option_data: Option parameters (strike, volatility, rate, time to maturity)
+//   m_grid: Pre-allocated moneyness grid (S/K values, must be sorted ascending, n_m points)
+//   n_m: Number of moneyness points (must be >= 3)
+//   dt: Time step for TR-BDF2 solver
+//   n_steps: Number of time steps
+// Returns: AmericanOptionResult with solver containing solution on exact m_grid
+// Caller must call american_option_free_result() on result to clean up
+AmericanOptionResult american_option_solve_on_moneyness_grid(
+    const OptionData *option_data,
+    const double *m_grid,
+    size_t n_m,
+    double dt,
+    size_t n_steps);
+
 // Free resources associated with AmericanOptionResult
 // This frees both the solver and internal data structures
 void american_option_free_result(AmericanOptionResult *result);

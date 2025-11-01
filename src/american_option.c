@@ -319,6 +319,162 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     return result;
 }
 
+// Solve American option on pre-allocated moneyness grid
+// This enables unified grid architecture where FDM solves directly on price table's grid
+// Parameters:
+//   option_data: Option parameters (strike, vol, rate, maturity)
+//   m_grid: Pre-allocated moneyness grid (S/K values, must be sorted ascending)
+//   n_m: Number of moneyness points
+//   dt: Time step for TR-BDF2 solver
+//   n_steps: Number of time steps
+// Returns: AmericanOptionResult with solver containing solution on exact m_grid
+AmericanOptionResult american_option_solve_on_moneyness_grid(
+    const OptionData *option_data,
+    const double *m_grid,
+    size_t n_m,
+    double dt,
+    size_t n_steps) {
+
+    AmericanOptionResult result = {nullptr, -1, nullptr};
+
+    if (option_data == nullptr || m_grid == nullptr || n_m < 3) {
+        return result;
+    }
+
+    // Trace option pricing start
+    MANGO_TRACE_OPTION_START(option_data->option_type, option_data->strike,
+                              option_data->volatility, option_data->time_to_maturity);
+
+    // Convert moneyness grid to log-moneyness: x = ln(m) = ln(S/K)
+    double *x_grid = (double *)malloc(n_m * sizeof(double));
+    if (x_grid == nullptr) {
+        return result;
+    }
+
+    #pragma omp simd
+    for (size_t i = 0; i < n_m; i++) {
+        x_grid[i] = log(m_grid[i]);
+    }
+
+    // Create spatial grid (takes ownership of x_grid)
+    SpatialGrid grid = {
+        .x_min = x_grid[0],
+        .x_max = x_grid[n_m - 1],
+        .n_points = n_m,
+        .dx = (x_grid[n_m - 1] - x_grid[0]) / (n_m - 1),  // Average spacing
+        .x = x_grid
+    };
+
+    // Time domain: solve forward in time-to-maturity
+    TimeDomain time = {
+        .t_start = 0.0,
+        .t_end = option_data->time_to_maturity,
+        .dt = dt,
+        .n_steps = n_steps
+    };
+
+    // Convert dividend times from calendar time to solver time
+    double *div_times_solver = nullptr;
+    if (option_data->n_dividends > 0 && option_data->dividend_times != nullptr &&
+        option_data->dividend_amounts != nullptr) {
+        div_times_solver = (double *)malloc(option_data->n_dividends * sizeof(double));
+        if (div_times_solver == nullptr) {
+            free(x_grid);
+            return result;
+        }
+
+        const double T = option_data->time_to_maturity;
+        #pragma omp simd
+        for (size_t i = 0; i < option_data->n_dividends; i++) {
+            div_times_solver[i] = T - option_data->dividend_times[i];
+        }
+
+        // Sort dividend times in ascending order (for solver)
+        for (size_t i = 0; i < option_data->n_dividends; i++) {
+            for (size_t j = i + 1; j < option_data->n_dividends; j++) {
+                if (div_times_solver[j] < div_times_solver[i]) {
+                    double temp = div_times_solver[i];
+                    div_times_solver[i] = div_times_solver[j];
+                    div_times_solver[j] = temp;
+                }
+            }
+        }
+    }
+
+    // Create extended user data to pass grid boundaries to callbacks
+    ExtendedOptionData *ext_data = (ExtendedOptionData *)malloc(sizeof(ExtendedOptionData));
+    if (ext_data == nullptr) {
+        if (div_times_solver != nullptr) {
+            free(div_times_solver);
+        }
+        free(x_grid);
+        return result;
+    }
+
+    ext_data->option_data = option_data;
+    ext_data->x_min = grid.x_min;
+    ext_data->x_max = grid.x_max;
+
+    // Setup callbacks (reuse existing callbacks)
+    PDECallbacks callbacks = {
+        .initial_condition = american_option_terminal_condition,
+        .left_boundary = american_option_left_boundary,
+        .right_boundary = american_option_right_boundary,
+        .spatial_operator = american_option_spatial_operator,
+        .diffusion_coeff = 0.5 * option_data->volatility * option_data->volatility,  // σ²/2
+        .jump_condition = nullptr,
+        .obstacle = american_option_obstacle,
+        .temporal_event = nullptr,
+        .n_temporal_events = 0,
+        .temporal_event_times = nullptr,
+        .user_data = (void *)ext_data
+    };
+
+    // Enable temporal event callback for discrete dividends
+    if (div_times_solver != nullptr) {
+        callbacks.temporal_event = american_option_dividend_event;
+        callbacks.n_temporal_events = option_data->n_dividends;
+        callbacks.temporal_event_times = div_times_solver;
+    }
+
+    // Create solver configuration with relaxed tolerance
+    BoundaryConfig bc_config = pde_default_boundary_config();
+    TRBDF2Config trbdf2_config = pde_default_trbdf2_config();
+    trbdf2_config.tolerance = 1e-4;  // Relaxed tolerance for American options
+    trbdf2_config.max_iter = 200;    // More iterations allowed
+
+    // Create and run solver (takes ownership of grid)
+    PDESolver *solver = pde_solver_create(&grid, &time, &bc_config,
+                                          &trbdf2_config, &callbacks);
+    if (solver == nullptr) {
+        if (div_times_solver != nullptr) {
+            free(div_times_solver);
+        }
+        free(ext_data);
+        // Note: grid.x is nullptr after pde_solver_create, no need to free x_grid
+        return result;
+    }
+
+    pde_solver_initialize(solver);
+
+    // Solve PDE (temporal events handled automatically by solver)
+    int status = pde_solver_solve(solver);
+
+    result.solver = solver;
+    result.status = status;
+    result.internal_data = (void *)ext_data;  // Store for cleanup
+
+    // Clean up dividend time array
+    if (div_times_solver != nullptr) {
+        free(div_times_solver);
+    }
+
+    // Trace option pricing completion
+    MANGO_TRACE_OPTION_COMPLETE(status, n_steps);
+
+    return result;
+}
+
 // Free resources associated with AmericanOptionResult
 void american_option_free_result(AmericanOptionResult *result) {
     if (result == nullptr) {

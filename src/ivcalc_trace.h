@@ -58,6 +58,8 @@
 #define MODULE_IMPLIED_VOL      3
 #define MODULE_BRENT_ROOT       4
 #define MODULE_CUBIC_SPLINE     5
+#define MODULE_VALIDATION       6
+#define MODULE_PRICE_TABLE      7
 
 /**
  * ============================================================================
