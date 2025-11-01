@@ -374,3 +374,28 @@ TEST(PriceTableTest, VegaArrayAllocation) {
 
     price_table_destroy(table);
 }
+
+TEST(PriceTableTest, VegaGetSet) {
+    double m[] = {0.9, 1.0, 1.1};
+    double tau[] = {0.25, 0.5};
+    double sigma[] = {0.2, 0.3};
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        OPTION_CALL, AMERICAN);
+
+    // Set vega at specific grid point
+    int status = price_table_set_vega(table, 1, 0, 1, 0, 0, 0.42);
+    EXPECT_EQ(status, 0);
+
+    // Get vega back
+    double vega = price_table_get_vega(table, 1, 0, 1, 0, 0);
+    EXPECT_DOUBLE_EQ(vega, 0.42);
+
+    // Out of bounds should return NaN
+    double oob = price_table_get_vega(table, 10, 0, 0, 0, 0);
+    EXPECT_TRUE(std::isnan(oob));
+
+    price_table_destroy(table);
+}

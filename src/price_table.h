@@ -334,6 +334,24 @@ int price_table_set(OptionPriceTable *table,
                     size_t i_r, size_t i_q, double price);
 
 /**
+ * Get vega at specific grid point
+ *
+ * @return vega at grid point, or NaN if indices out of bounds
+ */
+double price_table_get_vega(const OptionPriceTable *table,
+                             size_t i_m, size_t i_tau, size_t i_sigma,
+                             size_t i_r, size_t i_q);
+
+/**
+ * Set vega at specific grid point
+ *
+ * @return 0 on success, -1 on error (NULL table or out of bounds)
+ */
+int price_table_set_vega(OptionPriceTable *table,
+                         size_t i_m, size_t i_tau, size_t i_sigma,
+                         size_t i_r, size_t i_q, double vega);
+
+/**
  * Build interpolation structures (e.g., cubic spline coefficients)
  *
  * Call this after manually populating prices with price_table_set()

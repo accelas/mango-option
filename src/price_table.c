@@ -700,6 +700,47 @@ int price_table_set(OptionPriceTable *table,
     return 0;
 }
 
+double price_table_get_vega(const OptionPriceTable *table,
+                             size_t i_m, size_t i_tau, size_t i_sigma,
+                             size_t i_r, size_t i_q) {
+    if (!table || !table->vegas) return NAN;
+
+    // Bounds checking
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= (table->n_dividend > 0 ? table->n_dividend : 1)) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->vegas[idx];
+}
+
+int price_table_set_vega(OptionPriceTable *table,
+                         size_t i_m, size_t i_tau, size_t i_sigma,
+                         size_t i_r, size_t i_q, double vega) {
+    if (!table || !table->vegas) return -1;
+
+    // Bounds checking
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= (table->n_dividend > 0 ? table->n_dividend : 1)) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->vegas[idx] = vega;
+    return 0;
+}
+
 int price_table_build_interpolation(OptionPriceTable *table) {
     if (!table) return -1;
 
