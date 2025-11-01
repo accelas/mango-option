@@ -132,7 +132,7 @@ static OptionPriceTable* g_table = nullptr;
 void setup_precomputed_table(bool is_put) {
     std::cout << "\n========================================\n";
     std::cout << "Precomputing Price Table for Accuracy Test\n";
-    std::cout << "Using INTERP_CUBIC with raw coordinates\n";
+    std::cout << "Using COORD_LOG_SQRT + LAYOUT_M_INNER (PR #41 + #48)\n";
     std::cout << "========================================\n";
 
     // Create fine-grained grid for accuracy
@@ -370,7 +370,7 @@ int main() {
     std::cout << "║                                       CONCLUSIONS                                              ║\n";
     std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
-    std::cout << "Configuration: INTERP_CUBIC with raw coordinates (baseline)\n";
+    std::cout << "Configuration: COORD_LOG_SQRT + LAYOUT_M_INNER (coordinate transforms ENABLED)\n";
     std::cout << "\n";
     std::cout << "1. FDM vs Interpolation:\n";
     std::cout << "   ✓ Interpolation preserves FDM accuracy (avg " << avg_fdm_interp_error << "% error)\n";
