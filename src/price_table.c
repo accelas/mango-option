@@ -15,9 +15,9 @@
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
-#define PRICE_TABLE_VERSION 2          // Version 2: adds coord_system and memory_layout
+#define PRICE_TABLE_VERSION 3          // Version 3: adds gammas
 
-// File header structure (Version 2)
+// File header structure (Version 3)
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -32,7 +32,8 @@ typedef struct {
     time_t generation_time;
     CoordinateSystem coord_system;    // Version 2+: coordinate transformation
     MemoryLayout memory_layout;       // Version 2+: memory layout strategy
-    uint8_t padding[120];             // Reserved for future use (reduced from 128)
+    uint8_t has_gammas;               // Version 3+: 1 if gammas present, 0 otherwise
+    uint8_t padding[119];             // Reserved for future use (reduced from 120)
 } PriceTableHeader;
 
 // ---------- Helper Functions ----------
@@ -1389,7 +1390,8 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         .exercise = table->exercise,
         .generation_time = table->generation_time,
         .coord_system = table->coord_system,
-        .memory_layout = table->memory_layout
+        .memory_layout = table->memory_layout,
+        .has_gammas = (table->gammas != NULL) ? 1 : 0
     };
     memcpy(header.underlying, table->underlying, sizeof(header.underlying));
 
@@ -1430,6 +1432,14 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         }
     }
 
+    // Write gamma data (only if allocated)
+    if (table->gammas) {
+        if (fwrite(table->gammas, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1453,13 +1463,13 @@ OptionPriceTable* price_table_load(const char *filename) {
         return NULL;
     }
 
-    // Support version 1 (without coord_system/memory_layout) and version 2
-    if (header.version != 1 && header.version != 2) {
+    // Support version 1 (without coord_system/memory_layout), version 2, and version 3 (adds gammas)
+    if (header.version < 1 || header.version > 3) {
         fclose(fp);
         return NULL;
     }
 
-    // For version 1, use default values; for version 2, use header values
+    // For version 1, use default values; for version 2+, use header values
     CoordinateSystem coord_system = (header.version >= 2) ? header.coord_system : COORD_RAW;
     MemoryLayout memory_layout = (header.version >= 2) ? header.memory_layout : LAYOUT_M_OUTER;
 
@@ -1561,6 +1571,24 @@ OptionPriceTable* price_table_load(const char *filename) {
         // Old format without vega data - vegas stays NULL
         // It will be allocated if/when precompute is called
         table->vegas = NULL;
+    }
+
+    // Load gamma data (version 3+)
+    if (header.version >= 3 && header.has_gammas) {
+        table->gammas = malloc(n_points * sizeof(double));
+        if (!table->gammas) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->gammas, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Older version or no gammas - initialize to NULL
+        table->gammas = NULL;
     }
 
     // Set metadata

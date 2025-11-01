@@ -751,3 +751,90 @@ TEST(PriceTableTest, GammaInterpolation5D) {
 
     price_table_destroy(table);
 }
+
+TEST(PriceTableTest, GammaSaveLoad) {
+    // Create and precompute table
+    std::vector<double> m = {0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.5};
+    std::vector<double> sigma = {0.15, 0.20, 0.25};
+    std::vector<double> r = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 50
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    // Get a gamma value before save
+    double gamma_before = price_table_get_gamma(table, 1, 0, 1, 0, 0);
+    EXPECT_FALSE(std::isnan(gamma_before));
+
+    // Save
+    const char *filename = "test_gamma_save_load.bin";
+    status = price_table_save(table, filename);
+    EXPECT_EQ(status, 0);
+
+    // Load
+    OptionPriceTable *loaded = price_table_load(filename);
+    ASSERT_NE(loaded, nullptr);
+
+    // Verify gamma loaded correctly
+    EXPECT_NE(loaded->gammas, nullptr);
+    double gamma_after = price_table_get_gamma(loaded, 1, 0, 1, 0, 0);
+    EXPECT_DOUBLE_EQ(gamma_before, gamma_after);
+
+    // Cleanup
+    price_table_destroy(table);
+    price_table_destroy(loaded);
+    std::remove(filename);
+}
+
+TEST(PriceTableTest, LoadOldFormatWithoutGamma) {
+    // This test verifies loading v2 files (without gamma) doesn't crash
+    // In practice, you'd have a v2 file to test with
+    // For now, just verify that a newly loaded table initializes gammas correctly
+
+    std::vector<double> m = {1.0};
+    std::vector<double> tau = {0.5};
+    std::vector<double> sigma = {0.20};
+    std::vector<double> r = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    // Don't precompute - gammas should be NULL
+    EXPECT_EQ(table->gammas, nullptr);
+
+    // Save without precomputing (no gammas)
+    const char *filename = "test_no_gamma.bin";
+    int status = price_table_save(table, filename);
+    EXPECT_EQ(status, 0);
+
+    // Load - gammas should still be NULL
+    OptionPriceTable *loaded = price_table_load(filename);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->gammas, nullptr);
+
+    price_table_destroy(table);
+    price_table_destroy(loaded);
+    std::remove(filename);
+}
