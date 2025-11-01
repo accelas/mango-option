@@ -23,7 +23,7 @@ typedef enum {
  * @file price_table.h
  * @brief Multi-dimensional option price table with pluggable interpolation
  *
- * Pre-computes option prices, vegas, and gammas on a multi-dimensional grid for fast lookup:
+ * Pre-computes option prices and Greeks (vega, gamma, theta, rho) on a multi-dimensional grid for fast lookup:
  * - Moneyness (m = S/K)
  * - Maturity (τ = T - t)
  * - Volatility (σ)
@@ -33,8 +33,7 @@ typedef enum {
  * Features:
  * - Sub-microsecond queries (4D: ~500ns, 5D: ~2µs)
  * - 40,000x faster than FDM solver (21.7ms → 500ns)
- * - Vega interpolation for accurate first-order Greeks
- * - Gamma interpolation for accurate second-order Greeks
+ * - Greeks interpolation: vega, gamma, theta, rho
  * - Runtime interpolation strategy selection
  * - Parallel pre-computation via OpenMP
  * - Binary save/load for persistence
@@ -45,7 +44,7 @@ typedef enum {
  *       moneyness, n_m, maturity, n_tau, volatility, n_sigma,
  *       rate, n_r, NULL, 0, OPTION_PUT, AMERICAN);
  *
- *   // Pre-compute all option prices, vegas, and gammas (uses FDM)
+ *   // Pre-compute all option prices and Greeks (uses FDM)
  *   price_table_precompute(table, pde_solver_template);
  *
  *   // Save for fast loading later
@@ -59,6 +58,12 @@ typedef enum {
  *
  *   // Fast gamma query (~8ns)
  *   double gamma = price_table_interpolate_gamma_4d(table, 1.05, 0.25, 0.20, 0.05);
+ *
+ *   // Fast theta query (~8ns)
+ *   double theta = price_table_interpolate_theta_4d(table, 1.05, 0.25, 0.20, 0.05);
+ *
+ *   // Fast rho query (~8ns)
+ *   double rho = price_table_interpolate_rho_4d(table, 1.05, 0.25, 0.20, 0.05);
  *
  *   // Cleanup
  *   price_table_destroy(table);
@@ -157,6 +162,8 @@ typedef struct OptionPriceTable {
     // Greeks data (added to end to preserve ABI compatibility)
     double *vegas;              // ∂V/∂σ values (same dimensions as prices)
     double *gammas;             // ∂²V/∂S² values (same dimensions as prices)
+    double *thetas;             // -∂V/∂τ values (same dimensions as prices)
+    double *rhos;               // ∂V/∂r values (same dimensions as prices)
 } OptionPriceTable;
 
 /**
@@ -464,6 +471,83 @@ double price_table_get_gamma(const OptionPriceTable *table,
 int price_table_set_gamma(OptionPriceTable *table,
                           size_t i_m, size_t i_tau, size_t i_sigma,
                           size_t i_r, size_t i_q, double gamma);
+
+/**
+ * Interpolate theta (-∂V/∂τ) at query point (4D table)
+ *
+ * Theta is the negative time derivative of option value.
+ * Note: Returns -∂V/∂τ (negative derivative) as per market convention.
+ *
+ * @return interpolated theta value, or NaN if query out of bounds
+ *
+ * Example:
+ *   double theta = price_table_interpolate_theta_4d(table, 1.05, 0.5, 0.20, 0.05);
+ */
+double price_table_interpolate_theta_4d(const OptionPriceTable *table,
+                                         double moneyness, double maturity,
+                                         double volatility, double rate);
+
+/**
+ * Interpolate theta (-∂V/∂τ) at query point (5D table with dividend)
+ *
+ * @return interpolated theta value, or NaN if query out of bounds
+ */
+double price_table_interpolate_theta_5d(const OptionPriceTable *table,
+                                         double moneyness, double maturity,
+                                         double volatility, double rate,
+                                         double dividend);
+
+/**
+ * Get theta value at specific grid indices
+ */
+double price_table_get_theta(const OptionPriceTable *table,
+                              size_t i_m, size_t i_tau, size_t i_sigma,
+                              size_t i_r, size_t i_q);
+
+/**
+ * Set theta value at specific grid indices
+ */
+int price_table_set_theta(OptionPriceTable *table,
+                           size_t i_m, size_t i_tau, size_t i_sigma,
+                           size_t i_r, size_t i_q, double theta);
+
+/**
+ * Interpolate rho (∂V/∂r) at query point (4D table)
+ *
+ * Rho is the interest rate sensitivity of option value.
+ *
+ * @return interpolated rho value, or NaN if query out of bounds
+ *
+ * Example:
+ *   double rho = price_table_interpolate_rho_4d(table, 1.05, 0.5, 0.20, 0.05);
+ */
+double price_table_interpolate_rho_4d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate);
+
+/**
+ * Interpolate rho (∂V/∂r) at query point (5D table with dividend)
+ *
+ * @return interpolated rho value, or NaN if query out of bounds
+ */
+double price_table_interpolate_rho_5d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       double dividend);
+
+/**
+ * Get rho value at specific grid indices
+ */
+double price_table_get_rho(const OptionPriceTable *table,
+                            size_t i_m, size_t i_tau, size_t i_sigma,
+                            size_t i_r, size_t i_q);
+
+/**
+ * Set rho value at specific grid indices
+ */
+int price_table_set_rho(OptionPriceTable *table,
+                         size_t i_m, size_t i_tau, size_t i_sigma,
+                         size_t i_r, size_t i_q, double rho);
 
 /**
  * Compute Greeks via finite differences on interpolated prices

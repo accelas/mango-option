@@ -15,9 +15,9 @@
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
-#define PRICE_TABLE_VERSION 3          // Version 3: adds gammas
+#define PRICE_TABLE_VERSION 4          // Version 4: adds thetas and rhos
 
-// File header structure (Version 3)
+// File header structure (Version 4)
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -33,7 +33,9 @@ typedef struct {
     CoordinateSystem coord_system;    // Version 2+: coordinate transformation
     MemoryLayout memory_layout;       // Version 2+: memory layout strategy
     uint8_t has_gammas;               // Version 3+: 1 if gammas present, 0 otherwise
-    uint8_t padding[119];             // Reserved for future use (reduced from 120)
+    uint8_t has_thetas;               // Version 4+: 1 if thetas present, 0 otherwise
+    uint8_t has_rhos;                 // Version 4+: 1 if rhos present, 0 otherwise
+    uint8_t padding[117];             // Reserved for future use (reduced from 119)
 } PriceTableHeader;
 
 // ---------- Helper Functions ----------
@@ -391,9 +393,11 @@ OptionPriceTable* price_table_create_ex(
         table->prices[i] = NAN;
     }
 
-    // Vega array - not allocated in create, only during precompute
+    // Greeks arrays - not allocated in create, only during precompute
     table->vegas = NULL;
     table->gammas = NULL;
+    table->thetas = NULL;
+    table->rhos = NULL;
 
     // Set metadata
     table->type = type;
@@ -445,6 +449,8 @@ void price_table_destroy(OptionPriceTable *table) {
     free(table->prices);
     free(table->vegas);
     free(table->gammas);
+    free(table->thetas);
+    free(table->rhos);
     free(table);
 }
 
@@ -484,6 +490,30 @@ int price_table_precompute(OptionPriceTable *table,
         // Initialize to NaN
         for (size_t i = 0; i < n_total; i++) {
             table->gammas[i] = NAN;
+        }
+    }
+
+    // Allocate theta array if not already allocated
+    if (!table->thetas) {
+        table->thetas = malloc(n_total * sizeof(double));
+        if (!table->thetas) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->thetas[i] = NAN;
+        }
+    }
+
+    // Allocate rho array if not already allocated
+    if (!table->rhos) {
+        table->rhos = malloc(n_total * sizeof(double));
+        if (!table->rhos) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->rhos[i] = NAN;
         }
     }
 
@@ -868,6 +898,191 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
+    // Fourth pass: Compute theta via finite differences on maturity axis
+    // Note: θ = -∂V/∂τ (negative time derivative for time decay)
+
+    // Handle lower boundary (i_tau == 0) with forward differences
+    if (table->n_maturity > 1) {
+        double tau_0 = table->maturity_grid[0];
+        double tau_1 = table->maturity_grid[1];
+        double h_forward = tau_1 - tau_0;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + 0 * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_next = idx + table->stride_tau;
+
+                        double price_current = table->prices[idx];
+                        double price_next = table->prices[idx_next];
+
+                        // Theta is negative of time derivative
+                        table->thetas[idx] = (!isnan(price_current) && !isnan(price_next))
+                            ? -(price_next - price_current) / h_forward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle interior points (0 < i_tau < n-1) with centered differences (SIMD-friendly)
+    if (table->n_maturity > 2) {
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_tau = 1; i_tau < table->n_maturity - 1; i_tau++) {
+                    double tau_minus = table->maturity_grid[i_tau - 1];
+                    double tau_plus = table->maturity_grid[i_tau + 1];
+                    double h_centered = tau_plus - tau_minus;
+
+                    for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                        #pragma omp simd
+                        for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_tau;
+                            size_t idx_plus = idx + table->stride_tau;
+
+                            double price_minus = table->prices[idx_minus];
+                            double price_plus = table->prices[idx_plus];
+
+                            // Theta is negative of time derivative
+                            table->thetas[idx] = (!isnan(price_minus) && !isnan(price_plus))
+                                ? -(price_plus - price_minus) / h_centered
+                                : NAN;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle upper boundary (i_tau == n-1) with backward differences
+    if (table->n_maturity > 1) {
+        size_t i_tau_last = table->n_maturity - 1;
+        double tau_last = table->maturity_grid[i_tau_last];
+        double tau_prev = table->maturity_grid[i_tau_last - 1];
+        double h_backward = tau_last - tau_prev;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau_last * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_prev = idx - table->stride_tau;
+
+                        double price_current = table->prices[idx];
+                        double price_prev = table->prices[idx_prev];
+
+                        // Theta is negative of time derivative
+                        table->thetas[idx] = (!isnan(price_current) && !isnan(price_prev))
+                            ? -(price_current - price_prev) / h_backward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fifth pass: Compute rho via finite differences on rate axis
+    // ρ = ∂V/∂r (interest rate sensitivity)
+
+    // Handle lower boundary (i_r == 0) with forward differences
+    if (table->n_rate > 1) {
+        double r_0 = table->rate_grid[0];
+        double r_1 = table->rate_grid[1];
+        double h_forward = r_1 - r_0;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + 0 * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_next = idx + table->stride_r;
+
+                        double price_current = table->prices[idx];
+                        double price_next = table->prices[idx_next];
+
+                        table->rhos[idx] = (!isnan(price_current) && !isnan(price_next))
+                            ? (price_next - price_current) / h_forward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle interior points (0 < i_r < n-1) with centered differences (SIMD-friendly)
+    if (table->n_rate > 2) {
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                    for (size_t i_r = 1; i_r < table->n_rate - 1; i_r++) {
+                        double r_minus = table->rate_grid[i_r - 1];
+                        double r_plus = table->rate_grid[i_r + 1];
+                        double h_centered = r_plus - r_minus;
+
+                        #pragma omp simd
+                        for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_r;
+                            size_t idx_plus = idx + table->stride_r;
+
+                            double price_minus = table->prices[idx_minus];
+                            double price_plus = table->prices[idx_plus];
+
+                            table->rhos[idx] = (!isnan(price_minus) && !isnan(price_plus))
+                                ? (price_plus - price_minus) / h_centered
+                                : NAN;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle upper boundary (i_r == n-1) with backward differences
+    if (table->n_rate > 1) {
+        size_t i_r_last = table->n_rate - 1;
+        double r_last = table->rate_grid[i_r_last];
+        double r_prev = table->rate_grid[i_r_last - 1];
+        double h_backward = r_last - r_prev;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r_last * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_prev = idx - table->stride_r;
+
+                        double price_current = table->prices[idx];
+                        double price_prev = table->prices[idx_prev];
+
+                        table->rhos[idx] = (!isnan(price_current) && !isnan(price_prev))
+                            ? (price_current - price_prev) / h_backward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
     MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
 
     free(batch_options);
@@ -1003,6 +1218,96 @@ int price_table_set_gamma(OptionPriceTable *table,
                + i_q * table->stride_q;
 
     table->gammas[idx] = gamma;
+    return 0;
+}
+
+// ========== Theta Get/Set ==========
+
+double price_table_get_theta(const OptionPriceTable *table,
+                              size_t i_m, size_t i_tau, size_t i_sigma,
+                              size_t i_r, size_t i_q) {
+    if (!table || !table->thetas) return NAN;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->thetas[idx];
+}
+
+int price_table_set_theta(OptionPriceTable *table,
+                           size_t i_m, size_t i_tau, size_t i_sigma,
+                           size_t i_r, size_t i_q, double theta) {
+    if (!table || !table->thetas) return -1;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->thetas[idx] = theta;
+    return 0;
+}
+
+// ========== Rho Get/Set ==========
+
+double price_table_get_rho(const OptionPriceTable *table,
+                            size_t i_m, size_t i_tau, size_t i_sigma,
+                            size_t i_r, size_t i_q) {
+    if (!table || !table->rhos) return NAN;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->rhos[idx];
+}
+
+int price_table_set_rho(OptionPriceTable *table,
+                         size_t i_m, size_t i_tau, size_t i_sigma,
+                         size_t i_r, size_t i_q, double rho) {
+    if (!table || !table->rhos) return -1;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->rhos[idx] = rho;
     return 0;
 }
 
@@ -1177,6 +1482,136 @@ double price_table_interpolate_gamma_5d(const OptionPriceTable *table,
     ((OptionPriceTable*)table)->prices = table->gammas;
 
     // Use price interpolation strategy on gamma data
+    double result = table->strategy->interpolate_5d(
+        table, moneyness, maturity, volatility, rate, dividend,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_theta_4d(const OptionPriceTable *table,
+                                         double moneyness, double maturity,
+                                         double volatility, double rate) {
+    if (!table || !table->strategy || !table->thetas) {
+        return NAN;
+    }
+
+    if (table->n_dividend > 0) {
+        // Table is 5D, can't use 4D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports theta interpolation
+    if (!table->strategy->interpolate_4d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with thetas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->thetas;
+
+    // Use price interpolation strategy on theta data
+    double result = table->strategy->interpolate_4d(
+        table, moneyness, maturity, volatility, rate,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_theta_5d(const OptionPriceTable *table,
+                                         double moneyness, double maturity,
+                                         double volatility, double rate,
+                                         double dividend) {
+    if (!table || !table->strategy || !table->thetas) {
+        return NAN;
+    }
+
+    if (table->n_dividend == 0) {
+        // Table is 4D, can't use 5D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports theta interpolation
+    if (!table->strategy->interpolate_5d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with thetas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->thetas;
+
+    // Use price interpolation strategy on theta data
+    double result = table->strategy->interpolate_5d(
+        table, moneyness, maturity, volatility, rate, dividend,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_rho_4d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate) {
+    if (!table || !table->strategy || !table->rhos) {
+        return NAN;
+    }
+
+    if (table->n_dividend > 0) {
+        // Table is 5D, can't use 4D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports rho interpolation
+    if (!table->strategy->interpolate_4d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with rhos for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->rhos;
+
+    // Use price interpolation strategy on rho data
+    double result = table->strategy->interpolate_4d(
+        table, moneyness, maturity, volatility, rate,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_rho_5d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       double dividend) {
+    if (!table || !table->strategy || !table->rhos) {
+        return NAN;
+    }
+
+    if (table->n_dividend == 0) {
+        // Table is 4D, can't use 5D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports rho interpolation
+    if (!table->strategy->interpolate_5d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with rhos for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->rhos;
+
+    // Use price interpolation strategy on rho data
     double result = table->strategy->interpolate_5d(
         table, moneyness, maturity, volatility, rate, dividend,
         table->interp_context);
@@ -1399,7 +1834,9 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         .generation_time = table->generation_time,
         .coord_system = table->coord_system,
         .memory_layout = table->memory_layout,
-        .has_gammas = (table->gammas != NULL) ? 1 : 0
+        .has_gammas = (table->gammas != NULL) ? 1 : 0,
+        .has_thetas = (table->thetas != NULL) ? 1 : 0,
+        .has_rhos = (table->rhos != NULL) ? 1 : 0
     };
     memcpy(header.underlying, table->underlying, sizeof(header.underlying));
 
@@ -1448,6 +1885,22 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         }
     }
 
+    // Write theta data (only if allocated)
+    if (table->thetas) {
+        if (fwrite(table->thetas, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
+    // Write rho data (only if allocated)
+    if (table->rhos) {
+        if (fwrite(table->rhos, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1471,8 +1924,8 @@ OptionPriceTable* price_table_load(const char *filename) {
         return NULL;
     }
 
-    // Support version 1 (without coord_system/memory_layout), version 2, and version 3 (adds gammas)
-    if (header.version < 1 || header.version > 3) {
+    // Support version 1 (without coord_system/memory_layout), version 2, version 3 (adds gammas), and version 4 (adds theta/rho)
+    if (header.version < 1 || header.version > 4) {
         fclose(fp);
         return NULL;
     }
@@ -1597,6 +2050,44 @@ OptionPriceTable* price_table_load(const char *filename) {
     } else {
         // Older version or no gammas - initialize to NULL
         table->gammas = NULL;
+    }
+
+    // Load theta data (version 4+)
+    if (header.version >= 4 && header.has_thetas) {
+        table->thetas = malloc(n_points * sizeof(double));
+        if (!table->thetas) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->thetas, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Older version or no thetas - initialize to NULL
+        // Will be computed if/when precompute is called
+        table->thetas = NULL;
+    }
+
+    // Load rho data (version 4+)
+    if (header.version >= 4 && header.has_rhos) {
+        table->rhos = malloc(n_points * sizeof(double));
+        if (!table->rhos) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->rhos, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Older version or no rhos - initialize to NULL
+        // Will be computed if/when precompute is called
+        table->rhos = NULL;
     }
 
     // Set metadata
