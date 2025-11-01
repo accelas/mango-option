@@ -4,6 +4,7 @@
 extern "C" {
 #include "../src/implied_volatility.h"
 #include "../src/american_option.h"
+#include "../src/price_table.h"
 }
 
 // Test fixture for American option implied volatility tests
@@ -27,11 +28,13 @@ TEST_F(ImpliedVolatilityTest, ATMPutIV) {
         .strike = 100.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 6.08,  // Typical American put price
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.15);  // Reasonable range
@@ -47,11 +50,13 @@ TEST_F(ImpliedVolatilityTest, OTMCallIV) {
         .strike = 110.0,
         .time_to_maturity = 0.5,
         .risk_free_rate = 0.03,
+        .dividend_yield = 0.0,
         .market_price = 3.0,
-        .is_call = true
+        .option_type = OPTION_CALL,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.10);
@@ -66,11 +71,13 @@ TEST_F(ImpliedVolatilityTest, ITMPutIV) {
         .strike = 110.0,
         .time_to_maturity = 0.25,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 11.0,  // ITM put
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.05);
@@ -85,11 +92,13 @@ TEST_F(ImpliedVolatilityTest, SimpleCalculation) {
         .strike = 100.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 6.0,
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv_simple(&params);
+    IVResult result = calculate_iv_simple(&params, nullptr);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
@@ -103,11 +112,13 @@ TEST_F(ImpliedVolatilityTest, InvalidSpot) {
         .strike = 100.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 10.0,
-        .is_call = true
+        .option_type = OPTION_CALL,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_FALSE(result.converged);
     EXPECT_NE(result.error, nullptr);
@@ -120,11 +131,13 @@ TEST_F(ImpliedVolatilityTest, BelowIntrinsicValue) {
         .strike = 110.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 5.0,  // Below intrinsic (10)
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_FALSE(result.converged);
     EXPECT_NE(result.error, nullptr);
@@ -137,11 +150,13 @@ TEST_F(ImpliedVolatilityTest, ShortMaturity) {
         .strike = 100.0,
         .time_to_maturity = 0.027,  // ~1 week
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = 2.0,
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
-    IVResult result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
@@ -178,13 +193,41 @@ TEST_F(ImpliedVolatilityTest, RoundTripConsistency) {
         .strike = 100.0,
         .time_to_maturity = 1.0,
         .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
         .market_price = market_price,
-        .is_call = false
+        .option_type = OPTION_PUT,
+        .exercise_type = AMERICAN
     };
 
-    IVResult iv_result = calculate_iv(&params, &default_grid, 1e-6, 100);
+    IVResult iv_result = calculate_iv(&params, &default_grid, nullptr, 1e-6, 100);
 
     EXPECT_TRUE(iv_result.converged);
     // Should recover original volatility within tolerance
     EXPECT_NEAR(iv_result.implied_vol, true_vol, 0.01);  // Within 1%
+}
+
+// Test new API with NULL table (Task 1 Step 1)
+TEST_F(ImpliedVolatilityTest, AcceptsNullTable) {
+    IVParams params = {
+        .spot_price = 100.0,
+        .strike = 100.0,
+        .time_to_maturity = 1.0,
+        .risk_free_rate = 0.05,
+        .dividend_yield = 0.0,
+        .market_price = 10.0,
+        .option_type = OPTION_CALL,
+        .exercise_type = EUROPEAN
+    };
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 100
+    };
+
+    // Should work with NULL table (uses FDM fallback)
+    IVResult result = calculate_iv(&params, &grid, nullptr, 1e-6, 100);
+
+    EXPECT_TRUE(result.converged);
+    EXPECT_GT(result.implied_vol, 0.0);
+    EXPECT_LT(result.implied_vol, 1.0);
 }

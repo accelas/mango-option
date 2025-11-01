@@ -12,7 +12,7 @@ typedef struct {
     double time_to_maturity;
     double risk_free_rate;
     double market_price;
-    bool is_call;
+    OptionType option_type;
     const AmericanOptionGrid *grid;
 } AmericanObjectiveData;
 
@@ -25,7 +25,7 @@ static double american_objective(double volatility, void *user_data) {
         .volatility = volatility,  // This is what we're solving for
         .risk_free_rate = data->risk_free_rate,
         .time_to_maturity = data->time_to_maturity,
-        .option_type = data->is_call ? OPTION_CALL : OPTION_PUT,
+        .option_type = data->option_type,
         .n_dividends = 0,
         .dividend_times = NULL,
         .dividend_amounts = NULL
@@ -48,6 +48,7 @@ static double american_objective(double volatility, void *user_data) {
 
 IVResult calculate_iv(const IVParams *params,
                      const AmericanOptionGrid *grid_params,
+                     const OptionPriceTable *table,
                      double tolerance, int max_iter) {
     IVResult result = {0.0, 0.0, 0, false, NULL};
 
@@ -79,7 +80,8 @@ IVResult calculate_iv(const IVParams *params,
 
     // Check for arbitrage bounds (American options)
     double intrinsic_value;
-    if (params->is_call) {
+    bool is_call = (params->option_type == OPTION_CALL);
+    if (is_call) {
         intrinsic_value = fmax(params->spot_price - params->strike, 0.0);
         if (params->market_price > params->spot_price) {
             MANGO_TRACE_IV_VALIDATION_ERROR(5, params->market_price, params->spot_price);
@@ -106,7 +108,7 @@ IVResult calculate_iv(const IVParams *params,
                                            params->time_to_maturity,
                                            params->risk_free_rate,
                                            params->market_price,
-                                           params->is_call);
+                                           is_call);
 
     // Establish Brent bounds
     double lower_bound = 1e-6;
@@ -119,7 +121,7 @@ IVResult calculate_iv(const IVParams *params,
         .time_to_maturity = params->time_to_maturity,
         .risk_free_rate = params->risk_free_rate,
         .market_price = params->market_price,
-        .is_call = params->is_call,
+        .option_type = params->option_type,
         .grid = grid_params
     };
 
@@ -141,10 +143,13 @@ IVResult calculate_iv(const IVParams *params,
         MANGO_TRACE_CONVERGENCE_FAILED(MODULE_IMPLIED_VOL, brent_result.iterations, max_iter, 0.0);
     }
 
+    // Note: table parameter will be used in Task 3 for Newton's method
+
     return result;
 }
 
-IVResult calculate_iv_simple(const IVParams *params) {
+IVResult calculate_iv_simple(const IVParams *params,
+                             const OptionPriceTable *table) {
     // Default grid configuration
     AmericanOptionGrid default_grid = {
         .x_min = -0.7,      // ln(0.5)
@@ -154,5 +159,5 @@ IVResult calculate_iv_simple(const IVParams *params) {
         .n_steps = 1000
     };
 
-    return calculate_iv(params, &default_grid, 1e-6, 100);
+    return calculate_iv(params, &default_grid, table, 1e-6, 100);
 }

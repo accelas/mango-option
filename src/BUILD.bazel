@@ -80,6 +80,8 @@ cc_library(
     hdrs = [
         "implied_volatility.h",
         "brent.h",
+        "price_table.h",
+        "interp_strategy.h",
         "ivcalc_trace.h",
     ],
     copts = [
