@@ -27,10 +27,10 @@ TEST_F(PriceTablePrecomputeTest, NullGridPointer) {
     double moneyness[] = {0.9, 1.0, 1.1};
     double maturity[] = {0.25, 0.5};
     double volatility[] = {0.2, 0.3};
-    double rate[] = {0.05};
+    double rate[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 3, maturity, 2, volatility, 2, rate, 1, nullptr, 0,
+        moneyness, 3, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -174,11 +174,11 @@ TEST_F(PriceTablePrecomputeTest, BatchSizeConsistency) {
     double moneyness[] = {0.9, 1.0, 1.1};
     double maturity[] = {0.25, 0.5};
     double volatility[] = {0.2, 0.3};
-    double rate[] = {0.05};
+    double rate[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     // First run with default batch size
     OptionPriceTable *table1 = price_table_create(
-        moneyness, 3, maturity, 2, volatility, 2, rate, 1, nullptr, 0,
+        moneyness, 3, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table1, nullptr);
@@ -188,7 +188,7 @@ TEST_F(PriceTablePrecomputeTest, BatchSizeConsistency) {
     setenv("IVCALC_PRECOMPUTE_BATCH_SIZE", "1", 1);
 
     OptionPriceTable *table2 = price_table_create(
-        moneyness, 3, maturity, 2, volatility, 2, rate, 1, nullptr, 0,
+        moneyness, 3, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table2, nullptr);
@@ -211,11 +211,11 @@ TEST_F(PriceTablePrecomputeTest, GetSetOperations) {
     // Test price_table_get and price_table_set operations
     double moneyness[] = {0.9, 1.0};
     double maturity[] = {0.25, 0.5};
-    double volatility[] = {0.2};
-    double rate[] = {0.05};
+    double volatility[] = {0.2, 0.3};  // Cubic interpolation requires ≥2 points
+    double rate[] = {0.04, 0.05};      // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
-        moneyness, 2, maturity, 2, volatility, 1, rate, 1, nullptr, 0,
+        moneyness, 2, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -272,21 +272,21 @@ TEST_F(PriceTablePrecomputeTest, IntrinsicValueBound) {
 
 TEST_F(PriceTablePrecomputeTest, CallPutTypeCorrectness) {
     // Verify that call and put tables store different prices
-    double moneyness[] = {1.0};
-    double maturity[] = {0.5};
-    double volatility[] = {0.25};
-    double rate[] = {0.05};
+    double moneyness[] = {0.95, 1.0};     // Cubic interpolation requires ≥2 points
+    double maturity[] = {0.5, 1.0};       // Cubic interpolation requires ≥2 points
+    double volatility[] = {0.25, 0.30};   // Cubic interpolation requires ≥2 points
+    double rate[] = {0.04, 0.05};         // Cubic interpolation requires ≥2 points
 
     // American call
     OptionPriceTable *call_table = price_table_create(
-        moneyness, 1, maturity, 1, volatility, 1, rate, 1, nullptr, 0,
+        moneyness, 2, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_CALL, AMERICAN);
     ASSERT_NE(call_table, nullptr);
     price_table_precompute(call_table, &default_grid);
 
     // American put
     OptionPriceTable *put_table = price_table_create(
-        moneyness, 1, maturity, 1, volatility, 1, rate, 1, nullptr, 0,
+        moneyness, 2, maturity, 2, volatility, 2, rate, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
     ASSERT_NE(put_table, nullptr);
     price_table_precompute(put_table, &default_grid);
@@ -354,10 +354,10 @@ TEST(PriceTableTest, VegaArrayAllocation) {
     double m[] = {0.9, 1.0, 1.1};
     double tau[] = {0.25, 0.5};
     double sigma[] = {0.2, 0.3};
-    double r[] = {0.05};
+    double r[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
-        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        m, 3, tau, 2, sigma, 2, r, 2, nullptr, 0,
         OPTION_CALL, AMERICAN);
 
     ASSERT_NE(table, nullptr);
@@ -372,10 +372,10 @@ TEST(PriceTableTest, VegaGetSet) {
     double m[] = {0.9, 1.0, 1.1};
     double tau[] = {0.25, 0.5};
     double sigma[] = {0.2, 0.3};
-    double r[] = {0.05};
+    double r[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
-        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        m, 3, tau, 2, sigma, 2, r, 2, nullptr, 0,
         OPTION_CALL, AMERICAN);
 
     // Vega array is allocated during precompute
@@ -408,13 +408,13 @@ TEST(PriceTableTest, VegaGetSet) {
 
 TEST(PriceTableTest, VegaPrecomputation) {
     // Small grid for fast test
-    double m[] = {1.0};
-    double tau[] = {0.5};
+    double m[] = {0.95, 1.0};  // Cubic interpolation requires ≥2 points
+    double tau[] = {0.5, 1.0};  // Cubic interpolation requires ≥2 points
     double sigma[] = {0.15, 0.20, 0.25};  // Need 3+ points for centered diff
-    double r[] = {0.05};
+    double r[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
-        m, 1, tau, 1, sigma, 3, r, 1, nullptr, 0,
+        m, 2, tau, 2, sigma, 3, r, 2, nullptr, 0,
         OPTION_PUT, AMERICAN);
 
     // Precompute with coarse grid (fast test)
@@ -515,9 +515,9 @@ TEST(PriceTableTest, VegaInterpolation5D) {
 TEST(PriceTableTest, VegaSaveLoad) {
     // Create and precompute table
     std::vector<double> m = {0.9, 1.0, 1.1};
-    std::vector<double> tau = {0.5};
+    std::vector<double> tau = {0.5, 1.0};  // Cubic interpolation requires ≥2 points
     std::vector<double> sigma = {0.15, 0.20, 0.25};
-    std::vector<double> r = {0.05};
+    std::vector<double> r = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
         m.data(), m.size(),
@@ -560,10 +560,10 @@ TEST(PriceTableTest, LoadOldFormatWithoutVega) {
     // doesn't crash and initializes vega to NaN
 
     // Create a table and save with old format (manually, without vega)
-    std::vector<double> m = {1.0};
-    std::vector<double> tau = {0.5};
-    std::vector<double> sigma = {0.20};
-    std::vector<double> r = {0.05};
+    std::vector<double> m = {0.95, 1.0};  // Cubic interpolation requires ≥2 points
+    std::vector<double> tau = {0.5, 1.0};  // Cubic interpolation requires ≥2 points
+    std::vector<double> sigma = {0.20, 0.25};  // Cubic interpolation requires ≥2 points
+    std::vector<double> r = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create(
         m.data(), m.size(),
@@ -600,17 +600,17 @@ TEST(PriceTableTest, GammaGetSet) {
     double m[] = {0.9, 1.0, 1.1};
     double tau[] = {0.25, 0.5};
     double sigma[] = {0.2, 0.3};
-    double r[] = {0.05};
+    double r[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
-        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        m, 3, tau, 2, sigma, 2, r, 2, nullptr, 0,
         OPTION_PUT, AMERICAN,
         COORD_RAW, LAYOUT_M_INNER);
 
     ASSERT_NE(table, nullptr);
 
     // Allocate gammas
-    size_t n_total = 3 * 2 * 2 * 1;
+    size_t n_total = 3 * 2 * 2 * 2;
     table->gammas = (double*)malloc(n_total * sizeof(double));
     ASSERT_NE(table->gammas, nullptr);
 
@@ -636,13 +636,13 @@ TEST(PriceTableTest, GammaGetSet) {
 
 TEST(PriceTableTest, GammaPrecomputation) {
     // Small grid for fast test
-    double m[] = {1.0};
-    double tau[] = {0.5};
+    double m[] = {0.95, 1.0};  // Cubic interpolation requires ≥2 points
+    double tau[] = {0.5, 1.0};  // Cubic interpolation requires ≥2 points
     double sigma[] = {0.15, 0.20, 0.25};  // Need 3+ for centered diff
-    double r[] = {0.05};
+    double r[] = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
-        m, 1, tau, 1, sigma, 3, r, 1, nullptr, 0,
+        m, 2, tau, 2, sigma, 3, r, 2, nullptr, 0,
         OPTION_PUT, AMERICAN,
         COORD_RAW, LAYOUT_M_INNER);
 
@@ -716,7 +716,7 @@ TEST(PriceTableTest, GammaInterpolation5D) {
     std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
     std::vector<double> tau = {0.25, 0.5};
     std::vector<double> sigma = {0.15, 0.20, 0.25};
-    std::vector<double> r = {0.05};
+    std::vector<double> r = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
     std::vector<double> q = {0.0, 0.02};
 
     OptionPriceTable *table = price_table_create_ex(
@@ -755,9 +755,9 @@ TEST(PriceTableTest, GammaInterpolation5D) {
 TEST(PriceTableTest, GammaSaveLoad) {
     // Create and precompute table
     std::vector<double> m = {0.9, 1.0, 1.1};
-    std::vector<double> tau = {0.5};
+    std::vector<double> tau = {0.5, 1.0};  // Cubic interpolation requires ≥2 points
     std::vector<double> sigma = {0.15, 0.20, 0.25};
-    std::vector<double> r = {0.05};
+    std::vector<double> r = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
         m.data(), m.size(),
@@ -807,10 +807,10 @@ TEST(PriceTableTest, LoadOldFormatWithoutGamma) {
     // In practice, you'd have a v2 file to test with
     // For now, just verify that a newly loaded table initializes gammas correctly
 
-    std::vector<double> m = {1.0};
-    std::vector<double> tau = {0.5};
-    std::vector<double> sigma = {0.20};
-    std::vector<double> r = {0.05};
+    std::vector<double> m = {0.95, 1.0};  // Cubic interpolation requires ≥2 points
+    std::vector<double> tau = {0.5, 1.0};  // Cubic interpolation requires ≥2 points
+    std::vector<double> sigma = {0.20, 0.25};  // Cubic interpolation requires ≥2 points
+    std::vector<double> r = {0.04, 0.05};  // Cubic interpolation requires ≥2 points
 
     OptionPriceTable *table = price_table_create_ex(
         m.data(), m.size(),
