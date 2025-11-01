@@ -114,6 +114,18 @@ cc_test(
 )
 
 cc_test(
+    name = "adaptive_accuracy_test",
+    srcs = ["adaptive_accuracy_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:validation",
+        "//src:price_table",
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "interpolation_test",
     srcs = ["interpolation_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
