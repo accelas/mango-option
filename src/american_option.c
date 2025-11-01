@@ -89,6 +89,8 @@ double american_option_right_boundary(double t, void *user_data) {
 
 // Black-Scholes spatial operator in log-price coordinates (vectorized)
 // L(V) = (1/2)σ²∂²V/∂x² + (r - σ²/2)∂V/∂x - rV
+//
+// Supports non-uniform grids using local finite difference formulas
 void american_option_spatial_operator(const double *x, [[maybe_unused]] double t,
                                      const double *V, size_t n_points,
                                      double *LV, void *user_data) {
@@ -96,9 +98,6 @@ void american_option_spatial_operator(const double *x, [[maybe_unused]] double t
     const OptionData *data = ext_data->option_data;
     const double sigma = data->volatility;
     const double r = data->risk_free_rate;
-    const double dx = (x[n_points - 1] - x[0]) / (n_points - 1);
-    const double dx_inv = 1.0 / dx;
-    const double dx2_inv = 1.0 / (dx * dx);
 
     // Black-Scholes PDE coefficients in log-price coordinates
     // The solver time t represents time-to-maturity τ
@@ -110,14 +109,33 @@ void american_option_spatial_operator(const double *x, [[maybe_unused]] double t
     LV[0] = 0.0;
     LV[n_points - 1] = 0.0;
 
-    // Interior points: second-order centered differences
-    #pragma omp simd
+    // Interior points: non-uniform grid finite differences (second-order accurate)
+    // For non-uniform grid with local spacings:
+    //   h_minus = x[i] - x[i-1]
+    //   h_plus = x[i+1] - x[i]
+    //
+    // Second-order accurate formulas for non-uniform grids:
+    //
+    // First derivative:
+    //   ∂V/∂x = [-h+²·V[i-1] + (h+² - h-²)·V[i] + h-²·V[i+1]] / [h-·h+·(h- + h+)]
+    //
+    // Second derivative:
+    //   ∂²V/∂x² = 2·[h+·V[i-1] - (h+ + h-)·V[i] + h-·V[i+1]] / [h-·h+·(h- + h+)]
     for (size_t i = 1; i < n_points - 1; i++) {
-        // ∂²V/∂x² ≈ (V[i-1] - 2*V[i] + V[i+1]) / dx²
-        double d2V_dx2 = (V[i - 1] - 2.0 * V[i] + V[i + 1]) * dx2_inv;
+        const double h_minus = x[i] - x[i - 1];
+        const double h_plus = x[i + 1] - x[i];
+        const double h_sum = h_plus + h_minus;
+        const double h_prod = h_minus * h_plus;
+        const double denom = h_prod * h_sum;
 
-        // ∂V/∂x ≈ (V[i+1] - V[i-1]) / (2*dx) (centered)
-        double dV_dx = (V[i + 1] - V[i - 1]) * 0.5 * dx_inv;
+        // First derivative (second-order accurate on non-uniform grid)
+        const double dV_dx = (-h_plus * h_plus * V[i - 1] +
+                              (h_plus * h_plus - h_minus * h_minus) * V[i] +
+                              h_minus * h_minus * V[i + 1]) / denom;
+
+        // Second derivative (second-order accurate on non-uniform grid)
+        const double d2V_dx2 = 2.0 * (h_plus * V[i - 1] - h_sum * V[i] +
+                                      h_minus * V[i + 1]) / denom;
 
         LV[i] = coeff_2nd * d2V_dx2 + coeff_1st * dV_dx + coeff_0th * V[i];
     }
@@ -341,6 +359,14 @@ AmericanOptionResult american_option_solve(
         return result;
     }
 
+    // Validate that moneyness grid is sorted in ascending order
+    for (size_t i = 1; i < n_m; i++) {
+        if (m_grid[i] <= m_grid[i - 1]) {
+            // Grid must be strictly increasing
+            return result;
+        }
+    }
+
     // Trace option pricing start
     MANGO_TRACE_OPTION_START(option_data->option_type, option_data->strike,
                               option_data->volatility, option_data->time_to_maturity);
@@ -438,7 +464,16 @@ AmericanOptionResult american_option_solve(
     }
 
     // Create solver configuration with relaxed tolerance
-    BoundaryConfig bc_config = pde_default_boundary_config();
+    // Use Neumann BCs (zero gradient) for arbitrary user-provided grids
+    // since the grid may not extend to natural boundaries (S→0, S→∞)
+    BoundaryConfig bc_config = {
+        .left_type = BC_NEUMANN,
+        .right_type = BC_NEUMANN,
+        .left_robin_a = 1.0,
+        .left_robin_b = 0.0,
+        .right_robin_a = 1.0,
+        .right_robin_b = 0.0
+    };
     TRBDF2Config trbdf2_config = pde_default_trbdf2_config();
     trbdf2_config.tolerance = 1e-4;  // Relaxed tolerance for American options
     trbdf2_config.max_iter = 200;    // More iterations allowed
