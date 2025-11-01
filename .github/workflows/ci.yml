@@ -65,23 +65,42 @@ jobs:
 
       - name: Run all tests
         run: |
-          # Define slow test bypass list (easily extensible)
-          # Tests here are excluded from CI but can be run manually
-          SLOW_TESTS=(
-            # IV tests using heavy FDM grids (250-2200ms each)
-            "ImpliedVolatilityTest.ATMPutIV"
-            "ImpliedVolatilityTest.OTMCallIV"
-            "ImpliedVolatilityTest.ITMPutIV"
-            "ImpliedVolatilityTest.SimpleCalculation"
-            "ImpliedVolatilityTest.ShortMaturity"
-            "ImpliedVolatilityTest.RoundTripConsistency"
-            "ImpliedVolatilityTest.NewtonMethodWithTable"
+          # ============================================================
+          # Slow Test Bypass List (easily extensible)
+          # ============================================================
+          # All slow test cases are excluded from CI via GoogleTest filter
+          # but can be run manually with:
+          #   bazel test //tests:implied_volatility_test
+          #   bazel test //tests:adaptive_accuracy_test
+          #   bazel test //tests:price_table_slow_test
+          #
+          # To add a new slow test: append to SLOW_TEST_CASES array below
+          # ============================================================
+
+          SLOW_TEST_CASES=(
+            # ImpliedVolatilityTest: Heavy FDM grids
+            # Medium-slow (250-350ms each, cumulative ~2s):
+            "ImpliedVolatilityTest.ATMPutIV"           # 267ms
+            "ImpliedVolatilityTest.OTMCallIV"          # 257ms
+            "ImpliedVolatilityTest.ITMPutIV"           # 339ms
+            "ImpliedVolatilityTest.SimpleCalculation"  # 264ms
+            "ImpliedVolatilityTest.ShortMaturity"      # 299ms
+            "ImpliedVolatilityTest.RoundTripConsistency"  # 346ms
+            # Slow (>1s):
+            "ImpliedVolatilityTest.NewtonMethodWithTable"  # 2.2s
+
+            # AdaptiveAccuracyTest: Only the slow ones
+            "AdaptiveAccuracyTest.AccuracyImprovement"  # 241s (4 minutes!)
+            "AdaptiveAccuracyTest.AdaptiveConvergence"  # Likely slow (similar logic)
+
+            # PriceTablePrecomputeSlowTest: Precomputes 1200 grid points
+            "PriceTablePrecomputeSlowTest.InterpolationAccuracyIntegration"  # 4.8s
           )
 
           # Build filter string: -Test1:Test2:Test3
-          FILTER="-$(IFS=:; echo "${SLOW_TESTS[*]}")"
+          FILTER="-$(IFS=:; echo "${SLOW_TEST_CASES[*]}")"
 
-          # Run tests with filter
+          # Run tests (excludes manual tags by default + filtered test cases)
           bazel test //tests/... --test_output=errors --test_filter="$FILTER"
 
       - name: Display test results

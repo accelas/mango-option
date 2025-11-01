@@ -123,7 +123,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Disabled: requires Phase 2 completion (see issue #55)
+    # Note: Slow tests excluded from CI via test_filter in .github/workflows/ci.yml
 )
 
 cc_test(
@@ -183,7 +183,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Too slow for CI/CD (precomputes 1200 grid points)
+    # Note: Slow tests excluded from CI via test_filter in .github/workflows/ci.yml
 )
 
 cc_test(
