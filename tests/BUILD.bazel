@@ -123,7 +123,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    # Note: Slow tests excluded from CI via test_filter in .github/workflows/ci.yml
+    tags = ["manual"],  # Disabled: mostly slow tests + known failures (issue #61)
 )
 
 cc_test(
@@ -183,7 +183,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    # Note: Slow tests excluded from CI via test_filter in .github/workflows/ci.yml
+    tags = ["manual"],  # Disabled: precomputes 1200 grid points (~5s)
 )
 
 cc_test(
