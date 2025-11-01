@@ -73,31 +73,6 @@ void transform_query_to_grid(
 }
 
 /**
- * Convert flat index to multi-dimensional grid indices.
- * Maps a linear array index to (moneyness, maturity, volatility, rate, dividend)
- * indices based on the table's stride configuration.
- */
-static void unflatten_index(size_t idx, const OptionPriceTable *table,
-                           size_t *i_m, size_t *i_tau, size_t *i_sigma,
-                           size_t *i_r, size_t *i_q) {
-    size_t remaining = idx;
-
-    *i_m = remaining / table->stride_m;
-    remaining %= table->stride_m;
-
-    *i_tau = remaining / table->stride_tau;
-    remaining %= table->stride_tau;
-
-    *i_sigma = remaining / table->stride_sigma;
-    remaining %= table->stride_sigma;
-
-    *i_r = remaining / table->stride_r;
-    remaining %= table->stride_r;
-
-    *i_q = remaining;
-}
-
-/**
  * Convert grid point indices to OptionData structure.
  * Extracts grid values at the specified indices and constructs an option
  * with fixed reference strike K_ref = 100.0.
