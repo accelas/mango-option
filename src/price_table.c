@@ -491,6 +491,30 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
+    // Allocate theta array if not already allocated
+    if (!table->thetas) {
+        table->thetas = malloc(n_total * sizeof(double));
+        if (!table->thetas) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->thetas[i] = NAN;
+        }
+    }
+
+    // Allocate rho array if not already allocated
+    if (!table->rhos) {
+        table->rhos = malloc(n_total * sizeof(double));
+        if (!table->rhos) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->rhos[i] = NAN;
+        }
+    }
+
     size_t batch_size = get_batch_size();
 
     // Allocate batch arrays
@@ -866,6 +890,191 @@ int price_table_precompute(OptionPriceTable *table,
                                 table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fourth pass: Compute theta via finite differences on maturity axis
+    // Note: θ = -∂V/∂τ (negative time derivative for time decay)
+
+    // Handle lower boundary (i_tau == 0) with forward differences
+    if (table->n_maturity > 1) {
+        double tau_0 = table->maturity_grid[0];
+        double tau_1 = table->maturity_grid[1];
+        double h_forward = tau_1 - tau_0;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + 0 * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_next = idx + table->stride_tau;
+
+                        double price_current = table->prices[idx];
+                        double price_next = table->prices[idx_next];
+
+                        // Theta is negative of time derivative
+                        table->thetas[idx] = (!isnan(price_current) && !isnan(price_next))
+                            ? -(price_next - price_current) / h_forward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle interior points (0 < i_tau < n-1) with centered differences (SIMD-friendly)
+    if (table->n_maturity > 2) {
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_tau = 1; i_tau < table->n_maturity - 1; i_tau++) {
+                    double tau_minus = table->maturity_grid[i_tau - 1];
+                    double tau_plus = table->maturity_grid[i_tau + 1];
+                    double h_centered = tau_plus - tau_minus;
+
+                    for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                        #pragma omp simd
+                        for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_tau;
+                            size_t idx_plus = idx + table->stride_tau;
+
+                            double price_minus = table->prices[idx_minus];
+                            double price_plus = table->prices[idx_plus];
+
+                            // Theta is negative of time derivative
+                            table->thetas[idx] = (!isnan(price_minus) && !isnan(price_plus))
+                                ? -(price_plus - price_minus) / h_centered
+                                : NAN;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle upper boundary (i_tau == n-1) with backward differences
+    if (table->n_maturity > 1) {
+        size_t i_tau_last = table->n_maturity - 1;
+        double tau_last = table->maturity_grid[i_tau_last];
+        double tau_prev = table->maturity_grid[i_tau_last - 1];
+        double h_backward = tau_last - tau_prev;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau_last * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_prev = idx - table->stride_tau;
+
+                        double price_current = table->prices[idx];
+                        double price_prev = table->prices[idx_prev];
+
+                        // Theta is negative of time derivative
+                        table->thetas[idx] = (!isnan(price_current) && !isnan(price_prev))
+                            ? -(price_current - price_prev) / h_backward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fifth pass: Compute rho via finite differences on rate axis
+    // ρ = ∂V/∂r (interest rate sensitivity)
+
+    // Handle lower boundary (i_r == 0) with forward differences
+    if (table->n_rate > 1) {
+        double r_0 = table->rate_grid[0];
+        double r_1 = table->rate_grid[1];
+        double h_forward = r_1 - r_0;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + 0 * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_next = idx + table->stride_r;
+
+                        double price_current = table->prices[idx];
+                        double price_next = table->prices[idx_next];
+
+                        table->rhos[idx] = (!isnan(price_current) && !isnan(price_next))
+                            ? (price_next - price_current) / h_forward
+                            : NAN;
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle interior points (0 < i_r < n-1) with centered differences (SIMD-friendly)
+    if (table->n_rate > 2) {
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                    for (size_t i_r = 1; i_r < table->n_rate - 1; i_r++) {
+                        double r_minus = table->rate_grid[i_r - 1];
+                        double r_plus = table->rate_grid[i_r + 1];
+                        double h_centered = r_plus - r_minus;
+
+                        #pragma omp simd
+                        for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_r;
+                            size_t idx_plus = idx + table->stride_r;
+
+                            double price_minus = table->prices[idx_minus];
+                            double price_plus = table->prices[idx_plus];
+
+                            table->rhos[idx] = (!isnan(price_minus) && !isnan(price_plus))
+                                ? (price_plus - price_minus) / h_centered
+                                : NAN;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle upper boundary (i_r == n-1) with backward differences
+    if (table->n_rate > 1) {
+        size_t i_r_last = table->n_rate - 1;
+        double r_last = table->rate_grid[i_r_last];
+        double r_prev = table->rate_grid[i_r_last - 1];
+        double h_backward = r_last - r_prev;
+
+        for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+            for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+                for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                    #pragma omp simd
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r_last * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_prev = idx - table->stride_r;
+
+                        double price_current = table->prices[idx];
+                        double price_prev = table->prices[idx_prev];
+
+                        table->rhos[idx] = (!isnan(price_current) && !isnan(price_prev))
+                            ? (price_current - price_prev) / h_backward
+                            : NAN;
                     }
                 }
             }
