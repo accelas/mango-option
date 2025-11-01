@@ -94,6 +94,7 @@ cc_library(
     deps = [
         ":american_option",
         ":lets_be_rational",
+        ":price_table",
     ],
     visibility = ["//visibility:public"],
 )
