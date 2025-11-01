@@ -39,11 +39,11 @@ cc_test(
 )
 
 cc_test(
-    name = "european_option_test",
-    srcs = ["european_option_test.cc"],
+    name = "lets_be_rational_test",
+    srcs = ["lets_be_rational_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
     deps = [
-        "//src:european_option",
+        "//src:lets_be_rational",
         "@googletest//:gtest_main",
     ],
 )
@@ -54,7 +54,7 @@ cc_test(
     copts = ["-std=c++17", "-Wall", "-Wextra"],
     deps = [
         "//src:implied_volatility",
-        "//src:european_option",
+        "//src:american_option",
         "@googletest//:gtest_main",
     ],
 )
@@ -85,7 +85,6 @@ cc_test(
     srcs = ["interpolation_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
     deps = [
-        "//src:interp_multilinear",
         "//src:interp_cubic",
         "//src:iv_surface",
         "//src:price_table",
@@ -99,7 +98,6 @@ cc_test(
     copts = ["-std=c++17", "-Wall", "-Wextra"],
     deps = [
         "//src:interp_cubic",
-        "//src:interp_multilinear",
         "//src:price_table",
         "@googletest//:gtest_main",
     ],
@@ -127,6 +125,19 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_test(
+    name = "price_table_slow_test",
+    size = "large",
+    srcs = ["price_table_slow_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],  # Too slow for CI/CD (precomputes 1200 grid points)
 )
 
 cc_test(

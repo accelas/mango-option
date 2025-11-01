@@ -7,7 +7,7 @@
 extern "C" {
 #include "../src/american_option.h"
 #include "../src/implied_volatility.h"
-#include "../src/european_option.h"
+#include "../src/lets_be_rational.h"
 }
 
 // Benchmark: Sequential American option pricing
@@ -107,19 +107,34 @@ static void BM_ImpliedVol_Sequential(benchmark::State& state) {
     std::vector<double> market_prices(n_options);
     std::vector<IVParams> params(n_options);
 
+    // Grid for market price generation
+    AmericanOptionGrid grid_gen = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 101,
+        .dt = 0.001,
+        .n_steps = 500
+    };
+
     for (size_t i = 0; i < n_options; i++) {
         double strike = 95.0 + i * 0.5;
         double vol = 0.2 + i * 0.005;
 
-        // Generate "market" price using Black-Scholes
-        market_prices[i] = black_scholes_price(
-            100.0,  // spot
-            strike,
-            1.0,    // time_to_maturity
-            0.05,   // risk_free_rate
-            vol,
-            true    // is_call
-        );
+        // Generate "market" price using American option pricing
+        OptionData option = {
+            .strike = strike,
+            .volatility = vol,
+            .risk_free_rate = 0.05,
+            .time_to_maturity = 1.0,
+            .option_type = OPTION_CALL,
+            .n_dividends = 0,
+            .dividend_times = nullptr,
+            .dividend_amounts = nullptr
+        };
+
+        AmericanOptionResult price_result = american_option_price(&option, &grid_gen);
+        market_prices[i] = american_option_get_value_at_spot(price_result.solver, 100.0, strike);
+        american_option_free_result(&price_result);
 
         params[i] = (IVParams){
             .spot_price = 100.0,
@@ -134,7 +149,7 @@ static void BM_ImpliedVol_Sequential(benchmark::State& state) {
     // Benchmark loop
     for (auto _ : state) {
         for (size_t i = 0; i < n_options; i++) {
-            IVResult result = implied_volatility_calculate_simple(&params[i]);
+            IVResult result = calculate_iv_simple(&params[i]);
             benchmark::DoNotOptimize(result.implied_vol);
         }
     }

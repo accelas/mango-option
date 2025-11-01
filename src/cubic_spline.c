@@ -30,7 +30,7 @@ int pde_spline_init(CubicSpline *spline, const double *x, const double *y,
                     size_t n_points, double *workspace, double *temp_workspace) {
     if (n_points < 2 || spline == nullptr || workspace == nullptr || temp_workspace == nullptr) {
         // Trace error condition
-        IVCALC_TRACE_SPLINE_ERROR(n_points, 2);
+        MANGO_TRACE_SPLINE_ERROR(n_points, 2);
         return -1;
     }
 
@@ -118,7 +118,7 @@ int pde_spline_init(CubicSpline *spline, const double *x, const double *y,
 CubicSpline* pde_spline_create(const double *x, const double *y, size_t n_points) {
     if (n_points < 2) {
         // Trace error condition
-        IVCALC_TRACE_SPLINE_ERROR(n_points, 2);
+        MANGO_TRACE_SPLINE_ERROR(n_points, 2);
         return nullptr;
     }
 

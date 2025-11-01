@@ -4,11 +4,11 @@
 
 ## Executive Summary
 
-The mango-iv codebase implements a complete suite for implied volatility (IV) calculation and American option pricing. It uses a **callback-based, vectorized architecture** with:
+The mango-iv codebase implements a complete suite for American option pricing and implied volatility (IV) calculation. It uses a **callback-based, vectorized architecture** with:
 
-- **Black-Scholes formula** for European option pricing (basis for IV calculation)
+- **Let's Be Rational** for fast European IV estimation (used for American IV bounds)
 - **TR-BDF2 PDE solver** for American option pricing via finite difference method
-- **Brent's method** for root-finding in IV calculation
+- **American IV calculation** combining FDM with Brent's method for root-finding
 - **Cubic spline interpolation** for off-grid solution evaluation
 - **USDT tracing** for zero-overhead diagnostic monitoring
 - **OpenMP SIMD** pragmas for automatic vectorization
@@ -20,9 +20,9 @@ The mango-iv codebase implements a complete suite for implied volatility (IV) ca
 
 ```mermaid
 graph TD
-    IV[Implied Volatility Calculator<br/>implied_volatility.c/.h<br/>- IV search via Brent's method]
+    IV[American IV Calculator<br/>implied_volatility.c/.h<br/>- FDM-based IV via Brent's method<br/>- Nested iteration structure]
 
-    EO[European Option Pricer<br/>european_option.c/.h<br/>- Black-Scholes pricing<br/>- Black-Scholes vega]
+    LBR[Let's Be Rational<br/>lets_be_rational.c/.h<br/>- European IV estimation<br/>- Bound calculation for American IV]
 
     AO[American Option Pricer<br/>american_option.c/.h<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
 
@@ -33,13 +33,14 @@ graph TD
     TRI[Tridiagonal Solver]
 
     IV --> BRENT
-    IV --> EO
+    IV --> LBR
+    IV --> AO
     AO --> PDE
     PDE --> SPLINE
     PDE --> TRI
 
     style IV fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
-    style EO fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style LBR fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style AO fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
     style PDE fill:#ffe1f5,stroke:#333,stroke-width:2px,color:#000
     style BRENT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
@@ -49,12 +50,13 @@ graph TD
 
 ---
 
-## Component 1: Implied Volatility Calculation
+## Component 1: American Implied Volatility Calculation
 
 ### File Locations
 - **Header**: `src/implied_volatility.h`
 - **Implementation**: `src/implied_volatility.c`
 - **Tests**: `tests/implied_volatility_test.cc`
+- **Benchmark**: `benchmarks/american_iv_benchmark.cc`
 - **Example**: `examples/example_implied_volatility.c`
 
 ### Core Data Structures
@@ -82,85 +84,65 @@ typedef struct {
 
 ### Dependencies
 
-The implied volatility calculator depends on the **European Option** module (`european_option.{h,c}`) for Black-Scholes pricing functions. These functions are described below but are implemented in the separate `european_option` module.
+The American IV calculator depends on:
+- **Let's Be Rational** module (`lets_be_rational.{h,c}`) for European IV estimation (used to calculate upper bounds)
+- **American Option** module (`american_option.{h,c}`) for FDM-based pricing
+- **Brent's method** (`brent.h`) for root-finding
 
 ### Key Functions
 
-#### 1. **Black-Scholes Option Pricing** (from `european_option.h`)
+#### 1. **Let's Be Rational - European IV Estimation** (from `lets_be_rational.h`)
 ```c
-double black_scholes_price(double spot, double strike, 
-                           double time_to_maturity,
-                           double risk_free_rate, 
-                           double volatility, bool is_call)
+LBRResult lbr_implied_volatility(double spot, double strike,
+                                  double time_to_maturity,
+                                  double risk_free_rate,
+                                  double market_price,
+                                  bool is_call)
 ```
+
+**Purpose**: Fast European IV estimation for calculating American IV upper bounds
 
 **How it works:**
-- Computes d₁ and d₂ parameters using:
-  - d₁ = [ln(S/K) + (r + σ²/2)T] / (σ√T)
-  - d₂ = d₁ - σ√T
-- Uses **Abramowitz & Stegun approximation** for standard normal CDF (max error: 7.5e-8)
-- For calls: C = S·N(d₁) - K·e^(-rT)·N(d₂)
-- For puts: P = K·e^(-rT)·N(-d₂) - S·N(-d₁)
+- Uses Black-Scholes formula with Abramowitz & Stegun normal CDF approximation
+- Bisection-based root finding (simpler than Brent's method)
+- Typically converges in 20-30 iterations
+- **Performance**: ~781ns per calculation
 
-**Performance**: O(1) with high precision
+**Why needed for American IV:**
+- American option value ≥ European option value (early exercise premium)
+- If European IV = σ_euro, then American IV ≤ σ_euro × 1.5 (heuristic upper bound)
+- Provides tight bracketing interval for Brent's method
+- Avoids expensive FDM calls during bound calculation
 
-#### 2. **Black-Scholes Greeks** (from `european_option.h`)
+**Implementation note**: Uses simple bisection instead of Brent's method for simplicity and predictable performance
 
-The `european_option` module provides analytical Greeks calculations:
-
-**Vega** (∂V/∂σ):
+#### 2. **American Option Pricing Objective** (internal)
 ```c
-double black_scholes_vega(double spot, double strike,
-                          double time_to_maturity,
-                          double risk_free_rate, double volatility)
+static double american_objective(double volatility, void *user_data)
 ```
-- Formula: Vega = S·φ(d₁)·√T where φ is the standard normal PDF
-- Same for calls and puts
-- Used by Brent's method for convergence diagnostics
 
-**Delta** (∂V/∂S):
-```c
-double black_scholes_delta(double spot, double strike,
-                           double time_to_maturity,
-                           double risk_free_rate, double volatility, bool is_call)
-```
-- For calls: Δ = N(d₁)
-- For puts: Δ = N(d₁) - 1
+**Purpose**: Objective function for Brent's method root-finding
 
-**Gamma** (∂²V/∂S²):
-```c
-double black_scholes_gamma(double spot, double strike,
-                           double time_to_maturity,
-                           double risk_free_rate, double volatility)
-```
-- Same for calls and puts
-- Γ = φ(d₁) / (S·σ·√T)
+**How it works:**
+1. Receives guessed volatility σ from Brent's method
+2. Constructs American option with that volatility
+3. Solves Black-Scholes PDE using FDM (~21ms per call)
+4. Interpolates option value at spot price
+5. Returns: theoretical_price(σ) - market_price
 
-**Theta** (∂V/∂t):
-```c
-double black_scholes_theta(double spot, double strike,
-                           double time_to_maturity,
-                           double risk_free_rate, double volatility, bool is_call)
-```
-- Measures time decay (typically negative)
-- Different formulas for calls and puts
+**Nested iteration structure:**
+- Outer loop: Brent's method searching for σ
+- Inner loop: Each Brent iteration calls FDM solver
+- Convergence: When |theoretical_price - market_price| < tolerance
 
-**Rho** (∂V/∂r):
+#### 3. **Main American IV Calculation Function**
 ```c
-double black_scholes_rho(double spot, double strike,
-                         double time_to_maturity,
-                         double risk_free_rate, double volatility, bool is_call)
-```
-- Sensitivity to risk-free rate changes
-- Different formulas for calls and puts
-
-#### 3. **Main IV Calculation Function**
-```c
-IVResult implied_volatility_calculate(const IVParams *params,
-                                      double initial_guess_low,
-                                      double initial_guess_high,
-                                      double tolerance,
-                                      int max_iter)
+IVResult calculate_iv(const IVParams *params,
+                      const AmericanOptionGrid *grid,
+                      double vol_lower,
+                      double vol_upper,
+                      double tolerance,
+                      int max_iter)
 ```
 
 **Algorithm Overview:**
@@ -172,31 +154,32 @@ IVResult implied_volatility_calculate(const IVParams *params,
 
 2. **Objective Function Setup**:
    ```
-   f(σ) = BS_price(σ) - market_price
+   f(σ) = American_price_FDM(σ) - market_price
    ```
    Objective is to find σ where f(σ) = 0
 
 3. **Brent's Method Root Finding**:
-   - Searches in interval [initial_guess_low, initial_guess_high]
+   - Searches in interval [vol_lower, vol_upper]
+   - Each iteration calls `american_option_price()` with guessed σ (~21ms per call)
    - Combines bisection, secant method, and inverse quadratic interpolation
    - Guaranteed convergence if root is bracketed
-   - Superlinear convergence rate (typical: 8-12 iterations)
+   - Typical: 5-8 iterations → ~145ms total time
 
 4. **Post-Processing**:
-   - Calculates vega at solution for sensitivity information
    - Returns convergence status and iteration count
+   - No vega calculation (would require numerical differentiation)
 
 #### 4. **Convenience Function**
 ```c
-IVResult implied_volatility_calculate_simple(const IVParams *params)
+IVResult calculate_iv_simple(const IVParams *params)
 ```
 
-**Automatic Bound Determination**:
-- **Lower bound**: 0.0001 (0.01% volatility)
-- **Upper bound**: Heuristic based on time value
-  - For ATM options: C ≈ 0.4·S·σ·√T, so σ ≈ C/(0.4·S·√T)
-  - Uses 2x estimate as upper bound
-  - Constrained to [1.0, 10.0] range (100% to 1000%)
+**Automatic Configuration**:
+- **Grid**: Default American option grid (141 points, 1000 steps)
+- **Lower bound**: 0.01 (1% volatility)
+- **Upper bound**: Uses Let's Be Rational to estimate European IV, then multiplies by 1.5
+  - Rationale: American IV ≤ 1.5 × European IV (heuristic)
+  - Fast calculation (~781ns) avoids expensive FDM calls for bounds
 - **Tolerance**: 1e-6
 - **Max iterations**: 100
 
@@ -211,31 +194,38 @@ The implementation validates:
 ### Test Coverage
 
 From `implied_volatility_test.cc`:
-- ✅ Black-Scholes pricing verification
-- ✅ Vega calculation and symmetry
-- ✅ IV recovery from synthetic prices (ATM, OTM, ITM)
-- ✅ Short/long maturity edge cases
-- ✅ Extreme volatility (5% to 300%)
-- ✅ Zero/negative interest rates
-- ✅ Custom tolerance levels
-- ✅ Error cases (invalid inputs, arbitrage)
-- ✅ Stress tests (deep OTM/ITM, extreme moneyness)
-- ✅ Numerical stability at small prices
-- ✅ Convergence consistency (deterministic)
+- ✅ American put IV recovery (ATM, OTM, ITM)
+- ✅ American call IV recovery
+- ✅ Let's Be Rational bound estimation
+- ✅ Input validation (invalid spot, strike, time, price)
+- ✅ Arbitrage detection (price > intrinsic bounds)
+- ✅ Grid configuration validation
+- ✅ Convergence with default settings
+- ✅ Edge cases (near expiry, extreme volatility)
+- ✅ Deterministic convergence (same inputs → same outputs)
 
-**Test Result**: 32 comprehensive test cases, all passing
+From `lets_be_rational_test.cc`:
+- ✅ ATM European option IV estimation
+- ✅ OTM European option IV estimation
+- ✅ Invalid input handling
+- ✅ Near-expiry edge cases
+
+**Test Result**: 9 American IV test cases + 4 Let's Be Rational test cases, all passing
 
 ### Performance Characteristics
 
-| Scenario | Iterations | Time | Notes |
-|----------|-----------|------|-------|
-| ATM call/put | 8-12 | <1µs | Optimal convergence |
-| OTM option | 10-15 | <1µs | Slightly slower |
-| ITM option | 8-12 | <1µs | Similar to ATM |
-| Deep OTM | 12-18 | 1-2µs | More iterations needed |
-| Very high vol | 15-20 | 2-3µs | Brackets must be wider |
+| Operation | Time | Details |
+|----------|------|---------|
+| Let's Be Rational (European IV) | ~781ns | Fast bound calculation, 20-30 bisection iterations |
+| American option pricing (single) | ~21.7ms | FDM solve with 141 points × 1000 steps |
+| American IV calculation (single) | ~145ms | 5-8 Brent iterations × 21.7ms per FDM call |
+| Bound calculation overhead | <1µs | Let's Be Rational + 1.5x scaling |
 
-**Scaling**: O(log(1/ε)) where ε is tolerance (Brent's property)
+**Bottleneck**: FDM solver calls within Brent's method (each iteration = full PDE solve)
+
+**Scaling**:
+- Brent iterations: O(log(1/ε)) where ε is tolerance
+- Total time: O(iterations × FDM_time) ≈ O(8 × 21.7ms) ≈ 145ms
 
 ---
 
@@ -935,7 +925,7 @@ Provides sub-microsecond option pricing and IV lookups via pre-computed interpol
 ```
 src/
 ├── interp_strategy.h      # Strategy pattern interface for interpolation algorithms
-├── interp_multilinear.{h,c}  # Multi-linear interpolation strategy
+├── interp_cubic.{h,c}     # Cubic spline interpolation strategy
 ├── iv_surface.{h,c}       # 2D implied volatility surface (~100ns queries)
 └── price_table.{h,c}      # 4D/5D option price table (~500ns queries)
 
@@ -945,6 +935,54 @@ examples/
 tests/
 └── interpolation_test.cc    # Unit tests for all interpolation components
 ```
+
+### Architecture Overview
+
+```mermaid
+graph TD
+    USER[User Query<br/>m, τ, σ, r]
+
+    TRANSFORM[Coordinate Transform<br/>Raw → Grid Space<br/>COORD_LOG_SQRT]
+
+    STRATEGY[Interpolation Strategy<br/>INTERP_CUBIC]
+
+    PRECOMP[Precomputed Spline<br/>Coefficients<br/>~10MB for 4D table]
+
+    STAGE1[Stage 1: Moneyness<br/>Evaluate splines along m<br/>for each τ,σ,r]
+
+    STAGE2[Stage 2: Maturity<br/>Build & evaluate splines along τ<br/>for each σ,r]
+
+    STAGE3[Stage 3: Volatility<br/>Build & evaluate splines along σ<br/>for each r]
+
+    STAGE4[Stage 4: Rate<br/>Build & evaluate spline along r<br/>→ final result]
+
+    RESULT[Interpolated Price<br/>~500ns total]
+
+    USER --> TRANSFORM
+    TRANSFORM --> STRATEGY
+    STRATEGY --> PRECOMP
+    PRECOMP --> STAGE1
+    STAGE1 --> STAGE2
+    STAGE2 --> STAGE3
+    STAGE3 --> STAGE4
+    STAGE4 --> RESULT
+
+    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style TRANSFORM fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style STRATEGY fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style PRECOMP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style STAGE1 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE2 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE3 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style STAGE4 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Key Features**:
+- **Strategy Pattern**: Runtime selection of interpolation algorithm (cubic splines)
+- **Coordinate Transforms**: Log-sqrt transforms for better interpolation accuracy
+- **Tensor-Product**: Separable stages reduce complexity from O(n^4) to O(n)
+- **Precomputation**: Spline coefficients computed once, reused for millions of queries
 
 ### Core Data Structures
 
@@ -994,6 +1032,50 @@ typedef struct {
 
 **Memory footprint**: ~2.4MB per table (4D: 50×30×20×10 grid)
 
+### Memory Layout Options
+
+The price table supports different memory layouts for cache optimization:
+
+```mermaid
+graph TD
+    TABLE[OptionPriceTable<br/>4D Array: m×τ×σ×r]
+
+    OUTER[LAYOUT_M_OUTER<br/>m, τ, σ, r<br/>Default ordering]
+
+    INNER[LAYOUT_M_INNER<br/>r, σ, τ, m<br/>Recommended for cubic]
+
+    POINT_QUERY[Point Query<br/>table.m.tau.sigma.r<br/>~Equal performance]
+
+    SLICE_OUTER[Slice Extraction OUTER<br/>Extract all m for fixed τ,σ,r<br/>Scattered memory access<br/>~30x slower]
+
+    SLICE_INNER[Slice Extraction INNER<br/>Extract all m for fixed τ,σ,r<br/>Contiguous memory access<br/>~30x faster]
+
+    TABLE --> OUTER
+    TABLE --> INNER
+
+    OUTER --> POINT_QUERY
+    INNER --> POINT_QUERY
+
+    OUTER --> SLICE_OUTER
+    INNER --> SLICE_INNER
+
+    style TABLE fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style OUTER fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style INNER fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style POINT_QUERY fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+    style SLICE_OUTER fill:#ffcdd2,stroke:#333,stroke-width:2px,color:#000
+    style SLICE_INNER fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Layout Comparison**:
+- **LAYOUT_M_OUTER** [m][τ][σ][r]: Good for point queries, compatible with older code
+- **LAYOUT_M_INNER** [r][σ][τ][m]: Optimized for cubic interpolation (slice-based)
+  - 64-byte cache lines hold 8 consecutive moneyness values
+  - ~30x faster moneyness slice extraction
+  - Same memory usage, same point query performance
+
+**Why it matters for cubic**: Precomputation creates splines along moneyness dimension for each (τ,σ,r) combination. LAYOUT_M_INNER makes these slices contiguous in memory, dramatically improving cache performance during precomputation.
+
 ### Interpolation Strategy Pattern
 
 Uses **dependency injection** for runtime algorithm selection without recompilation:
@@ -1020,8 +1102,11 @@ typedef struct {
 ```
 
 **Available strategies**:
-- `INTERP_MULTILINEAR`: Fast separable multi-linear interpolation (C0 continuous, ~100ns)
-- `INTERP_CUBIC`: Tensor-product cubic splines (C2 continuous, ~500ns) - *future work*
+- `INTERP_CUBIC`: Tensor-product cubic splines (C² continuous, ~500ns for 4D)
+  - Provides accurate second derivatives (gamma, vega-convexity, etc.)
+  - Handles coordinate transformations (COORD_LOG_SQRT, COORD_LOG_VARIANCE)
+  - Requires precomputation of spline coefficients
+  - Minimum 2 points per dimension required
 
 ### Key Functions
 
@@ -1083,26 +1168,72 @@ int price_table_save(const OptionPriceTable *table, const char *filename);
 OptionPriceTable* price_table_load(const char *filename);
 ```
 
-### Multi-linear Interpolation Algorithm
+### Cubic Spline Interpolation Algorithm
 
-**Method**: Separable tensor-product linear interpolation
+**Method**: Tensor-product cubic spline interpolation with separable stages
 
 **4D Algorithm** (for price tables):
-1. Find bracketing grid indices for each dimension via binary search
-2. Extract 2^4 = 16 hypercube corner values
-3. Perform recursive linear interpolation:
-   - Stage 1: 8 interpolations along moneyness (16→8)
-   - Stage 2: 4 interpolations along maturity (8→4)
-   - Stage 3: 2 interpolations along volatility (4→2)
-   - Stage 4: 1 interpolation along rate (2→1)
-   - Total: 15 linear interpolations
+1. **Precomputation** (done once after filling table):
+   - For each combination of (τ, σ, r): create cubic spline in moneyness dimension
+   - Stores spline coefficients for all slices
+   - Enables O(1) evaluation along first dimension
+
+2. **Query** (per interpolation request):
+   - Stage 1: Evaluate moneyness splines for all (τ, σ, r) combinations → intermediate values
+   - Stage 2: Create and evaluate maturity splines for each (σ, r) → intermediate values
+   - Stage 3: Create and evaluate volatility splines for each r → intermediate values
+   - Stage 4: Create and evaluate rate spline → final result
+
+3. **Coordinate Transformation**:
+   - Query coordinates transformed from raw to grid space before interpolation
+   - Supports COORD_RAW, COORD_LOG_SQRT, COORD_LOG_VARIANCE
+
+```mermaid
+graph LR
+    RAW["User Query<br/>m=1.05, τ=0.25"]
+
+    COORD_RAW["COORD_RAW<br/>Identity<br/>m'=1.05, τ'=0.25"]
+
+    COORD_LOG_SQRT["COORD_LOG_SQRT<br/>m'=ln(m)<br/>τ'=√τ<br/>m'=0.049, τ'=0.5"]
+
+    COORD_LOG_VAR["COORD_LOG_VARIANCE<br/>m'=ln(m)<br/>σ'²=σ²·τ<br/>Better for vol surfaces"]
+
+    INTERP["Cubic Spline<br/>Interpolation<br/>in Grid Space"]
+
+    RESULT["Interpolated<br/>Price"]
+
+    RAW --> COORD_RAW
+    RAW --> COORD_LOG_SQRT
+    RAW --> COORD_LOG_VAR
+
+    COORD_RAW --> INTERP
+    COORD_LOG_SQRT --> INTERP
+    COORD_LOG_VAR --> INTERP
+
+    INTERP --> RESULT
+
+    style RAW fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style COORD_RAW fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style COORD_LOG_SQRT fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style COORD_LOG_VAR fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style INTERP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
+```
+
+**Why coordinate transforms?**
+- **Log-moneyness**: ln(m) spreads out ATM region where most trading occurs
+- **Square-root time**: √τ linearizes time decay near expiry
+- **Better interpolation**: Transformed coordinates are more linear, reducing interpolation error
 
 **Complexity**:
-- Time: O(d log n + 2^d) where d=dimensions, n=grid size per dimension
-- Space: O(1) - no temporary arrays needed
-- 4D example: ~31 operations (16 lookups + 15 lerps)
+- Precomputation: O(n_τ × n_σ × n_r × n_m) cubic spline setups
+- Query time: O(n_τ × n_σ × n_r) spline evaluations per query
+- Space: O(n_τ × n_σ × n_r × n_m) for spline coefficients (4x price array size)
 
-**Key Implementation Detail**: Dimension ordering matters! Interpolation must proceed from most significant dimension (largest stride) to least significant to maintain correctness.
+**Key Features**:
+- C² continuous (smooth second derivatives)
+- Accurate Greeks (gamma, vega-convexity, etc.)
+- Requires ≥2 points in each dimension
 
 ### Performance Characteristics
 
@@ -1119,12 +1250,14 @@ OptionPriceTable* price_table_load(const char *filename);
 **Accuracy**:
 - On-grid points: Exact (machine precision)
 - Off-grid points: Typically <0.5% relative error for smooth functions
-- Delta: Accurate (first derivatives preserved by linear interpolation)
-- Gamma: **Approximately zero** (second derivatives vanish for piecewise linear functions)
+- **Delta**: Accurate (first derivatives from cubic splines)
+- **Gamma**: Accurate (second derivatives continuous, C² property)
+- **Vega/Theta/Rho**: Accurate via finite differences on interpolated values
 
-**Important Limitation**: Multi-linear interpolation is C0 continuous (continuous but not smooth). Second derivatives (gamma) are approximately zero within grid cells. For accurate gamma calculations, either:
-1. Use cubic spline interpolation (future work), or
-2. Store pre-computed Greeks in separate tables
+**Advantages of Cubic**:
+- C² continuous interpolation (smooth second derivatives)
+- Accurate Greeks without storing separate tables
+- Better approximation of smooth functions between grid points
 
 ### Integration with Existing Components
 
@@ -1155,18 +1288,27 @@ For complete design rationale and implementation roadmap, see `docs/notes/INTERP
 
 ## Integration Architecture
 
-### Workflow 1: Single IV Calculation
+### Workflow 1: American IV Calculation
 
 ```
 Market Price + Option Parameters
           ↓
-implied_volatility_calculate()
+calculate_iv_simple()
           ↓
-    Setup Black-Scholes objective: f(σ) = BS_price(σ) - market_price
+    Estimate European IV using Let's Be Rational (~781ns)
+    Calculate upper bound: vol_upper = european_iv × 1.5
+          ↓
+    Setup American pricing objective: f(σ) = American_price_FDM(σ) - market_price
           ↓
     Use Brent's method to find σ where f(σ) = 0
+      Each iteration:
+        - Construct American option with guessed σ
+        - Solve Black-Scholes PDE via FDM (~21ms)
+        - Interpolate value at spot price
+        - Return error vs market price
+      Typical: 5-8 iterations → ~145ms total
           ↓
-    Return: IVResult (implied_vol, vega, iterations, convergence status)
+    Return: IVResult (implied_vol, iterations, convergence status)
 ```
 
 ### Workflow 2: American Option Pricing
@@ -1219,40 +1361,49 @@ Returns: Array of implied volatilities
 
 ```mermaid
 graph TD
-    PARAMS["Option Parameters<br/>(S, K, T, r, σ, div)"]
+    PARAMS["Option Parameters<br/>(S, K, T, r, market_price)"]
 
-    AMERICAN["American Pricing<br/>(PDE Solve)"]
-    EUROPEAN["European Pricing<br/>(Black-Scholes)"]
+    LBR["Let's Be Rational<br/>(European IV Estimation)"]
+
+    BOUNDS["Upper Bound<br/>vol_upper = euro_iv × 1.5"]
+
+    AMERICAN["American Pricing<br/>(FDM PDE Solve)"]
 
     SPLINE["Cubic Spline<br/>Interpolation"]
 
-    VALUE["Option Value at S=K"]
+    VALUE["Option Value at Spot"]
 
     MARKET["Market Price<br/>(from market)"]
 
-    BRENT["Brent Root Finder"]
+    OBJECTIVE["Objective Function<br/>f(σ) = price(σ) - market"]
 
-    IV["Implied Volatility"]
+    BRENT["Brent Root Finder<br/>(5-8 iterations)"]
+
+    IV["American Implied Volatility"]
+
+    PARAMS --> LBR
+    LBR -->|"~781ns"| BOUNDS
+    BOUNDS --> BRENT
 
     PARAMS --> AMERICAN
-    PARAMS --> EUROPEAN
-
-    AMERICAN -->|"Option Value<br/>at All Spots"| SPLINE
+    AMERICAN -->|"~21ms<br/>Option Value<br/>at All Spots"| SPLINE
     SPLINE --> VALUE
+    VALUE --> OBJECTIVE
 
-    EUROPEAN -->|"Theoretical Price"| VALUE
+    MARKET --> OBJECTIVE
+    OBJECTIVE --> BRENT
 
-    VALUE -->|"BS Price vs"| BRENT
-    MARKET --> BRENT
-
-    BRENT --> IV
+    BRENT -->|"Each iteration<br/>calls FDM"| AMERICAN
+    BRENT -->|"~145ms total"| IV
 
     style PARAMS fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style LBR fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style BOUNDS fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
     style AMERICAN fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style EUROPEAN fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
     style SPLINE fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style VALUE fill:#fce4ec,stroke:#333,stroke-width:2px,color:#000
     style MARKET fill:#ffebee,stroke:#333,stroke-width:2px,color:#000
+    style OBJECTIVE fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
     style BRENT fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
     style IV fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
 ```
@@ -1261,15 +1412,18 @@ graph TD
 
 ## Performance Characteristics
 
-### Implied Volatility Calculation
+### American Implied Volatility Calculation
 
-| Scenario | Iterations | Time |
-|----------|-----------|------|
-| Typical | 10-12 | <1 µs |
-| Extreme | 15-20 | 2-3 µs |
-| **Batch (1000s)** | - | **100-500 µs** |
+| Operation | Time | Notes |
+|----------|------|-------|
+| Let's Be Rational (bound) | ~781ns | European IV estimation |
+| American option pricing | ~21.7ms | Single FDM solve |
+| American IV (single) | ~145ms | 5-8 Brent iterations × 21.7ms |
+| **Future: IV via interpolation** | **~7.5µs** | **40,000× speedup (planned)** |
 
-**Bottleneck**: Not the IV calculation; the option pricing that feeds it
+**Bottleneck**: FDM solver calls within Brent's method (each iteration = full PDE solve)
+
+**Scaling**: O(iterations × FDM_time) ≈ O(8 × 21.7ms) ≈ 145ms
 
 ### American Option Pricing (Unoptimized)
 
@@ -1387,7 +1541,7 @@ From benchmark:
 
 ## Usage Patterns
 
-### Pattern 1: Simple IV Calculation
+### Pattern 1: American IV Calculation
 
 ```c
 #include "src/implied_volatility.h"
@@ -1397,13 +1551,15 @@ IVParams params = {
     .strike = 100.0,
     .time_to_maturity = 1.0,
     .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = true
+    .market_price = 6.08,  // American put market price
+    .is_call = false
 };
 
-IVResult result = implied_volatility_calculate_simple(&params);
+// Simple API: uses default grid and Let's Be Rational for bounds
+IVResult result = calculate_iv_simple(&params);
 if (result.converged) {
-    printf("IV: %.4f\n", result.implied_vol);
+    printf("American IV: %.4f (%.1f%%)\n", result.implied_vol, result.implied_vol * 100);
+    printf("Iterations: %d\n", result.iterations);
 } else {
     printf("Error: %s\n", result.error);
 }
@@ -1499,29 +1655,37 @@ bazel build //benchmarks:quantlib_benchmark
 
 | Component | Purpose | Files | API |
 |-----------|---------|-------|-----|
-| **Implied Volatility** | IV from option price | implied_volatility.{h,c} | `implied_volatility_calculate()`, `implied_volatility_calculate_simple()` |
-| **Black-Scholes** | European option pricing & Greeks | european_option.{h,c} | `black_scholes_price()`, `black_scholes_vega()`, `black_scholes_delta()`, `black_scholes_gamma()`, `black_scholes_theta()`, `black_scholes_rho()` |
+| **American IV** | American IV from market price | implied_volatility.{h,c} | `calculate_iv()`, `calculate_iv_simple()` |
+| **Let's Be Rational** | European IV estimation (bounds) | lets_be_rational.{h,c} | `lbr_implied_volatility()` |
 | **American Option** | American option pricing | american_option.{h,c} | `american_option_price()`, `american_option_price_batch()`, `american_option_free_result()` |
 | **PDE Solver** | FDM time-stepping engine | pde_solver.{h,c} | `pde_solver_create()`, `pde_solver_solve()`, `pde_solver_destroy()` |
 | **IV Surface** | Fast 2D IV interpolation (~100ns) | iv_surface.{h,c} | `iv_surface_create()`, `iv_surface_interpolate()` |
 | **Price Table** | Fast 4D/5D price lookup (~500ns) | price_table.{h,c} | `price_table_create()`, `price_table_interpolate_4d()`, `price_table_greeks_4d()` |
-| **Multilinear Interpolation** | N-dimensional linear interpolation | interp_multilinear.{h,c}, interp_strategy.h | `INTERP_MULTILINEAR` strategy |
+| **Cubic Interpolation** | N-dimensional cubic spline interpolation | interp_cubic.{h,c}, interp_cubic_workspace.c, interp_strategy.h | `INTERP_CUBIC` strategy |
 | **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
 | **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()` (malloc), `pde_spline_init()` (workspace), `pde_spline_eval()` |
 | **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
-| **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `IVCALC_TRACE_*` macros |
+| **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `MANGO_TRACE_*` macros |
 
 ---
 
 ## Conclusion
 
-The mango-iv codebase implements a complete, production-ready suite for implied volatility calculation and American option pricing. The architecture prioritizes:
+The mango-iv codebase implements a complete, production-ready suite for American option pricing and implied volatility calculation. The architecture prioritizes:
 
-1. **Mathematical correctness** (Black-Scholes, TR-BDF2, obstacle conditions)
+1. **Mathematical correctness** (Let's Be Rational, TR-BDF2, obstacle conditions, nested iteration)
 2. **Flexibility** (callback-based design, custom PDEs)
 3. **Vectorization** (array-oriented, SIMD-ready)
 4. **Performance** (single workspace buffer, batch API, parallel-ready)
 5. **Validation** (comprehensive test coverage, QuantLib comparison)
 
-The main opportunities for improvement are algorithmic optimizations (Red-Black PSOR, adaptive relaxation) and memory layout improvements (even-odd splitting), which could achieve 100-200x speedup in batch mode with full optimization.
+**Current Performance:**
+- American option pricing: ~21.7ms (FDM solver)
+- American IV calculation: ~145ms (5-8 Brent iterations)
+- Let's Be Rational (bounds): ~781ns (European IV estimation)
+
+**Future Optimization:**
+- Price table pre-computation + interpolation: ~7.5µs per IV query
+- Target speedup: 40,000× for repeated queries
+- Enables real-time trading applications with sub-millisecond response times
 

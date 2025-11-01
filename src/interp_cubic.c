@@ -164,6 +164,12 @@ double cubic_interpolate_4d_workspace(const OptionPriceTable *table,
         return NAN;
     }
 
+    // Transform query coordinates to grid space
+    double m_grid, tau_grid, sigma_grid, r_grid;
+    transform_query_to_grid(table->coord_system,
+                            moneyness, maturity, volatility, rate,
+                            &m_grid, &tau_grid, &sigma_grid, &r_grid);
+
     const size_t n_m = table->n_moneyness;
     const size_t n_tau = table->n_maturity;
     const size_t n_sigma = table->n_volatility;
@@ -217,7 +223,7 @@ double cubic_interpolate_4d_workspace(const OptionPriceTable *table,
             if (ret != 0) return NAN;
 
             size_t idx2 = k_sigma * n_r + l_r;
-            intermediate2[idx2] = pde_spline_eval(&tau_spline, maturity);
+            intermediate2[idx2] = pde_spline_eval(&tau_spline, tau_grid);
         }
     }
 
@@ -512,11 +518,17 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
         return NAN;
     }
 
-    // Validate query point is within grid bounds
-    if (!is_within_bounds(moneyness, table->moneyness_grid, table->n_moneyness) ||
-        !is_within_bounds(maturity, table->maturity_grid, table->n_maturity) ||
-        !is_within_bounds(volatility, table->volatility_grid, table->n_volatility) ||
-        !is_within_bounds(rate, table->rate_grid, table->n_rate)) {
+    // Transform query coordinates to grid space
+    double m_grid, tau_grid, sigma_grid, r_grid;
+    transform_query_to_grid(table->coord_system,
+                            moneyness, maturity, volatility, rate,
+                            &m_grid, &tau_grid, &sigma_grid, &r_grid);
+
+    // Validate query point is within grid bounds (after transformation)
+    if (!is_within_bounds(m_grid, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(tau_grid, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(sigma_grid, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(r_grid, table->rate_grid, table->n_rate)) {
         return NAN;  // Query point outside grid coverage
     }
 
@@ -561,7 +573,7 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
                     size_t spline_idx = j_tau * (coeffs->n_volatility * coeffs->n_rate)
                                       + j_sigma * coeffs->n_rate
                                       + j_r;
-                    intermediate1[idx1] = pde_spline_eval(coeffs->moneyness_splines[spline_idx], moneyness);
+                    intermediate1[idx1] = pde_spline_eval(coeffs->moneyness_splines[spline_idx], m_grid);
                 }
             }
         }
@@ -604,7 +616,7 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
                     size_t idx1 = j_tau * (table->n_volatility * table->n_rate)
                                 + j_sigma * table->n_rate
                                 + j_r;
-                    intermediate1[idx1] = pde_spline_eval(&m_spline, moneyness);
+                    intermediate1[idx1] = pde_spline_eval(&m_spline, m_grid);
                     // No destroy needed - workspace is reused
                 }
             }
@@ -658,7 +670,7 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
             }
 
             size_t idx2 = j_sigma * table->n_rate + j_r;
-            intermediate2[idx2] = pde_spline_eval(&tau_spline, maturity);
+            intermediate2[idx2] = pde_spline_eval(&tau_spline, tau_grid);
             // No destroy needed - workspace is reused
         }
     }
@@ -706,7 +718,7 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
             return NAN;
         }
 
-        intermediate3[j_r] = pde_spline_eval(&sigma_spline, volatility);
+        intermediate3[j_r] = pde_spline_eval(&sigma_spline, sigma_grid);
         // No destroy needed - workspace is reused
     }
     free(intermediate2);
@@ -724,7 +736,7 @@ static double cubic_interpolate_4d(const OptionPriceTable *table,
         return NAN;
     }
 
-    double result = pde_spline_eval(&r_spline, rate);
+    double result = pde_spline_eval(&r_spline, r_grid);
     // No destroy needed - workspace managed by caller
 
     free(intermediate3);
@@ -762,12 +774,19 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
         return NAN;
     }
 
-    // Validate query point is within grid bounds
-    if (!is_within_bounds(moneyness, table->moneyness_grid, table->n_moneyness) ||
-        !is_within_bounds(maturity, table->maturity_grid, table->n_maturity) ||
-        !is_within_bounds(volatility, table->volatility_grid, table->n_volatility) ||
-        !is_within_bounds(rate, table->rate_grid, table->n_rate) ||
-        !is_within_bounds(dividend, table->dividend_grid, table->n_dividend)) {
+    // Transform query coordinates to grid space (dividend stays raw)
+    double m_grid, tau_grid, sigma_grid, r_grid;
+    transform_query_to_grid(table->coord_system,
+                            moneyness, maturity, volatility, rate,
+                            &m_grid, &tau_grid, &sigma_grid, &r_grid);
+    double q_grid = dividend;  // Dividend is not transformed
+
+    // Validate query point is within grid bounds (after transformation)
+    if (!is_within_bounds(m_grid, table->moneyness_grid, table->n_moneyness) ||
+        !is_within_bounds(tau_grid, table->maturity_grid, table->n_maturity) ||
+        !is_within_bounds(sigma_grid, table->volatility_grid, table->n_volatility) ||
+        !is_within_bounds(r_grid, table->rate_grid, table->n_rate) ||
+        !is_within_bounds(q_grid, table->dividend_grid, table->n_dividend)) {
         return NAN;  // Query point outside grid coverage
     }
 
@@ -816,7 +835,7 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                                           + j_sigma * (coeffs->n_rate * coeffs->n_dividend)
                                           + j_r * coeffs->n_dividend
                                           + j_q;
-                        intermediate1[idx1] = pde_spline_eval(coeffs->moneyness_splines[spline_idx], moneyness);
+                        intermediate1[idx1] = pde_spline_eval(coeffs->moneyness_splines[spline_idx], m_grid);
                     }
                 }
             }
@@ -863,7 +882,7 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                                     + j_sigma * (table->n_rate * table->n_dividend)
                                     + j_r * table->n_dividend
                                     + j_q;
-                        intermediate1[idx1] = pde_spline_eval(&m_spline, moneyness);
+                        intermediate1[idx1] = pde_spline_eval(&m_spline, m_grid);
                         // No destroy needed - workspace is reused
                     }
                 }
@@ -922,7 +941,7 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
                 size_t idx2 = j_sigma * (table->n_rate * table->n_dividend)
                             + j_r * table->n_dividend
                             + j_q;
-                intermediate2[idx2] = pde_spline_eval(&tau_spline, maturity);
+                intermediate2[idx2] = pde_spline_eval(&tau_spline, tau_grid);
                 // No destroy needed - workspace is reused
             }
         }
@@ -1042,7 +1061,7 @@ static double cubic_interpolate_5d(const OptionPriceTable *table,
         return NAN;
     }
 
-    double result = pde_spline_eval(&q_spline, dividend);
+    double result = pde_spline_eval(&q_spline, q_grid);
     // No destroy needed - workspace managed by caller
 
     free(intermediate4);

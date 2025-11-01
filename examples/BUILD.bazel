@@ -25,7 +25,7 @@ cc_binary(
     copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
     deps = [
         "//src:implied_volatility",
-        "//src:european_option",
+        "//src:american_option",
     ],
 )
 

@@ -20,9 +20,11 @@ An **option** is a financial derivative that gives the holder the right (but not
 **Need:** Fair market price of the option
 
 **Why it's hard:**
-1. **European options** have closed-form solutions (Black-Scholes formula)
-2. **American options** can be exercised early, requiring numerical methods
+1. **European options** have closed-form solutions (Black-Scholes formula) - fast but limited
+2. **American options** can be exercised early, requiring numerical PDE solvers - slow but realistic
 3. **Path-dependent options** (barriers, Asians, etc.) need simulation or PDEs
+
+**mango-iv focuses on American options** - the more challenging and practically relevant case for equity options.
 
 ### The Inverse Problem: Implied Volatility
 
@@ -37,7 +39,8 @@ An **option** is a financial derivative that gives the holder the right (but not
 **Why it's hard:**
 - Black-Scholes formula is not analytically invertible
 - Requires root-finding (Brent's method, Newton's method)
-- American options need PDE solver in the loop (very expensive!)
+- **American options need PDE solver in each iteration** (~145ms per IV calculation, very expensive!)
+- Each Brent iteration solves a full PDE (~21ms) to price the option with guessed volatility
 
 ### Real-World Use Cases
 
@@ -83,28 +86,28 @@ An **option** is a financial derivative that gives the holder the right (but not
 
 ### What mango-iv Provides
 
-#### 1. **Black-Scholes Pricing (European Options)**
+#### 1. **Let's Be Rational (European IV Estimation)**
 
 ```c
-double price = black_scholes_price(spot, strike, maturity, rate, vol, is_call);
+LBRResult result = lbr_implied_volatility(spot, strike, maturity, rate, market_price, is_call);
 ```
 
-- **Analytical formula**: No approximation error
-- **Performance**: <1µs per calculation
-- **Accuracy**: 7.5e-8 relative error (Abramowitz & Stegun CDF)
-- **Use case**: Basis for IV calculation, quick European option pricing
+- **Purpose**: Fast European IV estimation for American IV upper bounds
+- **Performance**: ~781ns per calculation (20-30 bisection iterations)
+- **Accuracy**: Sufficient for bound calculation
+- **Use case**: Provides tight bracketing interval for American IV search
 
-#### 2. **Implied Volatility Calculation**
+#### 2. **American Implied Volatility Calculation**
 
 ```c
-IVResult result = calculate_implied_volatility(&params);
-// result.implied_vol, result.vega, result.iterations
+IVResult result = calculate_iv_simple(&params);
+// result.implied_vol, result.iterations
 ```
 
-- **Brent's method**: Robust root-finding (no derivatives needed)
-- **Performance**: 8-12 iterations typical, <1µs per calculation
-- **Convergence**: 99.9% success rate on realistic inputs
-- **Validation**: 44 comprehensive test cases
+- **FDM-based**: Each Brent iteration solves full PDE (~21ms)
+- **Performance**: ~145ms per calculation (5-8 Brent iterations)
+- **Convergence**: Robust with Let's Be Rational bounds
+- **Validation**: 9 American IV test cases + 4 Let's Be Rational test cases
 
 #### 3. **American Option Pricing (PDE Solver)**
 
@@ -175,9 +178,9 @@ pde_solver_solve(solver);
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| European option (Black-Scholes) | <1µs | Analytical formula |
-| Implied volatility | <1µs | 8-12 iterations with Brent's |
+| Let's Be Rational (European IV) | ~781ns | Fast bound estimation, 20-30 iterations |
 | American option (single) | 21.7ms | TR-BDF2, 141 points × 1000 steps |
+| American IV (single) | ~145ms | 5-8 Brent iterations × 21.7ms per FDM |
 | American option (batch 64) | ~1.5ms wall | OpenMP parallelization |
 | vs QuantLib | 2.1x slower | Reasonable for research code |
 
@@ -198,12 +201,13 @@ pde_solver_solve(solver);
 ```
 mango-iv/
 ├── src/                           # Core library
-│   ├── implied_volatility.{h,c}   # IV calculation + Black-Scholes
+│   ├── implied_volatility.{h,c}   # American IV calculation (FDM + Brent)
+│   ├── lets_be_rational.{h,c}     # European IV estimation (bounds)
 │   ├── american_option.{h,c}      # American option pricing
 │   ├── pde_solver.{h,c}           # General PDE solver (FDM)
 │   ├── cubic_spline.{h,c}         # Interpolation
-│   ├── brent.{h,c}                # Root-finding
-│   └── ivcalc_trace.h             # USDT tracing probes
+│   ├── brent.h                    # Root-finding
+│   └── mango_trace.h             # USDT tracing probes
 │
 ├── examples/                      # Demonstration programs
 │   ├── example_implied_volatility.c
@@ -211,7 +215,8 @@ mango-iv/
 │   └── example_heat_equation.c
 │
 ├── tests/                         # Comprehensive test suite
-│   ├── implied_volatility_test.cc # 32 test cases
+│   ├── implied_volatility_test.cc # 9 American IV test cases
+│   ├── lets_be_rational_test.cc   # 4 European IV test cases
 │   ├── american_option_test.cc    # 42 test cases
 │   └── pde_solver_test.cc         # Core solver tests
 │
@@ -225,7 +230,7 @@ mango-iv/
 │   └── QUICK_REFERENCE.md         # Developer quick-start
 │
 ├── scripts/                       # Utilities
-│   ├── ivcalc-trace               # USDT tracing helper
+│   ├── mango-trace               # USDT tracing helper
 │   └── tracing/                   # bpftrace scripts
 │
 ├── CLAUDE.md                      # Instructions for Claude Code
@@ -270,7 +275,7 @@ bazel test //...
 bazel run //examples:example_implied_volatility
 ```
 
-### Quick Example: Calculate Implied Volatility
+### Quick Example: Calculate American Implied Volatility
 
 ```c
 #include "src/implied_volatility.h"
@@ -280,14 +285,15 @@ IVParams params = {
     .strike = 100.0,
     .time_to_maturity = 1.0,
     .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = true
+    .market_price = 6.08,  // American put market price
+    .is_call = false
 };
 
-IVResult result = calculate_implied_volatility(&params);
+// Simple API: uses default grid and Let's Be Rational for bounds
+IVResult result = calculate_iv_simple(&params);
 
 if (result.converged) {
-    printf("Implied volatility: %.4f (%.1f%%)\n",
+    printf("American IV: %.4f (%.1f%%)\n",
            result.implied_vol, result.implied_vol * 100);
     printf("Iterations: %d\n", result.iterations);
 } else {
@@ -349,9 +355,9 @@ printf("American put price: %.4f\n", price);
 ## Roadmap
 
 ### Current State (v0.1)
-- ✅ Black-Scholes pricing and IV calculation
-- ✅ American option pricing (PDE-based)
-- ✅ TR-BDF2 implicit solver
+- ✅ American option pricing (PDE-based, TR-BDF2)
+- ✅ American option implied volatility (FDM + Brent's method)
+- ✅ Let's Be Rational (European IV for bound estimation)
 - ✅ USDT tracing system
 - ✅ Comprehensive test suite
 - ✅ QuantLib benchmarks

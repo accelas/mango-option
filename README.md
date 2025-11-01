@@ -10,18 +10,19 @@
 
 **mango-iv** is a C23-based library that solves two fundamental problems in quantitative finance:
 
-1. **Option Pricing**: Calculate fair prices for European and American options
-2. **Implied Volatility**: Invert market prices to extract implied volatility
+1. **American Option Pricing**: Calculate fair prices using finite-difference PDE solver
+2. **American Option Implied Volatility**: Invert market prices to extract implied volatility
 
-The library combines **performance**, **flexibility**, and **correctness** with a focus on research and prototyping use cases.
+The library combines **performance**, **flexibility**, and **correctness** with a focus on research and prototyping use cases for American options.
 
 ### Key Features
 
-- **Black-Scholes Pricing** - Analytical European option pricing (<1µs)
 - **American Option Pricing** - PDE-based solver using TR-BDF2 method (~22ms)
-- **Implied Volatility** - Robust calculation using Brent's method (<1µs, 99.9% success rate)
+- **American Option Implied Volatility** - FDM-based IV calculation using Brent's method (~145ms)
+- **Let's Be Rational** - Fast European IV estimation for bound calculation (~781ns)
 - **General PDE Solver** - Callback-based framework for custom parabolic PDEs
 - **Cubic Spline Interpolation** - Off-grid solution evaluation
+- **Price Table Pre-computation** - Fast lookups via interpolation (future: ~7.5µs IV)
 - **Zero-Overhead Tracing** - USDT probes for production-safe diagnostics
 - **Batch Processing** - OpenMP parallelization for multiple calculations
 - **SIMD Vectorization** - Automatic vectorization via OpenMP pragmas
@@ -59,7 +60,7 @@ bazel run //examples:example_heat_equation
 
 ## Usage Examples
 
-### Calculate Implied Volatility
+### Calculate American Option Implied Volatility
 
 ```c
 #include "src/implied_volatility.h"
@@ -69,11 +70,11 @@ IVParams params = {
     .strike = 100.0,
     .time_to_maturity = 1.0,
     .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = true
+    .market_price = 6.08,  // American put price
+    .is_call = false
 };
 
-IVResult result = calculate_implied_volatility(&params);
+IVResult result = calculate_iv_simple(&params);
 
 if (result.converged) {
     printf("Implied volatility: %.4f (%.1f%%)\n",
@@ -86,8 +87,8 @@ if (result.converged) {
 
 **Output:**
 ```
-Implied volatility: 0.2500 (25.0%)
-Iterations: 8
+Implied volatility: 0.1998 (19.98%)
+Iterations: 5
 ```
 
 ### Price an American Put Option
@@ -170,10 +171,11 @@ See `examples/` for complete working programs.
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| European option (Black-Scholes) | <1µs | Analytical formula |
-| Implied volatility | <1µs | 8-12 iterations with Brent's method |
+| Let's Be Rational (European IV) | ~781ns | Fast bound estimation for American IV |
 | American option (single) | 21.7ms | TR-BDF2, 141 points × 1000 steps |
 | American option (batch of 64) | ~1.5ms wall | OpenMP parallelization |
+| American implied volatility | ~145ms | FDM-based IV with Brent's method |
+| Future: IV via interpolation | ~7.5µs | 40,000× speedup (planned) |
 
 ### Validation
 
@@ -188,22 +190,45 @@ See `examples/` for complete working programs.
 ```
 mango-iv/
 ├── src/                           # Core library
-│   ├── implied_volatility.{h,c}   # IV calculation + Black-Scholes
-│   ├── american_option.{h,c}      # American option pricing
-│   ├── pde_solver.{h,c}           # General PDE solver (FDM)
-│   ├── cubic_spline.{h,c}         # Interpolation
-│   ├── brent.{h,c}                # Root-finding
-│   └── ivcalc_trace.h             # USDT tracing probes
+│   ├── implied_volatility.{h,c}   # American IV calculation (FDM + Brent)
+│   ├── lets_be_rational.{h,c}     # European IV estimation (bound calculation)
+│   ├── american_option.{h,c}      # American option pricing (FDM)
+│   ├── pde_solver.{h,c}           # General PDE solver (TR-BDF2)
+│   ├── cubic_spline.{h,c}         # 1D cubic spline interpolation
+│   ├── interp_strategy.h          # Interpolation strategy pattern
+│   ├── interp_cubic.{h,c}         # Multi-dimensional cubic interpolation
+│   ├── interp_cubic_workspace.c   # Workspace management for cubic splines
+│   ├── price_table.{h,c}          # 4D/5D option price tables
+│   ├── iv_surface.{h,c}           # 2D implied volatility surfaces
+│   ├── brent.h                    # Brent's method (root-finding)
+│   ├── tridiagonal.h              # Tridiagonal solver
+│   └── mango_trace.h             # USDT tracing probes
 │
 ├── examples/                      # Demonstration programs
 │   ├── example_implied_volatility.c
 │   ├── example_american_option.c
-│   └── example_heat_equation.c
+│   ├── example_american_option_dividend.c
+│   ├── example_heat_equation.c
+│   ├── example_interpolation_engine.c
+│   ├── example_precompute_table.c
+│   └── test_cubic_4d_5d.c
 │
 ├── tests/                         # Comprehensive test suite
-│   ├── implied_volatility_test.cc # 32 test cases
-│   ├── american_option_test.cc    # 42 test cases
-│   └── pde_solver_test.cc         # Core solver tests
+│   ├── implied_volatility_test.cc # American IV calculation tests
+│   ├── lets_be_rational_test.cc   # European IV estimation tests
+│   ├── american_option_test.cc    # American option tests
+│   ├── pde_solver_test.cc         # Core PDE solver tests
+│   ├── cubic_spline_test.cc       # 1D spline tests
+│   ├── interpolation_test.cc      # Multi-dimensional interpolation tests
+│   ├── interpolation_workspace_test.cc
+│   ├── cubic_interp_4d_5d_test.cc
+│   ├── price_table_test.cc        # Price table tests
+│   ├── price_table_slow_test.cc   # Long-running table tests
+│   ├── coordinate_transform_test.cc
+│   ├── memory_layout_test.cc
+│   ├── brent_test.cc              # Root-finding tests
+│   ├── tridiagonal_test.cc        # Linear solver tests
+│   └── stability_test.cc          # Numerical stability tests
 │
 ├── docs/                          # Documentation
 │   ├── PROJECT_OVERVIEW.md        # Problem domain & motivation
@@ -211,7 +236,7 @@ mango-iv/
 │   └── QUICK_REFERENCE.md         # Developer quick-start
 │
 ├── scripts/                       # Utilities
-│   ├── ivcalc-trace               # USDT tracing helper
+│   ├── mango-trace               # USDT tracing helper
 │   └── tracing/                   # bpftrace scripts
 │
 ├── CLAUDE.md                      # Instructions for Claude Code
@@ -235,13 +260,13 @@ The library includes **zero-overhead tracing** via USDT (User Statically-Defined
 
 ```bash
 # Monitor all library activity
-sudo ./scripts/ivcalc-trace monitor ./bazel-bin/examples/example_american_option
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_american_option
 
 # Watch convergence behavior
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=convergence
+sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
 
 # Debug failures
-sudo ./scripts/ivcalc-trace monitor ./my_program --preset=debug
+sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 ```
 
 Tracing provides:
@@ -303,16 +328,17 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 ## Roadmap
 
 ### Current (v0.1)
-- ✅ Black-Scholes pricing and IV calculation
-- ✅ American option pricing (PDE-based)
-- ✅ TR-BDF2 implicit solver
+- ✅ American option pricing (PDE-based, TR-BDF2)
+- ✅ American option implied volatility (FDM + Brent's method)
+- ✅ Let's Be Rational (European IV for bound estimation)
 - ✅ USDT tracing system
 - ✅ Comprehensive test suite
 - ✅ QuantLib benchmarks
 
 ### Near-Term (v0.2-0.3)
-- 🚧 Interpolation-based pricing engine (40,000x speedup planned)
-- 🚧 CPU optimizations (AVX-512, FMA, restrict)
+- ✅ Cubic spline interpolation (C² continuous, accurate Greeks)
+- ✅ Coordinate transformation support (log-sqrt, log-variance)
+- 🚧 Price table pre-computation (40,000x speedup planned)
 - 🚧 Greeks calculation via finite differences
 - 🚧 Volatility surface calibration
 

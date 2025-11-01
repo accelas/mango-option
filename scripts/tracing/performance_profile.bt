@@ -11,18 +11,18 @@
 
 BEGIN
 {
-    printf("Profiling ivcalc library performance...\n");
+    printf("Profiling mango library performance...\n");
     printf("Collecting timing and iteration statistics...\n\n");
 }
 
 /* Track algorithm start times */
-usdt::ivcalc:algo_start
+usdt::mango:algo_start
 {
     @algo_start[arg0] = nsecs;
 }
 
 /* Measure algorithm duration on completion */
-usdt::ivcalc:algo_complete
+usdt::mango:algo_complete
 {
     if (@algo_start[arg0] > 0) {
         $duration_ns = nsecs - @algo_start[arg0];
@@ -47,7 +47,7 @@ usdt::ivcalc:algo_complete
 }
 
 /* Track PDE solver progress for step timing */
-usdt::ivcalc:algo_progress
+usdt::mango:algo_progress
 /arg0 == 1/  /* PDE solver */
 {
     if (@last_progress_time > 0) {
@@ -58,14 +58,14 @@ usdt::ivcalc:algo_progress
 }
 
 /* Track convergence performance */
-usdt::ivcalc:convergence_success
+usdt::mango:convergence_success
 {
     @convergence_iters[arg0] = hist(arg2);
     @convergence_errors[arg0] = hist(arg3);
 }
 
 /* Count Brent iterations */
-usdt::ivcalc:brent_iter
+usdt::mango:brent_iter
 {
     @brent_iter_count++;
 }

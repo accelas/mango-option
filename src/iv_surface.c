@@ -1,5 +1,5 @@
 #include "iv_surface.h"
-#include "interp_multilinear.h"
+#include "interp_cubic.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -32,9 +32,9 @@ IVSurface* iv_surface_create_with_strategy(
         return NULL;
     }
 
-    // Default to multilinear if no strategy specified
+    // Default to cubic if no strategy specified
     if (!strategy) {
-        strategy = &INTERP_MULTILINEAR;
+        strategy = &INTERP_CUBIC;
     }
 
     IVSurface *surface = malloc(sizeof(IVSurface));
@@ -84,7 +84,7 @@ IVSurface* iv_surface_create(
     const double *moneyness, size_t n_m,
     const double *maturity, size_t n_tau) {
     return iv_surface_create_with_strategy(moneyness, n_m, maturity, n_tau,
-                                            &INTERP_MULTILINEAR);
+                                            &INTERP_CUBIC);
 }
 
 void iv_surface_destroy(IVSurface *surface) {
