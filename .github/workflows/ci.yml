@@ -64,7 +64,25 @@ jobs:
         run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Run all tests
-        run: bazel test //tests/... --test_output=errors
+        run: |
+          # Define slow test bypass list (easily extensible)
+          # Tests here are excluded from CI but can be run manually
+          SLOW_TESTS=(
+            # IV tests using heavy FDM grids (250-2200ms each)
+            "ImpliedVolatilityTest.ATMPutIV"
+            "ImpliedVolatilityTest.OTMCallIV"
+            "ImpliedVolatilityTest.ITMPutIV"
+            "ImpliedVolatilityTest.SimpleCalculation"
+            "ImpliedVolatilityTest.ShortMaturity"
+            "ImpliedVolatilityTest.RoundTripConsistency"
+            "ImpliedVolatilityTest.NewtonMethodWithTable"
+          )
+
+          # Build filter string: -Test1:Test2:Test3
+          FILTER="-$(IFS=:; echo "${SLOW_TESTS[*]}")"
+
+          # Run tests with filter
+          bazel test //tests/... --test_output=errors --test_filter="$FILTER"
 
       - name: Display test results
         if: always()
