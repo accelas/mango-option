@@ -391,6 +391,34 @@ double price_table_interpolate_5d(const OptionPriceTable *table,
                                    double dividend);
 
 /**
+ * Interpolate vega (∂V/∂σ) at query point (4D table)
+ *
+ * Uses same interpolation strategy as prices for consistency.
+ *
+ * @param moneyness: S/K (raw, not transformed)
+ * @param maturity: T (raw, not transformed)
+ * @param volatility: σ (raw)
+ * @param rate: r (raw)
+ * @return interpolated vega value, or NaN if query out of bounds
+ *
+ * Example:
+ *   double vega = price_table_interpolate_vega_4d(table, 1.05, 0.5, 0.20, 0.05);
+ */
+double price_table_interpolate_vega_4d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate);
+
+/**
+ * Interpolate vega (∂V/∂σ) at query point (5D table with dividend)
+ *
+ * @return interpolated vega value, or NaN if query out of bounds
+ */
+double price_table_interpolate_vega_5d(const OptionPriceTable *table,
+                                       double moneyness, double maturity,
+                                       double volatility, double rate,
+                                       double dividend);
+
+/**
  * Compute Greeks via finite differences on interpolated prices
  *
  * Uses centered finite differences:

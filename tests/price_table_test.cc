@@ -437,3 +437,71 @@ TEST(PriceTableTest, VegaPrecomputation) {
 
     price_table_destroy(table);
 }
+
+TEST(PriceTableTest, VegaInterpolation4D) {
+    // Create table with reasonable grid
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau = {0.25, 0.5, 1.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r = {0.03, 0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN);
+
+    // Precompute (includes vega)
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 50
+    };
+    price_table_precompute(table, &grid);
+
+    // Build interpolation structures
+    price_table_build_interpolation(table);
+
+    // Query vega at off-grid point
+    double vega = price_table_interpolate_vega_4d(table, 0.95, 0.75, 0.22, 0.04);
+
+    // Should return interpolated value (not NaN)
+    EXPECT_FALSE(std::isnan(vega));
+
+    // Vega should be positive for put
+    EXPECT_GT(vega, 0.0);
+
+    price_table_destroy(table);
+}
+
+TEST(PriceTableTest, VegaInterpolation5D) {
+    std::vector<double> m = {0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.25, 0.5};
+    std::vector<double> sigma = {0.15, 0.20, 0.25};  // Need 3+ for centered diff
+    std::vector<double> r = {0.03, 0.05};  // Need at least 2 for cubic
+    std::vector<double> q = {0.0, 0.02};  // 5D with dividend
+
+    OptionPriceTable *table = price_table_create(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        q.data(), q.size(),
+        OPTION_CALL, AMERICAN);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 50
+    };
+    price_table_precompute(table, &grid);
+    price_table_build_interpolation(table);
+
+    // Query vega at off-grid point (5D)
+    double vega = price_table_interpolate_vega_5d(table, 0.95, 0.35, 0.22, 0.05, 0.01);
+
+    EXPECT_FALSE(std::isnan(vega));
+    EXPECT_GT(vega, 0.0);
+
+    price_table_destroy(table);
+}
