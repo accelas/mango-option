@@ -1113,6 +1113,71 @@ double price_table_interpolate_vega_5d(const OptionPriceTable *table,
     return result;
 }
 
+double price_table_interpolate_gamma_4d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate) {
+    if (!table || !table->strategy || !table->gammas) {
+        return NAN;
+    }
+
+    if (table->n_dividend > 0) {
+        // Table is 5D, can't use 4D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports gamma interpolation
+    if (!table->strategy->interpolate_4d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with gammas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->gammas;
+
+    // Use price interpolation strategy on gamma data
+    double result = table->strategy->interpolate_4d(
+        table, moneyness, maturity, volatility, rate,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_gamma_5d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate,
+                                        double dividend) {
+    if (!table || !table->strategy || !table->gammas) {
+        return NAN;
+    }
+
+    if (table->n_dividend == 0) {
+        // Table is 4D, can't use 5D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports gamma interpolation
+    if (!table->strategy->interpolate_5d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with gammas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->gammas;
+
+    // Use price interpolation strategy on gamma data
+    double result = table->strategy->interpolate_5d(
+        table, moneyness, maturity, volatility, rate, dividend,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
 OptionGreeks price_table_greeks_4d(const OptionPriceTable *table,
                                     double moneyness, double maturity,
                                     double volatility, double rate) {
