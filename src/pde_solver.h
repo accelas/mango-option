@@ -117,11 +117,16 @@ struct PDESolver {
     // Single workspace buffer for all arrays (better cache locality)
     double *workspace;
 
-    // Solution storage (sliced from workspace)
-    double *u_current;    // u^n
-    double *u_next;       // u^{n+1}
-    double *u_stage;      // Intermediate stage for TR-BDF2
-    double *rhs;          // Right-hand side vector
+    // Swappable solution buffers (separate allocations for pointer swapping)
+    double *buffer_A;
+    double *buffer_B;
+    double *buffer_C;
+
+    // Solution storage (pointers to buffers, swappable)
+    double *u_current;    // u^n (points to one of buffer_A/B/C)
+    double *u_next;       // u^{n+1} (points to one of buffer_A/B/C)
+    double *u_stage;      // Intermediate stage for TR-BDF2 (points to one of buffer_A/B/C)
+    double *rhs;          // Right-hand side vector (sliced from workspace)
 
     // Working arrays for linear system (sliced from workspace)
     double *matrix_diag;

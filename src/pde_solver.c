@@ -399,7 +399,8 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
 
     // Allocate single workspace buffer for all arrays (better cache locality)
     // Need arrays totaling 12n doubles:
-    //   - Solution: u_current, u_next, u_stage, rhs (4n)
+    //   - Solution: buffer_A, buffer_B, buffer_C (3n) - swappable pointers
+    //   - RHS: rhs (1n)
     //   - Matrix: matrix_diag, matrix_upper, matrix_lower (3n)
     //   - Temps: u_old, Lu, u_temp (3n)
     //   - Tridiagonal workspace: c_prime, d_prime (2n)
@@ -425,10 +426,17 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     }
 
     // Slice workspace into individual arrays (each aligned)
+    // Solution buffers come first for potential cache benefits
     size_t offset = 0;
-    solver->u_current = solver->workspace + offset; offset += n_aligned;
-    solver->u_next = solver->workspace + offset; offset += n_aligned;
-    solver->u_stage = solver->workspace + offset; offset += n_aligned;
+    solver->buffer_A = solver->workspace + offset; offset += n_aligned;
+    solver->buffer_B = solver->workspace + offset; offset += n_aligned;
+    solver->buffer_C = solver->workspace + offset; offset += n_aligned;
+
+    // Point solution arrays to buffers (will be swapped during time-stepping)
+    solver->u_current = solver->buffer_A;
+    solver->u_next = solver->buffer_B;
+    solver->u_stage = solver->buffer_C;
+
     solver->rhs = solver->workspace + offset; offset += n_aligned;
     solver->matrix_diag = solver->workspace + offset; offset += n_aligned;
     solver->matrix_upper = solver->workspace + offset; offset += n_aligned;
@@ -445,7 +453,7 @@ void pde_solver_destroy(PDESolver *solver) {
     if (solver == nullptr) return;
 
     pde_free_grid(&solver->grid);
-    free(solver->workspace);  // Single free for all arrays
+    free(solver->workspace);  // Single free for all arrays (including buffers)
     free(solver);
 }
 
@@ -522,8 +530,10 @@ static int pde_solver_step_internal(PDESolver *solver, double t_current, size_t 
                                 solver->rhs, solver->u_next, step);
 
     if (status == 0) {
-        // Update current solution
-        memcpy(u_current, u_next, n * sizeof(double));
+        // Update current solution via pointer swap (zero-copy)
+        double *temp = solver->u_current;
+        solver->u_current = solver->u_next;
+        solver->u_next = temp;
     }
 
     return status;
