@@ -1313,12 +1313,20 @@ int price_table_expand_grid(OptionPriceTable *table,
     table->rhos = new_rhos;
 
     // Update strides for new dimensions
-    // For LAYOUT_M_INNER: moneyness is innermost
-    table->stride_q = 1;
-    table->stride_r = (table->n_dividend > 0) ? table->n_dividend : 1;
-    table->stride_sigma = table->stride_r * table->n_rate;
-    table->stride_tau = table->stride_sigma * table->n_volatility;
-    table->stride_m = 1;  // Innermost dimension
+    // For LAYOUT_M_INNER: [q][r][sigma][tau][m]
+    if (table->n_dividend > 0) {
+        table->stride_m = 1;
+        table->stride_tau = n_total;
+        table->stride_sigma = n_tau * n_total;
+        table->stride_r = n_sigma * n_tau * n_total;
+        table->stride_q = n_r * n_sigma * n_tau * n_total;
+    } else {
+        table->stride_m = 1;
+        table->stride_tau = n_total;
+        table->stride_sigma = n_tau * n_total;
+        table->stride_r = n_sigma * n_tau * n_total;
+        table->stride_q = 0;
+    }
 
     return 0;
 }
