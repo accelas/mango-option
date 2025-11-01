@@ -1173,6 +1173,12 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         return -1;
     }
 
+    // Write vega data
+    if (fwrite(table->vegas, sizeof(double), n_points, fp) != n_points) {
+        fclose(fp);
+        return -1;
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1278,6 +1284,27 @@ OptionPriceTable* price_table_load(const char *filename) {
         price_table_destroy(table);
         fclose(fp);
         return NULL;
+    }
+
+    // Read vega data (if available in file)
+    // For backward compatibility, check if there's more data
+    long current_pos = ftell(fp);
+    fseek(fp, 0, SEEK_END);
+    long end_pos = ftell(fp);
+    fseek(fp, current_pos, SEEK_SET);
+
+    if (end_pos - current_pos >= (long)(n_points * sizeof(double))) {
+        // Vega data exists in file
+        if (fread(table->vegas, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Old format without vega data - initialize to NaN
+        for (size_t i = 0; i < n_points; i++) {
+            table->vegas[i] = NAN;
+        }
     }
 
     // Set metadata

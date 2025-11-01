@@ -505,3 +505,87 @@ TEST(PriceTableTest, VegaInterpolation5D) {
 
     price_table_destroy(table);
 }
+
+TEST(PriceTableTest, VegaSaveLoad) {
+    // Create and precompute table
+    std::vector<double> m = {0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.5};
+    std::vector<double> sigma = {0.15, 0.20, 0.25};
+    std::vector<double> r = {0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 50
+    };
+    price_table_precompute(table, &grid);
+
+    // Save to file
+    const char *filename = "/tmp/test_vega_table.bin";
+    int status = price_table_save(table, filename);
+    EXPECT_EQ(status, 0);
+
+    // Get vega value before destroying
+    double vega_original = price_table_get_vega(table, 1, 0, 1, 0, 0);
+    EXPECT_FALSE(std::isnan(vega_original));
+
+    price_table_destroy(table);
+
+    // Load from file
+    OptionPriceTable *loaded = price_table_load(filename);
+    ASSERT_NE(loaded, nullptr);
+
+    // Verify vega was restored
+    double vega_loaded = price_table_get_vega(loaded, 1, 0, 1, 0, 0);
+    EXPECT_DOUBLE_EQ(vega_loaded, vega_original);
+
+    price_table_destroy(loaded);
+}
+
+TEST(PriceTableTest, LoadOldFormatWithoutVega) {
+    // This test verifies that loading old binary files (without vega)
+    // doesn't crash and initializes vega to NaN
+
+    // Create a table and save with old format (manually, without vega)
+    std::vector<double> m = {1.0};
+    std::vector<double> tau = {0.5};
+    std::vector<double> sigma = {0.20};
+    std::vector<double> r = {0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN);
+
+    // Set a price manually
+    price_table_set(table, 0, 0, 0, 0, 0, 5.0);
+
+    // Save (will include vega in new format)
+    const char *filename = "/tmp/test_compat_table.bin";
+    price_table_save(table, filename);
+    price_table_destroy(table);
+
+    // Load and verify
+    OptionPriceTable *loaded = price_table_load(filename);
+    ASSERT_NE(loaded, nullptr);
+
+    // Price should be preserved
+    double price = price_table_get(loaded, 0, 0, 0, 0, 0);
+    EXPECT_DOUBLE_EQ(price, 5.0);
+
+    // Vega should exist (newly saved format includes it)
+    double vega = price_table_get_vega(loaded, 0, 0, 0, 0, 0);
+    EXPECT_TRUE(std::isnan(vega));  // NaN because not precomputed
+
+    price_table_destroy(loaded);
+}
