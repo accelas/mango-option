@@ -595,3 +595,246 @@ TEST(PriceTableTest, LoadOldFormatWithoutVega) {
 
     price_table_destroy(loaded);
 }
+
+TEST(PriceTableTest, GammaGetSet) {
+    double m[] = {0.9, 1.0, 1.1};
+    double tau[] = {0.25, 0.5};
+    double sigma[] = {0.2, 0.3};
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m, 3, tau, 2, sigma, 2, r, 1, nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    // Allocate gammas
+    size_t n_total = 3 * 2 * 2 * 1;
+    table->gammas = (double*)malloc(n_total * sizeof(double));
+    ASSERT_NE(table->gammas, nullptr);
+
+    // Initialize to NaN
+    for (size_t i = 0; i < n_total; i++) {
+        table->gammas[i] = NAN;
+    }
+
+    // Test set
+    int status = price_table_set_gamma(table, 1, 0, 1, 0, 0, 42.5);
+    EXPECT_EQ(status, 0);
+
+    // Test get
+    double gamma = price_table_get_gamma(table, 1, 0, 1, 0, 0);
+    EXPECT_DOUBLE_EQ(gamma, 42.5);
+
+    // Test bounds checking - out of bounds should return NaN
+    double gamma_oob = price_table_get_gamma(table, 99, 0, 0, 0, 0);
+    EXPECT_TRUE(std::isnan(gamma_oob));
+
+    price_table_destroy(table);
+}
+
+TEST(PriceTableTest, GammaPrecomputation) {
+    // Small grid for fast test
+    double m[] = {1.0};
+    double tau[] = {0.5};
+    double sigma[] = {0.15, 0.20, 0.25};  // Need 3+ for centered diff
+    double r[] = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m, 1, tau, 1, sigma, 3, r, 1, nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7,
+        .x_max = 0.7,
+        .n_points = 51,
+        .dt = 0.01,
+        .n_steps = 50
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    // Gammas should be allocated
+    EXPECT_NE(table->gammas, nullptr);
+
+    // Gammas should have reasonable values (non-NaN for interior points)
+    // Note: With only 1 moneyness point, all gammas will be NaN (no neighbors)
+    // This is expected - just verify array was allocated
+    double gamma = price_table_get_gamma(table, 0, 0, 1, 0, 0);
+    // We expect NaN because there's only 1 moneyness point (no neighbors for finite diff)
+    EXPECT_TRUE(std::isnan(gamma));
+
+    price_table_destroy(table);
+}
+
+TEST(PriceTableTest, GammaInterpolation4D) {
+    // Create table with reasonable grid
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau = {0.25, 0.5, 1.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25};
+    std::vector<double> r = {0.03, 0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 100
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    price_table_build_interpolation(table);
+
+    // Query gamma at an interior point
+    double gamma = price_table_interpolate_gamma_4d(table, 1.0, 0.5, 0.20, 0.05);
+
+    // Should not be NaN
+    EXPECT_FALSE(std::isnan(gamma));
+
+    // Gamma should be positive for ATM put
+    EXPECT_GT(gamma, 0.0);
+
+    price_table_destroy(table);
+}
+
+TEST(PriceTableTest, GammaInterpolation5D) {
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau = {0.25, 0.5};
+    std::vector<double> sigma = {0.15, 0.20, 0.25};
+    std::vector<double> r = {0.05};
+    std::vector<double> q = {0.0, 0.02};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        q.data(), q.size(),
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 50
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    price_table_build_interpolation(table);
+
+    // Verify gammas were allocated
+    EXPECT_NE(table->gammas, nullptr);
+
+    // Query gamma with dividend - just verify function doesn't crash
+    double gamma = price_table_interpolate_gamma_5d(table, 1.0, 0.25, 0.20, 0.05, 0.01);
+
+    // Gamma might be NaN depending on grid resolution, just verify we got a result
+    (void)gamma;  // Use the variable
+
+    price_table_destroy(table);
+}
+
+TEST(PriceTableTest, GammaSaveLoad) {
+    // Create and precompute table
+    std::vector<double> m = {0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.5};
+    std::vector<double> sigma = {0.15, 0.20, 0.25};
+    std::vector<double> r = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    ASSERT_NE(table, nullptr);
+
+    AmericanOptionGrid grid = {
+        .x_min = -0.7, .x_max = 0.7,
+        .n_points = 51, .dt = 0.01, .n_steps = 50
+    };
+
+    int status = price_table_precompute(table, &grid);
+    EXPECT_EQ(status, 0);
+
+    // Get a gamma value before save
+    double gamma_before = price_table_get_gamma(table, 1, 0, 1, 0, 0);
+    EXPECT_FALSE(std::isnan(gamma_before));
+
+    // Save
+    const char *filename = "test_gamma_save_load.bin";
+    status = price_table_save(table, filename);
+    EXPECT_EQ(status, 0);
+
+    // Load
+    OptionPriceTable *loaded = price_table_load(filename);
+    ASSERT_NE(loaded, nullptr);
+
+    // Verify gamma loaded correctly
+    EXPECT_NE(loaded->gammas, nullptr);
+    double gamma_after = price_table_get_gamma(loaded, 1, 0, 1, 0, 0);
+    EXPECT_DOUBLE_EQ(gamma_before, gamma_after);
+
+    // Cleanup
+    price_table_destroy(table);
+    price_table_destroy(loaded);
+    std::remove(filename);
+}
+
+TEST(PriceTableTest, LoadOldFormatWithoutGamma) {
+    // This test verifies loading v2 files (without gamma) doesn't crash
+    // In practice, you'd have a v2 file to test with
+    // For now, just verify that a newly loaded table initializes gammas correctly
+
+    std::vector<double> m = {1.0};
+    std::vector<double> tau = {0.5};
+    std::vector<double> sigma = {0.20};
+    std::vector<double> r = {0.05};
+
+    OptionPriceTable *table = price_table_create_ex(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN,
+        COORD_RAW, LAYOUT_M_INNER);
+
+    // Don't precompute - gammas should be NULL
+    EXPECT_EQ(table->gammas, nullptr);
+
+    // Save without precomputing (no gammas)
+    const char *filename = "test_no_gamma.bin";
+    int status = price_table_save(table, filename);
+    EXPECT_EQ(status, 0);
+
+    // Load - gammas should still be NULL
+    OptionPriceTable *loaded = price_table_load(filename);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->gammas, nullptr);
+
+    price_table_destroy(table);
+    price_table_destroy(loaded);
+    std::remove(filename);
+}
