@@ -19,6 +19,16 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_generation_test",
+    srcs = ["grid_generation_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:grid_generation",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "stability_test",
     srcs = ["stability_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
