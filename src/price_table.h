@@ -23,7 +23,7 @@ typedef enum {
  * @file price_table.h
  * @brief Multi-dimensional option price table with pluggable interpolation
  *
- * Pre-computes option prices and vegas on a multi-dimensional grid for fast lookup:
+ * Pre-computes option prices, vegas, and gammas on a multi-dimensional grid for fast lookup:
  * - Moneyness (m = S/K)
  * - Maturity (τ = T - t)
  * - Volatility (σ)
@@ -33,7 +33,8 @@ typedef enum {
  * Features:
  * - Sub-microsecond queries (4D: ~500ns, 5D: ~2µs)
  * - 40,000x faster than FDM solver (21.7ms → 500ns)
- * - Vega interpolation for accurate Greeks
+ * - Vega interpolation for accurate first-order Greeks
+ * - Gamma interpolation for accurate second-order Greeks
  * - Runtime interpolation strategy selection
  * - Parallel pre-computation via OpenMP
  * - Binary save/load for persistence
@@ -44,7 +45,7 @@ typedef enum {
  *       moneyness, n_m, maturity, n_tau, volatility, n_sigma,
  *       rate, n_r, NULL, 0, OPTION_PUT, AMERICAN);
  *
- *   // Pre-compute all option prices and vegas (uses FDM)
+ *   // Pre-compute all option prices, vegas, and gammas (uses FDM)
  *   price_table_precompute(table, pde_solver_template);
  *
  *   // Save for fast loading later
@@ -55,6 +56,9 @@ typedef enum {
  *
  *   // Fast vega query (~8ns)
  *   double vega = price_table_interpolate_vega_4d(table, 1.05, 0.25, 0.20, 0.05);
+ *
+ *   // Fast gamma query (~8ns)
+ *   double gamma = price_table_interpolate_gamma_4d(table, 1.05, 0.25, 0.20, 0.05);
  *
  *   // Cleanup
  *   price_table_destroy(table);
@@ -152,6 +156,7 @@ typedef struct OptionPriceTable {
 
     // Greeks data (added to end to preserve ABI compatibility)
     double *vegas;              // ∂V/∂σ values (same dimensions as prices)
+    double *gammas;             // ∂²V/∂S² values (same dimensions as prices)
 } OptionPriceTable;
 
 /**
@@ -423,6 +428,42 @@ double price_table_interpolate_vega_5d(const OptionPriceTable *table,
                                        double moneyness, double maturity,
                                        double volatility, double rate,
                                        double dividend);
+
+/**
+ * Interpolate gamma (∂²V/∂S²) at query point (4D)
+ *
+ * @return interpolated gamma value, or NaN if query out of bounds
+ *
+ * Example:
+ *   double gamma = price_table_interpolate_gamma_4d(table, 1.05, 0.5, 0.20, 0.05);
+ */
+double price_table_interpolate_gamma_4d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate);
+
+/**
+ * Interpolate gamma (∂²V/∂S²) at query point (5D)
+ *
+ * @return interpolated gamma value, or NaN if query out of bounds
+ */
+double price_table_interpolate_gamma_5d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate,
+                                        double dividend);
+
+/**
+ * Get gamma value at specific grid indices
+ */
+double price_table_get_gamma(const OptionPriceTable *table,
+                             size_t i_m, size_t i_tau, size_t i_sigma,
+                             size_t i_r, size_t i_q);
+
+/**
+ * Set gamma value at specific grid indices
+ */
+int price_table_set_gamma(OptionPriceTable *table,
+                          size_t i_m, size_t i_tau, size_t i_sigma,
+                          size_t i_r, size_t i_q, double gamma);
 
 /**
  * Compute Greeks via finite differences on interpolated prices

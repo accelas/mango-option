@@ -15,9 +15,9 @@
 
 // File format constants
 #define PRICE_TABLE_MAGIC 0x50545442  // "PTTB"
-#define PRICE_TABLE_VERSION 2          // Version 2: adds coord_system and memory_layout
+#define PRICE_TABLE_VERSION 3          // Version 3: adds gammas
 
-// File header structure (Version 2)
+// File header structure (Version 3)
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -32,7 +32,8 @@ typedef struct {
     time_t generation_time;
     CoordinateSystem coord_system;    // Version 2+: coordinate transformation
     MemoryLayout memory_layout;       // Version 2+: memory layout strategy
-    uint8_t padding[120];             // Reserved for future use (reduced from 128)
+    uint8_t has_gammas;               // Version 3+: 1 if gammas present, 0 otherwise
+    uint8_t padding[119];             // Reserved for future use (reduced from 120)
 } PriceTableHeader;
 
 // ---------- Helper Functions ----------
@@ -392,6 +393,7 @@ OptionPriceTable* price_table_create_ex(
 
     // Vega array - not allocated in create, only during precompute
     table->vegas = NULL;
+    table->gammas = NULL;
 
     // Set metadata
     table->type = type;
@@ -442,6 +444,7 @@ void price_table_destroy(OptionPriceTable *table) {
     free(table->dividend_grid);
     free(table->prices);
     free(table->vegas);
+    free(table->gammas);
     free(table);
 }
 
@@ -469,6 +472,18 @@ int price_table_precompute(OptionPriceTable *table,
         // Initialize to NaN
         for (size_t i = 0; i < n_total; i++) {
             table->vegas[i] = NAN;
+        }
+    }
+
+    // Allocate gamma array if not already allocated
+    if (!table->gammas) {
+        table->gammas = malloc(n_total * sizeof(double));
+        if (!table->gammas) {
+            return -1;
+        }
+        // Initialize to NaN
+        for (size_t i = 0; i < n_total; i++) {
+            table->gammas[i] = NAN;
         }
     }
 
@@ -721,6 +736,138 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
+    // Third pass: Compute gamma via finite differences on moneyness axis
+    // Note: γ = ∂²V/∂S², not ∂²V/∂m². Since m = S/K_ref, we have:
+    // ∂²V/∂S² = ∂²V/∂m² · (∂m/∂S)² = ∂²V/∂m² / K_ref²
+    const double K_ref_sq = K_ref * K_ref;  // 10000
+
+    // Handle lower boundary (i_m == 0) with forward differences
+    if (table->n_moneyness > 2) {
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx0 = 0 * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx1 = idx0 + table->stride_m;
+                        size_t idx2 = idx0 + 2 * table->stride_m;
+
+                        double V0 = table->prices[idx0];
+                        double V1 = table->prices[idx1];
+                        double V2 = table->prices[idx2];
+
+                        if (table->coord_system == COORD_LOG_SQRT) {
+                            // Transform from log-space to raw space
+                            double m0 = exp(table->moneyness_grid[0]);
+                            double h = table->moneyness_grid[1] - table->moneyness_grid[0];
+
+                            if (!isnan(V0) && !isnan(V1) && !isnan(V2)) {
+                                double d2V = (V2 - 2*V1 + V0) / (h * h);
+                                double dV = (V1 - V0) / h;
+                                double d2V_dm2 = (d2V - dV) / (m0 * m0);
+                                table->gammas[idx0] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
+                            }
+                        } else {
+                            // Raw coordinates - direct computation
+                            double h = table->moneyness_grid[1] - table->moneyness_grid[0];
+                            if (!isnan(V0) && !isnan(V1) && !isnan(V2)) {
+                                double d2V_dm2 = (V2 - 2*V1 + V0) / (h * h);
+                                table->gammas[idx0] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Interior points - centered differences with SIMD vectorization
+    if (table->n_moneyness > 2) {
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        #pragma omp simd
+                        for (size_t i_m = 1; i_m < table->n_moneyness - 1; i_m++) {
+                            size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                       + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                       + i_q * table->stride_q;
+                            size_t idx_minus = idx - table->stride_m;
+                            size_t idx_plus = idx + table->stride_m;
+
+                            double V_minus = table->prices[idx_minus];
+                            double V = table->prices[idx];
+                            double V_plus = table->prices[idx_plus];
+
+                            if (table->coord_system == COORD_LOG_SQRT) {
+                                // Transform from log-space to raw space
+                                double m = exp(table->moneyness_grid[i_m]);
+                                double h = table->moneyness_grid[i_m+1] - table->moneyness_grid[i_m];
+
+                                if (!isnan(V_minus) && !isnan(V_plus)) {
+                                    double d2V_dlogm2 = (V_plus - 2*V + V_minus) / (h * h);
+                                    double dV_dlogm = (V_plus - V_minus) / (2 * h);
+                                    double d2V_dm2 = (d2V_dlogm2 - dV_dlogm) / (m * m);
+                                    table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
+                                }
+                            } else {
+                                // Raw coordinates - direct computation
+                                double h = table->moneyness_grid[i_m+1] - table->moneyness_grid[i_m];
+                                if (!isnan(V_minus) && !isnan(V_plus)) {
+                                    double d2V_dm2 = (V_plus - 2*V + V_minus) / (h * h);
+                                    table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Upper boundary (i_m == n_moneyness-1) with backward differences
+    if (table->n_moneyness > 2) {
+        size_t i_m_last = table->n_moneyness - 1;
+        for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
+            for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+                for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                    for (size_t i_q = 0; i_q < n_q_effective; i_q++) {
+                        size_t idx = i_m_last * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+                        size_t idx_minus1 = idx - table->stride_m;
+                        size_t idx_minus2 = idx - 2 * table->stride_m;
+
+                        double V = table->prices[idx];
+                        double V1 = table->prices[idx_minus1];
+                        double V2 = table->prices[idx_minus2];
+
+                        if (table->coord_system == COORD_LOG_SQRT) {
+                            // Transform from log-space to raw space
+                            double m = exp(table->moneyness_grid[i_m_last]);
+                            double h = table->moneyness_grid[i_m_last] - table->moneyness_grid[i_m_last-1];
+
+                            if (!isnan(V) && !isnan(V1) && !isnan(V2)) {
+                                double d2V = (V - 2*V1 + V2) / (h * h);
+                                double dV = (V - V1) / h;
+                                double d2V_dm2 = (d2V - dV) / (m * m);
+                                table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
+                            }
+                        } else {
+                            // Raw coordinates - direct computation
+                            double h = table->moneyness_grid[i_m_last] - table->moneyness_grid[i_m_last-1];
+                            if (!isnan(V) && !isnan(V1) && !isnan(V2)) {
+                                double d2V_dm2 = (V - 2*V1 + V2) / (h * h);
+                                table->gammas[idx] = d2V_dm2 / K_ref_sq;  // Convert to ∂²V/∂S²
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
 
     free(batch_options);
@@ -811,6 +958,51 @@ int price_table_set_vega(OptionPriceTable *table,
                + i_q * table->stride_q;
 
     table->vegas[idx] = vega;
+    return 0;
+}
+
+double price_table_get_gamma(const OptionPriceTable *table,
+                             size_t i_m, size_t i_tau, size_t i_sigma,
+                             size_t i_r, size_t i_q) {
+    if (!table || !table->gammas) {
+        return NAN;
+    }
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return NAN;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    return table->gammas[idx];
+}
+
+int price_table_set_gamma(OptionPriceTable *table,
+                          size_t i_m, size_t i_tau, size_t i_sigma,
+                          size_t i_r, size_t i_q, double gamma) {
+    if (!table || !table->gammas) return -1;
+
+    // Bounds checking
+    size_t n_q_effective = table->n_dividend > 0 ? table->n_dividend : 1;
+    if (i_m >= table->n_moneyness || i_tau >= table->n_maturity ||
+        i_sigma >= table->n_volatility || i_r >= table->n_rate ||
+        i_q >= n_q_effective) {
+        return -1;
+    }
+
+    // Calculate flat index using pre-computed strides
+    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+               + i_sigma * table->stride_sigma + i_r * table->stride_r
+               + i_q * table->stride_q;
+
+    table->gammas[idx] = gamma;
     return 0;
 }
 
@@ -920,6 +1112,71 @@ double price_table_interpolate_vega_5d(const OptionPriceTable *table,
     ((OptionPriceTable*)table)->prices = table->vegas;
 
     // Use price interpolation strategy on vega data
+    double result = table->strategy->interpolate_5d(
+        table, moneyness, maturity, volatility, rate, dividend,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_gamma_4d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate) {
+    if (!table || !table->strategy || !table->gammas) {
+        return NAN;
+    }
+
+    if (table->n_dividend > 0) {
+        // Table is 5D, can't use 4D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports gamma interpolation
+    if (!table->strategy->interpolate_4d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with gammas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->gammas;
+
+    // Use price interpolation strategy on gamma data
+    double result = table->strategy->interpolate_4d(
+        table, moneyness, maturity, volatility, rate,
+        table->interp_context);
+
+    // Restore original prices pointer
+    ((OptionPriceTable*)table)->prices = original_prices;
+
+    return result;
+}
+
+double price_table_interpolate_gamma_5d(const OptionPriceTable *table,
+                                        double moneyness, double maturity,
+                                        double volatility, double rate,
+                                        double dividend) {
+    if (!table || !table->strategy || !table->gammas) {
+        return NAN;
+    }
+
+    if (table->n_dividend == 0) {
+        // Table is 4D, can't use 5D interpolation
+        return NAN;
+    }
+
+    // Check if strategy supports gamma interpolation
+    if (!table->strategy->interpolate_5d) {
+        return NAN;
+    }
+
+    // Temporarily swap prices with gammas for interpolation
+    double *original_prices = table->prices;
+    ((OptionPriceTable*)table)->prices = table->gammas;
+
+    // Use price interpolation strategy on gamma data
     double result = table->strategy->interpolate_5d(
         table, moneyness, maturity, volatility, rate, dividend,
         table->interp_context);
@@ -1141,7 +1398,8 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         .exercise = table->exercise,
         .generation_time = table->generation_time,
         .coord_system = table->coord_system,
-        .memory_layout = table->memory_layout
+        .memory_layout = table->memory_layout,
+        .has_gammas = (table->gammas != NULL) ? 1 : 0
     };
     memcpy(header.underlying, table->underlying, sizeof(header.underlying));
 
@@ -1182,6 +1440,14 @@ int price_table_save(const OptionPriceTable *table, const char *filename) {
         }
     }
 
+    // Write gamma data (only if allocated)
+    if (table->gammas) {
+        if (fwrite(table->gammas, sizeof(double), n_points, fp) != n_points) {
+            fclose(fp);
+            return -1;
+        }
+    }
+
     fclose(fp);
     return 0;
 }
@@ -1205,13 +1471,13 @@ OptionPriceTable* price_table_load(const char *filename) {
         return NULL;
     }
 
-    // Support version 1 (without coord_system/memory_layout) and version 2
-    if (header.version != 1 && header.version != 2) {
+    // Support version 1 (without coord_system/memory_layout), version 2, and version 3 (adds gammas)
+    if (header.version < 1 || header.version > 3) {
         fclose(fp);
         return NULL;
     }
 
-    // For version 1, use default values; for version 2, use header values
+    // For version 1, use default values; for version 2+, use header values
     CoordinateSystem coord_system = (header.version >= 2) ? header.coord_system : COORD_RAW;
     MemoryLayout memory_layout = (header.version >= 2) ? header.memory_layout : LAYOUT_M_OUTER;
 
@@ -1313,6 +1579,24 @@ OptionPriceTable* price_table_load(const char *filename) {
         // Old format without vega data - vegas stays NULL
         // It will be allocated if/when precompute is called
         table->vegas = NULL;
+    }
+
+    // Load gamma data (version 3+)
+    if (header.version >= 3 && header.has_gammas) {
+        table->gammas = malloc(n_points * sizeof(double));
+        if (!table->gammas) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+        if (fread(table->gammas, sizeof(double), n_points, fp) != n_points) {
+            price_table_destroy(table);
+            fclose(fp);
+            return NULL;
+        }
+    } else {
+        // Older version or no gammas - initialize to NULL
+        table->gammas = NULL;
     }
 
     // Set metadata
