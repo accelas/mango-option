@@ -83,6 +83,52 @@ impl OptionParams {
     }
 }
 
+/// Grid parameters for PDE solver
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GridParams {
+    pub n_points: usize,
+    pub x_min: f64,
+    pub x_max: f64,
+    pub dx: f64,
+}
+
+impl GridParams {
+    /// Create uniform grid
+    pub fn uniform(x_min: f64, x_max: f64, n_points: usize) -> Self {
+        let dx = (x_max - x_min) / (n_points as f64 - 1.0);
+        Self {
+            n_points,
+            x_min,
+            x_max,
+            dx,
+        }
+    }
+}
+
+/// Time domain parameters
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct TimeParams {
+    pub t_start: f64,
+    pub t_end: f64,
+    pub dt: f64,
+    pub n_steps: usize,
+}
+
+impl TimeParams {
+    /// Create time domain with uniform steps
+    pub fn uniform(t_start: f64, t_end: f64, n_steps: usize) -> Self {
+        let dt = (t_end - t_start) / n_steps as f64;
+        Self {
+            t_start,
+            t_end,
+            dt,
+            n_steps,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +173,23 @@ mod tests {
         let params = OptionParams::american_call(100.0, 105.0, 0.5, 0.03, 0.25);
         assert_eq!(params.option_type, OptionType::Call);
         assert_eq!(params.strike, 105.0);
+    }
+
+    #[test]
+    fn test_grid_params() {
+        let grid = GridParams::uniform(-1.0, 1.0, 101);
+        assert_eq!(grid.n_points, 101);
+        assert_eq!(grid.x_min, -1.0);
+        assert_eq!(grid.x_max, 1.0);
+        assert!((grid.dx - 0.02).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_time_params() {
+        let time = TimeParams::uniform(0.0, 1.0, 1000);
+        assert_eq!(time.n_steps, 1000);
+        assert_eq!(time.t_start, 0.0);
+        assert_eq!(time.t_end, 1.0);
+        assert!((time.dt - 0.001).abs() < 1e-10);
     }
 }
