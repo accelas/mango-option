@@ -18,9 +18,16 @@ pub enum ExerciseType {
     American = 1,
 }
 
-/// Option parameters for pricing calculations
+/// Option parameters for GPU pricing kernels
 ///
-/// C-compatible struct matching `OptionData` from american_option.h
+/// This struct contains all parameters needed for option pricing on GPU.
+/// It uses `#[repr(C)]` for stable layout but is NOT intended for C FFI
+/// in Phase 1. FFI bridge will be added in Phase 6 (Week 15-16).
+///
+/// Differences from C's `OptionData`:
+/// - Includes `spot_price` (needed for GPU kernel dispatch)
+/// - Uses `dividend_yield` instead of discrete dividends
+/// - Includes `exercise_type` for kernel routing
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct OptionParams {
