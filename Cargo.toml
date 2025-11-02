@@ -10,5 +10,12 @@ edition = "2021"
 authors = ["mango-iv contributors"]
 license = "MIT OR Apache-2.0"
 
+[workspace.metadata]
+description = "Rust+GPU option pricing library"
+repository = "https://github.com/yourusername/mango-iv"
+readme = "README.md"
+keywords = ["options", "pricing", "finance", "gpu", "rust"]
+categories = ["science", "mathematics"]
+
 [workspace.dependencies]
 # Shared dependencies across crates (none yet)
