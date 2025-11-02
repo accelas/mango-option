@@ -1,0 +1,13 @@
+[package]
+name = "mango-types"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "mango_types"
+path = "src/lib.rs"
+
+[dependencies]
+# No dependencies yet - pure types

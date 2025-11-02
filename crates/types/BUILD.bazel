@@ -1,0 +1,14 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "types",
+    srcs = ["src/lib.rs"],
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "types_test",
+    crate = ":types",
+    edition = "2021",
+)
