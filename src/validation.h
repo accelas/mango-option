@@ -78,26 +78,48 @@ typedef struct {
 /**
  * Validate interpolation error in IV space
  *
- * Compares interpolated prices from table against "true" FDM prices computed
- * on fine grids. Converts both to implied volatility using Brent's method and
- * measures error in basis points.
+ * Compares interpolated prices from table against "true" prices from either:
+ * 1. Reference table interpolation (fast, tests interpolation quality)
+ * 2. FDM solve on fine grid (slow, tests absolute accuracy)
+ *
+ * Converts both to implied volatility using Brent's method and measures error
+ * in basis points.
  *
  * @param table: Price table to validate
- * @param grid_params: FDM grid parameters for computing "true" prices
+ * @param grid_params: FDM grid parameters (only used if reference_table is NULL)
+ * @param reference_table: Optional reference table for fast validation (NULL = use FDM)
  * @param n_samples: Number of random samples to test (recommend 10,000+)
  * @param target_error_bp: Target error threshold for high-error identification (e.g., 1.0 for 1bp)
  * @return Validation result with statistics and high-error regions
  *
- * Performance: ~2-5 seconds per 1000 samples (depends on FDM grid resolution)
+ * Performance:
+ * - With reference table: ~100 microseconds per 1000 samples (fast)
+ * - With FDM: ~2-5 seconds per 1000 samples (slow)
  *
- * Example:
+ * Example (fast validation with reference table):
  * @code
- *   AmericanOptionGrid grid = {.n_points = 201, .n_steps = 2000, ...};
- *   ValidationResult result = validate_interpolation_error(table, &grid, 10000, 1.0);
+ *   // Create reference table with 2× denser grid
+ *   OptionPriceTable *ref_table = price_table_create(...);  // Dense grid
+ *   price_table_precompute(ref_table, &grid);
+ *   price_table_build_interpolation(ref_table);
+ *
+ *   // Validate test table against reference
+ *   ValidationResult result = validate_interpolation_error(
+ *       table, NULL, ref_table, 10000, 1.0);
  *
  *   if (result.p95_iv_error > 1.0) {
  *       printf("Need refinement: P95 error = %.2f bp\n", result.p95_iv_error);
  *   }
+ *
+ *   validation_result_free(&result);
+ *   price_table_destroy(ref_table);
+ * @endcode
+ *
+ * Example (absolute accuracy test with FDM):
+ * @code
+ *   AmericanOptionGrid grid = {.n_points = 201, .n_steps = 2000, ...};
+ *   ValidationResult result = validate_interpolation_error(
+ *       table, &grid, NULL, 1000, 1.0);  // No reference table = use FDM
  *
  *   validation_result_free(&result);
  * @endcode
@@ -105,6 +127,7 @@ typedef struct {
 ValidationResult validate_interpolation_error(
     const OptionPriceTable *table,
     const AmericanOptionGrid *grid_params,
+    const OptionPriceTable *reference_table,
     size_t n_samples,
     double target_error_bp);
 

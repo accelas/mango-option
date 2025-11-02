@@ -109,12 +109,19 @@ double compute_implied_volatility(
 ValidationResult validate_interpolation_error(
     const OptionPriceTable *table,
     const AmericanOptionGrid *grid_params,
+    const OptionPriceTable *reference_table,
     size_t n_samples,
     double target_error_bp)
 {
     ValidationResult result = {0};
 
-    if (!table || !grid_params || n_samples == 0) {
+    if (!table || n_samples == 0) {
+        return result;
+    }
+
+    // Either reference_table OR grid_params must be provided
+    if (!reference_table && !grid_params) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_VALIDATION, 0, 0, 0.0);
         return result;
     }
 
@@ -182,60 +189,84 @@ ValidationResult validate_interpolation_error(
             continue;
         }
 
-        // 2. Compute "true" price via FDM on fine grid
-        // Use american_option_solve_on_moneyness_grid for unified grid
-        OptionData option_data = {
-            .strike = 100.0,  // Use K=100 as reference
-            .volatility = s->volatility,
-            .risk_free_rate = s->rate,
-            .time_to_maturity = s->maturity,
-            .option_type = table->type,
-            .n_dividends = 0,
-            .dividend_times = NULL,
-            .dividend_amounts = NULL
-        };
+        // 2. Compute reference price (either from reference table or FDM)
+        double price_ref;
 
-        // Create fine moneyness grid around sample point
-        double m_grid[3] = {
-            s->moneyness * 0.95,
-            s->moneyness,
-            s->moneyness * 1.05
-        };
+        if (reference_table) {
+            // Fast path: Use reference table interpolation
+            price_ref = price_table_interpolate_4d(
+                reference_table, s->moneyness, s->maturity, s->volatility, s->rate);
 
-        AmericanOptionResult fdm_result = american_option_solve(
-            &option_data, m_grid, 3, grid_params->dt, grid_params->n_steps);
+            if (isnan(price_ref) || price_ref <= 0.0) {
+                iv_errors[i] = NAN;
+                continue;
+            }
+        } else {
+            // Slow path: Compute via FDM on fine grid
+            // Use american_option_solve_on_moneyness_grid for unified grid
+            OptionData option_data = {
+                .strike = 100.0,  // Use K=100 as reference
+                .volatility = s->volatility,
+                .risk_free_rate = s->rate,
+                .time_to_maturity = s->maturity,
+                .option_type = table->type,
+                .n_dividends = 0,
+                .dividend_times = NULL,
+                .dividend_amounts = NULL
+            };
 
-        if (fdm_result.status != 0) {
-            iv_errors[i] = NAN;
+            // Create fine moneyness grid around sample point (101 points for accuracy)
+            const size_t n_validation = 101;
+            double *m_grid = malloc(n_validation * sizeof(double));
+            if (!m_grid) {
+                iv_errors[i] = NAN;
+                continue;
+            }
+
+            double m_min = s->moneyness * 0.85;  // Wider range for boundary accuracy
+            double m_max = s->moneyness * 1.15;
+
+            for (size_t j = 0; j < n_validation; j++) {
+                double frac = (double)j / (n_validation - 1);
+                m_grid[j] = m_min + frac * (m_max - m_min);
+            }
+
+            AmericanOptionResult fdm_result = american_option_solve(
+                &option_data, m_grid, n_validation, grid_params->dt, grid_params->n_steps);
+
+            free(m_grid);
+
+            if (fdm_result.status != 0) {
+                iv_errors[i] = NAN;
+                american_option_free_result(&fdm_result);
+                continue;
+            }
+
+            // Extract price at sample point via interpolation
+            price_ref = pde_solver_interpolate(fdm_result.solver, s->moneyness);
+
             american_option_free_result(&fdm_result);
-            continue;
-        }
 
-        // Extract price at middle point (index 1)
-        const double *solution = pde_solver_get_solution(fdm_result.solver);
-        double price_fdm = solution[1];
-
-        american_option_free_result(&fdm_result);
-
-        if (isnan(price_fdm) || price_fdm <= 0.0) {
-            iv_errors[i] = NAN;
-            continue;
+            if (isnan(price_ref) || price_ref <= 0.0) {
+                iv_errors[i] = NAN;
+                continue;
+            }
         }
 
         // 3. Convert both prices to IV
         double iv_interp = compute_implied_volatility(
             price_interp, s->moneyness, s->maturity, s->rate, table->type);
 
-        double iv_fdm = compute_implied_volatility(
-            price_fdm, s->moneyness, s->maturity, s->rate, table->type);
+        double iv_ref = compute_implied_volatility(
+            price_ref, s->moneyness, s->maturity, s->rate, table->type);
 
-        if (isnan(iv_interp) || isnan(iv_fdm)) {
+        if (isnan(iv_interp) || isnan(iv_ref)) {
             iv_errors[i] = NAN;
             continue;
         }
 
         // 4. Compute IV error in basis points
-        double iv_error_bp = fabs(iv_interp - iv_fdm) * 10000.0;
+        double iv_error_bp = fabs(iv_interp - iv_ref) * 10000.0;
         iv_errors[i] = iv_error_bp;
 
         // Update statistics
@@ -504,7 +535,7 @@ int price_table_precompute_adaptive(
         // 2b. Validate interpolation error
         printf("  Validating accuracy...\n");
         ValidationResult result = validate_interpolation_error(
-            table, grid, validation_samples, target_iv_error_bp
+            table, grid, NULL, validation_samples, target_iv_error_bp
         );
 
         if (result.n_samples == 0) {
