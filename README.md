@@ -302,6 +302,28 @@ mango-iv/
 └── MODULE.bazel                   # Build configuration
 ```
 
+### Rust Crates (Experimental)
+
+**Status**: Phase 1 - Type Definitions
+
+Rust rewrite for GPU acceleration is in progress. See `docs/plans/2025-11-01-rust-gpu-rewrite.md` for the full design.
+
+```
+mango-iv-rs/
+├── Cargo.toml           # Workspace root
+└── crates/
+    └── types/           # Core type definitions (#[repr(C)] for FFI)
+```
+
+**Build Rust crates**:
+```bash
+cargo build --workspace   # Cargo build
+bazel build //crates/...  # Bazel build
+cargo test -p mango-types # Run tests
+```
+
+**Branch**: `experimental/rust-gpu-rewrite` (not merged to main)
+
 ### Key Design Principles
 
 1. **Modularity** - Clear separation: IV ← American pricing ← PDE solver
