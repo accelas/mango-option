@@ -207,3 +207,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "diagnostic_interp_test",
+    size = "small",
+    srcs = ["diagnostic_interp_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//src:price_table",
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -426,7 +426,14 @@ OptionPriceTable* price_table_create_ex(
 
     // Set interpolation strategy to cubic (default)
     table->strategy = &INTERP_CUBIC;
+
+    // Create interpolation context with table dimensions
+    size_t dimensions = (n_q > 0) ? 5 : 4;
+    size_t grid_sizes[5] = {n_m, n_tau, n_sigma, n_r, n_q};
     table->interp_context = NULL;
+    if (table->strategy->create_context) {
+        table->interp_context = table->strategy->create_context(dimensions, grid_sizes);
+    }
 
     return table;
 }
@@ -1337,6 +1344,41 @@ int price_table_expand_grid(OptionPriceTable *table,
         table->stride_sigma = n_tau * n_total;
         table->stride_r = n_sigma * n_tau * n_total;
         table->stride_q = 0;
+    }
+
+    // 6. Recreate interpolation context with new grid dimensions
+    // After grid expansion, the old context has stale dimensions and must be rebuilt
+    if (table->strategy && table->interp_context) {
+        printf("  [DEBUG] Recreating interpolation context: %zu → %zu moneyness points\n", n_old, n_total);
+
+        // Destroy old context
+        if (table->strategy->destroy_context) {
+            table->strategy->destroy_context(table->interp_context);
+            printf("  [DEBUG] Old context destroyed\n");
+        }
+
+        // Create new context with updated moneyness dimension
+        size_t dimensions = (table->n_dividend > 0) ? 5 : 4;
+        size_t grid_sizes[5] = {
+            n_total,  // Updated moneyness grid size
+            table->n_maturity,
+            table->n_volatility,
+            table->n_rate,
+            table->n_dividend
+        };
+
+        table->interp_context = NULL;
+        if (table->strategy->create_context) {
+            table->interp_context = table->strategy->create_context(dimensions, grid_sizes);
+            printf("  [DEBUG] New context created: %p\n", (void*)table->interp_context);
+        } else {
+            printf("  [DEBUG] WARNING: create_context is NULL!\n");
+        }
+        // Note: Do NOT call strategy->precompute here - that's done separately
+        // after price_table_precompute() fills the new grid points
+    } else {
+        printf("  [DEBUG] WARNING: Skipping context recreation (strategy=%p, context=%p)\n",
+               (void*)table->strategy, (void*)table->interp_context);
     }
 
     return 0;
