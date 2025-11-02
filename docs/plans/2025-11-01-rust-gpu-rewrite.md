@@ -166,7 +166,7 @@ impl VulkanCompute {
 
 ## Migration Strategy
 
-### Phase Timeline (20 weeks)
+### Phase Timeline (19 weeks)
 
 **Phase 1: Port Type Definitions** (Week 1) ✅ COMPLETE
 - Created mango-types crate with C-compatible types
@@ -174,27 +174,34 @@ impl VulkanCompute {
 - Wired up Bazel + rules_rust integration
 - All tests passing
 
-**Phase 2: Port Interpolation** (Week 2-3)
-- Replace `interp_cubic.c` (1364 LOC)
-- Benefit: Eliminate bounds-check bugs, memory safety
-- Target: Pure Rust, CPU-only (already 500ns)
-- High bug surface area (pointer arithmetic)
+**Phase 2: Port TR-BDF2 Kernel to rust-gpu** (Week 2-5)
+- Replace `pde_solver.c` core loops (~500-1000 LOC → ~400 LOC)
+- Write `#[no_std]` Rust kernels (trbdf2.rs, tridiagonal.rs, spatial.rs)
+- Compile to both native (for CPU tests) and SPIR-V (for GPU)
+- **Why first**: Smaller than interpolation, validates rust-gpu toolchain early
+- **Benefits**: De-risk GPU compilation, test on critical path code
+- **Target**: Match C numerical accuracy (<1e-6 relative error)
 
-**Phase 3: Port Kernels to rust-gpu** (Week 4-8)
-- Replace `pde_solver.c` core loops (638 LOC → ~400 LOC)
-- Write `#[no_std]` Rust kernels
-- This is where rust-gpu enters
-
-**Phase 4: Build Vulkan Runtime** (Week 9-12)
+**Phase 3: Build Vulkan Runtime** (Week 6-9)
 - New `VulkanCompute` using `ash`
 - Upload params → dispatch compute → download results
-- Device buffer allocation, pipeline creation
+- Device buffer allocation, pipeline creation, compute shader dispatch
+- **Benefits**: End-to-end GPU validation with real kernels
+- **Target**: <2ms for 400 options (250× speedup over CPU)
 
-**Phase 5: Build CPU Fallback** (Week 13-14)
+**Phase 4: Port Interpolation** (Week 10-11)
+- Replace `interp_cubic.c` (1364 LOC)
+- Pure Rust, CPU-only (already 500ns, GPU transfer not worthwhile)
+- **Why later**: Not on critical path, already fast enough
+- **Benefits**: Memory safety, eliminate pointer arithmetic bugs
+- **Target**: Maintain ~500ns query performance
+
+**Phase 5: Build CPU Fallback** (Week 12-13)
 - `CpuCompute` calls rust-gpu kernels directly (no Vulkan)
 - Fallback for systems without GPU
+- **Benefits**: Graceful degradation, testing without GPU
 
-**Phase 6: FFI Bridge** (Week 15-16)
+**Phase 6: FFI Bridge** (Week 14-15)
 ```rust
 #[no_mangle]
 pub extern "C" fn rust_price_batch(params: *const COptionParams, ...) {
@@ -204,12 +211,13 @@ pub extern "C" fn rust_price_batch(params: *const COptionParams, ...) {
 ```
 C code forwards to Rust during transition.
 
-**Phase 7: Validation & Benchmarking** (Week 17-20)
+**Phase 7: Validation & Benchmarking** (Week 16-19)
 - Run C test suite against Rust implementation
 - Compare numerical accuracy (target: <1e-4 relative error)
-- Benchmark GPU vs CPU
+- Benchmark GPU vs CPU vs C
+- Profile GPU (compute vs transfer time)
 
-**Phase 8: Remove FFI Bridge** (Week 21+)
+**Phase 8: Remove FFI Bridge** (Week 20+)
 - Delete C code once all modules ported
 - Pure Rust system
 
@@ -343,7 +351,7 @@ fn test_batch_400_options() {
 | GPU driver bugs | Medium | Test multiple GPUs, CPU fallback |
 | Numerical accuracy drift | High | Comprehensive Rust vs C validation |
 | Memory transfer overhead | Medium | Persistent buffers, double buffering, profile |
-| Learning curve | Medium | Start with interpolation (no GPU) |
+| Learning curve | Medium | Start with small kernel (TR-BDF2), validate early |
 | Vendor lock-in | Low | Vulkan supports all GPUs (NVIDIA, AMD, Intel) |
 
 **Fallback mechanism**:
