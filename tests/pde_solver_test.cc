@@ -282,6 +282,86 @@ TEST_F(PDESolverTest, ObstacleCondition) {
     // Note: grid ownership transferred to solver
 }
 
+// Robin BC helper data for tests
+struct RobinBCData {
+    double left_g;
+    double right_g;
+};
+
+static void robin_initial_condition([[maybe_unused]] const double *x, size_t n_points,
+                                    double *u0, [[maybe_unused]] void *user_data) {
+    for (size_t i = 0; i < n_points; i++) {
+        u0[i] = 1.0 + 0.5 * static_cast<double>(i);
+    }
+}
+
+static double robin_left_bc([[maybe_unused]] double t, void *user_data) {
+    RobinBCData *data = static_cast<RobinBCData*>(user_data);
+    return data->left_g;
+}
+
+static double robin_right_bc([[maybe_unused]] double t, void *user_data) {
+    RobinBCData *data = static_cast<RobinBCData*>(user_data);
+    return data->right_g;
+}
+
+static void robin_zero_spatial_op([[maybe_unused]] const double *x, [[maybe_unused]] double t,
+                                  [[maybe_unused]] const double *u, size_t n_points,
+                                  double *Lu, [[maybe_unused]] void *user_data) {
+    for (size_t i = 0; i < n_points; i++) {
+        Lu[i] = 0.0;
+    }
+}
+
+TEST_F(PDESolverTest, RobinBoundaryConditionUsesOutwardNormal) {
+    SpatialGrid grid = pde_create_grid(0.0, 1.0, 5);
+    TimeDomain time = {.t_start = 0.0, .t_end = 0.1, .dt = 0.1, .n_steps = 1};
+
+    BoundaryConfig bc = pde_default_boundary_config();
+    bc.left_type = BC_ROBIN;
+    bc.right_type = BC_ROBIN;
+    bc.left_robin_a = 2.0;
+    bc.left_robin_b = 1.0;
+    bc.right_robin_a = 1.5;
+    bc.right_robin_b = -1.2;
+
+    RobinBCData data = {3.0, 0.25};
+
+    PDECallbacks callbacks = {
+        .initial_condition = robin_initial_condition,
+        .left_boundary = robin_left_bc,
+        .right_boundary = robin_right_bc,
+        .spatial_operator = robin_zero_spatial_op,
+        .jump_condition = nullptr,
+        .obstacle = nullptr,
+        .user_data = &data
+    };
+
+    TRBDF2Config trbdf2 = pde_default_trbdf2_config();
+
+    PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
+    ASSERT_NE(solver, nullptr);
+
+    pde_solver_initialize(solver);
+
+    const double *u = pde_solver_get_solution(solver);
+    ASSERT_NE(u, nullptr);
+
+    const size_t n = solver->grid.n_points;
+    const double dx = solver->grid.dx;
+
+    double expected_left = (data.left_g + bc.left_robin_b * u[1] / dx) /
+                           (bc.left_robin_a + bc.left_robin_b / dx);
+    double expected_right = (data.right_g + bc.right_robin_b * u[n - 2] / dx) /
+                            (bc.right_robin_a + bc.right_robin_b / dx);
+
+    EXPECT_NEAR(u[0], expected_left, 1e-12);
+    EXPECT_NEAR(u[n - 1], expected_right, 1e-12);
+
+    pde_solver_destroy(solver);
+    // Grid ownership transferred to solver; no need to free grid.x separately
+}
+
 // Negative test: Invalid Robin BC coefficient (division by zero)
 TEST_F(PDESolverTest, InvalidRobinCoefficient) {
     SpatialGrid grid = pde_create_grid(0.0, 1.0, 11);
