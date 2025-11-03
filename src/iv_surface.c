@@ -151,23 +151,30 @@ int iv_surface_set_strategy(IVSurface *surface,
                              const InterpolationStrategy *strategy) {
     if (!surface || !strategy) return -1;
 
+    // Create new context first (before destroying old one or changing strategy)
+    size_t grid_sizes[2] = {surface->n_moneyness, surface->n_maturity};
+    InterpContext new_context = NULL;
+    if (strategy->create_context) {
+        new_context = strategy->create_context(2, grid_sizes);
+        // If create_context exists but returns NULL, it's an allocation failure
+        if (new_context == NULL) {
+            return -1;  // Surface the error to caller without changing anything
+        }
+    }
+
+    // Only after successful context creation (or if no context needed), proceed with changes
     // Destroy old context
     if (surface->strategy && surface->strategy->destroy_context) {
         surface->strategy->destroy_context(surface->interp_context);
     }
 
-    // Set new strategy
+    // Set new strategy and context
     surface->strategy = strategy;
-
-    // Create new context
-    size_t grid_sizes[2] = {surface->n_moneyness, surface->n_maturity};
-    surface->interp_context = NULL;
-    if (strategy->create_context) {
-        surface->interp_context = strategy->create_context(2, grid_sizes);
-    }
+    surface->interp_context = new_context;
 
     // Pre-compute if supported
-    if (strategy->precompute) {
+    // Only call precompute if we have a valid context
+    if (strategy->precompute && surface->interp_context != NULL) {
         strategy->precompute(surface, surface->interp_context);
     }
 

@@ -838,3 +838,50 @@ TEST(PriceTableTest, LoadOldFormatWithoutGamma) {
     price_table_destroy(loaded);
     std::remove(filename);
 }
+
+// Test for issue #75: Guard price_table_set_strategy against null context
+TEST(PriceTableTest, SetStrategyWithFailedContextAllocation) {
+    // Create a mock strategy that fails to allocate context
+    static const InterpolationStrategy mock_strategy_fail_context = {
+        .name = "mock_fail",
+        .description = "Mock strategy that fails context allocation",
+        .interpolate_2d = nullptr,
+        .interpolate_4d = nullptr,
+        .interpolate_5d = nullptr,
+        // create_context returns NULL to simulate allocation failure
+        .create_context = [](size_t, const size_t*) -> void* { return nullptr; },
+        .destroy_context = nullptr,
+        .precompute = [](const void*, void* ctx) -> int {
+            // This should never be called with NULL context
+            EXPECT_NE(ctx, nullptr) << "precompute called with NULL context!";
+            return 0;
+        }
+    };
+
+    // Create a simple price table
+    std::vector<double> m = {0.95, 1.0};
+    std::vector<double> tau = {0.5, 1.0};
+    std::vector<double> sigma = {0.20, 0.25};
+    std::vector<double> r = {0.04, 0.05};
+
+    OptionPriceTable *table = price_table_create(
+        m.data(), m.size(),
+        tau.data(), tau.size(),
+        sigma.data(), sigma.size(),
+        r.data(), r.size(),
+        nullptr, 0,
+        OPTION_PUT, AMERICAN);
+    ASSERT_NE(table, nullptr);
+
+    // Try to set strategy that fails context allocation
+    int status = price_table_set_strategy(table, &mock_strategy_fail_context);
+
+    // Should return error (-1) when context allocation fails
+    EXPECT_EQ(status, -1) << "Should return error when context allocation fails";
+
+    // Strategy should not be set when context allocation fails
+    EXPECT_NE(table->strategy, &mock_strategy_fail_context)
+        << "Strategy should not be changed when context allocation fails";
+
+    price_table_destroy(table);
+}
