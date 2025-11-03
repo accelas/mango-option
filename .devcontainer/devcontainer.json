@@ -1,0 +1,63 @@
+{
+  "name": "Mango-IV Development",
+  "image": "ghcr.io/accelas/mango-iv/ci-env:latest",
+
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "installOhMyZsh": true,
+      "upgradePackages": false
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "ppa": true,
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "version": "latest"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cmake-tools",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "BazelBuild.vscode-bazel",
+        "stackbuild.bazel-stack-vscode"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "C_Cpp.default.compilerPath": "/usr/bin/gcc",
+        "C_Cpp.default.cStandard": "c23",
+        "C_Cpp.default.cppStandard": "c++17",
+        "files.associations": {
+          "*.bazel": "python",
+          "*.bzl": "python",
+          "BUILD": "python"
+        }
+      }
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  "remoteUser": "root",
+
+  "mounts": [
+    "source=${localWorkspaceFolder}/.bazel-cache,target=/root/.cache/bazel,type=bind,consistency=cached"
+  ],
+
+  "containerEnv": {
+    "BAZEL_CACHE_DIR": "/root/.cache/bazel"
+  },
+
+  "portsAttributes": {
+    "8080": {
+      "label": "Application",
+      "onAutoForward": "notify"
+    }
+  }
+}
