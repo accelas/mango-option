@@ -44,29 +44,59 @@ typedef struct {
     void *internal_data;     // Internal data (do not access directly)
 } AmericanOptionResult;
 
-// Solve American option on pre-allocated moneyness grid (PRIMARY API)
-// This is the core unified grid solver that FDM solves directly on caller's grid.
+// Helper: Create uniform moneyness grid for American option pricing
+// Generates a uniform grid in log-moneyness space: x = ln(S/K)
+// Returns dynamically allocated array that caller must free()
+//
+// Parameters:
+//   grid_params: Grid specification (bounds and resolution)
+//   n_out: Output parameter - receives number of grid points
+// Returns: Moneyness grid array (S/K values), or NULL on failure
+//
+// Example:
+//   size_t n;
+//   double *m_grid = american_option_create_grid(&grid_params, &n);
+//   AmericanOptionResult result = american_option_solve(..., m_grid, n, ...);
+//   free(m_grid);
+double* american_option_create_grid(const AmericanOptionGrid *grid_params, size_t *n_out);
+
+// Solve American option (PRIMARY AND ONLY API)
+//
+// This unified solver handles all American option pricing with automatic
+// boundary condition detection based on grid extent.
 //
 // Parameters:
 //   option_data: Option parameters (strike, volatility, rate, time to maturity)
-//   m_grid: Pre-allocated moneyness grid (S/K values, must be sorted ascending, n_m points)
+//   m_grid: Moneyness grid (S/K values, must be sorted ascending)
 //   n_m: Number of moneyness points (must be >= 3)
 //   dt: Time step for TR-BDF2 solver
 //   n_steps: Number of time steps
 // Returns: AmericanOptionResult with solver containing solution on exact m_grid
 // Caller must call american_option_free_result() on result to clean up
 //
+// Boundary conditions (auto-detected):
+// - Wide grids (S ∈ [~0.6K, ~1.65K]): Dirichlet BCs with theoretical boundary values
+// - Narrow grids: Neumann BCs (zero gradient) - safer for focused regions
+//
 // Benefits of unified grid:
 // - Zero-copy: No interpolation overhead, direct price extraction
 // - Performance: 20x faster precomputation (6s → 300ms per batch)
 // - Cache locality: Moneyness slice is contiguous in memory
+// - No PDE knowledge required: Boundary conditions auto-detected
 //
-// Example:
+// Example with helper:
+//   size_t n;
+//   double *m_grid = american_option_create_grid(&grid_params, &n);
+//   AmericanOptionResult result = american_option_solve(
+//       &option_data, m_grid, n, grid_params.dt, grid_params.n_steps);
+//   const double *prices = pde_solver_get_solution(result.solver);
+//   american_option_free_result(&result);
+//   free(m_grid);
+//
+// Example with custom grid:
 //   double m_grid[] = {0.8, 0.9, 1.0, 1.1, 1.2};  // S/K values
 //   AmericanOptionResult result = american_option_solve(
 //       &option_data, m_grid, 5, 0.001, 1000);
-//   const double *prices = pde_solver_get_solution(result.solver);
-//   // prices[i] corresponds to m_grid[i]
 //   american_option_free_result(&result);
 AmericanOptionResult american_option_solve(
     const OptionData *option_data,
@@ -75,17 +105,14 @@ AmericanOptionResult american_option_solve(
     double dt,
     size_t n_steps);
 
-// LEGACY: Price American option with automatic grid generation
-// This is a convenience wrapper around american_option_solve() that
-// generates a grid in log-moneyness space based on grid_params.
+// DEPRECATED: Compatibility wrapper - DO NOT USE IN NEW CODE
+// This function is deprecated and will be removed in a future version.
+// Use american_option_solve() with american_option_create_grid() instead.
 //
-// NOTE: For best performance, use american_option_solve() directly with
-// pre-allocated grids (enables unified grid optimization).
-//
-// Returns a solver with the solution
-// Caller must call american_option_free_result() on result to clean up
+// Exists only for backward compatibility during migration.
 AmericanOptionResult american_option_price(const OptionData *option_data,
-                                          const AmericanOptionGrid *grid_params);
+                                          const AmericanOptionGrid *grid_params)
+    __attribute__((deprecated("Use american_option_solve() with american_option_create_grid() instead")));
 
 // Free resources associated with AmericanOptionResult
 // This frees both the solver and internal data structures
