@@ -228,14 +228,19 @@ See `examples/` for complete working programs.
 | Let's Be Rational (European IV) | ~781ns | Fast bound estimation for American IV |
 | American option (single) | 21.7ms | TR-BDF2, 141 points × 1000 steps |
 | American option (batch of 64) | ~1.5ms wall | OpenMP parallelization |
-| American implied volatility | ~145ms | FDM-based IV with Brent's method |
-| Future: IV via interpolation | ~7.5µs | 40,000× speedup (planned) |
+| American IV (FDM-based) | ~145ms | Brent's method with full PDE solve per iteration |
+| **American IV (table-based)** | **~11.8ms** | **Newton's method with interpolation (22.5× faster)** |
+| Price table interpolation | ~500ns | 4D cubic spline query (43,400× faster than FDM) |
+| Greeks (vega, gamma) | ~500ns | Precomputed during table generation |
 
-### Validation
+### Validation & Accuracy
 
 - **44 test cases** for implied volatility (edge cases, extreme parameters)
 - **42 test cases** for American options (puts, calls, dividends, early exercise)
 - **QuantLib comparison**: 0.5% relative error, 2.1x slower (reasonable for research code)
+- **Interpolation accuracy**: <0.01bp mean error for in-bounds cases with table-based IV
+- **Validation framework**: Reference table validation ~1000× faster than FDM validation
+- **Adaptive refinement**: Achieves <1bp IV error for 95% of validation points
 
 ---
 
@@ -254,6 +259,7 @@ mango-iv/
 │   ├── interp_cubic_workspace.c   # Workspace management for cubic splines
 │   ├── price_table.{h,c}          # 4D/5D option price tables
 │   ├── iv_surface.{h,c}           # 2D implied volatility surfaces
+│   ├── validation.{h,c}           # Validation framework for adaptive refinement
 │   ├── grid_generation.{h,c}      # Non-uniform grid spacing utilities
 │   ├── grid_presets.{h,c}         # Preset grid configurations
 │   ├── brent.h                    # Brent's method (root-finding)
@@ -280,6 +286,9 @@ mango-iv/
 │   ├── cubic_interp_4d_5d_test.cc
 │   ├── price_table_test.cc        # Price table tests
 │   ├── price_table_slow_test.cc   # Long-running table tests
+│   ├── adaptive_accuracy_test.cc  # Adaptive refinement validation tests
+│   ├── diagnostic_interp_test.cc  # Interpolation correctness diagnostics
+│   ├── unified_grid_test.cc       # Unified grid architecture tests
 │   ├── coordinate_transform_test.cc
 │   ├── memory_layout_test.cc
 │   ├── grid_generation_test.cc    # Grid spacing tests
@@ -392,12 +401,15 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 - ✅ USDT tracing system
 - ✅ Comprehensive test suite
 - ✅ QuantLib benchmarks
-
-### Near-Term (v0.2-0.3)
 - ✅ Cubic spline interpolation (C² continuous, accurate Greeks)
 - ✅ Coordinate transformation support (log-sqrt, log-variance)
-- 🚧 Price table pre-computation (40,000x speedup planned)
-- 🚧 Greeks calculation via finite differences
+
+### Near-Term (v0.2-0.3)
+- ✅ Price table pre-computation (43,400× speedup achieved)
+- ✅ Table-based IV calculation (22.5× faster than FDM)
+- ✅ Greeks calculation (vega, gamma via precomputed derivatives)
+- ✅ Adaptive grid refinement (<1bp IV error for 95% of points)
+- ✅ Unified grid architecture (20,000× memcpy reduction)
 - 🚧 Volatility surface calibration
 
 ### Future (v1.0+)

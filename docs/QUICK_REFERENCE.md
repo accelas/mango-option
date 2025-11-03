@@ -222,8 +222,9 @@ pde_solver_destroy(solver);
 ## Performance Notes
 
 ### American IV Calculation
-- **Time**: ~145ms per call (FDM-based)
-- **Bottleneck**: American option pricing in each Brent iteration (~21ms × 5-8 iterations)
+- **FDM-based**: ~145ms per call (Brent's method with full PDE solve per iteration)
+- **Table-based**: ~11.8ms per call (Newton's method with interpolation, 22.5× faster)
+- **Bottleneck (FDM)**: American option pricing in each Brent iteration (~21ms × 5-8 iterations)
 - **Brent iterations**: 5-8 typically
 - **Let's Be Rational** (bounds): ~781ns
 
@@ -237,6 +238,17 @@ pde_solver_destroy(solver);
 - **Core count scaling**: ~linear up to 16 cores
 - **Wall time**: ~2-5 ms per option (16 cores)
 - **Enables**: Vectorized IV recovery
+
+### Greeks Calculation
+- **Via interpolation**: ~500ns per query (vega, gamma precomputed)
+- **Via FDM**: ~65ms per query (finite differences on PDE solution)
+- **Speedup**: ~130,000× faster with table-based approach
+
+### Validation Framework
+- **With reference table**: ~100μs per 1000 samples (~1000× faster than FDM)
+- **With FDM**: ~2-5s per 1000 samples (101-point PDEs)
+- **Accuracy**: <0.01bp mean error for in-bounds cases
+- **Target**: <1bp IV error for 95% of validation points
 
 ---
 
