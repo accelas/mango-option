@@ -57,59 +57,58 @@ void american_option_terminal_condition(const double *x, size_t n_points,
     compute_intrinsic_value(x, n_points, V, data->strike, data->option_type);
 }
 
+// Helper: Compute Dirichlet boundary condition value for American options
+// Returns the theoretical option value at boundary based on Black-Scholes
+typedef enum { BOUNDARY_LEFT, BOUNDARY_RIGHT } BoundarySide;
+
+static inline double compute_dirichlet_bc(const OptionData *data, double tau,
+                                         double x_boundary, BoundarySide side) {
+    const double K = data->strike;
+    const double r = data->risk_free_rate;
+    const double discount = exp(-r * tau);
+
+    if (side == BOUNDARY_LEFT) {
+        // Left boundary: S → 0 (x → -∞)
+        // Call: worthless when S=0
+        // Put: worth discounted strike when S=0 (certain to exercise)
+        return (data->option_type == OPTION_CALL) ? 0.0 : K * discount;
+    } else {
+        // Right boundary: S → ∞ (x → +∞)
+        // Call: worth intrinsic value S_max - K·e^(-rτ) (European value)
+        // Put: worthless when S is very large
+        if (data->option_type == OPTION_CALL) {
+            const double S_max = K * exp(x_boundary);
+            return S_max - K * discount;
+        } else {
+            return 0.0;
+        }
+    }
+}
+
 // Left boundary condition (S → 0, x → -∞)
 double american_option_left_boundary(double t, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
-    const OptionData *data = ext_data->option_data;
 
-    // For Neumann BCs, return gradient value (∂V/∂x)
-    // For zero-flux condition, gradient = 0
+    // Neumann BC: zero gradient
     if (ext_data->use_neumann_bc) {
-        return 0.0;  // Zero gradient at boundary (∂V/∂x = 0)
-    }
-
-    // For Dirichlet BCs, return option value V
-    // In our time mapping: t represents time-to-maturity τ
-    const double tau = t;
-
-    if (data->option_type == OPTION_CALL) {
-        // For call: V(0,τ) = 0 (worthless when S=0)
         return 0.0;
-    } else {
-        // For put: V(0,τ) ≈ K*exp(-r*τ) (discounted strike)
-        return data->strike * exp(-data->risk_free_rate * tau);
     }
+
+    // Dirichlet BC: theoretical option value at S=0
+    return compute_dirichlet_bc(ext_data->option_data, t, ext_data->x_min, BOUNDARY_LEFT);
 }
 
 // Right boundary condition (S → ∞, x → ∞)
 double american_option_right_boundary(double t, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
-    const OptionData *data = ext_data->option_data;
 
-    // For Neumann BCs, return gradient value (∂V/∂x)
-    // For zero-flux condition, gradient = 0
+    // Neumann BC: zero gradient
     if (ext_data->use_neumann_bc) {
-        return 0.0;  // Zero gradient at boundary (∂V/∂x = 0)
-    }
-
-    // For Dirichlet BCs, return option value V
-    const double x_max = ext_data->x_max;
-    // In our time mapping: t represents time-to-maturity τ
-    const double tau = t;
-
-    if (data->option_type == OPTION_CALL) {
-        // For call at large S: V(x_max, τ) ≈ S_max - K*exp(-r*τ)
-        // where S_max = K*exp(x_max)
-        // This is the European call value at the boundary, which equals the
-        // American call value for options with no dividends (early exercise never optimal)
-        const double K = data->strike;
-        const double r = data->risk_free_rate;
-        const double S_max = K * exp(x_max);
-        return S_max - K * exp(-r * tau);
-    } else {
-        // For put: V(S→∞, τ) = 0 (worthless when S is very large)
         return 0.0;
     }
+
+    // Dirichlet BC: theoretical option value at S=S_max
+    return compute_dirichlet_bc(ext_data->option_data, t, ext_data->x_max, BOUNDARY_RIGHT);
 }
 
 // Black-Scholes spatial operator in log-price coordinates (vectorized)
