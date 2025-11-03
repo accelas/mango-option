@@ -1345,6 +1345,90 @@ TEST_F(AmericanOptionTest, BatchProcessingZeroOptions) {
     EXPECT_EQ(status, -1);
 }
 
+// Regression test for issue #74: Handle dividend-induced NaN for deep ITM options
+TEST_F(AmericanOptionTest, LargeDividendNaNHandling) {
+    // Test case 1: Dividend larger than some stock prices in the grid
+    double div_times[] = {0.5};
+    double div_amounts[] = {60.0};  // Large dividend that could cause S_post <= 0
+
+    OptionData option = {
+        .strike = 100.0,
+        .volatility = 0.30,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_PUT,
+        .n_dividends = 1,
+        .dividend_times = div_times,
+        .dividend_amounts = div_amounts
+    };
+
+    AmericanOptionResult result = american_option_price(&option, &default_grid);
+    EXPECT_EQ(result.status, 0);
+    EXPECT_NE(result.solver, nullptr);
+
+    // Check that solution is valid (no NaN or inf)
+    if (result.solver != nullptr) {
+        // Test at various spot prices
+        double spots[] = {50.0, 75.0, 100.0, 125.0, 150.0};
+        for (double spot : spots) {
+            double value = american_option_get_value_at_spot(result.solver, spot, option.strike);
+            EXPECT_FALSE(std::isnan(value)) << "NaN at spot = " << spot;
+            EXPECT_FALSE(std::isinf(value)) << "Inf at spot = " << spot;
+            EXPECT_GE(value, 0.0) << "Negative value at spot = " << spot;
+
+            // For puts, value should be at least intrinsic
+            double intrinsic = std::max(option.strike - spot, 0.0);
+            EXPECT_GE(value, intrinsic * 0.99) << "Below intrinsic at spot = " << spot;
+        }
+
+        american_option_free_result(&result);
+    }
+
+    // Test case 2: Extreme dividend (larger than strike)
+    div_amounts[0] = 120.0;  // Dividend > strike
+
+    result = american_option_price(&option, &default_grid);
+    EXPECT_EQ(result.status, 0);
+    EXPECT_NE(result.solver, nullptr);
+
+    if (result.solver != nullptr) {
+        // Even with extreme dividend, should not produce NaN
+        double value = american_option_get_value_at_spot(result.solver, 100.0, option.strike);
+        EXPECT_FALSE(std::isnan(value)) << "NaN with extreme dividend";
+        EXPECT_FALSE(std::isinf(value)) << "Inf with extreme dividend";
+        EXPECT_GE(value, 0.0) << "Negative value with extreme dividend";
+
+        american_option_free_result(&result);
+    }
+
+    // Test case 3: Multiple large dividends
+    double multi_div_times[] = {0.25, 0.5, 0.75};
+    double multi_div_amounts[] = {30.0, 40.0, 35.0};
+
+    option.n_dividends = 3;
+    option.dividend_times = multi_div_times;
+    option.dividend_amounts = multi_div_amounts;
+
+    result = american_option_price(&option, &default_grid);
+    EXPECT_EQ(result.status, 0);
+    EXPECT_NE(result.solver, nullptr);
+
+    if (result.solver != nullptr) {
+        // Check deep ITM case specifically
+        double deep_itm_spot = 40.0;  // Deep ITM for put with K=100
+        double value = american_option_get_value_at_spot(result.solver, deep_itm_spot, option.strike);
+        EXPECT_FALSE(std::isnan(value)) << "NaN at deep ITM spot with multiple dividends";
+        EXPECT_FALSE(std::isinf(value)) << "Inf at deep ITM spot with multiple dividends";
+        EXPECT_GE(value, 0.0) << "Negative value at deep ITM spot";
+
+        // Value should be at least intrinsic for American put
+        double intrinsic = option.strike - deep_itm_spot;
+        EXPECT_GE(value, intrinsic * 0.99) << "Below intrinsic at deep ITM spot";
+
+        american_option_free_result(&result);
+    }
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
