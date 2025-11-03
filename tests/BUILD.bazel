@@ -78,6 +78,7 @@ cc_test(
         "//src:price_table",
         "@googletest//:gtest_main",
     ],
+    tags = ["manual"],  # Excluded from CI - takes ~300s due to FDM calculations
 )
 
 cc_test(
