@@ -1,18 +1,13 @@
-name: CI
+name: Slow Tests
 
 on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Build and Test
+  run-slow-tests:
+    name: Run Slow Test Suite
     runs-on: ubuntu-latest
     container:
       image: debian:trixie
@@ -63,22 +58,10 @@ jobs:
       - name: Build all targets
         run: bazel build //... --build_tag_filters=-benchmark
 
-      - name: Run fast test suite
+      - name: Run slow test suite
         run: |
-          # ============================================================
-          # Slow Test Exclusion
-          # ============================================================
-          # Tests marked with tags containing "slow" are excluded from the fast CI job:
-          #   - implied_volatility_test (~300s, uses FDM pricing)
-          #   - adaptive_accuracy_test (known failures, issue #61)
-          #   - price_table_slow_test (precomputes 1200 grid points)
-          #
-          # To run slow tests locally:
-          #   bazel test //tests:slow_tests
-          # ============================================================
-
-          # Run all fast tests
-          bazel test //tests:fast_tests --test_output=errors
+          # Run comprehensive (slow) tests
+          bazel test //tests:slow_tests --test_output=errors
 
       - name: Display test results
         if: always()
