@@ -115,17 +115,16 @@ double american_option_right_boundary(double t, void *user_data) {
 // Black-Scholes spatial operator in log-price coordinates (vectorized)
 // L(V) = (1/2)σ²∂²V/∂x² + (r - σ²/2)∂V/∂x - rV
 //
-// Supports non-uniform grids using second-order accurate formulas
-void american_option_spatial_operator(const double *x, [[maybe_unused]] double t,
-                                     const double *V, size_t n_points,
-                                     double *LV, void *user_data) {
+// Supports both uniform and non-uniform grids with optimized vectorization
+void american_option_spatial_operator(const double * restrict x, [[maybe_unused]] double t,
+                                     const double * restrict V, size_t n_points,
+                                     double * restrict LV, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *data = ext_data->option_data;
     const double sigma = data->volatility;
     const double r = data->risk_free_rate;
 
     // Black-Scholes PDE coefficients in log-price coordinates
-    // The solver time t represents time-to-maturity τ
     const double coeff_2nd = 0.5 * sigma * sigma;         // (1/2)σ²
     const double coeff_1st = r - 0.5 * sigma * sigma;     // r - σ²/2
     const double coeff_0th = -r;                          // -r
@@ -134,35 +133,60 @@ void american_option_spatial_operator(const double *x, [[maybe_unused]] double t
     LV[0] = 0.0;
     LV[n_points - 1] = 0.0;
 
-    // Interior points: non-uniform grid finite differences (second-order accurate)
-    // For non-uniform grid with local spacings:
-    //   h_minus = x[i] - x[i-1]
-    //   h_plus = x[i+1] - x[i]
-    //
-    // Second-order accurate formulas for non-uniform grids:
-    //
-    // First derivative:
-    //   ∂V/∂x = [-h+²·V[i-1] + (h+² - h-²)·V[i] + h-²·V[i+1]] / [h-·h+·(h- + h+)]
-    //
-    // Second derivative:
-    //   ∂²V/∂x² = 2·[h+·V[i-1] - (h+ + h-)·V[i] + h-·V[i+1]] / [h-·h+·(h- + h+)]
-    for (size_t i = 1; i < n_points - 1; i++) {
-        const double h_minus = x[i] - x[i - 1];
-        const double h_plus = x[i + 1] - x[i];
-        const double h_sum = h_plus + h_minus;
-        const double h_prod = h_minus * h_plus;
-        const double denom = h_prod * h_sum;
+    // Check if grid is uniform (common case from american_option_create_grid)
+    // A grid is uniform if spacing is constant within numerical tolerance
+    const double dx_first = x[1] - x[0];
+    const double dx_last = x[n_points - 1] - x[n_points - 2];
+    const double rel_diff = fabs(dx_last - dx_first) / dx_first;
+    const bool is_uniform = (rel_diff < 1e-10);
 
-        // First derivative (second-order accurate on non-uniform grid)
-        const double dV_dx = (-h_plus * h_plus * V[i - 1] +
-                              (h_plus * h_plus - h_minus * h_minus) * V[i] +
-                              h_minus * h_minus * V[i + 1]) / denom;
+    if (is_uniform) {
+        // FAST PATH: Uniform grid - fully vectorizable with simple stencil
+        // ∂V/∂x ≈ (V[i+1] - V[i-1]) / (2·dx)
+        // ∂²V/∂x² ≈ (V[i+1] - 2·V[i] + V[i-1]) / dx²
+        const double dx = dx_first;
+        const double dx_inv = 1.0 / dx;
+        const double dx2_inv = dx_inv * dx_inv;
+        const double half_dx_inv = 0.5 * dx_inv;
 
-        // Second derivative (second-order accurate on non-uniform grid)
-        const double d2V_dx2 = 2.0 * (h_plus * V[i - 1] - h_sum * V[i] +
-                                      h_minus * V[i + 1]) / denom;
+        // Vectorized loop: no dependencies, simple memory access pattern
+        #pragma omp simd
+        for (size_t i = 1; i < n_points - 1; i++) {
+            const double dV_dx = (V[i + 1] - V[i - 1]) * half_dx_inv;
+            const double d2V_dx2 = (V[i + 1] - 2.0 * V[i] + V[i - 1]) * dx2_inv;
+            LV[i] = coeff_2nd * d2V_dx2 + coeff_1st * dV_dx + coeff_0th * V[i];
+        }
+    } else {
+        // SLOW PATH: Non-uniform grid - second-order accurate formulas
+        // For non-uniform grid with local spacings:
+        //   h_minus = x[i] - x[i-1]
+        //   h_plus = x[i+1] - x[i]
+        //
+        // First derivative:
+        //   ∂V/∂x = [-h+²·V[i-1] + (h+² - h-²)·V[i] + h-²·V[i+1]] / [h-·h+·(h- + h+)]
+        //
+        // Second derivative:
+        //   ∂²V/∂x² = 2·[h+·V[i-1] - (h+ + h-)·V[i] + h-·V[i+1]] / [h-·h+·(h- + h+)]
+        //
+        // Note: Harder to vectorize due to per-point spacing calculations
+        for (size_t i = 1; i < n_points - 1; i++) {
+            const double h_minus = x[i] - x[i - 1];
+            const double h_plus = x[i + 1] - x[i];
+            const double h_sum = h_plus + h_minus;
+            const double h_prod = h_minus * h_plus;
+            const double denom = h_prod * h_sum;
 
-        LV[i] = coeff_2nd * d2V_dx2 + coeff_1st * dV_dx + coeff_0th * V[i];
+            // First derivative (second-order accurate on non-uniform grid)
+            const double dV_dx = (-h_plus * h_plus * V[i - 1] +
+                                  (h_plus * h_plus - h_minus * h_minus) * V[i] +
+                                  h_minus * h_minus * V[i + 1]) / denom;
+
+            // Second derivative (second-order accurate on non-uniform grid)
+            const double d2V_dx2 = 2.0 * (h_plus * V[i - 1] - h_sum * V[i] +
+                                          h_minus * V[i + 1]) / denom;
+
+            LV[i] = coeff_2nd * d2V_dx2 + coeff_1st * dV_dx + coeff_0th * V[i];
+        }
     }
 }
 
