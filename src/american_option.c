@@ -346,6 +346,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     PDESolver *solver = pde_solver_create(&solver_grid, &time, &bc_config,
                                           &trbdf2_config, &callbacks);
     if (solver == nullptr) {
+        // Clean up all allocated resources since ownership wasn't transferred
         goto cleanup;
     }
 
