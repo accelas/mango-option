@@ -40,8 +40,18 @@ typedef struct PDECallbacks PDECallbacks;
 typedef void (*InitialConditionFunc)(const double *x, size_t n_points,
                                      double *u0, void *user_data);
 
-// Boundary condition: value at boundary for time t
-typedef double (*BoundaryConditionFunc)(double t, void *user_data);
+// Boundary condition: value/gradient at boundary for time t
+// Parameters:
+//   t: current time
+//   x_boundary: location of boundary (x_min for left, x_max for right)
+//   bc_type: type of boundary condition (Dirichlet/Neumann/Robin)
+//   user_data: user-provided context
+// Returns:
+//   - For Dirichlet: boundary value u(x_boundary, t)
+//   - For Neumann: boundary gradient du/dx at x_boundary
+//   - For Robin: right-hand side g(t) in equation a*u + b*du/dx = g(t)
+typedef double (*BoundaryConditionFunc)(double t, double x_boundary,
+                                        BoundaryType bc_type, void *user_data);
 
 // Spatial operator: L(u) in the PDE du/dt = L(u)
 // Computes the spatial discretization for all points

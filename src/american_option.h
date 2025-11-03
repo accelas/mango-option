@@ -131,13 +131,16 @@ int american_option_price_batch(const OptionData *option_data,
 
 // Callback functions (exposed for advanced usage)
 // These match the PDE solver callback signatures
+// Note: user_data should point to OptionData for American options
 
 void american_option_terminal_condition(const double *x, size_t n_points,
                                        double *V, void *user_data);
 
-double american_option_left_boundary(double t, void *user_data);
+double american_option_left_boundary(double t, double x_boundary, BoundaryType bc_type,
+                                     void *user_data);
 
-double american_option_right_boundary(double t, void *user_data);
+double american_option_right_boundary(double t, double x_boundary, BoundaryType bc_type,
+                                      void *user_data);
 
 void american_option_spatial_operator(const double *x, double t, const double *V,
                                      size_t n_points, double *LV, void *user_data);
