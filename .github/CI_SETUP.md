@@ -131,6 +131,14 @@ RUN apt-get update && \
 ```
 
 ## Troubleshooting
+### Slow Test Workflow
+
+- Nightly coverage for the slow Bazel targets runs via `.github/workflows/slow-tests.yml`. The workflow also supports manual triggering through *Run workflow*.
+- Slow tests are the targets tagged with `slow` (currently `implied_volatility_test`, `adaptive_accuracy_test`, and `price_table_slow_test`). They stay out of the fast CI job to keep PR feedback tight.
+- To reproduce the nightly job locally:
+  ```bash
+  bazel test //tests:slow_tests
+  ```
 
 **CI fails with "image not found":**
 - The Docker image hasn't been built yet

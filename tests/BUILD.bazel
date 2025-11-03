@@ -78,7 +78,7 @@ cc_test(
         "//src:price_table",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Excluded from CI - takes ~300s due to FDM calculations
+    tags = ["manual", "slow"],  # Excluded from fast CI - takes ~300s due to FDM calculations
 )
 
 cc_test(
@@ -124,7 +124,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Disabled: mostly slow tests + known failures (issue #61)
+    tags = ["manual", "slow"],  # Disabled in fast CI: mostly slow tests + known failures (issue #61)
 )
 
 cc_test(
@@ -184,7 +184,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    tags = ["manual"],  # Disabled: precomputes 1200 grid points (~5s)
+    tags = ["manual", "slow"],  # Disabled in fast CI: precomputes 1200 grid points (~5s)
 )
 
 cc_test(
@@ -220,3 +220,7 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Test suites defined for convenience
+# Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
+# Slow tests: bazel test //tests/... --test_tag_filters=slow
