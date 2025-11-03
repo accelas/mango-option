@@ -244,19 +244,26 @@ void american_option_apply_dividend(const double *x_grid, size_t n_points,
         double x_post = log(S_post / strike);
 
         // Interpolate V from old grid (post-dividend) to find V(x_post)
-        // Linear interpolation
         if (x_post <= x_grid[0]) {
             V_new[i] = V_old[0];
         } else if (x_post >= x_grid[n_points - 1]) {
             V_new[i] = V_old[n_points - 1];
         } else {
-            // Find bracketing indices
-            size_t j = 0;
-            while (j < n_points - 1 && x_grid[j + 1] < x_post) {
-                j++;
+            // Binary search to find bracketing indices (O(log n) instead of O(n))
+            // Find largest j such that x_grid[j] <= x_post < x_grid[j+1]
+            size_t left = 0;
+            size_t right = n_points - 1;
+            while (right - left > 1) {
+                size_t mid = left + (right - left) / 2;
+                if (x_grid[mid] <= x_post) {
+                    left = mid;
+                } else {
+                    right = mid;
+                }
             }
+            size_t j = left;
 
-            // Linear interpolation
+            // Linear interpolation between x_grid[j] and x_grid[j+1]
             double alpha = (x_post - x_grid[j]) / (x_grid[j + 1] - x_grid[j]);
             V_new[i] = (1.0 - alpha) * V_old[j] + alpha * V_old[j + 1];
         }
