@@ -409,11 +409,13 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
     // Validate Robin boundary condition coefficients
     if (bc_config->left_type == BC_ROBIN && fabs(bc_config->left_robin_a) < 1e-15) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 1, bc_config->left_robin_a, 1e-15);
+        free(solver->grid.x);  // Free the transferred grid
         free(solver);
         return nullptr;
     }
     if (bc_config->right_type == BC_ROBIN && fabs(bc_config->right_robin_a) < 1e-15) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 2, bc_config->right_robin_a, 1e-15);
+        free(solver->grid.x);  // Free the transferred grid
         free(solver);
         return nullptr;
     }
@@ -441,6 +443,7 @@ PDESolver* pde_solver_create(SpatialGrid *grid,
         if (solver->workspace == nullptr) {
             // Both allocations failed
             MANGO_TRACE_VALIDATION_ERROR(MODULE_PDE_SOLVER, 0, workspace_size, 0.0);
+            free(solver->grid.x);  // Free the transferred grid
             free(solver);
             return nullptr;
         }
