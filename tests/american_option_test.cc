@@ -7,6 +7,14 @@ extern "C" {
 #include "../src/implied_volatility.h"
 }
 
+// Mirror of ExtendedOptionData from american_option.c for boundary callback tests
+struct TestExtendedOptionData {
+    const OptionData *option_data;
+    double x_min;
+    double x_max;
+    bool use_neumann_bc;
+};
+
 // Test fixture for American option tests
 class AmericanOptionTest : public ::testing::Test {
 protected:
@@ -1427,6 +1435,52 @@ TEST_F(AmericanOptionTest, LargeDividendNaNHandling) {
 
         american_option_free_result(&result);
     }
+}
+
+TEST_F(AmericanOptionTest, NeumannBoundaryCallbacksReturnGradients) {
+    OptionData call_option = {
+        .strike = 100.0,
+        .volatility = 0.2,
+        .risk_free_rate = 0.05,
+        .time_to_maturity = 1.0,
+        .option_type = OPTION_CALL,
+        .n_dividends = 0,
+        .dividend_times = nullptr,
+        .dividend_amounts = nullptr
+    };
+
+    TestExtendedOptionData call_data = {
+        .option_data = &call_option,
+        .x_min = std::log(0.6),
+        .x_max = std::log(1.4),
+        .use_neumann_bc = true
+    };
+
+    const double t = 0.35;
+
+    double left_grad_call = american_option_left_boundary(t, &call_data);
+    double right_grad_call = american_option_right_boundary(t, &call_data);
+
+    // For Neumann BCs with zero-flux conditions, both should return 0.0
+    EXPECT_NEAR(left_grad_call, 0.0, 1e-12);
+    EXPECT_NEAR(right_grad_call, 0.0, 1e-12);
+
+    OptionData put_option = call_option;
+    put_option.option_type = OPTION_PUT;
+
+    TestExtendedOptionData put_data = {
+        .option_data = &put_option,
+        .x_min = std::log(0.6),
+        .x_max = std::log(1.4),
+        .use_neumann_bc = true
+    };
+
+    double left_grad_put = american_option_left_boundary(t, &put_data);
+    double right_grad_put = american_option_right_boundary(t, &put_data);
+
+    // For Neumann BCs with zero-flux conditions, both should return 0.0
+    EXPECT_NEAR(left_grad_put, 0.0, 1e-12);
+    EXPECT_NEAR(right_grad_put, 0.0, 1e-12);
 }
 
 int main(int argc, char **argv) {
