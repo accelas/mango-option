@@ -29,25 +29,32 @@ typedef struct {
 // The PDE in solver time t: ∂V/∂t = L(V)
 // where L(V) = (1/2)σ²∂²V/∂x² + (r - σ²/2)∂V/∂x - rV
 
+// Helper: Compute intrinsic value (payoff) for American options (vectorized)
+// This is used by both terminal condition and obstacle condition
+// Intrinsic value = max(S - K, 0) for call, max(K - S, 0) for put
+static inline void compute_intrinsic_value(const double *x, size_t n_points,
+                                          double *values, double strike,
+                                          OptionType option_type) {
+    #pragma omp simd
+    for (size_t i = 0; i < n_points; i++) {
+        // x = ln(S/K), so S = K*exp(x)
+        double S = strike * exp(x[i]);
+
+        if (option_type == OPTION_CALL) {
+            values[i] = fmax(S - strike, 0.0);
+        } else {
+            values[i] = fmax(strike - S, 0.0);
+        }
+    }
+}
+
 // Terminal condition: Option payoff at maturity (vectorized)
-// At maturity, American = European = max(S - K, 0) for call
+// At maturity, American = European = intrinsic value
 void american_option_terminal_condition(const double *x, size_t n_points,
                                        double *V, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *data = ext_data->option_data;
-    const double K = data->strike;
-
-    #pragma omp simd
-    for (size_t i = 0; i < n_points; i++) {
-        // x = ln(S/K), so S = K*exp(x)
-        double S = K * exp(x[i]);
-
-        if (data->option_type == OPTION_CALL) {
-            V[i] = fmax(S - K, 0.0);
-        } else {
-            V[i] = fmax(K - S, 0.0);
-        }
-    }
+    compute_intrinsic_value(x, n_points, V, data->strike, data->option_type);
 }
 
 // Left boundary condition (S → 0, x → -∞)
@@ -165,19 +172,7 @@ void american_option_obstacle(const double *x, [[maybe_unused]] double t,
                              size_t n_points, double *obstacle, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *data = ext_data->option_data;
-    const double K = data->strike;
-
-    #pragma omp simd
-    for (size_t i = 0; i < n_points; i++) {
-        // x = ln(S/K), so S = K*exp(x)
-        double S = K * exp(x[i]);
-
-        if (data->option_type == OPTION_CALL) {
-            obstacle[i] = fmax(S - K, 0.0);
-        } else {
-            obstacle[i] = fmax(K - S, 0.0);
-        }
-    }
+    compute_intrinsic_value(x, n_points, obstacle, data->strike, data->option_type);
 }
 
 // Forward declarations
