@@ -258,6 +258,11 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     SpatialGrid grid = pde_create_grid(grid_params->x_min,
                                       grid_params->x_max,
                                       grid_params->n_points);
+    if (grid.x == nullptr) {
+        goto cleanup;
+    }
+
+    SpatialGrid solver_grid = grid;  // Copy so caller retains ownership on failure paths
 
     // Time domain: solve forward in time-to-maturity
     TimeDomain time = {
@@ -276,7 +281,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
         option_data->dividend_amounts != nullptr) {
         div_times_solver = (double *)malloc(option_data->n_dividends * sizeof(double));
         if (div_times_solver == nullptr) {
-            return result;
+            goto cleanup;
         }
 
         const double T = option_data->time_to_maturity;
@@ -301,10 +306,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     // Allocate dynamically to ensure lifetime extends beyond solver creation
     ExtendedOptionData *ext_data = (ExtendedOptionData *)malloc(sizeof(ExtendedOptionData));
     if (ext_data == nullptr) {
-        if (div_times_solver != nullptr) {
-            free(div_times_solver);
-        }
-        return result;
+        goto cleanup;
     }
 
     ext_data->option_data = option_data;
@@ -341,10 +343,10 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     trbdf2_config.max_iter = 200;    // More iterations allowed
 
     // Create and run solver
-    PDESolver *solver = pde_solver_create(&grid, &time, &bc_config,
+    PDESolver *solver = pde_solver_create(&solver_grid, &time, &bc_config,
                                           &trbdf2_config, &callbacks);
     if (solver == nullptr) {
-        return result;
+        goto cleanup;
     }
 
     pde_solver_initialize(solver);
@@ -355,14 +357,31 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     result.solver = solver;
     result.status = status;
     result.internal_data = (void *)ext_data;  // Store for cleanup
+    ext_data = nullptr;
 
     // Clean up dividend time array
     if (div_times_solver != nullptr) {
         free(div_times_solver);
+        div_times_solver = nullptr;
     }
 
     // Trace option pricing completion
     MANGO_TRACE_OPTION_COMPLETE(status, grid_params->n_steps);
+
+    return result;
+
+cleanup:
+    if (ext_data != nullptr) {
+        free(ext_data);
+    }
+
+    if (div_times_solver != nullptr) {
+        free(div_times_solver);
+    }
+
+    if (grid.x != nullptr) {
+        pde_free_grid(&grid);
+    }
 
     return result;
 }
