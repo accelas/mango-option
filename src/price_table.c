@@ -2054,27 +2054,35 @@ int price_table_set_strategy(OptionPriceTable *table,
                               const InterpolationStrategy *strategy) {
     if (!table || !strategy) return -1;
 
-    // Destroy old context
-    if (table->strategy && table->strategy->destroy_context) {
-        table->strategy->destroy_context(table->interp_context);
-    }
-
-    // Set new strategy
-    table->strategy = strategy;
-
-    // Create new context
+    // Create new context first (before destroying old one or changing strategy)
     size_t dimensions = (table->n_dividend > 0) ? 5 : 4;
     size_t grid_sizes[5] = {
         table->n_moneyness, table->n_maturity, table->n_volatility,
         table->n_rate, table->n_dividend
     };
-    table->interp_context = NULL;
+
+    InterpContext new_context = NULL;
     if (strategy->create_context) {
-        table->interp_context = strategy->create_context(dimensions, grid_sizes);
+        new_context = strategy->create_context(dimensions, grid_sizes);
+        // If create_context exists but returns NULL, it's an allocation failure
+        if (new_context == NULL) {
+            return -1;  // Surface the error to caller without changing anything
+        }
     }
 
+    // Only after successful context creation (or if no context needed), proceed with changes
+    // Destroy old context
+    if (table->strategy && table->strategy->destroy_context) {
+        table->strategy->destroy_context(table->interp_context);
+    }
+
+    // Set new strategy and context
+    table->strategy = strategy;
+    table->interp_context = new_context;
+
     // Pre-compute if supported
-    if (strategy->precompute) {
+    // Only call precompute if we have a valid context
+    if (strategy->precompute && table->interp_context != NULL) {
         strategy->precompute(table, table->interp_context);
     }
 
