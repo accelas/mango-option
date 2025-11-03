@@ -193,6 +193,17 @@ void american_option_apply_dividend(const double *x_grid, size_t n_points,
         // Post-dividend: S_post = S_pre - D (stock drops by dividend amount)
         double S_post = S_pre - dividend;
 
+        // Handle case where dividend causes stock price to go to zero or negative
+        // In this case, we can't compute log(S_post/K), so we need special handling
+        if (S_post <= 0.0) {
+            // When stock price drops to zero or negative, use the boundary value
+            // This is the most extreme case in the grid
+            // For puts, this would be close to strike value
+            // For calls, this would be close to zero
+            V_new[i] = V_old[0];  // Use leftmost boundary value (lowest x)
+            continue;
+        }
+
         // Post-dividend log-price: x_post = ln(S_post/K)
         double x_post = log(S_post / strike);
 
