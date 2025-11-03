@@ -60,8 +60,8 @@ jobs:
 
       - name: Run slow test suite
         run: |
-          # Run comprehensive (slow) tests
-          bazel test //tests:slow_tests --test_output=errors
+          # Run only tests tagged as slow
+          bazel test //tests/... --test_output=errors --test_tag_filters=slow
 
       - name: Display test results
         if: always()

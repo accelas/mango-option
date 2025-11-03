@@ -77,8 +77,8 @@ jobs:
           #   bazel test //tests:slow_tests
           # ============================================================
 
-          # Run all fast tests
-          bazel test //tests:fast_tests --test_output=errors
+          # Run all tests except those tagged as manual or slow
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual,-slow
 
       - name: Display test results
         if: always()

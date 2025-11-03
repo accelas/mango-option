@@ -221,36 +221,6 @@ cc_test(
     ],
 )
 
-test_suite(
-    name = "fast_tests",
-    tags = ["fast"],
-    tests = [
-        ":american_option_test",
-        ":brent_test",
-        ":coordinate_transform_test",
-        ":cubic_interp_4d_5d_test",
-        ":cubic_spline_test",
-        ":diagnostic_interp_test",
-        ":grid_generation_test",
-        ":grid_presets_test",
-        ":interpolation_test",
-        ":interpolation_workspace_test",
-        ":lets_be_rational_test",
-        ":memory_layout_test",
-        ":pde_solver_test",
-        ":price_table_test",
-        ":stability_test",
-        ":tridiagonal_test",
-        ":unified_grid_test",
-    ],
-)
-
-test_suite(
-    name = "slow_tests",
-    tags = ["slow"],
-    tests = [
-        ":adaptive_accuracy_test",
-        ":implied_volatility_test",
-        ":price_table_slow_test",
-    ],
-)
+# Test suites defined for convenience
+# Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
+# Slow tests: bazel test //tests/... --test_tag_filters=slow
