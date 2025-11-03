@@ -1,6 +1,7 @@
 #include "american_option.h"
 #include "ivcalc_trace.h"
 #include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,6 +11,7 @@ typedef struct {
     const OptionData *option_data;
     double x_min;
     double x_max;
+    bool use_neumann_bc;  // True if using Neumann BCs (return gradients), false for Dirichlet
 } ExtendedOptionData;
 
 // American Option Pricing using Black-Scholes PDE
@@ -52,6 +54,14 @@ void american_option_terminal_condition(const double *x, size_t n_points,
 double american_option_left_boundary(double t, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *data = ext_data->option_data;
+
+    // For Neumann BCs, return gradient value (∂V/∂x)
+    // For zero-flux condition, gradient = 0
+    if (ext_data->use_neumann_bc) {
+        return 0.0;  // Zero gradient at boundary (∂V/∂x = 0)
+    }
+
+    // For Dirichlet BCs, return option value V
     // In our time mapping: t represents time-to-maturity τ
     const double tau = t;
 
@@ -68,6 +78,14 @@ double american_option_left_boundary(double t, void *user_data) {
 double american_option_right_boundary(double t, void *user_data) {
     ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
     const OptionData *data = ext_data->option_data;
+
+    // For Neumann BCs, return gradient value (∂V/∂x)
+    // For zero-flux condition, gradient = 0
+    if (ext_data->use_neumann_bc) {
+        return 0.0;  // Zero gradient at boundary (∂V/∂x = 0)
+    }
+
+    // For Dirichlet BCs, return option value V
     const double x_max = ext_data->x_max;
     // In our time mapping: t represents time-to-maturity τ
     const double tau = t;
@@ -292,6 +310,7 @@ AmericanOptionResult american_option_price(const OptionData *option_data,
     ext_data->option_data = option_data;
     ext_data->x_min = grid_params->x_min;
     ext_data->x_max = grid_params->x_max;
+    ext_data->use_neumann_bc = false;  // Use Dirichlet BCs for american_option_price
 
     // Setup callbacks
     PDECallbacks callbacks = {
@@ -451,6 +470,7 @@ AmericanOptionResult american_option_solve(
     ext_data->option_data = option_data;
     ext_data->x_min = grid.x_min;
     ext_data->x_max = grid.x_max;
+    ext_data->use_neumann_bc = true;  // Use Neumann BCs for american_option_solve
 
     // Setup callbacks (reuse existing callbacks)
     PDECallbacks callbacks = {
