@@ -30,14 +30,14 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
         u[0] = u[1] - dx_left * g;
     } else if (solver->bc_config.left_type == BC_ROBIN) {
-        // a*u + b*du/dx = g
-        // Using backward difference: du/dx ≈ (u[1] - u[0])/dx_left
-        // a*u[0] + b*(u[1] - u[0])/dx_left = g
-        // u[0]*(a - b/dx_left) = g - b*u[1]/dx_left
+        // Robin BC uses outward normal derivative: a*u + b*du/dn = g with du/dn = -du/dx at x_min
+        // Using forward difference: du/dx ≈ (u[1] - u[0]) / dx_left
+        // a*u[0] - b*(u[1] - u[0]) / dx_left = g
+        // u[0]*(a + b/dx_left) = g + b*u[1]/dx_left
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
         double a = solver->bc_config.left_robin_a;
         double b = solver->bc_config.left_robin_b;
-        u[0] = (g - b * u[1] / dx_left) / (a - b / dx_left);
+        u[0] = (g + b * u[1] / dx_left) / (a + b / dx_left);
     }
 
     // Right boundary
