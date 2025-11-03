@@ -16,21 +16,28 @@
 // Apply boundary conditions
 static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
     const size_t n = solver->grid.n_points;
-    const double dx = solver->grid.dx;
+    const double *x = solver->grid.x;
+
+    // Use actual local grid spacing for non-uniform grids
+    const double dx_left = (n >= 2) ? (x[1] - x[0]) : solver->grid.dx;
+    const double dx_right = (n >= 2) ? (x[n-1] - x[n-2]) : solver->grid.dx;
 
     // Left boundary
     if (solver->bc_config.left_type == BC_DIRICHLET) {
         u[0] = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
     } else if (solver->bc_config.left_type == BC_NEUMANN) {
-        // du/dx = g => u[0] = u[1] - dx*g (first-order)
+        // du/dx = g => u[0] = u[1] - dx_left*g (first-order)
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
-        u[0] = u[1] - dx * g;
+        u[0] = u[1] - dx_left * g;
     } else if (solver->bc_config.left_type == BC_ROBIN) {
         // a*u + b*du/dx = g
+        // Using backward difference: du/dx ≈ (u[1] - u[0])/dx_left
+        // a*u[0] + b*(u[1] - u[0])/dx_left = g
+        // u[0]*(a - b/dx_left) = g - b*u[1]/dx_left
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
         double a = solver->bc_config.left_robin_a;
         double b = solver->bc_config.left_robin_b;
-        u[0] = (g - b * (u[1] - u[0]) / dx) / a;
+        u[0] = (g - b * u[1] / dx_left) / (a - b / dx_left);
     }
 
     // Right boundary
@@ -38,12 +45,16 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
         u[n - 1] = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
     } else if (solver->bc_config.right_type == BC_NEUMANN) {
         double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
-        u[n - 1] = u[n - 2] + dx * g;
+        u[n - 1] = u[n - 2] + dx_right * g;
     } else if (solver->bc_config.right_type == BC_ROBIN) {
+        // a*u + b*du/dx = g
+        // Using forward difference: du/dx ≈ (u[n-1] - u[n-2])/dx_right
+        // a*u[n-1] + b*(u[n-1] - u[n-2])/dx_right = g
+        // u[n-1]*(a + b/dx_right) = g + b*u[n-2]/dx_right
         double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
         double a = solver->bc_config.right_robin_a;
         double b = solver->bc_config.right_robin_b;
-        u[n - 1] = (g - b * (u[n - 1] - u[n - 2]) / dx) / a;
+        u[n - 1] = (g + b * u[n - 2] / dx_right) / (a + b / dx_right);
     }
 
     // Apply obstacle condition if provided
@@ -65,7 +76,15 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
                                       const double * __restrict__ u,
                                       double * __restrict__ result) {
     const size_t n = solver->grid.n_points;
-    const double dx = solver->grid.dx;
+    const double *x = solver->grid.x;
+
+    // Use actual local grid spacing for non-uniform grids
+    const double dx_left = (n >= 2) ? (x[1] - x[0]) : solver->grid.dx;
+    const double dx_right = (n >= 2) ? (x[n-1] - x[n-2]) : solver->grid.dx;
+
+    // For interior D estimation, use local spacing
+    const double dx_1 = (n >= 3) ? (x[2] - x[1]) : solver->grid.dx;
+    const double dx_n2 = (n >= 3) ? (x[n-2] - x[n-3]) : solver->grid.dx;
 
     // Call vectorized spatial operator
     solver->callbacks.spatial_operator(solver->grid.x, t, u, n, result,
@@ -77,24 +96,25 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
 
     if (solver->bc_config.left_type == BC_NEUMANN) {
         // Ghost point: u_{-1} = u_1 (for zero flux du/dx = 0)
-        // More generally: u_{-1} = u_1 - 2*dx*g where du/dx = g
+        // More generally: u_{-1} = u_1 - 2*dx_left*g where du/dx = g
         double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
         double D = solver->callbacks.diffusion_coeff;
 
         // Check if explicit diffusion coefficient is provided
         if (!isnan(D)) {
             // Use explicit diffusion coefficient (pure diffusion operator L(u) = D·∂²u/∂x²)
-            // Ghost point stencil: L(u)_0 = D * (u_{-1} - 2*u_0 + u_1) / dx²
-            //                             = D * (u_1 - 2*dx*g - 2*u_0 + u_1) / dx²
-            //                             = D * (2*u_1 - 2*u_0 - 2*dx*g) / dx²
-            result[0] = D * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
+            // Ghost point stencil: L(u)_0 = D * (u_{-1} - 2*u_0 + u_1) / dx_left²
+            //                             = D * (u_1 - 2*dx_left*g - 2*u_0 + u_1) / dx_left²
+            //                             = D * (2*u_1 - 2*u_0 - 2*dx_left*g) / dx_left²
+            result[0] = D * (2.0*u[1] - 2.0*u[0] - 2.0*dx_left*g) / (dx_left * dx_left);
         } else {
             // Fall back to estimation for variable/non-constant diffusion
             // ASSUMPTION: This assumes pure diffusion operator L(u) = D·∂²u/∂x²
             // For advection-diffusion or nonlinear operators, this may be inaccurate
             if (n >= 3 && fabs(u[0] - 2.0*u[1] + u[2]) > 1e-12) {
-                double D_estimate = result[1] * dx * dx / (u[0] - 2.0*u[1] + u[2]);
-                result[0] = D_estimate * (2.0*u[1] - 2.0*u[0] - 2.0*dx*g) / (dx * dx);
+                // Use interior point spacing for D estimation
+                double D_estimate = result[1] * dx_1 * dx_1 / (u[0] - 2.0*u[1] + u[2]);
+                result[0] = D_estimate * (2.0*u[1] - 2.0*u[0] - 2.0*dx_left*g) / (dx_left * dx_left);
             } else {
                 // Fallback for edge cases
                 result[0] = 0.0;
@@ -109,15 +129,16 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
         // Check if explicit diffusion coefficient is provided
         if (!isnan(D)) {
             // Use explicit diffusion coefficient (pure diffusion operator L(u) = D·∂²u/∂x²)
-            // Ghost point: u_n = u_{n-2} + 2*dx*g
-            // L(u)_{n-1} = D * (u_{n-2} - 2*u_{n-1} + u_n) / dx²
-            result[n-1] = D * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
+            // Ghost point: u_n = u_{n-2} + 2*dx_right*g
+            // L(u)_{n-1} = D * (u_{n-2} - 2*u_{n-1} + u_n) / dx_right²
+            result[n-1] = D * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx_right*g) / (dx_right * dx_right);
         } else {
             // Fall back to estimation for variable/non-constant diffusion
             // ASSUMPTION: Same as left boundary - assumes pure diffusion operator
             if (n >= 3 && fabs(u[n-3] - 2.0*u[n-2] + u[n-1]) > 1e-12) {
-                double D_estimate = result[n-2] * dx * dx / (u[n-3] - 2.0*u[n-2] + u[n-1]);
-                result[n-1] = D_estimate * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx*g) / (dx * dx);
+                // Use interior point spacing for D estimation
+                double D_estimate = result[n-2] * dx_n2 * dx_n2 / (u[n-3] - 2.0*u[n-2] + u[n-1]);
+                result[n-1] = D_estimate * (2.0*u[n-2] - 2.0*u[n-1] + 2.0*dx_right*g) / (dx_right * dx_right);
             } else {
                 result[n-1] = 0.0;
             }
