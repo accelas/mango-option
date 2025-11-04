@@ -59,14 +59,12 @@ public:
         , right_bc_(right_bc)
         , spatial_op_(spatial_op)
         , n_(grid.size())
-        , workspace_(n_, grid)
+        , workspace_(n_, grid, config_.cache_blocking_threshold)
         , u_current_(n_)
         , u_old_(n_)
         , rhs_(n_)
         , newton_solver_(n_, root_config_, workspace_, left_bc_, right_bc_, spatial_op_, grid)
     {
-        // Determine cache blocking strategy
-        use_cache_blocking_ = (n_ >= config_.cache_blocking_threshold);
     }
 
     /// Initialize with initial condition
@@ -142,9 +140,6 @@ private:
     // Newton solver (persistent, created once)
     NewtonSolver<BoundaryL, BoundaryR, SpatialOp> newton_solver_;
 
-    // Cache blocking flag
-    bool use_cache_blocking_;
-
     /// Apply boundary conditions
     void apply_boundary_conditions(std::span<double> u, double t) {
         auto dx_span = workspace_.dx();
@@ -162,6 +157,49 @@ private:
         right_bc_.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
     }
 
+    /// Apply spatial operator with cache-blocking for large grids
+    void apply_operator_with_blocking(double t,
+                                      std::span<const double> u,
+                                      std::span<double> Lu) {
+        const size_t n = grid_.size();
+
+        // Small grid: use full-array path (no blocking overhead)
+        if (workspace_.cache_config().n_blocks == 1) {
+            spatial_op_(t, grid_, u, Lu, workspace_.dx());
+            return;
+        }
+
+        // Large grid: blocked evaluation
+        for (size_t block = 0; block < workspace_.cache_config().n_blocks; ++block) {
+            auto [interior_start, interior_end] =
+                workspace_.get_block_interior_range(block);
+
+            // Skip boundary-only blocks
+            if (interior_start >= interior_end) continue;
+
+            // Compute halo sizes (clamped at global boundaries)
+            const size_t halo_left = std::min(workspace_.cache_config().overlap,
+                                             interior_start);
+            const size_t halo_right = std::min(workspace_.cache_config().overlap,
+                                              n - interior_end);
+            const size_t interior_count = interior_end - interior_start;
+
+            // Build spans with halos
+            auto x_halo = std::span{grid_.data() + interior_start - halo_left,
+                                   interior_count + halo_left + halo_right};
+            auto u_halo = std::span{u.data() + interior_start - halo_left,
+                                   interior_count + halo_left + halo_right};
+            auto lu_out = std::span{Lu.data() + interior_start, interior_count};
+
+            // Call block-aware operator
+            spatial_op_.apply_block(t, interior_start, halo_left, halo_right,
+                                   x_halo, u_halo, lu_out, workspace_.dx());
+        }
+
+        // Zero boundary values (BCs will override after)
+        Lu[0] = Lu[n-1] = 0.0;
+    }
+
     /// TR-BDF2 Stage 1: Trapezoidal rule
     ///
     /// u^{n+γ} = u^n + (γ·dt/2) · [L(u^n) + L(u^{n+γ})]
@@ -171,7 +209,7 @@ private:
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
-        spatial_op_(t_n, grid_, std::span{u_old_}, workspace_.lu(), workspace_.dx());
+        apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_.lu());
 
         // RHS = u^n + w1·L(u^n)
         for (size_t i = 0; i < n_; ++i) {
