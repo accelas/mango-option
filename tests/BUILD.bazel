@@ -52,6 +52,16 @@ cc_test(
 )
 
 cc_test(
+    name = "root_finding_test",
+    srcs = ["root_finding_test.cc"],
+    deps = [
+        "//src/cpp:root_finding",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "spatial_operators_test",
     srcs = ["spatial_operators_test.cc"],
     deps = [
