@@ -80,3 +80,10 @@ cc_library(
     copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "fixed_point_solver",
+    hdrs = ["fixed_point_solver.hpp"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
