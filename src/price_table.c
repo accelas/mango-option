@@ -485,12 +485,21 @@ int price_table_precompute(OptionPriceTable *table,
         return -1;
     }
 
+    // TODO: Dividend dimension not yet supported in precompute
+    // The OptionData structure only supports discrete dividends (times + amounts),
+    // but the price table's dividend_grid represents continuous yields.
+    // Proper support requires either:
+    // 1. Extending american_option API to accept continuous yields, OR
+    // 2. Converting continuous yields to equivalent discrete dividends
+    // For now, reject 5D tables to avoid silently producing incorrect results.
+    if (table->n_dividend > 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE, 3, table->n_dividend, 0);
+        return -1;
+    }
+
     // Calculate total grid points
     size_t n_total = table->n_moneyness * table->n_maturity *
                      table->n_volatility * table->n_rate;
-    if (table->n_dividend > 0) {
-        n_total *= table->n_dividend;
-    }
 
     // Allocate vega array if not already allocated
     if (!table->vegas) {
@@ -568,13 +577,7 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
-    // Number of PDE solves needed (one per combination of tau, sigma, r, q)
-    size_t n_solves = table->n_maturity * table->n_volatility * table->n_rate;
-    if (table->n_dividend > 0) {
-        n_solves *= table->n_dividend;
-    }
-
-    // Process each (tau, sigma, r, q) combination
+    // Process each (tau, sigma, r) combination (4D tables only)
     // Each PDE solve will populate ALL moneyness values at once
     for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
         double tau_grid = table->maturity_grid[i_tau];
@@ -607,62 +610,58 @@ int price_table_precompute(OptionPriceTable *table,
             for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
                 double r = table->rate_grid[i_r];
 
-                size_t n_q_iter = (table->n_dividend > 0) ? table->n_dividend : 1;
-                for (size_t i_q = 0; i_q < n_q_iter; i_q++) {
-                    // Create option data (moneyness-independent)
-                    OptionData option = {
-                        .strike = K_ref,
-                        .volatility = sigma,
-                        .risk_free_rate = r,
-                        .time_to_maturity = tau_raw,
-                        .option_type = table->type,
-                        .n_dividends = 0,
-                        .dividend_times = NULL,
-                        .dividend_amounts = NULL
-                    };
+                // Create option data (moneyness-independent, no dividends)
+                OptionData option = {
+                    .strike = K_ref,
+                    .volatility = sigma,
+                    .risk_free_rate = r,
+                    .time_to_maturity = tau_raw,
+                    .option_type = table->type,
+                    .n_dividends = 0,
+                    .dividend_times = NULL,
+                    .dividend_amounts = NULL
+                };
 
-                    // Solve PDE once for this (tau, sigma, r, q) using full moneyness grid
-                    AmericanOptionResult result = american_option_solve(
-                        &option, m_grid_raw, table->n_moneyness, grid->dt, n_steps);
+                // Solve PDE once for this (tau, sigma, r) using full moneyness grid
+                AmericanOptionResult result = american_option_solve(
+                    &option, m_grid_raw, table->n_moneyness, grid->dt, n_steps);
 
-                    if (result.status != 0 || !result.solver) {
-                        free(m_grid_raw);
-                        if (result.solver) {
-                            american_option_free_result(&result);
-                        }
-                        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, result.status, completed);
-                        return -1;
-                    }
-
-                    // Extract ALL moneyness prices from this single solve
-                    const double *solution = pde_solver_get_solution(result.solver);
-                    if (!solution) {
-                        free(m_grid_raw);
+                if (result.status != 0 || !result.solver) {
+                    free(m_grid_raw);
+                    if (result.solver) {
                         american_option_free_result(&result);
-                        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, -1, completed);
-                        return -1;
                     }
+                    MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, result.status, completed);
+                    return -1;
+                }
 
-                    // Store prices for all moneyness points
-                    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
-                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
-                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
-                                   + i_q * table->stride_q;
-
-                        table->prices[idx] = solution[i_m];
-                    }
-
-                    // Free the solver
+                // Extract ALL moneyness prices from this single solve
+                const double *solution = pde_solver_get_solution(result.solver);
+                if (!solution) {
+                    free(m_grid_raw);
                     american_option_free_result(&result);
+                    MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, -1, completed);
+                    return -1;
+                }
 
-                    completed += table->n_moneyness;
+                // Store prices for all moneyness points (4D table only, i_q = 0)
+                for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                    size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                               + i_sigma * table->stride_sigma + i_r * table->stride_r;
 
-                    // Progress tracking (every solve)
-                    if ((completed / table->n_moneyness) % 10 == 0 || completed >= n_total) {
-                        MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
-                                                   completed, n_total,
-                                                   (double)completed / (double)n_total);
-                    }
+                    table->prices[idx] = solution[i_m];
+                }
+
+                // Free the solver
+                american_option_free_result(&result);
+
+                completed += table->n_moneyness;
+
+                // Progress tracking (every 10 solves)
+                if ((completed / table->n_moneyness) % 10 == 0 || completed >= n_total) {
+                    MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
+                                               completed, n_total,
+                                               (double)completed / (double)n_total);
                 }
             }
         }
