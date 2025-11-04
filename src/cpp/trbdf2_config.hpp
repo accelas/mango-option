@@ -28,6 +28,10 @@ struct TRBDF2Config {
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;
 
+    /// Under-relaxation parameter for fixed-point iteration
+    /// TEMPORARY: Will be removed in Task 9 when Newton replaces fixed-point
+    double omega = 0.7;
+
     /// Compute weight for Stage 1 update
     ///
     /// Stage 1: u^{n+γ} = u^n + w1 * [L(u^n) + L(u^{n+γ})]

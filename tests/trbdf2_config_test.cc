@@ -8,6 +8,7 @@ TEST(TRBDF2ConfigTest, DefaultValues) {
     EXPECT_EQ(config.max_iter, 20);
     EXPECT_DOUBLE_EQ(config.tolerance, 1e-6);
     EXPECT_DOUBLE_EQ(config.jacobian_fd_epsilon, 1e-7);
+    EXPECT_DOUBLE_EQ(config.omega, 0.7);  // Temporary until Task 9
 
     // γ = 2 - √2 ≈ 0.5857864376269049
     EXPECT_NEAR(config.gamma, 2.0 - std::sqrt(2.0), 1e-10);
