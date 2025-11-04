@@ -280,6 +280,37 @@ private:
 
         return converged;
     }
+
+    /// Compute residual: r = rhs - u + coeff_dt·L(u)
+    /// ALL points use PDE formula (Dirichlet will be overwritten later)
+    void compute_residual(std::span<const double> u, double coeff_dt,
+                          std::span<const double> Lu, std::span<const double> rhs,
+                          std::span<double> residual) {
+        for (size_t i = 0; i < n_; ++i) {
+            residual[i] = rhs[i] - u[i] + coeff_dt * Lu[i];
+        }
+    }
+
+    /// Compute step-to-step delta error (RMS norm)
+    /// This matches C implementation convergence criterion
+    double compute_step_delta_error(std::span<const double> u_new,
+                                     std::span<const double> u_old) {
+        double sum_sq_error = 0.0;
+        double sum_sq_norm = 0.0;
+
+        for (size_t i = 0; i < n_; ++i) {
+            double diff = u_new[i] - u_old[i];
+            sum_sq_error += diff * diff;
+            sum_sq_norm += u_new[i] * u_new[i];
+        }
+
+        double rms_error = std::sqrt(sum_sq_error / n_);
+        double rms_norm = std::sqrt(sum_sq_norm / n_);
+
+        // Relative error with safeguard against division by zero
+        const double epsilon = 1e-12;
+        return (rms_norm > epsilon) ? rms_error / (rms_norm + epsilon) : rms_error;
+    }
 };
 
 }  // namespace mango
