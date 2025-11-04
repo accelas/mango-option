@@ -339,16 +339,20 @@ void validation_result_free(ValidationResult *result) {
 void validation_result_print(const ValidationResult *result) {
     if (!result) return;
 
-    printf("\nValidation Results (%zu samples):\n", result->n_samples);
-    printf("  Mean IV error:     %.2f bp\n", result->mean_iv_error);
-    printf("  Median IV error:   %.2f bp\n", result->median_iv_error);
-    printf("  P95 IV error:      %.2f bp\n", result->p95_iv_error);
-    printf("  P99 IV error:      %.2f bp\n", result->p99_iv_error);
-    printf("  Max IV error:      %.2f bp\n", result->max_iv_error);
-    printf("  Below 1bp:         %.1f%%\n", result->fraction_below_1bp * 100.0);
-    printf("  Below 5bp:         %.1f%%\n", result->fraction_below_5bp * 100.0);
-    printf("  Below 10bp:        %.1f%%\n", result->fraction_below_10bp * 100.0);
-    printf("  High-error points: %zu\n", result->n_high_error);
+    MANGO_TRACE_VALIDATION_RESULT_STATS(
+        result->n_samples,
+        result->mean_iv_error,
+        result->median_iv_error,
+        result->p95_iv_error,
+        result->p99_iv_error,
+        result->max_iv_error);
+
+    MANGO_TRACE_VALIDATION_RESULT_DISTRIBUTION(
+        result->n_samples,
+        result->fraction_below_1bp * 100.0,
+        result->fraction_below_5bp * 100.0,
+        result->fraction_below_10bp * 100.0,
+        result->n_high_error);
 }
 
 // Helper: Find grid interval index for a moneyness value
@@ -510,18 +514,20 @@ int price_table_precompute_adaptive(
         return -1;
     }
 
-    printf("\nAdaptive Refinement:\n");
-    printf("  Target IV error: %.2f bp\n", target_iv_error_bp);
-    printf("  Max iterations:  %zu\n", max_iterations);
-    printf("  Validation samples: %zu\n", validation_samples);
-    printf("  Initial grid size: %zu moneyness points\n\n", table->n_moneyness);
+    MANGO_TRACE_VALIDATION_REFINEMENT_CONFIG(
+        target_iv_error_bp,
+        max_iterations,
+        validation_samples,
+        table->n_moneyness);
 
     // 2. Adaptive refinement loop
     for (size_t iter = 0; iter < max_iterations; iter++) {
-        printf("Iteration %zu:\n", iter + 1);
+        const size_t iteration = iter + 1;
+
+        MANGO_TRACE_VALIDATION_ITERATION_BEGIN(iteration, table->n_moneyness);
+        MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_PRECOMPUTE);
 
         // 2a. Precompute prices (NaN entries only on subsequent iterations)
-        printf("  Precomputing prices...\n");
         int precompute_status = price_table_precompute(table, grid);
 
         if (precompute_status != 0) {
@@ -533,7 +539,7 @@ int price_table_precompute_adaptive(
         price_table_build_interpolation(table);
 
         // 2b. Validate interpolation error
-        printf("  Validating accuracy...\n");
+        MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_VALIDATE);
         ValidationResult result = validate_interpolation_error(
             table, grid, NULL, validation_samples, target_iv_error_bp
         );
@@ -544,25 +550,32 @@ int price_table_precompute_adaptive(
             return -1;
         }
 
-        // Print validation summary
-        printf("  Grid size: %zu\n", table->n_moneyness);
-        printf("  Mean IV error:   %.2f bp\n", result.mean_iv_error);
-        printf("  P95 IV error:    %.2f bp\n", result.p95_iv_error);
-        printf("  P99 IV error:    %.2f bp\n", result.p99_iv_error);
-        printf("  Below %.1f bp:   %.1f%%\n", target_iv_error_bp, result.fraction_below_1bp * 100.0);
-        printf("  High-error pts:  %zu\n\n", result.n_high_error);
+        // Emit validation summary via tracing
+        MANGO_TRACE_VALIDATION_ITERATION_METRICS(
+            iteration,
+            table->n_moneyness,
+            result.mean_iv_error,
+            result.p95_iv_error,
+            result.p99_iv_error,
+            result.n_high_error);
+
+        MANGO_TRACE_VALIDATION_ITERATION_COVERAGE(
+            iteration,
+            target_iv_error_bp,
+            result.fraction_below_1bp * 100.0);
 
         // 2c. Check convergence
         bool converged = (result.p95_iv_error < target_iv_error_bp) &&
                         (result.fraction_below_1bp > 0.95);
 
         if (converged) {
-            printf("✓ Target accuracy achieved!\n");
-            printf("  Final grid size: %zu moneyness points\n", table->n_moneyness);
-            printf("  P95 error: %.2f bp (target: %.2f bp)\n",
-                   result.p95_iv_error, target_iv_error_bp);
-            printf("  Coverage: %.1f%% below %.1f bp\n\n",
-                   result.fraction_below_1bp * 100.0, target_iv_error_bp);
+            MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_COMPLETE);
+            MANGO_TRACE_VALIDATION_CONVERGED(
+                iteration,
+                table->n_moneyness,
+                target_iv_error_bp,
+                result.p95_iv_error,
+                result.fraction_below_1bp * 100.0);
 
             validation_result_free(&result);
             return 0;  // Success
@@ -570,26 +583,31 @@ int price_table_precompute_adaptive(
 
         // 2d. Check if this is last iteration
         if (iter == max_iterations - 1) {
-            printf("⚠ Maximum iterations reached without full convergence\n");
-            printf("  Final P95 error: %.2f bp (target: %.2f bp)\n",
-                   result.p95_iv_error, target_iv_error_bp);
+            MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_COMPLETE);
+            MANGO_TRACE_VALIDATION_MAX_ITER(
+                iteration,
+                target_iv_error_bp,
+                result.p95_iv_error);
             validation_result_free(&result);
             return 1;  // Partial success
         }
 
         // 2e. Identify refinement points
-        printf("  Identifying refinement regions...\n");
+        MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_IDENTIFY);
         size_t n_new;
         double *new_points = identify_refinement_points(&result, table, &n_new);
 
         validation_result_free(&result);
 
         if (!new_points || n_new == 0) {
-            printf("  No refinement points identified (might be at numerical limits)\n\n");
+            MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_NO_REFINEMENT);
+            MANGO_TRACE_VALIDATION_NO_REFINEMENT(
+                iteration,
+                VALIDATION_NO_REFINEMENT_NUMERIC_LIMITS);
             return 1;  // Can't refine further
         }
 
-        printf("  Adding %zu refinement points\n", n_new);
+        MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, VALIDATION_STAGE_EXPAND);
 
         // 2f. Expand grid
         int expand_status = price_table_expand_grid(table, new_points, n_new);
@@ -600,7 +618,10 @@ int price_table_precompute_adaptive(
             return -1;
         }
 
-        printf("  New grid size: %zu moneyness points\n\n", table->n_moneyness);
+        MANGO_TRACE_VALIDATION_REFINEMENT_POINTS(
+            iteration,
+            n_new,
+            table->n_moneyness);
     }
 
     // Should not reach here (loop should return from inside)
