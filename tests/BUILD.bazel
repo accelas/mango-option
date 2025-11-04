@@ -62,6 +62,18 @@ cc_test(
 )
 
 cc_test(
+    name = "newton_workspace_test",
+    srcs = ["newton_workspace_test.cc"],
+    deps = [
+        "//src/cpp:newton_workspace",
+        "//src/cpp:workspace",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "spatial_operators_test",
     srcs = ["spatial_operators_test.cc"],
     deps = [
