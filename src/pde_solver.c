@@ -23,35 +23,41 @@ static void apply_boundary_conditions(PDESolver *solver, double t, double *u) {
     const double dx_right = (n >= 2) ? (x[n-1] - x[n-2]) : solver->grid.dx;
 
     // Left boundary
-    if (solver->bc_config.left_type == BC_DIRICHLET) {
-        u[0] = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
-    } else if (solver->bc_config.left_type == BC_NEUMANN) {
+    const double x_min = solver->grid.x_min;
+    const BoundaryType left_bc = solver->bc_config.left_type;
+
+    if (left_bc == BC_DIRICHLET) {
+        u[0] = solver->callbacks.left_boundary(t, x_min, left_bc, solver->callbacks.user_data);
+    } else if (left_bc == BC_NEUMANN) {
         // du/dx = g => u[0] = u[1] - dx_left*g (first-order)
-        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.left_boundary(t, x_min, left_bc, solver->callbacks.user_data);
         u[0] = u[1] - dx_left * g;
-    } else if (solver->bc_config.left_type == BC_ROBIN) {
+    } else if (left_bc == BC_ROBIN) {
         // Robin BC uses outward normal derivative: a*u + b*du/dn = g with du/dn = -du/dx at x_min
         // Using forward difference: du/dx ≈ (u[1] - u[0]) / dx_left
         // a*u[0] - b*(u[1] - u[0]) / dx_left = g
         // u[0]*(a + b/dx_left) = g + b*u[1]/dx_left
-        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.left_boundary(t, x_min, left_bc, solver->callbacks.user_data);
         double a = solver->bc_config.left_robin_a;
         double b = solver->bc_config.left_robin_b;
         u[0] = (g + b * u[1] / dx_left) / (a + b / dx_left);
     }
 
     // Right boundary
-    if (solver->bc_config.right_type == BC_DIRICHLET) {
-        u[n - 1] = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
-    } else if (solver->bc_config.right_type == BC_NEUMANN) {
-        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+    const double x_max = solver->grid.x_max;
+    const BoundaryType right_bc = solver->bc_config.right_type;
+
+    if (right_bc == BC_DIRICHLET) {
+        u[n - 1] = solver->callbacks.right_boundary(t, x_max, right_bc, solver->callbacks.user_data);
+    } else if (right_bc == BC_NEUMANN) {
+        double g = solver->callbacks.right_boundary(t, x_max, right_bc, solver->callbacks.user_data);
         u[n - 1] = u[n - 2] + dx_right * g;
-    } else if (solver->bc_config.right_type == BC_ROBIN) {
+    } else if (right_bc == BC_ROBIN) {
         // a*u + b*du/dx = g
         // Using forward difference: du/dx ≈ (u[n-1] - u[n-2])/dx_right
         // a*u[n-1] + b*(u[n-1] - u[n-2])/dx_right = g
         // u[n-1]*(a + b/dx_right) = g + b*u[n-2]/dx_right
-        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.right_boundary(t, x_max, right_bc, solver->callbacks.user_data);
         double a = solver->bc_config.right_robin_a;
         double b = solver->bc_config.right_robin_b;
         u[n - 1] = (g + b * u[n - 2] / dx_right) / (a + b / dx_right);
@@ -97,7 +103,7 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
     if (solver->bc_config.left_type == BC_NEUMANN) {
         // Ghost point: u_{-1} = u_1 (for zero flux du/dx = 0)
         // More generally: u_{-1} = u_1 - 2*dx_left*g where du/dx = g
-        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.left_boundary(t, solver->grid.x_min, solver->bc_config.left_type, solver->callbacks.user_data);
         double D = solver->callbacks.diffusion_coeff;
 
         // Check if explicit diffusion coefficient is provided
@@ -123,7 +129,7 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
     }
 
     if (solver->bc_config.right_type == BC_NEUMANN) {
-        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.right_boundary(t, solver->grid.x_max, solver->bc_config.right_type, solver->callbacks.user_data);
         double D = solver->callbacks.diffusion_coeff;
 
         // Check if explicit diffusion coefficient is provided
@@ -149,7 +155,7 @@ static void evaluate_spatial_operator(PDESolver *solver, double t,
 // Solve implicit system: (I - coeff*dt*L)*u_new = rhs
 // Uses linearized Newton iteration with tridiagonal solver
 static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
-                               const double *rhs, double *u_new, size_t step) {
+                               const double *rhs, double *u_new, [[maybe_unused]] size_t step) {
     const size_t n = solver->grid.n_points;
     const size_t max_iter = solver->trbdf2_config.max_iter;
     const double tol = solver->trbdf2_config.tolerance;
@@ -160,16 +166,16 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
 
     // Initialize boundary values to satisfy constraints (needed for Jacobian computation)
     if (solver->bc_config.left_type == BC_DIRICHLET) {
-        u_new[0] = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        u_new[0] = solver->callbacks.left_boundary(t, solver->grid.x_min, solver->bc_config.left_type, solver->callbacks.user_data);
     } else if (solver->bc_config.left_type == BC_NEUMANN) {
-        double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.left_boundary(t, solver->grid.x_min, solver->bc_config.left_type, solver->callbacks.user_data);
         u_new[0] = u_new[1] - solver->grid.dx * g;
     }
 
     if (solver->bc_config.right_type == BC_DIRICHLET) {
-        u_new[n-1] = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+        u_new[n-1] = solver->callbacks.right_boundary(t, solver->grid.x_max, solver->bc_config.right_type, solver->callbacks.user_data);
     } else if (solver->bc_config.right_type == BC_NEUMANN) {
-        double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+        double g = solver->callbacks.right_boundary(t, solver->grid.x_max, solver->bc_config.right_type, solver->callbacks.user_data);
         u_new[n-1] = u_new[n-2] + solver->grid.dx * g;
     }
 
@@ -275,7 +281,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
         // Boundary residuals - use PDE for Neumann, constraint for Dirichlet
         // Left boundary
         if (solver->bc_config.left_type == BC_DIRICHLET) {
-            double g = solver->callbacks.left_boundary(t, solver->callbacks.user_data);
+            double g = solver->callbacks.left_boundary(t, solver->grid.x_min, solver->bc_config.left_type, solver->callbacks.user_data);
             residual[0] = g - u_old[0];
         } else if (solver->bc_config.left_type == BC_NEUMANN) {
             // Use PDE at boundary (same as interior)
@@ -290,7 +296,7 @@ static int solve_implicit_step(PDESolver *solver, double t, double coeff_dt,
 
         // Right boundary
         if (solver->bc_config.right_type == BC_DIRICHLET) {
-            double g = solver->callbacks.right_boundary(t, solver->callbacks.user_data);
+            double g = solver->callbacks.right_boundary(t, solver->grid.x_max, solver->bc_config.right_type, solver->callbacks.user_data);
             residual[n-1] = g - u_old[n-1];
         } else if (solver->bc_config.right_type == BC_NEUMANN) {
             // Use PDE at boundary (same as interior)

@@ -63,11 +63,15 @@ static void steady_initial([[maybe_unused]] const double *x, size_t n_points,
     }
 }
 
-static double steady_left_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double steady_left_bc([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                             [[maybe_unused]] BoundaryType bc_type,
+                             [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
-static double steady_right_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double steady_right_bc([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                              [[maybe_unused]] BoundaryType bc_type,
+                              [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
@@ -151,7 +155,9 @@ static void heat_initial(const double *x, size_t n_points,
     }
 }
 
-static double heat_zero_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double heat_zero_bc([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                           [[maybe_unused]] BoundaryType bc_type,
+                           [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
@@ -295,12 +301,14 @@ static void robin_initial_condition([[maybe_unused]] const double *x, size_t n_p
     }
 }
 
-static double robin_left_bc([[maybe_unused]] double t, void *user_data) {
+static double robin_left_bc([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                            [[maybe_unused]] BoundaryType bc_type, void *user_data) {
     RobinBCData *data = static_cast<RobinBCData*>(user_data);
     return data->left_g;
 }
 
-static double robin_right_bc([[maybe_unused]] double t, void *user_data) {
+static double robin_right_bc([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                             [[maybe_unused]] BoundaryType bc_type, void *user_data) {
     RobinBCData *data = static_cast<RobinBCData*>(user_data);
     return data->right_g;
 }
