@@ -16,7 +16,7 @@ TEST(TRBDF2ConfigTest, StageWeights) {
     mango::TRBDF2Config config;
 
     // Stage 1 weight: γ·dt / 2
-    // Stage 2 weight (corrected BDF2): (1-γ)²·dt / (γ(2γ-1))
+    // Stage 2 weight (Ascher, Ruuth, Wetton 1995): (1-γ)·dt / (2-γ)
 
     double dt = 0.01;
     double w1 = config.stage1_weight(dt);
@@ -24,5 +24,5 @@ TEST(TRBDF2ConfigTest, StageWeights) {
 
     double gamma = 2.0 - std::sqrt(2.0);
     EXPECT_NEAR(w1, gamma * dt / 2.0, 1e-12);
-    EXPECT_NEAR(w2, (1.0 - gamma) * (1.0 - gamma) * dt / (gamma * (2.0 * gamma - 1.0)), 1e-12);
+    EXPECT_NEAR(w2, (1.0 - gamma) * dt / (2.0 - gamma), 1e-12);
 }

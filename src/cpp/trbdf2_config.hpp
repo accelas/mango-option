@@ -39,9 +39,9 @@ struct TRBDF2Config {
     /// Compute weight for Stage 2 update (BDF2 implicit weight)
     ///
     /// Stage 2: u^{n+1} - w2·L(u^{n+1}) = alpha·u^{n+γ} + beta·u^n
-    /// where w2 = (1-γ)²·dt / (γ(2γ-1))
+    /// where w2 = (1-γ)·dt / (2-γ)  (Ascher, Ruuth, Wetton 1995)
     double stage2_weight(double dt) const {
-        return (1.0 - gamma) * (1.0 - gamma) * dt / (gamma * (2.0 * gamma - 1.0));
+        return (1.0 - gamma) * dt / (2.0 - gamma);
     }
 };
 

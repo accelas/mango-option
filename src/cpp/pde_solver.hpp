@@ -204,24 +204,20 @@ private:
 
     /// TR-BDF2 Stage 2: BDF2
     ///
-    /// u^{n+1} = a·u^{n+γ} + b·u^n + c·dt·L(u^{n+1})
-    ///
-    /// where:
-    /// a = (1 + (1-γ)/(2γ-1))
-    /// b = -(1-γ)²/(γ(2γ-1))
-    /// c = (1-γ)/(2γ-1)
-    ///
-    /// Rearranging: u^{n+1} - c·dt·L(u^{n+1}) = a·u^{n+γ} + b·u^n
+    /// Standard TR-BDF2 formulation (Ascher, Ruuth, Wetton 1995):
+    /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via fixed-point iteration
     bool solve_stage2(double t_stage, double t_next, double dt) {
         const double gamma = config_.gamma;
+        const double one_minus_gamma = 1.0 - gamma;
+        const double two_minus_gamma = 2.0 - gamma;
+        const double denom = gamma * two_minus_gamma;
 
-        // Correct BDF2 coefficients (Bank et al., 1985)
-        // u^{n+1} - w2·L(u^{n+1}) = alpha·u^{n+γ} + beta·u^n
-        const double alpha = 1.0 / gamma;  // Correct BDF2 coefficient for u^{n+γ}
-        const double beta = -(1.0 - gamma) * (1.0 - gamma) / (gamma * (2.0 * gamma - 1.0));
-        const double w2 = config_.stage2_weight(dt);  // Now returns correct (1-γ)²·dt/(γ(2γ-1))
+        // Correct BDF2 coefficients (Ascher, Ruuth, Wetton 1995)
+        const double alpha = 1.0 / denom;  // Coefficient for u^{n+γ}
+        const double beta = -(one_minus_gamma * one_minus_gamma) / denom;  // Coefficient for u^n
+        const double w2 = config_.stage2_weight(dt);  // (1-γ)·dt/(2-γ)
 
         // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
         std::vector<double> rhs(n_);
