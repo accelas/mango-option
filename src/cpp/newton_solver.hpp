@@ -15,7 +15,7 @@ namespace mango {
 
 /// Newton-Raphson solver for implicit PDE stages
 ///
-/// Solves nonlinear system: F(u) = rhs - u + coeff_dt·L(u) = 0
+/// Solves nonlinear system: F(u) = u - rhs - coeff_dt·L(u) = 0
 /// where L is the spatial operator.
 ///
 /// **Algorithm:**
@@ -52,7 +52,7 @@ public:
     /// Solve implicit stage equation
     ///
     /// Solves: u = rhs + coeff_dt·L(u)
-    /// Equivalently: F(u) = rhs - u + coeff_dt·L(u) = 0
+    /// Equivalently: F(u) = u - rhs - coeff_dt·L(u) = 0
     ///
     /// @param t Time at which to evaluate operators
     /// @param coeff_dt TR-BDF2 weight (stage1_weight or stage2_weight)
