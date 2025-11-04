@@ -29,6 +29,28 @@ cc_test(
 )
 
 cc_test(
+    name = "workspace_test",
+    srcs = ["workspace_test.cc"],
+    deps = [
+        "//src/cpp:workspace",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "spatial_operators_test",
+    srcs = ["spatial_operators_test.cc"],
+    deps = [
+        "//src/cpp:spatial_operators",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "pde_solver_test",
     srcs = ["pde_solver_test.cc"],
     copts = ["-std=c++17", "-Wall", "-Wextra"],
