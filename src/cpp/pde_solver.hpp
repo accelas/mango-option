@@ -339,6 +339,83 @@ private:
             // Robin: Use PDE residual
         }
     }
+
+    /// Build Jacobian at boundaries (compile-time dispatch)
+    void build_jacobian_boundaries(double t, double coeff_dt,
+                                    std::span<const double> u, double eps) {
+        // Left boundary - compile-time dispatch
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
+            // Dirichlet: Identity row J[0,0] = 1, J[0,1] = 0
+            jacobian_diag_[0] = 1.0;
+            jacobian_upper_[0] = 0.0;
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::neumann_tag>) {
+            // Neumann: Compute Jacobian for PDE at boundary
+            // Perturb u[0] and evaluate effect on L[0]
+            u_perturb_[0] = u[0] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dL0_du0 = (Lu_perturb_[0] - Lu_[0]) / eps;
+            jacobian_diag_[0] = 1.0 - coeff_dt * dL0_du0;
+            u_perturb_[0] = u[0];  // Restore
+
+            // Perturb u[1] (affects L[0] via stencil)
+            u_perturb_[1] = u[1] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dL0_du1 = (Lu_perturb_[0] - Lu_[0]) / eps;
+            jacobian_upper_[0] = -coeff_dt * dL0_du1;
+            u_perturb_[1] = u[1];  // Restore
+        } else {
+            // Robin: Similar to Neumann (use PDE discretization)
+            // Simplified: treat as Neumann for now
+            u_perturb_[0] = u[0] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dL0_du0 = (Lu_perturb_[0] - Lu_[0]) / eps;
+            jacobian_diag_[0] = 1.0 - coeff_dt * dL0_du0;
+            u_perturb_[0] = u[0];
+
+            u_perturb_[1] = u[1] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dL0_du1 = (Lu_perturb_[0] - Lu_[0]) / eps;
+            jacobian_upper_[0] = -coeff_dt * dL0_du1;
+            u_perturb_[1] = u[1];
+        }
+
+        // Right boundary - compile-time dispatch
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::dirichlet_tag>) {
+            // Dirichlet: Identity row
+            jacobian_diag_[n_ - 1] = 1.0;
+            jacobian_lower_[n_ - 2] = 0.0;
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::neumann_tag>) {
+            // Neumann: FD computation for right boundary
+            size_t i = n_ - 1;
+
+            u_perturb_[i] = u[i] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_dui = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
+            u_perturb_[i] = u[i];
+
+            u_perturb_[i-1] = u[i-1] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_duim1 = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_lower_[i-1] = -coeff_dt * dLi_duim1;
+            u_perturb_[i-1] = u[i-1];
+        } else {
+            // Robin: Similar to Neumann
+            size_t i = n_ - 1;
+
+            u_perturb_[i] = u[i] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_dui = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
+            u_perturb_[i] = u[i];
+
+            u_perturb_[i-1] = u[i-1] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_}, std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_duim1 = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_lower_[i-1] = -coeff_dt * dLi_duim1;
+            u_perturb_[i-1] = u[i-1];
+        }
+    }
 };
 
 }  // namespace mango
