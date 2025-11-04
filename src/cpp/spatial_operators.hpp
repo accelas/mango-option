@@ -7,6 +7,56 @@
 namespace mango {
 
 /**
+ * LaplacianOperator: Simple diffusion operator for testing
+ *
+ * PDE: dV/dt = D * d2V/dx2
+ *
+ * This is a simplified operator for heat equation and basic PDE testing.
+ */
+class LaplacianOperator {
+public:
+    /**
+     * Create operator for simple diffusion
+     * @param D Diffusion coefficient
+     */
+    explicit LaplacianOperator(double D) : D_(D) {}
+
+    /**
+     * Apply spatial operator: Lu = D * d2u/dx2
+     * @param t Current time (unused for Laplacian)
+     * @param x Grid points
+     * @param u Solution values
+     * @param Lu Output: operator applied to u
+     * @param dx Pre-computed grid spacing (size n-1)
+     */
+    void operator()(double t, std::span<const double> x,
+                   std::span<const double> u, std::span<double> Lu,
+                   std::span<const double> dx) const {
+        const size_t n = x.size();
+
+        // Boundaries handled by boundary conditions
+        Lu[0] = Lu[n-1] = 0.0;
+
+        // Interior points: centered finite differences
+        for (size_t i = 1; i < n - 1; ++i) {
+            const double dx_left = dx[i-1];   // x[i] - x[i-1]
+            const double dx_right = dx[i];     // x[i+1] - x[i]
+            const double dx_center = 0.5 * (dx_left + dx_right);
+
+            // Second derivative: d2u/dx2
+            const double d2u = (u[i+1] - u[i]) / dx_right - (u[i] - u[i-1]) / dx_left;
+            const double d2u_dx2 = d2u / dx_center;
+
+            // Laplacian operator: L(u) = D * d2u/dx2
+            Lu[i] = D_ * d2u_dx2;
+        }
+    }
+
+private:
+    double D_;  // Diffusion coefficient
+};
+
+/**
  * EquityBlackScholesOperator: Black-Scholes PDE for equity options
  *
  * PDE: dV/dt = L(V) where

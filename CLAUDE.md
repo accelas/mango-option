@@ -258,6 +258,54 @@ All structures use explicit create/destroy patterns:
 - `pde_spline_create()` / `pde_spline_destroy()`
 - `pde_create_grid()` / `pde_free_grid()`
 
+## Unified Root-Finding API
+
+The library provides a unified configuration and result interface for all root-finding methods.
+
+### Configuration
+
+```cpp
+#include "src/cpp/root_finding.hpp"
+
+mango::RootFindingConfig config{
+    .max_iter = 100,
+    .tolerance = 1e-6,
+    .jacobian_fd_epsilon = 1e-7,  // Newton-specific
+    .brent_tol_abs = 1e-6          // Brent-specific
+};
+```
+
+### Newton-Raphson Solver
+
+Integrated into PDESolver for implicit time-stepping:
+
+```cpp
+mango::PDESolver solver(grid, time, trbdf2_config, root_config,
+                       left_bc, right_bc, spatial_op);
+
+solver.initialize(initial_condition);
+bool converged = solver.solve();  // Uses Newton for each stage
+```
+
+**Memory efficiency:**
+- NewtonWorkspace allocates 8n doubles (Jacobian, residual, delta, workspace)
+- Borrows 2n doubles from WorkspaceStorage (u_stage, rhs as scratch)
+- Total: 13n doubles for entire solver (vs. 15n before)
+
+**Design:**
+- Persistent solver instance (created once, reused)
+- Quasi-Newton: Jacobian built once per stage
+- Compile-time BC dispatch (Dirichlet, Neumann)
+- Zero allocation during solve() after construction
+
+### Workspace Management
+
+NewtonWorkspace implements hybrid allocation:
+- Owns: Jacobian matrices, residual, delta_u, u_old, tridiag_workspace
+- Borrows: Lu (read-only), u_perturb (from u_stage), Lu_perturb (from rhs)
+
+Safe borrowing: u_stage and rhs are unused during Newton iteration.
+
 ## USDT Tracing System
 
 **CRITICAL: Library code must NEVER use printf/fprintf for debug output.**

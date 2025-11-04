@@ -1,6 +1,7 @@
 #include "src/cpp/pde_solver.hpp"
 #include "src/cpp/spatial_operators.hpp"
 #include "src/cpp/boundary_conditions.hpp"
+#include "src/cpp/root_finding.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
@@ -23,6 +24,9 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
 
     // TR-BDF2 config
     mango::TRBDF2Config trbdf2;
+
+    // Root-finding config
+    mango::RootFindingConfig root_config;
 
     // Boundary conditions: u(0,t) = 0, u(1,t) = 0
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -56,7 +60,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     };
 
     // Create solver
-    mango::PDESolver solver(grid.span(), time, trbdf2, left_bc, right_bc, heat_op);
+    mango::PDESolver solver(grid.span(), time, trbdf2, root_config, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -92,7 +96,10 @@ TEST(PDESolverTest, NewtonConvergence) {
 
     // TR-BDF2 config
     mango::TRBDF2Config config;
-    config.max_iter = 20;  // Newton should converge well within this
+
+    // Root-finding config
+    mango::RootFindingConfig root_config;
+    root_config.max_iter = 20;  // Newton should converge well within this
 
     // Boundary conditions: u(0,t) = 0, u(1,t) = 0
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -126,7 +133,7 @@ TEST(PDESolverTest, NewtonConvergence) {
     };
 
     // Create solver
-    mango::PDESolver solver(grid.span(), time, config, left_bc, right_bc, heat_op);
+    mango::PDESolver solver(grid.span(), time, config, root_config, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -155,6 +162,7 @@ TEST(PDESolverTest, CacheBlockingCorrectness) {
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 200).generate();
     mango::TimeDomain time(0.0, 0.05, 0.001);
     mango::TRBDF2Config trbdf2;
+    mango::RootFindingConfig root_config;
 
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -182,7 +190,7 @@ TEST(PDESolverTest, CacheBlockingCorrectness) {
     };
 
     // Solve with default cache blocking (should use multiple blocks for n=200)
-    mango::PDESolver solver1(grid.span(), time, trbdf2, left_bc, right_bc, heat_op);
+    mango::PDESolver solver1(grid.span(), time, trbdf2, root_config, left_bc, right_bc, heat_op);
     solver1.initialize(ic);
     bool success1 = solver1.solve();
     EXPECT_TRUE(success1);
@@ -191,7 +199,7 @@ TEST(PDESolverTest, CacheBlockingCorrectness) {
     mango::TRBDF2Config trbdf2_single_block = trbdf2;
     trbdf2_single_block.cache_blocking_threshold = 10000;  // Force single block
 
-    mango::PDESolver solver2(grid.span(), time, trbdf2_single_block,
+    mango::PDESolver solver2(grid.span(), time, trbdf2_single_block, root_config,
                               left_bc, right_bc, heat_op);
     solver2.initialize(ic);
     bool success2 = solver2.solve();
@@ -204,4 +212,100 @@ TEST(PDESolverTest, CacheBlockingCorrectness) {
     for (size_t i = 0; i < grid.size(); ++i) {
         EXPECT_NEAR(sol1[i], sol2[i], 1e-12);  // Machine precision
     }
+}
+
+TEST(PDESolverTest, UsesNewtonSolverForStages) {
+    // Setup PDE solver with Newton integration
+    const size_t n = 101;
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+
+    mango::TimeDomain time{0.0, 0.1, 0.01};
+    mango::TRBDF2Config trbdf2_config;
+    mango::RootFindingConfig root_config{.max_iter = 20, .tolerance = 1e-6};
+
+    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
+
+    const double D = 1.0;
+    auto spatial_op = [D](double, std::span<const double> x,
+                          std::span<const double> u, std::span<double> Lu,
+                          std::span<const double> dx) {
+        const size_t n = x.size();
+        Lu[0] = Lu[n-1] = 0.0;
+        for (size_t i = 1; i < n - 1; ++i) {
+            double dx_left = dx[i-1];
+            double dx_right = dx[i];
+            double dx_avg = (dx_left + dx_right) / 2.0;
+            double d2u = (u[i+1] - u[i]) / dx_right - (u[i] - u[i-1]) / dx_left;
+            d2u /= dx_avg;
+            Lu[i] = D * d2u;
+        }
+    };
+
+    mango::PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+                           left_bc, right_bc, spatial_op);
+
+    // Initial condition: u(x, 0) = sin(πx)
+    const double pi = std::numbers::pi;
+    auto ic = [pi](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::sin(pi * x[i]);
+        }
+    };
+    solver.initialize(ic);
+
+    bool converged = solver.solve();
+
+    EXPECT_TRUE(converged);
+
+    // Verify solution decayed (heat equation with zero BCs)
+    auto solution = solver.solution();
+    for (size_t i = 1; i < n - 1; ++i) {
+        EXPECT_LT(std::abs(solution[i]), std::abs(std::sin(pi * grid.span()[i])));
+    }
+}
+
+TEST(PDESolverTest, NewtonConvergenceReported) {
+    // Test that Newton convergence failures propagate
+    const size_t n = 51;
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+
+    mango::TimeDomain time{0.0, 1.0, 0.5};  // Large dt
+    mango::TRBDF2Config trbdf2_config;
+    mango::RootFindingConfig root_config{.max_iter = 2, .tolerance = 1e-12};  // Hard to converge
+
+    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
+
+    const double D = 1.0;
+    auto spatial_op = [D](double, std::span<const double> x,
+                          std::span<const double> u, std::span<double> Lu,
+                          std::span<const double> dx) {
+        const size_t n = x.size();
+        Lu[0] = Lu[n-1] = 0.0;
+        for (size_t i = 1; i < n - 1; ++i) {
+            double dx_left = dx[i-1];
+            double dx_right = dx[i];
+            double dx_avg = (dx_left + dx_right) / 2.0;
+            double d2u = (u[i+1] - u[i]) / dx_right - (u[i] - u[i-1]) / dx_left;
+            d2u /= dx_avg;
+            Lu[i] = D * d2u;
+        }
+    };
+
+    mango::PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+                           left_bc, right_bc, spatial_op);
+
+    const double pi = std::numbers::pi;
+    auto ic = [pi](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::sin(pi * x[i]);
+        }
+    };
+    solver.initialize(ic);
+
+    bool converged = solver.solve();
+
+    // With harsh convergence requirements, should fail
+    EXPECT_FALSE(converged);
 }
