@@ -183,46 +183,23 @@ private:
     ///
     /// u^{n+γ} = u^n + (γ·dt/2) · [L(u^n) + L(u^{n+γ})]
     ///
-    /// Solved via fixed-point iteration:
-    /// u^{n+γ} = G(u^{n+γ}) where G(u) = u^n + (γ·dt/2) · [L(u^n) + L(u)]
+    /// Solved via Newton-Raphson iteration
     bool solve_stage1(double t_n, double t_stage, double dt) {
-        const double w1 = config_.stage1_weight(dt);
+        const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
-        // Compute L(u^n) → Lu_
+        // Compute L(u^n)
         spatial_op_(t_n, grid_, std::span{u_old_}, std::span{Lu_}, workspace_.dx());
 
-        // Fixed-point iteration: u^{n+γ} = u^n + w1 · [L(u^n) + L(u^{n+γ})]
-        auto iterate = [&](std::span<const double> u, std::span<double> G_u) {
-            // Compute L(u) → temp_
-            spatial_op_(t_stage, grid_, u, std::span{temp_}, workspace_.dx());
+        // RHS = u^n + w1·L(u^n)
+        for (size_t i = 0; i < n_; ++i) {
+            rhs_[i] = u_old_[i] + w1 * Lu_[i];
+        }
 
-            // G(u) = u^n + w1 · [L(u^n) + L(u)]
-            for (size_t i = 0; i < n_; ++i) {
-                G_u[i] = u_old_[i] + w1 * (Lu_[i] + temp_[i]);
-            }
-
-            // Apply boundary conditions to the iterate
-            apply_boundary_conditions(G_u, t_stage);
-        };
-
-        // Initial guess: u^{n+γ} = u^n
+        // Initial guess: u* = u^n
         std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
 
-        // Solve fixed-point problem
-        size_t iterations = 0;
-        bool converged = fixed_point_solve_vector(
-            std::span{u_current_},
-            iterate,
-            std::span{u_stage_},
-            config_.max_iter,
-            config_.tolerance,
-            config_.omega,
-            iterations
-        );
-
-        // Boundary conditions applied during iteration
-
-        return converged;
+        // Newton iteration
+        return newton_solve(t_stage, w1, std::span{u_current_}, std::span{rhs_});
     }
 
     /// TR-BDF2 Stage 2: BDF2
@@ -230,7 +207,7 @@ private:
     /// Standard TR-BDF2 formulation (Ascher, Ruuth, Wetton 1995):
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
-    /// Solved via fixed-point iteration
+    /// Solved via Newton-Raphson iteration
     bool solve_stage2(double t_stage, double t_next, double dt) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
@@ -243,43 +220,15 @@ private:
         const double w2 = config_.stage2_weight(dt);  // (1-γ)·dt/(2-γ)
 
         // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
-        std::vector<double> rhs(n_);
         for (size_t i = 0; i < n_; ++i) {
-            rhs[i] = alpha * u_current_[i] + beta * u_old_[i];
+            rhs_[i] = alpha * u_current_[i] + beta * u_old_[i];
         }
 
-        // Fixed-point iteration: u^{n+1} = rhs + w2·L(u^{n+1})
-        auto iterate = [&](std::span<const double> u, std::span<double> G_u) {
-            // Compute L(u) → temp_
-            spatial_op_(t_next, grid_, u, std::span{temp_}, workspace_.dx());
-
-            // G(u) = rhs + w2·L(u)
-            for (size_t i = 0; i < n_; ++i) {
-                G_u[i] = rhs[i] + w2 * temp_[i];
-            }
-
-            // Apply boundary conditions to the iterate
-            apply_boundary_conditions(G_u, t_next);
-        };
-
-        // Initial guess: u^{n+1} = u^{n+γ} (already in u_current_)
+        // Initial guess: u^{n+1} = u* (already in u_current_)
         // (No need to copy, u_current_ already has u^{n+γ})
 
-        // Solve fixed-point problem
-        size_t iterations = 0;
-        bool converged = fixed_point_solve_vector(
-            std::span{u_current_},
-            iterate,
-            std::span{u_stage_},
-            config_.max_iter,
-            config_.tolerance,
-            config_.omega,
-            iterations
-        );
-
-        // Boundary conditions applied during iteration
-
-        return converged;
+        // Newton iteration
+        return newton_solve(t_next, w2, std::span{u_current_}, std::span{rhs_});
     }
 
     /// Compute residual: r = rhs - u + coeff_dt·L(u)
