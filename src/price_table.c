@@ -554,31 +554,16 @@ int price_table_precompute(OptionPriceTable *table,
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
     size_t completed = 0;
 
-    // Build moneyness grid for PDE solver
-    // Convert table's (possibly transformed) grid to raw moneyness values
-    double *m_grid_raw = malloc(table->n_moneyness * sizeof(double));
-    if (!m_grid_raw) {
+    // Generate FDM solver grid (uses AmericanOptionGrid resolution)
+    // This creates a fine grid (e.g., 51-141 points) for accurate PDE solution
+    size_t n_fdm;
+    double *fdm_grid = american_option_create_grid(grid, &n_fdm);
+    if (!fdm_grid) {
         return -1;
     }
 
-    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
-        double m_grid = table->moneyness_grid[i_m];
-        switch (table->coord_system) {
-            case COORD_RAW:
-                m_grid_raw[i_m] = m_grid;
-                break;
-            case COORD_LOG_SQRT:
-            case COORD_LOG_VARIANCE:
-                m_grid_raw[i_m] = exp(m_grid);  // Grid stores log(m), convert to m
-                break;
-            default:
-                m_grid_raw[i_m] = m_grid;  // Fallback to raw
-                break;
-        }
-    }
-
     // Process each (tau, sigma, r) combination (4D tables only)
-    // Each PDE solve will populate ALL moneyness values at once
+    // Each PDE solve uses the fine FDM grid, then we interpolate to table's points
     for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
         double tau_grid = table->maturity_grid[i_tau];
 
@@ -622,12 +607,12 @@ int price_table_precompute(OptionPriceTable *table,
                     .dividend_amounts = NULL
                 };
 
-                // Solve PDE once for this (tau, sigma, r) using full moneyness grid
+                // Solve PDE once using fine FDM grid for accuracy
                 AmericanOptionResult result = american_option_solve(
-                    &option, m_grid_raw, table->n_moneyness, grid->dt, n_steps);
+                    &option, fdm_grid, n_fdm, grid->dt, n_steps);
 
                 if (result.status != 0 || !result.solver) {
-                    free(m_grid_raw);
+                    free(fdm_grid);
                     if (result.solver) {
                         american_option_free_result(&result);
                     }
@@ -635,21 +620,32 @@ int price_table_precompute(OptionPriceTable *table,
                     return -1;
                 }
 
-                // Extract ALL moneyness prices from this single solve
-                const double *solution = pde_solver_get_solution(result.solver);
-                if (!solution) {
-                    free(m_grid_raw);
-                    american_option_free_result(&result);
-                    MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, -1, completed);
-                    return -1;
-                }
-
-                // Store prices for all moneyness points (4D table only, i_q = 0)
+                // Interpolate from FDM solution to each table moneyness point
                 for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                    // Get table's moneyness value (transform if needed)
+                    double m_grid = table->moneyness_grid[i_m];
+                    double m_raw;
+                    switch (table->coord_system) {
+                        case COORD_RAW:
+                            m_raw = m_grid;
+                            break;
+                        case COORD_LOG_SQRT:
+                        case COORD_LOG_VARIANCE:
+                            m_raw = exp(m_grid);  // Grid stores log(m), convert to m
+                            break;
+                        default:
+                            m_raw = m_grid;
+                            break;
+                    }
+
+                    double spot_price = m_raw * K_ref;
+                    double price = american_option_get_value_at_spot(
+                        result.solver, spot_price, K_ref);
+
                     size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
                                + i_sigma * table->stride_sigma + i_r * table->stride_r;
 
-                    table->prices[idx] = solution[i_m];
+                    table->prices[idx] = price;
                 }
 
                 // Free the solver
@@ -667,7 +663,7 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
-    free(m_grid_raw);
+    free(fdm_grid);
 
     // Second pass: Compute vega via finite differences
     // Restructured for SIMD vectorization: handle boundary cases separately from interior points
