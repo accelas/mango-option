@@ -143,3 +143,48 @@ TEST(RobinBCTest, MixedLeft) {
     // Expected: (10 + 4/0.5) / (2 + 1/0.5) = (10 + 8) / (2 + 2) = 18/4 = 4.5
     EXPECT_DOUBLE_EQ(u, 4.5);
 }
+
+TEST(RobinBCTest, PureNeumannRight) {
+    // Robin with a=0, b=1 at right boundary should reduce to Neumann
+    // Formula: u = (g + b*u_interior/dx) / (a + b/dx)
+    // With a=0, b=1: u = (g + u_interior/dx) / (1/dx) = g*dx + u_interior
+    auto bc = mango::RobinBC([](double, double) { return 2.0; }, 0.0, 1.0);
+
+    const double dx = 0.1;
+    const double u_interior = 5.0;
+    double u = 999.0;
+
+    bc.apply(u, 1.0, 0.0, dx, u_interior, 1.0, mango::bc::BoundarySide::Right);
+
+    // Should behave like Neumann: u = u_interior + g*dx
+    EXPECT_DOUBLE_EQ(u, 5.0 + 2.0 * 0.1);
+}
+
+TEST(RobinBCTest, PureDirichletRight) {
+    // Robin with a=1, b=0 should reduce to Dirichlet
+    // Formula: u = (g + b*u_interior/dx) / (a + b/dx)
+    // With a=1, b=0: u = g / 1 = g
+    auto bc = mango::RobinBC([](double, double) { return 7.0; }, 1.0, 0.0);
+
+    double u = 999.0;
+    bc.apply(u, 1.0, 0.0, 0.1, 5.0, 1.0, mango::bc::BoundarySide::Right);
+
+    EXPECT_DOUBLE_EQ(u, 7.0);  // Should be g
+}
+
+TEST(RobinBCTest, MixedRight) {
+    // Robin: 2*u + du/dx = 10 at right boundary
+    // Formula: u = (g + b*u_interior/dx) / (a + b/dx)
+    // With a=2, b=1, g=10, dx=0.5, u_interior=4:
+    // u = (10 + 1*4/0.5) / (2 + 1/0.5) = (10 + 8) / (2 + 2) = 18/4 = 4.5
+    auto bc = mango::RobinBC([](double, double) { return 10.0; }, 2.0, 1.0);
+
+    const double dx = 0.5;
+    const double u_interior = 4.0;
+    double u = 999.0;
+
+    bc.apply(u, 1.0, 0.0, dx, u_interior, 1.0, mango::bc::BoundarySide::Right);
+
+    // Expected: (10 + 4/0.5) / (2 + 1/0.5) = (10 + 8) / (2 + 2) = 18/4 = 4.5
+    EXPECT_DOUBLE_EQ(u, 4.5);
+}

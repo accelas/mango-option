@@ -122,9 +122,9 @@ NeumannBC(Func, double) -> NeumannBC<Func>;
 /**
  * RobinBC: Mixed boundary condition a*u + b*du/dx = g
  *
- * Orientation-dependent formulas (outward normal convention):
+ * Unified formula for both boundaries (algebraic derivation shows same formula):
  * - Left:  a*u[0] - b*(u[1]-u[0])/dx = g  →  u[0] = (g + b*u[1]/dx) / (a + b/dx)
- * - Right: a*u[n-1] + b*(u[n-1]-u[n-2])/dx = g  →  u[n-1] = (g - b*u[n-2]/dx) / (a - b/dx)
+ * - Right: a*u[n-1] + b*(u[n-1]-u[n-2])/dx = g  →  u[n-1] = (g + b*u[n-2]/dx) / (a + b/dx)
  *
  * Special cases:
  * - a=1, b=0: Reduces to Dirichlet (u = g)
@@ -148,12 +148,12 @@ public:
                [[maybe_unused]] double D, bc::BoundarySide side) const {
         // Solve for u using finite difference with outward normal convention
         // Left:  a*u[0] - b*(u[1] - u[0])/dx = g  →  u[0] = (g + b*u[1]/dx) / (a + b/dx)
-        // Right: a*u[n-1] + b*(u[n-1] - u[n-2])/dx = g  →  u[n-1] = (g - b*u[n-2]/dx) / (a - b/dx)
+        // Right: a*u[n-1] + b*(u[n-1] - u[n-2])/dx = g  →  u[n-1] = (g + b*u[n-2]/dx) / (a + b/dx)
         double g = rhs(t, x);
         if (side == bc::BoundarySide::Left) {
             u = (g + b_ * u_interior / dx) / (a_ + b_ / dx);
         } else {  // Right
-            u = (g - b_ * u_interior / dx) / (a_ - b_ / dx);
+            u = (g + b_ * u_interior / dx) / (a_ + b_ / dx);
         }
     }
 
