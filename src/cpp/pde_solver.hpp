@@ -464,6 +464,70 @@ private:
         // Boundary rows - call helper (uses compile-time dispatch)
         build_jacobian_boundaries(t, coeff_dt, u, eps);
     }
+
+    /// Newton-Raphson solver for implicit system
+    /// Quasi-Newton: Jacobian built once and reused
+    bool newton_solve(double t, double coeff_dt,
+                      std::span<double> u, std::span<const double> rhs) {
+        const double eps = config_.jacobian_fd_epsilon;
+
+        // Initialize boundary conditions before Jacobian computation
+        // (Required for valid finite difference perturbations)
+        apply_boundary_conditions(u, t);
+
+        // Quasi-Newton: Build Jacobian once and reuse for all iterations
+        // Trade-off: Slightly slower convergence vs. lower per-iteration cost
+        // For mildly nonlinear problems (typical in PDEs), this achieves
+        // superlinear convergence while avoiding repeated FD evaluations
+        build_jacobian(t, coeff_dt, u, eps);
+
+        // Save u_old for step delta convergence check
+        std::copy(u.begin(), u.end(), u_old_newton_.begin());
+
+        for (size_t iter = 0; iter < config_.max_iter; ++iter) {
+            // Evaluate L(u)
+            spatial_op_(t, grid_, u, std::span{Lu_}, workspace_.dx());
+
+            // Compute residual: r = rhs - u + coeff_dt·L(u)
+            compute_residual(u, coeff_dt, std::span{Lu_}, rhs, std::span{residual_});
+
+            // Apply boundary conditions to residual
+            apply_bc_to_residual(std::span{residual_}, t);
+
+            // Solve J·δu = r (NOTE: no negation! residual already has correct sign)
+            bool success = solve_tridiagonal(
+                std::span{jacobian_lower_}, std::span{jacobian_diag_},
+                std::span{jacobian_upper_}, std::span{residual_},
+                std::span{delta_u_}, std::span{tridiag_workspace_}
+            );
+
+            if (!success) {
+                return false;  // Jacobian singular
+            }
+
+            // Update: u ← u + δu
+            // Note: This is the critical Newton step. The residual computation
+            // returned r = rhs - u + coeff_dt·L(u), so solving J·δu = r and
+            // updating u ← u + δu moves toward the solution where r = 0.
+            for (size_t i = 0; i < n_; ++i) {
+                u[i] += delta_u_[i];
+            }
+
+            // Apply boundary conditions
+            apply_boundary_conditions(u, t);
+
+            // Check convergence: step-to-step delta (NOT residual!)
+            double error = compute_step_delta_error(u, std::span{u_old_newton_});
+            if (error < config_.tolerance) {
+                return true;  // Converged
+            }
+
+            // Save current u for next iteration's delta check
+            std::copy(u.begin(), u.end(), u_old_newton_.begin());
+        }
+
+        return false;  // Max iterations
+    }
 };
 
 }  // namespace mango
