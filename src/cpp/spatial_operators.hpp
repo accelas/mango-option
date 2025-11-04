@@ -31,20 +31,24 @@ public:
      * @param S Grid of stock prices
      * @param u Solution values
      * @param Lu Output: operator applied to u
+     * @param dx Pre-computed grid spacing (size n-1)
      */
     void apply(double t, std::span<const double> S,
-               std::span<const double> u, std::span<double> Lu) const {
+               std::span<const double> u, std::span<double> Lu,
+               std::span<const double> dx) const {
 
         const size_t n = S.size();
 
         // Boundaries are handled by boundary conditions
         Lu[0] = Lu[n-1] = 0.0;
 
-        // Interior points: centered finite differences
+        // Interior points: centered finite differences using pre-computed dx
         for (size_t i = 1; i < n - 1; ++i) {
             const double S_i = S[i];
-            const double dx_left = S[i] - S[i-1];
-            const double dx_right = S[i+1] - S[i];
+
+            // Use PRE-COMPUTED grid spacing
+            const double dx_left = dx[i-1];   // S[i] - S[i-1]
+            const double dx_right = dx[i];     // S[i+1] - S[i]
             const double dx_center = 0.5 * (dx_left + dx_right);
 
             // Second derivative: d2u/dS2 (centered difference on non-uniform grid)
@@ -89,18 +93,26 @@ public:
 
     /**
      * Apply spatial operator: Lu = L(u)
+     * @param t Current time
+     * @param S Grid of stock prices
+     * @param u Solution values
+     * @param Lu Output: operator applied to u
+     * @param dx Pre-computed grid spacing (size n-1)
      */
     void apply(double t, std::span<const double> S,
-               std::span<const double> u, std::span<double> Lu) const {
+               std::span<const double> u, std::span<double> Lu,
+               std::span<const double> dx) const {
 
         const size_t n = S.size();
         Lu[0] = Lu[n-1] = 0.0;
 
-        // Interior points
+        // Interior points: use pre-computed dx
         for (size_t i = 1; i < n - 1; ++i) {
             const double S_i = S[i];
-            const double dx_left = S[i] - S[i-1];
-            const double dx_right = S[i+1] - S[i];
+
+            // Use PRE-COMPUTED grid spacing
+            const double dx_left = dx[i-1];   // S[i] - S[i-1]
+            const double dx_right = dx[i];     // S[i+1] - S[i]
             const double dx_center = 0.5 * (dx_left + dx_right);
 
             // Second derivative

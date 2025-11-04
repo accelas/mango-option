@@ -1,4 +1,5 @@
 #include "src/cpp/spatial_operators.hpp"
+#include "src/cpp/workspace.hpp"
 #include "src/cpp/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
@@ -11,17 +12,18 @@ TEST(BlackScholesOperatorTest, EquityOperatorBasic) {
     // Create simple grid
     auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41);
     auto grid = spec.generate();
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
     // Test input: linear function u(S) = S (delta = 1, gamma = 0)
-    std::vector<double> u(41);
+    auto u = workspace.u_current();
     for (size_t i = 0; i < 41; ++i) {
         u[i] = grid[i];
     }
 
-    std::vector<double> Lu(41);
+    auto Lu = workspace.lu();
 
-    // Apply operator
-    op.apply(0.0, grid.span(), std::span<const double>(u), std::span<double>(Lu));
+    // Apply operator with pre-computed dx
+    op.apply(0.0, grid.span(), u, Lu, workspace.dx());
 
     // For u(S) = S, the Black-Scholes operator gives:
     // L(u) = r*S*du/dS - r*u = r*S*1 - r*S = 0
@@ -35,14 +37,15 @@ TEST(BlackScholesOperatorTest, EquityOperatorParabolic) {
 
     auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21);
     auto grid = spec.generate();
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
-    std::vector<double> u(21);
+    auto u = workspace.u_current();
     for (size_t i = 0; i < 21; ++i) {
         u[i] = grid[i] * grid[i];
     }
 
-    std::vector<double> Lu(21);
-    op.apply(0.0, grid.span(), std::span<const double>(u), std::span<double>(Lu));
+    auto Lu = workspace.lu();
+    op.apply(0.0, grid.span(), u, Lu, workspace.dx());
 
     // For u(S) = S^2:
     // du/dS = 2S, d2u/dS2 = 2
@@ -60,15 +63,16 @@ TEST(BlackScholesOperatorTest, IndexOperatorWithDividend) {
 
     auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41);
     auto grid = spec.generate();
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
     // Test with u(S) = S (delta = 1, gamma = 0)
-    std::vector<double> u(41);
+    auto u = workspace.u_current();
     for (size_t i = 0; i < 41; ++i) {
         u[i] = grid[i];
     }
 
-    std::vector<double> Lu(41);
-    op.apply(0.0, grid.span(), std::span<const double>(u), std::span<double>(Lu));
+    auto Lu = workspace.lu();
+    op.apply(0.0, grid.span(), u, Lu, workspace.dx());
 
     // For u(S) = S with dividend:
     // du/dS = 1, d2u/dS2 = 0
@@ -87,15 +91,19 @@ TEST(BlackScholesOperatorTest, IndexVsEquityDifference) {
 
     auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21);
     auto grid = spec.generate();
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
-    std::vector<double> u(21);
+    auto u = workspace.u_current();
     for (size_t i = 0; i < 21; ++i) {
         u[i] = grid[i];  // u(S) = S
     }
 
-    std::vector<double> Lu_equity(21), Lu_index(21);
-    equity_op.apply(0.0, grid.span(), std::span<const double>(u), std::span<double>(Lu_equity));
-    index_op.apply(0.0, grid.span(), std::span<const double>(u), std::span<double>(Lu_index));
+    auto Lu_equity = workspace.lu();
+    std::vector<double> Lu_index_buffer(21);
+    std::span<double> Lu_index(Lu_index_buffer);
+
+    equity_op.apply(0.0, grid.span(), u, Lu_equity, workspace.dx());
+    index_op.apply(0.0, grid.span(), u, Lu_index, workspace.dx());
 
     // For u(S) = S:
     // Equity: L(u) = r*S - r*S = 0
@@ -105,4 +113,31 @@ TEST(BlackScholesOperatorTest, IndexVsEquityDifference) {
     EXPECT_NEAR(Lu_equity[10], 0.0, 0.01);
     EXPECT_NEAR(Lu_index[10], -q * S, 0.01);
     EXPECT_NEAR(Lu_index[10] - Lu_equity[10], -q * S, 0.01);
+}
+
+TEST(BlackScholesOperatorTest, OperatorUsesPrecomputedDx) {
+    // Create non-uniform grid to ensure dx matters
+    auto spec = mango::GridSpec<>::sinh_spaced(50.0, 150.0, 21, 1.5);
+    auto grid = spec.generate();
+
+    // Create workspace with pre-computed dx
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+
+    // Initialize test function u(S) = S
+    auto u = workspace.u_current();
+    for (size_t i = 0; i < grid.size(); ++i) {
+        u[i] = grid[i];
+    }
+
+    // Apply index operator WITH dx parameter
+    mango::IndexBlackScholesOperator op(0.05, 0.2, 0.03);
+    auto Lu = workspace.lu();
+
+    // NEW SIGNATURE: pass pre-computed dx
+    op.apply(0.0, grid.span(), u, Lu, workspace.dx());
+
+    // For u(S) = S: L(u) = -q*S
+    double S_mid = grid[10];  // Middle of grid
+    double expected = -0.03 * S_mid;
+    EXPECT_NEAR(Lu[10], expected, 0.01);
 }

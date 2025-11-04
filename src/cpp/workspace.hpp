@@ -7,22 +7,31 @@
 
 namespace mango {
 
-/**
- * WorkspaceStorage: Cache-blocked storage for PDE solver arrays
- *
- * Manages solver workspace with:
- * - Contiguous buffer for all arrays (cache-friendly)
- * - Pre-computed dx array (avoids out-of-bounds in cache blocks)
- * - Cache-blocking configuration
- * - 64-byte alignment for SIMD operations
- */
+/// Workspace storage for PDE solver arrays
+///
+/// **CPU-only implementation** - SYCL GPU specialization deferred to v2.1.
+///
+/// Manages all solver state in a single contiguous buffer for cache efficiency.
+/// Arrays: u_current, u_next, u_stage, rhs, Lu (5n doubles total).
+///
+/// **Pre-computed dx array** - Grid spacing computed once during construction
+/// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
+///
+/// **Cache-blocking** - Adaptive strategy based on grid size:
+/// - n < 5000: Single block (no blocking overhead)
+/// - n ≥ 5000: L1-blocked (~1000 points per block, ~32 KB working set)
+///
+/// Future GPU version (v2.1) will use SYCL unified shared memory (USM)
+/// with explicit device allocation and host-device synchronization.
 class WorkspaceStorage {
 public:
-    /**
-     * Create workspace for grid
-     * @param n Number of grid points
-     * @param grid Grid coordinates (used to pre-compute dx)
-     */
+    /// Construct workspace for n grid points
+    ///
+    /// @param n Number of grid points
+    /// @param grid Grid coordinates for pre-computing dx
+    ///
+    /// Allocates 5n doubles (u_current, u_next, u_stage, rhs, Lu)
+    /// plus (n-1) doubles for pre-computed dx array.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid)
         : buffer_(5 * n)  // u_current, u_next, u_stage, rhs, Lu
         , cache_config_(CacheBlockConfig::adaptive(n))
@@ -125,8 +134,8 @@ public:
     }
 
 private:
-    std::vector<double> buffer_;     // Single allocation for all arrays
-    CacheBlockConfig cache_config_;  // Cache-blocking configuration
+    std::vector<double> buffer_;     // Single allocation for all arrays (CPU memory)
+    CacheBlockConfig cache_config_;  // Cache-blocking configuration (CPU-only)
     std::vector<double> dx_;         // Pre-computed grid spacing
 
     // Spans into buffer_

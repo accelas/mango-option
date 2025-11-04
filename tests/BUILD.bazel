@@ -9,6 +9,18 @@ cc_test(
 )
 
 cc_test(
+    name = "multigrid_test",
+    srcs = ["multigrid_test.cc"],
+    deps = [
+        "//src/cpp:multigrid",
+        "//src/cpp:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+)
+
+cc_test(
     name = "boundary_conditions_test",
     srcs = ["boundary_conditions_test.cc"],
     deps = [
@@ -44,6 +56,7 @@ cc_test(
     srcs = ["spatial_operators_test.cc"],
     deps = [
         "//src/cpp:spatial_operators",
+        "//src/cpp:workspace",
         "//src/cpp:grid",
         "@googletest//:gtest_main",
     ],
@@ -271,6 +284,20 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_test(
+    name = "integration_5d_price_table_test",
+    srcs = ["integration_5d_price_table_test.cc"],
+    deps = [
+        "//src/cpp:multigrid",
+        "//src/cpp:workspace",
+        "//src/cpp:spatial_operators",
+        "//src/cpp:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
 )
 
 # Test suites defined for convenience
