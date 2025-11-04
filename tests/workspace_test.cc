@@ -39,3 +39,40 @@ TEST(WorkspaceStorageTest, PreComputedDxArray) {
         EXPECT_DOUBLE_EQ(workspace.dx()[i], 2.0);
     }
 }
+
+TEST(WorkspaceStorageTest, GetBlockInterior) {
+    auto spec = mango::GridSpec<>::uniform(0.0, 10.0, 20);
+    auto grid = spec.generate();
+
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    workspace.cache_config() = mango::CacheBlockConfig{10, 2, 1};  // Force 2 blocks for testing
+
+    // Block 0: indices 0-9, interior 1-9 (skip boundary at 0)
+    auto [start, end] = workspace.get_block_interior_range(0);
+    EXPECT_EQ(start, 1);
+    EXPECT_EQ(end, 10);
+
+    // Block 1: indices 10-19, interior 10-18 (skip boundary at 19)
+    auto [start2, end2] = workspace.get_block_interior_range(1);
+    EXPECT_EQ(start2, 10);
+    EXPECT_EQ(end2, 19);
+}
+
+TEST(WorkspaceStorageTest, GetBlockWithHalo) {
+    auto spec = mango::GridSpec<>::uniform(0.0, 1.0, 20);
+    auto grid = spec.generate();
+
+    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    workspace.cache_config() = mango::CacheBlockConfig{10, 2, 1};  // Force 2 blocks for testing
+
+    // Initialize u_current with index values for testing
+    for (size_t i = 0; i < 20; ++i) {
+        workspace.u_current()[i] = static_cast<double>(i);
+    }
+
+    // Block with halo should include overlap points
+    auto block_info = workspace.get_block_with_halo(workspace.u_current(), 1);
+
+    EXPECT_GT(block_info.halo_left, 0);
+    EXPECT_EQ(block_info.data[block_info.halo_left], workspace.u_current()[block_info.interior_start]);
+}

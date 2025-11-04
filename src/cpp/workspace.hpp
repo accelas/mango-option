@@ -64,6 +64,65 @@ public:
 
     // Cache configuration
     const CacheBlockConfig& cache_config() const { return cache_config_; }
+    CacheBlockConfig& cache_config() { return cache_config_; }
+
+    /**
+     * BlockInfo: Information about a cache block with halo
+     */
+    struct BlockInfo {
+        std::span<const double> data;  // Data with halo
+        size_t interior_start;         // Global index where interior starts
+        size_t interior_count;         // Number of interior points
+        size_t halo_left;             // Number of left halo points
+        size_t halo_right;            // Number of right halo points
+    };
+
+    /**
+     * Get interior range for a cache block
+     * @param block_idx Block index
+     * @return [start, end) range of interior points (exclusive of boundaries)
+     */
+    std::pair<size_t, size_t> get_block_interior_range(size_t block_idx) const {
+        const size_t n = u_current_.size();
+        size_t start = block_idx * cache_config_.block_size;
+        size_t end = std::min(start + cache_config_.block_size, n);
+
+        // Skip global boundaries (0 and n-1)
+        size_t interior_start = std::max(start, size_t{1});
+        size_t interior_end = std::min(end, n - 1);
+
+        return {interior_start, interior_end};
+    }
+
+    /**
+     * Get block with halo for stencil operations
+     * @param array Array to get block from
+     * @param block_idx Block index
+     * @return BlockInfo with data span and halo information
+     */
+    BlockInfo get_block_with_halo(std::span<const double> array, size_t block_idx) const {
+        auto [interior_start, interior_end] = get_block_interior_range(block_idx);
+
+        if (interior_start >= interior_end) {
+            // Boundary-only block (shouldn't happen with proper sizing)
+            return {std::span<const double>{}, interior_start, 0, 0, 0};
+        }
+
+        const size_t n = array.size();
+        const size_t interior_count = interior_end - interior_start;
+
+        // Compute halo sizes (clamped to available points)
+        const size_t halo_left  = std::min(cache_config_.overlap, interior_start);
+        const size_t halo_right = std::min(cache_config_.overlap, n - interior_end);
+
+        // Build span with halos
+        auto data_with_halo = array.subspan(
+            interior_start - halo_left,
+            interior_count + halo_left + halo_right
+        );
+
+        return {data_with_halo, interior_start, interior_count, halo_left, halo_right};
+    }
 
 private:
     std::vector<double> buffer_;     // Single allocation for all arrays
