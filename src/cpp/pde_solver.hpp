@@ -311,6 +311,34 @@ private:
         const double epsilon = 1e-12;
         return (rms_norm > epsilon) ? rms_error / (rms_norm + epsilon) : rms_error;
     }
+
+    /// Apply boundary conditions to residual
+    /// Dirichlet: r = g(t) - u (constraint)
+    /// Neumann: keep PDE residual (already computed)
+    void apply_bc_to_residual(std::span<double> residual, double t) {
+        // Left boundary - compile-time dispatch on tag type
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
+            // Dirichlet: Constraint equation r[0] = g(t) - u[0]
+            // Sign matches C implementation (src/pde_solver.c:285)
+            double g = left_bc_.value(t, grid_[0]);
+            residual[0] = g - u_current_[0];
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::neumann_tag>) {
+            // Neumann: Use PDE residual (already computed, no modification)
+        } else {
+            // Robin: Use PDE residual (boundary handled via apply_boundary_conditions)
+        }
+
+        // Right boundary - compile-time dispatch on tag type
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::dirichlet_tag>) {
+            // Dirichlet: Constraint equation
+            double g = right_bc_.value(t, grid_[n_ - 1]);
+            residual[n_ - 1] = g - u_current_[n_ - 1];
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::neumann_tag>) {
+            // Neumann: Use PDE residual (already computed)
+        } else {
+            // Robin: Use PDE residual
+        }
+    }
 };
 
 }  // namespace mango
