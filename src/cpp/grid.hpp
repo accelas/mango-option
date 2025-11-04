@@ -9,11 +9,14 @@
 namespace mango {
 
 // Forward declarations
-template<typename T>
+template<typename T = double>
 class GridBuffer;
 
-template<typename T>
+template<typename T = double>
 class GridView;
+
+template<typename T = double>
+class GridSpec;
 
 /**
  * GridSpec: Immutable grid specification (how to generate a grid)
@@ -21,7 +24,7 @@ class GridView;
  * This is a value type that describes grid generation parameters.
  * It doesn't own data - call generate() to create a GridBuffer.
  */
-template<typename T = double>
+template<typename T>
 class GridSpec {
 public:
     enum class Type {
@@ -95,7 +98,7 @@ private:
  * This is a lightweight wrapper around std::span that provides
  * grid-specific operations. It doesn't own data and is cheap to copy.
  */
-template<typename T = double>
+template<typename T>
 class GridView {
 public:
     // Construct from span
