@@ -87,3 +87,18 @@ cc_library(
     copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "pde_solver",
+    hdrs = ["pde_solver.hpp"],
+    deps = [
+        ":grid",
+        ":workspace",
+        ":boundary_conditions",
+        ":time_domain",
+        ":trbdf2_config",
+        ":fixed_point_solver",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
