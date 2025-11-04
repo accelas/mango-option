@@ -540,24 +540,42 @@ int price_table_precompute(OptionPriceTable *table,
         }
     }
 
-    size_t batch_size = get_batch_size();
-
-    // Allocate batch arrays
-    OptionData *batch_options = malloc(batch_size * sizeof(OptionData));
-    AmericanOptionResult *batch_results = malloc(batch_size * sizeof(AmericanOptionResult));
-
-    if (!batch_options || !batch_results) {
-        free(batch_options);
-        free(batch_results);
-        return -1;
-    }
-
-    MANGO_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, batch_size, 0);
+    MANGO_TRACE_ALGO_START(MODULE_PRICE_TABLE, n_total, 0, 0);
 
     const double K_ref = 100.0;  // Reference strike for moneyness scaling
     size_t completed = 0;
 
-    // Process each maturity separately with adaptive time steps
+    // Build moneyness grid for PDE solver
+    // Convert table's (possibly transformed) grid to raw moneyness values
+    double *m_grid_raw = malloc(table->n_moneyness * sizeof(double));
+    if (!m_grid_raw) {
+        return -1;
+    }
+
+    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+        double m_grid = table->moneyness_grid[i_m];
+        switch (table->coord_system) {
+            case COORD_RAW:
+                m_grid_raw[i_m] = m_grid;
+                break;
+            case COORD_LOG_SQRT:
+            case COORD_LOG_VARIANCE:
+                m_grid_raw[i_m] = exp(m_grid);  // Grid stores log(m), convert to m
+                break;
+            default:
+                m_grid_raw[i_m] = m_grid;  // Fallback to raw
+                break;
+        }
+    }
+
+    // Number of PDE solves needed (one per combination of tau, sigma, r, q)
+    size_t n_solves = table->n_maturity * table->n_volatility * table->n_rate;
+    if (table->n_dividend > 0) {
+        n_solves *= table->n_dividend;
+    }
+
+    // Process each (tau, sigma, r, q) combination
+    // Each PDE solve will populate ALL moneyness values at once
     for (size_t i_tau = 0; i_tau < table->n_maturity; i_tau++) {
         double tau_grid = table->maturity_grid[i_tau];
 
@@ -579,122 +597,78 @@ int price_table_precompute(OptionPriceTable *table,
                 break;
         }
 
-        // Create adaptive grid for this maturity
-        AmericanOptionGrid adaptive_grid = *grid;  // Copy base grid
-        adaptive_grid.n_steps = (size_t)(tau_raw / grid->dt);  // Adaptive time steps
-        if (adaptive_grid.n_steps < 10) adaptive_grid.n_steps = 10;  // Minimum steps
+        // Calculate adaptive time steps for this maturity
+        size_t n_steps = (size_t)(tau_raw / grid->dt);
+        if (n_steps < 10) n_steps = 10;  // Minimum steps
 
-        // Calculate points for this maturity slice
-        size_t points_per_maturity = table->n_moneyness * table->n_volatility * table->n_rate;
-        if (table->n_dividend > 0) {
-            points_per_maturity *= table->n_dividend;
-        }
+        for (size_t i_sigma = 0; i_sigma < table->n_volatility; i_sigma++) {
+            double sigma = table->volatility_grid[i_sigma];
 
-        // Process this maturity slice in batches
-        for (size_t slice_start = 0; slice_start < points_per_maturity; slice_start += batch_size) {
-            size_t batch_count = min(batch_size, points_per_maturity - slice_start);
+            for (size_t i_r = 0; i_r < table->n_rate; i_r++) {
+                double r = table->rate_grid[i_r];
 
-            // Fill batch with points from this maturity slice
-            for (size_t i = 0; i < batch_count; i++) {
-                size_t slice_idx = slice_start + i;
+                size_t n_q_iter = (table->n_dividend > 0) ? table->n_dividend : 1;
+                for (size_t i_q = 0; i_q < n_q_iter; i_q++) {
+                    // Create option data (moneyness-independent)
+                    OptionData option = {
+                        .strike = K_ref,
+                        .volatility = sigma,
+                        .risk_free_rate = r,
+                        .time_to_maturity = tau_raw,
+                        .option_type = table->type,
+                        .n_dividends = 0,
+                        .dividend_times = NULL,
+                        .dividend_amounts = NULL
+                    };
 
-                // Decompose slice index into other dimensions
-                size_t i_m, i_sigma, i_r, i_q;
-                if (table->n_dividend > 0) {
-                    size_t per_dividend = table->n_moneyness * table->n_volatility * table->n_rate;
-                    i_q = slice_idx / per_dividend;
-                    slice_idx %= per_dividend;
-                } else {
-                    i_q = 0;
+                    // Solve PDE once for this (tau, sigma, r, q) using full moneyness grid
+                    AmericanOptionResult result = american_option_solve(
+                        &option, m_grid_raw, table->n_moneyness, grid->dt, n_steps);
+
+                    if (result.status != 0 || !result.solver) {
+                        free(m_grid_raw);
+                        if (result.solver) {
+                            american_option_free_result(&result);
+                        }
+                        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, result.status, completed);
+                        return -1;
+                    }
+
+                    // Extract ALL moneyness prices from this single solve
+                    const double *solution = pde_solver_get_solution(result.solver);
+                    if (!solution) {
+                        free(m_grid_raw);
+                        american_option_free_result(&result);
+                        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, -1, completed);
+                        return -1;
+                    }
+
+                    // Store prices for all moneyness points
+                    for (size_t i_m = 0; i_m < table->n_moneyness; i_m++) {
+                        size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
+                                   + i_sigma * table->stride_sigma + i_r * table->stride_r
+                                   + i_q * table->stride_q;
+
+                        table->prices[idx] = solution[i_m];
+                    }
+
+                    // Free the solver
+                    american_option_free_result(&result);
+
+                    completed += table->n_moneyness;
+
+                    // Progress tracking (every solve)
+                    if ((completed / table->n_moneyness) % 10 == 0 || completed >= n_total) {
+                        MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
+                                                   completed, n_total,
+                                                   (double)completed / (double)n_total);
+                    }
                 }
-
-                size_t per_rate = table->n_moneyness * table->n_volatility;
-                i_r = slice_idx / per_rate;
-                slice_idx %= per_rate;
-
-                size_t per_sigma = table->n_moneyness;
-                i_sigma = slice_idx / per_sigma;
-                i_m = slice_idx % per_sigma;
-
-                batch_options[i] = grid_point_to_option(table, i_m, i_tau,
-                                                         i_sigma, i_r, i_q);
-            }
-
-            // Solve batch with maturity-specific grid
-            int status = american_option_price_batch(batch_options, &adaptive_grid,
-                                                      batch_count, batch_results);
-            if (status != 0) {
-                free(batch_options);
-                free(batch_results);
-                MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, status, completed);
-                return -1;
-            }
-
-            // Store results in table and free solvers
-            for (size_t i = 0; i < batch_count; i++) {
-                size_t slice_idx = slice_start + i;
-
-                // Reconstruct global index
-                size_t i_m, i_sigma, i_r, i_q;
-                if (table->n_dividend > 0) {
-                    size_t per_dividend = table->n_moneyness * table->n_volatility * table->n_rate;
-                    i_q = slice_idx / per_dividend;
-                    slice_idx %= per_dividend;
-                } else {
-                    i_q = 0;
-                }
-
-                size_t per_rate = table->n_moneyness * table->n_volatility;
-                i_r = slice_idx / per_rate;
-                slice_idx %= per_rate;
-
-                size_t per_sigma = table->n_moneyness;
-                i_sigma = slice_idx / per_sigma;
-                i_m = slice_idx % per_sigma;
-
-                // Calculate global index
-                size_t idx = i_m * table->stride_m + i_tau * table->stride_tau
-                           + i_sigma * table->stride_sigma + i_r * table->stride_r
-                           + i_q * table->stride_q;
-
-                // Extract moneyness for this grid point
-                // Reverse transform if using coordinate transformations
-                double m_grid = table->moneyness_grid[i_m];
-                double m_raw;
-                switch (table->coord_system) {
-                    case COORD_RAW:
-                        m_raw = m_grid;
-                        break;
-                    case COORD_LOG_SQRT:
-                    case COORD_LOG_VARIANCE:
-                        m_raw = exp(m_grid);  // Grid stores log(m), convert to m
-                        break;
-                    default:
-                        m_raw = m_grid;  // Fallback to raw
-                        break;
-                }
-                double spot_price = m_raw * K_ref;
-
-                // Extract price at the spot price
-                double price = american_option_get_value_at_spot(
-                    batch_results[i].solver, spot_price, K_ref);
-
-                table->prices[idx] = price;
-
-                // Free the solver
-                pde_solver_destroy(batch_results[i].solver);
-            }
-
-            completed += batch_count;
-
-            // Progress tracking (every 10 batches)
-            if ((completed / batch_size) % 10 == 0) {
-                MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE,
-                                           completed, n_total,
-                                           (double)completed / (double)n_total);
             }
         }
     }
+
+    free(m_grid_raw);
 
     // Second pass: Compute vega via finite differences
     // Restructured for SIMD vectorization: handle boundary cases separately from interior points
@@ -1107,9 +1081,6 @@ int price_table_precompute(OptionPriceTable *table,
     }
 
     MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE, n_total, 1.0);
-
-    free(batch_options);
-    free(batch_results);
 
     // Mark table with generation timestamp
     table->generation_time = time(NULL);
