@@ -46,3 +46,28 @@ TEST(MultiGridBufferTest, AccessAxisData) {
         EXPECT_NEAR(spacing, expected_spacing, 1e-10);
     }
 }
+
+TEST(MultiGridBufferTest, FiveDimensionalPriceTable) {
+    mango::MultiGridBuffer mgrid;
+
+    // 5D price table: moneyness × maturity × volatility × rate × dividend
+    mgrid.add_axis(mango::GridAxis::Moneyness,  mango::GridSpec<>::log_spaced(0.7, 1.3, 50));
+    mgrid.add_axis(mango::GridAxis::Maturity,   mango::GridSpec<>::uniform(0.027, 2.0, 30));
+    mgrid.add_axis(mango::GridAxis::Volatility, mango::GridSpec<>::uniform(0.10, 0.80, 20));
+    mgrid.add_axis(mango::GridAxis::Rate,       mango::GridSpec<>::uniform(0.0, 0.10, 10));
+    mgrid.add_axis(mango::GridAxis::Dividend,   mango::GridSpec<>::uniform(0.0, 0.05, 5));
+
+    // Verify all axes present
+    EXPECT_EQ(mgrid.n_axes(), 5);
+    EXPECT_TRUE(mgrid.has_axis(mango::GridAxis::Dividend));
+
+    // Verify total points
+    size_t expected_total = 50 * 30 * 20 * 10 * 5;  // 1,500,000 points
+    EXPECT_EQ(mgrid.total_points(), expected_total);
+
+    // Verify dividend axis spacing
+    auto div_view = mgrid.axis_view(mango::GridAxis::Dividend);
+    EXPECT_EQ(div_view.size(), 5);
+    EXPECT_DOUBLE_EQ(div_view[0], 0.0);
+    EXPECT_DOUBLE_EQ(div_view[4], 0.05);
+}
