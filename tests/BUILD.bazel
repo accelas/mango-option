@@ -311,6 +311,17 @@ cc_test(
     copts = ["-std=c++20", "-Wall", "-Wextra"],
 )
 
+cc_test(
+    name = "trbdf2_config_test",
+    srcs = ["trbdf2_config_test.cc"],
+    deps = [
+        "//src/cpp:trbdf2_config",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
