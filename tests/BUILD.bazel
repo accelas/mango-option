@@ -9,6 +9,18 @@ cc_test(
 )
 
 cc_test(
+    name = "multigrid_test",
+    srcs = ["multigrid_test.cc"],
+    deps = [
+        "//src/cpp:multigrid",
+        "//src/cpp:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+)
+
+cc_test(
     name = "boundary_conditions_test",
     srcs = ["boundary_conditions_test.cc"],
     deps = [
