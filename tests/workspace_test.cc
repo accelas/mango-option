@@ -76,3 +76,21 @@ TEST(WorkspaceStorageTest, GetBlockWithHalo) {
     EXPECT_GT(block_info.halo_left, 0);
     EXPECT_EQ(block_info.data[block_info.halo_left], workspace.u_current()[block_info.interior_start]);
 }
+
+TEST(WorkspaceStorageTest, ThresholdControlsBlocking) {
+    // Grid below threshold: single block
+    auto spec_small = mango::GridSpec<>::uniform(0.0, 1.0, 100);
+    auto small_grid = spec_small.generate();
+
+    mango::WorkspaceStorage ws_small(small_grid.size(), small_grid.span(), 5000);
+    EXPECT_EQ(ws_small.cache_config().n_blocks, 1);
+    EXPECT_EQ(ws_small.cache_config().overlap, 1);
+
+    // Grid above threshold: multiple blocks
+    auto spec_large = mango::GridSpec<>::uniform(0.0, 1.0, 5001);
+    auto large_grid = spec_large.generate();
+
+    mango::WorkspaceStorage ws_large(large_grid.size(), large_grid.span(), 5000);
+    EXPECT_GT(ws_large.cache_config().n_blocks, 1);
+    EXPECT_EQ(ws_large.cache_config().overlap, 1);
+}
