@@ -107,6 +107,7 @@ cc_test(
         "//src/cpp:pde_solver",
         "//src/cpp:spatial_operators",
         "//src/cpp:boundary_conditions",
+        "//src/cpp:root_finding",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
