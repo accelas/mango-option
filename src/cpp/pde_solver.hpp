@@ -343,6 +343,11 @@ private:
     /// Build Jacobian at boundaries (compile-time dispatch)
     void build_jacobian_boundaries(double t, double coeff_dt,
                                     std::span<const double> u, double eps) {
+        // Initialize u_perturb_ and compute baseline L(u)
+        // CRITICAL: Lu_ must be computed before finite differences
+        std::copy(u.begin(), u.end(), u_perturb_.begin());
+        spatial_op_(t, grid_, u, std::span{Lu_}, workspace_.dx());
+
         // Left boundary - compile-time dispatch
         if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
             // Dirichlet: Identity row J[0,0] = 1, J[0,1] = 0
