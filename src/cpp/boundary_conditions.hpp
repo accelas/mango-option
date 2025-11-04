@@ -71,4 +71,52 @@ private:
 template<typename Func>
 DirichletBC(Func) -> DirichletBC<Func>;
 
+/**
+ * NeumannBC: Specifies boundary gradient ∂u/∂x = g(x,t)
+ *
+ * Uses ghost-point method with orientation-aware formulas:
+ * - Left boundary:  (u[1] - u[0]) / dx = g  →  u[0] = u[1] - g·dx
+ * - Right boundary: (u[n-1] - u[n-2]) / dx = g  →  u[n-1] = u[n-2] + g·dx
+ *
+ * Requires diffusion coefficient D for proper ghost-point construction.
+ */
+template<typename Func>
+class NeumannBC {
+public:
+    using tag = bc::neumann_tag;
+
+    NeumannBC(Func f, double diffusion_coeff)
+        : func_(std::move(f)), diffusion_coeff_(diffusion_coeff) {}
+
+    // Natural interface - returns gradient
+    double gradient(double t, double x) const {
+        return func_(t, x);
+    }
+
+    double diffusion_coeff() const { return diffusion_coeff_; }
+
+    // Solver interface - UNIFORM signature for all BC types
+    // Neumann uses gradient, dx, and side to enforce du/dx = g via ghost point method
+    void apply(double& u, double x, double t, double dx, double u_interior,
+               [[maybe_unused]] double D, bc::BoundarySide side) const {
+        // Ghost point method: enforce gradient by setting boundary value
+        // Left boundary:  (u[1] - u[0]) / dx = g  →  u[0] = u[1] - g·dx
+        // Right boundary: (u[n-1] - u[n-2]) / dx = g  →  u[n-1] = u[n-2] + g·dx
+        double g = gradient(t, x);
+        if (side == bc::BoundarySide::Left) {
+            u = u_interior - g * dx;  // Forward difference
+        } else {  // Right
+            u = u_interior + g * dx;  // Backward difference
+        }
+    }
+
+private:
+    Func func_;
+    double diffusion_coeff_;
+};
+
+// Deduction guide
+template<typename Func>
+NeumannBC(Func, double) -> NeumannBC<Func>;
+
 } // namespace mango
