@@ -32,7 +32,9 @@ static void stiff_initial(const double *x, size_t n_points,
     }
 }
 
-static double zero_bc([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double zero_bc([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                      [[maybe_unused]] BoundaryType bc_type,
+                      [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
@@ -209,7 +211,9 @@ static void conservation_initial(const double *x, size_t n_points,
     }
 }
 
-static double neumann_zero([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double neumann_zero([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                           [[maybe_unused]] BoundaryType bc_type,
+                           [[maybe_unused]] void *user_data) {
     return 0.0;  // Zero flux
 }
 

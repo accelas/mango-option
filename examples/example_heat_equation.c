@@ -24,12 +24,16 @@ static void heat_initial_condition(const double *x, size_t n_points,
 }
 
 // Left boundary: u(0, t) = 0
-static double heat_left_boundary([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double heat_left_boundary([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                                 [[maybe_unused]] BoundaryType bc_type,
+                                 [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 
 // Right boundary: u(1, t) = 0
-static double heat_right_boundary([[maybe_unused]] double t, [[maybe_unused]] void *user_data) {
+static double heat_right_boundary([[maybe_unused]] double t, [[maybe_unused]] double x_boundary,
+                                  [[maybe_unused]] BoundaryType bc_type,
+                                  [[maybe_unused]] void *user_data) {
     return 0.0;
 }
 

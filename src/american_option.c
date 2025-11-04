@@ -5,14 +5,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Extended user data structure that includes grid boundaries
-// This is needed for boundary conditions that depend on spatial location
+// No extended user data needed anymore - boundary callbacks receive x_boundary and bc_type
+// directly from the PDE solver
+
+// Dividend event: pairs time with amount for proper sorting
 typedef struct {
-    const OptionData *option_data;
-    double x_min;
-    double x_max;
-    bool use_neumann_bc;  // True if using Neumann BCs (return gradients), false for Dirichlet
-} ExtendedOptionData;
+    double time;    // Time in solver coordinates (time to maturity)
+    double amount;  // Dividend amount
+} DividendEvent;
+
+// Comparison function for qsort (sort by time ascending)
+static int compare_dividend_events(const void *a, const void *b) {
+    const DividendEvent *ea = (const DividendEvent *)a;
+    const DividendEvent *eb = (const DividendEvent *)b;
+    if (ea->time < eb->time) return -1;
+    if (ea->time > eb->time) return 1;
+    return 0;
+}
+
+// Internal data passed to callbacks
+// Needed to provide sorted dividend information to temporal event callback
+typedef struct {
+    const OptionData *option_data;     // Original option parameters
+    DividendEvent *sorted_dividends;   // Sorted dividend events (nullptr if no dividends)
+    bool is_uniform_grid;              // True if grid has uniform spacing
+} SolverCallbackData;
 
 // American Option Pricing using Black-Scholes PDE
 //
@@ -52,63 +69,57 @@ static inline void compute_intrinsic_value(const double *x, size_t n_points,
 // At maturity, American = European = intrinsic value
 void american_option_terminal_condition(const double *x, size_t n_points,
                                        double *V, void *user_data) {
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
-    const OptionData *data = ext_data->option_data;
+    const SolverCallbackData *callback_data = (const SolverCallbackData *)user_data;
+    const OptionData *data = callback_data->option_data;
     compute_intrinsic_value(x, n_points, V, data->strike, data->option_type);
 }
 
-// Helper: Compute Dirichlet boundary condition value for American options
-// Returns the theoretical option value at boundary based on Black-Scholes
-typedef enum { BOUNDARY_LEFT, BOUNDARY_RIGHT } BoundarySide;
-
-static inline double compute_dirichlet_bc(const OptionData *data, double tau,
-                                         double x_boundary, BoundarySide side) {
-    const double K = data->strike;
-    const double r = data->risk_free_rate;
-    const double discount = exp(-r * tau);
-
-    if (side == BOUNDARY_LEFT) {
-        // Left boundary: S → 0 (x → -∞)
-        // Call: worthless when S=0
-        // Put: worth discounted strike when S=0 (certain to exercise)
-        return (data->option_type == OPTION_CALL) ? 0.0 : K * discount;
-    } else {
-        // Right boundary: S → ∞ (x → +∞)
-        // Call: worth intrinsic value S_max - K·e^(-rτ) (European value)
-        // Put: worthless when S is very large
-        if (data->option_type == OPTION_CALL) {
-            const double S_max = K * exp(x_boundary);
-            return S_max - K * discount;
-        } else {
-            return 0.0;
-        }
-    }
-}
-
 // Left boundary condition (S → 0, x → -∞)
-double american_option_left_boundary(double t, void *user_data) {
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+double american_option_left_boundary(double t, double x_boundary, BoundaryType bc_type,
+                                     void *user_data) {
+    const SolverCallbackData *callback_data = (const SolverCallbackData *)user_data;
+    const OptionData *data = callback_data->option_data;
 
     // Neumann BC: zero gradient
-    if (ext_data->use_neumann_bc) {
+    if (bc_type == BC_NEUMANN) {
         return 0.0;
     }
 
     // Dirichlet BC: theoretical option value at S=0
-    return compute_dirichlet_bc(ext_data->option_data, t, ext_data->x_min, BOUNDARY_LEFT);
+    // Left boundary: S → 0 (x → -∞)
+    // Call: worthless when S=0
+    // Put: worth discounted strike when S=0 (certain to exercise)
+    const double tau = t;  // Time to maturity
+    const double discount = exp(-data->risk_free_rate * tau);
+    return (data->option_type == OPTION_CALL) ? 0.0 : data->strike * discount;
+
+    (void)x_boundary;  // Unused for left boundary
 }
 
 // Right boundary condition (S → ∞, x → ∞)
-double american_option_right_boundary(double t, void *user_data) {
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
+double american_option_right_boundary(double t, double x_boundary, BoundaryType bc_type,
+                                      void *user_data) {
+    const SolverCallbackData *callback_data = (const SolverCallbackData *)user_data;
+    const OptionData *data = callback_data->option_data;
 
     // Neumann BC: zero gradient
-    if (ext_data->use_neumann_bc) {
+    if (bc_type == BC_NEUMANN) {
         return 0.0;
     }
 
     // Dirichlet BC: theoretical option value at S=S_max
-    return compute_dirichlet_bc(ext_data->option_data, t, ext_data->x_max, BOUNDARY_RIGHT);
+    // Right boundary: S → ∞ (x → +∞)
+    // Call: worth intrinsic value S_max - K·e^(-rτ) (European value)
+    // Put: worthless when S is very large
+    const double tau = t;  // Time to maturity
+    const double discount = exp(-data->risk_free_rate * tau);
+
+    if (data->option_type == OPTION_CALL) {
+        const double S_max = data->strike * exp(x_boundary);
+        return S_max - data->strike * discount;
+    } else {
+        return 0.0;
+    }
 }
 
 // Black-Scholes spatial operator in log-price coordinates (vectorized)
@@ -118,8 +129,8 @@ double american_option_right_boundary(double t, void *user_data) {
 void american_option_spatial_operator(const double * restrict x, [[maybe_unused]] double t,
                                      const double * restrict V, size_t n_points,
                                      double * restrict LV, void *user_data) {
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
-    const OptionData *data = ext_data->option_data;
+    const SolverCallbackData *callback_data = (const SolverCallbackData *)user_data;
+    const OptionData *data = callback_data->option_data;
     const double sigma = data->volatility;
     const double r = data->risk_free_rate;
 
@@ -132,18 +143,12 @@ void american_option_spatial_operator(const double * restrict x, [[maybe_unused]
     LV[0] = 0.0;
     LV[n_points - 1] = 0.0;
 
-    // Check if grid is uniform (common case from american_option_create_grid)
-    // A grid is uniform if spacing is constant within numerical tolerance
-    const double dx_first = x[1] - x[0];
-    const double dx_last = x[n_points - 1] - x[n_points - 2];
-    const double rel_diff = fabs(dx_last - dx_first) / dx_first;
-    const bool is_uniform = (rel_diff < 1e-10);
-
-    if (is_uniform) {
+    // Use uniform grid flag from callback data (set during solver initialization)
+    if (callback_data->is_uniform_grid) {
         // FAST PATH: Uniform grid - fully vectorizable with simple stencil
         // ∂V/∂x ≈ (V[i+1] - V[i-1]) / (2·dx)
         // ∂²V/∂x² ≈ (V[i+1] - 2·V[i] + V[i-1]) / dx²
-        const double dx = dx_first;
+        const double dx = x[1] - x[0];
         const double dx_inv = 1.0 / dx;
         const double dx2_inv = dx_inv * dx_inv;
         const double half_dx_inv = 0.5 * dx_inv;
@@ -193,8 +198,8 @@ void american_option_spatial_operator(const double * restrict x, [[maybe_unused]
 // V(S,t) ≥ intrinsic_value(S)
 void american_option_obstacle(const double *x, [[maybe_unused]] double t,
                              size_t n_points, double *obstacle, void *user_data) {
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
-    const OptionData *data = ext_data->option_data;
+    const SolverCallbackData *callback_data = (const SolverCallbackData *)user_data;
+    const OptionData *data = callback_data->option_data;
     compute_intrinsic_value(x, n_points, obstacle, data->strike, data->option_type);
 }
 
@@ -337,50 +342,73 @@ static AmericanOptionResult american_option_solve_internal(
         .n_steps = n_steps
     };
 
-    // Convert dividend times from calendar time to solver time
+    // Create sorted dividend events (pairs time with amount)
+    DividendEvent *sorted_dividends = nullptr;
     double *div_times_solver = nullptr;
+
     if (option_data->n_dividends > 0 && option_data->dividend_times != nullptr &&
         option_data->dividend_amounts != nullptr) {
-        div_times_solver = (double *)malloc(option_data->n_dividends * sizeof(double));
-        if (div_times_solver == nullptr) {
+
+        // Allocate dividend event array
+        sorted_dividends = (DividendEvent *)malloc(option_data->n_dividends * sizeof(DividendEvent));
+        if (sorted_dividends == nullptr) {
             free(x_grid);
             return result;
         }
 
+        // Convert from calendar time to solver time and populate events
         const double T = option_data->time_to_maturity;
-        #pragma omp simd
         for (size_t i = 0; i < option_data->n_dividends; i++) {
-            div_times_solver[i] = T - option_data->dividend_times[i];
+            sorted_dividends[i].time = T - option_data->dividend_times[i];
+            sorted_dividends[i].amount = option_data->dividend_amounts[i];
         }
 
-        // Sort dividend times in ascending order (for solver)
+        // Sort by time using qsort (O(n log n) instead of O(n²) bubble sort)
+        qsort(sorted_dividends, option_data->n_dividends, sizeof(DividendEvent),
+              compare_dividend_events);
+
+        // Extract sorted times for PDE solver
+        div_times_solver = (double *)malloc(option_data->n_dividends * sizeof(double));
+        if (div_times_solver == nullptr) {
+            free(sorted_dividends);
+            free(x_grid);
+            return result;
+        }
+
         for (size_t i = 0; i < option_data->n_dividends; i++) {
-            for (size_t j = i + 1; j < option_data->n_dividends; j++) {
-                if (div_times_solver[j] < div_times_solver[i]) {
-                    double temp = div_times_solver[i];
-                    div_times_solver[i] = div_times_solver[j];
-                    div_times_solver[j] = temp;
-                }
+            div_times_solver[i] = sorted_dividends[i].time;
+        }
+    }
+
+    // Check if grid is uniform (constant spacing within tolerance)
+    bool is_uniform_grid = true;
+    if (n_m > 2) {
+        const double dx_first = x_grid[1] - x_grid[0];
+        for (size_t i = 2; i < n_m; i++) {
+            const double dx_i = x_grid[i] - x_grid[i - 1];
+            const double rel_diff = fabs(dx_i - dx_first) / dx_first;
+            if (rel_diff > 1e-10) {
+                is_uniform_grid = false;
+                break;
             }
         }
     }
 
-    // Create extended user data to pass grid boundaries to callbacks
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)malloc(sizeof(ExtendedOptionData));
-    if (ext_data == nullptr) {
-        if (div_times_solver != nullptr) {
-            free(div_times_solver);
-        }
+    // Create internal callback data
+    SolverCallbackData *callback_data = (SolverCallbackData *)malloc(sizeof(SolverCallbackData));
+    if (callback_data == nullptr) {
+        if (sorted_dividends != nullptr) free(sorted_dividends);
+        if (div_times_solver != nullptr) free(div_times_solver);
         free(x_grid);
         return result;
     }
 
-    ext_data->option_data = option_data;
-    ext_data->x_min = grid.x_min;
-    ext_data->x_max = grid.x_max;
-    ext_data->use_neumann_bc = use_neumann_bc;  // Use BC type from parameter
+    callback_data->option_data = option_data;
+    callback_data->sorted_dividends = sorted_dividends;
+    callback_data->is_uniform_grid = is_uniform_grid;
 
-    // Setup callbacks (reuse existing callbacks)
+    // Setup callbacks - pass SolverCallbackData as user_data
+    // Boundary callbacks now receive x_boundary and bc_type from PDE solver
     PDECallbacks callbacks = {
         .initial_condition = american_option_terminal_condition,
         .left_boundary = american_option_left_boundary,
@@ -392,7 +420,7 @@ static AmericanOptionResult american_option_solve_internal(
         .temporal_event = nullptr,
         .n_temporal_events = 0,
         .temporal_event_times = nullptr,
-        .user_data = (void *)ext_data
+        .user_data = (void *)callback_data  // Pass SolverCallbackData
     };
 
     // Enable temporal event callback for discrete dividends
@@ -427,10 +455,15 @@ static AmericanOptionResult american_option_solve_internal(
     PDESolver *solver = pde_solver_create(&grid, &time, &bc_config,
                                           &trbdf2_config, &callbacks);
     if (solver == nullptr) {
+        if (callback_data != nullptr) {
+            if (callback_data->sorted_dividends != nullptr) {
+                free(callback_data->sorted_dividends);
+            }
+            free(callback_data);
+        }
         if (div_times_solver != nullptr) {
             free(div_times_solver);
         }
-        free(ext_data);
         // Note: grid.x is nullptr after pde_solver_create, no need to free x_grid
         return result;
     }
@@ -442,9 +475,9 @@ static AmericanOptionResult american_option_solve_internal(
 
     result.solver = solver;
     result.status = status;
-    result.internal_data = (void *)ext_data;  // Store for cleanup
+    result.internal_data = callback_data;  // Store for cleanup in american_option_free_result
 
-    // Clean up dividend time array
+    // Clean up dividend time array (the sorted_dividends are kept in callback_data)
     if (div_times_solver != nullptr) {
         free(div_times_solver);
     }
@@ -525,9 +558,13 @@ void american_option_free_result(AmericanOptionResult *result) {
         result->solver = nullptr;
     }
 
-    // Free the extended option data
+    // Free internal callback data (includes sorted dividends)
     if (result->internal_data != nullptr) {
-        free(result->internal_data);
+        SolverCallbackData *callback_data = (SolverCallbackData *)result->internal_data;
+        if (callback_data->sorted_dividends != nullptr) {
+            free(callback_data->sorted_dividends);
+        }
+        free(callback_data);
         result->internal_data = nullptr;
     }
 
@@ -543,8 +580,8 @@ static void american_option_dividend_event([[maybe_unused]] double t,
                                            size_t n_events_triggered,
                                            void *user_data,
                                            double *workspace) {
-    ExtendedOptionData *ext_data = (ExtendedOptionData *)user_data;
-    const OptionData *option_data = ext_data->option_data;
+    const SolverCallbackData *callback_data = (const SolverCallbackData *)user_data;
+    const OptionData *option_data = callback_data->option_data;
 
     // Use workspace instead of malloc
     // workspace already allocated by solver (n_points doubles)
@@ -554,9 +591,12 @@ static void american_option_dividend_event([[maybe_unused]] double t,
     for (size_t i = 0; i < n_events_triggered; i++) {
         size_t div_idx = event_indices[i];
 
+        // Access dividend amount from sorted array
+        double dividend_amount = callback_data->sorted_dividends[div_idx].amount;
+
         // Apply dividend jump to current solution
         american_option_apply_dividend(x_grid, n_points, V, V_temp,
-                                      option_data->dividend_amounts[div_idx],
+                                      dividend_amount,
                                       option_data->strike);
 
         // Copy adjusted solution back
