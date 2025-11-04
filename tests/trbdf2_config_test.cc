@@ -5,8 +5,9 @@
 TEST(TRBDF2ConfigTest, DefaultValues) {
     mango::TRBDF2Config config;
 
-    EXPECT_EQ(config.max_iter, 100);
+    EXPECT_EQ(config.max_iter, 20);
     EXPECT_DOUBLE_EQ(config.tolerance, 1e-6);
+    EXPECT_DOUBLE_EQ(config.jacobian_fd_epsilon, 1e-7);
 
     // γ = 2 - √2 ≈ 0.5857864376269049
     EXPECT_NEAR(config.gamma, 2.0 - std::sqrt(2.0), 1e-10);
