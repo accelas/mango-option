@@ -6,6 +6,7 @@
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
 #include "fixed_point_solver.hpp"
+#include "tridiagonal_solver.hpp"
 #include <span>
 #include <vector>
 #include <functional>
@@ -420,6 +421,48 @@ private:
             jacobian_lower_[i-1] = -coeff_dt * dLi_duim1;
             u_perturb_[i-1] = u[i-1];
         }
+    }
+
+    /// Build Jacobian matrix via finite differences
+    /// CRITICAL: Initializes u_perturb_ to avoid undefined behavior
+    void build_jacobian(double t, double coeff_dt,
+                        std::span<const double> u, double eps) {
+        // CRITICAL: Initialize u_perturb_ with current u before perturbations
+        // Without this, finite differences work off undefined data!
+        std::copy(u.begin(), u.end(), u_perturb_.begin());
+
+        // Evaluate L(u) as baseline
+        spatial_op_(t, grid_, u, std::span{Lu_}, workspace_.dx());
+
+        // Interior points: tridiagonal structure
+        for (size_t i = 1; i < n_ - 1; ++i) {
+            // ∂L_i/∂u_i (diagonal)
+            u_perturb_[i] = u[i] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_},
+                        std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_dui = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
+            u_perturb_[i] = u[i];  // Restore
+
+            // ∂L_i/∂u_{i-1} (lower diagonal)
+            u_perturb_[i-1] = u[i-1] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_},
+                        std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_duim1 = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_lower_[i-1] = -coeff_dt * dLi_duim1;
+            u_perturb_[i-1] = u[i-1];  // Restore
+
+            // ∂L_i/∂u_{i+1} (upper diagonal)
+            u_perturb_[i+1] = u[i+1] + eps;
+            spatial_op_(t, grid_, std::span{u_perturb_},
+                        std::span{Lu_perturb_}, workspace_.dx());
+            double dLi_duip1 = (Lu_perturb_[i] - Lu_[i]) / eps;
+            jacobian_upper_[i] = -coeff_dt * dLi_duip1;
+            u_perturb_[i+1] = u[i+1];  // Restore
+        }
+
+        // Boundary rows - call helper (uses compile-time dispatch)
+        build_jacobian_boundaries(t, coeff_dt, u, eps);
     }
 };
 
