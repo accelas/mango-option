@@ -1,0 +1,11 @@
+cc_library(
+    name = "grid",
+    hdrs = ["grid.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
