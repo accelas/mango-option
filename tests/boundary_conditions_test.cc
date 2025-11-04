@@ -188,3 +188,41 @@ TEST(RobinBCTest, MixedRight) {
     // Expected: (10 + 4/0.5) / (2 + 1/0.5) = (10 + 8) / (2 + 2) = 18/4 = 4.5
     EXPECT_DOUBLE_EQ(u, 4.5);
 }
+
+// Concept verification tests
+TEST(BoundaryConditionConceptTest, DirichletSatisfiesConcept) {
+    auto bc = mango::DirichletBC([](double, double) { return 1.0; });
+    static_assert(mango::BoundaryCondition<decltype(bc)>,
+                  "DirichletBC must satisfy BoundaryCondition concept");
+    SUCCEED();  // If we compile, the test passes
+}
+
+TEST(BoundaryConditionConceptTest, NeumannSatisfiesConcept) {
+    auto bc = mango::NeumannBC([](double, double) { return 0.0; }, 1.0);
+    static_assert(mango::BoundaryCondition<decltype(bc)>,
+                  "NeumannBC must satisfy BoundaryCondition concept");
+    SUCCEED();
+}
+
+TEST(BoundaryConditionConceptTest, RobinSatisfiesConcept) {
+    auto bc = mango::RobinBC([](double, double) { return 1.0; }, 1.0, 1.0);
+    static_assert(mango::BoundaryCondition<decltype(bc)>,
+                  "RobinBC must satisfy BoundaryCondition concept");
+    SUCCEED();
+}
+
+TEST(BoundaryConditionConceptTest, TagTypesAreDistinct) {
+    using DTag = typename decltype(mango::DirichletBC([](double, double) { return 0.0; }))::tag;
+    using NTag = typename decltype(mango::NeumannBC([](double, double) { return 0.0; }, 1.0))::tag;
+    using RTag = typename decltype(mango::RobinBC([](double, double) { return 0.0; }, 1.0, 1.0))::tag;
+
+    static_assert(std::is_same_v<DTag, mango::bc::dirichlet_tag>);
+    static_assert(std::is_same_v<NTag, mango::bc::neumann_tag>);
+    static_assert(std::is_same_v<RTag, mango::bc::robin_tag>);
+
+    static_assert(!std::is_same_v<DTag, NTag>);
+    static_assert(!std::is_same_v<NTag, RTag>);
+    static_assert(!std::is_same_v<DTag, RTag>);
+
+    SUCCEED();
+}
