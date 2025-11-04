@@ -14,7 +14,7 @@ namespace mango {
 /// γ = 2 - √2 ≈ 0.5857864376269049 (optimal for L-stability)
 struct TRBDF2Config {
     /// Maximum iterations for implicit solver
-    size_t max_iter = 100;
+    size_t max_iter = 20;
 
     /// Convergence tolerance (relative error)
     double tolerance = 1e-6;
@@ -22,11 +22,11 @@ struct TRBDF2Config {
     /// Stage 1 parameter (γ = 2 - √2)
     double gamma = 2.0 - std::sqrt(2.0);
 
-    /// Under-relaxation parameter for fixed-point iteration
-    double omega = 0.7;
-
     /// Cache blocking threshold (apply blocking when n >= threshold)
     size_t cache_blocking_threshold = 5000;
+
+    /// Finite difference epsilon for Jacobian computation
+    double jacobian_fd_epsilon = 1e-7;
 
     /// Compute weight for Stage 1 update
     ///

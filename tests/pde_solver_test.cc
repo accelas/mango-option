@@ -76,6 +76,75 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     }
 }
 
+TEST(PDESolverTest, NewtonConvergence) {
+    // Test that Newton converges in < 20 iterations for simple heat equation
+    // This verifies the quasi-Newton implementation is working
+
+    const size_t n = 101;
+    const double D = 0.1;
+    const double pi = std::numbers::pi;
+
+    // Create grid
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+
+    // Time domain
+    mango::TimeDomain time(0.0, 0.1, 0.01);  // 10 steps
+
+    // TR-BDF2 config
+    mango::TRBDF2Config config;
+    config.max_iter = 20;  // Newton should converge well within this
+
+    // Boundary conditions: u(0,t) = 0, u(1,t) = 0
+    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
+
+    // Spatial operator: L(u) = D·d²u/dx²
+    auto heat_op = [D](double, std::span<const double> x,
+                       std::span<const double> u, std::span<double> Lu,
+                       std::span<const double> dx) {
+        const size_t n = x.size();
+        Lu[0] = Lu[n-1] = 0.0;  // Boundaries handled separately
+
+        for (size_t i = 1; i < n - 1; ++i) {
+            double dx_left = dx[i-1];
+            double dx_right = dx[i];
+            double dx_avg = (dx_left + dx_right) / 2.0;
+
+            // Second derivative: d²u/dx²
+            double d2u = (u[i+1] - u[i]) / dx_right - (u[i] - u[i-1]) / dx_left;
+            d2u /= dx_avg;
+
+            Lu[i] = D * d2u;
+        }
+    };
+
+    // Initial condition: u(x,0) = sin(π·x)
+    auto ic = [pi](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::sin(pi * x[i]);
+        }
+    };
+
+    // Create solver
+    mango::PDESolver solver(grid.span(), time, config, left_bc, right_bc, heat_op);
+
+    // Initialize with IC
+    solver.initialize(ic);
+
+    // Solve - should converge (Newton is robust)
+    bool converged = solver.solve();
+    EXPECT_TRUE(converged);
+
+    // Solution should decay exponentially: u(x,t) ≈ exp(-π²Dt)sin(πx)
+    auto solution = solver.solution();
+    double expected_decay = std::exp(-pi * pi * D * 0.1);
+
+    // Check middle point
+    size_t mid = n / 2;
+    double expected = expected_decay * std::sin(pi * grid.span()[mid]);
+    EXPECT_NEAR(solution[mid], expected, 0.01);  // 1% tolerance
+}
+
 TEST(PDESolverTest, CacheBlockingCorrectness) {
     // Verify that cache-blocked solver produces identical results to single-block
     // Grid with n = 200 (triggers cache blocking at default threshold)

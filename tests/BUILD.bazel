@@ -74,7 +74,6 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20", "-Wall", "-Wextra"],
-    tags = ["manual"],  # Disabled: CacheBlockingCorrectness needs Newton iteration (not fixed-point)
 )
 
 cc_test(
@@ -327,10 +326,10 @@ cc_test(
 )
 
 cc_test(
-    name = "fixed_point_solver_test",
-    srcs = ["fixed_point_solver_test.cc"],
+    name = "tridiagonal_solver_test",
+    srcs = ["tridiagonal_solver_test.cc"],
     deps = [
-        "//src/cpp:fixed_point_solver",
+        "//src/cpp:tridiagonal_solver",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
