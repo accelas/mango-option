@@ -9,3 +9,15 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "boundary_conditions",
+    hdrs = ["boundary_conditions.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
