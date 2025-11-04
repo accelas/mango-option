@@ -62,6 +62,21 @@
 #define MODULE_PRICE_TABLE      7
 
 /**
+ * Validation stage identifiers for adaptive refinement tracing
+ */
+#define VALIDATION_STAGE_PRECOMPUTE       1
+#define VALIDATION_STAGE_VALIDATE         2
+#define VALIDATION_STAGE_IDENTIFY         3
+#define VALIDATION_STAGE_EXPAND           4
+#define VALIDATION_STAGE_COMPLETE         5
+#define VALIDATION_STAGE_NO_REFINEMENT    6
+
+/**
+ * Validation refinement status codes
+ */
+#define VALIDATION_NO_REFINEMENT_NUMERIC_LIMITS 1
+
+/**
  * ============================================================================
  * Algorithm Lifecycle Probes
  * ============================================================================
@@ -160,6 +175,119 @@
  */
 #define MANGO_TRACE_RUNTIME_ERROR(module_id, error_code, context) \
     DTRACE_PROBE3(MANGO_PROVIDER, runtime_error, module_id, error_code, context)
+
+/**
+ * ============================================================================
+ * Validation Module Probes
+ * ============================================================================
+ */
+
+/**
+ * Fired when validation results are recorded
+ * @param n_samples: Number of samples analyzed
+ * @param mean_bp: Mean IV error in basis points
+ * @param median_bp: Median IV error in basis points
+ * @param p95_bp: 95th percentile IV error in basis points
+ * @param p99_bp: 99th percentile IV error in basis points
+ * @param max_bp: Maximum IV error in basis points
+ */
+#define MANGO_TRACE_VALIDATION_RESULT_STATS(n_samples, mean_bp, median_bp, p95_bp, p99_bp, max_bp) \
+    DTRACE_PROBE6(MANGO_PROVIDER, validation_result_stats, n_samples, mean_bp, median_bp, p95_bp, p99_bp, max_bp)
+
+/**
+ * Fired when validation distribution metrics are available
+ * @param n_samples: Number of samples considered
+ * @param below_1bp_pct: Percentage below 1bp
+ * @param below_5bp_pct: Percentage below 5bp
+ * @param below_10bp_pct: Percentage below 10bp
+ * @param high_error_count: Number of high-error samples
+ */
+#define MANGO_TRACE_VALIDATION_RESULT_DISTRIBUTION(n_samples, below_1bp_pct, below_5bp_pct, below_10bp_pct, high_error_count) \
+    DTRACE_PROBE5(MANGO_PROVIDER, validation_result_distribution, n_samples, below_1bp_pct, below_5bp_pct, below_10bp_pct, high_error_count)
+
+/**
+ * Fired when adaptive refinement configuration is established
+ * @param target_bp: Target IV error in basis points
+ * @param max_iter: Maximum refinement iterations
+ * @param validation_samples: Number of validation samples per iteration
+ * @param initial_grid_size: Initial moneyness grid size
+ */
+#define MANGO_TRACE_VALIDATION_REFINEMENT_CONFIG(target_bp, max_iter, validation_samples, initial_grid_size) \
+    DTRACE_PROBE4(MANGO_PROVIDER, validation_refinement_config, target_bp, max_iter, validation_samples, initial_grid_size)
+
+/**
+ * Fired at the beginning of each refinement iteration
+ * @param iteration: Iteration number (1-based)
+ * @param grid_size: Current moneyness grid size
+ */
+#define MANGO_TRACE_VALIDATION_ITERATION_BEGIN(iteration, grid_size) \
+    DTRACE_PROBE2(MANGO_PROVIDER, validation_iter_begin, iteration, grid_size)
+
+/**
+ * Fired to mark major stages within an iteration
+ * @param iteration: Iteration number
+ * @param stage: Stage identifier (VALIDATION_STAGE_*)
+ */
+#define MANGO_TRACE_VALIDATION_ITERATION_STAGE(iteration, stage) \
+    DTRACE_PROBE2(MANGO_PROVIDER, validation_iter_stage, iteration, stage)
+
+/**
+ * Fired when per-iteration metrics are calculated
+ * @param iteration: Iteration number
+ * @param grid_size: Current grid size
+ * @param mean_bp: Mean IV error in basis points
+ * @param p95_bp: 95th percentile IV error in basis points
+ * @param p99_bp: 99th percentile IV error in basis points
+ * @param high_error_count: Number of high-error samples
+ */
+#define MANGO_TRACE_VALIDATION_ITERATION_METRICS(iteration, grid_size, mean_bp, p95_bp, p99_bp, high_error_count) \
+    DTRACE_PROBE6(MANGO_PROVIDER, validation_iter_metrics, iteration, grid_size, mean_bp, p95_bp, p99_bp, high_error_count)
+
+/**
+ * Fired with coverage metrics relative to target error threshold
+ * @param iteration: Iteration number
+ * @param target_bp: Target IV error in basis points
+ * @param coverage_pct: Percentage of samples below target
+ */
+#define MANGO_TRACE_VALIDATION_ITERATION_COVERAGE(iteration, target_bp, coverage_pct) \
+    DTRACE_PROBE3(MANGO_PROVIDER, validation_iter_coverage, iteration, target_bp, coverage_pct)
+
+/**
+ * Fired when convergence criteria are met
+ * @param iteration: Iteration number
+ * @param final_grid_size: Final grid size
+ * @param target_bp: Target IV error in basis points
+ * @param p95_bp: Achieved 95th percentile error
+ * @param coverage_pct: Percentage of samples below target
+ */
+#define MANGO_TRACE_VALIDATION_CONVERGED(iteration, final_grid_size, target_bp, p95_bp, coverage_pct) \
+    DTRACE_PROBE5(MANGO_PROVIDER, validation_converged, iteration, final_grid_size, target_bp, p95_bp, coverage_pct)
+
+/**
+ * Fired when refinement terminates due to max iterations
+ * @param iteration: Iteration number at termination
+ * @param target_bp: Target IV error in basis points
+ * @param p95_bp: Final 95th percentile error
+ */
+#define MANGO_TRACE_VALIDATION_MAX_ITER(iteration, target_bp, p95_bp) \
+    DTRACE_PROBE3(MANGO_PROVIDER, validation_max_iter, iteration, target_bp, p95_bp)
+
+/**
+ * Fired when new refinement points are added
+ * @param iteration: Iteration number
+ * @param n_new_points: Number of refinement points inserted
+ * @param new_grid_size: Grid size after expansion
+ */
+#define MANGO_TRACE_VALIDATION_REFINEMENT_POINTS(iteration, n_new_points, new_grid_size) \
+    DTRACE_PROBE3(MANGO_PROVIDER, validation_refine_points, iteration, n_new_points, new_grid_size)
+
+/**
+ * Fired when no refinement points are identified
+ * @param iteration: Iteration number
+ * @param reason: Reason code (VALIDATION_NO_REFINEMENT_*)
+ */
+#define MANGO_TRACE_VALIDATION_NO_REFINEMENT(iteration, reason) \
+    DTRACE_PROBE2(MANGO_PROVIDER, validation_no_refine, iteration, reason)
 
 /**
  * ============================================================================
