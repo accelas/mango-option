@@ -300,6 +300,17 @@ cc_test(
     copts = ["-std=c++20", "-Wall", "-Wextra"],
 )
 
+cc_test(
+    name = "time_domain_test",
+    srcs = ["time_domain_test.cc"],
+    deps = [
+        "//src/cpp:time_domain",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow

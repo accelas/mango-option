@@ -66,3 +66,10 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "time_domain",
+    hdrs = ["time_domain.hpp"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
