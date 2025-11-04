@@ -7,12 +7,11 @@ extern "C" {
 #include "../src/implied_volatility.h"
 }
 
-// Mirror of ExtendedOptionData from american_option.c for boundary callback tests
-struct TestExtendedOptionData {
+// Mirror of SolverCallbackData from american_option.c for boundary callback tests
+struct TestSolverCallbackData {
     const OptionData *option_data;
-    double x_min;
-    double x_max;
-    bool use_neumann_bc;
+    void *sorted_dividends;  // Not used in these tests, set to nullptr
+    bool is_uniform_grid;    // Not used in boundary tests, can be false
 };
 
 // Test fixture for American option tests
@@ -1449,17 +1448,18 @@ TEST_F(AmericanOptionTest, NeumannBoundaryCallbacksReturnGradients) {
         .dividend_amounts = nullptr
     };
 
-    TestExtendedOptionData call_data = {
+    TestSolverCallbackData call_data = {
         .option_data = &call_option,
-        .x_min = std::log(0.6),
-        .x_max = std::log(1.4),
-        .use_neumann_bc = true
+        .sorted_dividends = nullptr,
+        .is_uniform_grid = false
     };
 
     const double t = 0.35;
+    const double x_min = std::log(0.6);
+    const double x_max = std::log(1.4);
 
-    double left_grad_call = american_option_left_boundary(t, &call_data);
-    double right_grad_call = american_option_right_boundary(t, &call_data);
+    double left_grad_call = american_option_left_boundary(t, x_min, BC_NEUMANN, &call_data);
+    double right_grad_call = american_option_right_boundary(t, x_max, BC_NEUMANN, &call_data);
 
     // For Neumann BCs with zero-flux conditions, both should return 0.0
     EXPECT_NEAR(left_grad_call, 0.0, 1e-12);
@@ -1468,15 +1468,14 @@ TEST_F(AmericanOptionTest, NeumannBoundaryCallbacksReturnGradients) {
     OptionData put_option = call_option;
     put_option.option_type = OPTION_PUT;
 
-    TestExtendedOptionData put_data = {
+    TestSolverCallbackData put_data = {
         .option_data = &put_option,
-        .x_min = std::log(0.6),
-        .x_max = std::log(1.4),
-        .use_neumann_bc = true
+        .sorted_dividends = nullptr,
+        .is_uniform_grid = false
     };
 
-    double left_grad_put = american_option_left_boundary(t, &put_data);
-    double right_grad_put = american_option_right_boundary(t, &put_data);
+    double left_grad_put = american_option_left_boundary(t, x_min, BC_NEUMANN, &put_data);
+    double right_grad_put = american_option_right_boundary(t, x_max, BC_NEUMANN, &put_data);
 
     // For Neumann BCs with zero-flux conditions, both should return 0.0
     EXPECT_NEAR(left_grad_put, 0.0, 1e-12);
