@@ -99,3 +99,47 @@ TEST(NeumannBCTest, InsulatedBoundary) {
     bc.apply(u_boundary, 1.0, 0.0, dx, u_interior, 1.0, mango::bc::BoundarySide::Right);
     EXPECT_DOUBLE_EQ(u_boundary, u_interior);
 }
+
+TEST(RobinBCTest, PureNeumannLeft) {
+    // Robin with outward normal convention at left boundary:
+    // a*u[0] - b*(u[1]-u[0])/dx = g
+    // With a=0, b=-1: -(−1)*(u[1]-u[0])/dx = g  →  (u[1]-u[0])/dx = g
+    // This reduces to standard Neumann: du/dx = g
+    auto bc = mango::RobinBC([](double, double) { return 2.0; }, 0.0, -1.0);
+
+    const double dx = 0.1;
+    const double u_interior = 5.0;
+    double u = 999.0;
+
+    bc.apply(u, 0.0, 0.0, dx, u_interior, 1.0, mango::bc::BoundarySide::Left);
+
+    // Should behave like Neumann: u[0] = u[1] - g*dx
+    EXPECT_DOUBLE_EQ(u, 5.0 - 2.0 * 0.1);
+}
+
+TEST(RobinBCTest, PureDirichletLeft) {
+    // Robin: a*u + b*du/dx = g
+    // With a=1, b=0: u = g (reduces to Dirichlet)
+    auto bc = mango::RobinBC([](double, double) { return 7.0; }, 1.0, 0.0);
+
+    double u = 999.0;
+    bc.apply(u, 0.0, 0.0, 0.1, 5.0, 1.0, mango::bc::BoundarySide::Left);
+
+    EXPECT_DOUBLE_EQ(u, 7.0);  // Should be g/a = 7/1
+}
+
+TEST(RobinBCTest, MixedLeft) {
+    // Robin: 2*u + u/dx = 10
+    // At left: 2*u[0] - (u[1]-u[0])/dx = 10
+    // Solve: u[0] = (10 + u[1]/dx) / (2 + 1/dx)
+    auto bc = mango::RobinBC([](double, double) { return 10.0; }, 2.0, 1.0);
+
+    const double dx = 0.5;
+    const double u_interior = 4.0;
+    double u = 999.0;
+
+    bc.apply(u, 0.0, 0.0, dx, u_interior, 1.0, mango::bc::BoundarySide::Left);
+
+    // Expected: (10 + 4/0.5) / (2 + 1/0.5) = (10 + 8) / (2 + 2) = 18/4 = 4.5
+    EXPECT_DOUBLE_EQ(u, 4.5);
+}

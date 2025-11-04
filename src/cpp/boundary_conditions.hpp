@@ -119,4 +119,51 @@ private:
 template<typename Func>
 NeumannBC(Func, double) -> NeumannBC<Func>;
 
+/**
+ * RobinBC: Mixed boundary condition a*u + b*du/dx = g
+ *
+ * Orientation-dependent formulas (outward normal convention):
+ * - Left:  a*u[0] - b*(u[1]-u[0])/dx = g  →  u[0] = (g + b*u[1]/dx) / (a + b/dx)
+ * - Right: a*u[n-1] + b*(u[n-1]-u[n-2])/dx = g  →  u[n-1] = (g - b*u[n-2]/dx) / (a - b/dx)
+ *
+ * Special cases:
+ * - a=1, b=0: Reduces to Dirichlet (u = g)
+ * - a=0, b=-1 (left) or b=1 (right): Reduces to Neumann (du/dx = g)
+ */
+template<typename Func>
+class RobinBC {
+public:
+    using tag = bc::robin_tag;
+
+    RobinBC(Func f, double a, double b)
+        : func_(std::move(f)), a_(a), b_(b) {}
+
+    double rhs(double t, double x) const { return func_(t, x); }
+    double a() const { return a_; }
+    double b() const { return b_; }
+
+    // Solver interface - UNIFORM signature for all BC types
+    // Robin enforces: a*u +/- b*du/dn = g (outward normal convention)
+    void apply(double& u, double x, double t, double dx, double u_interior,
+               [[maybe_unused]] double D, bc::BoundarySide side) const {
+        // Solve for u using finite difference with outward normal convention
+        // Left:  a*u[0] - b*(u[1] - u[0])/dx = g  →  u[0] = (g + b*u[1]/dx) / (a + b/dx)
+        // Right: a*u[n-1] + b*(u[n-1] - u[n-2])/dx = g  →  u[n-1] = (g - b*u[n-2]/dx) / (a - b/dx)
+        double g = rhs(t, x);
+        if (side == bc::BoundarySide::Left) {
+            u = (g + b_ * u_interior / dx) / (a_ + b_ / dx);
+        } else {  // Right
+            u = (g - b_ * u_interior / dx) / (a_ - b_ / dx);
+        }
+    }
+
+private:
+    Func func_;
+    double a_, b_;
+};
+
+// Deduction guide
+template<typename Func>
+RobinBC(Func, double, double) -> RobinBC<Func>;
+
 } // namespace mango
