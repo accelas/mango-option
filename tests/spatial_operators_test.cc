@@ -242,3 +242,47 @@ TEST(LaplacianOperatorTest, ApplyBlockSmallerLastBlock) {
 
     EXPECT_NEAR(Lu_interior[0], 1.0, 1e-10);  // D * 2 = 0.5 * 2
 }
+
+TEST(EquityBlackScholesOperatorTest, ApplyBlockMiddleBlock) {
+    mango::EquityBlackScholesOperator op(0.05, 0.20);  // r=5%, sigma=20%
+
+    std::vector<double> grid = {80.0, 90.0, 100.0, 110.0, 120.0};
+    std::vector<double> u = {20.0, 15.0, 10.0, 6.0, 3.0};  // Call prices
+
+    std::vector<double> dx(grid.size() - 1);
+    for (size_t i = 0; i < dx.size(); ++i) {
+        dx[i] = grid[i+1] - grid[i];
+    }
+
+    // Block: base_idx=2, interior=[2], halo=[1,2,3]
+    std::span<const double> x_halo(grid.data() + 1, 3);
+    std::span<const double> u_halo(u.data() + 1, 3);
+    std::vector<double> Lu_interior(1);
+
+    op.apply_block(0.0, 2, 1, 1, x_halo, u_halo,
+                   std::span{Lu_interior}, std::span{dx});
+
+    // Just verify it computes something reasonable (non-zero)
+    EXPECT_NE(Lu_interior[0], 0.0);
+}
+
+TEST(IndexBlackScholesOperatorTest, ApplyBlockMiddleBlock) {
+    mango::IndexBlackScholesOperator op(0.05, 0.20, 0.02);  // r=5%, sigma=20%, q=2%
+
+    std::vector<double> grid = {80.0, 90.0, 100.0, 110.0, 120.0};
+    std::vector<double> u = {20.0, 15.0, 10.0, 6.0, 3.0};
+
+    std::vector<double> dx(grid.size() - 1);
+    for (size_t i = 0; i < dx.size(); ++i) {
+        dx[i] = grid[i+1] - grid[i];
+    }
+
+    std::span<const double> x_halo(grid.data() + 1, 3);
+    std::span<const double> u_halo(u.data() + 1, 3);
+    std::vector<double> Lu_interior(1);
+
+    op.apply_block(0.0, 2, 1, 1, x_halo, u_halo,
+                   std::span{Lu_interior}, std::span{dx});
+
+    EXPECT_NE(Lu_interior[0], 0.0);
+}
