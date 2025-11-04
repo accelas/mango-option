@@ -41,3 +41,31 @@ TEST(GridSpecTest, SinhSpacedGridGeneration) {
     EXPECT_DOUBLE_EQ(grid[10], 1.0);
     EXPECT_DOUBLE_EQ(grid[5], 0.5);  // Center point should be at midpoint
 }
+
+TEST(GridViewTest, ViewFromBuffer) {
+    auto spec = mango::GridSpec<>::uniform(0.0, 10.0, 6);
+    auto grid = spec.generate();
+    auto view = grid.view();
+
+    EXPECT_EQ(view.size(), 6);
+    EXPECT_DOUBLE_EQ(view[0], 0.0);
+    EXPECT_DOUBLE_EQ(view[5], 10.0);
+}
+
+TEST(GridViewTest, ViewIsCheapToCopy) {
+    auto spec = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    auto grid = spec.generate();
+    auto view1 = grid.view();
+    auto view2 = view1;  // Copy view (cheap)
+
+    EXPECT_EQ(view2.size(), 11);
+    EXPECT_DOUBLE_EQ(view2[0], 0.0);
+}
+
+TEST(GridViewTest, ViewFromSpan) {
+    std::vector<double> data = {1.0, 2.0, 3.0, 4.0, 5.0};
+    auto view = mango::GridView<>(std::span<const double>(data));
+
+    EXPECT_EQ(view.size(), 5);
+    EXPECT_DOUBLE_EQ(view[2], 3.0);
+}

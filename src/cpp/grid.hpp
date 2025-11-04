@@ -9,10 +9,10 @@
 namespace mango {
 
 // Forward declarations
-template<typename T = double>
+template<typename T>
 class GridBuffer;
 
-template<typename T = double>
+template<typename T>
 class GridView;
 
 /**
@@ -90,6 +90,52 @@ private:
 };
 
 /**
+ * GridView: Non-owning view of grid data (cheap to copy)
+ *
+ * This is a lightweight wrapper around std::span that provides
+ * grid-specific operations. It doesn't own data and is cheap to copy.
+ */
+template<typename T = double>
+class GridView {
+public:
+    // Construct from span
+    explicit GridView(std::span<const T> data) : data_(data) {}
+
+    // Copyable and movable (cheap - just a span)
+    GridView(const GridView&) = default;
+    GridView& operator=(const GridView&) = default;
+    GridView(GridView&&) noexcept = default;
+    GridView& operator=(GridView&&) noexcept = default;
+
+    // Access
+    size_t size() const { return data_.size(); }
+    const T& operator[](size_t i) const { return data_[i]; }
+
+    std::span<const T> span() const { return data_; }
+    const T* data() const { return data_.data(); }
+
+    // Grid properties
+    T x_min() const { return data_[0]; }
+    T x_max() const { return data_[data_.size() - 1]; }
+
+    // Check if grid is uniform (within tolerance)
+    bool is_uniform(T tolerance = T(1e-10)) const {
+        if (data_.size() < 2) return true;
+        const T expected_dx = (x_max() - x_min()) / static_cast<T>(data_.size() - 1);
+        for (size_t i = 1; i < data_.size(); ++i) {
+            const T actual_dx = data_[i] - data_[i-1];
+            if (std::abs(actual_dx - expected_dx) > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+private:
+    std::span<const T> data_;
+};
+
+/**
  * GridBuffer: Owns grid data (movable, not copyable by default)
  *
  * This is the storage container for grid points. It owns a std::vector
@@ -122,7 +168,9 @@ public:
     const T* data() const { return data_.data(); }
 
     // Create non-owning view
-    GridView<T> view() const;
+    GridView<T> view() const {
+        return GridView<T>(std::span<const T>(data_));
+    }
 
     // Create shared ownership (for reuse across solvers)
     std::shared_ptr<GridBuffer<T>> share() && {
