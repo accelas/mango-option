@@ -326,17 +326,6 @@ cc_test(
 )
 
 cc_test(
-    name = "fixed_point_solver_test",
-    srcs = ["fixed_point_solver_test.cc"],
-    deps = [
-        "//src/cpp:fixed_point_solver",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
-)
-
-cc_test(
     name = "tridiagonal_solver_test",
     srcs = ["tridiagonal_solver_test.cc"],
     deps = [

@@ -5,7 +5,6 @@
 #include "boundary_conditions.hpp"
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
-#include "fixed_point_solver.hpp"
 #include "tridiagonal_solver.hpp"
 #include <span>
 #include <vector>
@@ -57,7 +56,6 @@ public:
         , n_(grid.size())
         , workspace_(n_, grid)
         , u_current_(n_)
-        , u_stage_(n_)
         , u_old_(n_)
         , Lu_(n_)
         , temp_(n_)
@@ -142,10 +140,9 @@ private:
 
     // Solution storage
     std::vector<double> u_current_;  // u^{n+1} or u^{n+γ}
-    std::vector<double> u_stage_;    // Staging buffer for fixed-point
     std::vector<double> u_old_;      // u^n
     std::vector<double> Lu_;         // L(u) temporary
-    std::vector<double> temp_;       // Fixed-point iteration temp
+    std::vector<double> temp_;       // Temporary buffer
 
     // Newton-Raphson arrays
     std::vector<double> jacobian_lower_;      // n-1: Lower diagonal of Jacobian
