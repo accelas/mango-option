@@ -60,6 +60,16 @@ public:
         , u_old_(n_)
         , Lu_(n_)
         , temp_(n_)
+        , jacobian_lower_(n_ - 1)
+        , jacobian_diag_(n_)
+        , jacobian_upper_(n_ - 1)
+        , residual_(n_)
+        , delta_u_(n_)
+        , u_perturb_(n_)
+        , Lu_perturb_(n_)
+        , tridiag_workspace_(2 * n_)
+        , rhs_(n_)
+        , u_old_newton_(n_)
     {
         // Determine cache blocking strategy
         use_cache_blocking_ = (n_ >= config_.cache_blocking_threshold);
@@ -135,6 +145,18 @@ private:
     std::vector<double> u_old_;      // u^n
     std::vector<double> Lu_;         // L(u) temporary
     std::vector<double> temp_;       // Fixed-point iteration temp
+
+    // Newton-Raphson arrays
+    std::vector<double> jacobian_lower_;      // n-1: Lower diagonal of Jacobian
+    std::vector<double> jacobian_diag_;       // n: Main diagonal of Jacobian
+    std::vector<double> jacobian_upper_;      // n-1: Upper diagonal of Jacobian
+    std::vector<double> residual_;            // n: Residual vector r(u)
+    std::vector<double> delta_u_;             // n: Newton step δu
+    std::vector<double> u_perturb_;           // n: Perturbed u for finite differences
+    std::vector<double> Lu_perturb_;          // n: L(u_perturb) for finite differences
+    std::vector<double> tridiag_workspace_;   // 2n: Workspace for tridiagonal solver
+    std::vector<double> rhs_;                 // n: RHS vector (persistent, not local)
+    std::vector<double> u_old_newton_;        // n: Previous u for step delta check
 
     // Cache blocking flag
     bool use_cache_blocking_;
