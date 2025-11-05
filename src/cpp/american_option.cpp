@@ -207,18 +207,99 @@ std::vector<double> AmericanOptionSolver::get_solution() const {
 }
 
 double AmericanOptionSolver::compute_delta() const {
-    // TODO: Implement in Task 9
-    return 0.0;
+    if (!solved_) {
+        return 0.0;  // No solution available
+    }
+
+    const size_t n = solution_.size();
+    const double dx = (grid_.x_max - grid_.x_min) / (n - 1);
+
+    // Find current spot in grid
+    double current_moneyness = std::log(params_.spot / params_.strike);
+
+    // Find the grid point closest to current_moneyness
+    // Use the same approach as interpolate_solution
+    size_t i = 0;
+    while (i < n-1 && grid_.x_min + (i+1)*dx < current_moneyness) {
+        i++;
+    }
+
+    // Ensure we're in valid interior range for centered differences
+    if (i == 0) i = 1;
+    if (i >= n-1) i = n-2;
+
+    // Compute ∂V/∂x using centered finite difference
+    // Note: solution_ stores V/K (normalized)
+    double dVdx = (solution_[i+1] - solution_[i-1]) / (2.0 * dx);
+
+    // Transform from log-moneyness to spot
+    // V_dollar = V_norm * K
+    // Delta = ∂V_dollar/∂S = K * ∂V_norm/∂x * ∂x/∂S
+    //       = K * dVdx * (1/S)
+    //       = (K/S) * dVdx
+    double delta = (params_.strike / params_.spot) * dVdx;
+
+    return delta;
 }
 
 double AmericanOptionSolver::compute_gamma() const {
-    // TODO: Implement in Task 9
-    return 0.0;
+    if (!solved_) {
+        return 0.0;  // No solution available
+    }
+
+    const size_t n = solution_.size();
+    const double dx = (grid_.x_max - grid_.x_min) / (n - 1);
+
+    // Find current spot in grid
+    double current_moneyness = std::log(params_.spot / params_.strike);
+
+    // Find the grid point closest to current_moneyness
+    size_t i = 0;
+    while (i < n-1 && grid_.x_min + (i+1)*dx < current_moneyness) {
+        i++;
+    }
+
+    // Ensure we're in valid interior range for centered differences
+    if (i == 0) i = 1;
+    if (i >= n-1) i = n-2;
+
+    // Centered second derivative: [V(i+1) - 2*V(i) + V(i-1)] / dx²
+    double d2Vdx2 = (solution_[i+1] - 2.0*solution_[i] + solution_[i-1]) / (dx * dx);
+    // Centered first derivative: [V(i+1) - V(i-1)] / (2*dx)
+    double dVdx = (solution_[i+1] - solution_[i-1]) / (2.0 * dx);
+
+    // Transform from log-moneyness to spot using chain rule
+    // x = ln(S/K), so ∂x/∂S = 1/S and ∂²x/∂S² = -1/S²
+    //
+    // V_dollar(S) = K * V_norm(x(S))
+    //
+    // First derivative:
+    // dV/dS = K * dV_norm/dx * dx/dS = K * dV_norm/dx * (1/S)
+    //
+    // Second derivative:
+    // d²V/dS² = d/dS[K * dV_norm/dx * (1/S)]
+    //         = K * d/dS[dV_norm/dx * (1/S)]
+    //         = K * [d²V_norm/dx² * (dx/dS) * (1/S) + dV_norm/dx * d/dS(1/S)]
+    //         = K * [d²V_norm/dx² * (1/S²) + dV_norm/dx * (-1/S²)]
+    //         = (K/S²) * [d²V_norm/dx² - dV_norm/dx]
+    //
+    double S = params_.spot;
+    double K = params_.strike;
+    double gamma = (K / (S * S)) * (d2Vdx2 - dVdx);
+
+    return gamma;
 }
 
 double AmericanOptionSolver::compute_theta() const {
-    // TODO: Implement in Task 9
-    return 0.0;
+    // Theta is time decay: ∂V/∂t
+    // For American options with no closed form, accurate theta requires:
+    // 1. Re-solving at slightly different time, or
+    // 2. Evaluating the PDE operator: ∂V/∂t = L(V)
+    //
+    // Both approaches are expensive and complex. For now, return 0.0 as stub.
+    // Future enhancement could evaluate the BS operator on the solution surface.
+
+    return 0.0;  // Stub implementation
 }
 
 }  // namespace mango

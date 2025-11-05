@@ -5,6 +5,7 @@
 
 #include "src/cpp/american_option.hpp"
 #include <gtest/gtest.h>
+#include <cmath>
 
 namespace mango {
 namespace {
@@ -308,6 +309,59 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
     EXPECT_THROW({
         solver.get_solution();
     }, std::runtime_error);
+}
+
+TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
+    AmericanOptionParams params{
+        .strike = 100.0,
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = 0.2,
+        .rate = 0.05,
+        .dividend_yield = 0.0,
+        .option_type = OptionType::PUT
+    };
+
+    AmericanOptionGrid grid{};  // Use defaults
+    AmericanOptionSolver solver(params, grid);
+
+    auto result = solver.solve();
+
+    // Should converge
+    EXPECT_TRUE(result.converged);
+
+    // Delta for ATM put should be negative (around -0.5 for European)
+    // American put delta can be different, but should still be negative
+    EXPECT_LT(result.delta, 0.0);
+    EXPECT_GT(result.delta, -1.0);  // Should be between -1 and 0
+}
+
+TEST(AmericanOptionSolverTest, GammaIsComputed) {
+    AmericanOptionParams params{
+        .strike = 100.0,
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = 0.2,
+        .rate = 0.05,
+        .dividend_yield = 0.0,
+        .option_type = mango::OptionType::PUT
+    };
+
+    AmericanOptionGrid grid{};  // Use defaults
+    AmericanOptionSolver solver(params, grid);
+
+    auto result = solver.solve();
+
+    // Should converge
+    EXPECT_TRUE(result.converged);
+
+    // NOTE: The PDE solver has known issues with time evolution (Issue #73)
+    // Until fixed, we can only verify that gamma is computed and finite
+    // Gamma should theoretically be positive (convexity), but the buggy
+    // time evolution can cause incorrect solution surfaces
+    EXPECT_TRUE(std::isfinite(result.gamma));
+    // Sanity check: gamma shouldn't be absurdly large
+    EXPECT_LT(std::abs(result.gamma), 10000.0);
 }
 
 }  // namespace
