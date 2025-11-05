@@ -96,6 +96,11 @@ private:
 
     void build_jacobian_boundaries(double t, double coeff_dt,
                                    std::span<const double> u, double eps);
+
+    /// Apply spatial operator with blocking awareness
+    void apply_spatial_operator_blocked(double t,
+                                       std::span<const double> u,
+                                       std::span<double> Lu);
 };
 
 // ============================================================================
@@ -122,7 +127,7 @@ RootFindingResult NewtonSolver<BoundaryL, BoundaryR, SpatialOp>::solve(
     // Newton iteration
     for (size_t iter = 0; iter < config_.max_iter; ++iter) {
         // Evaluate L(u)
-        spatial_op_(t, grid_, u, workspace_.lu(), workspace_.dx());
+        apply_spatial_operator_blocked(t, u, workspace_.lu());
 
         // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
         compute_residual(u, coeff_dt, workspace_.lu(), rhs,
@@ -257,7 +262,7 @@ void NewtonSolver<BoundaryL, BoundaryR, SpatialOp>::build_jacobian(
 {
     // Initialize u_perturb and compute baseline L(u)
     std::copy(u.begin(), u.end(), newton_ws_.u_perturb().begin());
-    spatial_op_(t, grid_, u, workspace_.lu(), workspace_.dx());
+    apply_spatial_operator_blocked(t, u, workspace_.lu());
 
     // Interior points: tridiagonal structure via finite differences
     // J = ∂F/∂u where F(u) = u - rhs - coeff_dt·L(u)
@@ -265,21 +270,21 @@ void NewtonSolver<BoundaryL, BoundaryR, SpatialOp>::build_jacobian(
     for (size_t i = 1; i < n_ - 1; ++i) {
         // Diagonal: ∂F/∂u_i = 1 - coeff_dt·∂L_i/∂u_i
         newton_ws_.u_perturb()[i] = u[i] + eps;
-        spatial_op_(t, grid_, newton_ws_.u_perturb(), newton_ws_.Lu_perturb(), workspace_.dx());
+        apply_spatial_operator_blocked(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
         double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
         newton_ws_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
         newton_ws_.u_perturb()[i] = u[i];
 
         // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
         newton_ws_.u_perturb()[i - 1] = u[i - 1] + eps;
-        spatial_op_(t, grid_, newton_ws_.u_perturb(), newton_ws_.Lu_perturb(), workspace_.dx());
+        apply_spatial_operator_blocked(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
         double dLi_duim1 = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
         newton_ws_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
         newton_ws_.u_perturb()[i - 1] = u[i - 1];
 
         // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
         newton_ws_.u_perturb()[i + 1] = u[i + 1] + eps;
-        spatial_op_(t, grid_, newton_ws_.u_perturb(), newton_ws_.Lu_perturb(), workspace_.dx());
+        apply_spatial_operator_blocked(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
         double dLi_duip1 = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
         newton_ws_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
         newton_ws_.u_perturb()[i + 1] = u[i + 1];
@@ -302,13 +307,13 @@ void NewtonSolver<BoundaryL, BoundaryR, SpatialOp>::build_jacobian_boundaries(
     } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::neumann_tag>) {
         // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
         newton_ws_.u_perturb()[0] = u[0] + eps;
-        spatial_op_(t, grid_, newton_ws_.u_perturb(), newton_ws_.Lu_perturb(), workspace_.dx());
+        apply_spatial_operator_blocked(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
         double dL0_du0 = (newton_ws_.Lu_perturb()[0] - workspace_.lu()[0]) / eps;
         newton_ws_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
         newton_ws_.u_perturb()[0] = u[0];
 
         newton_ws_.u_perturb()[1] = u[1] + eps;
-        spatial_op_(t, grid_, newton_ws_.u_perturb(), newton_ws_.Lu_perturb(), workspace_.dx());
+        apply_spatial_operator_blocked(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
         double dL0_du1 = (newton_ws_.Lu_perturb()[0] - workspace_.lu()[0]) / eps;
         newton_ws_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
         newton_ws_.u_perturb()[1] = u[1];
@@ -322,11 +327,52 @@ void NewtonSolver<BoundaryL, BoundaryR, SpatialOp>::build_jacobian_boundaries(
         // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
         size_t i = n_ - 1;
         newton_ws_.u_perturb()[i] = u[i] + eps;
-        spatial_op_(t, grid_, newton_ws_.u_perturb(), newton_ws_.Lu_perturb(), workspace_.dx());
+        apply_spatial_operator_blocked(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
         double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
         newton_ws_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
         newton_ws_.u_perturb()[i] = u[i];
     }
+}
+
+template<typename BoundaryL, typename BoundaryR, typename SpatialOp>
+void NewtonSolver<BoundaryL, BoundaryR, SpatialOp>::apply_spatial_operator_blocked(
+    double t,
+    std::span<const double> u,
+    std::span<double> Lu)
+{
+    const size_t n = grid_.size();
+
+    // Check if blocking is enabled
+    if (workspace_.cache_config().n_blocks == 1) {
+        // Full-array path
+        spatial_op_(t, grid_, u, Lu, workspace_.dx());
+        return;
+    }
+
+    // Blocked path
+    for (size_t block = 0; block < workspace_.cache_config().n_blocks; ++block) {
+        auto [interior_start, interior_end] =
+            workspace_.get_block_interior_range(block);
+
+        if (interior_start >= interior_end) continue;
+
+        const size_t halo_left = std::min(workspace_.cache_config().overlap,
+                                         interior_start);
+        const size_t halo_right = std::min(workspace_.cache_config().overlap,
+                                          n - interior_end);
+        const size_t interior_count = interior_end - interior_start;
+
+        auto x_halo = std::span{grid_.data() + interior_start - halo_left,
+                               interior_count + halo_left + halo_right};
+        auto u_halo = std::span{u.data() + interior_start - halo_left,
+                               interior_count + halo_left + halo_right};
+        auto lu_out = std::span{Lu.data() + interior_start, interior_count};
+
+        spatial_op_.apply_block(t, interior_start, halo_left, halo_right,
+                               x_halo, u_halo, lu_out, workspace_.dx());
+    }
+
+    Lu[0] = Lu[n-1] = 0.0;
 }
 
 }  // namespace mango
