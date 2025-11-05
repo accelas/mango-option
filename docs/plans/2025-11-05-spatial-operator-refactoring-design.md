@@ -6,7 +6,8 @@ Refactor spatial operator classes to follow Single Responsibility Principle by s
 
 **Revision History:**
 - v1: Initial design
-- v2: Addressed critical issues from codex subagent review (lambda decoupling, explicit interior interface, time-aware polymorphism, factory pattern)
+- v2: Addressed critical issues from first codex review (lambda decoupling, explicit interior interface, time-aware polymorphism, factory pattern)
+- v3: Fixed critical lifetime issue and implementation gaps from second codex review (shared_ptr ownership, non-uniform formula, boundary contracts, degenerate grids)
 
 ## Problem Statement
 
@@ -58,11 +59,17 @@ public:
     T spacing_at(size_t i) const;   // dx[i] = x[i+1] - x[i]
 
     // Left and right spacing for non-uniform centered differences
+    // Preconditions:
+    //   left_spacing(i):  requires 1 <= i < size()
+    //   right_spacing(i): requires 0 <= i < size()-1
     T left_spacing(size_t i) const;  // dx[i-1] = x[i] - x[i-1]
     T right_spacing(size_t i) const; // dx[i] = x[i+1] - x[i]
 
     const GridView<T>& grid() const;
     size_t size() const;
+
+    // Minimum size for 3-point stencil
+    static constexpr size_t min_stencil_size() { return 3; }
 
 private:
     GridView<T> grid_;
@@ -87,7 +94,7 @@ private:
 - Provides `left_spacing()` and `right_spacing()` for centered difference stencils on non-uniform grids
 - Contract: `spacing()`, `spacing_inv()`, `spacing_inv_sq()` require `is_uniform() == true`
 
-**Status**: ✅ Implemented (needs left/right spacing methods added)
+**Status**: 🔄 Partially implemented (needs left/right_spacing methods and min_stencil_size)
 
 ---
 
@@ -227,7 +234,7 @@ void CenteredDifference::apply_uniform(
 - All-points methods for Greeks (vectorized when possible)
 - Operates on `[start, end)` range for cache blocking support
 
-**Status**: ✅ Implemented (needs fused kernel methods added)
+**Status**: 🔄 Partially implemented (needs fused kernel methods: apply_uniform, apply_non_uniform, compute_all_*)
 
 ---
 
@@ -248,10 +255,12 @@ struct StencilInterior {
 template<typename PDE, typename T = double>
 class SpatialOperator {
 public:
-    SpatialOperator(const PDE& pde, const GridSpacing<T>& spacing);
+    SpatialOperator(const PDE& pde, std::shared_ptr<GridSpacing<T>> spacing);
 
     /// Get interior range for this stencil (3-point: [1, n-1))
+    /// Precondition: n >= GridSpacing<T>::min_stencil_size() (i.e., n >= 3)
     StencilInterior interior_range(size_t n) const {
+        assert(n >= GridSpacing<T>::min_stencil_size());
         return {1, n - 1};  // 3-point stencil width
     }
 
@@ -278,7 +287,7 @@ public:
 
 private:
     const PDE& pde_;
-    const GridSpacing<T>& spacing_;
+    std::shared_ptr<GridSpacing<T>> spacing_;
     CenteredDifference<T> stencil_;
 };
 ```
@@ -303,7 +312,7 @@ void SpatialOperator<PDE, T>::apply_interior(
     };
 
     // Dispatch to appropriate stencil strategy
-    if (spacing_.is_uniform()) {
+    if (spacing_->is_uniform()) {
         stencil_.apply_uniform(u, Lu, start, end, eval);
     } else {
         stencil_.apply_non_uniform(u, Lu, start, end, eval);
@@ -332,6 +341,8 @@ inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
 
 **Design rationale**:
 - Composes `BlackScholesPDE`, `GridSpacing`, `CenteredDifference`
+- **Lifetime ownership**: Stores `GridSpacing` via `shared_ptr` - safe from dangling references
+- `CenteredDifference` constructed with `*spacing_` (reference is safe since operator owns the pointer)
 - Explicit `apply_interior(start, end)` for cache blocking
 - Returns `interior_range()` so solver knows stencil width
 - Operator doesn't touch boundaries - solver's responsibility
@@ -339,8 +350,9 @@ inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
 - Time parameter always present in API, compile-time dispatch for time-independent PDEs
 - `if constexpr` eliminates unused branch at compile time (zero cost)
 - Grid strategy selection happens once in `apply_interior`, delegates to stencil
+- Precondition checking: `interior_range()` asserts grid has minimum size for stencil
 
-**Status**: 🔄 In progress (needs complete redesign)
+**Status**: 📝 Needs implementation
 
 ---
 
@@ -355,22 +367,23 @@ inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
 namespace mango::operators {
 
 /// Factory function to create spatial operator with appropriate stencil
+/// Returns operator with owned GridSpacing (safe lifetime)
 template<typename PDE, typename T = double>
 auto create_spatial_operator(
     const PDE& pde,
     const GridView<T>& grid)
 {
     auto spacing = std::make_shared<GridSpacing<T>>(grid);
-    return SpatialOperator<PDE, T>(pde, *spacing);
+    return SpatialOperator<PDE, T>(pde, spacing);  // Pass shared_ptr, not reference
 }
 
-/// Overload with explicit spacing
+/// Overload with explicit spacing (for reuse across multiple operators)
 template<typename PDE, typename T = double>
 auto create_spatial_operator(
     const PDE& pde,
     std::shared_ptr<GridSpacing<T>> spacing)
 {
-    return SpatialOperator<PDE, T>(pde, *spacing);
+    return SpatialOperator<PDE, T>(pde, spacing);  // Pass shared_ptr directly
 }
 
 } // namespace mango::operators
@@ -378,7 +391,8 @@ auto create_spatial_operator(
 
 **Design rationale**:
 - Simple factory for common case
-- Handles lifetime management (spacing outlives operator)
+- **Lifetime safety**: Operator owns `GridSpacing` via `shared_ptr` - no dangling references
+- Multiple operators can share the same `GridSpacing` (efficient for parameter sweeps)
 - Uniform vs non-uniform selection happens automatically in `GridSpacing`
 - No runtime polymorphism needed - template instantiation at compile time
 - Can extend to select different stencil types in future
@@ -430,11 +444,18 @@ template<typename Evaluator>
 void apply_non_uniform(span u, span Lu, size_t start, size_t end,
                       Evaluator&& eval) const {
     for (size_t i = start; i < end; ++i) {
-        const T dx_left = spacing_.left_spacing(i);
-        const T dx_right = spacing_.right_spacing(i);
+        const T dx_left = spacing_.left_spacing(i);    // x[i] - x[i-1]
+        const T dx_right = spacing_.right_spacing(i);  // x[i+1] - x[i]
+        const T dx_center = T(0.5) * (dx_left + dx_right);
 
+        // First derivative: centered difference
         const T du_dx = (u[i+1] - u[i-1]) / (dx_left + dx_right);
-        const T d2u_dx2 = /* centered difference with variable spacing */;
+
+        // Second derivative: non-uniform centered difference
+        // d²u/dx² ≈ 2 * [(u[i+1] - u[i])/dx_right - (u[i] - u[i-1])/dx_left] / (dx_left + dx_right)
+        const T forward_diff = (u[i+1] - u[i]) / dx_right;
+        const T backward_diff = (u[i] - u[i-1]) / dx_left;
+        const T d2u_dx2 = (forward_diff - backward_diff) / dx_center;
 
         Lu[i] = eval(d2u_dx2, du_dx, u[i]);
     }
@@ -558,7 +579,10 @@ Test each component independently:
    - Uniform grid: verify `spacing_inv()`, `spacing_inv_sq()` are correct
    - Non-uniform grid: verify `left_spacing(i)`, `right_spacing(i)` match manual calculation
    - Contract enforcement: `spacing()` on non-uniform grid should fail (debug assertion)
-   - Edge cases: n=1, n=2 grids
+   - Precondition enforcement: `left_spacing(0)` should assert/fail (out of bounds)
+   - Precondition enforcement: `right_spacing(n-1)` should assert/fail (out of bounds)
+   - Degenerate grids: n=0, n=1, n=2 (below minimum stencil size)
+   - Minimum size checking: `min_stencil_size()` returns 3
 
 2. **BlackScholesPDE**:
    - Verify operator evaluation matches formula
@@ -579,7 +603,9 @@ Test each component independently:
    - Verify uniform and non-uniform paths produce correct results
    - Time parameter: test with time-independent PDE (parameter ignored)
    - Interior range: verify `[1, n-1)` for 3-point stencil
+   - Interior range precondition: `interior_range(2)` should assert (n < min_stencil_size)
    - `apply()` and `apply_interior()` produce same results
+   - Lifetime safety: operator owns GridSpacing, no dangling references after factory returns
 
 5. **Time-aware dispatch**:
    - Test `has_time_param_v` trait with various PDE types
@@ -801,7 +827,7 @@ spatial_op.apply(t, u, Lu);  // t parameter used by PDE
 
 ## Addressed Design Issues
 
-From codex subagent review:
+### From First codex subagent Review:
 
 1. ✅ **SRP regression in uniform fast path**: Fixed by moving fused kernel to `CenteredDifference` with lambda evaluator (no PDE coupling)
 2. ✅ **Non-uniform spacing underspecified**: Added `left_spacing()` and `right_spacing()` methods to `GridSpacing`
@@ -809,6 +835,14 @@ From codex subagent review:
 4. ✅ **Time parameter removed**: Kept `t` parameter, compile-time dispatch via `if constexpr` for time-independent PDEs (zero cost)
 5. ✅ **Grid strategy in operator**: Strategy selection delegated to stencil via fused kernel methods
 6. ✅ **Migration plan contradiction**: Clarified incremental development in feature branch, atomic merge to main
+
+### From Second codex subagent Review (Final):
+
+1. ✅ **Critical: Dangling reference in factory**: Fixed by storing `shared_ptr<GridSpacing>` in `SpatialOperator` instead of reference
+2. ✅ **Non-uniform second derivative formula missing**: Added complete implementation with centered difference formula for variable spacing
+3. ✅ **Boundary contracts not specified**: Added preconditions for `left_spacing(i)` (requires i >= 1) and `right_spacing(i)` (requires i < n-1)
+4. ✅ **Degenerate grids unhandled**: Added `min_stencil_size()` constant, precondition checking in `interior_range()`, comprehensive tests for n < 3
+5. ✅ **Status conflicts**: Updated all status markers to be consistent (🔄 Partially implemented, 📝 Needs implementation)
 
 ## Related Work
 
@@ -832,13 +866,20 @@ The separation of concerns makes the codebase more flexible and maintainable for
 
 ## Design Validation
 
-**Reviewed by**: codex-subagent (architectural review)
+**Reviewed by**: codex-subagent (two rounds of architectural review)
 
-**Key improvements from review**:
+**First review improvements**:
 - Lambda evaluator pattern eliminates PDE-stencil coupling
 - Explicit interior interface enables clean cache blocking
 - Compile-time time-dispatch supports future extensibility at zero cost
 - Factory pattern recommended but deferred (YAGNI for now)
+
+**Second review (final) improvements**:
+- Fixed critical lifetime bug: operator now owns `GridSpacing` via `shared_ptr`
+- Completed non-uniform stencil formulas (no TODOs remaining)
+- Added explicit preconditions for all boundary-sensitive methods
+- Added degenerate grid handling (n < 3) with compile-time constants
+- Clarified all implementation details for immediate coding
 
 **Performance validation plan**:
 - Unit tests for each component
@@ -846,3 +887,4 @@ The separation of concerns makes the codebase more flexible and maintainable for
 - Benchmark: verify 15.5ms maintained
 - Assembly inspection: confirm lambda inlining
 - `perf stat`: verify instruction count and IPC unchanged
+- Guard tests: small grids (n < 3), API misuse (out-of-bounds access)
