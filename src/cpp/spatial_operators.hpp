@@ -91,6 +91,49 @@ public:
         }
     }
 
+    /// Compute first derivative ∂u/∂x using centered finite differences
+    void compute_first_derivative(std::span<const double> x,
+                                  std::span<const double> u,
+                                  std::span<double> du,
+                                  std::span<const double> dx) const {
+        const size_t n = u.size();
+        if (n < 2) return;
+
+        // Interior: centered difference
+        for (size_t i = 1; i < n - 1; ++i) {
+            double dx_total = dx[i] + dx[i-1];
+            du[i] = (u[i+1] - u[i-1]) / dx_total;
+        }
+
+        // Boundaries: one-sided
+        du[0] = (u[1] - u[0]) / dx[0];
+        du[n-1] = (u[n-1] - u[n-2]) / dx[n-2];
+    }
+
+    /// Compute second derivative ∂²u/∂x² using centered finite differences
+    void compute_second_derivative(std::span<const double> x,
+                                   std::span<const double> u,
+                                   std::span<double> d2u,
+                                   std::span<const double> dx) const {
+        const size_t n = u.size();
+        if (n < 3) {
+            std::fill(d2u.begin(), d2u.end(), 0.0);
+            return;
+        }
+
+        // Interior: centered difference
+        for (size_t i = 1; i < n - 1; ++i) {
+            double left_slope = (u[i] - u[i-1]) / dx[i-1];
+            double right_slope = (u[i+1] - u[i]) / dx[i];
+            double dx_avg = 0.5 * (dx[i] + dx[i-1]);
+            d2u[i] = (right_slope - left_slope) / dx_avg;
+        }
+
+        // Boundaries: zero (needs ghost points for accuracy)
+        d2u[0] = 0.0;
+        d2u[n-1] = 0.0;
+    }
+
 private:
     double D_;  // Diffusion coefficient
 };
