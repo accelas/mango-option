@@ -107,6 +107,9 @@ public:
 
             // Update time
             t = t_next;
+
+            // Process snapshots (CHANGED: pass step index)
+            process_snapshots(step, t);
         }
 
         return true;
@@ -162,6 +165,57 @@ private:
     };
     std::vector<SnapshotRequest> snapshot_requests_;
     size_t next_snapshot_idx_ = 0;
+
+    // Workspace for derivatives
+    std::vector<double> du_dx_;
+    std::vector<double> d2u_dx2_;
+
+    /// Process snapshots at current step index
+    void process_snapshots(size_t step_idx, double t_current) {
+        while (next_snapshot_idx_ < snapshot_requests_.size()) {
+            const auto& req = snapshot_requests_[next_snapshot_idx_];
+
+            // Check if this step index matches
+            if (req.step_index > step_idx) {
+                break;  // Future snapshot
+            }
+
+            if (req.step_index != step_idx) {
+                ++next_snapshot_idx_;  // Skip missed snapshot
+                continue;
+            }
+
+            // Allocate derivative storage on first use
+            if (du_dx_.empty()) {
+                du_dx_.resize(n_);
+                d2u_dx2_.resize(n_);
+            }
+
+            // Compute derivatives using PDE operator
+            spatial_op_.compute_first_derivative(grid_, std::span{u_current_},
+                                                std::span{du_dx_}, workspace_.dx());
+            spatial_op_.compute_second_derivative(grid_, std::span{u_current_},
+                                                  std::span{d2u_dx2_}, workspace_.dx());
+
+            // Build snapshot
+            Snapshot snapshot{
+                .time = t_current,
+                .user_index = req.user_index,
+                .spatial_grid = grid_,
+                .dx = workspace_.dx(),
+                .solution = std::span{u_current_},
+                .spatial_operator = workspace_.lu(),
+                .first_derivative = std::span{du_dx_},
+                .second_derivative = std::span{d2u_dx2_},
+                .problem_params = nullptr
+            };
+
+            // Call collector
+            req.collector->collect(snapshot);
+
+            ++next_snapshot_idx_;
+        }
+    }
 
     /// Apply boundary conditions
     void apply_boundary_conditions(std::span<double> u, double t) {
