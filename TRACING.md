@@ -536,7 +536,7 @@ sudo apt-get install bpftrace
 - Type mismatch between probe definition and script
 - Binary/script version mismatch
 
-**Solution:** Verify probe signatures in `src/mango_trace.h`
+**Solution:** Verify probe signatures in `src/ivcalc_trace.h`
 
 ## Best Practices
 
@@ -565,7 +565,7 @@ sudo apt-get install bpftrace
 
 - [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) - 5-minute getting started
 - [scripts/tracing/README.md](scripts/tracing/README.md) - Script reference
-- [src/mango_trace.h](src/mango_trace.h) - Probe definitions
+- [src/ivcalc_trace.h](src/ivcalc_trace.h) - Probe definitions
 - [bpftrace documentation](https://github.com/iovisor/bpftrace)
 - [USDT probes](https://lwn.net/Articles/753601/)
 
@@ -621,7 +621,7 @@ END { print(@step_times); }
 For issues or questions:
 
 1. Check [Troubleshooting](#troubleshooting) section
-2. Verify probe definitions in `src/mango_trace.h`
+2. Verify probe definitions in `src/ivcalc_trace.h`
 3. Review example scripts in `scripts/tracing/`
 4. Consult bpftrace documentation
 

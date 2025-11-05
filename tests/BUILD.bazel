@@ -72,6 +72,17 @@ cc_test(
 )
 
 cc_test(
+    name = "brent_cpp_test",
+    srcs = ["brent_cpp_test.cc"],
+    deps = [
+        "//src/cpp:brent",
+        "//src/cpp:root_finding",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "newton_workspace_test",
     srcs = ["newton_workspace_test.cc"],
     deps = [
@@ -418,6 +429,16 @@ cc_test(
     ],
     copts = ["-std=c++20"],
     tags = ["manual", "slow"],  # Excluded from fast CI: benchmark takes ~30-60s
+)
+
+cc_test(
+    name = "iv_solver_test",
+    srcs = ["iv_solver_test.cc"],
+    deps = [
+        "//src/cpp:iv_solver",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
 )
 
 cc_test(

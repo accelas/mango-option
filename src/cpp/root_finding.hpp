@@ -42,6 +42,10 @@ struct RootFindingResult {
 
     /// Optional failure diagnostic message
     std::optional<std::string> failure_reason;
+
+    /// Optional root value (for scalar root-finding methods like Brent)
+    /// Not used by Newton-Raphson (which operates on solution vectors)
+    std::optional<double> root;
 };
 
 }  // namespace mango

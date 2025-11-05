@@ -264,7 +264,7 @@ mango-iv/
 │   ├── grid_presets.{h,c}         # Preset grid configurations
 │   ├── brent.h                    # Brent's method (root-finding)
 │   ├── tridiagonal.h              # Tridiagonal solver
-│   └── mango_trace.h             # USDT tracing probes
+│   └── ivcalc_trace.h             # USDT tracing probes
 │
 ├── examples/                      # Demonstration programs
 │   ├── example_implied_volatility.c

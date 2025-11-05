@@ -98,6 +98,23 @@ cc_library(
 )
 
 cc_library(
+    name = "brent",
+    hdrs = ["brent.hpp"],
+    deps = [
+        ":root_finding",
+        "//src:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "newton_workspace",
     hdrs = ["newton_workspace.hpp"],
     deps = [":workspace"],
@@ -175,5 +192,25 @@ cc_library(
         ":snapshot",
     ],
     copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_solver",
+    srcs = ["iv_solver.cpp"],
+    hdrs = ["iv_solver.hpp"],
+    deps = [
+        ":root_finding",
+        ":brent",
+        "//src:american_option",
+        "//src:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
     visibility = ["//visibility:public"],
 )
