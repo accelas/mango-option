@@ -135,6 +135,7 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
         "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
         "-ftree-vectorize",   # Enable auto-vectorization
     ],
@@ -154,6 +155,7 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
         "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
         "-ftree-vectorize",   # Enable auto-vectorization
     ],
