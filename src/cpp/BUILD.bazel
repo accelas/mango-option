@@ -135,6 +135,8 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
     ],
     visibility = ["//visibility:public"],
 )
@@ -152,6 +154,8 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
     ],
     visibility = ["//visibility:public"],
 )
