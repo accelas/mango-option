@@ -419,6 +419,19 @@ cc_test(
     tags = ["manual", "slow"],  # Excluded from fast CI: benchmark takes ~30-60s
 )
 
+cc_test(
+    name = "temporal_event_test",
+    size = "small",
+    srcs = ["temporal_event_test.cc"],
+    deps = [
+        "//src/cpp:pde_solver",
+        "//src/cpp:spatial_operators",
+        "//src/cpp:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow

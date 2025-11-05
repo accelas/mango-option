@@ -18,6 +18,21 @@
 
 namespace mango {
 
+// Temporal event callback signature
+using TemporalEventCallback = std::function<void(double t,
+                                                  std::span<const double> x,
+                                                  std::span<double> u)>;
+
+// Temporal event definition
+struct TemporalEvent {
+    double time;
+    TemporalEventCallback callback;
+
+    auto operator<=>(const TemporalEvent& other) const {
+        return time <=> other.time;
+    }
+};
+
 /// PDE Solver with TR-BDF2 time stepping and cache blocking
 ///
 /// Solves PDEs of the form: ∂u/∂t = L(u, x, t)
@@ -89,6 +104,8 @@ public:
         const double dt = time_.dt();
 
         for (size_t step = 0; step < time_.n_steps(); ++step) {
+            double t_old = t;
+
             // Store u^n for TR-BDF2
             std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
 
@@ -108,6 +125,9 @@ public:
 
             // Update time
             t = t_next;
+
+            // Process temporal events AFTER completing the step
+            process_temporal_events(t_old, t_next, step);
 
             // Process snapshots (CHANGED: pass step index)
             process_snapshots(step, t);
@@ -132,6 +152,19 @@ public:
         std::sort(snapshot_requests_.begin(), snapshot_requests_.end(),
                  [](const auto& a, const auto& b) { return a.step_index < b.step_index; });
         next_snapshot_idx_ = 0;
+    }
+
+    /// Add temporal event to be executed at specific time
+    ///
+    /// Events are applied AFTER the TR-BDF2 step completes (not before).
+    /// This ensures the PDE state is fully updated before event application.
+    ///
+    /// @param time Time at which to execute event
+    /// @param callback Event callback: callback(t, x, u)
+    void add_temporal_event(double time, TemporalEventCallback callback) {
+        events_.push_back({time, std::move(callback)});
+        std::sort(events_.begin(), events_.end(),
+                  [](const auto& a, const auto& b) { return a.time < b.time; });
     }
 
 private:
@@ -166,6 +199,10 @@ private:
     };
     std::vector<SnapshotRequest> snapshot_requests_;
     size_t next_snapshot_idx_ = 0;
+
+    // Temporal event system
+    std::vector<TemporalEvent> events_;
+    size_t next_event_idx_ = 0;
 
     // Workspace for derivatives
     std::vector<double> du_dx_;
@@ -215,6 +252,30 @@ private:
             req.collector->collect(snapshot);
 
             ++next_snapshot_idx_;
+        }
+    }
+
+    /// Process temporal events in time interval (t_old, t_new]
+    ///
+    /// Events are applied AFTER the TR-BDF2 step completes.
+    /// This ensures proper ordering: PDE evolution happens first,
+    /// then events modify the solution (e.g., dividend jumps).
+    void process_temporal_events(double t_old, double t_new, size_t step) {
+        while (next_event_idx_ < events_.size()) {
+            const auto& event = events_[next_event_idx_];
+
+            if (event.time <= t_old) {
+                next_event_idx_++;
+                continue;
+            }
+
+            if (event.time > t_new) {
+                break;
+            }
+
+            // Event is in (t_old, t_new] - apply it
+            event.callback(event.time, grid_, std::span{u_current_});
+            next_event_idx_++;
         }
     }
 
