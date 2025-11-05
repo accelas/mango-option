@@ -45,7 +45,7 @@ struct AmericanOptionParams {
         if (spot <= 0.0) throw std::invalid_argument("Spot must be positive");
         if (maturity <= 0.0) throw std::invalid_argument("Maturity must be positive");
         if (volatility <= 0.0) throw std::invalid_argument("Volatility must be positive");
-        if (rate < 0.0) throw std::invalid_argument("Rate must be non-negative");
+        // Note: rate can be negative (EUR, JPY, CHF markets)
         if (continuous_dividend_yield < 0.0) throw std::invalid_argument("Continuous dividend yield must be non-negative");
 
         // Validate discrete dividends

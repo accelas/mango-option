@@ -181,9 +181,17 @@ AmericanOptionResult AmericanOptionSolver::solve() {
                         });
 
         // 6. Register discrete dividends as temporal events
-        for (const auto& [time, amount] : params_.discrete_dividends) {
+        // Convert from calendar time (years from now) to solver time (backward time)
+        for (const auto& [calendar_time, amount] : params_.discrete_dividends) {
+            // Solver time: t=0 at maturity, t=T at present
+            // Calendar time: time=0 now, time=T at maturity
+            double solver_time = params_.maturity - calendar_time;
+
+            // Skip dividends at or beyond maturity (solver_time <= 0)
+            if (solver_time <= 1e-10) continue;
+
             DividendJump div_jump(amount, params_.strike);
-            solver.add_temporal_event(time,
+            solver.add_temporal_event(solver_time,
                 [div_jump](double t, auto x, auto u) {
                     div_jump(t, x, u);
                 });
@@ -223,9 +231,17 @@ AmericanOptionResult AmericanOptionSolver::solve() {
                         });
 
         // 6. Register discrete dividends as temporal events
-        for (const auto& [time, amount] : params_.discrete_dividends) {
+        // Convert from calendar time (years from now) to solver time (backward time)
+        for (const auto& [calendar_time, amount] : params_.discrete_dividends) {
+            // Solver time: t=0 at maturity, t=T at present
+            // Calendar time: time=0 now, time=T at maturity
+            double solver_time = params_.maturity - calendar_time;
+
+            // Skip dividends at or beyond maturity (solver_time <= 0)
+            if (solver_time <= 1e-10) continue;
+
             DividendJump div_jump(amount, params_.strike);
-            solver.add_temporal_event(time,
+            solver.add_temporal_event(solver_time,
                 [div_jump](double t, auto x, auto u) {
                     div_jump(t, x, u);
                 });

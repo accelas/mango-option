@@ -401,9 +401,10 @@ public:
         : sigma_(sigma), r_(r), d_(d) {}
 
     /**
-     * Apply spatial operator: Lu = -[(σ²/2)·∂²u/∂x² + (r-d-σ²/2)·∂u/∂x - r·u]
+     * Apply spatial operator: Lu = (σ²/2)·∂²u/∂x² + (r-d-σ²/2)·∂u/∂x - r·u
      *
-     * The negative sign converts from backward time (∂V/∂τ) to forward time (∂V/∂t).
+     * This is the Black-Scholes PDE operator in log-moneyness coordinates.
+     * PDESolver integrates forward in solver time where t=0 is at maturity.
      *
      * @param t Current time (unused for time-independent coefficients)
      * @param x Grid points (log-moneyness values)
@@ -439,8 +440,8 @@ public:
             // First derivative: ∂V/∂x (centered finite difference)
             const double du_dx = (u[i+1] - u[i-1]) / (dx_left + dx_right);
 
-            // Black-Scholes operator in forward time (negated)
-            Lu[i] = -(half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u[i]);
+            // Black-Scholes operator without negation
+            Lu[i] = half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u[i];
         }
     }
 
@@ -484,7 +485,8 @@ public:
 
             const double du_dx = (u_with_halo[j+1] - u_with_halo[j-1]) / (dx_left + dx_right);
 
-            Lu_interior[i] = -(half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u_with_halo[j]);
+            // Black-Scholes operator without negation
+            Lu_interior[i] = half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u_with_halo[j];
         }
     }
 

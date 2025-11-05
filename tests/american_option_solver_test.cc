@@ -101,22 +101,23 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
     }, std::invalid_argument);
 }
 
-TEST(AmericanOptionSolverTest, InvalidRate) {
+TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
+    // Negative rates are valid (EUR, JPY, CHF markets)
     AmericanOptionParams params{
         .strike = 100.0,
         .spot = 100.0,
         .maturity = 1.0,
         .volatility = 0.2,
-        .rate = -0.05,  // Invalid
+        .rate = -0.01,  // Valid: negative rate
         .continuous_dividend_yield =0.02,
         .option_type = OptionType::CALL
     };
 
     AmericanOptionGrid grid{};
 
-    EXPECT_THROW({
+    EXPECT_NO_THROW({
         AmericanOptionSolver solver(params, grid);
-    }, std::invalid_argument);
+    });
 }
 
 TEST(AmericanOptionSolverTest, InvalidDividendYield) {
