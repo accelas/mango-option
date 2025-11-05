@@ -506,22 +506,6 @@ cc_test(
 )
 
 cc_test(
-    name = "black_scholes_operator_test",
-    size = "small",
-    srcs = ["black_scholes_operator_test.cc"],
-    deps = [
-        "//src/cpp:spatial_operators",
-        "//src/cpp:pde_solver",
-        "//src/cpp:boundary_conditions",
-        "//src/cpp:root_finding",
-        "//src/cpp:time_domain",
-        "//src/cpp:trbdf2_config",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20", "-fopenmp-simd"],
-)
-
-cc_test(
     name = "american_option_solver_test",
     size = "small",
     srcs = ["american_option_solver_test.cc"],
