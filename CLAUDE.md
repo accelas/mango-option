@@ -385,7 +385,7 @@ This library uses **bpftrace** as the primary tracing tool. bpftrace is:
 
 ### Available Probe Categories
 
-See `src/mango_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
+See `src/ivcalc_trace.h` for complete probe definitions. The tracing system is designed to work across all modules:
 
 1. **Algorithm Lifecycle** (General): `MANGO_TRACE_ALGO_START`, `MANGO_TRACE_ALGO_PROGRESS`, `MANGO_TRACE_ALGO_COMPLETE`
 2. **Convergence Tracking** (General): `MANGO_TRACE_CONVERGENCE_ITER`, `MANGO_TRACE_CONVERGENCE_SUCCESS`, `MANGO_TRACE_CONVERGENCE_FAILED`
@@ -402,7 +402,7 @@ Each module has access to both general-purpose probes (for common patterns like 
 
 When adding new library functionality that needs logging:
 
-1. **Define probe in `src/mango_trace.h`**:
+1. **Define probe in `src/ivcalc_trace.h`**:
    ```c
    #define MANGO_TRACE_MY_EVENT(module_id, param1, param2) \
        DTRACE_PROBE3(MANGO_PROVIDER, my_event, module_id, param1, param2)
@@ -410,7 +410,7 @@ When adding new library functionality that needs logging:
 
 2. **Use probe in source code**:
    ```c
-   #include "mango_trace.h"
+   #include "ivcalc_trace.h"
 
    void my_function() {
        // ... code ...
