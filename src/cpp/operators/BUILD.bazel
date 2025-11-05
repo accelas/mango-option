@@ -21,3 +21,15 @@ cc_library(
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "spatial_operator",
+    hdrs = ["spatial_operator.hpp"],
+    deps = [
+        ":grid_spacing",
+        ":centered_difference",
+        "//src/cpp:grid",
+    ],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
