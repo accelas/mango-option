@@ -146,24 +146,34 @@ AmericanOptionResult AmericanOptionSolver::solve() {
 
     // 4. Setup boundary conditions (NORMALIZED by K=1)
     // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
+    // IMPORTANT: Boundaries must account for time evolution via discounting
+    //
     // LEFT boundary (x → -∞, S → 0):
-    auto left_bc = DirichletBC([this](double, double x) {
+    auto left_bc = DirichletBC([this](double t, double x) {
+        const double tau = t;  // Time to maturity (backward PDE time)
+        const double discount = std::exp(-params_.rate * tau);
+
         if (params_.option_type == OptionType::PUT) {
-            // Deep ITM put: V/K ≈ 1 - exp(x) → 1 as x → -∞
-            return 1.0 - std::exp(x);
+            // Deep ITM put: V = K·e^(-r*τ) - S ≈ K·e^(-r*τ) as S → 0
+            // Normalized: V/K = e^(-r*τ) - e^(x - r*τ) ≈ e^(-r*τ) as x → -∞
+            return discount - std::exp(x) * discount;
         } else {
-            // Deep OTM call: V/K → 0 as S → 0
+            // Deep OTM call: V → 0 as S → 0
             return 0.0;
         }
     });
 
     // RIGHT boundary (x → +∞, S → ∞):
-    auto right_bc = DirichletBC([this](double, double x) {
+    auto right_bc = DirichletBC([this](double t, double x) {
+        const double tau = t;  // Time to maturity (backward PDE time)
+        const double discount = std::exp(-params_.rate * tau);
+
         if (params_.option_type == OptionType::CALL) {
-            // Deep ITM call: V/K ≈ exp(x) - 1
-            return std::exp(x) - 1.0;
+            // Deep ITM call: V = S - K·e^(-r*τ)
+            // Normalized: V/K = (S/K) - e^(-r*τ) = e^x - e^(-r*τ)
+            return std::exp(x) - discount;
         } else {
-            // Deep OTM put: V/K → 0 as S → ∞
+            // Deep OTM put: V → 0 as S → ∞
             return 0.0;
         }
     });
@@ -223,6 +233,7 @@ AmericanOptionResult AmericanOptionSolver::solve() {
 
     } else {  // CALL
         // Create PDESolver with obstacle
+        // Note: left_bc and right_bc already defined above with time-dependent discounting
         PDESolver solver(x_grid, time_domain, trbdf2_config_, root_config_,
                         left_bc, right_bc, bs_op,
                         [](double t, auto x, auto psi) {

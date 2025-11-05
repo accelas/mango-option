@@ -494,6 +494,18 @@ cc_test(
     copts = ["-std=c++20"],
 )
 
+cc_test(
+    name = "cpp_boundary_test",
+    size = "small",
+    srcs = ["cpp_boundary_test.cc"],
+    deps = [
+        "//src:american_option",
+        "//src/cpp:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
