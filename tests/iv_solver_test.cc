@@ -124,3 +124,82 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
     EXPECT_GT(result.implied_vol, 0.0);
     EXPECT_LT(result.implied_vol, 1.0);
 }
+
+// Test 9: Deep ITM put (tests adaptive grid bounds)
+TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
+    params.spot_price = 50.0;  // Deep in the money (S/K = 0.5)
+    params.strike = 100.0;
+    params.market_price = 51.0;  // Intrinsic value is 50
+
+    IVSolver solver(params, config);
+    IVResult result = solver.solve();
+
+    // Should converge with adaptive grid
+    EXPECT_TRUE(result.converged) << "Deep ITM should converge with adaptive grid";
+    EXPECT_GT(result.implied_vol, 0.0);
+    EXPECT_LT(result.implied_vol, 1.0);
+}
+
+// Test 10: Deep OTM put (tests adaptive grid bounds)
+TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
+    params.spot_price = 200.0;  // Deep out of the money (S/K = 2.0)
+    params.strike = 100.0;
+    params.market_price = 1.0;
+
+    IVSolver solver(params, config);
+    IVResult result = solver.solve();
+
+    // Should converge with adaptive grid
+    EXPECT_TRUE(result.converged) << "Deep OTM should converge with adaptive grid";
+    EXPECT_GT(result.implied_vol, 0.0);
+    EXPECT_LT(result.implied_vol, 1.5);
+}
+
+// Test 11: Call option IV calculation
+TEST_F(IVSolverTest, ATMCallIVCalculation) {
+    params.is_call = true;
+    params.market_price = 10.0;  // ATM call price
+
+    IVSolver solver(params, config);
+    IVResult result = solver.solve();
+
+    EXPECT_TRUE(result.converged) << "ATM call should converge";
+    EXPECT_GT(result.implied_vol, 0.15);
+    EXPECT_LT(result.implied_vol, 0.35);
+}
+
+// Test 12: Zero grid_n_space validation
+TEST_F(IVSolverTest, InvalidGridNSpace) {
+    config.grid_n_space = 0;  // Invalid
+
+    IVSolver solver(params, config);
+    IVResult result = solver.solve();
+
+    EXPECT_FALSE(result.converged);
+    EXPECT_TRUE(result.failure_reason.has_value());
+    EXPECT_EQ(result.failure_reason.value(), "Grid n_space must be positive");
+}
+
+// Test 13: Zero grid_n_time validation
+TEST_F(IVSolverTest, InvalidGridNTime) {
+    config.grid_n_time = 0;  // Invalid
+
+    IVSolver solver(params, config);
+    IVResult result = solver.solve();
+
+    EXPECT_FALSE(result.converged);
+    EXPECT_TRUE(result.failure_reason.has_value());
+    EXPECT_EQ(result.failure_reason.value(), "Grid n_time must be positive");
+}
+
+// Test 14: Negative grid_s_max validation
+TEST_F(IVSolverTest, InvalidGridSMax) {
+    config.grid_s_max = -100.0;  // Invalid
+
+    IVSolver solver(params, config);
+    IVResult result = solver.solve();
+
+    EXPECT_FALSE(result.converged);
+    EXPECT_TRUE(result.failure_reason.has_value());
+    EXPECT_EQ(result.failure_reason.value(), "Grid s_max must be positive");
+}

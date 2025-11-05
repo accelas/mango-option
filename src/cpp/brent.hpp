@@ -54,13 +54,25 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
     // Emit start trace
     MANGO_TRACE_BRENT_START(a, b, config.brent_tol_abs, config.max_iter);
 
+    // Check for NaN/Inf at endpoints (indicates invalid input or function failure)
+    if (!std::isfinite(fa) || !std::isfinite(fb)) {
+        return RootFindingResult{
+            .converged = false,
+            .iterations = 0,
+            .final_error = std::numeric_limits<double>::quiet_NaN(),
+            .failure_reason = "Function returned non-finite value (NaN or Inf)",
+            .root = std::nullopt
+        };
+    }
+
     // Check if root is bracketed
     if (fa * fb > 0.0) {
         return RootFindingResult{
             .converged = false,
             .iterations = 0,
             .final_error = std::min(std::abs(fa), std::abs(fb)),
-            .failure_reason = "Root not bracketed"
+            .failure_reason = "Root not bracketed",
+            .root = std::nullopt
         };
     }
 
@@ -157,6 +169,18 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
 
         // Evaluate function at s
         double fs = f(s);
+
+        // Check for NaN (indicates PDE solver failure or invalid input)
+        if (!std::isfinite(fs)) {
+            MANGO_TRACE_BRENT_COMPLETE(s, iter + 1, 0);
+            return RootFindingResult{
+                .converged = false,
+                .iterations = iter + 1,
+                .final_error = std::numeric_limits<double>::quiet_NaN(),
+                .failure_reason = "Function returned non-finite value (NaN or Inf)",
+                .root = std::nullopt
+            };
+        }
 
         // Update for next iteration
         d = c;

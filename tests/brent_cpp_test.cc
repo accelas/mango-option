@@ -101,6 +101,39 @@ TEST_F(BrentCppTest, TranscendentalFunction) {
     EXPECT_LT(std::abs(result.final_error), tolerance);
 }
 
+// Test NaN handling (critical bug fix)
+TEST_F(BrentCppTest, FunctionReturnsNaN) {
+    // Function that always returns NaN (simulates PDE solver failure)
+    auto f = [](double x) -> double {
+        return std::numeric_limits<double>::quiet_NaN();
+    };
+
+    mango::RootFindingConfig config{.max_iter = max_iter, .tolerance = tolerance};
+    auto result = mango::brent_find_root(f, 0.0, 3.0, config);
+
+    // Should fail with descriptive error, not false convergence
+    EXPECT_FALSE(result.converged);
+    EXPECT_TRUE(result.failure_reason.has_value());
+    EXPECT_EQ(result.failure_reason.value(), "Function returned non-finite value (NaN or Inf)");
+    EXPECT_TRUE(std::isnan(result.final_error));
+}
+
+// Test Inf handling
+TEST_F(BrentCppTest, FunctionReturnsInf) {
+    // Function that always returns Inf
+    auto f = [](double x) -> double {
+        return std::numeric_limits<double>::infinity();
+    };
+
+    mango::RootFindingConfig config{.max_iter = max_iter, .tolerance = tolerance};
+    auto result = mango::brent_find_root(f, 0.0, 3.0, config);
+
+    // Should fail with descriptive error
+    EXPECT_FALSE(result.converged);
+    EXPECT_TRUE(result.failure_reason.has_value());
+    EXPECT_EQ(result.failure_reason.value(), "Function returned non-finite value (NaN or Inf)");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

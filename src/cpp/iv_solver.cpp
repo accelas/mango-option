@@ -40,6 +40,22 @@ std::optional<std::string> IVSolver::validate_params() const {
         return "Market price must be positive";
     }
 
+    // Validate grid parameters
+    if (config_.grid_n_space == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
+        return "Grid n_space must be positive";
+    }
+
+    if (config_.grid_n_time == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
+        return "Grid n_time must be positive";
+    }
+
+    if (config_.grid_s_max <= 0.0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 8, config_.grid_s_max, 0.0);
+        return "Grid s_max must be positive";
+    }
+
     // Check arbitrage bounds
     double intrinsic_value;
     if (params_.is_call) {
@@ -112,11 +128,32 @@ double IVSolver::objective_function(double volatility) const {
         .dividend_amounts = nullptr
     };
 
+    // Compute adaptive grid bounds based on spot/strike and config.grid_s_max
+    // The grid should:
+    // 1. Always contain the spot price (critical for interpolation)
+    // 2. Extend to at least grid_s_max (default 200.0)
+    // 3. Use reasonable lower bound (0.5 * spot or smaller if needed)
+
+    double moneyness = params_.spot_price / params_.strike;
+
+    // Lower bound: ensure we capture deep ITM scenarios
+    // Use smaller of: 0.5 * moneyness or 0.5 (whichever extends grid more)
+    double min_moneyness = std::min(0.5, moneyness * 0.5);
+
+    // Upper bound: ensure we capture deep OTM scenarios
+    // Use larger of: 2.0 * moneyness or grid_s_max / strike (whichever extends grid more)
+    double max_s = std::max(params_.strike * 2.0, config_.grid_s_max);
+    double max_moneyness = std::max(2.0, max_s / params_.strike);
+
+    // Ensure spot is within bounds (with margin for interpolation)
+    min_moneyness = std::min(min_moneyness, moneyness * 0.9);
+    max_moneyness = std::max(max_moneyness, moneyness * 1.1);
+
     // Create grid for PDE solver
     size_t n_grid;
     AmericanOptionGrid grid_params = {
-        .x_min = std::log(0.5),  // ln(0.5)
-        .x_max = std::log(2.0),  // ln(2.0)
+        .x_min = std::log(min_moneyness),  // Adaptive lower bound
+        .x_max = std::log(max_moneyness),  // Adaptive upper bound
         .n_points = config_.grid_n_space,
         .dt = params_.time_to_maturity / config_.grid_n_time,
         .n_steps = config_.grid_n_time
