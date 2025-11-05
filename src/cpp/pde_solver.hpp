@@ -277,7 +277,7 @@ private:
     //
     // These methods were previously in a separate NewtonSolver class but were
     // merged into PDESolver to make the design honest about their specific
-    // purpose. See PR #94 for the architectural discussion.
+    // purpose. See PR #97 for the architectural discussion.
     // ========================================================================
 
     /// Solve implicit stage equation via Newton-Raphson
