@@ -468,6 +468,17 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_spacing_test",
+    srcs = ["grid_spacing_test.cc"],
+    deps = [
+        "//src/cpp/operators:grid_spacing",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "black_scholes_operator_test",
     size = "small",
     srcs = ["black_scholes_operator_test.cc"],

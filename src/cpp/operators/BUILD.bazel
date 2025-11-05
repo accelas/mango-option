@@ -1,0 +1,23 @@
+cc_library(
+    name = "grid_spacing",
+    hdrs = ["grid_spacing.hpp"],
+    deps = ["//src/cpp:grid"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "centered_difference",
+    hdrs = ["centered_difference.hpp"],
+    deps = [":grid_spacing"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "black_scholes_pde",
+    hdrs = ["black_scholes_pde.hpp"],
+    deps = [":grid_spacing"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
