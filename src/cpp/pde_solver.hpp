@@ -6,7 +6,7 @@
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
 #include "tridiagonal_solver.hpp"
-#include "newton_solver.hpp"
+#include "newton_workspace.hpp"
 #include "root_finding.hpp"
 #include "snapshot.hpp"
 #include <span>
@@ -14,6 +14,7 @@
 #include <functional>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace mango {
 
@@ -64,7 +65,7 @@ public:
         , u_current_(n_)
         , u_old_(n_)
         , rhs_(n_)
-        , newton_solver_(n_, root_config_, workspace_, left_bc_, right_bc_, spatial_op_, grid)
+        , newton_ws_(n_, workspace_)
     {
     }
 
@@ -154,8 +155,8 @@ private:
     std::vector<double> u_old_;      // u^n
     std::vector<double> rhs_;        // n: RHS vector for stages
 
-    // Newton solver (persistent, created once)
-    NewtonSolver<BoundaryL, BoundaryR, SpatialOp> newton_solver_;
+    // Newton workspace (for implicit stage solving)
+    NewtonWorkspace newton_ws_;
 
     // Snapshot collection
     struct SnapshotRequest {
@@ -296,8 +297,8 @@ private:
         // Initial guess: u* = u^n
         std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
 
-        // Use NewtonSolver
-        auto result = newton_solver_.solve(t_stage, w1,
+        // Solve implicit stage
+        auto result = solve_implicit_stage(t_stage, w1,
                                           std::span{u_current_},
                                           std::span{rhs_});
 
@@ -310,7 +311,7 @@ private:
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via Newton-Raphson iteration
-    bool solve_stage2(double t_stage, double t_next, double dt) {
+    bool solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
         const double two_minus_gamma = 2.0 - gamma;
@@ -329,13 +330,229 @@ private:
         // Initial guess: u^{n+1} = u* (already in u_current_)
         // (No need to copy, u_current_ already has u^{n+γ})
 
-        // Use NewtonSolver
-        auto result = newton_solver_.solve(t_next, w2,
+        // Solve implicit stage
+        auto result = solve_implicit_stage(t_next, w2,
                                           std::span{u_current_},
                                           std::span{rhs_});
 
         return result.converged;
     }
+
+    // ========================================================================
+    // Newton-Raphson methods (for implicit stage solving)
+    // ========================================================================
+    //
+    // NOTE: These methods are TR-BDF2-specific implementation details and NOT
+    // intended as a general-purpose Newton solver. They solve the specific form:
+    //   u = rhs + coeff_dt·L(u)
+    // which arises from implicit time-stepping in PDEs.
+    //
+    // For general root-finding needs, see root_finding.hpp for the abstraction
+    // layer (RootFindingConfig, RootFindingResult). A truly general Newton
+    // solver would use function pointers/callables rather than template
+    // parameters for boundary conditions and spatial operators.
+    //
+    // These methods were previously in a separate NewtonSolver class but were
+    // merged into PDESolver to make the design honest about their specific
+    // purpose. See PR #97 for the architectural discussion.
+    // ========================================================================
+
+    /// Solve implicit stage equation via Newton-Raphson
+    ///
+    /// Solves: u = rhs + coeff_dt·L(u)
+    /// Equivalently: F(u) = u - rhs - coeff_dt·L(u) = 0
+    ///
+    /// @param t Time at which to evaluate operators
+    /// @param coeff_dt TR-BDF2 weight (stage1_weight or stage2_weight)
+    /// @param u Solution vector (input: initial guess, output: converged solution)
+    /// @param rhs Right-hand side from previous stage
+    /// @return Result with convergence status
+    RootFindingResult solve_implicit_stage(double t, double coeff_dt,
+                                           std::span<double> u,
+                                           std::span<const double> rhs) {
+        const double eps = root_config_.jacobian_fd_epsilon;
+
+        // Apply BCs to initial guess
+        apply_boundary_conditions(u, t);
+
+        // Quasi-Newton: Build Jacobian once and reuse
+        build_jacobian(t, coeff_dt, u, eps);
+
+        // Copy initial guess
+        std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
+
+        // Newton iteration
+        for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
+            // Evaluate L(u)
+            apply_operator_with_blocking(t, u, workspace_.lu());
+
+            // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
+            compute_residual(u, coeff_dt, workspace_.lu(), rhs,
+                           newton_ws_.residual());
+
+            // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
+            apply_bc_to_residual(newton_ws_.residual(), u, t);
+
+            // Newton method: Solve J·δu = -F(u), then update u ← u + δu
+            // Negate residual for RHS
+            for (size_t i = 0; i < n_; ++i) {
+                newton_ws_.residual()[i] = -newton_ws_.residual()[i];
+            }
+
+            // Solve J·δu = -F(u) using Thomas algorithm
+            bool success = solve_tridiagonal(
+                newton_ws_.jacobian_lower(),
+                newton_ws_.jacobian_diag(),
+                newton_ws_.jacobian_upper(),
+                newton_ws_.residual(),
+                newton_ws_.delta_u(),
+                newton_ws_.tridiag_workspace()
+            );
+
+            if (!success) {
+                return {false, iter, std::numeric_limits<double>::infinity(),
+                       "Singular Jacobian"};
+            }
+
+            // Update: u ← u + δu
+            for (size_t i = 0; i < n_; ++i) {
+                u[i] += newton_ws_.delta_u()[i];
+            }
+
+            apply_boundary_conditions(u, t);
+
+            // Check convergence via step delta
+            double error = compute_step_delta_error(u, newton_ws_.u_old());
+
+            if (error < root_config_.tolerance) {
+                return {true, iter + 1, error, std::nullopt};
+            }
+
+            // Prepare for next iteration
+            std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
+        }
+
+        return {false, root_config_.max_iter,
+               compute_step_delta_error(u, newton_ws_.u_old()),
+               "Max iterations reached"};
+    }
+
+    void compute_residual(std::span<const double> u, double coeff_dt,
+                         std::span<const double> Lu,
+                         std::span<const double> rhs,
+                         std::span<double> residual) {
+        // F(u) = u - rhs - coeff_dt·L(u) = 0
+        // We want to solve u = rhs + coeff_dt·L(u)
+        for (size_t i = 0; i < n_; ++i) {
+            residual[i] = u[i] - rhs[i] - coeff_dt * Lu[i];
+        }
+    }
+
+    double compute_step_delta_error(std::span<const double> u_new,
+                                    std::span<const double> u_old) {
+        double sum_sq_error = 0.0;
+        double sum_sq_norm = 0.0;
+        for (size_t i = 0; i < n_; ++i) {
+            double diff = u_new[i] - u_old[i];
+            sum_sq_error += diff * diff;
+            sum_sq_norm += u_new[i] * u_new[i];
+        }
+        double rms_error = std::sqrt(sum_sq_error / n_);
+        double rms_norm = std::sqrt(sum_sq_norm / n_);
+        const double epsilon = 1e-12;
+        return (rms_norm > epsilon) ? rms_error / (rms_norm + epsilon) : rms_error;
+    }
+
+    void apply_bc_to_residual(std::span<double> residual,
+                              std::span<const double> u,
+                              double t) {
+        // For Dirichlet BC: F(u) = u - g, so residual = u - g
+        // Left boundary
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
+            double g = left_bc_.value(t, grid_[0]);
+            residual[0] = u[0] - g;  // u - g (we want u = g, so F = u - g = 0)
+        }
+
+        // Right boundary
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::dirichlet_tag>) {
+            double g = right_bc_.value(t, grid_[n_ - 1]);
+            residual[n_ - 1] = u[n_ - 1] - g;  // u - g
+        }
+    }
+
+    void build_jacobian(double t, double coeff_dt,
+                       std::span<const double> u, double eps) {
+        // Initialize u_perturb and compute baseline L(u)
+        std::copy(u.begin(), u.end(), newton_ws_.u_perturb().begin());
+        apply_operator_with_blocking(t, u, workspace_.lu());
+
+        // Interior points: tridiagonal structure via finite differences
+        // J = ∂F/∂u where F(u) = u - rhs - coeff_dt·L(u)
+        // So ∂F/∂u = I - coeff_dt·∂L/∂u
+        for (size_t i = 1; i < n_ - 1; ++i) {
+            // Diagonal: ∂F/∂u_i = 1 - coeff_dt·∂L_i/∂u_i
+            newton_ws_.u_perturb()[i] = u[i] + eps;
+            apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
+            double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            newton_ws_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
+            newton_ws_.u_perturb()[i] = u[i];
+
+            // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
+            newton_ws_.u_perturb()[i - 1] = u[i - 1] + eps;
+            apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
+            double dLi_duim1 = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            newton_ws_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
+            newton_ws_.u_perturb()[i - 1] = u[i - 1];
+
+            // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
+            newton_ws_.u_perturb()[i + 1] = u[i + 1] + eps;
+            apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
+            double dLi_duip1 = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            newton_ws_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
+            newton_ws_.u_perturb()[i + 1] = u[i + 1];
+        }
+
+        // Boundary rows
+        build_jacobian_boundaries(t, coeff_dt, u, eps);
+    }
+
+    void build_jacobian_boundaries(double t, double coeff_dt,
+                                   std::span<const double> u, double eps) {
+        // Left boundary
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
+            // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
+            newton_ws_.jacobian_diag()[0] = 1.0;
+            newton_ws_.jacobian_upper()[0] = 0.0;
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::neumann_tag>) {
+            // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
+            newton_ws_.u_perturb()[0] = u[0] + eps;
+            apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
+            double dL0_du0 = (newton_ws_.Lu_perturb()[0] - workspace_.lu()[0]) / eps;
+            newton_ws_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
+            newton_ws_.u_perturb()[0] = u[0];
+
+            newton_ws_.u_perturb()[1] = u[1] + eps;
+            apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
+            double dL0_du1 = (newton_ws_.Lu_perturb()[0] - workspace_.lu()[0]) / eps;
+            newton_ws_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
+            newton_ws_.u_perturb()[1] = u[1];
+        }
+
+        // Right boundary
+        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::dirichlet_tag>) {
+            // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
+            newton_ws_.jacobian_diag()[n_ - 1] = 1.0;
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::neumann_tag>) {
+            // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
+            size_t i = n_ - 1;
+            newton_ws_.u_perturb()[i] = u[i] + eps;
+            apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
+            double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            newton_ws_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
+            newton_ws_.u_perturb()[i] = u[i];
+        }
+    }
+
 };
 
 }  // namespace mango
