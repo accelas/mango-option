@@ -8,6 +8,7 @@ Refactor spatial operator classes to follow Single Responsibility Principle by s
 - v1: Initial design
 - v2: Addressed critical issues from first codex review (lambda decoupling, explicit interior interface, time-aware polymorphism, factory pattern)
 - v3: Fixed critical lifetime issue and implementation gaps from second codex review (shared_ptr ownership, non-uniform formula, boundary contracts, degenerate grids)
+- v4: Fixed critical PDE lifetime issue from third codex review (PDE stored by value, safe for temporaries)
 
 ## Problem Statement
 
@@ -255,7 +256,7 @@ struct StencilInterior {
 template<typename PDE, typename T = double>
 class SpatialOperator {
 public:
-    SpatialOperator(const PDE& pde, std::shared_ptr<GridSpacing<T>> spacing);
+    SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing);
 
     /// Get interior range for this stencil (3-point: [1, n-1))
     /// Precondition: n >= GridSpacing<T>::min_stencil_size() (i.e., n >= 3)
@@ -286,7 +287,7 @@ public:
                                   std::span<T> d2u_dx2) const;
 
 private:
-    const PDE& pde_;
+    PDE pde_;  // Owned by value (PDEs are typically small)
     std::shared_ptr<GridSpacing<T>> spacing_;
     CenteredDifference<T> stencil_;
 };
@@ -341,8 +342,10 @@ inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
 
 **Design rationale**:
 - Composes `BlackScholesPDE`, `GridSpacing`, `CenteredDifference`
-- **Lifetime ownership**: Stores `GridSpacing` via `shared_ptr` - safe from dangling references
-- `CenteredDifference` constructed with `*spacing_` (reference is safe since operator owns the pointer)
+- **Lifetime ownership**:
+  - PDE stored by value (safe from temporaries, PDEs are typically small: 24-32 bytes)
+  - `GridSpacing` stored via `shared_ptr` (allows sharing across operators)
+  - `CenteredDifference` constructed with `*spacing_` (reference is safe since operator owns the pointer)
 - Explicit `apply_interior(start, end)` for cache blocking
 - Returns `interior_range()` so solver knows stencil width
 - Operator doesn't touch boundaries - solver's responsibility
@@ -367,23 +370,23 @@ inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
 namespace mango::operators {
 
 /// Factory function to create spatial operator with appropriate stencil
-/// Returns operator with owned GridSpacing (safe lifetime)
+/// Returns operator with owned PDE and GridSpacing (safe lifetimes)
 template<typename PDE, typename T = double>
 auto create_spatial_operator(
-    const PDE& pde,
+    PDE pde,  // Pass by value to allow perfect forwarding of temporaries
     const GridView<T>& grid)
 {
     auto spacing = std::make_shared<GridSpacing<T>>(grid);
-    return SpatialOperator<PDE, T>(pde, spacing);  // Pass shared_ptr, not reference
+    return SpatialOperator<PDE, T>(std::move(pde), spacing);
 }
 
 /// Overload with explicit spacing (for reuse across multiple operators)
 template<typename PDE, typename T = double>
 auto create_spatial_operator(
-    const PDE& pde,
+    PDE pde,  // Pass by value
     std::shared_ptr<GridSpacing<T>> spacing)
 {
-    return SpatialOperator<PDE, T>(pde, spacing);  // Pass shared_ptr directly
+    return SpatialOperator<PDE, T>(std::move(pde), spacing);
 }
 
 } // namespace mango::operators
@@ -391,7 +394,10 @@ auto create_spatial_operator(
 
 **Design rationale**:
 - Simple factory for common case
-- **Lifetime safety**: Operator owns `GridSpacing` via `shared_ptr` - no dangling references
+- **Lifetime safety**:
+  - PDE passed by value and moved into operator - safe for temporaries
+  - `GridSpacing` owned via `shared_ptr` - no dangling references
+  - Supports `create_spatial_operator(BlackScholesPDE(sigma, r, d), grid)` safely
 - Multiple operators can share the same `GridSpacing` (efficient for parameter sweeps)
 - Uniform vs non-uniform selection happens automatically in `GridSpacing`
 - No runtime polymorphism needed - template instantiation at compile time
@@ -689,9 +695,10 @@ UniformGridBlackScholesOperator bs_op(sigma, r, d, dx);
 
 // NEW:
 auto grid_view = GridView(grid_.x);  // From existing grid
-auto spacing = std::make_shared<GridSpacing>(grid_view);
-auto pde = BlackScholesPDE(sigma, r, d);
-auto spatial_op = create_spatial_operator(pde, spacing);
+auto spatial_op = create_spatial_operator(
+    BlackScholesPDE(sigma, r, d),  // Temporary is safe
+    grid_view
+);
 ```
 
 ### Phase 4: Update Greeks Computation
@@ -772,9 +779,16 @@ bs_op.compute_second_derivative(x, u, d2u_dx2, dx_array);
 
 ```cpp
 auto grid_view = GridView(grid.x);
-auto spacing = std::make_shared<GridSpacing>(grid_view);
+
+// Option 1: Pass temporary PDE (safe with value semantics)
+auto spatial_op = create_spatial_operator(
+    BlackScholesPDE(sigma, r, d),  // Temporary is safe!
+    grid_view
+);
+
+// Option 2: Reuse PDE across operators (if needed)
 auto pde = BlackScholesPDE(sigma, r, d);
-auto spatial_op = create_spatial_operator(pde, spacing);
+auto spatial_op2 = create_spatial_operator(pde, grid_view);
 
 // Apply operator (time parameter for future extensibility)
 spatial_op.apply(t, u, Lu);
@@ -836,13 +850,17 @@ spatial_op.apply(t, u, Lu);  // t parameter used by PDE
 5. ✅ **Grid strategy in operator**: Strategy selection delegated to stencil via fused kernel methods
 6. ✅ **Migration plan contradiction**: Clarified incremental development in feature branch, atomic merge to main
 
-### From Second codex subagent Review (Final):
+### From Second codex subagent Review:
 
 1. ✅ **Critical: Dangling reference in factory**: Fixed by storing `shared_ptr<GridSpacing>` in `SpatialOperator` instead of reference
 2. ✅ **Non-uniform second derivative formula missing**: Added complete implementation with centered difference formula for variable spacing
 3. ✅ **Boundary contracts not specified**: Added preconditions for `left_spacing(i)` (requires i >= 1) and `right_spacing(i)` (requires i < n-1)
 4. ✅ **Degenerate grids unhandled**: Added `min_stencil_size()` constant, precondition checking in `interior_range()`, comprehensive tests for n < 3
 5. ✅ **Status conflicts**: Updated all status markers to be consistent (🔄 Partially implemented, 📝 Needs implementation)
+
+### From Third codex subagent Review (Final):
+
+1. ✅ **Critical: PDE dangling reference**: Fixed by storing PDE by value in `SpatialOperator` instead of reference. Factory now passes PDE by value and moves it. Safe for temporaries: `create_spatial_operator(BlackScholesPDE(sigma, r, d), grid)` now works correctly.
 
 ## Related Work
 
@@ -866,7 +884,7 @@ The separation of concerns makes the codebase more flexible and maintainable for
 
 ## Design Validation
 
-**Reviewed by**: codex-subagent (two rounds of architectural review)
+**Reviewed by**: codex-subagent (three rounds of architectural review)
 
 **First review improvements**:
 - Lambda evaluator pattern eliminates PDE-stencil coupling
@@ -874,12 +892,18 @@ The separation of concerns makes the codebase more flexible and maintainable for
 - Compile-time time-dispatch supports future extensibility at zero cost
 - Factory pattern recommended but deferred (YAGNI for now)
 
-**Second review (final) improvements**:
+**Second review improvements**:
 - Fixed critical lifetime bug: operator now owns `GridSpacing` via `shared_ptr`
 - Completed non-uniform stencil formulas (no TODOs remaining)
 - Added explicit preconditions for all boundary-sensitive methods
 - Added degenerate grid handling (n < 3) with compile-time constants
 - Clarified all implementation details for immediate coding
+
+**Third review (final) improvements**:
+- Fixed critical PDE lifetime bug: operator now owns PDE by value (not reference)
+- Factory passes PDE by value and moves it into operator
+- Safe for temporaries: `create_spatial_operator(BlackScholesPDE(...), grid)` works correctly
+- All lifetime issues resolved: both PDE and GridSpacing safely owned
 
 **Performance validation plan**:
 - Unit tests for each component
