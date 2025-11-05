@@ -115,6 +115,8 @@ cc_test(
         "//src/cpp:boundary_conditions",
         "//src/cpp:root_finding",
         "//src/cpp:snapshot",
+        "//src/cpp/operators:operator_factory",
+        "//src/cpp/operators:laplacian_pde",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -468,19 +470,39 @@ cc_test(
 )
 
 cc_test(
-    name = "black_scholes_operator_test",
-    size = "small",
-    srcs = ["black_scholes_operator_test.cc"],
+    name = "grid_spacing_test",
+    srcs = ["grid_spacing_test.cc"],
     deps = [
-        "//src/cpp:spatial_operators",
-        "//src/cpp:pde_solver",
-        "//src/cpp:boundary_conditions",
-        "//src/cpp:root_finding",
-        "//src/cpp:time_domain",
-        "//src/cpp:trbdf2_config",
+        "//src/cpp/operators:grid_spacing",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "centered_difference_test",
+    srcs = ["centered_difference_test.cc"],
+    deps = [
+        "//src/cpp/operators:centered_difference",
+        "//src/cpp/operators:grid_spacing",
+        "//src/cpp:grid",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20", "-fopenmp-simd"],
+)
+
+cc_test(
+    name = "spatial_operator_test",
+    srcs = ["spatial_operator_test.cc"],
+    deps = [
+        "//src/cpp/operators:spatial_operator",
+        "//src/cpp/operators:black_scholes_pde",
+        "//src/cpp/operators:grid_spacing",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
 )
 
 cc_test(
@@ -504,6 +526,31 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20", "-fopenmp-simd"],
+)
+
+cc_test(
+    name = "operator_factory_test",
+    srcs = ["operator_factory_test.cc"],
+    deps = [
+        "//src/cpp/operators:operator_factory",
+        "//src/cpp/operators:black_scholes_pde",
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "spatial_operator_integration_test",
+    srcs = ["spatial_operator_integration_test.cc"],
+    deps = [
+        "//src/cpp/operators:operator_factory",
+        "//src/cpp/operators:black_scholes_pde",
+        "//src/cpp:spatial_operators",  # Old operators for comparison
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
 )
 
 # Test suites defined for convenience

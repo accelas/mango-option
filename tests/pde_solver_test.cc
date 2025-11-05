@@ -3,6 +3,8 @@
 #include "src/cpp/boundary_conditions.hpp"
 #include "src/cpp/root_finding.hpp"
 #include "src/cpp/snapshot.hpp"
+#include "src/cpp/operators/operator_factory.hpp"
+#include "src/cpp/operators/laplacian_pde.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
@@ -318,4 +320,69 @@ TEST(PDESolverTest, SnapshotCollection) {
     ASSERT_EQ(collector.collected_indices.size(), 2u);
     EXPECT_EQ(collector.collected_indices[0], 0u);  // tau_idx=0
     EXPECT_EQ(collector.collected_indices[1], 1u);  // tau_idx=1
+}
+
+TEST(PDESolverTest, WorksWithNewOperatorInterface) {
+    // Test that PDESolver works with new SpatialOperator interface
+    // This test uses the new composed operator architecture
+    // Heat equation: du/dt = D·d²u/dx² with D = 0.1
+    // Domain: x ∈ [0, 1], t ∈ [0, 0.1]
+    // BC: u(0,t) = 0, u(1,t) = 0
+    // IC: u(x,0) = sin(π·x)
+    // Analytical: u(x,t) = sin(π·x)·exp(-D·π²·t)
+
+    const double D = 0.1;
+    const double pi = std::numbers::pi;
+
+    // Create grid
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 51).generate();
+    auto grid_view = mango::GridView<double>(grid.span());
+
+    // Create new spatial operator using factory
+    auto spatial_op = mango::operators::create_spatial_operator(
+        mango::operators::LaplacianPDE<double>(D),
+        grid_view
+    );
+
+    // Time domain
+    mango::TimeDomain time(0.0, 0.1, 0.001);  // 100 time steps
+
+    // TR-BDF2 config (force single block for small grid)
+    mango::TRBDF2Config trbdf2;
+    trbdf2.cache_blocking_threshold = 10000;
+
+    // Root-finding config
+    mango::RootFindingConfig root_config;
+
+    // Boundary conditions: u(0,t) = 0, u(1,t) = 0
+    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
+    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
+
+    // Initial condition: u(x,0) = sin(π·x)
+    auto ic = [pi](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::sin(pi * x[i]);
+        }
+    };
+
+    // Create solver with new operator
+    mango::PDESolver solver(grid.span(), time, trbdf2, root_config,
+                           left_bc, right_bc, spatial_op);
+
+    // Initialize with IC
+    solver.initialize(ic);
+
+    // Solve
+    bool success = solver.solve();
+    EXPECT_TRUE(success);
+
+    // Verify against analytical solution
+    auto solution = solver.solution();
+    double decay = std::exp(-D * pi * pi * 0.1);
+
+    for (size_t i = 0; i < grid.size(); ++i) {
+        double x = grid.span()[i];
+        double expected = std::sin(pi * x) * decay;
+        EXPECT_NEAR(solution[i], expected, 5e-4);  // 0.05% relative error
+    }
 }

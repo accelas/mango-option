@@ -91,6 +91,11 @@ public:
         , rhs_(n_)
         , newton_ws_(n_, workspace_)
     {
+        // Initialize grid information for legacy operators that need it
+        // (e.g., LaplacianOperator) via set_grid() if present
+        if constexpr (requires { spatial_op_.set_grid(grid, workspace_.dx()); }) {
+            spatial_op_.set_grid(grid, workspace_.dx());
+        }
     }
 
     /// Initialize with initial condition
@@ -246,10 +251,8 @@ private:
             }
 
             // Compute derivatives using PDE operator
-            spatial_op_.compute_first_derivative(grid_, std::span{u_current_},
-                                                std::span{du_dx_}, workspace_.dx());
-            spatial_op_.compute_second_derivative(grid_, std::span{u_current_},
-                                                  std::span{d2u_dx2_}, workspace_.dx());
+            spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_});
+            spatial_op_.compute_second_derivative(std::span{u_current_}, std::span{d2u_dx2_});
 
             // Build snapshot
             Snapshot snapshot{
@@ -341,7 +344,9 @@ private:
 
         // Small grid: use full-array path (no blocking overhead)
         if (workspace_.cache_config().n_blocks == 1) {
-            spatial_op_(t, grid_, u, Lu, workspace_.dx());
+            spatial_op_.apply(t, u, Lu);
+            // Zero boundary values (BCs will override after)
+            Lu[0] = Lu[n-1] = 0.0;
             return;
         }
 
@@ -353,23 +358,8 @@ private:
             // Skip boundary-only blocks
             if (interior_start >= interior_end) continue;
 
-            // Compute halo sizes (clamped at global boundaries)
-            const size_t halo_left = std::min(workspace_.cache_config().overlap,
-                                             interior_start);
-            const size_t halo_right = std::min(workspace_.cache_config().overlap,
-                                              n - interior_end);
-            const size_t interior_count = interior_end - interior_start;
-
-            // Build spans with halos
-            auto x_halo = std::span{grid_.data() + interior_start - halo_left,
-                                   interior_count + halo_left + halo_right};
-            auto u_halo = std::span{u.data() + interior_start - halo_left,
-                                   interior_count + halo_left + halo_right};
-            auto lu_out = std::span{Lu.data() + interior_start, interior_count};
-
-            // Call block-aware operator
-            spatial_op_.apply_block(t, interior_start, halo_left, halo_right,
-                                   x_halo, u_halo, lu_out, workspace_.dx());
+            // Call apply_interior on this block
+            spatial_op_.apply_interior(t, u, Lu, interior_start, interior_end);
         }
 
         // Zero boundary values (BCs will override after)
