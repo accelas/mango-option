@@ -177,3 +177,22 @@ cc_library(
     copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "iv_solver",
+    srcs = ["iv_solver.cpp"],
+    hdrs = ["iv_solver.hpp"],
+    deps = [
+        ":root_finding",
+        ":brent",
+        "//src:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    visibility = ["//visibility:public"],
+)
