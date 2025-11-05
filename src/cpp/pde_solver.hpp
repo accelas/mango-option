@@ -356,6 +356,8 @@ private:
                 // Old interface: monolithic operator
                 spatial_op_(t, grid_, u, Lu, workspace_.dx());
             }
+            // Zero boundary values (BCs will override after)
+            Lu[0] = Lu[n-1] = 0.0;
             return;
         }
 
