@@ -133,6 +133,8 @@ private:
     // Parameters
     AmericanOptionParams params_;
     AmericanOptionGrid grid_;
+    TRBDF2Config trbdf2_config_;
+    RootFindingConfig root_config_;
 
     // Dividend schedule
     std::vector<std::pair<double, double>> dividends_;  // (time, amount)
@@ -141,10 +143,11 @@ private:
     std::vector<double> solution_;
     bool solved_ = false;
 
-    // Helper methods (to be implemented in Task 8)
+    // Helper methods
     double compute_delta() const;
     double compute_gamma() const;
     double compute_theta() const;
+    double interpolate_solution(double x_target, std::span<const double> x_grid) const;
 };
 
 }  // namespace mango
