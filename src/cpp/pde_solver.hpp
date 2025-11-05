@@ -276,7 +276,7 @@ private:
     /// Events are applied AFTER the TR-BDF2 step completes.
     /// This ensures proper ordering: PDE evolution happens first,
     /// then events modify the solution (e.g., dividend jumps).
-    void process_temporal_events(double t_old, double t_new, size_t step) {
+    void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step) {
         while (next_event_idx_ < events_.size()) {
             const auto& event = events_[next_event_idx_];
 
@@ -509,7 +509,7 @@ private:
 
             if (!success) {
                 return {false, iter, std::numeric_limits<double>::infinity(),
-                       "Singular Jacobian"};
+                       "Singular Jacobian", std::nullopt};
             }
 
             // Update: u ← u + δu
@@ -527,7 +527,7 @@ private:
             double error = compute_step_delta_error(u, newton_ws_.u_old());
 
             if (error < root_config_.tolerance) {
-                return {true, iter + 1, error, std::nullopt};
+                return {true, iter + 1, error, std::nullopt, std::nullopt};
             }
 
             // Prepare for next iteration
@@ -536,7 +536,7 @@ private:
 
         return {false, root_config_.max_iter,
                compute_step_delta_error(u, newton_ws_.u_old()),
-               "Max iterations reached"};
+               "Max iterations reached", std::nullopt};
     }
 
     void compute_residual(std::span<const double> u, double coeff_dt,
