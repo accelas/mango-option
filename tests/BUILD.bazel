@@ -374,6 +374,19 @@ cc_test(
     copts = ["-std=c++20", "-Wall", "-Wextra"],
 )
 
+cc_test(
+    name = "cache_blocking_benchmark",
+    srcs = ["cache_blocking_benchmark.cc"],
+    deps = [
+        "//src/cpp:pde_solver",
+        "//src/cpp:spatial_operators",
+        "//src/cpp:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+    tags = ["benchmark"],  # Optional tag for filtering
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
