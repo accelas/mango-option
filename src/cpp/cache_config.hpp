@@ -57,8 +57,8 @@ struct CacheBlockConfig {
     }
 
     // Adaptive: single block for small grids, L1-blocked for large
-    static CacheBlockConfig adaptive(size_t n) {
-        if (n < 5000) {
+    static CacheBlockConfig adaptive(size_t n, size_t threshold = 5000) {
+        if (n < threshold) {
             return CacheBlockConfig{n, 1, 1};  // Single block with halo
         }
         return l1_blocked(n);

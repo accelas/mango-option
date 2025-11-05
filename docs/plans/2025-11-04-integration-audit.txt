@@ -1,0 +1,13 @@
+# Spatial Operator Integration Audit
+
+## PDESolver (src/cpp/pde_solver.hpp)
+- Line ~174: solve_stage1() - Direct call, needs blocking wrapper
+
+## NewtonSolver (src/cpp/newton_solver.hpp)
+- Line ~125: solve() - Baseline operator evaluation
+- Line ~260-285: build_jacobian() - 3 perturbations per interior point (diagonal, lower, upper)
+- Line ~305-315: build_jacobian_boundaries() - 2 boundary perturbations
+
+**Total call sites:** ~10
+**Impact:** All must use blocking-aware interface for consistency
+**Strategy:** Add apply_operator_with_blocking() method to PDESolver, expose to Newton
