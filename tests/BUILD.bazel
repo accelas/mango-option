@@ -463,28 +463,6 @@ cc_test(
 )
 
 cc_test(
-    name = "american_obstacle_test",
-    size = "small",
-    srcs = ["american_obstacle_test.cc"],
-    deps = [
-        "//src/cpp:american_obstacle",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20"],
-)
-
-cc_test(
-    name = "dividend_jump_test",
-    size = "small",
-    srcs = ["dividend_jump_test.cc"],
-    deps = [
-        "//src/cpp:dividend_jump",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20"],
-)
-
-cc_test(
     name = "american_option_solver_test",
     size = "small",
     srcs = ["american_option_solver_test.cc"],

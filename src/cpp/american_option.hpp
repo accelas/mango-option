@@ -8,8 +8,6 @@
 
 #include "src/cpp/pde_solver.hpp"
 #include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/american_obstacle.hpp"
-#include "src/cpp/dividend_jump.hpp"
 #include <vector>
 #include <stdexcept>
 #include <cmath>

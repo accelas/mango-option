@@ -12,8 +12,104 @@
 #include <algorithm>
 #include <span>
 #include <cmath>
+#include <vector>
 
 namespace mango {
+
+// ============================================================================
+// Internal implementation details (not exposed in public API)
+// ============================================================================
+
+namespace {
+
+/**
+ * American put option obstacle in log-moneyness coordinates.
+ *
+ * Intrinsic value: ψ(x) = max(1 - exp(x), 0)
+ * where x = ln(S/K).
+ */
+class AmericanPutObstacle {
+public:
+    void operator()(double, std::span<const double> x,
+                    std::span<double> psi) const {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+        }
+    }
+};
+
+/**
+ * American call option obstacle in log-moneyness coordinates.
+ *
+ * Intrinsic value: ψ(x) = max(exp(x) - 1, 0)
+ * where x = ln(S/K).
+ */
+class AmericanCallObstacle {
+public:
+    void operator()(double, std::span<const double> x,
+                    std::span<double> psi) const {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+        }
+    }
+};
+
+/**
+ * Dividend jump event for discrete dividend payments.
+ *
+ * When dividend D is paid, stock price drops: S → S - D
+ * causing jump in log-moneyness: x = ln(S/K) → x' = ln((S-D)/K)
+ */
+class DividendJump {
+public:
+    DividendJump(double dividend, double strike)
+        : dividend_(dividend), strike_(strike) {}
+
+    void operator()(double, std::span<const double> x,
+                    std::span<double> u) const {
+        const size_t n = x.size();
+        std::vector<double> u_old(u.begin(), u.end());
+        std::vector<double> x_new(n);
+
+        // Compute new x positions after dividend
+        for (size_t i = 0; i < n; ++i) {
+            const double S = strike_ * std::exp(x[i]);
+            const double S_new = S - dividend_;
+            x_new[i] = (S_new <= 0.0) ? -10.0 : std::log(S_new / strike_);
+        }
+
+        // Interpolate u values to new positions
+        for (size_t i = 0; i < n; ++i) {
+            u[i] = interpolate(x, u_old, x_new[i]);
+        }
+    }
+
+private:
+    double dividend_;
+    double strike_;
+
+    /// Linear interpolation
+    static double interpolate(std::span<const double> x,
+                              std::span<const double> u,
+                              double x_target) {
+        const size_t n = x.size();
+        if (x_target <= x[0]) return u[0];
+        if (x_target >= x[n-1]) return u[n-1];
+
+        auto it = std::lower_bound(x.begin(), x.end(), x_target);
+        size_t j = std::distance(x.begin(), it);
+        if (j == 0) j = 1;
+        size_t i = j - 1;
+
+        double dx = x[j] - x[i];
+        double weight = (x_target - x[i]) / dx;
+        return (1.0 - weight) * u[i] + weight * u[j];
+    }
+};
+
+}  // anonymous namespace
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
