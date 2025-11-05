@@ -29,7 +29,7 @@ public:
      * @param Lu Output: operator applied to u
      * @param dx Pre-computed grid spacing (size n-1)
      */
-    void operator()(double t, std::span<const double> x,
+    void operator()([[maybe_unused]] double t, std::span<const double> x,
                    std::span<const double> u, std::span<double> Lu,
                    std::span<const double> dx) const {
         const size_t n = x.size();
@@ -63,11 +63,11 @@ public:
      * @param Lu_interior Output: operator applied (interior only, no halos)
      * @param dx Pre-computed grid spacing (size n-1)
      */
-    void apply_block(double t,
+    void apply_block([[maybe_unused]] double t,
                      size_t base_idx,
                      size_t halo_left,
-                     size_t halo_right,
-                     std::span<const double> x_with_halo,
+                     [[maybe_unused]] size_t halo_right,
+                     [[maybe_unused]] std::span<const double> x_with_halo,
                      std::span<const double> u_with_halo,
                      std::span<double> Lu_interior,
                      std::span<const double> dx) const {
@@ -92,7 +92,7 @@ public:
     }
 
     /// Compute first derivative ∂u/∂x using centered finite differences
-    void compute_first_derivative(std::span<const double> x,
+    void compute_first_derivative([[maybe_unused]] std::span<const double> x,
                                   std::span<const double> u,
                                   std::span<double> du,
                                   std::span<const double> dx) const {
@@ -111,7 +111,7 @@ public:
     }
 
     /// Compute second derivative ∂²u/∂x² using centered finite differences
-    void compute_second_derivative(std::span<const double> x,
+    void compute_second_derivative([[maybe_unused]] std::span<const double> x,
                                    std::span<const double> u,
                                    std::span<double> d2u,
                                    std::span<const double> dx) const {
@@ -165,7 +165,7 @@ public:
      * @param Lu Output: operator applied to u
      * @param dx Pre-computed grid spacing (size n-1)
      */
-    void apply(double t, std::span<const double> S,
+    void apply([[maybe_unused]] double t, std::span<const double> S,
                std::span<const double> u, std::span<double> Lu,
                std::span<const double> dx) const {
 
@@ -209,10 +209,10 @@ public:
      * @param Lu_interior Output: operator applied (interior only, no halos)
      * @param dx Pre-computed grid spacing (size n-1)
      */
-    void apply_block(double t,
+    void apply_block([[maybe_unused]] double t,
                      size_t base_idx,
                      size_t halo_left,
-                     size_t halo_right,
+                     [[maybe_unused]] size_t halo_right,
                      std::span<const double> x_with_halo,
                      std::span<const double> u_with_halo,
                      std::span<double> Lu_interior,
@@ -282,7 +282,7 @@ public:
      * @param Lu Output: operator applied to u
      * @param dx Pre-computed grid spacing (size n-1)
      */
-    void apply(double t, std::span<const double> S,
+    void apply([[maybe_unused]] double t, std::span<const double> S,
                std::span<const double> u, std::span<double> Lu,
                std::span<const double> dx) const {
 
@@ -324,10 +324,10 @@ public:
      * @param Lu_interior Output: operator applied (interior only, no halos)
      * @param dx Pre-computed grid spacing (size n-1)
      */
-    void apply_block(double t,
+    void apply_block([[maybe_unused]] double t,
                      size_t base_idx,
                      size_t halo_left,
-                     size_t halo_right,
+                     [[maybe_unused]] size_t halo_right,
                      std::span<const double> x_with_halo,
                      std::span<const double> u_with_halo,
                      std::span<double> Lu_interior,
