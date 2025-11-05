@@ -398,6 +398,17 @@ cc_test(
     tags = ["manual", "slow"],  # Disabled in fast CI: runs n=10k solver twice for performance comparison
 )
 
+cc_test(
+    name = "snapshot_interpolator_test",
+    srcs = ["snapshot_interpolator_test.cc"],
+    deps = [
+        "//src/cpp:snapshot_interpolator",
+        "//src:cubic_spline",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
