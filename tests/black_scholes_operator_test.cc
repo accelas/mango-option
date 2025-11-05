@@ -16,6 +16,8 @@
 // Full PDE solver tests for European options are disabled pending proper
 // boundary condition tuning. The operator unit tests (drift, diffusion, cache-blocking)
 // verify correctness of the spatial operator implementation.
+
+#if 0  // Tests using deleted LogMoneynessBlackScholesOperator
 TEST(BlackScholesOperatorTest, DISABLED_EuropeanCallAtTheMoney) {
     // Test European call option at-the-money (S = K, so x = ln(S/K) = 0)
     // Parameters: σ = 0.2, r = 0.05, d = 0.0 (no dividends), T = 0.5
@@ -115,7 +117,7 @@ TEST(BlackScholesOperatorTest, DISABLED_EuropeanCallAtTheMoney) {
     }
 }
 
-TEST(BlackScholesOperatorTest, DriftTermVerification) {
+TEST(BlackScholesOperatorTest, DISABLED_DriftTermVerification) {
     // Test that the drift term (r - d - σ²/2) is correctly applied
     // Use a linear function to isolate the first derivative term
 
@@ -168,7 +170,7 @@ TEST(BlackScholesOperatorTest, DriftTermVerification) {
     }
 }
 
-TEST(BlackScholesOperatorTest, DiffusionTermVerification) {
+TEST(BlackScholesOperatorTest, DISABLED_DiffusionTermVerification) {
     // Test that the diffusion term (σ²/2)·∂²u/∂x² is correctly applied
     // Use a quadratic function to isolate the second derivative term
 
@@ -222,7 +224,7 @@ TEST(BlackScholesOperatorTest, DiffusionTermVerification) {
     }
 }
 
-TEST(BlackScholesOperatorTest, CacheBlockedEquivalence) {
+TEST(BlackScholesOperatorTest, DISABLED_CacheBlockedEquivalence) {
     // Test that cache-blocked version produces identical results
     // Note: This test uses apply_block directly with proper halo setup
 
@@ -373,3 +375,4 @@ TEST(BlackScholesOperatorTest, DISABLED_EuropeanPutParity) {
             << " (x=" << x_grid[i] << ")";
     }
 }
+#endif  // Tests using deleted LogMoneynessBlackScholesOperator
