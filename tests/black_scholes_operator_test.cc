@@ -154,15 +154,15 @@ TEST(BlackScholesOperatorTest, DriftTermVerification) {
     // For u(x) = x:
     // ∂u/∂x = 1
     // ∂²u/∂x² = 0
-    // L(u) = -(0.5·σ²·0 + (r - d - σ²/2)·1 - r·x)
-    //      = -(r - d - σ²/2 - r·x)
-    //      = -(r - d - σ²/2) + r·x
+    // L(u) = (0.5·σ²·0 + (r - d - σ²/2)·1 - r·x)
+    //      = (r - d - σ²/2 - r·x)
+    //      = (r - d - σ²/2) - r·x
 
-    const double expected_const = -(r - d - 0.5 * sigma * sigma);
+    const double expected_const = (r - d - 0.5 * sigma * sigma);
 
     // Check interior points (boundaries are set to zero by operator)
     for (size_t i = 1; i < n - 1; ++i) {
-        double expected = expected_const + r * x_grid[i];
+        double expected = expected_const - r * x_grid[i];
         EXPECT_NEAR(Lu[i], expected, 1e-10)
             << "Drift term not correctly applied at i=" << i;
     }
@@ -207,16 +207,16 @@ TEST(BlackScholesOperatorTest, DiffusionTermVerification) {
     // For u(x) = x²:
     // ∂u/∂x = 2x
     // ∂²u/∂x² = 2
-    // L(u) = -(0.5·σ²·2 + (r - d - σ²/2)·2x - r·x²)
-    //      = -(σ² + 2(r - d - σ²/2)·x - r·x²)
-    //      = -σ² - 2(r - d - σ²/2)·x + r·x²
+    // L(u) = (0.5·σ²·2 + (r - d - σ²/2)·2x - r·x²)
+    //      = (σ² + 2(r - d - σ²/2)·x - r·x²)
+    //      = σ² + 2(r - d - σ²/2)·x - r·x²
 
     const double half_sigma_sq = 0.5 * sigma * sigma;
     const double drift = r - d - half_sigma_sq;
 
     // Check interior points
     for (size_t i = 1; i < n - 1; ++i) {
-        double expected = -(2.0 * half_sigma_sq + 2.0 * drift * x_grid[i] - r * x_grid[i] * x_grid[i]);
+        double expected = 2.0 * half_sigma_sq + 2.0 * drift * x_grid[i] - r * x_grid[i] * x_grid[i];
         EXPECT_NEAR(Lu[i], expected, 1e-8)
             << "Diffusion term not correctly applied at i=" << i;
     }
