@@ -151,6 +151,7 @@ cc_library(
         ":tridiagonal_solver",
         ":newton_solver",
         ":root_finding",
+        ":snapshot",
     ],
     copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],

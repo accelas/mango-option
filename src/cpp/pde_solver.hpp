@@ -8,6 +8,7 @@
 #include "tridiagonal_solver.hpp"
 #include "newton_solver.hpp"
 #include "root_finding.hpp"
+#include "snapshot.hpp"
 #include <span>
 #include <vector>
 #include <functional>
@@ -116,6 +117,19 @@ public:
         return std::span{u_current_};
     }
 
+    /// Register snapshot collection at specific step index
+    ///
+    /// @param step_index Step number (0-based) to collect snapshot
+    /// @param user_index User-provided index for matching
+    /// @param collector Callback to receive snapshot (must outlive solver)
+    void register_snapshot(size_t step_index, size_t user_index, SnapshotCollector* collector) {
+        snapshot_requests_.push_back({step_index, user_index, collector});
+        // Sort by step index for efficient lookup
+        std::sort(snapshot_requests_.begin(), snapshot_requests_.end(),
+                 [](const auto& a, const auto& b) { return a.step_index < b.step_index; });
+        next_snapshot_idx_ = 0;
+    }
+
 private:
     // Grid and configuration
     std::span<const double> grid_;
@@ -139,6 +153,15 @@ private:
 
     // Newton solver (persistent, created once)
     NewtonSolver<BoundaryL, BoundaryR, SpatialOp> newton_solver_;
+
+    // Snapshot collection
+    struct SnapshotRequest {
+        size_t step_index;        // CHANGED: use step index not time
+        size_t user_index;
+        SnapshotCollector* collector;
+    };
+    std::vector<SnapshotRequest> snapshot_requests_;
+    size_t next_snapshot_idx_ = 0;
 
     /// Apply boundary conditions
     void apply_boundary_conditions(std::span<double> u, double t) {

@@ -118,6 +118,7 @@ cc_test(
         "//src/cpp:spatial_operators",
         "//src/cpp:boundary_conditions",
         "//src/cpp:root_finding",
+        "//src/cpp:snapshot",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
