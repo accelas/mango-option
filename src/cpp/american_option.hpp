@@ -7,7 +7,7 @@
 #define MANGO_AMERICAN_OPTION_HPP
 
 #include "src/cpp/pde_solver.hpp"
-#include "src/cpp/black_scholes_operator.hpp"
+#include "src/cpp/spatial_operators.hpp"
 #include "src/cpp/american_obstacle.hpp"
 #include "src/cpp/dividend_jump.hpp"
 #include <vector>
@@ -76,7 +76,7 @@ struct AmericanOptionGrid {
 struct AmericanOptionResult {
     double value;    ///< Option value (dollars)
     double delta;    ///< V/S (first derivative wrt spot)
-    double gamma;    ///< ²V/S² (second derivative wrt spot)
+    double gamma;    ///< ï¿½V/Sï¿½ (second derivative wrt spot)
     double theta;    ///< V/t (time decay)
     bool converged;  ///< Solver convergence status
 

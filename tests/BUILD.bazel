@@ -451,7 +451,7 @@ cc_test(
     size = "small",
     srcs = ["black_scholes_operator_test.cc"],
     deps = [
-        "//src/cpp:black_scholes_operator",
+        "//src/cpp:spatial_operators",
         "//src/cpp:pde_solver",
         "//src/cpp:boundary_conditions",
         "//src/cpp:root_finding",
