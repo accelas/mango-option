@@ -440,8 +440,9 @@ public:
             // First derivative: ∂V/∂x (centered finite difference)
             const double du_dx = (u[i+1] - u[i-1]) / (dx_left + dx_right);
 
-            // Black-Scholes operator without negation
-            Lu[i] = half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u[i];
+            // Black-Scholes operator (negated for backward-time PDE)
+            // ∂V/∂t = -[(σ²/2)·∂²V/∂x² + (r-d-σ²/2)·∂V/∂x - r·V]
+            Lu[i] = -(half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u[i]);
         }
     }
 
@@ -485,8 +486,8 @@ public:
 
             const double du_dx = (u_with_halo[j+1] - u_with_halo[j-1]) / (dx_left + dx_right);
 
-            // Black-Scholes operator without negation
-            Lu_interior[i] = half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u_with_halo[j];
+            // Black-Scholes operator (negated for backward-time PDE)
+            Lu_interior[i] = -(half_sigma_sq * d2u_dx2 + drift * du_dx - r_ * u_with_halo[j]);
         }
     }
 
