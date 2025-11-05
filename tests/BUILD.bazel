@@ -193,16 +193,17 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "american_option_test",
-    srcs = ["american_option_test.cc"],
-    copts = ["-std=c++17", "-Wall", "-Wextra"],
-    deps = [
-        "//src:american_option",
-        "//src:implied_volatility",
-        "@googletest//:gtest_main",
-    ],
-)
+# TODO: Re-enable when american_option_test.cc is implemented
+# cc_test(
+#     name = "american_option_test",
+#     srcs = ["american_option_test.cc"],
+#     copts = ["-std=c++17", "-Wall", "-Wextra"],
+#     deps = [
+#         "//src:american_option",
+#         "//src:implied_volatility",
+#         "@googletest//:gtest_main",
+#     ],
+# )
 
 cc_test(
     name = "unified_grid_test",
@@ -417,6 +418,59 @@ cc_test(
     ],
     copts = ["-std=c++20"],
     tags = ["manual", "slow"],  # Excluded from fast CI: benchmark takes ~30-60s
+)
+
+cc_test(
+    name = "temporal_event_test",
+    size = "small",
+    srcs = ["temporal_event_test.cc"],
+    deps = [
+        "//src/cpp:pde_solver",
+        "//src/cpp:spatial_operators",
+        "//src/cpp:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "obstacle_test",
+    size = "small",
+    srcs = ["obstacle_test.cc"],
+    deps = [
+        "//src/cpp:pde_solver",
+        "//src/cpp:spatial_operators",
+        "//src/cpp:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "black_scholes_operator_test",
+    size = "small",
+    srcs = ["black_scholes_operator_test.cc"],
+    deps = [
+        "//src/cpp:spatial_operators",
+        "//src/cpp:pde_solver",
+        "//src/cpp:boundary_conditions",
+        "//src/cpp:root_finding",
+        "//src/cpp:time_domain",
+        "//src/cpp:trbdf2_config",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "american_option_solver_test",
+    size = "small",
+    srcs = ["american_option_solver_test.cc"],
+    deps = [
+        "//src/cpp:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
 )
 
 # Test suites defined for convenience
