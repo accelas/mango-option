@@ -103,7 +103,7 @@ cc_test(
         "//src/cpp:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++20", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -118,7 +118,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++20", "-Wall", "-Wextra", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -346,7 +346,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++20", "-Wall", "-Wextra", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -451,7 +451,7 @@ cc_test(
         "//src/cpp:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++20", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -464,7 +464,7 @@ cc_test(
         "//src/cpp:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++20", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -480,7 +480,7 @@ cc_test(
         "//src/cpp:trbdf2_config",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++20", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -492,6 +492,18 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "cpp_boundary_test",
+    size = "small",
+    srcs = ["cpp_boundary_test.cc"],
+    deps = [
+        "//src:american_option",
+        "//src/cpp:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-fopenmp-simd"],
 )
 
 # Test suites defined for convenience
