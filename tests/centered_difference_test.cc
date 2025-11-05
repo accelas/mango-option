@@ -97,12 +97,16 @@ TEST(CenteredDifferenceTest, NonUniformFirstDerivative) {
     }
 
     // Test interior point i=2 (x=1.0)
-    // f'(1.0) = 2.0
+    // f'(1.0) = 2.0 (exact)
     // dx_left = 0.5, dx_right = 1.0
-    // Numerical: (u[3] - u[1]) / (dx_left + dx_right) = (4.0 - 0.25) / 1.5 = 2.5
-    // (Note: Second-order accuracy on non-uniform grids degrades for highly non-uniform spacing)
+    // Weighted formula (2nd order on non-uniform):
+    //   w_left = dx_right / (dx_left + dx_right) = 1.0 / 1.5 = 2/3
+    //   w_right = dx_left / (dx_left + dx_right) = 0.5 / 1.5 = 1/3
+    //   du_dx = (2/3)*(u[2]-u[1])/dx_left + (1/3)*(u[3]-u[2])/dx_right
+    //         = (2/3)*(1.0-0.25)/0.5 + (1/3)*(4.0-1.0)/1.0
+    //         = (2/3)*1.5 + (1/3)*3.0 = 1.0 + 1.0 = 2.0
     double du_dx = stencil.first_derivative(u, 2);
-    EXPECT_NEAR(du_dx, 2.5, 1e-10);  // Exact numerical result for this spacing
+    EXPECT_NEAR(du_dx, 2.0, 1e-10);  // Exact derivative with 2nd order formula
 }
 
 TEST(CenteredDifferenceTest, ApplyNonUniformFusedKernel) {
@@ -130,14 +134,14 @@ TEST(CenteredDifferenceTest, ApplyNonUniformFusedKernel) {
     stencil.apply_non_uniform(u, Lu, 1, 4, eval);
 
     // Verify interior point i=2 (x=1.0)
-    // First derivative (numerical): 2.5
-    // Second derivative for non-uniform grid needs calculation
+    // First derivative (weighted, 2nd order): 2.0 (as computed above)
+    // Second derivative for non-uniform grid:
     // dx_left = 0.5, dx_right = 1.0, dx_center = 0.75
     // forward_diff = (u[3] - u[2]) / 1.0 = (4.0 - 1.0) / 1.0 = 3.0
     // backward_diff = (u[2] - u[1]) / 0.5 = (1.0 - 0.25) / 0.5 = 1.5
     // d2u_dx2 = (3.0 - 1.5) / 0.75 = 2.0
-    // Lu[2] = 0.5 * 2.0 + 2.0 * 2.5 = 1.0 + 5.0 = 6.0
-    EXPECT_NEAR(Lu[2], 6.0, 1e-10);
+    // Lu[2] = 0.5 * 2.0 + 2.0 * 2.0 = 1.0 + 4.0 = 5.0
+    EXPECT_NEAR(Lu[2], 5.0, 1e-10);
 }
 
 TEST(CenteredDifferenceTest, ComputeAllFirstUniform) {
@@ -207,8 +211,8 @@ TEST(CenteredDifferenceTest, ComputeAllFirstNonUniform) {
     std::vector<double> du_dx(5, 0.0);
     stencil.compute_all_first(u, du_dx, 1, 4);
 
-    // Verify i=2: should match previous test
-    EXPECT_NEAR(du_dx[2], 2.5, 1e-10);
+    // Verify i=2: should match previous test (weighted 2nd order formula = 2.0)
+    EXPECT_NEAR(du_dx[2], 2.0, 1e-10);
 }
 
 TEST(CenteredDifferenceTest, ComputeAllSecondNonUniform) {

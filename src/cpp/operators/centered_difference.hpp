@@ -16,7 +16,8 @@ namespace mango::operators {
  *   d²u/dx² = (u[i+1] - 2*u[i] + u[i-1]) / dx²
  *
  * Non-uniform grid formulas:
- *   du/dx = (u[i+1] - u[i-1]) / (dx_left + dx_right)
+ *   du/dx = w_left*(u[i] - u[i-1])/dx_left + w_right*(u[i+1] - u[i])/dx_right
+ *     where w_left = dx_right/(dx_left + dx_right), w_right = dx_left/(dx_left + dx_right)
  *   d²u/dx² = 2 * ((u[i+1] - u[i])/dx_right - (u[i] - u[i-1])/dx_left) / (dx_left + dx_right)
  *
  * Single Responsibility: Finite difference discretization
@@ -43,10 +44,13 @@ public:
             // Uniform: (u[i+1] - u[i-1]) / (2*dx)
             return (u[i+1] - u[i-1]) * spacing_.spacing_inv() * T(0.5);
         } else {
-            // Non-uniform: (u[i+1] - u[i-1]) / (dx_left + dx_right)
+            // Non-uniform: weighted three-point (2nd order)
             const T dx_left = spacing_.spacing_at(i - 1);
             const T dx_right = spacing_.spacing_at(i);
-            return (u[i+1] - u[i-1]) / (dx_left + dx_right);
+            const T w_left = dx_right / (dx_left + dx_right);
+            const T w_right = dx_left / (dx_left + dx_right);
+            return w_left * (u[i] - u[i-1]) / dx_left
+                 + w_right * (u[i+1] - u[i]) / dx_right;
         }
     }
 
@@ -122,8 +126,11 @@ public:
             const T dx_right = spacing_.right_spacing(i);  // x[i+1] - x[i]
             const T dx_center = T(0.5) * (dx_left + dx_right);
 
-            // First derivative: centered difference
-            const T du_dx = (u[i+1] - u[i-1]) / (dx_left + dx_right);
+            // First derivative: weighted three-point (2nd order on non-uniform grids)
+            const T w_left = dx_right / (dx_left + dx_right);
+            const T w_right = dx_left / (dx_left + dx_right);
+            const T du_dx = w_left * (u[i] - u[i-1]) / dx_left
+                          + w_right * (u[i+1] - u[i]) / dx_right;
 
             // Second derivative: non-uniform centered difference
             const T forward_diff = (u[i+1] - u[i]) / dx_right;
@@ -149,7 +156,11 @@ public:
             for (size_t i = start; i < end; ++i) {
                 const T dx_left = spacing_.left_spacing(i);
                 const T dx_right = spacing_.right_spacing(i);
-                du_dx[i] = (u[i+1] - u[i-1]) / (dx_left + dx_right);
+                // Weighted three-point (2nd order on non-uniform grids)
+                const T w_left = dx_right / (dx_left + dx_right);
+                const T w_right = dx_left / (dx_left + dx_right);
+                du_dx[i] = w_left * (u[i] - u[i-1]) / dx_left
+                         + w_right * (u[i+1] - u[i]) / dx_right;
             }
         }
     }
