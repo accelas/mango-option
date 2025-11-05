@@ -286,3 +286,57 @@ TEST(IndexBlackScholesOperatorTest, ApplyBlockMiddleBlock) {
 
     EXPECT_NE(Lu_interior[0], 0.0);
 }
+
+TEST(SpatialOperatorsTest, FirstDerivativeParabola) {
+    // Test ∂/∂x(x²) = 2x on uniform grid
+    const size_t n = 5;
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    mango::WorkspaceStorage ws(n, grid.span(), 10000);
+
+    std::vector<double> u(n);
+    for (size_t i = 0; i < n; ++i) {
+        double x = grid.span()[i];
+        u[i] = x * x;  // u = x²
+    }
+
+    std::vector<double> du(n);
+    mango::LaplacianOperator op(1.0);
+    op.compute_first_derivative(grid.span(), std::span{u}, std::span{du}, ws.dx());
+
+    // Check interior points: du/dx = 2x
+    for (size_t i = 1; i < n - 1; ++i) {
+        double x = grid.span()[i];
+        double expected = 2.0 * x;
+        EXPECT_NEAR(du[i], expected, 1e-10) << "at i=" << i;
+    }
+
+    // Boundaries use one-sided differences (first-order accurate, O(dx) error)
+    EXPECT_NEAR(du[0], 0.0, 0.3);      // x=0: 2x=0, one-sided has O(dx)=0.25 error
+    EXPECT_NEAR(du[n-1], 2.0, 0.3);    // x=1: 2x=2, one-sided has O(dx)=0.25 error
+}
+
+TEST(SpatialOperatorsTest, SecondDerivativeParabola) {
+    // Test ∂²/∂x²(x²) = 2 on uniform grid
+    const size_t n = 5;
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    mango::WorkspaceStorage ws(n, grid.span(), 10000);
+
+    std::vector<double> u(n);
+    for (size_t i = 0; i < n; ++i) {
+        double x = grid.span()[i];
+        u[i] = x * x;
+    }
+
+    std::vector<double> d2u(n);
+    mango::LaplacianOperator op(1.0);
+    op.compute_second_derivative(grid.span(), std::span{u}, std::span{d2u}, ws.dx());
+
+    // Check interior points: d²u/dx² = 2
+    for (size_t i = 1; i < n - 1; ++i) {
+        EXPECT_NEAR(d2u[i], 2.0, 1e-10) << "at i=" << i;
+    }
+
+    // Boundaries set to zero
+    EXPECT_DOUBLE_EQ(d2u[0], 0.0);
+    EXPECT_DOUBLE_EQ(d2u[n-1], 0.0);
+}
