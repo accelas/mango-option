@@ -234,7 +234,7 @@ private:
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via Newton-Raphson iteration
-    bool solve_stage2(double t_stage, double t_next, double dt) {
+    bool solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
         const double two_minus_gamma = 2.0 - gamma;
@@ -263,6 +263,21 @@ private:
 
     // ========================================================================
     // Newton-Raphson methods (for implicit stage solving)
+    // ========================================================================
+    //
+    // NOTE: These methods are TR-BDF2-specific implementation details and NOT
+    // intended as a general-purpose Newton solver. They solve the specific form:
+    //   u = rhs + coeff_dt·L(u)
+    // which arises from implicit time-stepping in PDEs.
+    //
+    // For general root-finding needs, see root_finding.hpp for the abstraction
+    // layer (RootFindingConfig, RootFindingResult). A truly general Newton
+    // solver would use function pointers/callables rather than template
+    // parameters for boundary conditions and spatial operators.
+    //
+    // These methods were previously in a separate NewtonSolver class but were
+    // merged into PDESolver to make the design honest about their specific
+    // purpose. See PR #94 for the architectural discussion.
     // ========================================================================
 
     /// Solve implicit stage equation via Newton-Raphson
