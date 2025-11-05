@@ -150,6 +150,8 @@ cc_library(
     deps = [
         ":pde_solver",
         ":spatial_operators",
+        "//src/cpp/operators:operator_factory",
+        "//src/cpp/operators:black_scholes_pde",
     ],
     copts = [
         "-std=c++20",

@@ -4,11 +4,12 @@
  */
 
 #include "src/cpp/american_option.hpp"
-#include "src/cpp/spatial_operators.hpp"
 #include "src/cpp/boundary_conditions.hpp"
 #include "src/cpp/grid.hpp"
 #include "src/cpp/time_domain.hpp"
 #include "src/cpp/pde_solver.hpp"
+#include "src/cpp/operators/operator_factory.hpp"
+#include "src/cpp/operators/black_scholes_pde.hpp"
 #include <algorithm>
 #include <span>
 #include <cmath>
@@ -138,13 +139,15 @@ AmericanOptionResult AmericanOptionSolver::solve() {
     TimeDomain time_domain(0.0, params_.maturity, params_.maturity / grid_.n_time);
 
     // 3. Create Black-Scholes operator in log-moneyness coordinates
-    // Use uniform grid fast path for 16x speedup (matches C performance)
-    const double dx = (grid_.x_max - grid_.x_min) / static_cast<double>(grid_.n_space - 1);
-    UniformGridBlackScholesOperator bs_op(
-        params_.volatility,
-        params_.rate,
-        params_.continuous_dividend_yield,
-        dx
+    // Use composed operator architecture for uniform grid fast path
+    auto grid_view = GridView<double>(x_grid);
+    auto bs_op = operators::create_spatial_operator(
+        operators::BlackScholesPDE<double>(
+            params_.volatility,
+            params_.rate,
+            params_.continuous_dividend_yield
+        ),
+        grid_view
     );
 
     // 4. Setup boundary conditions (NORMALIZED by K=1)
