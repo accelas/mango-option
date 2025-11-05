@@ -18,6 +18,17 @@ cc_library(
 )
 
 cc_library(
+    name = "price_table_snapshot_collector",
+    hdrs = ["price_table_snapshot_collector.hpp"],
+    deps = [
+        ":snapshot",
+        ":snapshot_interpolator",
+    ],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
     copts = [
