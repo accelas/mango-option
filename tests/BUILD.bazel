@@ -1,4 +1,14 @@
 cc_test(
+    name = "snapshot_test",
+    srcs = ["snapshot_test.cc"],
+    deps = [
+        "//src/cpp:snapshot",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "grid_test",
     srcs = ["grid_test.cc"],
     deps = [

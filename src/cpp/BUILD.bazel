@@ -1,4 +1,11 @@
 cc_library(
+    name = "snapshot",
+    hdrs = ["snapshot.hpp"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
     copts = [
