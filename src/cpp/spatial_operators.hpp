@@ -52,6 +52,45 @@ public:
         }
     }
 
+    /**
+     * Apply spatial operator to a single block with halos
+     * @param t Current time (unused for Laplacian)
+     * @param base_idx Starting global index of interior
+     * @param halo_left Left halo size (must be >= 1 for 3-point stencil)
+     * @param halo_right Right halo size (must be >= 1 for 3-point stencil)
+     * @param x_with_halo Grid points including halos
+     * @param u_with_halo Solution values including halos
+     * @param Lu_interior Output: operator applied (interior only, no halos)
+     * @param dx Pre-computed grid spacing (size n-1)
+     */
+    void apply_block(double t,
+                     size_t base_idx,
+                     size_t halo_left,
+                     size_t halo_right,
+                     std::span<const double> x_with_halo,
+                     std::span<const double> u_with_halo,
+                     std::span<double> Lu_interior,
+                     std::span<const double> dx) const {
+
+        const size_t interior_count = Lu_interior.size();
+
+        for (size_t i = 0; i < interior_count; ++i) {
+            const size_t j = i + halo_left;  // Index in u_with_halo
+            const size_t global_idx = base_idx + i;
+
+            // Access pre-computed dx at global index
+            const double dx_left = dx[global_idx - 1];   // x[global] - x[global-1]
+            const double dx_right = dx[global_idx];      // x[global+1] - x[global]
+            const double dx_center = 0.5 * (dx_left + dx_right);
+
+            // 3-point stencil using halo
+            const double d2u = (u_with_halo[j+1] - u_with_halo[j]) / dx_right
+                             - (u_with_halo[j] - u_with_halo[j-1]) / dx_left;
+
+            Lu_interior[i] = D_ * d2u / dx_center;
+        }
+    }
+
 private:
     double D_;  // Diffusion coefficient
 };
@@ -116,6 +155,57 @@ public:
         }
     }
 
+    /**
+     * Apply spatial operator to a single block with halos
+     * @param t Current time
+     * @param base_idx Starting global index of interior
+     * @param halo_left Left halo size (must be >= 1 for 3-point stencil)
+     * @param halo_right Right halo size (must be >= 1 for 3-point stencil)
+     * @param x_with_halo Grid points including halos
+     * @param u_with_halo Solution values including halos
+     * @param Lu_interior Output: operator applied (interior only, no halos)
+     * @param dx Pre-computed grid spacing (size n-1)
+     */
+    void apply_block(double t,
+                     size_t base_idx,
+                     size_t halo_left,
+                     size_t halo_right,
+                     std::span<const double> x_with_halo,
+                     std::span<const double> u_with_halo,
+                     std::span<double> Lu_interior,
+                     std::span<const double> dx) const {
+
+        const size_t interior_count = Lu_interior.size();
+
+        for (size_t i = 0; i < interior_count; ++i) {
+            const size_t j = i + halo_left;
+            const size_t global_idx = base_idx + i;
+
+            const double S_i = x_with_halo[j];
+
+            // Grid spacing from pre-computed dx array
+            const double dx_left = dx[global_idx - 1];
+            const double dx_right = dx[global_idx];
+            const double dx_center = 0.5 * (dx_left + dx_right);
+
+            // Second derivative: d²u/dS²
+            const double d2u = (u_with_halo[j+1] - u_with_halo[j]) / dx_right
+                             - (u_with_halo[j] - u_with_halo[j-1]) / dx_left;
+            const double d2u_dS2 = d2u / dx_center;
+
+            // First derivative: weighted three-point (2nd order on non-uniform grids)
+            const double w_left = dx_right / (dx_left + dx_right);
+            const double w_right = dx_left / (dx_left + dx_right);
+            const double du_dS = w_left * (u_with_halo[j] - u_with_halo[j-1]) / dx_left
+                               + w_right * (u_with_halo[j+1] - u_with_halo[j]) / dx_right;
+
+            // Black-Scholes operator
+            Lu_interior[i] = sigma_sq_half_ * S_i * S_i * d2u_dS2
+                           + r_ * S_i * du_dS
+                           - r_ * u_with_halo[j];
+        }
+    }
+
 private:
     double r_;              // Risk-free rate
     double sigma_;          // Volatility
@@ -177,6 +267,54 @@ public:
             Lu[i] = sigma_sq_half_ * S_i * S_i * d2u_dS2
                   + (r_ - q_) * S_i * du_dS
                   - r_ * u[i];
+        }
+    }
+
+    /**
+     * Apply spatial operator to a single block with halos
+     * @param t Current time
+     * @param base_idx Starting global index of interior
+     * @param halo_left Left halo size (must be >= 1 for 3-point stencil)
+     * @param halo_right Right halo size (must be >= 1 for 3-point stencil)
+     * @param x_with_halo Grid points including halos
+     * @param u_with_halo Solution values including halos
+     * @param Lu_interior Output: operator applied (interior only, no halos)
+     * @param dx Pre-computed grid spacing (size n-1)
+     */
+    void apply_block(double t,
+                     size_t base_idx,
+                     size_t halo_left,
+                     size_t halo_right,
+                     std::span<const double> x_with_halo,
+                     std::span<const double> u_with_halo,
+                     std::span<double> Lu_interior,
+                     std::span<const double> dx) const {
+
+        const size_t interior_count = Lu_interior.size();
+
+        for (size_t i = 0; i < interior_count; ++i) {
+            const size_t j = i + halo_left;
+            const size_t global_idx = base_idx + i;
+
+            const double S_i = x_with_halo[j];
+
+            const double dx_left = dx[global_idx - 1];
+            const double dx_right = dx[global_idx];
+            const double dx_center = 0.5 * (dx_left + dx_right);
+
+            const double d2u = (u_with_halo[j+1] - u_with_halo[j]) / dx_right
+                             - (u_with_halo[j] - u_with_halo[j-1]) / dx_left;
+            const double d2u_dS2 = d2u / dx_center;
+
+            const double w_left = dx_right / (dx_left + dx_right);
+            const double w_right = dx_left / (dx_left + dx_right);
+            const double du_dS = w_left * (u_with_halo[j] - u_with_halo[j-1]) / dx_left
+                               + w_right * (u_with_halo[j+1] - u_with_halo[j]) / dx_right;
+
+            // Black-Scholes with dividend yield
+            Lu_interior[i] = sigma_sq_half_ * S_i * S_i * d2u_dS2
+                           + (r_ - q_) * S_i * du_dS
+                           - r_ * u_with_halo[j];
         }
     }
 
