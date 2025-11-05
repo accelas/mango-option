@@ -146,6 +146,14 @@ private:
     /// @return Error message if invalid, std::nullopt if valid
     std::optional<std::string> validate_params() const;
 
+    /// Estimate upper bound for volatility search using intrinsic value approximation
+    /// @return Upper bound estimate (typically 2.0-3.0 for reasonable markets)
+    double estimate_upper_bound() const;
+
+    /// Estimate lower bound for volatility search
+    /// @return Lower bound (typically 0.01 or 1%)
+    double estimate_lower_bound() const;
+
     /// Objective function for root-finding: f(σ) = V(σ) - V_market
     /// @param volatility Candidate volatility
     /// @return Difference between theoretical and market price

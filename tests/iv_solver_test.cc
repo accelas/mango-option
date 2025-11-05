@@ -42,16 +42,17 @@ TEST_F(IVSolverTest, ConstructionSucceeds) {
     SUCCEED();
 }
 
-// Test 2: Solve should return "Not implemented" error (TDD - expected failure)
-TEST_F(IVSolverTest, SolveReturnsNotImplemented) {
+// Test 2: Basic ATM put IV calculation (should converge now)
+TEST_F(IVSolverTest, ATMPutIVCalculation) {
     IVSolver solver(params, config);
 
     IVResult result = solver.solve();
 
-    // Should not converge in stub implementation
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
-    EXPECT_EQ(result.failure_reason.value(), "Not implemented");
+    // Should converge with real implementation
+    EXPECT_TRUE(result.converged);
+    EXPECT_GT(result.implied_vol, 0.15);
+    EXPECT_LT(result.implied_vol, 0.35);
+    EXPECT_GT(result.iterations, 0);
 }
 
 // Test 3: Invalid parameters should be caught
@@ -98,18 +99,7 @@ TEST_F(IVSolverTest, InvalidMarketPrice) {
     EXPECT_TRUE(result.failure_reason.has_value());
 }
 
-// Future tests (to be uncommented when solve() is implemented):
-/*
-TEST_F(IVSolverTest, ATMPutIVCalculation) {
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
-
-    EXPECT_TRUE(result.converged);
-    EXPECT_GT(result.implied_vol, 0.15);
-    EXPECT_LT(result.implied_vol, 0.35);
-    EXPECT_GT(result.iterations, 0);
-}
-
+// Test 7: ITM put IV calculation
 TEST_F(IVSolverTest, ITMPutIVCalculation) {
     params.strike = 110.0;  // In the money
     params.market_price = 15.0;
@@ -119,8 +109,10 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
+    EXPECT_LT(result.implied_vol, 1.0);
 }
 
+// Test 8: OTM put IV calculation
 TEST_F(IVSolverTest, OTMPutIVCalculation) {
     params.strike = 90.0;  // Out of the money
     params.market_price = 2.5;
@@ -130,5 +122,5 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
+    EXPECT_LT(result.implied_vol, 1.0);
 }
-*/

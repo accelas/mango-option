@@ -185,6 +185,7 @@ cc_library(
     deps = [
         ":root_finding",
         ":brent",
+        "//src:american_option",
         "//src:ivcalc_trace_hdr",
     ],
     copts = [

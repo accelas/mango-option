@@ -110,6 +110,7 @@ cc_library(
     ],
     linkopts = ["-fopenmp"],  # Link OpenMP runtime
     deps = [":pde_solver"],
+    strip_include_prefix = "",
     visibility = ["//visibility:public"],
 )
 
