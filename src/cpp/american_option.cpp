@@ -4,7 +4,6 @@
  */
 
 #include "src/cpp/american_option.hpp"
-#include "src/cpp/spatial_operators.hpp"
 #include "src/cpp/boundary_conditions.hpp"
 #include "src/cpp/grid.hpp"
 #include "src/cpp/time_domain.hpp"
