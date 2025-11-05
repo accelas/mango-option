@@ -554,6 +554,19 @@ cc_test(
     copts = ["-std=c++20"],
 )
 
+cc_test(
+    name = "spatial_operator_integration_test",
+    srcs = ["spatial_operator_integration_test.cc"],
+    deps = [
+        "//src/cpp/operators:operator_factory",
+        "//src/cpp/operators:black_scholes_pde",
+        "//src/cpp:spatial_operators",  # Old operators for comparison
+        "//src/cpp:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
