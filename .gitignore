@@ -18,3 +18,5 @@ Thumbs.db
 test_*.bin
 accuracy_test_table.bin
 .cache/
+.cache/
+.bazel_cache/
