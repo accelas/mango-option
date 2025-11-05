@@ -246,10 +246,17 @@ private:
             }
 
             // Compute derivatives using PDE operator
-            spatial_op_.compute_first_derivative(grid_, std::span{u_current_},
-                                                std::span{du_dx_}, workspace_.dx());
-            spatial_op_.compute_second_derivative(grid_, std::span{u_current_},
-                                                  std::span{d2u_dx2_}, workspace_.dx());
+            if constexpr (requires { spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_}); }) {
+                // New interface: no grid or dx parameters
+                spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_});
+                spatial_op_.compute_second_derivative(std::span{u_current_}, std::span{d2u_dx2_});
+            } else {
+                // Old interface: requires grid and dx
+                spatial_op_.compute_first_derivative(grid_, std::span{u_current_},
+                                                    std::span{du_dx_}, workspace_.dx());
+                spatial_op_.compute_second_derivative(grid_, std::span{u_current_},
+                                                      std::span{d2u_dx2_}, workspace_.dx());
+            }
 
             // Build snapshot
             Snapshot snapshot{
@@ -341,35 +348,57 @@ private:
 
         // Small grid: use full-array path (no blocking overhead)
         if (workspace_.cache_config().n_blocks == 1) {
-            spatial_op_(t, grid_, u, Lu, workspace_.dx());
+            // Check if operator has new interface (apply method) or old interface (operator())
+            if constexpr (requires { spatial_op_.apply(t, u, Lu); }) {
+                // New interface: composed operator
+                spatial_op_.apply(t, u, Lu);
+            } else {
+                // Old interface: monolithic operator
+                spatial_op_(t, grid_, u, Lu, workspace_.dx());
+            }
             return;
         }
 
         // Large grid: blocked evaluation
-        for (size_t block = 0; block < workspace_.cache_config().n_blocks; ++block) {
-            auto [interior_start, interior_end] =
-                workspace_.get_block_interior_range(block);
+        if constexpr (requires { spatial_op_.apply_interior(t, u, Lu, size_t{0}, size_t{0}); }) {
+            // New interface: use apply_interior for cache blocking
+            for (size_t block = 0; block < workspace_.cache_config().n_blocks; ++block) {
+                auto [interior_start, interior_end] =
+                    workspace_.get_block_interior_range(block);
 
-            // Skip boundary-only blocks
-            if (interior_start >= interior_end) continue;
+                // Skip boundary-only blocks
+                if (interior_start >= interior_end) continue;
 
-            // Compute halo sizes (clamped at global boundaries)
-            const size_t halo_left = std::min(workspace_.cache_config().overlap,
-                                             interior_start);
-            const size_t halo_right = std::min(workspace_.cache_config().overlap,
-                                              n - interior_end);
-            const size_t interior_count = interior_end - interior_start;
+                // Call apply_interior on this block
+                spatial_op_.apply_interior(t, u, Lu, interior_start, interior_end);
+            }
+        } else {
+            // Old interface: use apply_block
+            for (size_t block = 0; block < workspace_.cache_config().n_blocks; ++block) {
+                auto [interior_start, interior_end] =
+                    workspace_.get_block_interior_range(block);
 
-            // Build spans with halos
-            auto x_halo = std::span{grid_.data() + interior_start - halo_left,
-                                   interior_count + halo_left + halo_right};
-            auto u_halo = std::span{u.data() + interior_start - halo_left,
-                                   interior_count + halo_left + halo_right};
-            auto lu_out = std::span{Lu.data() + interior_start, interior_count};
+                // Skip boundary-only blocks
+                if (interior_start >= interior_end) continue;
 
-            // Call block-aware operator
-            spatial_op_.apply_block(t, interior_start, halo_left, halo_right,
-                                   x_halo, u_halo, lu_out, workspace_.dx());
+                // Compute halo sizes (clamped at global boundaries)
+                const size_t halo_left = std::min(workspace_.cache_config().overlap,
+                                                 interior_start);
+                const size_t halo_right = std::min(workspace_.cache_config().overlap,
+                                                  n - interior_end);
+                const size_t interior_count = interior_end - interior_start;
+
+                // Build spans with halos
+                auto x_halo = std::span{grid_.data() + interior_start - halo_left,
+                                       interior_count + halo_left + halo_right};
+                auto u_halo = std::span{u.data() + interior_start - halo_left,
+                                       interior_count + halo_left + halo_right};
+                auto lu_out = std::span{Lu.data() + interior_start, interior_count};
+
+                // Call block-aware operator
+                spatial_op_.apply_block(t, interior_start, halo_left, halo_right,
+                                       x_halo, u_halo, lu_out, workspace_.dx());
+            }
         }
 
         // Zero boundary values (BCs will override after)
