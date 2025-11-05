@@ -1,6 +1,9 @@
 # Bazel build artifacts
 bazel-*
 
+# Makefile build artifacts
+build/
+
 # IDE and editor files
 .vscode/
 .idea/
@@ -17,3 +20,6 @@ Thumbs.db
 *_temp.bin
 test_*.bin
 accuracy_test_table.bin
+
+# Example output files
+*.dat
