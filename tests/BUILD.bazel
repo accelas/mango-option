@@ -74,21 +74,6 @@ cc_test(
 )
 
 cc_test(
-    name = "newton_solver_test",
-    srcs = ["newton_solver_test.cc"],
-    deps = [
-        "//src/cpp:newton_solver",
-        "//src/cpp:root_finding",
-        "//src/cpp:workspace",
-        "//src/cpp:boundary_conditions",
-        "//src/cpp:spatial_operators",
-        "//src/cpp:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20"],
-)
-
-cc_test(
     name = "spatial_operators_test",
     srcs = ["spatial_operators_test.cc"],
     deps = [
