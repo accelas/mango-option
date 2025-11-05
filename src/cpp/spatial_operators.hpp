@@ -381,8 +381,8 @@ private:
  *   - d = dividend yield
  *   - x = ln(S/K) (log-moneyness)
  *
- * Since our solver uses forward time t (not backward time τ = T - t),
- * we return -L(V) to match the sign convention for ∂V/∂t = L(V).
+ * The operator returns L(V) for the PDE ∂V/∂t = L(V) where t is solver time
+ * (t=0 at maturity, t=T at present). This matches backward calendar time.
  *
  * This coordinate system is ideal for American options as it:
  * - Normalizes strike to K=1 (simplifies obstacles)
