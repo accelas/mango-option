@@ -12,6 +12,7 @@
 #include <span>
 #include <vector>
 #include <functional>
+#include <optional>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -22,6 +23,11 @@ namespace mango {
 using TemporalEventCallback = std::function<void(double t,
                                                   std::span<const double> x,
                                                   std::span<double> u)>;
+
+// Obstacle callback signature
+using ObstacleCallback = std::function<void(double t,
+                                             std::span<const double> x,
+                                             std::span<double> psi)>;
 
 // Temporal event definition
 struct TemporalEvent {
@@ -61,13 +67,15 @@ public:
     /// @param left_bc Left boundary condition
     /// @param right_bc Right boundary condition
     /// @param spatial_op Spatial operator L(u)
+    /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
               const TRBDF2Config& config,
               const RootFindingConfig& root_config,
               const BoundaryL& left_bc,
               const BoundaryR& right_bc,
-              const SpatialOp& spatial_op)
+              const SpatialOp& spatial_op,
+              std::optional<ObstacleCallback> obstacle = std::nullopt)
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -75,6 +83,7 @@ public:
         , left_bc_(left_bc)
         , right_bc_(right_bc)
         , spatial_op_(spatial_op)
+        , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_(n_, grid, config_.cache_blocking_threshold)
         , u_current_(n_)
@@ -93,6 +102,7 @@ public:
 
         // Apply boundary conditions at t=0
         double t = time_.t_start();
+        apply_obstacle(t, std::span{u_current_});
         apply_boundary_conditions(std::span{u_current_}, t);
     }
 
@@ -141,6 +151,11 @@ public:
         return std::span{u_current_};
     }
 
+    /// Check if obstacle condition is present
+    bool has_obstacle() const {
+        return obstacle_.has_value();
+    }
+
     /// Register snapshot collection at specific step index
     ///
     /// @param step_index Step number (0-based) to collect snapshot
@@ -176,6 +191,7 @@ private:
     BoundaryL left_bc_;
     BoundaryR right_bc_;
     SpatialOp spatial_op_;
+    std::optional<ObstacleCallback> obstacle_;
 
     // Grid size
     size_t n_;
@@ -276,6 +292,27 @@ private:
             // Event is in (t_old, t_new] - apply it
             event.callback(event.time, grid_, std::span{u_current_});
             next_event_idx_++;
+        }
+    }
+
+    /// Apply obstacle condition: u(x,t) ≥ ψ(x,t)
+    ///
+    /// Projects solution onto obstacle constraint via complementarity:
+    /// u[i] = max(u[i], ψ[i]) for all i
+    ///
+    /// This is called AFTER each Newton update to enforce variational
+    /// inequality constraints (e.g., American option early exercise).
+    void apply_obstacle(double t, std::span<double> u) {
+        if (!obstacle_) return;
+
+        auto psi = workspace_.psi_buffer();
+        (*obstacle_)(t, grid_, psi);
+
+        // Project: u[i] = max(u[i], psi[i])
+        for (size_t i = 0; i < u.size(); ++i) {
+            if (u[i] < psi[i]) {
+                u[i] = psi[i];
+            }
         }
     }
 
@@ -479,6 +516,10 @@ private:
             for (size_t i = 0; i < n_; ++i) {
                 u[i] += newton_ws_.delta_u()[i];
             }
+
+            // Apply obstacle projection BEFORE boundary conditions
+            // This ensures complementarity: u ≥ ψ
+            apply_obstacle(t, u);
 
             apply_boundary_conditions(u, t);
 
