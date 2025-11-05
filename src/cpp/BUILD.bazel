@@ -134,7 +134,11 @@ cc_library(
         "-std=c++20",
         "-Wall",
         "-Wextra",
+        "-Werror",
         "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
     ],
     visibility = ["//visibility:public"],
 )
@@ -151,7 +155,11 @@ cc_library(
         "-std=c++20",
         "-Wall",
         "-Wextra",
+        "-Werror",
         "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
     ],
     visibility = ["//visibility:public"],
 )
