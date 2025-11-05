@@ -193,16 +193,17 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "american_option_test",
-    srcs = ["american_option_test.cc"],
-    copts = ["-std=c++17", "-Wall", "-Wextra"],
-    deps = [
-        "//src:american_option",
-        "//src:implied_volatility",
-        "@googletest//:gtest_main",
-    ],
-)
+# TODO: Re-enable when american_option_test.cc is implemented
+# cc_test(
+#     name = "american_option_test",
+#     srcs = ["american_option_test.cc"],
+#     copts = ["-std=c++17", "-Wall", "-Wextra"],
+#     deps = [
+#         "//src:american_option",
+#         "//src:implied_volatility",
+#         "@googletest//:gtest_main",
+#     ],
+# )
 
 cc_test(
     name = "unified_grid_test",
@@ -478,6 +479,17 @@ cc_test(
     srcs = ["dividend_jump_test.cc"],
     deps = [
         "//src/cpp:dividend_jump",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "american_option_solver_test",
+    size = "small",
+    srcs = ["american_option_solver_test.cc"],
+    deps = [
+        "//src/cpp:american_option",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20"],
