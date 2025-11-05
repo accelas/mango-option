@@ -34,8 +34,13 @@ TEST(SpatialOperatorTest, UniformGridApplication) {
     spatial_op.apply(0.0, u, Lu);  // t = 0.0
 
     // Verify interior point i=5 (x=0.5) was computed
-    // (Exact value depends on PDE coefficients and numerical stencil)
-    EXPECT_NE(Lu[5], 0.0);  // Should be non-zero
+    // For u = exp(-x), analytically:
+    // L(u) = (σ²/2)·u'' + (r-d-σ²/2)·u' - r·u
+    //      = 0.02·exp(-x) + 0.02·(-exp(-x)) - 0.05·exp(-x)
+    //      = -0.05·exp(-x)
+    // At x=0.5: L(u) ≈ -0.0303
+    const double expected = -0.05 * std::exp(-0.5);  // ≈ -0.0303
+    EXPECT_NEAR(Lu[5], expected, 1e-4);  // Numerical error tolerance
 
     // Boundaries should be untouched (left as 0.0)
     EXPECT_EQ(Lu[0], 0.0);
@@ -103,5 +108,7 @@ TEST(SpatialOperatorTest, LifetimeSafety) {
     std::vector<double> Lu(4, 0.0);
     spatial_op.apply(0.0, u, Lu);  // Should not crash
 
-    EXPECT_NE(Lu[1], 0.0);  // Should produce non-zero result
+    // Should produce non-zero result in interior (just verify computation happened)
+    // Exact value depends on irregular spacing, so we only check != 0
+    EXPECT_NE(Lu[1], 0.0) << "Interior point should be computed";
 }

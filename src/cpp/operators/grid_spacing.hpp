@@ -51,20 +51,24 @@ public:
 
     // Get uniform spacing (only valid if is_uniform())
     T spacing() const {
+        assert(is_uniform_ && "spacing() requires uniform grid");
         return dx_uniform_;
     }
 
     T spacing_inv() const {
+        assert(is_uniform_ && "spacing_inv() requires uniform grid");
         return dx_uniform_inv_;
     }
 
     T spacing_inv_sq() const {
+        assert(is_uniform_ && "spacing_inv_sq() requires uniform grid");
         return dx_uniform_inv_sq_;
     }
 
     // Get spacing at point i: dx[i] = x[i+1] - x[i]
     // Valid for i in [0, n-2]
     T spacing_at(size_t i) const {
+        assert(i < grid_.size() - 1 && "spacing_at(i) requires i < n-1");
         if (is_uniform_) {
             return dx_uniform_;
         } else {

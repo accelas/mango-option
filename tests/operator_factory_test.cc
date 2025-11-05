@@ -16,7 +16,9 @@ TEST(OperatorFactoryTest, CreateFromGrid) {
     std::vector<double> Lu(5, 0.0);
     spatial_op.apply(0.0, u, Lu);
 
-    EXPECT_NE(Lu[2], 0.0);  // Should produce non-zero result
+    // Should produce non-zero result in interior (uniform grid: x = [0,1,2,3,4])
+    // Just verify computation happened - exact value depends on grid spacing
+    EXPECT_NE(Lu[2], 0.0) << "Interior point should be computed";
 }
 
 TEST(OperatorFactoryTest, CreateWithTemporaryPDE) {
@@ -33,7 +35,8 @@ TEST(OperatorFactoryTest, CreateWithTemporaryPDE) {
     std::vector<double> Lu(5, 0.0);
     spatial_op.apply(0.0, u, Lu);
 
-    EXPECT_NE(Lu[2], 0.0);  // Should not crash, should work correctly
+    // Should not crash, should work correctly even with temporary PDE
+    EXPECT_NE(Lu[2], 0.0) << "Interior point should be computed (PDE owned by value)";
 }
 
 TEST(OperatorFactoryTest, CreateWithSharedSpacing) {
