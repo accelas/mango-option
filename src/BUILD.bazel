@@ -1,3 +1,11 @@
+# Header-only library for USDT tracing (usable from both C and C++)
+cc_library(
+    name = "ivcalc_trace_hdr",
+    hdrs = ["ivcalc_trace.h"],
+    copts = ["-DHAVE_SYSTEMTAP_SDT"],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "cubic_spline",
     srcs = ["cubic_spline.c"],
@@ -102,6 +110,7 @@ cc_library(
     ],
     linkopts = ["-fopenmp"],  # Link OpenMP runtime
     deps = [":pde_solver"],
+    strip_include_prefix = "",
     visibility = ["//visibility:public"],
 )
 

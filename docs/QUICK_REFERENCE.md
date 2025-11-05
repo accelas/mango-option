@@ -431,7 +431,7 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 | Root finding | `src/brent.h` |
 | Interpolation | `src/cubic_spline.h/.c` |
 | Linear solver | `src/tridiagonal.h` |
-| Tracing | `src/mango_trace.h` |
+| Tracing | `src/ivcalc_trace.h` |
 
 ---
 
