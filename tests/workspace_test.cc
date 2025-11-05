@@ -94,3 +94,24 @@ TEST(WorkspaceStorageTest, ThresholdControlsBlocking) {
     EXPECT_GT(ws_large.cache_config().n_blocks, 1);
     EXPECT_EQ(ws_large.cache_config().overlap, 1);
 }
+
+TEST(WorkspaceStorageTest, PsiBufferAvailable) {
+    const size_t n = 100;
+    auto spec = mango::GridSpec<>::uniform(0.0, 1.0, n);
+    auto grid = spec.generate();
+
+    mango::WorkspaceStorage ws(grid.size(), grid.span());
+
+    auto psi = ws.psi_buffer();
+    EXPECT_EQ(psi.size(), n);
+
+    // Verify writable
+    for (size_t i = 0; i < n; ++i) {
+        psi[i] = static_cast<double>(i);
+    }
+
+    // Verify no overlap with other buffers
+    auto u_current = ws.u_current();
+    u_current[0] = 999.0;
+    EXPECT_NE(psi[0], 999.0);
+}

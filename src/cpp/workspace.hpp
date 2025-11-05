@@ -12,7 +12,7 @@ namespace mango {
 /// **CPU-only implementation** - SYCL GPU specialization deferred to v2.1.
 ///
 /// Manages all solver state in a single contiguous buffer for cache efficiency.
-/// Arrays: u_current, u_next, u_stage, rhs, Lu (5n doubles total).
+/// Arrays: u_current, u_next, u_stage, rhs, Lu, psi (6n doubles total).
 ///
 /// **Pre-computed dx array** - Grid spacing computed once during construction
 /// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
@@ -31,10 +31,10 @@ public:
     /// @param grid Grid coordinates for pre-computing dx
     /// @param threshold Cache-blocking threshold (default 5000)
     ///
-    /// Allocates 5n doubles (u_current, u_next, u_stage, rhs, Lu)
+    /// Allocates 6n doubles (u_current, u_next, u_stage, rhs, Lu, psi)
     /// plus (n-1) doubles for pre-computed dx array.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
-        : buffer_(5 * n)  // u_current, u_next, u_stage, rhs, Lu
+        : buffer_(6 * n)  // u_current, u_next, u_stage, rhs, Lu, psi
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)
     {
@@ -50,7 +50,8 @@ public:
         u_next_    = std::span{buffer_.data() + offset, n}; offset += n;
         u_stage_   = std::span{buffer_.data() + offset, n}; offset += n;
         rhs_       = std::span{buffer_.data() + offset, n}; offset += n;
-        lu_        = std::span{buffer_.data() + offset, n};
+        lu_        = std::span{buffer_.data() + offset, n}; offset += n;
+        psi_       = std::span{buffer_.data() + offset, n}; offset += n;
     }
 
     // Access to arrays
@@ -68,6 +69,9 @@ public:
 
     std::span<double> lu() { return lu_; }
     std::span<const double> lu() const { return lu_; }
+
+    std::span<double> psi_buffer() { return psi_; }
+    std::span<const double> psi_buffer() const { return psi_; }
 
     // Access to pre-computed dx
     std::span<const double> dx() const { return dx_; }
@@ -145,6 +149,7 @@ private:
     std::span<double> u_stage_;
     std::span<double> rhs_;
     std::span<double> lu_;
+    std::span<double> psi_;
 };
 
 } // namespace mango

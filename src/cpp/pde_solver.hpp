@@ -12,11 +12,32 @@
 #include <span>
 #include <vector>
 #include <functional>
+#include <optional>
 #include <cmath>
 #include <algorithm>
 #include <limits>
 
 namespace mango {
+
+// Temporal event callback signature
+using TemporalEventCallback = std::function<void(double t,
+                                                  std::span<const double> x,
+                                                  std::span<double> u)>;
+
+// Obstacle callback signature
+using ObstacleCallback = std::function<void(double t,
+                                             std::span<const double> x,
+                                             std::span<double> psi)>;
+
+// Temporal event definition
+struct TemporalEvent {
+    double time;
+    TemporalEventCallback callback;
+
+    auto operator<=>(const TemporalEvent& other) const {
+        return time <=> other.time;
+    }
+};
 
 /// PDE Solver with TR-BDF2 time stepping and cache blocking
 ///
@@ -46,13 +67,15 @@ public:
     /// @param left_bc Left boundary condition
     /// @param right_bc Right boundary condition
     /// @param spatial_op Spatial operator L(u)
+    /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
               const TRBDF2Config& config,
               const RootFindingConfig& root_config,
               const BoundaryL& left_bc,
               const BoundaryR& right_bc,
-              const SpatialOp& spatial_op)
+              const SpatialOp& spatial_op,
+              std::optional<ObstacleCallback> obstacle = std::nullopt)
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -60,6 +83,7 @@ public:
         , left_bc_(left_bc)
         , right_bc_(right_bc)
         , spatial_op_(spatial_op)
+        , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_(n_, grid, config_.cache_blocking_threshold)
         , u_current_(n_)
@@ -78,6 +102,7 @@ public:
 
         // Apply boundary conditions at t=0
         double t = time_.t_start();
+        apply_obstacle(t, std::span{u_current_});
         apply_boundary_conditions(std::span{u_current_}, t);
     }
 
@@ -89,6 +114,8 @@ public:
         const double dt = time_.dt();
 
         for (size_t step = 0; step < time_.n_steps(); ++step) {
+            double t_old = t;
+
             // Store u^n for TR-BDF2
             std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
 
@@ -109,6 +136,9 @@ public:
             // Update time
             t = t_next;
 
+            // Process temporal events AFTER completing the step
+            process_temporal_events(t_old, t_next, step);
+
             // Process snapshots (CHANGED: pass step index)
             process_snapshots(step, t);
         }
@@ -119,6 +149,11 @@ public:
     /// Get current solution
     std::span<const double> solution() const {
         return std::span{u_current_};
+    }
+
+    /// Check if obstacle condition is present
+    bool has_obstacle() const {
+        return obstacle_.has_value();
     }
 
     /// Register snapshot collection at specific step index
@@ -134,6 +169,19 @@ public:
         next_snapshot_idx_ = 0;
     }
 
+    /// Add temporal event to be executed at specific time
+    ///
+    /// Events are applied AFTER the TR-BDF2 step completes (not before).
+    /// This ensures the PDE state is fully updated before event application.
+    ///
+    /// @param time Time at which to execute event
+    /// @param callback Event callback: callback(t, x, u)
+    void add_temporal_event(double time, TemporalEventCallback callback) {
+        events_.push_back({time, std::move(callback)});
+        std::sort(events_.begin(), events_.end(),
+                  [](const auto& a, const auto& b) { return a.time < b.time; });
+    }
+
 private:
     // Grid and configuration
     std::span<const double> grid_;
@@ -143,6 +191,7 @@ private:
     BoundaryL left_bc_;
     BoundaryR right_bc_;
     SpatialOp spatial_op_;
+    std::optional<ObstacleCallback> obstacle_;
 
     // Grid size
     size_t n_;
@@ -166,6 +215,10 @@ private:
     };
     std::vector<SnapshotRequest> snapshot_requests_;
     size_t next_snapshot_idx_ = 0;
+
+    // Temporal event system
+    std::vector<TemporalEvent> events_;
+    size_t next_event_idx_ = 0;
 
     // Workspace for derivatives
     std::vector<double> du_dx_;
@@ -215,6 +268,51 @@ private:
             req.collector->collect(snapshot);
 
             ++next_snapshot_idx_;
+        }
+    }
+
+    /// Process temporal events in time interval (t_old, t_new]
+    ///
+    /// Events are applied AFTER the TR-BDF2 step completes.
+    /// This ensures proper ordering: PDE evolution happens first,
+    /// then events modify the solution (e.g., dividend jumps).
+    void process_temporal_events(double t_old, double t_new, size_t step) {
+        while (next_event_idx_ < events_.size()) {
+            const auto& event = events_[next_event_idx_];
+
+            if (event.time <= t_old) {
+                next_event_idx_++;
+                continue;
+            }
+
+            if (event.time > t_new) {
+                break;
+            }
+
+            // Event is in (t_old, t_new] - apply it
+            event.callback(event.time, grid_, std::span{u_current_});
+            next_event_idx_++;
+        }
+    }
+
+    /// Apply obstacle condition: u(x,t) ≥ ψ(x,t)
+    ///
+    /// Projects solution onto obstacle constraint via complementarity:
+    /// u[i] = max(u[i], ψ[i]) for all i
+    ///
+    /// This is called AFTER each Newton update to enforce variational
+    /// inequality constraints (e.g., American option early exercise).
+    void apply_obstacle(double t, std::span<double> u) {
+        if (!obstacle_) return;
+
+        auto psi = workspace_.psi_buffer();
+        (*obstacle_)(t, grid_, psi);
+
+        // Project: u[i] = max(u[i], psi[i])
+        for (size_t i = 0; i < u.size(); ++i) {
+            if (u[i] < psi[i]) {
+                u[i] = psi[i];
+            }
         }
     }
 
@@ -418,6 +516,10 @@ private:
             for (size_t i = 0; i < n_; ++i) {
                 u[i] += newton_ws_.delta_u()[i];
             }
+
+            // Apply obstacle projection BEFORE boundary conditions
+            // This ensures complementarity: u ≥ ψ
+            apply_obstacle(t, u);
 
             apply_boundary_conditions(u, t);
 
