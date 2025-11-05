@@ -17,7 +17,7 @@ TEST(AmericanOptionSolverTest, ConstructorValidation) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::CALL
     };
 
@@ -36,7 +36,7 @@ TEST(AmericanOptionSolverTest, InvalidStrike) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::PUT
     };
 
@@ -54,7 +54,7 @@ TEST(AmericanOptionSolverTest, InvalidSpot) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::PUT
     };
 
@@ -72,7 +72,7 @@ TEST(AmericanOptionSolverTest, InvalidMaturity) {
         .maturity = -1.0,  // Invalid
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::CALL
     };
 
@@ -90,7 +90,7 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
         .maturity = 1.0,
         .volatility = -0.2,  // Invalid
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::PUT
     };
 
@@ -108,7 +108,7 @@ TEST(AmericanOptionSolverTest, InvalidRate) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = -0.05,  // Invalid
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::CALL
     };
 
@@ -126,7 +126,7 @@ TEST(AmericanOptionSolverTest, InvalidDividendYield) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = -0.02,  // Invalid
+        .continuous_dividend_yield =-0.02,  // Invalid
         .option_type = OptionType::PUT
     };
 
@@ -144,7 +144,7 @@ TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::CALL
     };
 
@@ -163,7 +163,7 @@ TEST(AmericanOptionSolverTest, InvalidGridNTime) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::PUT
     };
 
@@ -182,7 +182,7 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::CALL
     };
 
@@ -195,69 +195,79 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
     }, std::invalid_argument);
 }
 
-TEST(AmericanOptionSolverTest, RegisterDividend) {
+TEST(AmericanOptionSolverTest, DiscreteDividends) {
     AmericanOptionParams params{
         .strike = 100.0,
         .spot = 100.0,
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.0,
-        .option_type = OptionType::CALL
+        .continuous_dividend_yield =0.0,
+        .option_type = OptionType::CALL,
+        .discrete_dividends = {{0.25, 1.0}, {0.75, 1.5}}  // Valid dividends
     };
 
     AmericanOptionGrid grid{};
-    AmericanOptionSolver solver(params, grid);
 
-    // Should accept valid dividends
+    // Should accept valid discrete dividends
     EXPECT_NO_THROW({
-        solver.register_dividend(0.25, 1.0);
-        solver.register_dividend(0.75, 1.5);
+        AmericanOptionSolver solver(params, grid);
     });
 }
 
-TEST(AmericanOptionSolverTest, RegisterDividendInvalidTime) {
-    AmericanOptionParams params{
+TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
+    // Should reject negative time
+    AmericanOptionParams params1{
         .strike = 100.0,
         .spot = 100.0,
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.0,
-        .option_type = OptionType::CALL
+        .continuous_dividend_yield =0.0,
+        .option_type = OptionType::CALL,
+        .discrete_dividends = {{-0.1, 1.0}}  // Invalid: negative time
     };
 
     AmericanOptionGrid grid{};
-    AmericanOptionSolver solver(params, grid);
 
-    // Should reject negative time
     EXPECT_THROW({
-        solver.register_dividend(-0.1, 1.0);
+        AmericanOptionSolver solver(params1, grid);
     }, std::invalid_argument);
 
     // Should reject time beyond maturity
+    AmericanOptionParams params2{
+        .strike = 100.0,
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = 0.2,
+        .rate = 0.05,
+        .continuous_dividend_yield =0.0,
+        .option_type = OptionType::CALL,
+        .discrete_dividends = {{2.0, 1.0}}  // Invalid: beyond maturity
+    };
+
     EXPECT_THROW({
-        solver.register_dividend(2.0, 1.0);
+        AmericanOptionSolver solver(params2, grid);
     }, std::invalid_argument);
 }
 
-TEST(AmericanOptionSolverTest, RegisterDividendInvalidAmount) {
+TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
     AmericanOptionParams params{
         .strike = 100.0,
         .spot = 100.0,
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.0,
-        .option_type = OptionType::PUT
+        .continuous_dividend_yield =0.0,
+        .option_type = OptionType::PUT,
+        .discrete_dividends = {{0.5, -1.0}}  // Invalid: negative amount
     };
 
     AmericanOptionGrid grid{};
-    AmericanOptionSolver solver(params, grid);
 
     // Should reject negative amount
     EXPECT_THROW({
-        solver.register_dividend(0.5, -1.0);
+        AmericanOptionSolver solver(params, grid);
     }, std::invalid_argument);
 }
 
@@ -268,7 +278,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.0,
+        .continuous_dividend_yield =0.0,
         .option_type = OptionType::PUT
     };
 
@@ -298,7 +308,7 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.02,
+        .continuous_dividend_yield =0.02,
         .option_type = OptionType::PUT
     };
 
@@ -318,7 +328,7 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.0,
+        .continuous_dividend_yield =0.0,
         .option_type = OptionType::PUT
     };
 
@@ -343,7 +353,7 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
         .maturity = 1.0,
         .volatility = 0.2,
         .rate = 0.05,
-        .dividend_yield = 0.0,
+        .continuous_dividend_yield =0.0,
         .option_type = mango::OptionType::PUT
     };
 

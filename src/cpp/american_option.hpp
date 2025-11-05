@@ -26,13 +26,18 @@ enum class OptionType {
  * American option pricing parameters.
  */
 struct AmericanOptionParams {
-    double strike;           ///< Strike price (dollars)
-    double spot;             ///< Current stock price (dollars)
-    double maturity;         ///< Time to maturity (years)
-    double volatility;       ///< Implied volatility (fraction)
-    double rate;             ///< Risk-free rate (fraction)
-    double dividend_yield;   ///< Continuous dividend yield (fraction)
-    OptionType option_type;  ///< Call or Put
+    double strike;                      ///< Strike price (dollars)
+    double spot;                        ///< Current stock price (dollars)
+    double maturity;                    ///< Time to maturity (years)
+    double volatility;                  ///< Implied volatility (fraction)
+    double rate;                        ///< Risk-free rate (fraction)
+    double continuous_dividend_yield;   ///< Continuous dividend yield (fraction, affects PDE drift)
+    OptionType option_type;             ///< Call or Put
+
+    /// Discrete dividend schedule: (time, amount) pairs
+    /// Time is in years from now, amount is in dollars
+    /// Can be used simultaneously with continuous_dividend_yield
+    std::vector<std::pair<double, double>> discrete_dividends;
 
     /// Validate parameters
     void validate() const {
@@ -41,7 +46,17 @@ struct AmericanOptionParams {
         if (maturity <= 0.0) throw std::invalid_argument("Maturity must be positive");
         if (volatility <= 0.0) throw std::invalid_argument("Volatility must be positive");
         if (rate < 0.0) throw std::invalid_argument("Rate must be non-negative");
-        if (dividend_yield < 0.0) throw std::invalid_argument("Dividend yield must be non-negative");
+        if (continuous_dividend_yield < 0.0) throw std::invalid_argument("Continuous dividend yield must be non-negative");
+
+        // Validate discrete dividends
+        for (const auto& [time, amount] : discrete_dividends) {
+            if (time < 0.0 || time > maturity) {
+                throw std::invalid_argument("Discrete dividend time must be in [0, maturity]");
+            }
+            if (amount < 0.0) {
+                throw std::invalid_argument("Discrete dividend amount must be non-negative");
+            }
+        }
     }
 };
 
@@ -95,7 +110,7 @@ public:
     /**
      * Constructor.
      *
-     * @param params Option pricing parameters
+     * @param params Option pricing parameters (including discrete dividends)
      * @param grid Numerical grid parameters
      * @param trbdf2_config TR-BDF2 solver configuration
      * @param root_config Root finding configuration for Newton solver
@@ -104,14 +119,6 @@ public:
                         const AmericanOptionGrid& grid,
                         const TRBDF2Config& trbdf2_config = {},
                         const RootFindingConfig& root_config = {});
-
-    /**
-     * Register discrete dividend payment.
-     *
-     * @param time Time of dividend payment (years from now)
-     * @param amount Dividend amount (dollars)
-     */
-    void register_dividend(double time, double amount);
 
     /**
      * Solve for option value and Greeks.
@@ -133,9 +140,6 @@ private:
     AmericanOptionGrid grid_;
     TRBDF2Config trbdf2_config_;
     RootFindingConfig root_config_;
-
-    // Dividend schedule
-    std::vector<std::pair<double, double>> dividends_;  // (time, amount)
 
     // Solution state
     std::vector<double> solution_;

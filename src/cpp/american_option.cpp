@@ -121,23 +121,9 @@ AmericanOptionSolver::AmericanOptionSolver(
     , trbdf2_config_(trbdf2_config)
     , root_config_(root_config)
 {
-    // Validate parameters
+    // Validate parameters (includes discrete dividend validation)
     params_.validate();
     grid_.validate();
-}
-
-void AmericanOptionSolver::register_dividend(double time, double amount) {
-    if (time < 0.0 || time > params_.maturity) {
-        throw std::invalid_argument("Dividend time must be in [0, maturity]");
-    }
-    if (amount < 0.0) {
-        throw std::invalid_argument("Dividend amount must be non-negative");
-    }
-    dividends_.push_back({time, amount});
-
-    // Sort by time (early dividends first)
-    std::sort(dividends_.begin(), dividends_.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
 }
 
 AmericanOptionResult AmericanOptionSolver::solve() {
@@ -155,7 +141,7 @@ AmericanOptionResult AmericanOptionSolver::solve() {
     LogMoneynessBlackScholesOperator bs_op(
         params_.volatility,
         params_.rate,
-        params_.dividend_yield
+        params_.continuous_dividend_yield
     );
 
     // 4. Setup boundary conditions (NORMALIZED by K=1)
@@ -194,8 +180,8 @@ AmericanOptionResult AmericanOptionSolver::solve() {
                             obstacle(t, x, psi);
                         });
 
-        // 6. Register dividends as temporal events
-        for (const auto& [time, amount] : dividends_) {
+        // 6. Register discrete dividends as temporal events
+        for (const auto& [time, amount] : params_.discrete_dividends) {
             DividendJump div_jump(amount, params_.strike);
             solver.add_temporal_event(time,
                 [div_jump](double t, auto x, auto u) {
@@ -236,8 +222,8 @@ AmericanOptionResult AmericanOptionSolver::solve() {
                             obstacle(t, x, psi);
                         });
 
-        // 6. Register dividends as temporal events
-        for (const auto& [time, amount] : dividends_) {
+        // 6. Register discrete dividends as temporal events
+        for (const auto& [time, amount] : params_.discrete_dividends) {
             DividendJump div_jump(amount, params_.strike);
             solver.add_temporal_event(time,
                 [div_jump](double t, auto x, auto u) {
