@@ -369,12 +369,15 @@ private:
 };
 
 /**
- * UniformGridBlackScholesOperator: Optimized Black-Scholes for uniform grids
+ * UniformGridBlackScholesOperator: Optimized Black-Scholes in log-moneyness coordinates
  *
  * FAST PATH for uniform grids - pre-computes all division operations.
  * Uses simplified finite difference stencils with constant spacing.
  *
- * Performance vs non-uniform version:
+ * Implements the Black-Scholes PDE in log-moneyness coordinates x = ln(S/K):
+ *   ∂V/∂t = (σ²/2)·∂²V/∂x² + (r-d-σ²/2)·∂V/∂x - r·V
+ *
+ * Performance vs non-uniform LogMoneynessBlackScholesOperator:
  * - ~5x fewer instructions (0 divisions in hot loop)
  * - ~3x better IPC (4.0+ vs 1.47)
  * - Combined: ~16x speedup
