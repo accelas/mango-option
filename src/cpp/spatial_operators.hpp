@@ -12,6 +12,13 @@ namespace mango {
  * PDE: dV/dt = D * d2V/dx2
  *
  * This is a simplified operator for heat equation and basic PDE testing.
+ *
+ * DEPRECATED: This class exists for backward compatibility with old tests.
+ * For new code, use operators::SpatialOperator with operators::LaplacianPDE.
+ *
+ * This class now supports BOTH old and new PDESolver interfaces. The new interface
+ * methods (apply, apply_interior, compute_*_derivative without grid/dx params) are
+ * implemented as wrappers around the old interface for compatibility.
  */
 class LaplacianOperator {
 public:
@@ -19,7 +26,7 @@ public:
      * Create operator for simple diffusion
      * @param D Diffusion coefficient
      */
-    explicit LaplacianOperator(double D) : D_(D) {}
+    explicit LaplacianOperator(double D) : D_(D), grid_(), dx_() {}
 
     /**
      * Apply spatial operator: Lu = D * d2u/dx2
@@ -134,8 +141,60 @@ public:
         d2u[n-1] = 0.0;
     }
 
+    // ========================================================================
+    // NEW INTERFACE (for compatibility with new PDESolver)
+    // ========================================================================
+
+    /// Initialize grid information (called once by PDESolver constructor)
+    /// This method is detected via SFINAE and called if present
+    void set_grid(std::span<const double> x, std::span<const double> dx) {
+        grid_ = x;
+        dx_ = dx;
+    }
+
+    /// Apply operator to full grid (new interface)
+    void apply(double t, std::span<const double> u, std::span<double> Lu) const {
+        // Delegate to old interface
+        (*this)(t, grid_, u, Lu, dx_);
+    }
+
+    /// Apply operator to interior points only (new interface for cache blocking)
+    void apply_interior([[maybe_unused]] double t,
+                       std::span<const double> u,
+                       std::span<double> Lu,
+                       size_t start,
+                       size_t end) const {
+        // Interior points: centered finite differences
+        for (size_t i = start; i < end; ++i) {
+            const double dx_left = dx_[i-1];   // x[i] - x[i-1]
+            const double dx_right = dx_[i];     // x[i+1] - x[i]
+            const double dx_center = 0.5 * (dx_left + dx_right);
+
+            // Second derivative: d2u/dx2
+            const double d2u = (u[i+1] - u[i]) / dx_right - (u[i] - u[i-1]) / dx_left;
+            const double d2u_dx2 = d2u / dx_center;
+
+            // Laplacian operator: L(u) = D * d2u/dx2
+            Lu[i] = D_ * d2u_dx2;
+        }
+    }
+
+    /// Compute first derivative (new interface - no grid/dx parameters)
+    void compute_first_derivative(std::span<const double> u, std::span<double> du) const {
+        // Delegate to old interface
+        compute_first_derivative(grid_, u, du, dx_);
+    }
+
+    /// Compute second derivative (new interface - no grid/dx parameters)
+    void compute_second_derivative(std::span<const double> u, std::span<double> d2u) const {
+        // Delegate to old interface
+        compute_second_derivative(grid_, u, d2u, dx_);
+    }
+
 private:
     double D_;  // Diffusion coefficient
+    mutable std::span<const double> grid_;  // Grid points (set by PDESolver via set_grid)
+    mutable std::span<const double> dx_;    // Pre-computed grid spacing (set by PDESolver)
 };
 
 /**
