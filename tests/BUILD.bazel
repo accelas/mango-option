@@ -329,6 +329,16 @@ cc_test(
     copts = ["-std=c++20"],
 )
 
+cc_test(
+    name = "bspline_basis_test",
+    srcs = ["bspline_basis_test.cc"],
+    deps = [
+        "//src:bspline_basis_1d",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
