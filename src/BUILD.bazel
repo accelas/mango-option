@@ -71,6 +71,18 @@ cc_library(
 )
 
 cc_library(
+    name = "jacobian_view",
+    hdrs = ["jacobian_view.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "workspace",
     hdrs = ["workspace.hpp"],
     deps = [":cache_config"],
@@ -206,6 +218,7 @@ cc_library(
         ":newton_workspace",
         ":root_finding",
         ":snapshot",
+        ":jacobian_view",
     ],
     copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
