@@ -1,0 +1,245 @@
+# Legacy C test suite - all tests marked as manual
+# These won't run in CI but can be run explicitly if needed
+# Example: bazel test //legacy/tests:cubic_spline_test --test_output=all
+
+cc_test(
+    name = "cubic_spline_test",
+    srcs = ["cubic_spline_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "grid_generation_test",
+    srcs = ["grid_generation_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:grid_generation",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "grid_presets_test",
+    srcs = ["grid_presets_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:grid_presets",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "stability_test",
+    srcs = ["stability_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "brent_test",
+    srcs = ["brent_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:implied_volatility",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "lets_be_rational_test",
+    srcs = ["lets_be_rational_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:lets_be_rational",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "implied_volatility_test",
+    srcs = ["implied_volatility_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:implied_volatility",
+        "//legacy/src:american_option",
+        "//legacy/src:price_table",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual", "slow"],
+)
+
+cc_test(
+    name = "tridiagonal_test",
+    srcs = ["tridiagonal_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:cubic_spline",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "unified_grid_test",
+    srcs = ["unified_grid_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:american_option",
+        "//legacy/src:price_table",
+        "//legacy/src:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "adaptive_accuracy_test",
+    srcs = ["adaptive_accuracy_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:validation",
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual", "slow"],
+)
+
+cc_test(
+    name = "interpolation_test",
+    srcs = ["interpolation_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:interp_cubic",
+        "//legacy/src:iv_surface",
+        "//legacy/src:price_table",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "cubic_interp_4d_5d_test",
+    srcs = ["cubic_interp_4d_5d_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:interp_cubic",
+        "//legacy/src:price_table",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "interpolation_workspace_test",
+    srcs = ["interpolation_workspace_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:interp_cubic",
+        "//legacy/src:iv_surface",
+        "//legacy/src:price_table",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "price_table_test",
+    size = "small",
+    srcs = ["price_table_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "price_table_slow_test",
+    size = "large",
+    srcs = ["price_table_slow_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual", "slow"],
+)
+
+cc_test(
+    name = "coordinate_transform_test",
+    size = "small",
+    srcs = ["coordinate_transform_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:price_table",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "memory_layout_test",
+    size = "small",
+    srcs = ["memory_layout_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:price_table",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "diagnostic_interp_test",
+    size = "small",
+    srcs = ["diagnostic_interp_test.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra"],
+    deps = [
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "snapshot_interpolator_test",
+    srcs = ["snapshot_interpolator_test.cc"],
+    deps = [
+        "//src/cpp:snapshot_interpolator",
+        "//legacy/src:cubic_spline",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "cpp_boundary_test",
+    size = "small",
+    srcs = ["cpp_boundary_test.cc"],
+    deps = [
+        "//legacy/src:american_option",
+        "//src/cpp:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-fopenmp-simd"],
+    tags = ["manual"],
+)

@@ -47,20 +47,58 @@ The active C++20 implementation provides equivalent (and often enhanced) functio
 
 For new development, please use the C++20 API in `src/cpp/`.
 
-## Building (Not Recommended)
+## Building
 
-This code is **not** integrated into the Bazel build system. To compile manually:
+This code has Bazel build files with all targets marked as `manual`, meaning:
+- ✅ Can be built explicitly when needed
+- ❌ Won't be built automatically in CI
+- ❌ Won't be included in `bazel build //...` or `bazel test //...`
+
+### Building Libraries
 
 ```bash
-# Example: Compile a single example
-gcc -std=c23 -O3 -fopenmp-simd \
-    legacy/examples/example_heat_equation.c \
-    legacy/src/pde_solver.c \
-    legacy/src/cubic_spline.c \
-    -Ilegacy/src -lm -o heat_equation
+# Build a specific library
+bazel build //legacy/src:pde_solver
+bazel build //legacy/src:american_option
+bazel build //legacy/src:price_table
 
-# Note: Dependencies must be resolved manually
+# Build all legacy libraries (explicit wildcard)
+bazel build //legacy/src:all
 ```
+
+### Running Tests
+
+```bash
+# Run a specific test
+bazel test //legacy/tests:cubic_spline_test --test_output=all
+bazel test //legacy/tests:price_table_test --test_output=all
+
+# Run all legacy tests (explicit wildcard)
+bazel test //legacy/tests:all --test_output=all
+
+# Note: Some tests are tagged as "slow"
+bazel test //legacy/tests:implied_volatility_test --test_output=all
+```
+
+### Running Examples
+
+```bash
+# Build and run an example
+bazel run //legacy/examples:example_heat_equation
+bazel run //legacy/examples:example_american_option
+bazel run //legacy/examples:example_precompute_table
+
+# Build all legacy examples
+bazel build //legacy/examples:all
+```
+
+### Why `manual` tag?
+
+The `manual` tag ensures these targets:
+- Don't run in CI (reducing CI time and cost)
+- Don't break `bazel build //...` if they have issues
+- Can still be built/tested explicitly for reference or debugging
+- Preserve the complete build configuration for future reference
 
 ## Documentation
 
