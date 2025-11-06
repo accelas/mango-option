@@ -305,7 +305,7 @@ void SpatialOperator<PDE, T>::apply_interior(
 {
     // Create evaluator lambda that handles time parameter
     auto eval = [&](T d2u, T du, T val) -> T {
-        if constexpr (has_time_param_v<PDE>) {
+        if constexpr (TimeDependentPDE<PDE>) {
             return pde_(t, d2u, du, val);  // Time-dependent PDE
         } else {
             return pde_(d2u, du, val);     // Time-independent PDE
@@ -321,23 +321,13 @@ void SpatialOperator<PDE, T>::apply_interior(
 }
 ```
 
-**Type trait for time detection**:
+**Concept for time detection**:
 ```cpp
-template<typename PDE, typename = void>
-struct has_time_param : std::false_type {};
-
+/// Concept to detect time-dependent PDEs
 template<typename PDE>
-struct has_time_param<PDE, std::void_t<
-    decltype(std::declval<PDE>()(
-        std::declval<double>(),  // t
-        std::declval<double>(),  // d2u
-        std::declval<double>(),  // du
-        std::declval<double>()   // u
-    ))
->> : std::true_type {};
-
-template<typename PDE>
-inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
+concept TimeDependentPDE = requires(PDE pde, double t, double d2u, double du, double u) {
+    { pde(t, d2u, du, u) } -> std::convertible_to<double>;
+};
 ```
 
 **Design rationale**:
@@ -614,7 +604,7 @@ Test each component independently:
    - Lifetime safety: operator owns GridSpacing, no dangling references after factory returns
 
 5. **Time-aware dispatch**:
-   - Test `has_time_param_v` trait with various PDE types
+   - Test `TimeDependentPDE` concept with various PDE types
    - Verify compile-time dispatch eliminates unused branch
    - Mock time-dependent PDE: verify `t` parameter passed correctly
 
@@ -666,7 +656,7 @@ src/cpp/operators/
 3. Add `compute_all_first()`, `compute_all_second()` to `CenteredDifference`
 4. Redesign `SpatialOperator` with clean interface
 5. Create `operator_factory.hpp` with helper functions
-6. Add `has_time_param_v` trait
+6. Add `TimeDependentPDE` concept
 7. Write comprehensive unit tests
 
 ### Phase 2: Update PDESolver Interface
