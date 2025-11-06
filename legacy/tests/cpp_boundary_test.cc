@@ -7,7 +7,7 @@
  * account for time discounting.
  */
 
-#include "src/cpp/american_option.hpp"
+#include "src/american_option.hpp"
 #include "src/american_option.h"
 #include <gtest/gtest.h>
 #include <cmath>
