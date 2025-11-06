@@ -13,6 +13,7 @@
 #include "src/american_option.hpp"
 #include "src/iv_solver.hpp"
 #include <benchmark/benchmark.h>
+#include <chrono>
 #include <cmath>
 
 using namespace mango;
@@ -230,10 +231,24 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
     grid.n_space = n_space;
     grid.n_time = n_time;
 
+    double total_time_ns = 0.0;
+    size_t iterations = 0;
+
     for (auto _ : state) {
+        auto start = std::chrono::high_resolution_clock::now();
         AmericanOptionSolver solver(params, grid);
         auto result = solver.solve();
+        auto end = std::chrono::high_resolution_clock::now();
+
         benchmark::DoNotOptimize(result);
+        total_time_ns += std::chrono::duration<double, std::nano>(end - start).count();
+        iterations++;
+    }
+
+    // Add time in milliseconds for easier reading
+    if (iterations > 0) {
+        double avg_time_ms = (total_time_ns / iterations) / 1e6;
+        state.counters["time_ms"] = avg_time_ms;
     }
 
     state.SetLabel("Grid: " + std::to_string(n_space) + "x" + std::to_string(n_time));
@@ -274,12 +289,8 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     grid.n_time = 1000;
 
     for (auto _ : state) {
-        #pragma omp parallel for
-        for (size_t i = 0; i < batch.size(); ++i) {
-            AmericanOptionSolver solver(batch[i], grid);
-            auto result = solver.solve();
-            benchmark::DoNotOptimize(result);
-        }
+        auto results = solve_american_options_batch(batch, grid);
+        benchmark::DoNotOptimize(results);
     }
 
     state.SetItemsProcessed(state.iterations() * batch_size);
@@ -316,12 +327,8 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
     config.grid_n_time = 1000;
 
     for (auto _ : state) {
-        #pragma omp parallel for
-        for (size_t i = 0; i < batch.size(); ++i) {
-            IVSolver solver(batch[i], config);
-            auto result = solver.solve();
-            benchmark::DoNotOptimize(result);
-        }
+        auto results = solve_implied_vol_batch(batch, config);
+        benchmark::DoNotOptimize(results);
     }
 
     state.SetItemsProcessed(state.iterations() * batch_size);
