@@ -1,6 +1,9 @@
 # Bazel build artifacts
 bazel-*
 
+# Makefile build artifacts
+build/
+
 # IDE and editor files
 .vscode/
 .idea/
