@@ -682,85 +682,124 @@ double interpolate(double x_eval) const;       // Cubic spline interpolation
 
 **std::span Benefits**: Zero-copy, bounds-checked in debug builds, iterator support
 
-### Implicit Solver (Fixed-Point Iteration)
+### Newton Solver for Implicit Stages
 
-For each implicit stage:
+The C++20 implementation uses **Newton's method** (via `NewtonWorkspace`) to solve implicit stages, not fixed-point iteration:
 
+```cpp
+// For each TR-BDF2 implicit stage, solve:
+// F(u) = u - dt·α·L(u) - RHS = 0
+//
+// Newton iteration:
+//   J·Δu = -F(u^k)
+//   u^{k+1} = u^k + Δu
+//
+// where J is the Jacobian approximated via finite differences
 ```
-Given: u_n, target: u_{n+1}
 
-Fixed-point iteration with under-relaxation (ω = 0.7):
-  u^(k+1) = ω · u_candidate(u^(k)) + (1-ω) · u^(k)
-
-Convergence criteria:
-  || u^(k+1) - u^(k) ||_∞ < tolerance
-```
+**Newton Workspace** (from `newton_workspace.hpp`):
+- Builds Jacobian matrix (tridiagonal for 1D PDEs)
+- Solves linear system via Thomas algorithm
+- Quasi-Newton: Jacobian computed once per stage, not per iteration
+- Convergence: `||F(u)|| < tolerance`
 
 **Configuration**:
-```c
-typedef struct {
-    double gamma;               // TR-BDF2 parameter (≈ 0.5858)
-    size_t max_iter;            // Max iterations per step
-    double tolerance;           // Convergence tolerance
-} TRBDF2Config;
+```cpp
+namespace mango {
+
+struct TRBDF2Config {
+    double gamma = 2.0 - std::sqrt(2.0);  // TR-BDF2 parameter (≈ 0.5858)
+    size_t cache_blocking_threshold = 5000;  // Enable cache blocking for large grids
+};
+
+struct RootFindingConfig {
+    size_t max_iter = 100;        // Max Newton iterations per stage
+    double tolerance = 1e-6;      // Convergence tolerance
+    double jacobian_fd_epsilon = 1e-7;  // Finite difference step for Jacobian
+};
+
+} // namespace mango
 ```
 
 ### Boundary Condition Types
 
-```c
-typedef enum {
-    BC_DIRICHLET,               // u = g(t)
-    BC_NEUMANN,                 // ∂u/∂x = g(t)
-    BC_ROBIN                    // a·u + b·∂u/∂x = g(t)
-} BoundaryType;
+```cpp
+namespace mango {
+
+enum class BoundaryType {
+    DIRICHLET,   // u = g(t)
+    NEUMANN,     // ∂u/∂x = g(t)
+    ROBIN        // a·u + b·∂u/∂x = g(t)
+};
+
+// Example boundary condition classes
+class DirichletBC {
+    double value_;
+public:
+    explicit DirichletBC(double v) : value_(v) {}
+    double value(double t) const { return value_; }
+    BoundaryType type() const { return BoundaryType::DIRICHLET; }
+};
+
+class NeumannBC {
+    double gradient_;
+public:
+    explicit NeumannBC(double g) : gradient_(g) {}
+    double value(double t) const { return gradient_; }
+    BoundaryType type() const { return BoundaryType::NEUMANN; }
+};
+
+class RobinBC {
+    double a_, b_, g_;
+public:
+    RobinBC(double a, double b, double g) : a_(a), b_(b), g_(g) {}
+    double value(double t) const { return g_; }
+    BoundaryType type() const { return BoundaryType::ROBIN; }
+    double coeff_a() const { return a_; }
+    double coeff_b() const { return b_; }
+};
+
+} // namespace mango
 ```
 
 ### Boundary Condition Implementation
 
+The C++20 implementation uses **compile-time dispatch** via templates and concepts to handle different boundary types efficiently.
+
 #### Dirichlet Boundaries
 Direct assignment of boundary values:
-```c
-u[0] = left_boundary(t);      // Left boundary
-u[n-1] = right_boundary(t);   // Right boundary
+```cpp
+u[0] = left_bc.value(t);      // Left boundary
+u[n-1] = right_bc.value(t);   // Right boundary
 ```
 
-#### Neumann Boundaries (Ghost Point Method)
-For ∂u/∂x = g at boundaries, the solver uses the **ghost point method** to properly compute the spatial operator at boundary points while maintaining conservation properties.
-
-**Left boundary** (x = x_min):
-- Creates virtual point u_{-1} outside domain
-- Ghost point relation: u_{-1} = u_1 - 2·dx·g (from centered difference)
-- Estimates diffusion coefficient D from interior stencil
-- Computes: L(u)_0 = D·(2u_1 - 2u_0 - 2·dx·g) / dx²
-
-**Right boundary** (x = x_max):
-- Creates virtual point u_n outside domain
-- Ghost point relation: u_n = u_{n-2} + 2·dx·g
-- Estimates diffusion coefficient D from interior stencil
-- Computes: L(u)_{n-1} = D·(2u_{n-2} - 2u_{n-1} + 2·dx·g) / dx²
-
-**Assumption**: Ghost point method assumes pure diffusion operator L(u) = D·∂²u/∂x². For advection-diffusion or nonlinear operators, coefficient estimation may not be accurate. See `pde_solver.c` lines 83-86, 105.
+#### Neumann Boundaries
+For ∂u/∂x = g at boundaries, handled via modified stencils during operator evaluation.
 
 #### Robin Boundaries
 For a·u + b·∂u/∂x = g at boundaries:
-- Modified matrix entries in tridiagonal system
-- Incorporates both value and derivative conditions
-- Coefficients a, b validated to prevent division by zero (a ≠ 0)
+- Incorporated into Newton Jacobian
+- Both value and derivative conditions applied
+- Type-safe coefficient access via `coeff_a()` and `coeff_b()` methods
 
 ### Performance Optimizations
 
-#### Zero-Allocation Tridiagonal Solver
-The tridiagonal solver (Thomas algorithm) uses pre-allocated workspace from the PDESolver's 12n buffer:
-- **Workspace**: 2n doubles for c_prime and d_prime arrays
-- **Benefit**: Eliminates malloc/free overhead in hot path
-- **Impact**: Called once per Newton iteration per timestep (~5-10% speedup)
-- **Backward compatibility**: Accepts NULL workspace pointer (allocates internally for standalone use)
+#### Memory Efficiency
+The C++20 implementation achieves significant memory reduction:
+- **Workspace**: 6n doubles (down from 12n in C version)
+- **Newton workspace**: 8n doubles allocated + 2n borrowed
+- **Total**: ~14n doubles vs 24n+ in legacy code (42% reduction)
 
-#### SIMD Vectorization
-Key loops marked with `#pragma omp simd` for automatic vectorization:
-- Spatial operator evaluation
-- Tridiagonal forward/backward sweeps
-- Fixed-point iteration updates
+#### Cache Blocking
+Automatic cache blocking for large grids (n ≥ 5000):
+- Splits spatial operators into L1-sized blocks (~1000 points)
+- Reduces memory bandwidth pressure
+- Transparent to user (same results as non-blocked)
+
+#### Template-Based Zero-Cost Abstractions
+- Boundary conditions: Compile-time dispatch via concepts
+- Spatial operators: No virtual function overhead
+- All callbacks inlined by compiler
 
 ### Test Coverage
 
