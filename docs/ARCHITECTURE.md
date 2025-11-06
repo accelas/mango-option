@@ -600,69 +600,86 @@ struct TemporalEvent {
 
 The solver supports **temporal events** for handling discrete discontinuities in time (e.g., dividend payments, regime changes).
 
-**Registration**:
-```c
-PDECallbacks callbacks = {
-    // ... other callbacks ...
-    .temporal_event = my_event_handler,
-    .n_temporal_events = 2,
-    .temporal_event_times = (double[]){0.25, 0.75},  // Event times in [t_start, t_end]
-    .user_data = &my_data
-};
+**Registration** (via PDESolver constructor):
+```cpp
+// Temporal events are registered during solver construction
+std::vector<TemporalEvent> events;
+
+events.push_back({
+    .time = 0.25,
+    .callback = [](double t, std::span<const double> x, std::span<double> u) {
+        // Handle first event
+    }
+});
+
+events.push_back({
+    .time = 0.75,
+    .callback = [](double t, std::span<const double> x, std::span<double> u) {
+        // Handle second event
+    }
+});
+
+// Events automatically sorted by time via spaceship operator
 ```
 
 **How it works**:
-1. Solver maintains sorted list of event times
+1. Solver maintains sorted list of event times (using `operator<=>`)
 2. During time-stepping, checks if current step crosses an event
 3. When event triggered:
    - Solver completes step to exact event time
-   - Calls `temporal_event` callback with solution array
+   - Calls lambda callback with std::span views of solution
    - Callback modifies solution in-place (e.g., applies dividend jump)
    - Solver continues from modified state
 
 **Example use case - Dividend payments**:
-```c
-void dividend_event(double t, const double *x, size_t n, double *u,
-                    const size_t *event_indices, size_t n_events, void *data) {
+```cpp
+auto dividend_event = [dividend_amount, strike](double t,
+                                                 std::span<const double> x,
+                                                 std::span<double> u) {
     // Apply stock price jump from dividend payment
-    // Interpolate option value to new grid after S → S - D
-    american_option_apply_dividend(x, n, u, u, dividend_amount, strike);
-}
+    // Lambda captures dividend amount and strike
+    apply_dividend_jump(x, u, dividend_amount, strike);
+};
 ```
 
-**Thread safety**: Each solver instance has independent event state; batch processing with temporal events is safe.
+**Thread safety**: Each solver instance has independent event state; lambda captures are thread-local.
 
-### Core Functions
+### Core API
 
-#### 1. **Solver Creation**
-```c
-PDESolver* pde_solver_create(SpatialGrid *grid,
-                              const TimeDomain *time,
-                              const BoundaryConfig *bc_config,
-                              const TRBDF2Config *trbdf2_config,
-                              const PDECallbacks *callbacks);
+#### 1. **Solver Construction (Template-Based)**
+```cpp
+template<typename BoundaryL, typename BoundaryR, typename SpatialOp>
+PDESolver(std::span<const double> grid,
+          const TimeDomain& time,
+          const TRBDF2Config& config,
+          const RootFindingConfig& root_config,
+          const BoundaryL& left_bc,
+          const BoundaryR& right_bc,
+          const SpatialOp& spatial_op,
+          std::optional<ObstacleCallback> obstacle = std::nullopt);
 ```
 
-**Ownership**: Takes ownership of grid; `grid.x` set to nullptr
+**Type Safety**: Template parameters constrained by concepts at compile-time
+
+**RAII**: Grid passed as std::span (non-owning view), resources managed automatically
 
 #### 2. **Solver Lifecycle**
-```c
-void pde_solver_initialize(PDESolver *solver);  // Apply initial conditions
-int pde_solver_solve(PDESolver *solver);        // Full solve loop
-void pde_solver_destroy(PDESolver *solver);     // Cleanup
+```cpp
+void initialize(InitialConditionFunc ic);  // Apply initial conditions
+bool solve();                              // Full solve loop (returns convergence status)
+bool step(double t_current);               // Single time step
 ```
 
-#### 3. **Single Step**
-```c
-int pde_solver_step(PDESolver *solver, double t_current);
+**Modern Error Handling**: Returns bool for success/failure instead of error codes
+
+#### 3. **Solution Access (Zero-Copy Views)**
+```cpp
+std::span<const double> solution() const;      // Get solution array (read-only view)
+std::span<const double> grid() const;          // Get spatial grid (read-only view)
+double interpolate(double x_eval) const;       // Cubic spline interpolation
 ```
 
-#### 4. **Solution Access**
-```c
-const double* pde_solver_get_solution(const PDESolver *solver);
-const double* pde_solver_get_grid(const PDESolver *solver);
-double pde_solver_interpolate(const PDESolver *solver, double x_eval);
-```
+**std::span Benefits**: Zero-copy, bounds-checked in debug builds, iterator support
 
 ### Implicit Solver (Fixed-Point Iteration)
 
