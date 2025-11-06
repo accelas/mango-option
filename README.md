@@ -2,13 +2,13 @@
 
 **Research-grade numerical library for option pricing and implied volatility calculation**
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C23](https://img.shields.io/badge/C-23-blue)]() [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C++20](https://img.shields.io/badge/C++-20-blue)]() [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
 
 ---
 
 ## What is mango-iv?
 
-**mango-iv** is a C23-based library that solves two fundamental problems in quantitative finance:
+**mango-iv** is a modern C++20 library that solves two fundamental problems in quantitative finance:
 
 1. **American Option Pricing**: Calculate fair prices using finite-difference PDE solver
 2. **American Option Implied Volatility**: Invert market prices to extract implied volatility
@@ -35,7 +35,7 @@ The library combines **performance**, **flexibility**, and **correctness** with 
 ### Prerequisites
 
 - **Bazel** (build system)
-- **GCC** or **Clang** with C23 support
+- **GCC 10+** or **Clang 13+** with C++20 support
 - **GoogleTest** (automatically fetched by Bazel)
 
 Optional:
@@ -63,10 +63,11 @@ bazel run //examples:example_heat_equation
 
 ### Calculate American Option Implied Volatility
 
-```c
-#include "src/implied_volatility.h"
+```cpp
+#include "src/iv_solver.hpp"
 
-IVParams params = {
+// Setup option parameters
+mango::IVParams params{
     .spot_price = 100.0,
     .strike = 100.0,
     .time_to_maturity = 1.0,
@@ -75,14 +76,16 @@ IVParams params = {
     .is_call = false
 };
 
-IVResult result = calculate_iv_simple(&params);
+// Solve for implied volatility
+mango::IVSolver solver(params);
+mango::IVResult result = solver.solve();
 
 if (result.converged) {
-    printf("Implied volatility: %.4f (%.1f%%)\n",
-           result.implied_vol, result.implied_vol * 100);
-    printf("Iterations: %d\n", result.iterations);
+    std::cout << "Implied volatility: " << result.implied_vol
+              << " (" << result.implied_vol * 100 << "%)\n";
+    std::cout << "Iterations: " << result.iterations << "\n";
 } else {
-    printf("Failed: %s\n", result.error);
+    std::cerr << "Failed: " << *result.failure_reason << "\n";
 }
 ```
 
@@ -94,22 +97,22 @@ Iterations: 5
 
 ### Price an American Put Option
 
-```c
-#include "src/american_option.h"
+```cpp
+#include "src/american_option.hpp"
 
-double price = american_option_price(
-    100.0,  // spot price
+// Create American option pricer
+mango::AmericanOption pricer(
     100.0,  // strike
-    1.0,    // time to maturity (years)
-    0.05,   // risk-free rate
     0.25,   // volatility
-    0.0,    // dividend yield
-    false,  // is_call (false = put)
-    141,    // spatial grid points
-    1000    // time steps
+    0.05,   // risk-free rate
+    1.0,    // time to maturity (years)
+    mango::OptionType::Put
 );
 
-printf("American put price: $%.4f\n", price);
+// Price at spot = 100
+double price = pricer.price(100.0);
+
+std::cout << "American put price: $" << price << "\n";
 ```
 
 **Output:**
@@ -119,47 +122,47 @@ American put price: $6.0842
 
 ### Solve a Custom PDE
 
-```c
-#include "src/pde_solver.h"
+```cpp
+#include "src/pde_solver.hpp"
+#include "src/operators/laplacian_pde.hpp"
+#include "src/boundary_conditions.hpp"
 
-// Define callbacks for heat equation: ∂u/∂t = D·∂²u/∂x²
-void heat_operator(const double *x, double t, const double *u,
-                   size_t n, double *Lu, void *user_data) {
-    const double dx = x[1] - x[0];
-    const double D = *(double*)user_data;  // diffusion coefficient
-
-    Lu[0] = Lu[n-1] = 0.0;  // boundaries
-
-    #pragma omp simd
-    for (size_t i = 1; i < n - 1; i++) {
-        Lu[i] = D * (u[i-1] - 2.0*u[i] + u[i+1]) / (dx * dx);
-    }
+// Create spatial grid
+std::vector<double> grid(101);
+for (size_t i = 0; i < grid.size(); ++i) {
+    grid[i] = i / 100.0;  // [0, 1]
 }
 
-// Setup and solve
-SpatialGrid grid = pde_create_grid(0.0, 1.0, 101);
-TimeDomain time = {.t_start = 0.0, .t_end = 1.0, .dt = 0.001, .n_steps = 1000};
+// Setup time domain
+mango::TimeDomain time{0.0, 1.0, 0.001};
+
+// Setup boundary conditions (Dirichlet: u = 0 at both ends)
+auto left_bc = mango::DirichletBC(0.0);
+auto right_bc = mango::DirichletBC(0.0);
+
+// Setup spatial operator (Laplacian: D·∂²u/∂x²)
 double diffusion = 0.1;
+auto spatial_op = mango::LaplacianOperator(diffusion);
 
-PDECallbacks callbacks = {
-    .initial_condition = my_ic_func,
-    .left_boundary = my_left_bc,
-    .right_boundary = my_right_bc,
-    .spatial_operator = heat_operator,
-    .user_data = &diffusion
+// Create solver
+mango::TRBDF2Config config;
+mango::RootFindingConfig root_config;
+mango::PDESolver solver(grid, time, config, root_config,
+                        left_bc, right_bc, spatial_op);
+
+// Initialize with custom initial condition
+auto initial_condition = [](std::span<const double> x, std::span<double> u) {
+    for (size_t i = 0; i < x.size(); ++i) {
+        u[i] = std::sin(M_PI * x[i]);
+    }
 };
+solver.initialize(initial_condition);
 
-BoundaryConfig bc = pde_default_boundary_config();
-TRBDF2Config trbdf2 = pde_default_trbdf2_config();
+// Solve
+bool converged = solver.solve();
 
-PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
-pde_solver_initialize(solver);
-pde_solver_solve(solver);
-
-const double *solution = pde_solver_get_solution(solver);
-// Use solution...
-
-pde_solver_destroy(solver);
+// Access solution
+auto solution = solver.solution();
 ```
 
 ### Use Grid Presets for Memory-Efficient Price Tables
@@ -248,54 +251,36 @@ See `examples/` for complete working programs.
 
 ```
 mango-iv/
-├── src/                           # Core library
-│   ├── implied_volatility.{h,c}   # American IV calculation (FDM + Brent)
-│   ├── lets_be_rational.{h,c}     # European IV estimation (bound calculation)
-│   ├── american_option.{h,c}      # American option pricing (FDM)
-│   ├── pde_solver.{h,c}           # General PDE solver (TR-BDF2)
-│   ├── cubic_spline.{h,c}         # 1D cubic spline interpolation
-│   ├── interp_strategy.h          # Interpolation strategy pattern
-│   ├── interp_cubic.{h,c}         # Multi-dimensional cubic interpolation
-│   ├── interp_cubic_workspace.c   # Workspace management for cubic splines
-│   ├── price_table.{h,c}          # 4D/5D option price tables
-│   ├── iv_surface.{h,c}           # 2D implied volatility surfaces
-│   ├── validation.{h,c}           # Validation framework for adaptive refinement
-│   ├── grid_generation.{h,c}      # Non-uniform grid spacing utilities
-│   ├── grid_presets.{h,c}         # Preset grid configurations
-│   ├── brent.h                    # Brent's method (root-finding)
-│   ├── tridiagonal.h              # Tridiagonal solver
-│   └── ivcalc_trace.h             # USDT tracing probes
+├── src/                           # Core library (C++20)
+│   ├── iv_solver.{hpp,cpp}        # American IV calculation
+│   ├── american_option.hpp        # American option pricing
+│   ├── pde_solver.hpp             # General PDE solver (TR-BDF2)
+│   ├── cubic_spline_solver.hpp    # Cubic spline interpolation
+│   ├── boundary_conditions.hpp    # Boundary condition types
+│   ├── spatial_operators.hpp      # Spatial operator interface
+│   ├── operators/                 # Operator implementations
+│   │   ├── spatial_operator.hpp   # Base operator interface
+│   │   ├── laplacian_pde.hpp      # Laplacian operator
+│   │   ├── black_scholes_pde.hpp  # Black-Scholes operator
+│   │   └── ...                    # Other operators
+│   ├── grid.hpp                   # Grid management
+│   ├── workspace.hpp              # Memory workspace
+│   ├── thomas_solver.hpp          # Tridiagonal solver
+│   ├── newton_workspace.hpp       # Newton solver workspace
+│   ├── root_finding.hpp           # Root-finding utilities
+│   └── ...                        # Other C++20 modules
 │
 ├── examples/                      # Demonstration programs
-│   ├── example_implied_volatility.c
-│   ├── example_american_option.c
-│   ├── example_american_option_dividend.c
-│   ├── example_heat_equation.c
-│   ├── example_interpolation_engine.c
-│   ├── example_precompute_table.c
-│   └── test_cubic_4d_5d.c
+│   └── example_newton_solver.cc   # Example PDE solving
 │
 ├── tests/                         # Comprehensive test suite
-│   ├── implied_volatility_test.cc # American IV calculation tests
-│   ├── lets_be_rational_test.cc   # European IV estimation tests
+│   ├── iv_solver_test.cc          # IV solver tests
 │   ├── american_option_test.cc    # American option tests
 │   ├── pde_solver_test.cc         # Core PDE solver tests
-│   ├── cubic_spline_test.cc       # 1D spline tests
-│   ├── interpolation_test.cc      # Multi-dimensional interpolation tests
-│   ├── interpolation_workspace_test.cc
-│   ├── cubic_interp_4d_5d_test.cc
-│   ├── price_table_test.cc        # Price table tests
-│   ├── price_table_slow_test.cc   # Long-running table tests
-│   ├── adaptive_accuracy_test.cc  # Adaptive refinement validation tests
-│   ├── diagnostic_interp_test.cc  # Interpolation correctness diagnostics
-│   ├── unified_grid_test.cc       # Unified grid architecture tests
-│   ├── coordinate_transform_test.cc
-│   ├── memory_layout_test.cc
-│   ├── grid_generation_test.cc    # Grid spacing tests
-│   ├── grid_presets_test.cc       # Preset configuration tests
-│   ├── brent_test.cc              # Root-finding tests
-│   ├── tridiagonal_test.cc        # Linear solver tests
-│   └── stability_test.cc          # Numerical stability tests
+│   ├── cubic_spline_test.cc       # Spline tests
+│   ├── boundary_conditions_test.cc # BC tests
+│   ├── spatial_operators_test.cc  # Operator tests
+│   └── ...                        # Additional test suites
 │
 ├── docs/                          # Documentation
 │   ├── PROJECT_OVERVIEW.md        # Problem domain & motivation
@@ -314,10 +299,11 @@ mango-iv/
 ### Key Design Principles
 
 1. **Modularity** - Clear separation: IV ← American pricing ← PDE solver
-2. **Performance-Conscious** - Vectorized, SIMD-friendly, zero-allocation hot paths
-3. **Correctness First** - Well-established methods, comprehensive tests, QuantLib validation
-4. **Zero-Overhead Diagnostics** - USDT tracing (no printf in library code)
-5. **Research-Friendly** - Modern C23, clear code, extensive documentation
+2. **Performance-Conscious** - Template-based zero-cost abstractions, SIMD-friendly, compile-time optimization
+3. **Type Safety** - Strong typing with concepts, compile-time checks, no void* pointers
+4. **Correctness First** - Well-established methods, comprehensive tests, QuantLib validation
+5. **Zero-Overhead Diagnostics** - USDT tracing (no printf in library code)
+6. **Research-Friendly** - Modern C++20, clear code, extensive documentation
 
 ---
 
@@ -378,7 +364,7 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 
 | Feature | mango-iv | QuantLib | PyQL | Bloomberg API |
 |---------|---------|----------|------|---------------|
-| **Language** | C23 | C++17 | Python | C++/Python |
+| **Language** | C++20 | C++17 | Python | C++/Python |
 | **License** | Open-source | BSD | BSD | Proprietary |
 | **American options** | ✅ PDE (TR-BDF2) | ✅ Multiple methods | ✅ Via QuantLib | ✅ |
 | **Implied volatility** | ✅ Brent's | ✅ Newton/Brent | ✅ | ✅ |

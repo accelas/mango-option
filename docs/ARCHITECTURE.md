@@ -4,15 +4,15 @@
 
 ## Executive Summary
 
-The mango-iv codebase implements a complete suite for American option pricing and implied volatility (IV) calculation. It uses a **callback-based, vectorized architecture** with:
+The mango-iv codebase implements a complete suite for American option pricing and implied volatility (IV) calculation. It uses a **modern C++20 template-based architecture** with:
 
-- **Let's Be Rational** for fast European IV estimation (used for American IV bounds)
 - **TR-BDF2 PDE solver** for American option pricing via finite difference method
 - **American IV calculation** combining FDM with Brent's method for root-finding
 - **Cubic spline interpolation** for off-grid solution evaluation
 - **USDT tracing** for zero-overhead diagnostic monitoring
-- **OpenMP SIMD** pragmas for automatic vectorization
-- **Batch API** for parallel processing
+- **Template metaprogramming** with concepts for compile-time optimization
+- **Zero-cost abstractions** via templates and inlining
+- **Type-safe design** with std::span, std::optional, and concepts
 
 ## Architecture Overview
 
@@ -53,33 +53,36 @@ graph TD
 ## Component 1: American Implied Volatility Calculation
 
 ### File Locations
-- **Header**: `src/implied_volatility.h`
-- **Implementation**: `src/implied_volatility.c`
-- **Tests**: `tests/implied_volatility_test.cc`
-- **Benchmark**: `benchmarks/american_iv_benchmark.cc`
-- **Example**: `examples/example_implied_volatility.c`
+- **Header**: `src/iv_solver.hpp`
+- **Implementation**: `src/iv_solver.cpp`
+- **Tests**: `tests/iv_solver_test.cc`
+- **Example**: See integration tests
 
 ### Core Data Structures
 
-```c
+```cpp
+namespace mango {
+
 // Input parameters
-typedef struct {
+struct IVParams {
     double spot_price;              // S: Current stock price
     double strike;                  // K: Strike price
     double time_to_maturity;        // T: Time to expiration (years)
     double risk_free_rate;          // r: Risk-free interest rate
     double market_price;            // Market price of option
     bool is_call;                   // true for call, false for put
-} IVParams;
+};
 
 // Result
-typedef struct {
+struct IVResult {
     double implied_vol;             // Calculated implied volatility
-    double vega;                    // Option vega at solution
     int iterations;                 // Number of iterations
+    double final_error;             // Final error value
     bool converged;                 // True if converged
-    const char *error;              // Error message if failed
-} IVResult;
+    std::optional<std::string> failure_reason;  // Error message if failed
+};
+
+} // namespace mango
 ```
 
 ### Dependencies
@@ -232,12 +235,9 @@ From `lets_be_rational_test.cc`:
 ## Component 2: American Option Pricing
 
 ### File Locations
-- **Header**: `src/american_option.h`
-- **Implementation**: `src/american_option.c`
+- **Header**: `src/american_option.hpp`
 - **Tests**: `tests/american_option_test.cc`
-- **Examples**:
-  - `examples/example_american_option.c`
-  - `examples/example_american_option_dividend.c`
+- **Related**: `src/operators/black_scholes_pde.hpp` (Black-Scholes operator)
 
 ### Core Data Structures
 
@@ -495,10 +495,10 @@ From `american_option_test.cc`:
 ## Component 3: PDE Solver (Finite Difference Method Engine)
 
 ### File Locations
-- **Header**: `src/pde_solver.h`
-- **Implementation**: `src/pde_solver.c`
+- **Header**: `src/pde_solver.hpp`
 - **Tests**: `tests/pde_solver_test.cc`
-- **Example**: `examples/example_heat_equation.c`
+- **Operators**: `src/operators/` directory
+- **Example**: `examples/example_newton_solver.cc`
 
 ### Overview
 
@@ -562,34 +562,49 @@ graph LR
 - 64-byte alignment for SIMD
 - Zero overhead during time-stepping
 
-### Callback-Based Architecture
+### Template-Based Architecture
 
-All functionality exposed through callbacks operating on **entire arrays** (vectorized):
+The PDE solver uses C++20 templates with concepts for type-safe, zero-cost abstractions:
 
-```c
-// Initial condition: u(x, t=0) for all grid points
-typedef void (*InitialConditionFunc)(const double *x, size_t n_points,
-                                     double *u0, void *user_data);
+```cpp
+namespace mango {
 
-// Boundary condition: scalar value at boundary
-typedef double (*BoundaryConditionFunc)(double t, void *user_data);
+// Initial condition: lambda or function object
+// Signature: void(std::span<const double> x, std::span<double> u0)
+using InitialConditionFunc = std::function<void(std::span<const double>, std::span<double>)>;
 
-// Spatial operator: L(u) for all points
-typedef void (*SpatialOperatorFunc)(const double *x, double t,
-                                    const double *u, size_t n_points,
-                                    double *Lu, void *user_data);
+// Boundary conditions: Concept-based compile-time polymorphism
+template<typename T>
+concept BoundaryCondition = requires(T bc, double t) {
+    { bc.value(t) } -> std::convertible_to<double>;
+    { bc.type() } -> std::same_as<BoundaryType>;
+};
 
-// Obstacle condition: ψ(x,t) for variational inequalities
-typedef void (*ObstacleFunc)(const double *x, double t, size_t n_points,
-                             double *psi, void *user_data);
+// Spatial operator: Concept-based interface
+template<typename T>
+concept SpatialOperator = requires(T op, std::span<const double> x, double t,
+                                    std::span<const double> u, std::span<double> Lu) {
+    { op(x, t, u, Lu) } -> std::same_as<void>;
+};
 
-// Temporal events: Handle time-based events (dividends, etc.)
-// workspace parameter provides n_points doubles for temporary storage (zero malloc)
-typedef void (*TemporalEventFunc)(double t, const double *x,
-                                  size_t n_points, double *u,
-                                  const size_t *event_indices,
-                                  size_t n_events_triggered,
-                                  void *user_data, double *workspace);
+// Obstacle condition: Optional callback
+using ObstacleCallback = std::function<void(double t, std::span<const double> x,
+                                             std::span<double> psi)>;
+
+// Temporal events: Event-driven architecture
+using TemporalEventCallback = std::function<void(double t, std::span<const double> x,
+                                                  std::span<double> u)>;
+
+struct TemporalEvent {
+    double time;
+    TemporalEventCallback callback;
+
+    auto operator<=>(const TemporalEvent& other) const {
+        return time <=> other.time;  // C++20 spaceship operator
+    }
+};
+
+} // namespace mango
 ```
 
 ### Temporal Event System
@@ -771,7 +786,7 @@ From `pde_solver_test.cc`:
 
 ### 4.2 Cubic Spline Interpolation
 
-**File**: `src/cubic_spline.h` and `.c`
+**File**: `src/cubic_spline_solver.hpp`
 
 **Purpose**: Evaluate PDE solution at arbitrary off-grid points
 
@@ -885,7 +900,7 @@ typedef struct {
 
 ### 4.4 Tridiagonal Solver
 
-**File**: `src/tridiagonal.h`
+**File**: `src/thomas_solver.hpp`
 
 **Method**: Thomas algorithm (TDMA - Tridiagonal Matrix Algorithm)
 - **Time complexity**: O(n)
@@ -895,7 +910,7 @@ typedef struct {
 
 ### 4.5 USDT Tracing System
 
-**File**: `src/ivcalc_trace.h`
+**Files**: Tracing infrastructure integrated throughout C++ codebase
 
 **Purpose**: Zero-overhead diagnostic tracing for profiling and debugging
 
