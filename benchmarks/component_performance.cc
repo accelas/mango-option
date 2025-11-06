@@ -274,15 +274,16 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     grid.n_time = 1000;
 
     for (auto _ : state) {
-        for (const auto& params : batch) {
-            AmericanOptionSolver solver(params, grid);
+        #pragma omp parallel for
+        for (size_t i = 0; i < batch.size(); ++i) {
+            AmericanOptionSolver solver(batch[i], grid);
             auto result = solver.solve();
             benchmark::DoNotOptimize(result);
         }
     }
 
     state.SetItemsProcessed(state.iterations() * batch_size);
-    state.SetLabel("Batch size: " + std::to_string(batch_size));
+    state.SetLabel("Parallel batch: " + std::to_string(batch_size) + " options");
 }
 BENCHMARK(BM_AmericanPut_Batch)
     ->Arg(10)
@@ -315,15 +316,16 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
     config.grid_n_time = 1000;
 
     for (auto _ : state) {
-        for (const auto& params : batch) {
-            IVSolver solver(params, config);
+        #pragma omp parallel for
+        for (size_t i = 0; i < batch.size(); ++i) {
+            IVSolver solver(batch[i], config);
             auto result = solver.solve();
             benchmark::DoNotOptimize(result);
         }
     }
 
     state.SetItemsProcessed(state.iterations() * batch_size);
-    state.SetLabel("Batch size: " + std::to_string(batch_size));
+    state.SetLabel("Parallel batch: " + std::to_string(batch_size) + " IVs");
 }
 BENCHMARK(BM_ImpliedVol_Batch)
     ->Arg(10)
