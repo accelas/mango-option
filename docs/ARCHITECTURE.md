@@ -251,38 +251,55 @@ From `lets_be_rational_test.cc`:
 
 ### Core Data Structures
 
-```c
-typedef enum {
-    OPTION_CALL,
-    OPTION_PUT
-} OptionType;
+```cpp
+namespace mango {
 
-typedef struct {
-    double strike;                  // Strike price K
-    double volatility;              // σ (volatility)
-    double risk_free_rate;          // r (risk-free rate)
-    double time_to_maturity;        // T (time to maturity in years)
-    OptionType option_type;         // Call or Put
-    
-    // Discrete dividend information (optional)
-    size_t n_dividends;             // Number of dividend payments
-    double *dividend_times;         // Times of dividend payments (in years)
-    double *dividend_amounts;       // Dividend amounts (absolute cash dividends)
-} OptionData;
+/// Option type enumeration
+enum class OptionType {
+    CALL,
+    PUT
+};
 
-typedef struct {
-    double x_min;                   // Minimum log-moneyness (e.g., -0.7)
-    double x_max;                   // Maximum log-moneyness (e.g., 0.7)
-    size_t n_points;                // Number of grid points (e.g., 141)
-    double dt;                      // Time step (e.g., 0.001)
-    size_t n_steps;                 // Number of time steps (e.g., 1000)
-} AmericanOptionGrid;
+/// American option pricing parameters
+struct AmericanOptionParams {
+    double strike;                      // Strike price (dollars)
+    double spot;                        // Current stock price (dollars)
+    double maturity;                    // Time to maturity (years)
+    double volatility;                  // Implied volatility (fraction)
+    double rate;                        // Risk-free rate (fraction)
+    double continuous_dividend_yield;   // Continuous dividend yield (fraction)
+    OptionType option_type;             // Call or Put
 
-typedef struct {
-    PDESolver *solver;              // PDE solver (caller must destroy with american_option_free_result)
-    int status;                     // 0 = success, -1 = failure
-    void *internal_data;            // Internal data (do not access directly)
-} AmericanOptionResult;
+    // Discrete dividend schedule: (time, amount) pairs
+    std::vector<std::pair<double, double>> discrete_dividends;
+
+    // Built-in validation
+    void validate() const;
+};
+
+/// Numerical grid parameters for PDE solver
+struct AmericanOptionGrid {
+    size_t n_space;    // Number of spatial grid points
+    size_t n_time;     // Number of time steps
+    double x_min;      // Minimum log-moneyness (default: -3.0)
+    double x_max;      // Maximum log-moneyness (default: +3.0)
+
+    // Default constructor with sensible defaults
+    AmericanOptionGrid();
+
+    void validate() const;
+};
+
+/// Solver result containing option value and Greeks
+struct AmericanOptionResult {
+    double value;      // Option value (dollars)
+    double delta;      // ∂V/∂S (first derivative wrt spot)
+    double gamma;      // ∂²V/∂S² (second derivative wrt spot)
+    double theta;      // ∂V/∂t (time decay)
+    bool converged;    // Solver convergence status
+};
+
+} // namespace mango
 ```
 
 ### Mathematical Formulation
@@ -344,96 +361,58 @@ V(x,τ) ≥ ψ(x)  for all τ
 
 This enforces early exercise: option value is at least intrinsic value at all times.
 
-### Key Functions
+### Key API
 
-#### 1. **High-Level API**
-```c
-AmericanOptionResult american_option_price(const OptionData *option_data,
-                                           const AmericanOptionGrid *grid_params)
+#### **Class-Based Interface**
+```cpp
+namespace mango {
+
+class AmericanOptionSolver {
+public:
+    /**
+     * Constructor.
+     *
+     * @param params Option pricing parameters (including discrete dividends)
+     * @param grid Numerical grid parameters
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration for Newton solver
+     */
+    AmericanOptionSolver(const AmericanOptionParams& params,
+                        const AmericanOptionGrid& grid,
+                        const TRBDF2Config& trbdf2_config = {},
+                        const RootFindingConfig& root_config = {});
+
+    /**
+     * Solve for option value and Greeks.
+     *
+     * @return Result containing option value and Greeks
+     */
+    AmericanOptionResult solve();
+
+    /**
+     * Get the full solution surface (for debugging/analysis).
+     *
+     * @return Vector of option values across the spatial grid
+     */
+    std::vector<double> get_solution() const;
+
+private:
+    // Internal implementation details...
+};
+
+} // namespace mango
 ```
 
 **Workflow**:
 1. Creates spatial grid in log-price coordinates
 2. Sets up time domain (forward time = time-to-maturity)
-3. Converts dividend times from calendar to solver time
-4. Creates callbacks for PDE solver
-5. Configures relaxed tolerance (1e-4) for obstacle constraints
-6. Solves using TR-BDF2 scheme
-7. Returns solver with solution
+3. Converts discrete dividends to temporal events
+4. Configures BlackScholesOperator with volatility and drift
+5. Sets up obstacle conditions for early exercise
+6. Solves using TR-BDF2 with Newton iteration
+7. Computes Greeks via finite differences
 
-**Cleanup**: Call `american_option_free_result()` to free both the solver and internal data structures
-
-#### 2. **Batch Processing API**
-```c
-int american_option_price_batch(const OptionData *option_data,
-                                const AmericanOptionGrid *grid_params,
-                                size_t n_options,
-                                AmericanOptionResult *results)
-```
-
-**Features**:
-- Uses OpenMP parallel for loop
-- Each thread prices one option independently
-- Significant wall-time speedup (10-60x on multi-core)
-- Enables vectorized IV recovery
-
-**Cleanup**: Call `american_option_free_result()` on each result to free resources
-
-#### 3. **Callback Functions** (Vectorized)
-
-**Terminal Condition**:
-```c
-void american_option_terminal_condition(const double *x, size_t n_points,
-                                        double *V, void *user_data)
-```
-- Computes payoff for all spatial points at maturity
-
-**Spatial Operator**:
-```c
-void american_option_spatial_operator(const double *x, double t,
-                                      const double *V, size_t n_points,
-                                      double *LV, void *user_data)
-```
-- Applies finite difference stencil to compute L(V)
-- Uses centered differences: (V[i-1] - 2V[i] + V[i+1]) / dx²
-- Vectorized with `#pragma omp simd`
-
-**Obstacle Condition**:
-```c
-void american_option_obstacle(const double *x, double t,
-                             size_t n_points, double *obstacle,
-                             void *user_data)
-```
-- Computes intrinsic value constraint for all points
-
-**Boundary Conditions**:
-```c
-double american_option_left_boundary(double t, void *user_data);
-double american_option_right_boundary(double t, void *user_data);
-```
-- Return scalar boundary values for each time step
-
-#### 4. **Dividend Handling**
-```c
-void american_option_apply_dividend(const double *x_grid, size_t n_points,
-                                    const double *V_old, double *V_new,
-                                    double dividend, double strike)
-```
-
-**Mechanism**:
-- When dividend D is paid, stock price jumps: S_old → S_old - D
-- In log-price: x_old → x_new = ln((e^x_old - D/K))
-- Interpolates option value from old grid to new grid
-- Called by temporal event callback when dividend time is reached
-
-#### 5. **Utility Function**
-```c
-double american_option_get_value_at_spot(const PDESolver *solver,
-                                        double spot_price,
-                                        double strike)
-```
-- Converts spot to log-moneyness: x = ln(S/K)
-- Uses cubic spline to interpolate value at x
+**RAII Memory Management**: All resources automatically managed, no manual cleanup needed
 
 ### Grid Configuration Recommendations
 
