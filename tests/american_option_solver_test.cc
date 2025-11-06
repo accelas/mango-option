@@ -3,7 +3,7 @@
  * @brief Tests for AmericanOptionSolver structure and API
  */
 
-#include "src/cpp/american_option.hpp"
+#include "src/american_option.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

@@ -1,7 +1,7 @@
 cc_library(
     name = "grid_spacing",
     hdrs = ["grid_spacing.hpp"],
-    deps = ["//src/cpp:grid"],
+    deps = ["//src:grid"],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
 )
@@ -35,7 +35,7 @@ cc_library(
     deps = [
         ":grid_spacing",
         ":centered_difference",
-        "//src/cpp:grid",
+        "//src:grid",
     ],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
@@ -47,7 +47,7 @@ cc_library(
     deps = [
         ":spatial_operator",
         ":grid_spacing",
-        "//src/cpp:grid",
+        "//src:grid",
     ],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],

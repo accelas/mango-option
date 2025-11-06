@@ -3,13 +3,13 @@
  * @brief American option pricing solver implementation
  */
 
-#include "src/cpp/american_option.hpp"
-#include "src/cpp/boundary_conditions.hpp"
-#include "src/cpp/grid.hpp"
-#include "src/cpp/time_domain.hpp"
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/operators/operator_factory.hpp"
-#include "src/cpp/operators/black_scholes_pde.hpp"
+#include "src/american_option.hpp"
+#include "src/boundary_conditions.hpp"
+#include "src/grid.hpp"
+#include "src/time_domain.hpp"
+#include "src/pde_solver.hpp"
+#include "src/operators/operator_factory.hpp"
+#include "src/operators/black_scholes_pde.hpp"
 #include <algorithm>
 #include <span>
 #include <cmath>

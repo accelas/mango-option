@@ -3,27 +3,6 @@
 # Example: bazel build //legacy/src:pde_solver
 
 cc_library(
-    name = "cubic_spline",
-    srcs = ["cubic_spline.c"],
-    hdrs = [
-        "cubic_spline.h",
-        "tridiagonal.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-        "-DHAVE_SYSTEMTAP_SDT",
-    ],
-    deps = ["//src:ivcalc_trace_hdr"],
-    visibility = ["//legacy:__subpackages__"],
-    tags = ["manual"],
-)
-
-cc_library(
     name = "grid_generation",
     srcs = ["grid_generation.c"],
     hdrs = ["grid_generation.h"],
@@ -85,7 +64,7 @@ cc_library(
         "-DHAVE_SYSTEMTAP_SDT",
     ],
     deps = [
-        ":cubic_spline",
+        "//src:cubic_spline",
         "//src:ivcalc_trace_hdr",
     ],
     visibility = ["//legacy:__subpackages__"],
@@ -203,7 +182,7 @@ cc_library(
         "-ftree-vectorize",
     ],
     deps = [
-        ":cubic_spline",
+        "//src:cubic_spline",
         "//src:ivcalc_trace_hdr",
     ],
     visibility = ["//legacy:__subpackages__"],
@@ -223,7 +202,7 @@ cc_library(
         "-Wextra",
         "-O3",
     ],
-    deps = [":interp_cubic", ":cubic_spline"],
+    deps = [":interp_cubic", "//src:cubic_spline"],
     visibility = ["//legacy:__subpackages__"],
     tags = ["manual"],
 )
@@ -245,7 +224,7 @@ cc_library(
     ],
     deps = [
         ":interp_cubic",
-        ":cubic_spline",
+        "//src:cubic_spline",
         ":american_option",
     ],
     visibility = ["//legacy:__subpackages__"],

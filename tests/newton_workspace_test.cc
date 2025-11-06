@@ -1,6 +1,6 @@
-#include "src/cpp/newton_workspace.hpp"
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/newton_workspace.hpp"
+#include "src/workspace.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

@@ -2,12 +2,12 @@ cc_binary(
     name = "example_newton_solver",
     srcs = ["example_newton_solver.cc"],
     deps = [
-        "//src/cpp:pde_solver",
-        "//src/cpp:boundary_conditions",
-        "//src/cpp:spatial_operators",
-        "//src/cpp:root_finding",
-        "//src/cpp:grid",
-        "//src/cpp:time_domain",
+        "//src:pde_solver",
+        "//src:boundary_conditions",
+        "//src:spatial_operators",
+        "//src:root_finding",
+        "//src:grid",
+        "//src:time_domain",
     ],
     copts = ["-std=c++20"],
 )
