@@ -441,16 +441,31 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     // Should converge
     EXPECT_TRUE(result.converged);
 
-    // NOTE: PDE solver has known time evolution issues (Issue #73)
-    // Discrete dividends + puts particularly trigger the bug
-    // For now, just verify solver completes and returns finite values
+    // STRICT BOUNDS (Issue #98 fixed):
+    // For ITM American put with discrete dividends:
+    // - Intrinsic value: max(K - S, 0) = max(100 - 90, 0) = 10.0
+    // - Upper bound: strike = 100.0 (put can't exceed strike)
 
-    // Value should be finite (may be incorrect due to Issue #73)
+    double intrinsic = params.strike - params.spot;  // 10.0
+
+    // Value should be at least intrinsic (American options worth at least immediate exercise)
+    EXPECT_GE(result.value, intrinsic);
+
+    // Value should not exceed strike (theoretical upper bound for puts)
+    EXPECT_LE(result.value, params.strike);
+
+    // Value should be finite and positive
     EXPECT_TRUE(std::isfinite(result.value));
-    EXPECT_GE(result.value, 0.0);  // At minimum should be non-negative
+    EXPECT_GT(result.value, 0.0);
 
-    // Delta should be finite (may be wrong due to Issue #73)
+    // Delta bounds for put: -1 ≤ delta ≤ 0
     EXPECT_TRUE(std::isfinite(result.delta));
+    EXPECT_LE(result.delta, 0.0);   // Negative for puts
+    EXPECT_GE(result.delta, -1.0);  // Should not be less than -1
+
+    // Gamma should be positive (convexity) and finite
+    EXPECT_TRUE(std::isfinite(result.gamma));
+    EXPECT_GT(result.gamma, 0.0);  // Options have positive gamma
 
     // Solution should be available
     auto solution = solver.get_solution();

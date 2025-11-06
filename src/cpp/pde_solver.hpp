@@ -279,6 +279,10 @@ private:
     /// Events are applied AFTER the TR-BDF2 step completes.
     /// This ensures proper ordering: PDE evolution happens first,
     /// then events modify the solution (e.g., dividend jumps).
+    ///
+    /// CRITICAL: After each event, obstacle and boundary conditions
+    /// must be re-applied to maintain consistency. Dividend jumps
+    /// interpolate the solution, which can violate constraints.
     void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step) {
         while (next_event_idx_ < events_.size()) {
             const auto& event = events_[next_event_idx_];
@@ -294,6 +298,18 @@ private:
 
             // Event is in (t_old, t_new] - apply it
             event.callback(event.time, grid_, std::span{u_current_});
+
+            // CRITICAL FIX (Issue #98): Re-apply obstacle and boundary conditions
+            // after event to maintain consistency. Dividend jumps interpolate
+            // the solution, which can violate:
+            // 1. Obstacle condition: u ≥ ψ (early exercise boundary)
+            // 2. Boundary conditions: u[0] and u[n-1] values
+            //
+            // Without this, American puts with discrete dividends produce
+            // values exceeding theoretical bounds (e.g., value > strike).
+            apply_obstacle(event.time, std::span{u_current_});
+            apply_boundary_conditions(std::span{u_current_}, event.time);
+
             next_event_idx_++;
         }
     }
