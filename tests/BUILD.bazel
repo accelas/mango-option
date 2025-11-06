@@ -163,7 +163,7 @@ cc_test(
     name = "tridiagonal_solver_test",
     srcs = ["tridiagonal_solver_test.cc"],
     deps = [
-        "//src:tridiagonal_solver",
+        "//src:thomas_solver",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

@@ -155,13 +155,12 @@ template<FloatingPoint T>
     c_prime[0] = upper[0] / diag[0];
     d_prime[0] = rhs[0] / diag[0];
 
-    // Middle rows (vectorizable loop)
-    // Modern compilers can auto-vectorize this with appropriate flags
-    #pragma omp simd
+    // Middle rows
+    // Note: Singularity checking prevents SIMD vectorization (early return)
     for (size_t i = 1; i < n - 1; ++i) {
         const T denom = diag[i] - lower[i-1] * c_prime[i-1];
 
-        // Singularity check (note: breaks vectorization, but necessary)
+        // Singularity check
         if (std::abs(denom) < config.singularity_tol) {
             return Result::error_result("Singular or ill-conditioned matrix");
         }

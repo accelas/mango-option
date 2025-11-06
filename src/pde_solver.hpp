@@ -5,7 +5,7 @@
 #include "boundary_conditions.hpp"
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
-#include "tridiagonal_solver.hpp"
+#include "thomas_solver.hpp"
 #include "newton_workspace.hpp"
 #include "root_finding.hpp"
 #include "snapshot.hpp"
@@ -504,7 +504,7 @@ private:
             }
 
             // Solve J·δu = -F(u) using Thomas algorithm
-            bool success = solve_tridiagonal(
+            auto result = solve_thomas<double>(
                 newton_ws_.jacobian_lower(),
                 newton_ws_.jacobian_diag(),
                 newton_ws_.jacobian_upper(),
@@ -513,7 +513,7 @@ private:
                 newton_ws_.tridiag_workspace()
             );
 
-            if (!success) {
+            if (!result.ok()) {
                 return {false, iter, std::numeric_limits<double>::infinity(),
                        "Singular Jacobian", std::nullopt};
             }
