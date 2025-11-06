@@ -52,9 +52,9 @@ int main() {
     std::cout << "Newton config: max_iter=" << root_config.max_iter
               << ", tol=" << root_config.tolerance << "\n\n";
 
-    bool converged = solver.solve();
+    auto status = solver.solve();
 
-    if (converged) {
+    if (status) {
         std::cout << "Solver converged successfully!\n\n";
 
         auto solution = solver.solution();
@@ -65,7 +65,7 @@ int main() {
             std::cout << "  u(" << grid_buffer[i] << ") = " << solution[i] << "\n";
         }
     } else {
-        std::cout << "Solver failed to converge.\n";
+        std::cout << "Solver failed to converge: " << status.error().message << "\n";
         return 1;
     }
 

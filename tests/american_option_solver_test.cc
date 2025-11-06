@@ -287,15 +287,16 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
     AmericanOptionSolver solver(params, grid);
 
     auto result = solver.solve();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
-    EXPECT_TRUE(result.converged);
+    EXPECT_TRUE(result->converged);
 
     // NOTE: Current implementation has known issues with PDE time evolution
     // The solution is converging but not evolving correctly in time
     // For now, just verify solver completes and produces reasonable bounds
-    EXPECT_GE(result.value, 0.0);  // Non-negative
-    EXPECT_LE(result.value, params.strike);  // Less than strike
+    EXPECT_GE(result->value, 0.0);  // Non-negative
+    EXPECT_LE(result->value, params.strike);  // Less than strike
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -337,14 +338,15 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
     AmericanOptionSolver solver(params, grid);
 
     auto result = solver.solve();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
-    EXPECT_TRUE(result.converged);
+    EXPECT_TRUE(result->converged);
 
     // Delta for ATM put should be negative (around -0.5 for European)
     // American put delta can be different, but should still be negative
-    EXPECT_LT(result.delta, 0.0);
-    EXPECT_GT(result.delta, -1.0);  // Should be between -1 and 0
+    EXPECT_LT(result->delta, 0.0);
+    EXPECT_GT(result->delta, -1.0);  // Should be between -1 and 0
 }
 
 TEST(AmericanOptionSolverTest, GammaIsComputed) {
@@ -362,17 +364,18 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
     AmericanOptionSolver solver(params, grid);
 
     auto result = solver.solve();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
-    EXPECT_TRUE(result.converged);
+    EXPECT_TRUE(result->converged);
 
     // NOTE: The PDE solver has known issues with time evolution (Issue #73)
     // Until fixed, we can only verify that gamma is computed and finite
     // Gamma should theoretically be positive (convexity), but the buggy
     // time evolution can cause incorrect solution surfaces
-    EXPECT_TRUE(std::isfinite(result.gamma));
+    EXPECT_TRUE(std::isfinite(result->gamma));
     // Sanity check: gamma shouldn't be absurdly large
-    EXPECT_LT(std::abs(result.gamma), 10000.0);
+    EXPECT_LT(std::abs(result->gamma), 10000.0);
 }
 
 TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
@@ -396,20 +399,21 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
     AmericanOptionSolver solver(params, grid);
 
     auto result = solver.solve();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
-    EXPECT_TRUE(result.converged);
+    EXPECT_TRUE(result->converged);
 
     // ITM call should have positive value
-    EXPECT_GT(result.value, 0.0);
+    EXPECT_GT(result->value, 0.0);
 
     // Value should be at least intrinsic value (spot - strike)
     double intrinsic = params.spot - params.strike;
-    EXPECT_GE(result.value, intrinsic * 0.9);  // Allow some numerical error
+    EXPECT_GE(result->value, intrinsic * 0.9);  // Allow some numerical error
 
     // Delta should be positive for call
-    EXPECT_GT(result.delta, 0.0);
-    EXPECT_LE(result.delta, 1.0);  // Between 0 and 1 for calls
+    EXPECT_GT(result->delta, 0.0);
+    EXPECT_LE(result->delta, 1.0);  // Between 0 and 1 for calls
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -437,9 +441,10 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     AmericanOptionSolver solver(params, grid);
 
     auto result = solver.solve();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
-    EXPECT_TRUE(result.converged);
+    EXPECT_TRUE(result->converged);
 
     // STRICT BOUNDS (Issue #98 fixed):
     // For ITM American put with discrete dividends:
@@ -449,23 +454,23 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     double intrinsic = params.strike - params.spot;  // 10.0
 
     // Value should be at least intrinsic (American options worth at least immediate exercise)
-    EXPECT_GE(result.value, intrinsic);
+    EXPECT_GE(result->value, intrinsic);
 
     // Value should not exceed strike (theoretical upper bound for puts)
-    EXPECT_LE(result.value, params.strike);
+    EXPECT_LE(result->value, params.strike);
 
     // Value should be finite and positive
-    EXPECT_TRUE(std::isfinite(result.value));
-    EXPECT_GT(result.value, 0.0);
+    EXPECT_TRUE(std::isfinite(result->value));
+    EXPECT_GT(result->value, 0.0);
 
     // Delta bounds for put: -1 ≤ delta ≤ 0
-    EXPECT_TRUE(std::isfinite(result.delta));
-    EXPECT_LE(result.delta, 0.0);   // Negative for puts
-    EXPECT_GE(result.delta, -1.0);  // Should not be less than -1
+    EXPECT_TRUE(std::isfinite(result->delta));
+    EXPECT_LE(result->delta, 0.0);   // Negative for puts
+    EXPECT_GE(result->delta, -1.0);  // Should not be less than -1
 
     // Gamma should be positive (convexity) and finite
-    EXPECT_TRUE(std::isfinite(result.gamma));
-    EXPECT_GT(result.gamma, 0.0);  // Options have positive gamma
+    EXPECT_TRUE(std::isfinite(result->gamma));
+    EXPECT_GT(result->gamma, 0.0);  // Options have positive gamma
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -492,22 +497,23 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
     AmericanOptionSolver solver(params, grid);
 
     auto result = solver.solve();
+    ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
-    EXPECT_TRUE(result.converged);
+    EXPECT_TRUE(result->converged);
 
     // NOTE: PDE solver has known time evolution issues (Issue #73)
     // For now, just verify solver completes successfully and Greeks are computed
 
     // Value should be non-negative (may be zero due to Issue #73)
-    EXPECT_GE(result.value, 0.0);
+    EXPECT_GE(result->value, 0.0);
 
     // Value should be bounded by strike
-    EXPECT_LE(result.value, params.strike);
+    EXPECT_LE(result->value, params.strike);
 
     // Delta and gamma should be finite
-    EXPECT_TRUE(std::isfinite(result.delta));
-    EXPECT_TRUE(std::isfinite(result.gamma));
+    EXPECT_TRUE(std::isfinite(result->delta));
+    EXPECT_TRUE(std::isfinite(result->gamma));
 
     // Solution should be available
     auto solution = solver.get_solution();

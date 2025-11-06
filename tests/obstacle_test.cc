@@ -42,7 +42,8 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
         std::fill(u.begin(), u.end(), 0.3);
     });
 
-    ASSERT_TRUE(solver.solve());
+    auto status = solver.solve();
+    ASSERT_TRUE(status.has_value()) << status.error().message;
 
     // Verify solution ≥ obstacle everywhere
     auto solution = solver.solution();
@@ -89,7 +90,8 @@ TEST(ObstacleTest, TimeVaryingObstacle) {
         std::fill(u.begin(), u.end(), 0.5);
     });
 
-    ASSERT_TRUE(solver.solve());
+    auto status2 = solver.solve();
+    ASSERT_TRUE(status2.has_value()) << status2.error().message;
 
     // At t=1.0, obstacle is ψ=1.0, so solution should be ≥ 1.0 everywhere
     auto solution = solver.solution();
@@ -124,7 +126,8 @@ TEST(ObstacleTest, NoObstacleOptional) {
         std::fill(u.begin(), u.end(), 0.5);
     });
 
-    ASSERT_TRUE(solver.solve());
+    auto status3 = solver.solve();
+    ASSERT_TRUE(status3.has_value()) << status3.error().message;
 
     // Without obstacle and zero spatial operator, solution should remain ~0.5
     // (BCs are zero, so boundaries will be zero)
