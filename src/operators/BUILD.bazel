@@ -9,7 +9,10 @@ cc_library(
 cc_library(
     name = "centered_difference",
     hdrs = ["centered_difference.hpp"],
-    deps = [":grid_spacing"],
+    deps = [
+        ":grid_spacing",
+        "//src:parallel",
+    ],
     copts = ["-std=c++20", "-fopenmp-simd"],
     visibility = ["//visibility:public"],
 )

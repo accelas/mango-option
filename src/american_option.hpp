@@ -9,6 +9,7 @@
 #include "src/pde_solver.hpp"
 #include "src/spatial_operators.hpp"
 #include "src/expected.hpp"
+#include "parallel.hpp"
 #include <vector>
 #include <stdexcept>
 #include <cmath>
@@ -183,7 +184,7 @@ public:
     {
         std::vector<expected<AmericanOptionResult, SolverError>> results(params.size());
 
-        #pragma omp parallel for
+        MANGO_PRAGMA_PARALLEL_FOR
         for (size_t i = 0; i < params.size(); ++i) {
             AmericanOptionSolver solver(params[i], grid);
             results[i] = solver.solve();

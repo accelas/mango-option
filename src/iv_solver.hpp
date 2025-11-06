@@ -3,6 +3,7 @@
 #include "root_finding.hpp"
 #include "common/ivcalc_trace.h"
 #include "src/expected.hpp"
+#include "parallel.hpp"
 #include <optional>
 #include <string>
 #include <vector>
@@ -199,7 +200,7 @@ public:
     {
         std::vector<IVResult> results(params.size());
 
-        #pragma omp parallel for
+        MANGO_PRAGMA_PARALLEL_FOR
         for (size_t i = 0; i < params.size(); ++i) {
             IVSolver solver(params[i], config);
             results[i] = solver.solve();
