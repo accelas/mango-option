@@ -1,4 +1,4 @@
-#include "src/cpp/tridiagonal_solver.hpp"
+#include "src/tridiagonal_solver.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

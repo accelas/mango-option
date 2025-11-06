@@ -1,5 +1,5 @@
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/workspace.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(WorkspaceStorageTest, SmallGridSingleBlock) {

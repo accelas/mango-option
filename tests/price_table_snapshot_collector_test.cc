@@ -1,5 +1,5 @@
-#include "src/cpp/price_table_snapshot_collector.hpp"
-#include "src/cpp/snapshot.hpp"
+#include "src/price_table_snapshot_collector.hpp"
+#include "src/snapshot.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

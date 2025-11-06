@@ -1,7 +1,7 @@
 #include "implied_volatility.h"
 #include "american_option.h"
 #include "lets_be_rational.h"
-#include "ivcalc_trace.h"
+#include "common/ivcalc_trace.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>

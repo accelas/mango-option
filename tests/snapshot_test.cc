@@ -1,4 +1,4 @@
-#include "src/cpp/snapshot.hpp"
+#include "src/snapshot.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

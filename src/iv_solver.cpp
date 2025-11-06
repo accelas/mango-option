@@ -1,11 +1,8 @@
 #include "iv_solver.hpp"
 #include "brent.hpp"
+#include "american_option.hpp"
 #include <cmath>
 #include <algorithm>
-
-extern "C" {
-#include "src/american_option.h"
-}
 
 namespace mango {
 
@@ -116,17 +113,15 @@ double IVSolver::estimate_lower_bound() const {
 }
 
 double IVSolver::objective_function(double volatility) const {
-    // Create OptionData structure for American option solver
-    OptionData option_data = {
-        .strike = params_.strike,
-        .volatility = volatility,
-        .risk_free_rate = params_.risk_free_rate,
-        .time_to_maturity = params_.time_to_maturity,
-        .option_type = params_.is_call ? OPTION_CALL : OPTION_PUT,
-        .n_dividends = 0,
-        .dividend_times = nullptr,
-        .dividend_amounts = nullptr
-    };
+    // Create American option parameters
+    AmericanOptionParams option_params;
+    option_params.strike = params_.strike;
+    option_params.spot = params_.spot_price;
+    option_params.maturity = params_.time_to_maturity;
+    option_params.volatility = volatility;
+    option_params.rate = params_.risk_free_rate;
+    option_params.continuous_dividend_yield = 0.0;  // No dividends for now
+    option_params.option_type = params_.is_call ? OptionType::CALL : OptionType::PUT;
 
     // Compute adaptive grid bounds based on spot/strike and config.grid_s_max
     // The grid should:
@@ -150,48 +145,27 @@ double IVSolver::objective_function(double volatility) const {
     max_moneyness = std::max(max_moneyness, moneyness * 1.1);
 
     // Create grid for PDE solver
-    size_t n_grid;
-    AmericanOptionGrid grid_params = {
-        .x_min = std::log(min_moneyness),  // Adaptive lower bound
-        .x_max = std::log(max_moneyness),  // Adaptive upper bound
-        .n_points = config_.grid_n_space,
-        .dt = params_.time_to_maturity / config_.grid_n_time,
-        .n_steps = config_.grid_n_time
-    };
+    AmericanOptionGrid grid_params;
+    grid_params.n_space = config_.grid_n_space;
+    grid_params.n_time = config_.grid_n_time;
+    grid_params.x_min = std::log(min_moneyness);  // Adaptive lower bound
+    grid_params.x_max = std::log(max_moneyness);  // Adaptive upper bound
 
-    double* m_grid = american_option_create_grid(&grid_params, &n_grid);
-    if (!m_grid) {
+    // Create solver and solve
+    try {
+        AmericanOptionSolver solver(option_params, grid_params);
+        AmericanOptionResult result = solver.solve();
+
+        if (!result.converged) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        // Return difference: V(σ) - V_market
+        return result.value - params_.market_price;
+    } catch (...) {
+        // If solver throws an exception, return NaN
         return std::numeric_limits<double>::quiet_NaN();
     }
-
-    // Solve American option PDE
-    AmericanOptionResult result = american_option_solve(
-        &option_data,
-        m_grid,
-        n_grid,
-        grid_params.dt,
-        grid_params.n_steps
-    );
-
-    free(m_grid);
-
-    if (result.status != 0 || !result.solver) {
-        american_option_free_result(&result);
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    // Get option value at current spot price
-    double theoretical_price = american_option_get_value_at_spot(
-        result.solver,
-        params_.spot_price,
-        params_.strike
-    );
-
-    // Clean up
-    american_option_free_result(&result);
-
-    // Return difference: V(σ) - V_market
-    return theoretical_price - params_.market_price;
 }
 
 IVResult IVSolver::solve() {

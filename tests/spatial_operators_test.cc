@@ -1,6 +1,6 @@
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/spatial_operators.hpp"
+#include "src/workspace.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

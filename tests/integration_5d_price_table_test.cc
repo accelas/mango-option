@@ -1,7 +1,7 @@
-#include "src/cpp/multigrid.hpp"
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/multigrid.hpp"
+#include "src/workspace.hpp"
+#include "src/spatial_operators.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 
 /// Integration test: 5D price table grid setup

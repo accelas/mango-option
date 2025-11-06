@@ -1,6 +1,6 @@
 #include "validation.h"
 #include "implied_volatility.h"
-#include "ivcalc_trace.h"
+#include "common/ivcalc_trace.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>

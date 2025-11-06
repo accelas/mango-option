@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/boundary_conditions.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/grid.hpp"
-#include "src/cpp/time_domain.hpp"
-#include "src/cpp/trbdf2_config.hpp"
-#include "src/cpp/root_finding.hpp"
+#include "src/pde_solver.hpp"
+#include "src/boundary_conditions.hpp"
+#include "src/spatial_operators.hpp"
+#include "src/grid.hpp"
+#include "src/time_domain.hpp"
+#include "src/trbdf2_config.hpp"
+#include "src/root_finding.hpp"
 #include <cmath>
 #include <algorithm>
 

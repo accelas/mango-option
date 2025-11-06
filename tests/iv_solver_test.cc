@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/cpp/iv_solver.hpp"
+#include "src/iv_solver.hpp"
 #include <cmath>
 
 using namespace mango;

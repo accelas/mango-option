@@ -6,8 +6,8 @@
 #ifndef MANGO_AMERICAN_OPTION_HPP
 #define MANGO_AMERICAN_OPTION_HPP
 
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/spatial_operators.hpp"
+#include "src/pde_solver.hpp"
+#include "src/spatial_operators.hpp"
 #include <vector>
 #include <stdexcept>
 #include <cmath>

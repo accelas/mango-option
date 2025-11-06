@@ -1,7 +1,7 @@
-#include "src/cpp/operators/operator_factory.hpp"
-#include "src/cpp/operators/black_scholes_pde.hpp"
-#include "src/cpp/spatial_operators.hpp"  // Old operators
-#include "src/cpp/grid.hpp"
+#include "src/operators/operator_factory.hpp"
+#include "src/operators/black_scholes_pde.hpp"
+#include "src/spatial_operators.hpp"  // Old operators
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

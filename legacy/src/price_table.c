@@ -1,7 +1,7 @@
 #include "price_table.h"
 #include "american_option.h"
 #include "interp_cubic.h"
-#include "ivcalc_trace.h"
+#include "common/ivcalc_trace.h"
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>

@@ -1,0 +1,85 @@
+# Legacy C examples - all binaries marked as manual
+# These won't be built in CI but can be built explicitly if needed
+# Example: bazel build //legacy/examples:example_heat_equation
+
+cc_binary(
+    name = "example_heat_equation",
+    srcs = ["example_heat_equation.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
+    deps = ["//legacy/src:pde_solver"],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "example_american_option",
+    srcs = ["example_american_option.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
+    deps = ["//legacy/src:american_option"],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "example_american_option_dividend",
+    srcs = ["example_american_option_dividend.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3", "-fopenmp-simd"],
+    deps = ["//legacy/src:american_option"],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "example_implied_volatility",
+    srcs = ["example_implied_volatility.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//legacy/src:implied_volatility",
+        "//legacy/src:american_option",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "example_interpolation_engine",
+    srcs = ["example_interpolation_engine.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//legacy/src:iv_surface",
+        "//legacy/src:price_table",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "test_cubic_4d_5d",
+    srcs = ["test_cubic_4d_5d.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//legacy/src:interp_cubic",
+        "//legacy/src:price_table",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "example_precompute_table",
+    srcs = ["example_precompute_table.c"],
+    copts = ["-std=c23", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "test_iv_accuracy",
+    srcs = ["test_iv_accuracy.cc"],
+    copts = ["-std=c++17", "-Wall", "-Wextra", "-O3"],
+    deps = [
+        "//legacy/src:implied_volatility",
+        "//legacy/src:american_option",
+        "//legacy/src:price_table",
+        "//legacy/src:grid_presets",
+        "//legacy/src:grid_transform",
+    ],
+    tags = ["manual"],
+)

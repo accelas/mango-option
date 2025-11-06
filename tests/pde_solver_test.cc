@@ -1,10 +1,10 @@
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/boundary_conditions.hpp"
-#include "src/cpp/root_finding.hpp"
-#include "src/cpp/snapshot.hpp"
-#include "src/cpp/operators/operator_factory.hpp"
-#include "src/cpp/operators/laplacian_pde.hpp"
+#include "src/pde_solver.hpp"
+#include "src/spatial_operators.hpp"
+#include "src/boundary_conditions.hpp"
+#include "src/root_finding.hpp"
+#include "src/snapshot.hpp"
+#include "src/operators/operator_factory.hpp"
+#include "src/operators/laplacian_pde.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
