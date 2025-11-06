@@ -20,32 +20,42 @@ The mango-iv codebase implements a complete suite for American option pricing an
 
 ```mermaid
 graph TD
-    IV[American IV Calculator<br/>implied_volatility.c/.h<br/>- FDM-based IV via Brent's method<br/>- Nested iteration structure]
+    IV[American IV Solver<br/>iv_solver.hpp/cpp<br/>- FDM-based IV via Brent's method<br/>- Nested iteration structure<br/>- Template-based design]
 
-    LBR[Let's Be Rational<br/>lets_be_rational.c/.h<br/>- European IV estimation<br/>- Bound calculation for American IV]
+    AO[American Option Pricer<br/>american_option.hpp<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
 
-    AO[American Option Pricer<br/>american_option.c/.h<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
+    PDE[PDE Solver Template<br/>pde_solver.hpp<br/>- TR-BDF2 time-stepping<br/>- Newton solver with concepts<br/>- Template-based architecture<br/>- Zero-cost abstractions]
 
-    PDE[PDE Solver FDM Engine<br/>pde_solver.c/.h<br/>- TR-BDF2 time-stepping<br/>- Implicit solver fixed-point<br/>- Callback-based architecture<br/>- Single workspace buffer]
+    OPS[Spatial Operators<br/>operators/*.hpp<br/>- Concept-based interface<br/>- LaplacianOperator<br/>- BlackScholesOperator<br/>- Compile-time dispatch]
 
-    BRENT[Brent's Root Finder]
-    SPLINE[Cubic Spline Interpolation]
-    TRI[Tridiagonal Solver]
+    BC[Boundary Conditions<br/>boundary_conditions.hpp<br/>- DirichletBC<br/>- NeumannBC<br/>- RobinBC<br/>- Concept constraints]
 
-    IV --> BRENT
-    IV --> LBR
+    ROOT[Root Finding<br/>root_finding.hpp<br/>- Brent's method<br/>- Newton's method]
+
+    SPLINE[Cubic Spline Solver<br/>cubic_spline_solver.hpp]
+
+    THOMAS[Thomas Solver<br/>thomas_solver.hpp<br/>- Tridiagonal solver]
+
+    NEWTON[Newton Workspace<br/>newton_workspace.hpp<br/>- Implicit solver]
+
+    IV --> ROOT
     IV --> AO
     AO --> PDE
+    PDE --> OPS
+    PDE --> BC
+    PDE --> NEWTON
     PDE --> SPLINE
-    PDE --> TRI
+    NEWTON --> THOMAS
 
     style IV fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
-    style LBR fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style AO fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
     style PDE fill:#ffe1f5,stroke:#333,stroke-width:2px,color:#000
-    style BRENT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style OPS fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style BC fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style ROOT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style SPLINE fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
-    style TRI fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style THOMAS fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style NEWTON fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -1378,13 +1388,19 @@ Returns: Array of implied volatilities
 graph TD
     PARAMS["Option Parameters<br/>(S, K, T, r, market_price)"]
 
-    LBR["Let's Be Rational<br/>(European IV Estimation)"]
+    IVSOLVER["IV Solver<br/>iv_solver.hpp/cpp"]
 
-    BOUNDS["Upper Bound<br/>vol_upper = euro_iv × 1.5"]
+    AMERICAN["American Pricer<br/>american_option.hpp<br/>~21ms per solve"]
 
-    AMERICAN["American Pricing<br/>(FDM PDE Solve)"]
+    PDE["PDE Solver<br/>pde_solver.hpp<br/>Template-based"]
 
-    SPLINE["Cubic Spline<br/>Interpolation"]
+    OPS["Spatial Operators<br/>operators/*.hpp<br/>BlackScholesOperator"]
+
+    BC["Boundary Conditions<br/>boundary_conditions.hpp"]
+
+    NEWTON["Newton Workspace<br/>Implicit solver"]
+
+    SPLINE["Cubic Spline<br/>cubic_spline_solver.hpp"]
 
     VALUE["Option Value at Spot"]
 
@@ -1392,16 +1408,19 @@ graph TD
 
     OBJECTIVE["Objective Function<br/>f(σ) = price(σ) - market"]
 
-    BRENT["Brent Root Finder<br/>(5-8 iterations)"]
+    BRENT["Brent Root Finder<br/>root_finding.hpp<br/>5-8 iterations"]
 
-    IV["American Implied Volatility"]
+    IV["American Implied Volatility<br/>~145ms total"]
 
-    PARAMS --> LBR
-    LBR -->|"~781ns"| BOUNDS
-    BOUNDS --> BRENT
+    PARAMS --> IVSOLVER
+    IVSOLVER --> BRENT
+    IVSOLVER --> AMERICAN
 
-    PARAMS --> AMERICAN
-    AMERICAN -->|"~21ms<br/>Option Value<br/>at All Spots"| SPLINE
+    AMERICAN --> PDE
+    PDE --> OPS
+    PDE --> BC
+    PDE --> NEWTON
+    PDE -->|"Solution"| SPLINE
     SPLINE --> VALUE
     VALUE --> OBJECTIVE
 
@@ -1409,17 +1428,20 @@ graph TD
     OBJECTIVE --> BRENT
 
     BRENT -->|"Each iteration<br/>calls FDM"| AMERICAN
-    BRENT -->|"~145ms total"| IV
+    BRENT --> IV
 
     style PARAMS fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style LBR fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style BOUNDS fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style AMERICAN fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style IVSOLVER fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
+    style AMERICAN fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
+    style PDE fill:#ffe1f5,stroke:#333,stroke-width:2px,color:#000
+    style OPS fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style BC fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style NEWTON fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
     style SPLINE fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style VALUE fill:#fce4ec,stroke:#333,stroke-width:2px,color:#000
     style MARKET fill:#ffebee,stroke:#333,stroke-width:2px,color:#000
     style OBJECTIVE fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
-    style BRENT fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
+    style BRENT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style IV fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
 ```
 
@@ -1670,19 +1692,19 @@ bazel build //benchmarks:quantlib_benchmark
 
 ## Summary Table
 
-| Component | Purpose | Files | API |
-|-----------|---------|-------|-----|
-| **American IV** | American IV from market price | implied_volatility.{h,c} | `calculate_iv()`, `calculate_iv_simple()` |
-| **Let's Be Rational** | European IV estimation (bounds) | lets_be_rational.{h,c} | `lbr_implied_volatility()` |
-| **American Option** | American option pricing | american_option.{h,c} | `american_option_price()`, `american_option_price_batch()`, `american_option_free_result()` |
-| **PDE Solver** | FDM time-stepping engine | pde_solver.{h,c} | `pde_solver_create()`, `pde_solver_solve()`, `pde_solver_destroy()` |
-| **IV Surface** | Fast 2D IV interpolation (~100ns) | iv_surface.{h,c} | `iv_surface_create()`, `iv_surface_interpolate()` |
-| **Price Table** | Fast 4D/5D price lookup (~500ns) | price_table.{h,c} | `price_table_create()`, `price_table_interpolate_4d()`, `price_table_greeks_4d()` |
-| **Cubic Interpolation** | N-dimensional cubic spline interpolation | interp_cubic.{h,c}, interp_cubic_workspace.c, interp_strategy.h | `INTERP_CUBIC` strategy |
-| **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
-| **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()` (malloc), `pde_spline_init()` (workspace), `pde_spline_eval()` |
-| **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
-| **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `MANGO_TRACE_*` macros |
+| Component | Purpose | Files | Key Classes/Functions |
+|-----------|---------|-------|----------------------|
+| **American IV** | American IV from market price | iv_solver.{hpp,cpp} | `mango::IVSolver`, `mango::IVParams`, `mango::IVResult` |
+| **American Option** | American option pricing | american_option.{hpp,cpp} | `mango::AmericanOption` |
+| **PDE Solver** | Template-based FDM engine | pde_solver.hpp | `mango::PDESolver<BoundaryL, BoundaryR, SpatialOp>` |
+| **Spatial Operators** | Operator implementations | operators/*.hpp | `LaplacianOperator`, `BlackScholesOperator`, concept-based |
+| **Boundary Conditions** | BC types | boundary_conditions.hpp | `DirichletBC`, `NeumannBC`, `RobinBC` |
+| **Root Finding** | Root finding methods | root_finding.hpp | `mango::RootFindingConfig`, Brent's method |
+| **Cubic Spline** | Off-grid interpolation | cubic_spline_solver.hpp | Template-based spline solver |
+| **Thomas Solver** | Tridiagonal solver | thomas_solver.hpp | O(n) matrix solve |
+| **Newton Workspace** | Implicit solver workspace | newton_workspace.hpp | `mango::NewtonWorkspace` |
+| **Grid Management** | Grid utilities | grid.hpp | Grid creation and management |
+| **Workspace** | Memory management | workspace.hpp | `mango::WorkspaceStorage` |
 
 ---
 
