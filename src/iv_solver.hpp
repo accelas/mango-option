@@ -1,7 +1,7 @@
 #pragma once
 
 #include "root_finding.hpp"
-#include "src/ivcalc_trace.h"
+#include "common/ivcalc_trace.h"
 #include <optional>
 #include <string>
 

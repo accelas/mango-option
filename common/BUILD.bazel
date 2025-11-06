@@ -1,0 +1,31 @@
+# Common utilities shared between modern C++ and legacy C implementations
+# Both //src/... and //legacy/... can depend on //common/...
+
+# Header-only library for USDT tracing (usable from both C and C++)
+cc_library(
+    name = "ivcalc_trace_hdr",
+    hdrs = ["ivcalc_trace.h"],
+    copts = ["-DHAVE_SYSTEMTAP_SDT"],
+    visibility = ["//visibility:public"],
+)
+
+# C cubic spline library (used by both C++ SnapshotInterpolator and legacy C code)
+cc_library(
+    name = "cubic_spline",
+    srcs = ["cubic_spline.c"],
+    hdrs = [
+        "cubic_spline.h",
+        "tridiagonal.h",
+    ],
+    copts = [
+        "-std=c23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-fopenmp-simd",
+        "-ftree-vectorize",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    deps = [":ivcalc_trace_hdr"],
+    visibility = ["//visibility:public"],
+)

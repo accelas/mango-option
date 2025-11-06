@@ -1,7 +1,7 @@
 #include "interp_cubic.h"
 #include "iv_surface.h"
 #include "price_table.h"
-#include "cubic_spline.h"
+#include "common/cubic_spline.h"
 #include <stdlib.h>
 #include <stdbool.h>
 #include <math.h>
