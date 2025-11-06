@@ -64,7 +64,7 @@ cc_library(
         "-DHAVE_SYSTEMTAP_SDT",
     ],
     deps = [
-        "//common:cubic_spline",
+        "//legacy/common:cubic_spline",
         "//common:ivcalc_trace_hdr",
     ],
     visibility = ["//legacy:__subpackages__"],
@@ -182,7 +182,7 @@ cc_library(
         "-ftree-vectorize",
     ],
     deps = [
-        "//common:cubic_spline",
+        "//legacy/common:cubic_spline",
         "//common:ivcalc_trace_hdr",
     ],
     visibility = ["//legacy:__subpackages__"],
@@ -202,7 +202,7 @@ cc_library(
         "-Wextra",
         "-O3",
     ],
-    deps = [":interp_cubic", "//common:cubic_spline"],
+    deps = [":interp_cubic", "//legacy/common:cubic_spline"],
     visibility = ["//legacy:__subpackages__"],
     tags = ["manual"],
 )
@@ -224,7 +224,7 @@ cc_library(
     ],
     deps = [
         ":interp_cubic",
-        "//common:cubic_spline",
+        "//legacy/common:cubic_spline",
         ":american_option",
     ],
     visibility = ["//legacy:__subpackages__"],
