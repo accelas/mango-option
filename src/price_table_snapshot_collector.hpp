@@ -50,8 +50,9 @@ public:
         // Derivatives will use eval_from_data() with PDE-computed arrays
         SnapshotInterpolator V_interp, Lu_interp;
 
-        V_interp.build(snapshot.spatial_grid, snapshot.solution);
-        Lu_interp.build(snapshot.spatial_grid, snapshot.spatial_operator);
+        // Build succeeds (grid is always valid from PDE solver)
+        (void)V_interp.build(snapshot.spatial_grid, snapshot.solution);
+        (void)Lu_interp.build(snapshot.spatial_grid, snapshot.spatial_operator);
 
         // Fill price table for all moneyness points
         for (size_t m_idx = 0; m_idx < moneyness_.size(); ++m_idx) {

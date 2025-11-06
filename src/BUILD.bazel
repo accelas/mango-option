@@ -9,12 +9,10 @@ cc_library(
     name = "snapshot_interpolator",
     hdrs = ["snapshot_interpolator.hpp"],
     deps = [
-        "//common:cubic_spline",
+        ":cubic_spline_solver",
     ],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
-    # Ensure the cubic_spline C library is linked transitively
-    linkopts = [],
 )
 
 cc_library(
