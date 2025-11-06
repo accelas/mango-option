@@ -188,6 +188,21 @@ cc_library(
 )
 
 cc_library(
+    name = "thomas_solver",
+    hdrs = ["thomas_solver.hpp"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "cubic_spline_solver",
+    hdrs = ["cubic_spline_solver.hpp"],
+    deps = [":thomas_solver"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pde_solver",
     hdrs = ["pde_solver.hpp"],
     deps = [
