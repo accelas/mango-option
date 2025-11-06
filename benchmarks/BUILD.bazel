@@ -23,8 +23,13 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
+        "-flto",
     ],
-    linkopts = ["-fopenmp"],
+    linkopts = [
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,  # Static link our library code
     deps = [
         "//src:american_option",
         "//src:iv_solver",
@@ -44,8 +49,14 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
+        "-flto",
     ],
-    linkopts = ["-lQuantLib", "-fopenmp"],
+    linkopts = [
+        "-lQuantLib",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,  # Static link our library code
     deps = [
         "//src:american_option",
         "@google_benchmark//:benchmark",
@@ -64,8 +75,14 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
+        "-flto",
     ],
-    linkopts = ["-lQuantLib", "-fopenmp"],
+    linkopts = [
+        "-lQuantLib",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,  # Static link our library code
     deps = [
         "//src:american_option",
         "@google_benchmark//:benchmark",
