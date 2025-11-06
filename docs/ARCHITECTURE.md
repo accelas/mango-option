@@ -4,15 +4,15 @@
 
 ## Executive Summary
 
-The mango-iv codebase implements a complete suite for American option pricing and implied volatility (IV) calculation. It uses a **callback-based, vectorized architecture** with:
+The mango-iv codebase implements a complete suite for American option pricing and implied volatility (IV) calculation. It uses a **modern C++20 template-based architecture** with:
 
-- **Let's Be Rational** for fast European IV estimation (used for American IV bounds)
 - **TR-BDF2 PDE solver** for American option pricing via finite difference method
 - **American IV calculation** combining FDM with Brent's method for root-finding
 - **Cubic spline interpolation** for off-grid solution evaluation
 - **USDT tracing** for zero-overhead diagnostic monitoring
-- **OpenMP SIMD** pragmas for automatic vectorization
-- **Batch API** for parallel processing
+- **Template metaprogramming** with concepts for compile-time optimization
+- **Zero-cost abstractions** via templates and inlining
+- **Type-safe design** with std::span, std::optional, and concepts
 
 ## Architecture Overview
 
@@ -20,32 +20,43 @@ The mango-iv codebase implements a complete suite for American option pricing an
 
 ```mermaid
 graph TD
-    IV[American IV Calculator<br/>implied_volatility.c/.h<br/>- FDM-based IV via Brent's method<br/>- Nested iteration structure]
+    IV[American IV Solver<br/>iv_solver.hpp/cpp<br/>- FDM-based IV via Brent's method<br/>- Nested iteration structure<br/>- Template-based design]
 
-    LBR[Let's Be Rational<br/>lets_be_rational.c/.h<br/>- European IV estimation<br/>- Bound calculation for American IV]
+    AO[American Option Pricer<br/>american_option.hpp<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
 
-    AO[American Option Pricer<br/>american_option.c/.h<br/>- Black-Scholes PDE setup<br/>- Log-price transformation<br/>- Obstacle conditions<br/>- Dividend event handling]
+    PDE[PDE Solver Template<br/>pde_solver.hpp<br/>- TR-BDF2 time-stepping<br/>- Newton solver with concepts<br/>- Template-based architecture<br/>- Zero-cost abstractions]
 
-    PDE[PDE Solver FDM Engine<br/>pde_solver.c/.h<br/>- TR-BDF2 time-stepping<br/>- Implicit solver fixed-point<br/>- Callback-based architecture<br/>- Single workspace buffer]
+    OPS[Spatial Operators<br/>operators/*.hpp<br/>- Concept-based interface<br/>- LaplacianOperator<br/>- BlackScholesOperator<br/>- Compile-time dispatch]
 
-    BRENT[Brent's Root Finder]
-    SPLINE[Cubic Spline Interpolation]
-    TRI[Tridiagonal Solver]
+    BC[Boundary Conditions<br/>boundary_conditions.hpp<br/>- DirichletBC<br/>- NeumannBC<br/>- RobinBC<br/>- Concept constraints]
 
-    IV --> BRENT
-    IV --> LBR
+    ROOT[Root Finding<br/>root_finding.hpp<br/>- Brent's method<br/>- Newton's method]
+
+    SPLINE[Cubic Spline Solver<br/>cubic_spline_solver.hpp]
+
+    THOMAS[Thomas Solver<br/>thomas_solver.hpp<br/>- Tridiagonal solver]
+
+    NEWTON[Newton Workspace<br/>newton_workspace.hpp<br/>- Implicit solver]
+
+    IV --> ROOT
     IV --> AO
     AO --> PDE
+    PDE --> OPS
+    PDE --> BC
+    PDE --> NEWTON
     PDE --> SPLINE
-    PDE --> TRI
+    NEWTON --> THOMAS
+    SPLINE --> THOMAS
 
     style IV fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
-    style LBR fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style AO fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
     style PDE fill:#ffe1f5,stroke:#333,stroke-width:2px,color:#000
-    style BRENT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style OPS fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style BC fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style ROOT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style SPLINE fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
-    style TRI fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style THOMAS fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style NEWTON fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -53,173 +64,142 @@ graph TD
 ## Component 1: American Implied Volatility Calculation
 
 ### File Locations
-- **Header**: `src/implied_volatility.h`
-- **Implementation**: `src/implied_volatility.c`
-- **Tests**: `tests/implied_volatility_test.cc`
-- **Benchmark**: `benchmarks/american_iv_benchmark.cc`
-- **Example**: `examples/example_implied_volatility.c`
+- **Header**: `src/iv_solver.hpp`
+- **Implementation**: `src/iv_solver.cpp`
+- **Tests**: `tests/iv_solver_test.cc`
 
 ### Core Data Structures
 
-```c
-// Input parameters
-typedef struct {
+```cpp
+namespace mango {
+
+/// Input parameters for IV calculation
+struct IVParams {
     double spot_price;              // S: Current stock price
     double strike;                  // K: Strike price
     double time_to_maturity;        // T: Time to expiration (years)
     double risk_free_rate;          // r: Risk-free interest rate
     double market_price;            // Market price of option
     bool is_call;                   // true for call, false for put
-} IVParams;
+};
 
-// Result
-typedef struct {
-    double implied_vol;             // Calculated implied volatility
-    double vega;                    // Option vega at solution
-    int iterations;                 // Number of iterations
+/// Configuration for IV solver
+struct IVConfig {
+    RootFindingConfig root_config;  // Brent's method parameters
+    size_t grid_n_space = 101;      // Spatial grid points for PDE
+    size_t grid_n_time = 1000;      // Time steps for PDE
+    double grid_s_max = 200.0;      // Maximum spot price for grid
+};
+
+/// Result from IV calculation
+struct IVResult {
     bool converged;                 // True if converged
-    const char *error;              // Error message if failed
-} IVResult;
+    size_t iterations;              // Number of iterations
+    double implied_vol;             // Calculated implied volatility
+    double final_error;             // Final pricing error
+    std::optional<std::string> failure_reason;  // Error message if failed
+    std::optional<double> vega;     // Optional vega at solution
+};
+
+} // namespace mango
 ```
 
 ### Dependencies
 
-The American IV calculator depends on:
-- **Let's Be Rational** module (`lets_be_rational.{h,c}`) for European IV estimation (used to calculate upper bounds)
-- **American Option** module (`american_option.{h,c}`) for FDM-based pricing
-- **Brent's method** (`brent.h`) for root-finding
+- **American Option** module (`american_option.hpp`) for FDM-based pricing
+- **Brent's method** (`root_finding.hpp`) for root-finding
 
-### Key Functions
+### IVSolver Class
 
-#### 1. **Let's Be Rational - European IV Estimation** (from `lets_be_rational.h`)
-```c
-LBRResult lbr_implied_volatility(double spot, double strike,
-                                  double time_to_maturity,
-                                  double risk_free_rate,
-                                  double market_price,
-                                  bool is_call)
+```cpp
+namespace mango {
+
+class IVSolver {
+public:
+    /// Construct IV solver with parameters and optional config
+    explicit IVSolver(const IVParams& params, const IVConfig& config = {});
+
+    /// Solve for implied volatility
+    /// Uses Brent's method with nested American option pricing
+    IVResult solve();
+
+private:
+    IVParams params_;
+    IVConfig config_;
+};
+
+} // namespace mango
 ```
 
-**Purpose**: Fast European IV estimation for calculating American IV upper bounds
+**Usage Example:**
+```cpp
+mango::IVParams params{
+    .spot_price = 100.0,
+    .strike = 100.0,
+    .time_to_maturity = 1.0,
+    .risk_free_rate = 0.05,
+    .market_price = 6.08,  // American put market price
+    .is_call = false
+};
 
-**How it works:**
-- Uses Black-Scholes formula with Abramowitz & Stegun normal CDF approximation
-- Bisection-based root finding (simpler than Brent's method)
-- Typically converges in 20-30 iterations
-- **Performance**: ~781ns per calculation
+mango::IVSolver solver(params);
+mango::IVResult result = solver.solve();
 
-**Why needed for American IV:**
-- American option value ≥ European option value (early exercise premium)
-- If European IV = σ_euro, then American IV ≤ σ_euro × 1.5 (heuristic upper bound)
-- Provides tight bracketing interval for Brent's method
-- Avoids expensive FDM calls during bound calculation
-
-**Implementation note**: Uses simple bisection instead of Brent's method for simplicity and predictable performance
-
-#### 2. **American Option Pricing Objective** (internal)
-```c
-static double american_objective(double volatility, void *user_data)
+if (result.converged) {
+    std::cout << "Implied volatility: " << result.implied_vol << "\n";
+    std::cout << "Iterations: " << result.iterations << "\n";
+}
 ```
 
-**Purpose**: Objective function for Brent's method root-finding
+### Algorithm Overview
 
-**How it works:**
-1. Receives guessed volatility σ from Brent's method
-2. Constructs American option with that volatility
-3. Solves Black-Scholes PDE using FDM (~21ms per call)
-4. Interpolates option value at spot price
-5. Returns: theoretical_price(σ) - market_price
-
-**Nested iteration structure:**
-- Outer loop: Brent's method searching for σ
-- Inner loop: Each Brent iteration calls FDM solver
-- Convergence: When |theoretical_price - market_price| < tolerance
-
-#### 3. **Main American IV Calculation Function**
-```c
-IVResult calculate_iv(const IVParams *params,
-                      const AmericanOptionGrid *grid,
-                      double vol_lower,
-                      double vol_upper,
-                      double tolerance,
-                      int max_iter)
-```
-
-**Algorithm Overview:**
 1. **Input Validation** (detects arbitrage violations):
    - Spot, strike, time, market price must be positive
    - Call price must not exceed spot price
-   - Put price must not exceed discounted strike K·e^(-rT)
+   - Put price must not exceed strike price (present value)
    - Market price must be above intrinsic value
 
-2. **Objective Function Setup**:
+2. **Objective Function**:
    ```
    f(σ) = American_price_FDM(σ) - market_price
    ```
-   Objective is to find σ where f(σ) = 0
+   Goal: Find σ where f(σ) = 0
 
 3. **Brent's Method Root Finding**:
-   - Searches in interval [vol_lower, vol_upper]
-   - Each iteration calls `american_option_price()` with guessed σ (~21ms per call)
-   - Combines bisection, secant method, and inverse quadratic interpolation
-   - Guaranteed convergence if root is bracketed
+   - Searches in interval [0.01, upper_bound]
+   - Each iteration solves full American option PDE (~21ms per call)
+   - Combines bisection, secant, and inverse quadratic interpolation
    - Typical: 5-8 iterations → ~145ms total time
 
-4. **Post-Processing**:
-   - Returns convergence status and iteration count
-   - No vega calculation (would require numerical differentiation)
-
-#### 4. **Convenience Function**
-```c
-IVResult calculate_iv_simple(const IVParams *params)
-```
-
-**Automatic Configuration**:
-- **Grid**: Default American option grid (141 points, 1000 steps)
-- **Lower bound**: 0.01 (1% volatility)
-- **Upper bound**: Uses Let's Be Rational to estimate European IV, then multiplies by 1.5
-  - Rationale: American IV ≤ 1.5 × European IV (heuristic)
-  - Fast calculation (~781ns) avoids expensive FDM calls for bounds
-- **Tolerance**: 1e-6
-- **Max iterations**: 100
+4. **Nested Iteration Structure:**
+   - **Outer loop**: Brent's method searching for σ
+   - **Inner loop**: Each iteration calls FDM solver for pricing
+   - **Convergence**: When |theoretical_price - market_price| < tolerance
 
 ### Validation & Error Handling
 
 The implementation validates:
 - ✅ All inputs are positive
-- ✅ No arbitrage violations (call upper bound, put upper bound, intrinsic floor)
+- ✅ No arbitrage violations (price bounds, intrinsic floor)
 - ✅ Convergence within max iterations
-- ✅ Returns descriptive error messages
+- ✅ Returns `std::optional<std::string>` for error messages
 
 ### Test Coverage
 
-From `implied_volatility_test.cc`:
+From `iv_solver_test.cc`:
 - ✅ American put IV recovery (ATM, OTM, ITM)
 - ✅ American call IV recovery
-- ✅ Let's Be Rational bound estimation
-- ✅ Input validation (invalid spot, strike, time, price)
-- ✅ Arbitrage detection (price > intrinsic bounds)
-- ✅ Grid configuration validation
+- ✅ Input validation (invalid parameters)
+- ✅ Arbitrage detection
 - ✅ Convergence with default settings
 - ✅ Edge cases (near expiry, extreme volatility)
-- ✅ Deterministic convergence (same inputs → same outputs)
-
-From `lets_be_rational_test.cc`:
-- ✅ ATM European option IV estimation
-- ✅ OTM European option IV estimation
-- ✅ Invalid input handling
-- ✅ Near-expiry edge cases
-
-**Test Result**: 9 American IV test cases + 4 Let's Be Rational test cases, all passing
 
 ### Performance Characteristics
 
 | Operation | Time | Details |
 |----------|------|---------|
-| Let's Be Rational (European IV) | ~781ns | Fast bound calculation, 20-30 bisection iterations |
-| American option pricing (single) | ~21.7ms | FDM solve with 141 points × 1000 steps |
+| American option pricing (single) | ~21.7ms | FDM solve with 101 points × 1000 steps |
 | American IV calculation (single) | ~145ms | 5-8 Brent iterations × 21.7ms per FDM call |
-| Bound calculation overhead | <1µs | Let's Be Rational + 1.5x scaling |
 
 **Bottleneck**: FDM solver calls within Brent's method (each iteration = full PDE solve)
 
@@ -232,47 +212,61 @@ From `lets_be_rational_test.cc`:
 ## Component 2: American Option Pricing
 
 ### File Locations
-- **Header**: `src/american_option.h`
-- **Implementation**: `src/american_option.c`
+- **Header**: `src/american_option.hpp`
 - **Tests**: `tests/american_option_test.cc`
-- **Examples**:
-  - `examples/example_american_option.c`
-  - `examples/example_american_option_dividend.c`
+- **Related**: `src/operators/black_scholes_pde.hpp` (Black-Scholes operator)
 
 ### Core Data Structures
 
-```c
-typedef enum {
-    OPTION_CALL,
-    OPTION_PUT
-} OptionType;
+```cpp
+namespace mango {
 
-typedef struct {
-    double strike;                  // Strike price K
-    double volatility;              // σ (volatility)
-    double risk_free_rate;          // r (risk-free rate)
-    double time_to_maturity;        // T (time to maturity in years)
-    OptionType option_type;         // Call or Put
-    
-    // Discrete dividend information (optional)
-    size_t n_dividends;             // Number of dividend payments
-    double *dividend_times;         // Times of dividend payments (in years)
-    double *dividend_amounts;       // Dividend amounts (absolute cash dividends)
-} OptionData;
+/// Option type enumeration
+enum class OptionType {
+    CALL,
+    PUT
+};
 
-typedef struct {
-    double x_min;                   // Minimum log-moneyness (e.g., -0.7)
-    double x_max;                   // Maximum log-moneyness (e.g., 0.7)
-    size_t n_points;                // Number of grid points (e.g., 141)
-    double dt;                      // Time step (e.g., 0.001)
-    size_t n_steps;                 // Number of time steps (e.g., 1000)
-} AmericanOptionGrid;
+/// American option pricing parameters
+struct AmericanOptionParams {
+    double strike;                      // Strike price (dollars)
+    double spot;                        // Current stock price (dollars)
+    double maturity;                    // Time to maturity (years)
+    double volatility;                  // Implied volatility (fraction)
+    double rate;                        // Risk-free rate (fraction)
+    double continuous_dividend_yield;   // Continuous dividend yield (fraction)
+    OptionType option_type;             // Call or Put
 
-typedef struct {
-    PDESolver *solver;              // PDE solver (caller must destroy with american_option_free_result)
-    int status;                     // 0 = success, -1 = failure
-    void *internal_data;            // Internal data (do not access directly)
-} AmericanOptionResult;
+    // Discrete dividend schedule: (time, amount) pairs
+    std::vector<std::pair<double, double>> discrete_dividends;
+
+    // Built-in validation
+    void validate() const;
+};
+
+/// Numerical grid parameters for PDE solver
+struct AmericanOptionGrid {
+    size_t n_space;    // Number of spatial grid points
+    size_t n_time;     // Number of time steps
+    double x_min;      // Minimum log-moneyness (default: -3.0)
+    double x_max;      // Maximum log-moneyness (default: +3.0)
+
+    // Default constructor with sensible defaults
+    AmericanOptionGrid();
+
+    void validate() const;
+};
+
+/// Solver result containing option value and Greeks
+struct AmericanOptionResult {
+    double value;      // Option value (dollars)
+    double delta;      // ∂V/∂S (first derivative wrt spot)
+    double gamma;      // ∂²V/∂S² (second derivative wrt spot)
+    double theta;      // ∂V/∂t (time decay)
+    bool converged;    // Solver convergence status
+};
+
+} // namespace mango
 ```
 
 ### Mathematical Formulation
@@ -334,96 +328,58 @@ V(x,τ) ≥ ψ(x)  for all τ
 
 This enforces early exercise: option value is at least intrinsic value at all times.
 
-### Key Functions
+### Key API
 
-#### 1. **High-Level API**
-```c
-AmericanOptionResult american_option_price(const OptionData *option_data,
-                                           const AmericanOptionGrid *grid_params)
+#### **Class-Based Interface**
+```cpp
+namespace mango {
+
+class AmericanOptionSolver {
+public:
+    /**
+     * Constructor.
+     *
+     * @param params Option pricing parameters (including discrete dividends)
+     * @param grid Numerical grid parameters
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration for Newton solver
+     */
+    AmericanOptionSolver(const AmericanOptionParams& params,
+                        const AmericanOptionGrid& grid,
+                        const TRBDF2Config& trbdf2_config = {},
+                        const RootFindingConfig& root_config = {});
+
+    /**
+     * Solve for option value and Greeks.
+     *
+     * @return Result containing option value and Greeks
+     */
+    AmericanOptionResult solve();
+
+    /**
+     * Get the full solution surface (for debugging/analysis).
+     *
+     * @return Vector of option values across the spatial grid
+     */
+    std::vector<double> get_solution() const;
+
+private:
+    // Internal implementation details...
+};
+
+} // namespace mango
 ```
 
 **Workflow**:
 1. Creates spatial grid in log-price coordinates
 2. Sets up time domain (forward time = time-to-maturity)
-3. Converts dividend times from calendar to solver time
-4. Creates callbacks for PDE solver
-5. Configures relaxed tolerance (1e-4) for obstacle constraints
-6. Solves using TR-BDF2 scheme
-7. Returns solver with solution
+3. Converts discrete dividends to temporal events
+4. Configures BlackScholesOperator with volatility and drift
+5. Sets up obstacle conditions for early exercise
+6. Solves using TR-BDF2 with Newton iteration
+7. Computes Greeks via finite differences
 
-**Cleanup**: Call `american_option_free_result()` to free both the solver and internal data structures
-
-#### 2. **Batch Processing API**
-```c
-int american_option_price_batch(const OptionData *option_data,
-                                const AmericanOptionGrid *grid_params,
-                                size_t n_options,
-                                AmericanOptionResult *results)
-```
-
-**Features**:
-- Uses OpenMP parallel for loop
-- Each thread prices one option independently
-- Significant wall-time speedup (10-60x on multi-core)
-- Enables vectorized IV recovery
-
-**Cleanup**: Call `american_option_free_result()` on each result to free resources
-
-#### 3. **Callback Functions** (Vectorized)
-
-**Terminal Condition**:
-```c
-void american_option_terminal_condition(const double *x, size_t n_points,
-                                        double *V, void *user_data)
-```
-- Computes payoff for all spatial points at maturity
-
-**Spatial Operator**:
-```c
-void american_option_spatial_operator(const double *x, double t,
-                                      const double *V, size_t n_points,
-                                      double *LV, void *user_data)
-```
-- Applies finite difference stencil to compute L(V)
-- Uses centered differences: (V[i-1] - 2V[i] + V[i+1]) / dx²
-- Vectorized with `#pragma omp simd`
-
-**Obstacle Condition**:
-```c
-void american_option_obstacle(const double *x, double t,
-                             size_t n_points, double *obstacle,
-                             void *user_data)
-```
-- Computes intrinsic value constraint for all points
-
-**Boundary Conditions**:
-```c
-double american_option_left_boundary(double t, void *user_data);
-double american_option_right_boundary(double t, void *user_data);
-```
-- Return scalar boundary values for each time step
-
-#### 4. **Dividend Handling**
-```c
-void american_option_apply_dividend(const double *x_grid, size_t n_points,
-                                    const double *V_old, double *V_new,
-                                    double dividend, double strike)
-```
-
-**Mechanism**:
-- When dividend D is paid, stock price jumps: S_old → S_old - D
-- In log-price: x_old → x_new = ln((e^x_old - D/K))
-- Interpolates option value from old grid to new grid
-- Called by temporal event callback when dividend time is reached
-
-#### 5. **Utility Function**
-```c
-double american_option_get_value_at_spot(const PDESolver *solver,
-                                        double spot_price,
-                                        double strike)
-```
-- Converts spot to log-moneyness: x = ln(S/K)
-- Uses cubic spline to interpolate value at x
+**RAII Memory Management**: All resources automatically managed, no manual cleanup needed
 
 ### Grid Configuration Recommendations
 
@@ -495,10 +451,10 @@ From `american_option_test.cc`:
 ## Component 3: PDE Solver (Finite Difference Method Engine)
 
 ### File Locations
-- **Header**: `src/pde_solver.h`
-- **Implementation**: `src/pde_solver.c`
+- **Header**: `src/pde_solver.hpp`
 - **Tests**: `tests/pde_solver_test.cc`
-- **Example**: `examples/example_heat_equation.c`
+- **Operators**: `src/operators/` directory
+- **Example**: `examples/example_newton_solver.cc`
 
 ### Overview
 
@@ -523,222 +479,294 @@ A two-stage implicit scheme combining:
 
 ### Memory Management (Single Buffer Architecture)
 
-**Workspace (12n doubles, contiguous allocation):**
+**Workspace (6n doubles + dx array, contiguous allocation):**
 
-All arrays allocated from single 64-byte aligned buffer:
+All arrays allocated from single contiguous buffer with std::span views:
 
 ```mermaid
 graph LR
-    A["u_current<br/>n doubles"]
-    B["u_next<br/>n doubles"]
-    C["u_stage<br/>n doubles"]
-    D["rhs<br/>n doubles"]
-    E["matrix_diag<br/>n doubles"]
-    F["matrix_upper<br/>n doubles"]
-    G["matrix_lower<br/>n doubles"]
-    H["u_old<br/>n doubles"]
-    I["Lu<br/>n doubles"]
-    J["u_temp<br/>n doubles"]
-    K["tridiag_workspace<br/>2n doubles"]
+    A["u_current<br/>n doubles<br/>(current time)"]
+    B["u_next<br/>n doubles<br/>(next time)"]
+    C["u_stage<br/>n doubles<br/>(TR-BDF2 stage)"]
+    D["rhs<br/>n doubles<br/>(right-hand side)"]
+    E["Lu<br/>n doubles<br/>(spatial operator)"]
+    F["psi<br/>n doubles<br/>(obstacle buffer)"]
+    G["dx<br/>(n-1) doubles<br/>(pre-computed spacing)"]
 
-    A --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K
+    A --> B --> C --> D --> E --> F
+    G -.separate allocation.- G
 
     style A fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
     style B fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
     style C fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
     style D fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style E fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style F fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style G fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style H fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style I fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style J fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style K fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
 ```
 
 **Advantages**:
-- Single malloc operation
-- Better cache locality
-- 64-byte alignment for SIMD
-- Zero overhead during time-stepping
+- Single malloc: 6n doubles vs old 12n (50% memory reduction)
+- Better cache locality with smaller working set
+- Pre-computed dx eliminates redundant spacing calculations
+- std::span provides bounds-checked views (debug mode)
+- Zero overhead during time-stepping (no allocations)
 
-### Callback-Based Architecture
+**Key Improvements from C version**:
+- **Removed arrays**: matrix_diag, matrix_upper, matrix_lower (3n) - Newton workspace now separate
+- **Removed arrays**: u_old, u_temp (2n) - no longer needed with refactored algorithm
+- **Removed arrays**: tridiag_workspace (2n) - Newton workspace manages this
+- **Added**: Pre-computed dx array for faster stencil operations
+- **Added**: Dedicated psi buffer for obstacle conditions
 
-All functionality exposed through callbacks operating on **entire arrays** (vectorized):
+### Template-Based Architecture
 
-```c
-// Initial condition: u(x, t=0) for all grid points
-typedef void (*InitialConditionFunc)(const double *x, size_t n_points,
-                                     double *u0, void *user_data);
+The PDE solver uses C++20 templates with concepts for type-safe, zero-cost abstractions:
 
-// Boundary condition: scalar value at boundary
-typedef double (*BoundaryConditionFunc)(double t, void *user_data);
+```cpp
+namespace mango {
 
-// Spatial operator: L(u) for all points
-typedef void (*SpatialOperatorFunc)(const double *x, double t,
-                                    const double *u, size_t n_points,
-                                    double *Lu, void *user_data);
+// Initial condition: lambda or function object
+// Signature: void(std::span<const double> x, std::span<double> u0)
+using InitialConditionFunc = std::function<void(std::span<const double>, std::span<double>)>;
 
-// Obstacle condition: ψ(x,t) for variational inequalities
-typedef void (*ObstacleFunc)(const double *x, double t, size_t n_points,
-                             double *psi, void *user_data);
+// Boundary conditions: Concept-based compile-time polymorphism
+template<typename T>
+concept BoundaryCondition = requires(T bc, double t) {
+    { bc.value(t) } -> std::convertible_to<double>;
+    { bc.type() } -> std::same_as<BoundaryType>;
+};
 
-// Temporal events: Handle time-based events (dividends, etc.)
-// workspace parameter provides n_points doubles for temporary storage (zero malloc)
-typedef void (*TemporalEventFunc)(double t, const double *x,
-                                  size_t n_points, double *u,
-                                  const size_t *event_indices,
-                                  size_t n_events_triggered,
-                                  void *user_data, double *workspace);
+// Spatial operator: Concept-based interface
+template<typename T>
+concept SpatialOperator = requires(T op, std::span<const double> x, double t,
+                                    std::span<const double> u, std::span<double> Lu) {
+    { op(x, t, u, Lu) } -> std::same_as<void>;
+};
+
+// Obstacle condition: Optional callback
+using ObstacleCallback = std::function<void(double t, std::span<const double> x,
+                                             std::span<double> psi)>;
+
+// Temporal events: Event-driven architecture
+using TemporalEventCallback = std::function<void(double t, std::span<const double> x,
+                                                  std::span<double> u)>;
+
+struct TemporalEvent {
+    double time;
+    TemporalEventCallback callback;
+
+    auto operator<=>(const TemporalEvent& other) const {
+        return time <=> other.time;  // C++20 spaceship operator
+    }
+};
+
+} // namespace mango
 ```
 
 ### Temporal Event System
 
 The solver supports **temporal events** for handling discrete discontinuities in time (e.g., dividend payments, regime changes).
 
-**Registration**:
-```c
-PDECallbacks callbacks = {
-    // ... other callbacks ...
-    .temporal_event = my_event_handler,
-    .n_temporal_events = 2,
-    .temporal_event_times = (double[]){0.25, 0.75},  // Event times in [t_start, t_end]
-    .user_data = &my_data
-};
+**Registration** (via PDESolver constructor):
+```cpp
+// Temporal events are registered during solver construction
+std::vector<TemporalEvent> events;
+
+events.push_back({
+    .time = 0.25,
+    .callback = [](double t, std::span<const double> x, std::span<double> u) {
+        // Handle first event
+    }
+});
+
+events.push_back({
+    .time = 0.75,
+    .callback = [](double t, std::span<const double> x, std::span<double> u) {
+        // Handle second event
+    }
+});
+
+// Events automatically sorted by time via spaceship operator
 ```
 
 **How it works**:
-1. Solver maintains sorted list of event times
+1. Solver maintains sorted list of event times (using `operator<=>`)
 2. During time-stepping, checks if current step crosses an event
 3. When event triggered:
    - Solver completes step to exact event time
-   - Calls `temporal_event` callback with solution array
+   - Calls lambda callback with std::span views of solution
    - Callback modifies solution in-place (e.g., applies dividend jump)
    - Solver continues from modified state
 
 **Example use case - Dividend payments**:
-```c
-void dividend_event(double t, const double *x, size_t n, double *u,
-                    const size_t *event_indices, size_t n_events, void *data) {
+```cpp
+auto dividend_event = [dividend_amount, strike](double t,
+                                                 std::span<const double> x,
+                                                 std::span<double> u) {
     // Apply stock price jump from dividend payment
-    // Interpolate option value to new grid after S → S - D
-    american_option_apply_dividend(x, n, u, u, dividend_amount, strike);
-}
+    // Lambda captures dividend amount and strike
+    apply_dividend_jump(x, u, dividend_amount, strike);
+};
 ```
 
-**Thread safety**: Each solver instance has independent event state; batch processing with temporal events is safe.
+**Thread safety**: Each solver instance has independent event state; lambda captures are thread-local.
 
-### Core Functions
+### Core API
 
-#### 1. **Solver Creation**
-```c
-PDESolver* pde_solver_create(SpatialGrid *grid,
-                              const TimeDomain *time,
-                              const BoundaryConfig *bc_config,
-                              const TRBDF2Config *trbdf2_config,
-                              const PDECallbacks *callbacks);
+#### 1. **Solver Construction (Template-Based)**
+```cpp
+template<typename BoundaryL, typename BoundaryR, typename SpatialOp>
+PDESolver(std::span<const double> grid,
+          const TimeDomain& time,
+          const TRBDF2Config& config,
+          const RootFindingConfig& root_config,
+          const BoundaryL& left_bc,
+          const BoundaryR& right_bc,
+          const SpatialOp& spatial_op,
+          std::optional<ObstacleCallback> obstacle = std::nullopt);
 ```
 
-**Ownership**: Takes ownership of grid; `grid.x` set to nullptr
+**Type Safety**: Template parameters constrained by concepts at compile-time
+
+**RAII**: Grid passed as std::span (non-owning view), resources managed automatically
 
 #### 2. **Solver Lifecycle**
-```c
-void pde_solver_initialize(PDESolver *solver);  // Apply initial conditions
-int pde_solver_solve(PDESolver *solver);        // Full solve loop
-void pde_solver_destroy(PDESolver *solver);     // Cleanup
+```cpp
+void initialize(InitialConditionFunc ic);  // Apply initial conditions
+bool solve();                              // Full solve loop (returns convergence status)
+bool step(double t_current);               // Single time step
 ```
 
-#### 3. **Single Step**
-```c
-int pde_solver_step(PDESolver *solver, double t_current);
+**Modern Error Handling**: Returns bool for success/failure instead of error codes
+
+#### 3. **Solution Access (Zero-Copy Views)**
+```cpp
+std::span<const double> solution() const;      // Get solution array (read-only view)
+std::span<const double> grid() const;          // Get spatial grid (read-only view)
+double interpolate(double x_eval) const;       // Cubic spline interpolation
 ```
 
-#### 4. **Solution Access**
-```c
-const double* pde_solver_get_solution(const PDESolver *solver);
-const double* pde_solver_get_grid(const PDESolver *solver);
-double pde_solver_interpolate(const PDESolver *solver, double x_eval);
+**std::span Benefits**: Zero-copy, bounds-checked in debug builds, iterator support
+
+### Newton Solver for Implicit Stages
+
+The C++20 implementation uses **Newton's method** (via `NewtonWorkspace`) to solve implicit stages, not fixed-point iteration:
+
+```cpp
+// For each TR-BDF2 implicit stage, solve:
+// F(u) = u - dt·α·L(u) - RHS = 0
+//
+// Newton iteration:
+//   J·Δu = -F(u^k)
+//   u^{k+1} = u^k + Δu
+//
+// where J is the Jacobian approximated via finite differences
 ```
 
-### Implicit Solver (Fixed-Point Iteration)
-
-For each implicit stage:
-
-```
-Given: u_n, target: u_{n+1}
-
-Fixed-point iteration with under-relaxation (ω = 0.7):
-  u^(k+1) = ω · u_candidate(u^(k)) + (1-ω) · u^(k)
-
-Convergence criteria:
-  || u^(k+1) - u^(k) ||_∞ < tolerance
-```
+**Newton Workspace** (from `newton_workspace.hpp`):
+- Builds Jacobian matrix (tridiagonal for 1D PDEs)
+- Solves linear system via Thomas algorithm
+- Quasi-Newton: Jacobian computed once per stage, not per iteration
+- Convergence: `||F(u)|| < tolerance`
 
 **Configuration**:
-```c
-typedef struct {
-    double gamma;               // TR-BDF2 parameter (≈ 0.5858)
-    size_t max_iter;            // Max iterations per step
-    double tolerance;           // Convergence tolerance
-} TRBDF2Config;
+```cpp
+namespace mango {
+
+struct TRBDF2Config {
+    double gamma = 2.0 - std::sqrt(2.0);  // TR-BDF2 parameter (≈ 0.5858)
+    size_t cache_blocking_threshold = 5000;  // Enable cache blocking for large grids
+};
+
+struct RootFindingConfig {
+    size_t max_iter = 100;        // Max Newton iterations per stage
+    double tolerance = 1e-6;      // Convergence tolerance
+    double jacobian_fd_epsilon = 1e-7;  // Finite difference step for Jacobian
+};
+
+} // namespace mango
 ```
 
 ### Boundary Condition Types
 
-```c
-typedef enum {
-    BC_DIRICHLET,               // u = g(t)
-    BC_NEUMANN,                 // ∂u/∂x = g(t)
-    BC_ROBIN                    // a·u + b·∂u/∂x = g(t)
-} BoundaryType;
+```cpp
+namespace mango {
+
+enum class BoundaryType {
+    DIRICHLET,   // u = g(t)
+    NEUMANN,     // ∂u/∂x = g(t)
+    ROBIN        // a·u + b·∂u/∂x = g(t)
+};
+
+// Example boundary condition classes
+class DirichletBC {
+    double value_;
+public:
+    explicit DirichletBC(double v) : value_(v) {}
+    double value(double t) const { return value_; }
+    BoundaryType type() const { return BoundaryType::DIRICHLET; }
+};
+
+class NeumannBC {
+    double gradient_;
+public:
+    explicit NeumannBC(double g) : gradient_(g) {}
+    double value(double t) const { return gradient_; }
+    BoundaryType type() const { return BoundaryType::NEUMANN; }
+};
+
+class RobinBC {
+    double a_, b_, g_;
+public:
+    RobinBC(double a, double b, double g) : a_(a), b_(b), g_(g) {}
+    double value(double t) const { return g_; }
+    BoundaryType type() const { return BoundaryType::ROBIN; }
+    double coeff_a() const { return a_; }
+    double coeff_b() const { return b_; }
+};
+
+} // namespace mango
 ```
 
 ### Boundary Condition Implementation
 
+The C++20 implementation uses **compile-time dispatch** via templates and concepts to handle different boundary types efficiently.
+
 #### Dirichlet Boundaries
 Direct assignment of boundary values:
-```c
-u[0] = left_boundary(t);      // Left boundary
-u[n-1] = right_boundary(t);   // Right boundary
+```cpp
+u[0] = left_bc.value(t);      // Left boundary
+u[n-1] = right_bc.value(t);   // Right boundary
 ```
 
-#### Neumann Boundaries (Ghost Point Method)
-For ∂u/∂x = g at boundaries, the solver uses the **ghost point method** to properly compute the spatial operator at boundary points while maintaining conservation properties.
-
-**Left boundary** (x = x_min):
-- Creates virtual point u_{-1} outside domain
-- Ghost point relation: u_{-1} = u_1 - 2·dx·g (from centered difference)
-- Estimates diffusion coefficient D from interior stencil
-- Computes: L(u)_0 = D·(2u_1 - 2u_0 - 2·dx·g) / dx²
-
-**Right boundary** (x = x_max):
-- Creates virtual point u_n outside domain
-- Ghost point relation: u_n = u_{n-2} + 2·dx·g
-- Estimates diffusion coefficient D from interior stencil
-- Computes: L(u)_{n-1} = D·(2u_{n-2} - 2u_{n-1} + 2·dx·g) / dx²
-
-**Assumption**: Ghost point method assumes pure diffusion operator L(u) = D·∂²u/∂x². For advection-diffusion or nonlinear operators, coefficient estimation may not be accurate. See `pde_solver.c` lines 83-86, 105.
+#### Neumann Boundaries
+For ∂u/∂x = g at boundaries, handled via modified stencils during operator evaluation.
 
 #### Robin Boundaries
 For a·u + b·∂u/∂x = g at boundaries:
-- Modified matrix entries in tridiagonal system
-- Incorporates both value and derivative conditions
-- Coefficients a, b validated to prevent division by zero (a ≠ 0)
+- Incorporated into Newton Jacobian
+- Both value and derivative conditions applied
+- Type-safe coefficient access via `coeff_a()` and `coeff_b()` methods
 
 ### Performance Optimizations
 
-#### Zero-Allocation Tridiagonal Solver
-The tridiagonal solver (Thomas algorithm) uses pre-allocated workspace from the PDESolver's 12n buffer:
-- **Workspace**: 2n doubles for c_prime and d_prime arrays
-- **Benefit**: Eliminates malloc/free overhead in hot path
-- **Impact**: Called once per Newton iteration per timestep (~5-10% speedup)
-- **Backward compatibility**: Accepts NULL workspace pointer (allocates internally for standalone use)
+#### Memory Efficiency
+The C++20 implementation achieves significant memory reduction:
+- **Workspace**: 6n doubles (down from 12n in C version)
+- **Newton workspace**: 8n doubles allocated + 2n borrowed
+- **Total**: ~14n doubles vs 24n+ in legacy code (42% reduction)
 
-#### SIMD Vectorization
-Key loops marked with `#pragma omp simd` for automatic vectorization:
-- Spatial operator evaluation
-- Tridiagonal forward/backward sweeps
-- Fixed-point iteration updates
+#### Cache Blocking
+Automatic cache blocking for large grids (n ≥ 5000):
+- Splits spatial operators into L1-sized blocks (~1000 points)
+- Reduces memory bandwidth pressure
+- Transparent to user (same results as non-blocked)
+
+#### Template-Based Zero-Cost Abstractions
+- Boundary conditions: Compile-time dispatch via concepts
+- Spatial operators: No virtual function overhead
+- All callbacks inlined by compiler
 
 ### Test Coverage
 
@@ -771,121 +799,93 @@ From `pde_solver_test.cc`:
 
 ### 4.2 Cubic Spline Interpolation
 
-**File**: `src/cubic_spline.h` and `.c`
+**File**: `src/cubic_spline_solver.hpp`
 
 **Purpose**: Evaluate PDE solution at arbitrary off-grid points
 
-**Method**: Natural cubic splines with:
-- Quadratic system solve via shared tridiagonal solver
-- Two API variants: malloc-based and workspace-based
-- Function and derivative evaluation
+**Method**: Natural cubic splines implementing C² continuous piecewise polynomials
 
-**Malloc-Based API** (convenience):
-```c
-CubicSpline *spline = pde_spline_create(x_grid, solution, n_points);
-double value_at_x = pde_spline_eval(spline, x_eval);
-double derivative = pde_spline_eval_derivative(spline, x_eval);
-pde_spline_destroy(spline);
+**Modern C++20 API**:
+```cpp
+namespace mango {
+
+template<FloatingPoint T>
+class CubicSpline {
+public:
+    /// Construct spline from data points
+    /// @param x X-coordinates (must be strictly increasing)
+    /// @param y Y-coordinates
+    /// @param config Spline configuration (default: natural boundaries)
+    /// @return Optional error message (nullopt on success)
+    [[nodiscard]] std::optional<std::string_view> build(
+        std::span<const T> x,
+        std::span<const T> y,
+        const CubicSplineConfig<T>& config = {}
+    );
+
+    /// Evaluate spline at point x
+    [[nodiscard]] T eval(T x_eval) const noexcept;
+
+    /// Evaluate first derivative at point x
+    [[nodiscard]] T eval_derivative(T x_eval) const noexcept;
+
+    /// Evaluate second derivative at point x
+    [[nodiscard]] T eval_second_derivative(T x_eval) const noexcept;
+};
+
+} // namespace mango
 ```
-- Allocates workspace internally (4n doubles for coefficients, 6n for temporary)
-- Convenient for one-off interpolation queries
-- Simple ownership model
 
-**Workspace-Based API** (zero-malloc, performance-critical):
-```c
-CubicSpline spline;  // Stack-allocated
-double workspace[4 * n_points];
-double temp_workspace[6 * n_points];
+**Usage Example**:
+```cpp
+// Create and build spline
+mango::CubicSpline<double> spline;
+auto error = spline.build(x_grid, solution_values);
 
-pde_spline_init(&spline, x_grid, solution, n_points, workspace, temp_workspace);
-double value_at_x = pde_spline_eval(&spline, x_eval);
-double derivative = pde_spline_eval_derivative(&spline, x_eval);
-// No destroy needed - workspace managed by caller
-```
-- Zero heap allocation (workspace provided by caller)
-- Ideal for hot paths with repeated spline creation/destruction
-- Used by 4D/5D interpolation engine for **99.9% malloc reduction**
-- Workspace requirements: 10n doubles total (4n + 6n)
-- Can reuse temp_workspace across multiple `pde_spline_init()` calls
-
-**Performance Impact**:
-- 2D interpolation: 2 mallocs → 2 workspace-only allocations
-- 4D interpolation: ~15 mallocs → 2 workspace-only allocations (87% reduction)
-- 5D interpolation: ~1,873 mallocs → 2 workspace-only allocations (99.9% reduction)
-
-**Implementation Note**: Both APIs share the same evaluation functions (`pde_spline_eval`, `pde_spline_eval_derivative`). The workspace-based API was added in PR #36 to eliminate malloc overhead in multi-dimensional interpolation hot paths.
-
-### 4.3 Workspace-Based Interpolation API
-
-**Added in PR #37** - Extends workspace pattern to multi-dimensional interpolation queries.
-
-**Files**: `src/interp_cubic.h`, `src/interp_cubic_workspace.c`
-
-**Problem**: Even with precomputed spline coefficients, slow-path queries (off-precomputed-grid) performed excessive malloc/free:
-- 2D interpolation: 4 malloc/free per query
-- 4D interpolation: 8 malloc/free per query
-- 5D interpolation: 10 malloc/free per query
-- Dividend event handler: 1 malloc/free per event
-
-**Solution**: Workspace-based interpolation functions that accept caller-provided buffers, eliminating all hot path allocations.
-
-**API**:
-```c
-// Calculate workspace size (once per table dimensions)
-size_t ws_size = cubic_interp_workspace_size_4d(n_m, n_tau, n_sigma, n_r);
-
-// Allocate workspace (once, reuse across millions of queries)
-double *buffer = malloc(ws_size * sizeof(double));
-CubicInterpWorkspace workspace;
-cubic_interp_workspace_init(&workspace, buffer, n_m, n_tau, n_sigma, n_r, 0);
-
-// Query with zero malloc (can be called millions of times)
-for (int i = 0; i < 1000000; i++) {
-    double price = cubic_interpolate_4d_workspace(table, m[i], tau[i],
-                                                    sigma[i], r[i], workspace);
+if (error) {
+    std::cerr << "Spline construction failed: " << *error << "\n";
+    return;
 }
 
-// Cleanup
-free(buffer);
+// Evaluate at arbitrary points
+double value = spline.eval(0.5);
+double slope = spline.eval_derivative(0.5);
+double curvature = spline.eval_second_derivative(0.5);
 ```
 
-**Workspace Structure**:
-```c
-typedef struct {
-    double *spline_coeff_workspace;   // 4 * max_grid_size (reused across stages)
-    double *spline_temp_workspace;    // 6 * max_grid_size (reused across stages)
-    double *intermediate_arrays;      // Stage results (dimension-dependent)
-    double *slice_buffers;            // max_grid_size (slice extraction)
-    size_t max_grid_size;             // Largest dimension
-    size_t total_size;                // Total doubles allocated
-} CubicInterpWorkspace;
+**Key Features**:
+- **Type-safe**: Template-based with `FloatingPoint` concept
+- **Zero-copy input**: Uses `std::span` for data views
+- **RAII memory management**: No manual cleanup needed
+- **Cache-efficient**: Struct-of-arrays layout for coefficient storage
+- **Thomas solver**: Tridiagonal system solved via optimized Thomas algorithm
+- **Binary search**: O(log n) interval lookup for evaluation
+
+**Boundary Conditions**:
+```cpp
+enum class SplineBoundary {
+    NATURAL,      // f''(x₀) = f''(xₙ) = 0 (default)
+    CLAMPED,      // f'(x₀) and f'(xₙ) specified (future)
+    NOT_A_KNOT    // f'''(x₁⁻) = f'''(x₁⁺) (future)
+};
 ```
 
-**Workspace Sizing Functions**:
-- `cubic_interp_workspace_size_2d(n_m, n_tau)` - 2D IV surface queries
-- `cubic_interp_workspace_size_4d(n_m, n_tau, n_sigma, n_r)` - 4D price tables
-- `cubic_interp_workspace_size_5d(n_m, n_tau, n_sigma, n_r, n_q)` - 5D with dividends
+Currently only `NATURAL` boundary conditions are implemented (clamped and not-a-knot planned for future releases).
 
-**Zero-Malloc Query Functions**:
-- `cubic_interpolate_2d_workspace(surface, m, tau, workspace)` - 2D queries
-- `cubic_interpolate_4d_workspace(table, m, tau, sigma, r, workspace)` - 4D queries
-- `cubic_interpolate_5d_workspace(table, m, tau, sigma, r, q, workspace)` - 5D queries
+**Memory Layout**:
+- Grid points: `n` doubles for x, `n` doubles for y
+- Coefficients: `(n-1)` intervals × 4 coefficients = `4(n-1)` doubles
+- Second derivatives: `n` doubles (c coefficients)
+- Total: ~`6n` doubles
 
-**Performance**: 100% elimination of malloc in interpolation hot paths.
+**Performance**:
+- Construction: O(n) via Thomas algorithm
+- Evaluation: O(log n) via binary search + O(1) polynomial evaluation
+- Cache-friendly: Sequential memory access patterns
 
-**Integration with Temporal Events**: The PDE solver provides workspace to temporal event callbacks via the `workspace` parameter, enabling zero-malloc dividend handling during American option pricing.
+### 4.3 Tridiagonal Solver
 
-**Memory Requirements** (typical 4D table: 50×30×20×10):
-- Spline workspace: 10 × 50 = 500 doubles (reused across stages)
-- Intermediate arrays: (30×20×10) + (20×10) + 10 = 6,210 doubles
-- Slice buffer: 50 doubles
-- **Total**: 6,760 doubles (~54KB per workspace)
-
-**Usage Pattern**: Allocate workspace once per table configuration, reuse across all queries. For multi-threaded scenarios, each thread maintains its own workspace to avoid contention.
-
-### 4.4 Tridiagonal Solver
-
-**File**: `src/tridiagonal.h`
+**File**: `src/thomas_solver.hpp`
 
 **Method**: Thomas algorithm (TDMA - Tridiagonal Matrix Algorithm)
 - **Time complexity**: O(n)
@@ -893,9 +893,9 @@ typedef struct {
   - TR-BDF2 implicit solver
   - Cubic spline coefficient calculation
 
-### 4.5 USDT Tracing System
+### 4.4 USDT Tracing System
 
-**File**: `src/ivcalc_trace.h`
+**Files**: Tracing infrastructure integrated throughout C++ codebase
 
 **Purpose**: Zero-overhead diagnostic tracing for profiling and debugging
 
@@ -911,378 +911,6 @@ typedef struct {
    - Cubic spline: Errors
 
 **Zero Overhead**: Compiles to NOP instructions when not traced; can be dynamically enabled at runtime via bpftrace
-
----
-
-## Component 5: Interpolation Engine (Fast Lookup)
-
-### Purpose
-
-Provides sub-microsecond option pricing and IV lookups via pre-computed interpolation tables, achieving **40,000x speedup** over FDM for real-time queries during trading sessions.
-
-### File Locations
-
-```
-src/
-├── interp_strategy.h      # Strategy pattern interface for interpolation algorithms
-├── interp_cubic.{h,c}     # Cubic spline interpolation strategy
-├── iv_surface.{h,c}       # 2D implied volatility surface (~100ns queries)
-└── price_table.{h,c}      # 4D/5D option price table (~500ns queries)
-
-examples/
-└── example_interpolation.c  # IV surface and price table usage
-
-tests/
-└── interpolation_test.cc    # Unit tests for all interpolation components
-```
-
-### Architecture Overview
-
-```mermaid
-graph TD
-    USER[User Query<br/>m, τ, σ, r]
-
-    TRANSFORM[Coordinate Transform<br/>Raw → Grid Space<br/>COORD_LOG_SQRT]
-
-    STRATEGY[Interpolation Strategy<br/>INTERP_CUBIC]
-
-    PRECOMP[Precomputed Spline<br/>Coefficients<br/>~10MB for 4D table]
-
-    STAGE1[Stage 1: Moneyness<br/>Evaluate splines along m<br/>for each τ,σ,r]
-
-    STAGE2[Stage 2: Maturity<br/>Build & evaluate splines along τ<br/>for each σ,r]
-
-    STAGE3[Stage 3: Volatility<br/>Build & evaluate splines along σ<br/>for each r]
-
-    STAGE4[Stage 4: Rate<br/>Build & evaluate spline along r<br/>→ final result]
-
-    RESULT[Interpolated Price<br/>~500ns total]
-
-    USER --> TRANSFORM
-    TRANSFORM --> STRATEGY
-    STRATEGY --> PRECOMP
-    PRECOMP --> STAGE1
-    STAGE1 --> STAGE2
-    STAGE2 --> STAGE3
-    STAGE3 --> STAGE4
-    STAGE4 --> RESULT
-
-    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style TRANSFORM fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style STRATEGY fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style PRECOMP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style STAGE1 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style STAGE2 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style STAGE3 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style STAGE4 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-```
-
-**Key Features**:
-- **Strategy Pattern**: Runtime selection of interpolation algorithm (cubic splines)
-- **Coordinate Transforms**: Log-sqrt transforms for better interpolation accuracy
-- **Tensor-Product**: Separable stages reduce complexity from O(n^4) to O(n)
-- **Precomputation**: Spline coefficients computed once, reused for millions of queries
-
-### Core Data Structures
-
-#### IV Surface (2D Interpolation)
-
-```c
-typedef struct {
-    size_t n_moneyness;          // Grid dimension
-    size_t n_maturity;
-    double *moneyness_grid;       // Moneyness values (S/K)
-    double *maturity_grid;        // Time to maturity (years)
-    double *iv_values;            // Implied volatilities (flattened 2D array)
-
-    const InterpolationStrategy *strategy;  // Runtime algorithm selection
-    InterpContext interp_context;           // Strategy-specific context
-
-    char underlying[32];          // "SPX", "NDX", etc.
-    time_t last_update;
-} IVSurface;
-```
-
-**Memory footprint**: ~12KB per surface (50 × 30 grid)
-
-#### Option Price Table (4D/5D Interpolation)
-
-```c
-typedef struct {
-    // Grid dimensions
-    size_t n_moneyness, n_maturity, n_volatility, n_rate, n_dividend;
-    double *moneyness_grid, *maturity_grid, *volatility_grid;
-    double *rate_grid, *dividend_grid;
-
-    double *prices;              // Pre-computed option prices (flattened array)
-
-    // Fast indexing strides (pre-computed)
-    size_t stride_m, stride_tau, stride_sigma, stride_r, stride_q;
-
-    const InterpolationStrategy *strategy;  // Runtime algorithm selection
-    InterpContext interp_context;
-
-    OptionType type;             // CALL or PUT
-    ExerciseType exercise;       // EUROPEAN or AMERICAN
-    char underlying[32];
-    time_t generation_time;
-} OptionPriceTable;
-```
-
-**Memory footprint**: ~2.4MB per table (4D: 50×30×20×10 grid)
-
-### Memory Layout Options
-
-The price table supports different memory layouts for cache optimization:
-
-```mermaid
-graph TD
-    TABLE[OptionPriceTable<br/>4D Array: m×τ×σ×r]
-
-    OUTER[LAYOUT_M_OUTER<br/>m, τ, σ, r<br/>Default ordering]
-
-    INNER[LAYOUT_M_INNER<br/>r, σ, τ, m<br/>Recommended for cubic]
-
-    POINT_QUERY[Point Query<br/>table.m.tau.sigma.r<br/>~Equal performance]
-
-    SLICE_OUTER[Slice Extraction OUTER<br/>Extract all m for fixed τ,σ,r<br/>Scattered memory access<br/>~30x slower]
-
-    SLICE_INNER[Slice Extraction INNER<br/>Extract all m for fixed τ,σ,r<br/>Contiguous memory access<br/>~30x faster]
-
-    TABLE --> OUTER
-    TABLE --> INNER
-
-    OUTER --> POINT_QUERY
-    INNER --> POINT_QUERY
-
-    OUTER --> SLICE_OUTER
-    INNER --> SLICE_INNER
-
-    style TABLE fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style OUTER fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style INNER fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style POINT_QUERY fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-    style SLICE_OUTER fill:#ffcdd2,stroke:#333,stroke-width:2px,color:#000
-    style SLICE_INNER fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-```
-
-**Layout Comparison**:
-- **LAYOUT_M_OUTER** [m][τ][σ][r]: Good for point queries, compatible with older code
-- **LAYOUT_M_INNER** [r][σ][τ][m]: Optimized for cubic interpolation (slice-based)
-  - 64-byte cache lines hold 8 consecutive moneyness values
-  - ~30x faster moneyness slice extraction
-  - Same memory usage, same point query performance
-
-**Why it matters for cubic**: Precomputation creates splines along moneyness dimension for each (τ,σ,r) combination. LAYOUT_M_INNER makes these slices contiguous in memory, dramatically improving cache performance during precomputation.
-
-### Interpolation Strategy Pattern
-
-Uses **dependency injection** for runtime algorithm selection without recompilation:
-
-```c
-typedef struct {
-    const char *name;
-    const char *description;
-
-    // Callbacks for different dimensions
-    double (*interpolate_2d)(const IVSurface*, double m, double tau, InterpContext);
-    double (*interpolate_4d)(const OptionPriceTable*, double m, double tau,
-                             double sigma, double r, InterpContext);
-    double (*interpolate_5d)(const OptionPriceTable*, double m, double tau,
-                             double sigma, double r, double q, InterpContext);
-
-    // Context management
-    InterpContext (*create_context)(size_t dimensions, const size_t *grid_sizes);
-    void (*destroy_context)(InterpContext);
-
-    // Optional pre-computation
-    int (*precompute)(void *table, InterpContext);
-} InterpolationStrategy;
-```
-
-**Available strategies**:
-- `INTERP_CUBIC`: Tensor-product cubic splines (C² continuous, ~500ns for 4D)
-  - Provides accurate second derivatives (gamma, vega-convexity, etc.)
-  - Handles coordinate transformations (COORD_LOG_SQRT, COORD_LOG_VARIANCE)
-  - Requires precomputation of spline coefficients
-  - Minimum 2 points per dimension required
-
-### Key Functions
-
-#### IV Surface API
-
-```c
-// Create/destroy
-IVSurface* iv_surface_create(const double *moneyness, size_t n_m,
-                              const double *maturity, size_t n_tau);
-IVSurface* iv_surface_create_with_strategy(/* ... */, const InterpolationStrategy*);
-void iv_surface_destroy(IVSurface *surface);
-
-// Data manipulation
-int iv_surface_set(IVSurface *surface, size_t i_m, size_t i_tau, double iv);
-int iv_surface_set_all(IVSurface *surface, const double *iv_data);
-double iv_surface_get(const IVSurface *surface, size_t i_m, size_t i_tau);
-
-// Fast interpolation (main query interface)
-double iv_surface_interpolate(const IVSurface *surface, double moneyness, double maturity);
-
-// I/O
-int iv_surface_save(const IVSurface *surface, const char *filename);
-IVSurface* iv_surface_load(const char *filename);
-```
-
-#### Price Table API
-
-```c
-// Create/destroy
-OptionPriceTable* price_table_create(
-    const double *moneyness, size_t n_m,
-    const double *maturity, size_t n_tau,
-    const double *volatility, size_t n_sigma,
-    const double *rate, size_t n_r,
-    const double *dividend, size_t n_q,  // Pass NULL for 4D mode
-    OptionType type, ExerciseType exercise);
-
-void price_table_destroy(OptionPriceTable *table);
-
-// Data manipulation
-int price_table_set(OptionPriceTable *table, size_t i_m, size_t i_tau,
-                    size_t i_sigma, size_t i_r, size_t i_q, double price);
-double price_table_get(const OptionPriceTable *table, /* ... */);
-
-// Fast interpolation (main query interface)
-double price_table_interpolate_4d(const OptionPriceTable *table,
-                                   double moneyness, double maturity,
-                                   double volatility, double rate);
-double price_table_interpolate_5d(const OptionPriceTable *table,
-                                   double moneyness, double maturity,
-                                   double volatility, double rate, double dividend);
-
-// Greeks via finite differences on interpolated values
-OptionGreeks price_table_greeks_4d(const OptionPriceTable *table, /* ... */);
-OptionGreeks price_table_greeks_5d(const OptionPriceTable *table, /* ... */);
-
-// I/O
-int price_table_save(const OptionPriceTable *table, const char *filename);
-OptionPriceTable* price_table_load(const char *filename);
-```
-
-### Cubic Spline Interpolation Algorithm
-
-**Method**: Tensor-product cubic spline interpolation with separable stages
-
-**4D Algorithm** (for price tables):
-1. **Precomputation** (done once after filling table):
-   - For each combination of (τ, σ, r): create cubic spline in moneyness dimension
-   - Stores spline coefficients for all slices
-   - Enables O(1) evaluation along first dimension
-
-2. **Query** (per interpolation request):
-   - Stage 1: Evaluate moneyness splines for all (τ, σ, r) combinations → intermediate values
-   - Stage 2: Create and evaluate maturity splines for each (σ, r) → intermediate values
-   - Stage 3: Create and evaluate volatility splines for each r → intermediate values
-   - Stage 4: Create and evaluate rate spline → final result
-
-3. **Coordinate Transformation**:
-   - Query coordinates transformed from raw to grid space before interpolation
-   - Supports COORD_RAW, COORD_LOG_SQRT, COORD_LOG_VARIANCE
-
-```mermaid
-graph LR
-    RAW["User Query<br/>m=1.05, τ=0.25"]
-
-    COORD_RAW["COORD_RAW<br/>Identity<br/>m'=1.05, τ'=0.25"]
-
-    COORD_LOG_SQRT["COORD_LOG_SQRT<br/>m'=ln(m)<br/>τ'=√τ<br/>m'=0.049, τ'=0.5"]
-
-    COORD_LOG_VAR["COORD_LOG_VARIANCE<br/>m'=ln(m)<br/>σ'²=σ²·τ<br/>Better for vol surfaces"]
-
-    INTERP["Cubic Spline<br/>Interpolation<br/>in Grid Space"]
-
-    RESULT["Interpolated<br/>Price"]
-
-    RAW --> COORD_RAW
-    RAW --> COORD_LOG_SQRT
-    RAW --> COORD_LOG_VAR
-
-    COORD_RAW --> INTERP
-    COORD_LOG_SQRT --> INTERP
-    COORD_LOG_VAR --> INTERP
-
-    INTERP --> RESULT
-
-    style RAW fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style COORD_RAW fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style COORD_LOG_SQRT fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style COORD_LOG_VAR fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style INTERP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-```
-
-**Why coordinate transforms?**
-- **Log-moneyness**: ln(m) spreads out ATM region where most trading occurs
-- **Square-root time**: √τ linearizes time decay near expiry
-- **Better interpolation**: Transformed coordinates are more linear, reducing interpolation error
-
-**Complexity**:
-- Precomputation: O(n_τ × n_σ × n_r × n_m) cubic spline setups
-- Query time: O(n_τ × n_σ × n_r) spline evaluations per query
-- Space: O(n_τ × n_σ × n_r × n_m) for spline coefficients (4x price array size)
-
-**Key Features**:
-- C² continuous (smooth second derivatives)
-- Accurate Greeks (gamma, vega-convexity, etc.)
-- Requires ≥2 points in each dimension
-
-### Performance Characteristics
-
-**Query Performance**:
-- **IV Surface (2D)**: <100ns per query
-- **Price Table (4D)**: ~500ns per query
-- **FDM (American option)**: 21.7ms per query
-- **Speedup**: 40,000x faster than FDM
-
-**Throughput**:
-- Single-threaded: >2M prices/second (vs 46/sec for FDM)
-- Memory-bandwidth limited (not compute-bound)
-
-**Accuracy**:
-- On-grid points: Exact (machine precision)
-- Off-grid points: Typically <0.5% relative error for smooth functions
-- **Delta**: Accurate (first derivatives from cubic splines)
-- **Gamma**: Accurate (second derivatives continuous, C² property)
-- **Vega/Theta/Rho**: Accurate via finite differences on interpolated values
-
-**Advantages of Cubic**:
-- C² continuous interpolation (smooth second derivatives)
-- Accurate Greeks without storing separate tables
-- Better approximation of smooth functions between grid points
-
-### Integration with Existing Components
-
-The interpolation engine **complements** rather than replaces the FDM solver:
-
-1. **Pre-computation**: Uses `american_option_price_batch()` with OpenMP to populate price tables
-2. **Runtime**: Queries use fast interpolation; falls back to FDM for out-of-range parameters
-3. **Workflow**:
-   - **Offline**: Pre-compute tables during downtime (minutes to hours)
-   - **Online**: Fast lookups during trading (sub-microsecond)
-
-### Design Rationale
-
-**Strategy Pattern Benefits**:
-- Runtime algorithm selection (no recompilation)
-- Easy to benchmark different strategies
-- Users can implement custom interpolation algorithms
-- Extensible for future enhancements (cubic splines, RBF, etc.)
-
-**Hybrid Approach** (IV Surface + Price Table):
-- IV surfaces (2D): Extremely fast, tiny memory, good for market data fitting
-- Price tables (4D/5D): Direct pricing given IV, includes American options
-- Both: Maximum flexibility for different use cases
-
-For complete design rationale and implementation roadmap, see `docs/notes/INTERPOLATION_ENGINE_DESIGN.md`.
 
 ---
 
@@ -1363,13 +991,19 @@ Returns: Array of implied volatilities
 graph TD
     PARAMS["Option Parameters<br/>(S, K, T, r, market_price)"]
 
-    LBR["Let's Be Rational<br/>(European IV Estimation)"]
+    IVSOLVER["IV Solver<br/>iv_solver.hpp/cpp"]
 
-    BOUNDS["Upper Bound<br/>vol_upper = euro_iv × 1.5"]
+    AMERICAN["American Pricer<br/>american_option.hpp<br/>~21ms per solve"]
 
-    AMERICAN["American Pricing<br/>(FDM PDE Solve)"]
+    PDE["PDE Solver<br/>pde_solver.hpp<br/>Template-based"]
 
-    SPLINE["Cubic Spline<br/>Interpolation"]
+    OPS["Spatial Operators<br/>operators/*.hpp<br/>BlackScholesOperator"]
+
+    BC["Boundary Conditions<br/>boundary_conditions.hpp"]
+
+    NEWTON["Newton Workspace<br/>Implicit solver"]
+
+    SPLINE["Cubic Spline<br/>cubic_spline_solver.hpp"]
 
     VALUE["Option Value at Spot"]
 
@@ -1377,16 +1011,19 @@ graph TD
 
     OBJECTIVE["Objective Function<br/>f(σ) = price(σ) - market"]
 
-    BRENT["Brent Root Finder<br/>(5-8 iterations)"]
+    BRENT["Brent Root Finder<br/>root_finding.hpp<br/>5-8 iterations"]
 
-    IV["American Implied Volatility"]
+    IV["American Implied Volatility<br/>~145ms total"]
 
-    PARAMS --> LBR
-    LBR -->|"~781ns"| BOUNDS
-    BOUNDS --> BRENT
+    PARAMS --> IVSOLVER
+    IVSOLVER --> BRENT
+    IVSOLVER --> AMERICAN
 
-    PARAMS --> AMERICAN
-    AMERICAN -->|"~21ms<br/>Option Value<br/>at All Spots"| SPLINE
+    AMERICAN --> PDE
+    PDE --> OPS
+    PDE --> BC
+    PDE --> NEWTON
+    PDE -->|"Solution"| SPLINE
     SPLINE --> VALUE
     VALUE --> OBJECTIVE
 
@@ -1394,17 +1031,20 @@ graph TD
     OBJECTIVE --> BRENT
 
     BRENT -->|"Each iteration<br/>calls FDM"| AMERICAN
-    BRENT -->|"~145ms total"| IV
+    BRENT --> IV
 
     style PARAMS fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style LBR fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style BOUNDS fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style AMERICAN fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style IVSOLVER fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
+    style AMERICAN fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
+    style PDE fill:#ffe1f5,stroke:#333,stroke-width:2px,color:#000
+    style OPS fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style BC fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
+    style NEWTON fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
     style SPLINE fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style VALUE fill:#fce4ec,stroke:#333,stroke-width:2px,color:#000
     style MARKET fill:#ffebee,stroke:#333,stroke-width:2px,color:#000
     style OBJECTIVE fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
-    style BRENT fill:#fff9c4,stroke:#333,stroke-width:2px,color:#000
+    style BRENT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style IV fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
 ```
 
@@ -1655,19 +1295,19 @@ bazel build //benchmarks:quantlib_benchmark
 
 ## Summary Table
 
-| Component | Purpose | Files | API |
-|-----------|---------|-------|-----|
-| **American IV** | American IV from market price | implied_volatility.{h,c} | `calculate_iv()`, `calculate_iv_simple()` |
-| **Let's Be Rational** | European IV estimation (bounds) | lets_be_rational.{h,c} | `lbr_implied_volatility()` |
-| **American Option** | American option pricing | american_option.{h,c} | `american_option_price()`, `american_option_price_batch()`, `american_option_free_result()` |
-| **PDE Solver** | FDM time-stepping engine | pde_solver.{h,c} | `pde_solver_create()`, `pde_solver_solve()`, `pde_solver_destroy()` |
-| **IV Surface** | Fast 2D IV interpolation (~100ns) | iv_surface.{h,c} | `iv_surface_create()`, `iv_surface_interpolate()` |
-| **Price Table** | Fast 4D/5D price lookup (~500ns) | price_table.{h,c} | `price_table_create()`, `price_table_interpolate_4d()`, `price_table_greeks_4d()` |
-| **Cubic Interpolation** | N-dimensional cubic spline interpolation | interp_cubic.{h,c}, interp_cubic_workspace.c, interp_strategy.h | `INTERP_CUBIC` strategy |
-| **Brent's Method** | Root finding for IV | brent.h | `brent_find_root()` |
-| **Cubic Spline** | Off-grid PDE interpolation | cubic_spline.{h,c} | `pde_spline_create()` (malloc), `pde_spline_init()` (workspace), `pde_spline_eval()` |
-| **Tridiagonal Solver** | O(n) matrix solve | tridiagonal.h | `solve_tridiagonal()` |
-| **USDT Tracing** | Diagnostic probes | ivcalc_trace.h | `MANGO_TRACE_*` macros |
+| Component | Purpose | Files | Key Classes/Functions |
+|-----------|---------|-------|----------------------|
+| **American IV** | American IV from market price | iv_solver.{hpp,cpp} | `mango::IVSolver`, `mango::IVParams`, `mango::IVResult` |
+| **American Option** | American option pricing | american_option.{hpp,cpp} | `mango::AmericanOption` |
+| **PDE Solver** | Template-based FDM engine | pde_solver.hpp | `mango::PDESolver<BoundaryL, BoundaryR, SpatialOp>` |
+| **Spatial Operators** | Operator implementations | operators/*.hpp | `LaplacianOperator`, `BlackScholesOperator`, concept-based |
+| **Boundary Conditions** | BC types | boundary_conditions.hpp | `DirichletBC`, `NeumannBC`, `RobinBC` |
+| **Root Finding** | Root finding methods | root_finding.hpp | `mango::RootFindingConfig`, Brent's method |
+| **Cubic Spline** | Off-grid interpolation | cubic_spline_solver.hpp | Template-based spline solver |
+| **Thomas Solver** | Tridiagonal solver | thomas_solver.hpp | O(n) matrix solve |
+| **Newton Workspace** | Implicit solver workspace | newton_workspace.hpp | `mango::NewtonWorkspace` |
+| **Grid Management** | Grid utilities | grid.hpp | Grid creation and management |
+| **Workspace** | Memory management | workspace.hpp | `mango::WorkspaceStorage` |
 
 ---
 
