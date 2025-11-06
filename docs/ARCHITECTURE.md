@@ -797,115 +797,87 @@ From `pde_solver_test.cc`:
 
 **Purpose**: Evaluate PDE solution at arbitrary off-grid points
 
-**Method**: Natural cubic splines with:
-- Quadratic system solve via shared tridiagonal solver
-- Two API variants: malloc-based and workspace-based
-- Function and derivative evaluation
+**Method**: Natural cubic splines implementing C² continuous piecewise polynomials
 
-**Malloc-Based API** (convenience):
-```c
-CubicSpline *spline = pde_spline_create(x_grid, solution, n_points);
-double value_at_x = pde_spline_eval(spline, x_eval);
-double derivative = pde_spline_eval_derivative(spline, x_eval);
-pde_spline_destroy(spline);
+**Modern C++20 API**:
+```cpp
+namespace mango {
+
+template<FloatingPoint T>
+class CubicSpline {
+public:
+    /// Construct spline from data points
+    /// @param x X-coordinates (must be strictly increasing)
+    /// @param y Y-coordinates
+    /// @param config Spline configuration (default: natural boundaries)
+    /// @return Optional error message (nullopt on success)
+    [[nodiscard]] std::optional<std::string_view> build(
+        std::span<const T> x,
+        std::span<const T> y,
+        const CubicSplineConfig<T>& config = {}
+    );
+
+    /// Evaluate spline at point x
+    [[nodiscard]] T eval(T x_eval) const noexcept;
+
+    /// Evaluate first derivative at point x
+    [[nodiscard]] T eval_derivative(T x_eval) const noexcept;
+
+    /// Evaluate second derivative at point x
+    [[nodiscard]] T eval_second_derivative(T x_eval) const noexcept;
+};
+
+} // namespace mango
 ```
-- Allocates workspace internally (4n doubles for coefficients, 6n for temporary)
-- Convenient for one-off interpolation queries
-- Simple ownership model
 
-**Workspace-Based API** (zero-malloc, performance-critical):
-```c
-CubicSpline spline;  // Stack-allocated
-double workspace[4 * n_points];
-double temp_workspace[6 * n_points];
+**Usage Example**:
+```cpp
+// Create and build spline
+mango::CubicSpline<double> spline;
+auto error = spline.build(x_grid, solution_values);
 
-pde_spline_init(&spline, x_grid, solution, n_points, workspace, temp_workspace);
-double value_at_x = pde_spline_eval(&spline, x_eval);
-double derivative = pde_spline_eval_derivative(&spline, x_eval);
-// No destroy needed - workspace managed by caller
-```
-- Zero heap allocation (workspace provided by caller)
-- Ideal for hot paths with repeated spline creation/destruction
-- Used by 4D/5D interpolation engine for **99.9% malloc reduction**
-- Workspace requirements: 10n doubles total (4n + 6n)
-- Can reuse temp_workspace across multiple `pde_spline_init()` calls
-
-**Performance Impact**:
-- 2D interpolation: 2 mallocs → 2 workspace-only allocations
-- 4D interpolation: ~15 mallocs → 2 workspace-only allocations (87% reduction)
-- 5D interpolation: ~1,873 mallocs → 2 workspace-only allocations (99.9% reduction)
-
-**Implementation Note**: Both APIs share the same evaluation functions (`pde_spline_eval`, `pde_spline_eval_derivative`). The workspace-based API was added in PR #36 to eliminate malloc overhead in multi-dimensional interpolation hot paths.
-
-### 4.3 Workspace-Based Interpolation API
-
-**Added in PR #37** - Extends workspace pattern to multi-dimensional interpolation queries.
-
-**Files**: `src/interp_cubic.h`, `src/interp_cubic_workspace.c`
-
-**Problem**: Even with precomputed spline coefficients, slow-path queries (off-precomputed-grid) performed excessive malloc/free:
-- 2D interpolation: 4 malloc/free per query
-- 4D interpolation: 8 malloc/free per query
-- 5D interpolation: 10 malloc/free per query
-- Dividend event handler: 1 malloc/free per event
-
-**Solution**: Workspace-based interpolation functions that accept caller-provided buffers, eliminating all hot path allocations.
-
-**API**:
-```c
-// Calculate workspace size (once per table dimensions)
-size_t ws_size = cubic_interp_workspace_size_4d(n_m, n_tau, n_sigma, n_r);
-
-// Allocate workspace (once, reuse across millions of queries)
-double *buffer = malloc(ws_size * sizeof(double));
-CubicInterpWorkspace workspace;
-cubic_interp_workspace_init(&workspace, buffer, n_m, n_tau, n_sigma, n_r, 0);
-
-// Query with zero malloc (can be called millions of times)
-for (int i = 0; i < 1000000; i++) {
-    double price = cubic_interpolate_4d_workspace(table, m[i], tau[i],
-                                                    sigma[i], r[i], workspace);
+if (error) {
+    std::cerr << "Spline construction failed: " << *error << "\n";
+    return;
 }
 
-// Cleanup
-free(buffer);
+// Evaluate at arbitrary points
+double value = spline.eval(0.5);
+double slope = spline.eval_derivative(0.5);
+double curvature = spline.eval_second_derivative(0.5);
 ```
 
-**Workspace Structure**:
-```c
-typedef struct {
-    double *spline_coeff_workspace;   // 4 * max_grid_size (reused across stages)
-    double *spline_temp_workspace;    // 6 * max_grid_size (reused across stages)
-    double *intermediate_arrays;      // Stage results (dimension-dependent)
-    double *slice_buffers;            // max_grid_size (slice extraction)
-    size_t max_grid_size;             // Largest dimension
-    size_t total_size;                // Total doubles allocated
-} CubicInterpWorkspace;
+**Key Features**:
+- **Type-safe**: Template-based with `FloatingPoint` concept
+- **Zero-copy input**: Uses `std::span` for data views
+- **RAII memory management**: No manual cleanup needed
+- **Cache-efficient**: Struct-of-arrays layout for coefficient storage
+- **Thomas solver**: Tridiagonal system solved via optimized Thomas algorithm
+- **Binary search**: O(log n) interval lookup for evaluation
+
+**Boundary Conditions**:
+```cpp
+enum class SplineBoundary {
+    NATURAL,      // f''(x₀) = f''(xₙ) = 0 (default)
+    CLAMPED,      // f'(x₀) and f'(xₙ) specified (future)
+    NOT_A_KNOT    // f'''(x₁⁻) = f'''(x₁⁺) (future)
+};
 ```
 
-**Workspace Sizing Functions**:
-- `cubic_interp_workspace_size_2d(n_m, n_tau)` - 2D IV surface queries
-- `cubic_interp_workspace_size_4d(n_m, n_tau, n_sigma, n_r)` - 4D price tables
-- `cubic_interp_workspace_size_5d(n_m, n_tau, n_sigma, n_r, n_q)` - 5D with dividends
+Currently only `NATURAL` boundary conditions are implemented (clamped and not-a-knot planned for future releases).
 
-**Zero-Malloc Query Functions**:
-- `cubic_interpolate_2d_workspace(surface, m, tau, workspace)` - 2D queries
-- `cubic_interpolate_4d_workspace(table, m, tau, sigma, r, workspace)` - 4D queries
-- `cubic_interpolate_5d_workspace(table, m, tau, sigma, r, q, workspace)` - 5D queries
+**Memory Layout**:
+- Grid points: `n` doubles for x, `n` doubles for y
+- Coefficients: `(n-1)` intervals × 4 coefficients = `4(n-1)` doubles
+- Second derivatives: `n` doubles (c coefficients)
+- Total: ~`6n` doubles
 
-**Performance**: 100% elimination of malloc in interpolation hot paths.
+**Performance**:
+- Construction: O(n) via Thomas algorithm
+- Evaluation: O(log n) via binary search + O(1) polynomial evaluation
+- Cache-friendly: Sequential memory access patterns
 
-**Integration with Temporal Events**: The PDE solver provides workspace to temporal event callbacks via the `workspace` parameter, enabling zero-malloc dividend handling during American option pricing.
-
-**Memory Requirements** (typical 4D table: 50×30×20×10):
-- Spline workspace: 10 × 50 = 500 doubles (reused across stages)
-- Intermediate arrays: (30×20×10) + (20×10) + 10 = 6,210 doubles
-- Slice buffer: 50 doubles
-- **Total**: 6,760 doubles (~54KB per workspace)
-
-**Usage Pattern**: Allocate workspace once per table configuration, reuse across all queries. For multi-threaded scenarios, each thread maintains its own workspace to avoid contention.
-
-### 4.4 Tridiagonal Solver
+### 4.3 Tridiagonal Solver
 
 **File**: `src/thomas_solver.hpp`
 
@@ -915,7 +887,7 @@ typedef struct {
   - TR-BDF2 implicit solver
   - Cubic spline coefficient calculation
 
-### 4.5 USDT Tracing System
+### 4.4 USDT Tracing System
 
 **Files**: Tracing infrastructure integrated throughout C++ codebase
 
@@ -933,378 +905,6 @@ typedef struct {
    - Cubic spline: Errors
 
 **Zero Overhead**: Compiles to NOP instructions when not traced; can be dynamically enabled at runtime via bpftrace
-
----
-
-## Component 5: Interpolation Engine (Fast Lookup)
-
-### Purpose
-
-Provides sub-microsecond option pricing and IV lookups via pre-computed interpolation tables, achieving **40,000x speedup** over FDM for real-time queries during trading sessions.
-
-### File Locations
-
-```
-src/
-├── interp_strategy.h      # Strategy pattern interface for interpolation algorithms
-├── interp_cubic.{h,c}     # Cubic spline interpolation strategy
-├── iv_surface.{h,c}       # 2D implied volatility surface (~100ns queries)
-└── price_table.{h,c}      # 4D/5D option price table (~500ns queries)
-
-examples/
-└── example_interpolation.c  # IV surface and price table usage
-
-tests/
-└── interpolation_test.cc    # Unit tests for all interpolation components
-```
-
-### Architecture Overview
-
-```mermaid
-graph TD
-    USER[User Query<br/>m, τ, σ, r]
-
-    TRANSFORM[Coordinate Transform<br/>Raw → Grid Space<br/>COORD_LOG_SQRT]
-
-    STRATEGY[Interpolation Strategy<br/>INTERP_CUBIC]
-
-    PRECOMP[Precomputed Spline<br/>Coefficients<br/>~10MB for 4D table]
-
-    STAGE1[Stage 1: Moneyness<br/>Evaluate splines along m<br/>for each τ,σ,r]
-
-    STAGE2[Stage 2: Maturity<br/>Build & evaluate splines along τ<br/>for each σ,r]
-
-    STAGE3[Stage 3: Volatility<br/>Build & evaluate splines along σ<br/>for each r]
-
-    STAGE4[Stage 4: Rate<br/>Build & evaluate spline along r<br/>→ final result]
-
-    RESULT[Interpolated Price<br/>~500ns total]
-
-    USER --> TRANSFORM
-    TRANSFORM --> STRATEGY
-    STRATEGY --> PRECOMP
-    PRECOMP --> STAGE1
-    STAGE1 --> STAGE2
-    STAGE2 --> STAGE3
-    STAGE3 --> STAGE4
-    STAGE4 --> RESULT
-
-    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style TRANSFORM fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style STRATEGY fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style PRECOMP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style STAGE1 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style STAGE2 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style STAGE3 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style STAGE4 fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-```
-
-**Key Features**:
-- **Strategy Pattern**: Runtime selection of interpolation algorithm (cubic splines)
-- **Coordinate Transforms**: Log-sqrt transforms for better interpolation accuracy
-- **Tensor-Product**: Separable stages reduce complexity from O(n^4) to O(n)
-- **Precomputation**: Spline coefficients computed once, reused for millions of queries
-
-### Core Data Structures
-
-#### IV Surface (2D Interpolation)
-
-```c
-typedef struct {
-    size_t n_moneyness;          // Grid dimension
-    size_t n_maturity;
-    double *moneyness_grid;       // Moneyness values (S/K)
-    double *maturity_grid;        // Time to maturity (years)
-    double *iv_values;            // Implied volatilities (flattened 2D array)
-
-    const InterpolationStrategy *strategy;  // Runtime algorithm selection
-    InterpContext interp_context;           // Strategy-specific context
-
-    char underlying[32];          // "SPX", "NDX", etc.
-    time_t last_update;
-} IVSurface;
-```
-
-**Memory footprint**: ~12KB per surface (50 × 30 grid)
-
-#### Option Price Table (4D/5D Interpolation)
-
-```c
-typedef struct {
-    // Grid dimensions
-    size_t n_moneyness, n_maturity, n_volatility, n_rate, n_dividend;
-    double *moneyness_grid, *maturity_grid, *volatility_grid;
-    double *rate_grid, *dividend_grid;
-
-    double *prices;              // Pre-computed option prices (flattened array)
-
-    // Fast indexing strides (pre-computed)
-    size_t stride_m, stride_tau, stride_sigma, stride_r, stride_q;
-
-    const InterpolationStrategy *strategy;  // Runtime algorithm selection
-    InterpContext interp_context;
-
-    OptionType type;             // CALL or PUT
-    ExerciseType exercise;       // EUROPEAN or AMERICAN
-    char underlying[32];
-    time_t generation_time;
-} OptionPriceTable;
-```
-
-**Memory footprint**: ~2.4MB per table (4D: 50×30×20×10 grid)
-
-### Memory Layout Options
-
-The price table supports different memory layouts for cache optimization:
-
-```mermaid
-graph TD
-    TABLE[OptionPriceTable<br/>4D Array: m×τ×σ×r]
-
-    OUTER[LAYOUT_M_OUTER<br/>m, τ, σ, r<br/>Default ordering]
-
-    INNER[LAYOUT_M_INNER<br/>r, σ, τ, m<br/>Recommended for cubic]
-
-    POINT_QUERY[Point Query<br/>table.m.tau.sigma.r<br/>~Equal performance]
-
-    SLICE_OUTER[Slice Extraction OUTER<br/>Extract all m for fixed τ,σ,r<br/>Scattered memory access<br/>~30x slower]
-
-    SLICE_INNER[Slice Extraction INNER<br/>Extract all m for fixed τ,σ,r<br/>Contiguous memory access<br/>~30x faster]
-
-    TABLE --> OUTER
-    TABLE --> INNER
-
-    OUTER --> POINT_QUERY
-    INNER --> POINT_QUERY
-
-    OUTER --> SLICE_OUTER
-    INNER --> SLICE_INNER
-
-    style TABLE fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style OUTER fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style INNER fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style POINT_QUERY fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-    style SLICE_OUTER fill:#ffcdd2,stroke:#333,stroke-width:2px,color:#000
-    style SLICE_INNER fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-```
-
-**Layout Comparison**:
-- **LAYOUT_M_OUTER** [m][τ][σ][r]: Good for point queries, compatible with older code
-- **LAYOUT_M_INNER** [r][σ][τ][m]: Optimized for cubic interpolation (slice-based)
-  - 64-byte cache lines hold 8 consecutive moneyness values
-  - ~30x faster moneyness slice extraction
-  - Same memory usage, same point query performance
-
-**Why it matters for cubic**: Precomputation creates splines along moneyness dimension for each (τ,σ,r) combination. LAYOUT_M_INNER makes these slices contiguous in memory, dramatically improving cache performance during precomputation.
-
-### Interpolation Strategy Pattern
-
-Uses **dependency injection** for runtime algorithm selection without recompilation:
-
-```c
-typedef struct {
-    const char *name;
-    const char *description;
-
-    // Callbacks for different dimensions
-    double (*interpolate_2d)(const IVSurface*, double m, double tau, InterpContext);
-    double (*interpolate_4d)(const OptionPriceTable*, double m, double tau,
-                             double sigma, double r, InterpContext);
-    double (*interpolate_5d)(const OptionPriceTable*, double m, double tau,
-                             double sigma, double r, double q, InterpContext);
-
-    // Context management
-    InterpContext (*create_context)(size_t dimensions, const size_t *grid_sizes);
-    void (*destroy_context)(InterpContext);
-
-    // Optional pre-computation
-    int (*precompute)(void *table, InterpContext);
-} InterpolationStrategy;
-```
-
-**Available strategies**:
-- `INTERP_CUBIC`: Tensor-product cubic splines (C² continuous, ~500ns for 4D)
-  - Provides accurate second derivatives (gamma, vega-convexity, etc.)
-  - Handles coordinate transformations (COORD_LOG_SQRT, COORD_LOG_VARIANCE)
-  - Requires precomputation of spline coefficients
-  - Minimum 2 points per dimension required
-
-### Key Functions
-
-#### IV Surface API
-
-```c
-// Create/destroy
-IVSurface* iv_surface_create(const double *moneyness, size_t n_m,
-                              const double *maturity, size_t n_tau);
-IVSurface* iv_surface_create_with_strategy(/* ... */, const InterpolationStrategy*);
-void iv_surface_destroy(IVSurface *surface);
-
-// Data manipulation
-int iv_surface_set(IVSurface *surface, size_t i_m, size_t i_tau, double iv);
-int iv_surface_set_all(IVSurface *surface, const double *iv_data);
-double iv_surface_get(const IVSurface *surface, size_t i_m, size_t i_tau);
-
-// Fast interpolation (main query interface)
-double iv_surface_interpolate(const IVSurface *surface, double moneyness, double maturity);
-
-// I/O
-int iv_surface_save(const IVSurface *surface, const char *filename);
-IVSurface* iv_surface_load(const char *filename);
-```
-
-#### Price Table API
-
-```c
-// Create/destroy
-OptionPriceTable* price_table_create(
-    const double *moneyness, size_t n_m,
-    const double *maturity, size_t n_tau,
-    const double *volatility, size_t n_sigma,
-    const double *rate, size_t n_r,
-    const double *dividend, size_t n_q,  // Pass NULL for 4D mode
-    OptionType type, ExerciseType exercise);
-
-void price_table_destroy(OptionPriceTable *table);
-
-// Data manipulation
-int price_table_set(OptionPriceTable *table, size_t i_m, size_t i_tau,
-                    size_t i_sigma, size_t i_r, size_t i_q, double price);
-double price_table_get(const OptionPriceTable *table, /* ... */);
-
-// Fast interpolation (main query interface)
-double price_table_interpolate_4d(const OptionPriceTable *table,
-                                   double moneyness, double maturity,
-                                   double volatility, double rate);
-double price_table_interpolate_5d(const OptionPriceTable *table,
-                                   double moneyness, double maturity,
-                                   double volatility, double rate, double dividend);
-
-// Greeks via finite differences on interpolated values
-OptionGreeks price_table_greeks_4d(const OptionPriceTable *table, /* ... */);
-OptionGreeks price_table_greeks_5d(const OptionPriceTable *table, /* ... */);
-
-// I/O
-int price_table_save(const OptionPriceTable *table, const char *filename);
-OptionPriceTable* price_table_load(const char *filename);
-```
-
-### Cubic Spline Interpolation Algorithm
-
-**Method**: Tensor-product cubic spline interpolation with separable stages
-
-**4D Algorithm** (for price tables):
-1. **Precomputation** (done once after filling table):
-   - For each combination of (τ, σ, r): create cubic spline in moneyness dimension
-   - Stores spline coefficients for all slices
-   - Enables O(1) evaluation along first dimension
-
-2. **Query** (per interpolation request):
-   - Stage 1: Evaluate moneyness splines for all (τ, σ, r) combinations → intermediate values
-   - Stage 2: Create and evaluate maturity splines for each (σ, r) → intermediate values
-   - Stage 3: Create and evaluate volatility splines for each r → intermediate values
-   - Stage 4: Create and evaluate rate spline → final result
-
-3. **Coordinate Transformation**:
-   - Query coordinates transformed from raw to grid space before interpolation
-   - Supports COORD_RAW, COORD_LOG_SQRT, COORD_LOG_VARIANCE
-
-```mermaid
-graph LR
-    RAW["User Query<br/>m=1.05, τ=0.25"]
-
-    COORD_RAW["COORD_RAW<br/>Identity<br/>m'=1.05, τ'=0.25"]
-
-    COORD_LOG_SQRT["COORD_LOG_SQRT<br/>m'=ln(m)<br/>τ'=√τ<br/>m'=0.049, τ'=0.5"]
-
-    COORD_LOG_VAR["COORD_LOG_VARIANCE<br/>m'=ln(m)<br/>σ'²=σ²·τ<br/>Better for vol surfaces"]
-
-    INTERP["Cubic Spline<br/>Interpolation<br/>in Grid Space"]
-
-    RESULT["Interpolated<br/>Price"]
-
-    RAW --> COORD_RAW
-    RAW --> COORD_LOG_SQRT
-    RAW --> COORD_LOG_VAR
-
-    COORD_RAW --> INTERP
-    COORD_LOG_SQRT --> INTERP
-    COORD_LOG_VAR --> INTERP
-
-    INTERP --> RESULT
-
-    style RAW fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
-    style COORD_RAW fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style COORD_LOG_SQRT fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style COORD_LOG_VAR fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
-    style INTERP fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style RESULT fill:#c8e6c9,stroke:#333,stroke-width:2px,color:#000
-```
-
-**Why coordinate transforms?**
-- **Log-moneyness**: ln(m) spreads out ATM region where most trading occurs
-- **Square-root time**: √τ linearizes time decay near expiry
-- **Better interpolation**: Transformed coordinates are more linear, reducing interpolation error
-
-**Complexity**:
-- Precomputation: O(n_τ × n_σ × n_r × n_m) cubic spline setups
-- Query time: O(n_τ × n_σ × n_r) spline evaluations per query
-- Space: O(n_τ × n_σ × n_r × n_m) for spline coefficients (4x price array size)
-
-**Key Features**:
-- C² continuous (smooth second derivatives)
-- Accurate Greeks (gamma, vega-convexity, etc.)
-- Requires ≥2 points in each dimension
-
-### Performance Characteristics
-
-**Query Performance**:
-- **IV Surface (2D)**: <100ns per query
-- **Price Table (4D)**: ~500ns per query
-- **FDM (American option)**: 21.7ms per query
-- **Speedup**: 40,000x faster than FDM
-
-**Throughput**:
-- Single-threaded: >2M prices/second (vs 46/sec for FDM)
-- Memory-bandwidth limited (not compute-bound)
-
-**Accuracy**:
-- On-grid points: Exact (machine precision)
-- Off-grid points: Typically <0.5% relative error for smooth functions
-- **Delta**: Accurate (first derivatives from cubic splines)
-- **Gamma**: Accurate (second derivatives continuous, C² property)
-- **Vega/Theta/Rho**: Accurate via finite differences on interpolated values
-
-**Advantages of Cubic**:
-- C² continuous interpolation (smooth second derivatives)
-- Accurate Greeks without storing separate tables
-- Better approximation of smooth functions between grid points
-
-### Integration with Existing Components
-
-The interpolation engine **complements** rather than replaces the FDM solver:
-
-1. **Pre-computation**: Uses `american_option_price_batch()` with OpenMP to populate price tables
-2. **Runtime**: Queries use fast interpolation; falls back to FDM for out-of-range parameters
-3. **Workflow**:
-   - **Offline**: Pre-compute tables during downtime (minutes to hours)
-   - **Online**: Fast lookups during trading (sub-microsecond)
-
-### Design Rationale
-
-**Strategy Pattern Benefits**:
-- Runtime algorithm selection (no recompilation)
-- Easy to benchmark different strategies
-- Users can implement custom interpolation algorithms
-- Extensible for future enhancements (cubic splines, RBF, etc.)
-
-**Hybrid Approach** (IV Surface + Price Table):
-- IV surfaces (2D): Extremely fast, tiny memory, good for market data fitting
-- Price tables (4D/5D): Direct pricing given IV, includes American options
-- Both: Maximum flexibility for different use cases
-
-For complete design rationale and implementation roadmap, see `docs/notes/INTERPOLATION_ENGINE_DESIGN.md`.
 
 ---
 
