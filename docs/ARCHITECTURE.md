@@ -46,6 +46,7 @@ graph TD
     PDE --> NEWTON
     PDE --> SPLINE
     NEWTON --> THOMAS
+    SPLINE --> THOMAS
 
     style IV fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
     style AO fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
