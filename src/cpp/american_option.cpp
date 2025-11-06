@@ -8,6 +8,7 @@
 #include "src/cpp/grid.hpp"
 #include "src/cpp/time_domain.hpp"
 #include "src/cpp/pde_solver.hpp"
+#include "src/cpp/cubic_interp_util.hpp"
 #include "src/cpp/operators/operator_factory.hpp"
 #include "src/cpp/operators/black_scholes_pde.hpp"
 #include <algorithm>
@@ -81,33 +82,18 @@ public:
             x_new[i] = (S_new <= 0.0) ? -10.0 : std::log(S_new / strike_);
         }
 
-        // Interpolate u values to new positions
+        // Build cubic spline once for all interpolations
+        CubicInterpolator spline(x, u_old);
+
+        // Interpolate u values to new positions using cubic spline
         for (size_t i = 0; i < n; ++i) {
-            u[i] = interpolate(x, u_old, x_new[i]);
+            u[i] = spline.eval(x_new[i]);
         }
     }
 
 private:
     double dividend_;
     double strike_;
-
-    /// Linear interpolation
-    static double interpolate(std::span<const double> x,
-                              std::span<const double> u,
-                              double x_target) {
-        const size_t n = x.size();
-        if (x_target <= x[0]) return u[0];
-        if (x_target >= x[n-1]) return u[n-1];
-
-        auto it = std::lower_bound(x.begin(), x.end(), x_target);
-        size_t j = std::distance(x.begin(), it);
-        if (j == 0) j = 1;
-        size_t i = j - 1;
-
-        double dx = x[j] - x[i];
-        double weight = (x_target - x[i]) / dx;
-        return (1.0 - weight) * u[i] + weight * u[j];
-    }
 };
 
 }  // anonymous namespace
@@ -297,21 +283,9 @@ AmericanOptionResult AmericanOptionSolver::solve() {
 
 double AmericanOptionSolver::interpolate_solution(double x_target,
                                                    std::span<const double> x_grid) const {
-    const size_t n = solution_.size();
-
-    // Boundary cases
-    if (x_target <= x_grid[0]) return solution_[0];
-    if (x_target >= x_grid[n-1]) return solution_[n-1];
-
-    // Find bracketing indices
-    size_t i = 0;
-    while (i < n-1 && x_grid[i+1] < x_target) {
-        i++;
-    }
-
-    // Linear interpolation
-    double t = (x_target - x_grid[i]) / (x_grid[i+1] - x_grid[i]);
-    return (1.0 - t) * solution_[i] + t * solution_[i+1];
+    // Use cubic spline interpolation for C2 continuity (smooth derivatives)
+    // This improves Newton convergence in IV solvers
+    return cubic_interpolate(x_grid, solution_, x_target);
 }
 
 std::vector<double> AmericanOptionSolver::get_solution() const {

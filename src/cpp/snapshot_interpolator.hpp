@@ -46,27 +46,24 @@ public:
 
     /// Interpolate from pre-computed data array
     ///
-    /// Uses spline basis functions but evaluates with external data.
-    /// Avoids re-differentiating the spline.
+    /// Uses cubic spline for C2-continuous interpolation.
+    /// Builds a temporary spline from the external data.
     ///
     /// @param x_eval Evaluation point
     /// @param data Pre-computed values at grid points (same grid as build())
     /// @return Interpolated value
     double eval_from_data(double x_eval, std::span<const double> data) const {
-        // Simple linear interpolation for now (TODO: use spline basis)
-        // Find bracketing interval
-        size_t i = 0;
-        while (i < x_.size() - 1 && x_[i+1] < x_eval) {
-            ++i;
+        // Build cubic spline from external data
+        // Note: This requires one spline construction per call, but provides
+        // C2 continuity essential for Newton convergence
+        CubicSpline* temp_spline = pde_spline_create(x_.data(), data.data(), x_.size());
+        if (!temp_spline) {
+            throw std::runtime_error("Failed to create temporary spline");
         }
 
-        if (i >= x_.size() - 1) {
-            return data.back();
-        }
-
-        // Linear interpolation
-        double t = (x_eval - x_[i]) / (x_[i+1] - x_[i]);
-        return (1.0 - t) * data[i] + t * data[i+1];
+        double result = pde_spline_eval(temp_spline, x_eval);
+        pde_spline_destroy(temp_spline);
+        return result;
     }
 
 private:
