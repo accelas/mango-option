@@ -512,44 +512,45 @@ A two-stage implicit scheme combining:
 
 ### Memory Management (Single Buffer Architecture)
 
-**Workspace (12n doubles, contiguous allocation):**
+**Workspace (6n doubles + dx array, contiguous allocation):**
 
-All arrays allocated from single 64-byte aligned buffer:
+All arrays allocated from single contiguous buffer with std::span views:
 
 ```mermaid
 graph LR
-    A["u_current<br/>n doubles"]
-    B["u_next<br/>n doubles"]
-    C["u_stage<br/>n doubles"]
-    D["rhs<br/>n doubles"]
-    E["matrix_diag<br/>n doubles"]
-    F["matrix_upper<br/>n doubles"]
-    G["matrix_lower<br/>n doubles"]
-    H["u_old<br/>n doubles"]
-    I["Lu<br/>n doubles"]
-    J["u_temp<br/>n doubles"]
-    K["tridiag_workspace<br/>2n doubles"]
+    A["u_current<br/>n doubles<br/>(current time)"]
+    B["u_next<br/>n doubles<br/>(next time)"]
+    C["u_stage<br/>n doubles<br/>(TR-BDF2 stage)"]
+    D["rhs<br/>n doubles<br/>(right-hand side)"]
+    E["Lu<br/>n doubles<br/>(spatial operator)"]
+    F["psi<br/>n doubles<br/>(obstacle buffer)"]
+    G["dx<br/>(n-1) doubles<br/>(pre-computed spacing)"]
 
-    A --> B --> C --> D --> E --> F --> G --> H --> I --> J --> K
+    A --> B --> C --> D --> E --> F
+    G -.separate allocation.- G
 
     style A fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
     style B fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
     style C fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
     style D fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
-    style E fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style F fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style G fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
-    style H fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style I fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style J fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
-    style K fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#ffe0b2,stroke:#333,stroke-width:2px,color:#000
 ```
 
 **Advantages**:
-- Single malloc operation
-- Better cache locality
-- 64-byte alignment for SIMD
-- Zero overhead during time-stepping
+- Single malloc: 6n doubles vs old 12n (50% memory reduction)
+- Better cache locality with smaller working set
+- Pre-computed dx eliminates redundant spacing calculations
+- std::span provides bounds-checked views (debug mode)
+- Zero overhead during time-stepping (no allocations)
+
+**Key Improvements from C version**:
+- **Removed arrays**: matrix_diag, matrix_upper, matrix_lower (3n) - Newton workspace now separate
+- **Removed arrays**: u_old, u_temp (2n) - no longer needed with refactored algorithm
+- **Removed arrays**: tridiag_workspace (2n) - Newton workspace manages this
+- **Added**: Pre-computed dx array for faster stencil operations
+- **Added**: Dedicated psi buffer for obstacle conditions
 
 ### Template-Based Architecture
 
