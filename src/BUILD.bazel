@@ -171,10 +171,13 @@ cc_library(
         "-O3",
         "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
         "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-fopenmp",           # Enable OpenMP for batch API parallelization
         "-ftree-vectorize",   # Enable auto-vectorization
     ],
+    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
+
 
 cc_library(
     name = "time_domain",
@@ -239,7 +242,9 @@ cc_library(
         "-Wall",
         "-Wextra",
         "-O3",
+        "-fopenmp",  # Enable OpenMP for batch API parallelization
         "-DHAVE_SYSTEMTAP_SDT",
     ],
+    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
