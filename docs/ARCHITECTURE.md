@@ -67,14 +67,13 @@ graph TD
 - **Header**: `src/iv_solver.hpp`
 - **Implementation**: `src/iv_solver.cpp`
 - **Tests**: `tests/iv_solver_test.cc`
-- **Example**: See integration tests
 
 ### Core Data Structures
 
 ```cpp
 namespace mango {
 
-// Input parameters
+/// Input parameters for IV calculation
 struct IVParams {
     double spot_price;              // S: Current stock price
     double strike;                  // K: Strike price
@@ -84,13 +83,22 @@ struct IVParams {
     bool is_call;                   // true for call, false for put
 };
 
-// Result
+/// Configuration for IV solver
+struct IVConfig {
+    RootFindingConfig root_config;  // Brent's method parameters
+    size_t grid_n_space = 101;      // Spatial grid points for PDE
+    size_t grid_n_time = 1000;      // Time steps for PDE
+    double grid_s_max = 200.0;      // Maximum spot price for grid
+};
+
+/// Result from IV calculation
 struct IVResult {
-    double implied_vol;             // Calculated implied volatility
-    int iterations;                 // Number of iterations
-    double final_error;             // Final error value
     bool converged;                 // True if converged
+    size_t iterations;              // Number of iterations
+    double implied_vol;             // Calculated implied volatility
+    double final_error;             // Final pricing error
     std::optional<std::string> failure_reason;  // Error message if failed
+    std::optional<double> vega;     // Optional vega at solution
 };
 
 } // namespace mango
@@ -98,142 +106,100 @@ struct IVResult {
 
 ### Dependencies
 
-The American IV calculator depends on:
-- **Let's Be Rational** module (`lets_be_rational.{h,c}`) for European IV estimation (used to calculate upper bounds)
-- **American Option** module (`american_option.{h,c}`) for FDM-based pricing
-- **Brent's method** (`brent.h`) for root-finding
+- **American Option** module (`american_option.hpp`) for FDM-based pricing
+- **Brent's method** (`root_finding.hpp`) for root-finding
 
-### Key Functions
+### IVSolver Class
 
-#### 1. **Let's Be Rational - European IV Estimation** (from `lets_be_rational.h`)
-```c
-LBRResult lbr_implied_volatility(double spot, double strike,
-                                  double time_to_maturity,
-                                  double risk_free_rate,
-                                  double market_price,
-                                  bool is_call)
+```cpp
+namespace mango {
+
+class IVSolver {
+public:
+    /// Construct IV solver with parameters and optional config
+    explicit IVSolver(const IVParams& params, const IVConfig& config = {});
+
+    /// Solve for implied volatility
+    /// Uses Brent's method with nested American option pricing
+    IVResult solve();
+
+private:
+    IVParams params_;
+    IVConfig config_;
+};
+
+} // namespace mango
 ```
 
-**Purpose**: Fast European IV estimation for calculating American IV upper bounds
+**Usage Example:**
+```cpp
+mango::IVParams params{
+    .spot_price = 100.0,
+    .strike = 100.0,
+    .time_to_maturity = 1.0,
+    .risk_free_rate = 0.05,
+    .market_price = 6.08,  // American put market price
+    .is_call = false
+};
 
-**How it works:**
-- Uses Black-Scholes formula with Abramowitz & Stegun normal CDF approximation
-- Bisection-based root finding (simpler than Brent's method)
-- Typically converges in 20-30 iterations
-- **Performance**: ~781ns per calculation
+mango::IVSolver solver(params);
+mango::IVResult result = solver.solve();
 
-**Why needed for American IV:**
-- American option value ≥ European option value (early exercise premium)
-- If European IV = σ_euro, then American IV ≤ σ_euro × 1.5 (heuristic upper bound)
-- Provides tight bracketing interval for Brent's method
-- Avoids expensive FDM calls during bound calculation
-
-**Implementation note**: Uses simple bisection instead of Brent's method for simplicity and predictable performance
-
-#### 2. **American Option Pricing Objective** (internal)
-```c
-static double american_objective(double volatility, void *user_data)
+if (result.converged) {
+    std::cout << "Implied volatility: " << result.implied_vol << "\n";
+    std::cout << "Iterations: " << result.iterations << "\n";
+}
 ```
 
-**Purpose**: Objective function for Brent's method root-finding
+### Algorithm Overview
 
-**How it works:**
-1. Receives guessed volatility σ from Brent's method
-2. Constructs American option with that volatility
-3. Solves Black-Scholes PDE using FDM (~21ms per call)
-4. Interpolates option value at spot price
-5. Returns: theoretical_price(σ) - market_price
-
-**Nested iteration structure:**
-- Outer loop: Brent's method searching for σ
-- Inner loop: Each Brent iteration calls FDM solver
-- Convergence: When |theoretical_price - market_price| < tolerance
-
-#### 3. **Main American IV Calculation Function**
-```c
-IVResult calculate_iv(const IVParams *params,
-                      const AmericanOptionGrid *grid,
-                      double vol_lower,
-                      double vol_upper,
-                      double tolerance,
-                      int max_iter)
-```
-
-**Algorithm Overview:**
 1. **Input Validation** (detects arbitrage violations):
    - Spot, strike, time, market price must be positive
    - Call price must not exceed spot price
-   - Put price must not exceed discounted strike K·e^(-rT)
+   - Put price must not exceed strike price (present value)
    - Market price must be above intrinsic value
 
-2. **Objective Function Setup**:
+2. **Objective Function**:
    ```
    f(σ) = American_price_FDM(σ) - market_price
    ```
-   Objective is to find σ where f(σ) = 0
+   Goal: Find σ where f(σ) = 0
 
 3. **Brent's Method Root Finding**:
-   - Searches in interval [vol_lower, vol_upper]
-   - Each iteration calls `american_option_price()` with guessed σ (~21ms per call)
-   - Combines bisection, secant method, and inverse quadratic interpolation
-   - Guaranteed convergence if root is bracketed
+   - Searches in interval [0.01, upper_bound]
+   - Each iteration solves full American option PDE (~21ms per call)
+   - Combines bisection, secant, and inverse quadratic interpolation
    - Typical: 5-8 iterations → ~145ms total time
 
-4. **Post-Processing**:
-   - Returns convergence status and iteration count
-   - No vega calculation (would require numerical differentiation)
-
-#### 4. **Convenience Function**
-```c
-IVResult calculate_iv_simple(const IVParams *params)
-```
-
-**Automatic Configuration**:
-- **Grid**: Default American option grid (141 points, 1000 steps)
-- **Lower bound**: 0.01 (1% volatility)
-- **Upper bound**: Uses Let's Be Rational to estimate European IV, then multiplies by 1.5
-  - Rationale: American IV ≤ 1.5 × European IV (heuristic)
-  - Fast calculation (~781ns) avoids expensive FDM calls for bounds
-- **Tolerance**: 1e-6
-- **Max iterations**: 100
+4. **Nested Iteration Structure:**
+   - **Outer loop**: Brent's method searching for σ
+   - **Inner loop**: Each iteration calls FDM solver for pricing
+   - **Convergence**: When |theoretical_price - market_price| < tolerance
 
 ### Validation & Error Handling
 
 The implementation validates:
 - ✅ All inputs are positive
-- ✅ No arbitrage violations (call upper bound, put upper bound, intrinsic floor)
+- ✅ No arbitrage violations (price bounds, intrinsic floor)
 - ✅ Convergence within max iterations
-- ✅ Returns descriptive error messages
+- ✅ Returns `std::optional<std::string>` for error messages
 
 ### Test Coverage
 
-From `implied_volatility_test.cc`:
+From `iv_solver_test.cc`:
 - ✅ American put IV recovery (ATM, OTM, ITM)
 - ✅ American call IV recovery
-- ✅ Let's Be Rational bound estimation
-- ✅ Input validation (invalid spot, strike, time, price)
-- ✅ Arbitrage detection (price > intrinsic bounds)
-- ✅ Grid configuration validation
+- ✅ Input validation (invalid parameters)
+- ✅ Arbitrage detection
 - ✅ Convergence with default settings
 - ✅ Edge cases (near expiry, extreme volatility)
-- ✅ Deterministic convergence (same inputs → same outputs)
-
-From `lets_be_rational_test.cc`:
-- ✅ ATM European option IV estimation
-- ✅ OTM European option IV estimation
-- ✅ Invalid input handling
-- ✅ Near-expiry edge cases
-
-**Test Result**: 9 American IV test cases + 4 Let's Be Rational test cases, all passing
 
 ### Performance Characteristics
 
 | Operation | Time | Details |
 |----------|------|---------|
-| Let's Be Rational (European IV) | ~781ns | Fast bound calculation, 20-30 bisection iterations |
-| American option pricing (single) | ~21.7ms | FDM solve with 141 points × 1000 steps |
+| American option pricing (single) | ~21.7ms | FDM solve with 101 points × 1000 steps |
 | American IV calculation (single) | ~145ms | 5-8 Brent iterations × 21.7ms per FDM call |
-| Bound calculation overhead | <1µs | Let's Be Rational + 1.5x scaling |
 
 **Bottleneck**: FDM solver calls within Brent's method (each iteration = full PDE solve)
 
