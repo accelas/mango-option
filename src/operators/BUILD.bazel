@@ -36,6 +36,7 @@ cc_library(
         ":grid_spacing",
         ":centered_difference",
         "//src:grid",
+        "//src:jacobian_view",
     ],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
