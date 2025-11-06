@@ -4,7 +4,7 @@
 #include "centered_difference.hpp"
 #include <span>
 #include <memory>
-#include <type_traits>
+#include <concepts>
 #include <cassert>
 
 namespace mango::operators {
@@ -15,22 +15,15 @@ struct StencilInterior {
     size_t end;    // One past last interior point
 };
 
-/// Type trait to detect time-dependent PDEs
-template<typename PDE, typename = void>
-struct has_time_param : std::false_type {};
-
+/// Concept to detect time-dependent PDEs
+///
+/// A PDE is time-dependent if it accepts a time parameter in its operator().
+/// Time-dependent: operator()(double t, double d2u, double du, double u)
+/// Time-independent: operator()(double d2u, double du, double u)
 template<typename PDE>
-struct has_time_param<PDE, std::void_t<
-    decltype(std::declval<PDE>()(
-        std::declval<double>(),  // t
-        std::declval<double>(),  // d2u
-        std::declval<double>(),  // du
-        std::declval<double>()   // u
-    ))
->> : std::true_type {};
-
-template<typename PDE>
-inline constexpr bool has_time_param_v = has_time_param<PDE>::value;
+concept TimeDependentPDE = requires(PDE pde, double t, double d2u, double du, double u) {
+    { pde(t, d2u, du, u) } -> std::convertible_to<double>;
+};
 
 /// SpatialOperator: Composes PDE, GridSpacing, and CenteredDifference
 template<typename PDE, typename T = double>
@@ -64,7 +57,7 @@ public:
                        size_t end) const {
         // Create evaluator lambda that handles time parameter
         auto eval = [&](T d2u, T du, T val) -> T {
-            if constexpr (has_time_param_v<PDE>) {
+            if constexpr (TimeDependentPDE<PDE>) {
                 return pde_(t, d2u, du, val);  // Time-dependent PDE
             } else {
                 return pde_(d2u, du, val);     // Time-independent PDE
