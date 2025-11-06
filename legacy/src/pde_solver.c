@@ -1,6 +1,6 @@
 #include "pde_solver.h"
 #include "common/ivcalc_trace.h"
-#include "common/tridiagonal.h"
+#include "legacy/common/tridiagonal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>

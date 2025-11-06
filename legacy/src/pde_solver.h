@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
-#include "common/cubic_spline.h"
+#include "legacy/common/cubic_spline.h"
 
 // Boundary condition types
 typedef enum {

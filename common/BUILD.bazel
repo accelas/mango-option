@@ -8,24 +8,3 @@ cc_library(
     copts = ["-DHAVE_SYSTEMTAP_SDT"],
     visibility = ["//visibility:public"],
 )
-
-# C cubic spline library (used by both C++ SnapshotInterpolator and legacy C code)
-cc_library(
-    name = "cubic_spline",
-    srcs = ["cubic_spline.c"],
-    hdrs = [
-        "cubic_spline.h",
-        "tridiagonal.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-        "-DHAVE_SYSTEMTAP_SDT",
-    ],
-    deps = [":ivcalc_trace_hdr"],
-    visibility = ["//visibility:public"],
-)

@@ -163,7 +163,7 @@ cc_test(
     name = "tridiagonal_solver_test",
     srcs = ["tridiagonal_solver_test.cc"],
     deps = [
-        "//src:tridiagonal_solver",
+        "//src:thomas_solver",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -313,6 +313,17 @@ cc_test(
         "//src/operators:black_scholes_pde",
         "//src:spatial_operators",  # Old operators for comparison
         "//src:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "thomas_cubic_spline_test",
+    srcs = ["thomas_cubic_spline_test.cc"],
+    deps = [
+        "//src:thomas_solver",
+        "//src:cubic_spline_solver",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20"],
