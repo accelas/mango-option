@@ -9,6 +9,7 @@
 #include "newton_workspace.hpp"
 #include "root_finding.hpp"
 #include "snapshot.hpp"
+#include "jacobian_view.hpp"
 #include <span>
 #include <vector>
 #include <functional>
@@ -18,6 +19,12 @@
 #include <limits>
 
 namespace mango {
+
+/// Concept to detect spatial operators with analytical Jacobian capability
+template<typename SpatialOp>
+concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, JacobianView jac) {
+    { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
+};
 
 // Temporal event callback signature
 using TemporalEventCallback = std::function<void(double t,
@@ -590,6 +597,28 @@ private:
 
     void build_jacobian(double t, double coeff_dt,
                        std::span<const double> u, double eps) {
+        // Dispatch to analytical or finite-difference Jacobian
+        if constexpr (HasAnalyticalJacobian<SpatialOp>) {
+            // Analytical Jacobian (O(n) - fast path)
+            JacobianView jac(newton_ws_.jacobian_lower(),
+                           newton_ws_.jacobian_diag(),
+                           newton_ws_.jacobian_upper());
+            spatial_op_.assemble_jacobian(coeff_dt, jac);
+        } else {
+            // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
+            build_jacobian_finite_difference(t, coeff_dt, u, eps);
+        }
+
+        // Boundary rows (same for both methods)
+        build_jacobian_boundaries(t, coeff_dt, u, eps);
+    }
+
+    /// Finite-difference Jacobian (fallback for unsupported operators)
+    ///
+    /// This is the original O(n²) implementation using finite differences.
+    /// Used when spatial operator doesn't provide analytical Jacobian.
+    void build_jacobian_finite_difference(double t, double coeff_dt,
+                                          std::span<const double> u, double eps) {
         // Initialize u_perturb and compute baseline L(u)
         std::copy(u.begin(), u.end(), newton_ws_.u_perturb().begin());
         apply_operator_with_blocking(t, u, workspace_.lu());
@@ -619,9 +648,6 @@ private:
             newton_ws_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
             newton_ws_.u_perturb()[i + 1] = u[i + 1];
         }
-
-        // Boundary rows
-        build_jacobian_boundaries(t, coeff_dt, u, eps);
     }
 
     void build_jacobian_boundaries(double t, double coeff_dt,
