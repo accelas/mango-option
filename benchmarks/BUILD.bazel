@@ -1,0 +1,91 @@
+# C++20 Benchmarks
+#
+# Modern C++ benchmarks for performance testing and comparison.
+# All targets are marked as "manual" - they won't build in `bazel test //...`
+#
+# To run benchmarks:
+#   bazel run //benchmarks:component_performance
+#   bazel run //benchmarks:quantlib_performance
+#   bazel run //benchmarks:quantlib_accuracy
+#
+# Component performance: Individual component timings (IV, American option)
+# QuantLib performance: Head-to-head speed comparison
+# QuantLib accuracy: Numerical accuracy validation
+
+cc_binary(
+    name = "component_performance",
+    srcs = ["component_performance.cc"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,  # Static link our library code
+    deps = [
+        "//src:american_option",
+        "//src:iv_solver",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "quantlib_performance",
+    srcs = ["quantlib_performance.cc"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-lQuantLib",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,  # Static link our library code
+    deps = [
+        "//src:american_option",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "quantlib_accuracy",
+    srcs = ["quantlib_accuracy.cc"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-lQuantLib",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,  # Static link our library code
+    deps = [
+        "//src:american_option",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
