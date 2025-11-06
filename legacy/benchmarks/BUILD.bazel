@@ -1,12 +1,17 @@
-# Benchmarks - NOT run in CI
+# Legacy C Benchmarks - NOT run in CI
 #
-# These are performance benchmarks that should be run manually.
-# They are cc_binary (not cc_test) so they won't be included in `bazel test //...`
+# ⚠️  WARNING: These benchmarks are currently BROKEN ⚠️
 #
-# To run benchmarks:
-#   bazel build //benchmarks:all
-#   ./bazel-bin/benchmarks/batch_benchmark
-#   ./bazel-bin/benchmarks/quantlib_benchmark
+# These benchmarks depend on legacy C code that is incomplete after PR #109
+# migrated cubic_spline and tridiagonal solvers to modern C++. The following
+# headers are missing from //legacy/src:
+#   - cubic_spline.h
+#   - tridiagonal.h
+#
+# These benchmarks are preserved for historical reference but cannot be built.
+# All targets are marked as "manual" - they won't build unless explicitly requested.
+#
+# For working benchmarks, see //benchmarks:... (C++20 implementations)
 
 cc_binary(
     name = "american_iv_benchmark",
@@ -19,9 +24,9 @@ cc_binary(
         "-march=native",
     ],
     deps = [
-        "//src:implied_volatility",
-        "//src:american_option",
-        "//src:lets_be_rational",
+        "//legacy/src:implied_volatility",
+        "//legacy/src:american_option",
+        "//legacy/src:lets_be_rational",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -40,9 +45,9 @@ cc_binary(
     ],
     linkopts = ["-lgomp"],
     deps = [
-        "//src:american_option",
-        "//src:implied_volatility",
-        "//src:lets_be_rational",
+        "//legacy/src:american_option",
+        "//legacy/src:implied_volatility",
+        "//legacy/src:lets_be_rational",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -60,8 +65,8 @@ cc_binary(
     ],
     linkopts = ["-lQuantLib"],
     deps = [
-        "//src:american_option",
-        "//src:implied_volatility",
+        "//legacy/src:american_option",
+        "//legacy/src:implied_volatility",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -79,9 +84,9 @@ cc_binary(
         "-ftree-vectorize",
     ],
     deps = [
-        "//src:iv_surface",
-        "//src:interp_multilinear",
-        "//src:interp_cubic",
+        "//legacy/src:iv_surface",
+        "//legacy/src:interp_multilinear",
+        "//legacy/src:interp_cubic",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -101,8 +106,8 @@ cc_binary(
     ],
     linkopts = ["-lgomp"],
     deps = [
-        "//src:price_table",
-        "//src:american_option",
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -122,9 +127,9 @@ cc_binary(
     ],
     linkopts = ["-lgomp", "-lQuantLib"],
     deps = [
-        "//src:price_table",
-        "//src:american_option",
-        "//src:interp_cubic",
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+        "//legacy/src:interp_cubic",
     ],
     tags = ["benchmark", "manual"],
 )
@@ -141,7 +146,7 @@ cc_binary(
         "-ftree-vectorize",
     ],
     deps = [
-        "//src:price_table",
+        "//legacy/src:price_table",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -159,7 +164,7 @@ cc_binary(
         "-ftree-vectorize",
     ],
     deps = [
-        "//src:price_table",
+        "//legacy/src:price_table",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -177,8 +182,8 @@ cc_binary(
         "-ftree-vectorize",
     ],
     deps = [
-        "//src:price_table",
-        "//src:american_option",
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
     ],
     tags = ["benchmark", "manual"],
 )
@@ -195,8 +200,8 @@ cc_binary(
         "-ftree-vectorize",
     ],
     deps = [
-        "//src:price_table",
-        "//src:american_option",
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
     ],
     tags = ["benchmark", "manual"],
 )
@@ -213,9 +218,9 @@ cc_binary(
         "-ftree-vectorize",
     ],
     deps = [
-        "//src:price_table",
-        "//src:american_option",
-        "//src:grid_presets",
+        "//legacy/src:price_table",
+        "//legacy/src:american_option",
+        "//legacy/src:grid_presets",
     ],
     tags = ["benchmark", "manual"],
 )
