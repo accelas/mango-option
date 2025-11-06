@@ -152,12 +152,34 @@ config.cache_blocking_threshold = CacheBlockConfig::default_threshold();
   - Hardware has large L1/L2 caches (>128 KB)
   - Problem fits entirely in cache
   - Convergence iterations dominate runtime
-- Benchmark available: `bazel test //tests:cache_blocking_benchmark`
+- Benchmarks available:
+  - Wall-clock time: `bazel test //tests:cache_blocking_benchmark`
+  - L1 cache verification: `./scripts/run_cachegrind_test.sh` (requires valgrind)
 
 **Opt-out:**
 ```cpp
 config.cache_blocking_threshold = 1000000;  // Effectively disable
 ```
+
+**Cache verification with Cachegrind:**
+
+Verify L1 cache performance improvement using Valgrind's Cachegrind tool:
+```bash
+./scripts/run_cachegrind_test.sh
+```
+
+This script:
+1. Runs the solver with and without cache blocking
+2. Measures L1 data cache miss rates using Cachegrind
+3. Reports improvement (typically 10-30% L1 miss reduction)
+
+Expected output:
+```
+L1 miss reduction: 18.00%
+✓ SUCCESS: Cache blocking reduces L1 misses by 18.00%
+```
+
+See `tests/CACHEGRIND.md` for detailed documentation.
 
 ### Implicit Solver
 

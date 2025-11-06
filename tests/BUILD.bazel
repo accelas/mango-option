@@ -553,6 +553,21 @@ cc_test(
     copts = ["-std=c++20"],
 )
 
+# Cachegrind test harness for cache-blocking verification
+# Run with: scripts/run_cachegrind_test.sh
+cc_binary(
+    name = "cachegrind_harness",
+    srcs = ["cachegrind_harness.cc"],
+    deps = [
+        "//src/cpp:pde_solver",
+        "//src/cpp:spatial_operators",
+        "//src/cpp:boundary_conditions",
+        "//src/cpp:root_finding",
+    ],
+    copts = ["-std=c++20", "-O2", "-g"],  # O2 for realistic perf, -g for cachegrind annotations
+    tags = ["manual"],  # Not built in CI - requires valgrind and is slow
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
