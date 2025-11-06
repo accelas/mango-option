@@ -35,7 +35,7 @@ if (result.converged) {
 **Key Points**:
 - **FDM-based**: Each Brent iteration solves full American option PDE (~21ms)
 - **Performance**: ~145ms per calculation (5-8 Brent iterations)
-- **Auto-bounds**: Uses Let's Be Rational to estimate European IV, then 1.5× for upper bound
+- **Auto-bounds**: Automatic bound estimation based on intrinsic value analysis
 - **Validates input** for arbitrage
 - Works for calls and puts
 
@@ -218,7 +218,6 @@ mango::PDESolver solver(grid, time, config, root_config,
 - **Table-based**: ~11.8ms per call (Newton's method with interpolation, 22.5× faster)
 - **Bottleneck (FDM)**: American option pricing in each Brent iteration (~21ms × 5-8 iterations)
 - **Brent iterations**: 5-8 typically
-- **Let's Be Rational** (bounds): ~781ns
 
 ### American Option (Single)
 - **Time**: 21.7 ms (default grid)
@@ -265,14 +264,6 @@ bazel test //tests:implied_volatility_test
 - Input validation and arbitrage detection
 - Grid configuration validation
 - Convergence with default settings
-
-### Let's Be Rational Tests (4 cases)
-```bash
-bazel test //tests:lets_be_rational_test
-```
-- ATM/OTM European IV estimation
-- Invalid input handling
-- Near-expiry edge cases
 
 ### American Option Tests (42 cases)
 ```bash
@@ -353,34 +344,6 @@ for (int i = 0; i < n_strikes; i++) {
     }
 }
 // Typical: 50 strikes × 20 maturities × 145ms = ~2.4 minutes
-```
-
-### Pattern: Early Exercise Premium
-
-```c
-// American vs European IV comparison
-IVParams params = {
-    .spot_price = 100.0,
-    .strike = 100.0,
-    .time_to_maturity = 1.0,
-    .risk_free_rate = 0.05,
-    .market_price = 6.08,  // American put market price
-    .is_call = false
-};
-
-// Get European IV estimate (fast)
-LBRResult euro_result = lbr_implied_volatility(
-    params.spot_price, params.strike, params.time_to_maturity,
-    params.risk_free_rate, params.market_price, params.is_call
-);
-
-// Get American IV (slow, FDM-based)
-IVResult american_result = calculate_iv_simple(&params);
-
-// Compare: American IV typically lower than European IV for same price
-// (American option worth more → requires less IV to match same price)
-printf("European IV estimate: %.4f\n", euro_result.implied_vol);
-printf("American IV: %.4f\n", american_result.implied_vol);
 ```
 
 ### Pattern: Sensitivity Analysis (Greeks)

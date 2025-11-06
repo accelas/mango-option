@@ -19,8 +19,7 @@ The library combines **performance**, **flexibility**, and **correctness** with 
 
 - **American Option Pricing** - PDE-based solver using TR-BDF2 method (~22ms)
 - **American Option Implied Volatility** - FDM-based IV calculation using Brent's method (~145ms)
-- **Let's Be Rational** - Fast European IV estimation for bound calculation (~781ns)
-- **General PDE Solver** - Callback-based framework for custom parabolic PDEs
+- **General PDE Solver** - Template-based framework for custom parabolic PDEs
 - **Cubic Spline Interpolation** - Off-grid solution evaluation
 - **Price Table Pre-computation** - Fast lookups via interpolation (future: ~7.5µs IV)
 - **Adaptive Grid Presets** - Non-uniform spacing with 4-23× memory reduction
@@ -228,7 +227,6 @@ See `examples/` for complete working programs.
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| Let's Be Rational (European IV) | ~781ns | Fast bound estimation for American IV |
 | American option (single) | 21.7ms | TR-BDF2, 141 points × 1000 steps |
 | American option (batch of 64) | ~1.5ms wall | OpenMP parallelization |
 | American IV (FDM-based) | ~145ms | Brent's method with full PDE solve per iteration |
@@ -383,7 +381,6 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 ### Current (v0.1)
 - ✅ American option pricing (PDE-based, TR-BDF2)
 - ✅ American option implied volatility (FDM + Brent's method)
-- ✅ Let's Be Rational (European IV for bound estimation)
 - ✅ USDT tracing system
 - ✅ Comprehensive test suite
 - ✅ QuantLib benchmarks

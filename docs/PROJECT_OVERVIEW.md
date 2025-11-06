@@ -86,36 +86,38 @@ An **option** is a financial derivative that gives the holder the right (but not
 
 ### What mango-iv Provides
 
-#### 1. **Let's Be Rational (European IV Estimation)**
+#### 1. **American Implied Volatility Calculation**
 
-```c
-LBRResult result = lbr_implied_volatility(spot, strike, maturity, rate, market_price, is_call);
-```
+```cpp
+mango::IVParams params{
+    .spot_price = 100.0,
+    .strike = 100.0,
+    .time_to_maturity = 1.0,
+    .risk_free_rate = 0.05,
+    .market_price = 10.45,
+    .is_call = false
+};
 
-- **Purpose**: Fast European IV estimation for American IV upper bounds
-- **Performance**: ~781ns per calculation (20-30 bisection iterations)
-- **Accuracy**: Sufficient for bound calculation
-- **Use case**: Provides tight bracketing interval for American IV search
-
-#### 2. **American Implied Volatility Calculation**
-
-```c
-IVResult result = calculate_iv_simple(&params);
-// result.implied_vol, result.iterations
+mango::IVSolver solver(params);
+mango::IVResult result = solver.solve();
 ```
 
 - **FDM-based**: Each Brent iteration solves full PDE (~21ms)
 - **Performance**: ~145ms per calculation (5-8 Brent iterations)
-- **Convergence**: Robust with Let's Be Rational bounds
-- **Validation**: 9 American IV test cases + 4 Let's Be Rational test cases
+- **Convergence**: Robust with automatic bound estimation
+- **Validation**: 44 test cases covering edge cases and extreme parameters
 
-#### 3. **American Option Pricing (PDE Solver)**
+#### 2. **American Option Pricing (PDE Solver)**
 
-```c
-double price = american_option_price(
-    S, K, T, r, sigma, dividend, is_call,
-    n_space_points, n_time_steps
+```cpp
+mango::AmericanOption pricer(
+    100.0,  // strike
+    0.25,   // volatility
+    0.05,   // risk-free rate
+    1.0,    // time to maturity
+    mango::OptionType::Put
 );
+double price = pricer.price(100.0);  // Price at spot = 100
 ```
 
 - **TR-BDF2 method**: L-stable implicit time-stepping
@@ -125,18 +127,19 @@ double price = american_option_price(
 - **Performance**: 21.7ms per option (with AVX-512)
 - **Validation**: Tested against QuantLib (0.5% relative error)
 
-#### 4. **General PDE Solver (Research Tool)**
+#### 3. **General PDE Solver (Research Tool)**
 
-```c
-PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
-pde_solver_initialize(solver);
-pde_solver_solve(solver);
+```cpp
+mango::PDESolver solver(grid, time, config, root_config,
+                        left_bc, right_bc, spatial_op);
+solver.initialize(initial_condition);
+solver.solve();
 ```
 
-- **Callback-based**: User defines initial/boundary conditions, spatial operators
-- **Vectorized**: OpenMP SIMD pragmas for automatic vectorization
+- **Template-based**: User defines spatial operators via concepts
+- **Zero-cost abstractions**: Compile-time polymorphism
 - **Flexible**: Solve any parabolic PDE (heat equation, diffusion, etc.)
-- **Memory-efficient**: Single contiguous workspace (12n doubles)
+- **Memory-efficient**: Single contiguous workspace (6n doubles)
 - **Use case**: Research, custom derivatives, exotic options
 
 ### Key Design Principles
@@ -178,7 +181,6 @@ pde_solver_solve(solver);
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| Let's Be Rational (European IV) | ~781ns | Fast bound estimation, 20-30 iterations |
 | American option (single) | 21.7ms | TR-BDF2, 141 points × 1000 steps |
 | American IV (single) | ~145ms | 5-8 Brent iterations × 21.7ms per FDM |
 | American option (batch 64) | ~1.5ms wall | OpenMP parallelization |
@@ -366,7 +368,6 @@ std::cout << "American put price: " << price << "\n";
 ### Current State (v0.1)
 - ✅ American option pricing (PDE-based, TR-BDF2)
 - ✅ American option implied volatility (FDM + Brent's method)
-- ✅ Let's Be Rational (European IV for bound estimation)
 - ✅ USDT tracing system
 - ✅ Comprehensive test suite
 - ✅ QuantLib benchmarks
