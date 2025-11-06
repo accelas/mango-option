@@ -1,16 +1,16 @@
-# IV Calculation and Option Pricing - Quick Reference
+# IV Calculation and Option Pricing - Quick Reference (C++20)
 
 ## Three Main APIs
 
 ### 1. American Implied Volatility
 
-**File**: `src/implied_volatility.h`
+**File**: `src/iv_solver.hpp`
 
-```c
-#include "src/implied_volatility.h"
+```cpp
+#include "src/iv_solver.hpp"
 
-// Simple usage (auto-determines bounds via Let's Be Rational)
-IVParams params = {
+// Setup option parameters (designated initializers)
+mango::IVParams params{
     .spot_price = 100.0,
     .strike = 100.0,
     .time_to_maturity = 1.0,
@@ -19,20 +19,23 @@ IVParams params = {
     .is_call = false
 };
 
-IVResult result = calculate_iv_simple(&params);
+// Create solver and solve
+mango::IVSolver solver(params);
+mango::IVResult result = solver.solve();
 
 if (result.converged) {
-    printf("American IV: %.4f (%.1f%%), Iterations: %d\n",
-           result.implied_vol, result.implied_vol * 100, result.iterations);
+    std::cout << "American IV: " << result.implied_vol
+              << " (" << result.implied_vol * 100 << "%), "
+              << "Iterations: " << result.iterations << "\n";
 } else {
-    printf("Error: %s\n", result.error);
+    std::cerr << "Error: " << *result.failure_reason << "\n";
 }
 ```
 
 **Key Points**:
 - **FDM-based**: Each Brent iteration solves full American option PDE (~21ms)
 - **Performance**: ~145ms per calculation (5-8 Brent iterations)
-- **Auto-bounds**: Uses Let's Be Rational to estimate European IV, then 1.5× for upper bound
+- **Auto-bounds**: Automatic bound estimation based on intrinsic value analysis
 - **Validates input** for arbitrage
 - Works for calls and puts
 
@@ -40,45 +43,24 @@ if (result.converged) {
 
 ### 2. American Option Pricing
 
-**File**: `src/american_option.h`
+**File**: `src/american_option.hpp`
 
-```c
-#include "src/american_option.h"
+```cpp
+#include "src/american_option.hpp"
 
-// Setup option parameters
-OptionData option = {
-    .strike = 100.0,
-    .volatility = 0.2,
-    .risk_free_rate = 0.05,
-    .time_to_maturity = 1.0,
-    .option_type = OPTION_PUT,
-    .n_dividends = 0,
-    .dividend_times = nullptr,
-    .dividend_amounts = nullptr
-};
+// Create American option pricer
+mango::AmericanOption pricer(
+    100.0,                     // strike
+    0.2,                       // volatility
+    0.05,                      // risk-free rate
+    1.0,                       // time to maturity
+    mango::OptionType::Put     // option type
+);
 
-// Setup grid
-AmericanOptionGrid grid = {
-    .x_min = -0.7,      // ln(50%) - covers 50% of strike
-    .x_max = 0.7,       // ln(200%) - covers 200% of strike
-    .n_points = 141,
-    .dt = 0.001,
-    .n_steps = 1000
-};
+// Price at spot = 100
+double value = pricer.price(100.0);
 
-// Price the option
-AmericanOptionResult result = american_option_price(&option, &grid);
-
-if (result.status == 0) {
-    // Get value at spot = strike
-    double value = american_option_get_value_at_spot(result.solver, 100.0, 100.0);
-    printf("Option value: %.4f\n", value);
-    
-    // Cleanup
-    pde_solver_destroy(result.solver);
-} else {
-    printf("Pricing failed\n");
-}
+std::cout << "Option value: " << value << "\n";
 ```
 
 **Key Points**:
@@ -95,127 +77,137 @@ if (result.status == 0) {
 
 ---
 
-### 3. Batch Processing
+### 3. Custom PDE Solving
 
-**File**: `src/american_option.h`
+**Files**: `src/pde_solver.hpp`, `src/operators/*.hpp`
 
-```c
-// Create array of options
-OptionData options[100];
-for (int i = 0; i < 100; i++) {
-    options[i] = { /* configure */ };
+```cpp
+#include "src/pde_solver.hpp"
+#include "src/operators/laplacian_pde.hpp"
+#include "src/boundary_conditions.hpp"
+
+// Create spatial grid
+std::vector<double> grid(101);
+for (size_t i = 0; i < grid.size(); ++i) {
+    grid[i] = i / 100.0;  // [0, 1]
 }
 
-// Create result array
-AmericanOptionResult results[100] = {0};
+// Setup components
+mango::TimeDomain time{0.0, 1.0, 0.001};
+auto left_bc = mango::DirichletBC(0.0);
+auto right_bc = mango::DirichletBC(0.0);
+auto spatial_op = mango::LaplacianOperator(0.1);  // diffusion coeff
 
-// Batch price (OpenMP parallel)
-int status = american_option_price_batch(options, &grid, 100, results);
+// Create solver (template-based, compile-time optimization)
+mango::TRBDF2Config config;
+mango::RootFindingConfig root_config;
+mango::PDESolver solver(grid, time, config, root_config,
+                        left_bc, right_bc, spatial_op);
 
-// Process results
-for (int i = 0; i < 100; i++) {
-    if (results[i].status == 0) {
-        // Use result
-        pde_solver_destroy(results[i].solver);
+// Initialize with lambda
+solver.initialize([](std::span<const double> x, std::span<double> u) {
+    for (size_t i = 0; i < x.size(); ++i) {
+        u[i] = std::sin(M_PI * x[i]);
     }
-}
+});
+
+// Solve
+bool converged = solver.solve();
+
+// Access solution (zero-copy view)
+auto solution = solver.solution();
 ```
 
 **Benefits**:
-- OpenMP parallel processing
-- 10-60x wall-time speedup
-- Enables vectorized IV recovery
+- Template-based zero-cost abstractions
+- Compile-time type checking via concepts
+- std::span for zero-copy array views
+- Lambda-based callbacks for flexibility
 
 ---
 
-## Let's Be Rational (European IV Estimation)
+## Modern C++20 Features Used
 
-**File**: `src/lets_be_rational.h`
+The library leverages C++20 features for performance and expressiveness:
 
-```c
-// Estimate European IV (used for American IV bounds)
-LBRResult result = lbr_implied_volatility(
-    100.0,   // spot
-    100.0,   // strike
-    1.0,     // time_to_maturity
-    0.05,    // risk_free_rate
-    10.45,   // market_price
-    true     // is_call
-);
-
-if (result.converged) {
-    printf("European IV: %.4f\n", result.implied_vol);
-}
-```
-
-**Key Points**:
-- **Fast**: ~781ns per calculation (20-30 bisection iterations)
-- **Purpose**: Provides upper bounds for American IV calculation
-- Uses Black-Scholes pricing with Abramowitz & Stegun normal CDF
-
----
-
-## PDE Solver (Advanced)
-
-**File**: `src/pde_solver.h`
-
-For custom PDEs: ∂u/∂t = L(u)
-
-```c
-#include "src/pde_solver.h"
-
-// Define callbacks
-void my_initial_condition(const double *x, size_t n, double *u0, void *data) {
-    for (size_t i = 0; i < n; i++) {
-        u0[i] = sin(x[i]);  // Your IC
-    }
-}
-
-void my_spatial_operator(const double *x, double t, const double *u,
-                        size_t n, double *Lu, void *data) {
-    // Compute L(u) for all points
-}
-
-double my_left_bc(double t, void *data) { return 0.0; }
-double my_right_bc(double t, void *data) { return 0.0; }
-
-// Setup callbacks
-PDECallbacks callbacks = {
-    .initial_condition = my_initial_condition,
-    .left_boundary = my_left_bc,
-    .right_boundary = my_right_bc,
-    .spatial_operator = my_spatial_operator,
-    .obstacle = nullptr,
-    .jump_condition = nullptr,
-    .temporal_event = nullptr,
-    .user_data = nullptr
+```cpp
+// Concepts for type constraints
+template<typename T>
+concept BoundaryCondition = requires(T bc, double t) {
+    { bc.value(t) } -> std::convertible_to<double>;
+    { bc.type() } -> std::same_as<BoundaryType>;
 };
 
-// Create grid and time domain
-SpatialGrid grid = pde_create_grid(0.0, 1.0, 101);
-TimeDomain time = {.t_start = 0.0, .t_end = 1.0, .dt = 0.001, .n_steps = 1000};
+// std::span for zero-copy array views
+void process(std::span<const double> data);
 
-// Create and solve
-BoundaryConfig bc = pde_default_boundary_config();
-TRBDF2Config tr = pde_default_trbdf2_config();
+// Spaceship operator for comparisons
+auto operator<=>(const Event& other) const {
+    return time <=> other.time;
+}
 
-PDESolver *solver = pde_solver_create(&grid, &time, &bc, &tr, &callbacks);
-pde_solver_initialize(solver);
-pde_solver_solve(solver);
+// Requires expressions for compile-time introspection
+if constexpr (requires { op.set_grid(grid, dx); }) {
+    op.set_grid(grid, dx);
+}
 
-// Access solution
-const double *solution = pde_solver_get_solution(solver);
-double value_at_x = pde_solver_interpolate(solver, 0.5);
+// std::optional for optional return values
+std::optional<std::string> error_message;
+```
 
-pde_solver_destroy(solver);
+**Key Benefits**:
+- **Zero-cost abstractions**: Templates compile away
+- **Type safety**: Concepts catch errors at compile-time
+- **Performance**: No runtime overhead for type checks
+- **Expressiveness**: Clear, concise code
+
+---
+
+## Creating Custom Operators
+
+**File**: `src/operators/spatial_operator.hpp`
+
+Implement the SpatialOperator concept:
+
+```cpp
+// Example: Custom advection-diffusion operator
+class AdvectionDiffusion {
+    double diffusion_;
+    double velocity_;
+
+public:
+    AdvectionDiffusion(double D, double v) : diffusion_(D), velocity_(v) {}
+
+    // Satisfies SpatialOperator concept
+    void operator()(std::span<const double> x, double t,
+                    std::span<const double> u,
+                    std::span<double> Lu) const {
+        const size_t n = x.size();
+        const double dx = x[1] - x[0];
+
+        // Interior points
+        for (size_t i = 1; i < n - 1; ++i) {
+            double laplacian = (u[i-1] - 2*u[i] + u[i+1]) / (dx*dx);
+            double advection = (u[i+1] - u[i-1]) / (2*dx);
+            Lu[i] = diffusion_ * laplacian - velocity_ * advection;
+        }
+
+        // Boundaries handled by BC
+        Lu[0] = Lu[n-1] = 0.0;
+    }
+};
+
+// Use in solver
+auto op = AdvectionDiffusion(0.1, 0.5);
+mango::PDESolver solver(grid, time, config, root_config,
+                        left_bc, right_bc, op);
 ```
 
 **Features**:
-- General-purpose PDE solver
-- TR-BDF2 time-stepping (implicit, L-stable)
-- Vectorized callbacks
-- Obstacle conditions (variational inequalities)
-- Cubic spline interpolation
+- Template-based operator interface
+- Compile-time type checking via concepts
+- Zero virtual function overhead
+- std::span for safe array access
 
 ---
 
@@ -226,7 +218,6 @@ pde_solver_destroy(solver);
 - **Table-based**: ~11.8ms per call (Newton's method with interpolation, 22.5× faster)
 - **Bottleneck (FDM)**: American option pricing in each Brent iteration (~21ms × 5-8 iterations)
 - **Brent iterations**: 5-8 typically
-- **Let's Be Rational** (bounds): ~781ns
 
 ### American Option (Single)
 - **Time**: 21.7 ms (default grid)
@@ -273,14 +264,6 @@ bazel test //tests:implied_volatility_test
 - Input validation and arbitrage detection
 - Grid configuration validation
 - Convergence with default settings
-
-### Let's Be Rational Tests (4 cases)
-```bash
-bazel test //tests:lets_be_rational_test
-```
-- ATM/OTM European IV estimation
-- Invalid input handling
-- Near-expiry edge cases
 
 ### American Option Tests (42 cases)
 ```bash
@@ -363,34 +346,6 @@ for (int i = 0; i < n_strikes; i++) {
 // Typical: 50 strikes × 20 maturities × 145ms = ~2.4 minutes
 ```
 
-### Pattern: Early Exercise Premium
-
-```c
-// American vs European IV comparison
-IVParams params = {
-    .spot_price = 100.0,
-    .strike = 100.0,
-    .time_to_maturity = 1.0,
-    .risk_free_rate = 0.05,
-    .market_price = 6.08,  // American put market price
-    .is_call = false
-};
-
-// Get European IV estimate (fast)
-LBRResult euro_result = lbr_implied_volatility(
-    params.spot_price, params.strike, params.time_to_maturity,
-    params.risk_free_rate, params.market_price, params.is_call
-);
-
-// Get American IV (slow, FDM-based)
-IVResult american_result = calculate_iv_simple(&params);
-
-// Compare: American IV typically lower than European IV for same price
-// (American option worth more → requires less IV to match same price)
-printf("European IV estimate: %.4f\n", euro_result.implied_vol);
-printf("American IV: %.4f\n", american_result.implied_vol);
-```
-
 ### Pattern: Sensitivity Analysis (Greeks)
 
 ```c
@@ -424,14 +379,17 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 
 | Purpose | File |
 |---|---|
-| American IV calculation | `src/implied_volatility.h/.c` |
-| Let's Be Rational (European IV) | `src/lets_be_rational.h/.c` |
-| American options | `src/american_option.h/.c` |
-| PDE solver | `src/pde_solver.h/.c` |
-| Root finding | `src/brent.h` |
-| Interpolation | `src/cubic_spline.h/.c` |
-| Linear solver | `src/tridiagonal.h` |
-| Tracing | `src/ivcalc_trace.h` |
+| American IV calculation | `src/iv_solver.{hpp,cpp}` |
+| American options | `src/american_option.hpp` |
+| PDE solver | `src/pde_solver.hpp` |
+| Spatial operators | `src/operators/*.hpp` |
+| Boundary conditions | `src/boundary_conditions.hpp` |
+| Root finding | `src/root_finding.hpp` |
+| Interpolation | `src/cubic_spline_solver.hpp` |
+| Linear solver | `src/thomas_solver.hpp` |
+| Newton solver | `src/newton_workspace.hpp` |
+| Grid management | `src/grid.hpp` |
+| Workspace | `src/workspace.hpp` |
 
 ---
 
