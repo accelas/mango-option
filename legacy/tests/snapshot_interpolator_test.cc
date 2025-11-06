@@ -1,4 +1,4 @@
-#include "src/cpp/snapshot_interpolator.hpp"
+#include "src/snapshot_interpolator.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

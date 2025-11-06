@@ -1,6 +1,6 @@
 #include "cubic_spline.h"
 #include "tridiagonal.h"
-#include "ivcalc_trace.h"
+#include "common/ivcalc_trace.h"
 #include <stdlib.h>
 
 // Binary search to find interval containing x_eval

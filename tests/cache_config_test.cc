@@ -1,4 +1,4 @@
-#include "src/cpp/cache_config.hpp"
+#include "src/cache_config.hpp"
 #include <gtest/gtest.h>
 
 TEST(CacheBlockConfigTest, SmallGridSingleBlock) {

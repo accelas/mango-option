@@ -1,4 +1,4 @@
-#include "src/cpp/root_finding.hpp"
+#include "src/root_finding.hpp"
 #include <gtest/gtest.h>
 
 TEST(RootFindingConfigTest, DefaultValues) {

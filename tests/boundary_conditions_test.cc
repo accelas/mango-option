@@ -1,4 +1,4 @@
-#include "src/cpp/boundary_conditions.hpp"
+#include "src/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 
 TEST(BoundaryConditionTest, DirichletTagExists) {

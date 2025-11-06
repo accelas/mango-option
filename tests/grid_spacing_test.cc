@@ -1,5 +1,5 @@
-#include "src/cpp/operators/grid_spacing.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/operators/grid_spacing.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

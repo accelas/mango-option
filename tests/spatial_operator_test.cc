@@ -1,7 +1,7 @@
-#include "src/cpp/operators/spatial_operator.hpp"
-#include "src/cpp/operators/black_scholes_pde.hpp"
-#include "src/cpp/operators/grid_spacing.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/operators/spatial_operator.hpp"
+#include "src/operators/black_scholes_pde.hpp"
+#include "src/operators/grid_spacing.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <memory>

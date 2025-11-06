@@ -1,4 +1,4 @@
-#include "src/cpp/brent.hpp"
+#include "src/brent.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

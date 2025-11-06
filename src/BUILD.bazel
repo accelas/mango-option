@@ -1,245 +1,226 @@
-# Header-only library for USDT tracing (usable from both C and C++)
 cc_library(
-    name = "ivcalc_trace_hdr",
-    hdrs = ["ivcalc_trace.h"],
-    copts = ["-DHAVE_SYSTEMTAP_SDT"],
+    name = "snapshot",
+    hdrs = ["snapshot.hpp"],
+    copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "cubic_spline",
-    srcs = ["cubic_spline.c"],
-    hdrs = [
-        "cubic_spline.h",
-        "tridiagonal.h",
-        "ivcalc_trace.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-        "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default (gracefully falls back if sys/sdt.h missing)
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "grid_generation",
-    srcs = ["grid_generation.c"],
-    hdrs = ["grid_generation.h"],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "grid_presets",
-    srcs = ["grid_presets.c"],
-    hdrs = ["grid_presets.h"],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    deps = [":grid_generation"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "grid_transform",
-    srcs = ["grid_transform.c"],
-    hdrs = ["grid_transform.h"],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
+    name = "snapshot_interpolator",
+    hdrs = ["snapshot_interpolator.hpp"],
     deps = [
-        ":grid_presets",
-        ":price_table",
+        "//common:cubic_spline",
+    ],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+    # Ensure the cubic_spline C library is linked transitively
+    linkopts = [],
+)
+
+cc_library(
+    name = "price_table_snapshot_collector",
+    hdrs = ["price_table_snapshot_collector.hpp"],
+    deps = [
+        ":snapshot",
+        ":snapshot_interpolator",
+    ],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "grid",
+    hdrs = ["grid.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
     ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "pde_solver",
-    srcs = ["pde_solver.c"],
-    hdrs = [
-        "pde_solver.h",
-        "ivcalc_trace.h",
-    ],
+    name = "multigrid",
+    hdrs = ["multigrid.hpp"],
+    deps = [":grid"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "boundary_conditions",
+    hdrs = ["boundary_conditions.hpp"],
     copts = [
-        "-std=c23",
+        "-std=c++20",
         "-Wall",
         "-Wextra",
         "-O3",
-        "-march=native",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-        "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
     ],
-    deps = [":cubic_spline"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "cache_config",
+    hdrs = ["cache_config.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "workspace",
+    hdrs = ["workspace.hpp"],
+    deps = [":cache_config"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "root_finding",
+    hdrs = ["root_finding.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "brent",
+    hdrs = ["brent.hpp"],
+    deps = [
+        ":root_finding",
+        "//common:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "newton_workspace",
+    hdrs = ["newton_workspace.hpp"],
+    deps = [":workspace"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "spatial_operators",
+    hdrs = ["spatial_operators.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
+    ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "american_option",
-    srcs = ["american_option.c"],
-    hdrs = [
-        "american_option.h",
-        "ivcalc_trace.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-        "-fopenmp",  # Full OpenMP support for parallel for
-        "-ftree-vectorize",
-        "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
-    ],
-    linkopts = ["-fopenmp"],  # Link OpenMP runtime
-    deps = [":pde_solver"],
-    strip_include_prefix = "",
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "lets_be_rational",
-    srcs = ["lets_be_rational.c"],
-    hdrs = ["lets_be_rational.h"],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "implied_volatility",
-    srcs = ["implied_volatility.c"],
-    hdrs = [
-        "implied_volatility.h",
-        "brent.h",
-        "price_table.h",
-        "interp_strategy.h",
-        "ivcalc_trace.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
-    ],
+    srcs = ["american_option.cpp"],
+    hdrs = ["american_option.hpp"],
     deps = [
-        ":american_option",
-        ":lets_be_rational",
-        ":price_table",
+        ":pde_solver",
+        ":spatial_operators",
+        "//src/operators:operator_factory",
+        "//src/operators:black_scholes_pde",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
     ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "validation",
-    srcs = ["validation.c"],
-    hdrs = [
-        "validation.h",
-        "ivcalc_trace.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-DHAVE_SYSTEMTAP_SDT",  # Enable USDT by default
-    ],
+    name = "time_domain",
+    hdrs = ["time_domain.hpp"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "trbdf2_config",
+    hdrs = ["trbdf2_config.hpp"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "tridiagonal_solver",
+    hdrs = ["tridiagonal_solver.hpp"],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "pde_solver",
+    hdrs = ["pde_solver.hpp"],
     deps = [
-        ":american_option",
-        ":implied_volatility",
-        ":price_table",
+        ":grid",
+        ":workspace",
+        ":boundary_conditions",
+        ":time_domain",
+        ":trbdf2_config",
+        ":tridiagonal_solver",
+        ":newton_workspace",
+        ":root_finding",
+        ":snapshot",
     ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "interp_cubic",
-    srcs = [
-        "interp_cubic.c",
-        "interp_cubic_workspace.c",
-    ],
-    hdrs = [
-        "interp_cubic.h",
-        "interp_strategy.h",
-        "iv_surface.h",
-        "price_table.h",
-        "american_option.h",
-        "pde_solver.h",
-        "cubic_spline.h",
-        "tridiagonal.h",
-        "ivcalc_trace.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-    ],
-    deps = [":cubic_spline"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "iv_surface",
-    srcs = ["iv_surface.c"],
-    hdrs = [
-        "iv_surface.h",
-        "interp_strategy.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    deps = [":interp_cubic", ":cubic_spline"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table",
-    srcs = ["price_table.c"],
-    hdrs = [
-        "price_table.h",
-        "interp_strategy.h",
-    ],
-    copts = [
-        "-std=c23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-    ],
+    name = "iv_solver",
+    srcs = ["iv_solver.cpp"],
+    hdrs = ["iv_solver.hpp"],
     deps = [
-        ":interp_cubic",
-        ":cubic_spline",
+        ":root_finding",
+        ":brent",
         ":american_option",
+        "//common:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
     ],
     visibility = ["//visibility:public"],
 )

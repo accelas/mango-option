@@ -5,7 +5,7 @@
 #include <vector>
 
 extern "C" {
-#include "src/cubic_spline.h"
+#include "common/cubic_spline.h"
 }
 
 namespace mango {

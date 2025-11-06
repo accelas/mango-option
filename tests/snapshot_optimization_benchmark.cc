@@ -1,7 +1,7 @@
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/price_table_snapshot_collector.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/boundary_conditions.hpp"
+#include "src/pde_solver.hpp"
+#include "src/price_table_snapshot_collector.hpp"
+#include "src/spatial_operators.hpp"
+#include "src/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>

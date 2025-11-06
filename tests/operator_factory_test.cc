@@ -1,6 +1,6 @@
-#include "src/cpp/operators/operator_factory.hpp"
-#include "src/cpp/operators/black_scholes_pde.hpp"
-#include "src/cpp/grid.hpp"
+#include "src/operators/operator_factory.hpp"
+#include "src/operators/black_scholes_pde.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

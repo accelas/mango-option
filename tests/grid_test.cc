@@ -1,4 +1,4 @@
-#include "src/cpp/grid.hpp"
+#include "src/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(GridSpecTest, UniformGridGeneration) {
