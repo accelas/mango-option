@@ -1,6 +1,7 @@
 #pragma once
 
 #include "grid_spacing.hpp"
+#include "../parallel.hpp"
 #include <span>
 
 namespace mango::operators {
@@ -106,7 +107,7 @@ public:
         const T half_dx_inv = spacing_.spacing_inv() * T(0.5);
         const T dx2_inv = spacing_.spacing_inv_sq();
 
-        #pragma omp simd
+        MANGO_PRAGMA_SIMD
         for (size_t i = start; i < end; ++i) {
             const T du_dx = (u[i+1] - u[i-1]) * half_dx_inv;
             const T d2u_dx2 = (u[i+1] - T(2)*u[i] + u[i-1]) * dx2_inv;
@@ -148,7 +149,7 @@ public:
                           size_t end) const {
         if (spacing_.is_uniform()) {
             const T half_dx_inv = spacing_.spacing_inv() * T(0.5);
-            #pragma omp simd
+            MANGO_PRAGMA_SIMD
             for (size_t i = start; i < end; ++i) {
                 du_dx[i] = (u[i+1] - u[i-1]) * half_dx_inv;
             }
@@ -172,7 +173,7 @@ public:
                            size_t end) const {
         if (spacing_.is_uniform()) {
             const T dx2_inv = spacing_.spacing_inv_sq();
-            #pragma omp simd
+            MANGO_PRAGMA_SIMD
             for (size_t i = start; i < end; ++i) {
                 d2u_dx2[i] = (u[i+1] - T(2)*u[i] + u[i-1]) * dx2_inv;
             }
