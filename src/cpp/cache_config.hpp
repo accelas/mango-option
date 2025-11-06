@@ -56,8 +56,16 @@ struct CacheBlockConfig {
         return for_cache(n, L2_CACHE_SIZE);
     }
 
+    // Default threshold for cache blocking
+    // Enable blocking when grid is 4× larger than L1 optimal block
+    // Rationale: At 4× optimal, blocking provides measurable benefit
+    static constexpr size_t default_threshold() {
+        const size_t optimal = L1_CACHE_SIZE / BYTES_PER_POINT;  // ~1365
+        return 4 * optimal;  // ~5461
+    }
+
     // Adaptive: single block for small grids, L1-blocked for large
-    static CacheBlockConfig adaptive(size_t n, size_t threshold = 5000) {
+    static CacheBlockConfig adaptive(size_t n, size_t threshold = default_threshold()) {
         if (n < threshold) {
             return CacheBlockConfig{n, 1, 1};  // Single block with halo
         }

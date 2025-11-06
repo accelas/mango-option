@@ -29,11 +29,12 @@ public:
     ///
     /// @param n Number of grid points
     /// @param grid Grid coordinates for pre-computing dx
-    /// @param threshold Cache-blocking threshold (default 5000)
+    /// @param threshold Cache-blocking threshold (default: 4× L1 optimal ~5461)
     ///
     /// Allocates 6n doubles (u_current, u_next, u_stage, rhs, Lu, psi)
     /// plus (n-1) doubles for pre-computed dx array.
-    explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
+    explicit WorkspaceStorage(size_t n, std::span<const double> grid,
+                            size_t threshold = CacheBlockConfig::default_threshold())
         : buffer_(6 * n)  // u_current, u_next, u_stage, rhs, Lu, psi
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)

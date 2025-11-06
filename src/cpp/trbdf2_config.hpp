@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cache_config.hpp"
 #include <cmath>
 #include <cstddef>
 
@@ -23,7 +24,8 @@ struct TRBDF2Config {
     double gamma = 2.0 - std::sqrt(2.0);
 
     /// Cache blocking threshold (apply blocking when n >= threshold)
-    size_t cache_blocking_threshold = 5000;
+    /// Default: 4× L1 optimal block size (~5461 for 32KB L1 cache)
+    size_t cache_blocking_threshold = CacheBlockConfig::default_threshold();
 
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;

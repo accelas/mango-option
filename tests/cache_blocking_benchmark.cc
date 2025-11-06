@@ -51,7 +51,7 @@ TEST(CacheBlockingBenchmark, LargeGridSpeedup) {
 
     // Benchmark: With blocking
     mango::TRBDF2Config config_block;
-    config_block.cache_blocking_threshold = 5000;  // Enable
+    config_block.cache_blocking_threshold = mango::CacheBlockConfig::default_threshold();  // Enable
 
     mango::PDESolver solver_block(grid.span(), time, config_block, root_config,
                            left_bc, right_bc, op);

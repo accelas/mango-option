@@ -112,16 +112,21 @@ This scheme provides:
 
 ### Cache-Blocking Optimization
 
-**Transparent optimization** for large grids (n ≥ 5000):
+**Transparent optimization** for large grids (n ≥ threshold):
 
 ```cpp
 mango::TRBDF2Config config;
-config.cache_blocking_threshold = 5000;  // Default threshold
+// Default threshold: 4× L1 optimal (~5461 for 32KB L1 cache)
+// Derived from: 4 × (L1_CACHE_SIZE / BYTES_PER_POINT)
+config.cache_blocking_threshold = CacheBlockConfig::default_threshold();
 ```
 
 **How it works:**
 - Small grids (n < threshold): Single-block evaluation (zero overhead)
 - Large grids (n ≥ threshold): Multi-block evaluation with L1 cache optimization
+- **Default threshold:** 4× L1 optimal block size (~5461 for typical 32KB L1 cache)
+  - Threshold scales with cache size: `4 × (L1_CACHE_SIZE / BYTES_PER_POINT)`
+  - Ensures blocking only activates when benefit outweighs overhead
 - **Speedup:** Hardware-dependent (1-8x depending on CPU cache architecture)
   - Measured: 1.05x on test system (n=10,000)
   - Best case: 4-8x on systems with small L1 cache relative to problem size
