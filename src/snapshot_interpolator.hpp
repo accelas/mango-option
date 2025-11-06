@@ -27,20 +27,29 @@ public:
     /// @param x X-coordinates (must be strictly increasing)
     /// @param y Y-coordinates
     /// @return Optional error message (nullopt on success)
+    ///
+    /// @note On failure, the interpolator is reset to unbuilt state.
+    ///       Previous state is NOT preserved across failed rebuilds.
     [[nodiscard]] std::optional<std::string_view> build(
         std::span<const double> x,
         std::span<const double> y)
     {
-        // Store grid for eval_from_data
-        x_.assign(x.begin(), x.end());
-        y_.assign(y.begin(), y.end());
+        // Reset to unbuilt state BEFORE attempting build
+        // This prevents state corruption if build fails
+        built_ = false;
 
-        // Build cubic spline
+        // Build cubic spline first (validates input)
         auto error = spline_.build(x, y);
         if (error.has_value()) {
+            // Leave in unbuilt state on failure
+            x_.clear();
+            y_.clear();
             return error;
         }
 
+        // Only update grid storage after successful build
+        x_.assign(x.begin(), x.end());
+        y_.assign(y.begin(), y.end());
         built_ = true;
         return std::nullopt;
     }

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <cassert>
 
 namespace mango {
 
@@ -50,9 +51,13 @@ public:
         // Derivatives will use eval_from_data() with PDE-computed arrays
         SnapshotInterpolator V_interp, Lu_interp;
 
-        // Build succeeds (grid is always valid from PDE solver)
-        (void)V_interp.build(snapshot.spatial_grid, snapshot.solution);
-        (void)Lu_interp.build(snapshot.spatial_grid, snapshot.spatial_operator);
+        // Build interpolators (grid should always be valid from PDE solver)
+        auto V_error = V_interp.build(snapshot.spatial_grid, snapshot.solution);
+        auto Lu_error = Lu_interp.build(snapshot.spatial_grid, snapshot.spatial_operator);
+
+        // Assert on failure - indicates programming error in PDE solver
+        assert(!V_error.has_value() && "Failed to build value interpolator");
+        assert(!Lu_error.has_value() && "Failed to build spatial operator interpolator");
 
         // Fill price table for all moneyness points
         for (size_t m_idx = 0; m_idx < moneyness_.size(); ++m_idx) {
