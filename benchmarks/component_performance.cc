@@ -15,6 +15,7 @@
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
+#include <stdexcept>
 
 using namespace mango;
 
@@ -41,7 +42,10 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     for (auto _ : state) {
         AmericanOptionSolver solver(params, grid);
         auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("ATM Put, T=1Y, σ=0.20");
@@ -67,7 +71,10 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     for (auto _ : state) {
         AmericanOptionSolver solver(params, grid);
         auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("OTM Put, T=3M, σ=0.30");
@@ -93,7 +100,10 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     for (auto _ : state) {
         AmericanOptionSolver solver(params, grid);
         auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("ITM Put, T=2Y, σ=0.25");
@@ -119,7 +129,10 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     for (auto _ : state) {
         AmericanOptionSolver solver(params, grid);
         auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("Call with 3 discrete dividends");
@@ -240,7 +253,10 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         auto result = solver.solve();
         auto end = std::chrono::high_resolution_clock::now();
 
-        benchmark::DoNotOptimize(result);
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
         total_time_ns += std::chrono::duration<double, std::nano>(end - start).count();
         iterations++;
     }
@@ -290,6 +306,11 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
     for (auto _ : state) {
         auto results = solve_american_options_batch(batch, grid);
+        for (const auto& res : results) {
+            if (!res) {
+                throw std::runtime_error(res.error().message);
+            }
+        }
         benchmark::DoNotOptimize(results);
     }
 

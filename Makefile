@@ -26,7 +26,7 @@ LIB_DIR := $(BUILD_DIR)/lib
 GTEST_DIR := $(BUILD_DIR)/googletest
 
 # Include paths
-INCLUDES := -I. -I$(SRC_DIR) -I$(SRC_DIR)/operators -Icommon
+INCLUDES := -I. -I$(SRC_DIR) -I$(SRC_DIR)/operators -Icommon -I3rd
 
 # GoogleTest paths (will be populated after gtest is built)
 GTEST_INCLUDES := -I$(GTEST_DIR)/googletest/include -I$(GTEST_DIR)/googlemock/include

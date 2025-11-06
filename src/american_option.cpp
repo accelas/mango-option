@@ -127,7 +127,7 @@ AmericanOptionSolver::AmericanOptionSolver(
     grid_.validate();
 }
 
-AmericanOptionResult AmericanOptionSolver::solve() {
+expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 1. Generate grid in log-moneyness coordinates
     auto grid_buffer = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate();
     auto x_grid = grid_buffer.span();
@@ -224,7 +224,11 @@ AmericanOptionResult AmericanOptionSolver::solve() {
         });
 
         // 8. Solve the PDE
-        result.converged = solver.solve();
+        auto solve_status = solver.solve();
+        if (!solve_status) {
+            return unexpected(solve_status.error());
+        }
+        result.converged = true;
 
         // 9. Extract solution
         auto solution_view = solver.solution();
@@ -274,7 +278,11 @@ AmericanOptionResult AmericanOptionSolver::solve() {
         });
 
         // 8. Solve the PDE
-        result.converged = solver.solve();
+        auto solve_status = solver.solve();
+        if (!solve_status) {
+            return unexpected(solve_status.error());
+        }
+        result.converged = true;
 
         // 9. Extract solution
         auto solution_view = solver.solution();

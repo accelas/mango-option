@@ -10,6 +10,7 @@
 #include "root_finding.hpp"
 #include "snapshot.hpp"
 #include "jacobian_view.hpp"
+#include "src/expected.hpp"
 #include <span>
 #include <vector>
 #include <functional>
@@ -120,8 +121,8 @@ public:
 
     /// Solve PDE from t_start to t_end
     ///
-    /// @return true if converged at all time steps, false otherwise
-    bool solve() {
+    /// @return expected success or solver error diagnostic
+    expected<void, SolverError> solve() {
         double t = time_.t_start();
         const double dt = time_.dt();
 
@@ -133,16 +134,16 @@ public:
 
             // Stage 1: Trapezoidal rule to t_n + γ·dt
             double t_stage1 = t + config_.gamma * dt;
-            bool stage1_ok = solve_stage1(t, t_stage1, dt);
+            auto stage1_ok = solve_stage1(t, t_stage1, dt);
             if (!stage1_ok) {
-                return false;  // Convergence failure
+                return unexpected(stage1_ok.error());
             }
 
             // Stage 2: BDF2 from t_n to t_n+1
             double t_next = t + dt;
-            bool stage2_ok = solve_stage2(t_stage1, t_next, dt);
+            auto stage2_ok = solve_stage2(t_stage1, t_next, dt);
             if (!stage2_ok) {
-                return false;  // Convergence failure
+                return unexpected(stage2_ok.error());
             }
 
             // Update time
@@ -155,7 +156,7 @@ public:
             process_snapshots(step, t);
         }
 
-        return true;
+        return {};
     }
 
     /// Get current solution
@@ -394,7 +395,7 @@ private:
     /// u^{n+γ} = u^n + (γ·dt/2) · [L(u^n) + L(u^{n+γ})]
     ///
     /// Solved via Newton-Raphson iteration
-    bool solve_stage1(double t_n, double t_stage, double dt) {
+    expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt) {
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
@@ -413,7 +414,21 @@ private:
                                           std::span{u_current_},
                                           std::span{rhs_});
 
-        return result.converged;
+        if (!result.converged) {
+            SolverError error{
+                .code = SolverErrorCode::Stage1ConvergenceFailure,
+                .message = result.failure_reason.value_or("TR-BDF2 stage1 failed to converge"),
+                .iterations = result.iterations
+            };
+
+            if (error.message == "Singular Jacobian") {
+                error.code = SolverErrorCode::LinearSolveFailure;
+            }
+
+            return unexpected(error);
+        }
+
+        return {};
     }
 
     /// TR-BDF2 Stage 2: BDF2
@@ -422,7 +437,7 @@ private:
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via Newton-Raphson iteration
-    bool solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
+    expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
         const double two_minus_gamma = 2.0 - gamma;
@@ -446,7 +461,21 @@ private:
                                           std::span{u_current_},
                                           std::span{rhs_});
 
-        return result.converged;
+        if (!result.converged) {
+            SolverError error{
+                .code = SolverErrorCode::Stage2ConvergenceFailure,
+                .message = result.failure_reason.value_or("TR-BDF2 stage2 failed to converge"),
+                .iterations = result.iterations
+            };
+
+            if (error.message == "Singular Jacobian") {
+                error.code = SolverErrorCode::LinearSolveFailure;
+            }
+
+            return unexpected(error);
+        }
+
+        return {};
     }
 
     // ========================================================================

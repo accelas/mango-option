@@ -65,7 +65,8 @@ TEST(SnapshotOptimizationBenchmark, CompareApproaches) {
                 }
             };
             solver.initialize(ic);
-            solver.solve();
+            auto status = solver.solve();
+            ASSERT_TRUE(status.has_value()) << status.error().message;
 
             ++n_solves_old;
         }
@@ -118,7 +119,8 @@ TEST(SnapshotOptimizationBenchmark, CompareApproaches) {
             }
         };
         solver.initialize(ic);
-        solver.solve();
+        auto status = solver.solve();
+        ASSERT_TRUE(status.has_value()) << status.error().message;
 
         // Collector now has prices for all n_m moneyness points
         ++n_solves_new;

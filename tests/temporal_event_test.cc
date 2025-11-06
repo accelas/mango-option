@@ -45,7 +45,8 @@ TEST(TemporalEventTest, EventAppliedAfterStep) {
         }
     });
 
-    ASSERT_TRUE(solver.solve());
+    auto status = solver.solve();
+    ASSERT_TRUE(status.has_value()) << status.error().message;
 
     // Verify event was applied
     EXPECT_TRUE(event_fired);

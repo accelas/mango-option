@@ -112,7 +112,10 @@ solver.initialize([](std::span<const double> x, std::span<double> u) {
 });
 
 // Solve
-bool converged = solver.solve();
+auto status = solver.solve();
+if (!status) {
+    throw std::runtime_error(status.error().message);
+}
 
 // Access solution (zero-copy view)
 auto solution = solver.solution();
@@ -401,4 +404,3 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 - **Examples**: `examples/example_*.c` - Usage examples
 - **Tests**: `tests/*_test.cc` - Test suite
 - **Tracing**: `TRACING.md`, `TRACING_QUICKSTART.md` - USDT tracing guide
-
