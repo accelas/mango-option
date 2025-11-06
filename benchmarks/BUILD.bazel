@@ -22,9 +22,9 @@ cc_binary(
         "-O3",
         "-march=native",
         "-ftree-vectorize",
-        "-fopenmp-simd",
+        "-fopenmp",
     ],
-    linkopts = ["-lgomp"],
+    linkopts = ["-fopenmp"],
     deps = [
         "//src:american_option",
         "//src:iv_solver",
@@ -43,8 +43,9 @@ cc_binary(
         "-O3",
         "-march=native",
         "-ftree-vectorize",
+        "-fopenmp",
     ],
-    linkopts = ["-lQuantLib"],
+    linkopts = ["-lQuantLib", "-fopenmp"],
     deps = [
         "//src:american_option",
         "@google_benchmark//:benchmark",
@@ -62,8 +63,9 @@ cc_binary(
         "-O3",
         "-march=native",
         "-ftree-vectorize",
+        "-fopenmp",
     ],
-    linkopts = ["-lQuantLib"],
+    linkopts = ["-lQuantLib", "-fopenmp"],
     deps = [
         "//src:american_option",
         "@google_benchmark//:benchmark",
