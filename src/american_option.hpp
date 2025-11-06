@@ -8,6 +8,7 @@
 
 #include "src/pde_solver.hpp"
 #include "src/spatial_operators.hpp"
+#include "src/expected.hpp"
 #include <vector>
 #include <stdexcept>
 #include <cmath>
@@ -125,7 +126,7 @@ public:
      *
      * @return Result containing option value and Greeks
      */
-    AmericanOptionResult solve();
+    expected<AmericanOptionResult, SolverError> solve();
 
     /**
      * Get the full solution surface (for debugging/analysis).
@@ -176,11 +177,11 @@ public:
     /// @param params Vector of option parameters
     /// @param grid Shared grid configuration (same for all options)
     /// @return Vector of results (same order as input)
-    static std::vector<AmericanOptionResult> solve_batch(
+    static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
         std::span<const AmericanOptionParams> params,
         const AmericanOptionGrid& grid)
     {
-        std::vector<AmericanOptionResult> results(params.size());
+        std::vector<expected<AmericanOptionResult, SolverError>> results(params.size());
 
         #pragma omp parallel for
         for (size_t i = 0; i < params.size(); ++i) {
@@ -192,7 +193,7 @@ public:
     }
 
     /// Solve a batch of American options in parallel (vector overload)
-    static std::vector<AmericanOptionResult> solve_batch(
+    static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
         const std::vector<AmericanOptionParams>& params,
         const AmericanOptionGrid& grid)
     {
@@ -201,7 +202,7 @@ public:
 };
 
 /// Convenience function for batch solving
-inline std::vector<AmericanOptionResult> solve_american_options_batch(
+inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
     std::span<const AmericanOptionParams> params,
     const AmericanOptionGrid& grid)
 {
@@ -209,7 +210,7 @@ inline std::vector<AmericanOptionResult> solve_american_options_batch(
 }
 
 /// Convenience function for batch solving (vector overload)
-inline std::vector<AmericanOptionResult> solve_american_options_batch(
+inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
     const std::vector<AmericanOptionParams>& params,
     const AmericanOptionGrid& grid)
 {

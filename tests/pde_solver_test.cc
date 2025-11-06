@@ -63,8 +63,8 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     solver.initialize(ic);
 
     // Solve
-    bool success = solver.solve();
-    EXPECT_TRUE(success);
+    auto status = solver.solve();
+    ASSERT_TRUE(status.has_value()) << status.error().message;
 
     // Verify against analytical solution
     auto solution = solver.solution();
@@ -120,8 +120,8 @@ TEST(PDESolverTest, NewtonConvergence) {
     solver.initialize(ic);
 
     // Solve - should converge (Newton is robust)
-    bool converged = solver.solve();
-    EXPECT_TRUE(converged);
+    auto status3 = solver.solve();
+    ASSERT_TRUE(status3.has_value()) << status3.error().message;
 
     // Solution should decay exponentially: u(x,t) ≈ exp(-π²Dt)sin(πx)
     auto solution = solver.solution();
@@ -177,11 +177,11 @@ TEST(PDESolverTest, CacheBlockingCorrectness) {
     solver1.initialize(ic);
     solver2.initialize(ic);
 
-    bool conv1 = solver1.solve();
-    bool conv2 = solver2.solve();
+    auto conv1 = solver1.solve();
+    auto conv2 = solver2.solve();
 
-    ASSERT_TRUE(conv1);
-    ASSERT_TRUE(conv2);
+    ASSERT_TRUE(conv1.has_value()) << conv1.error().message;
+    ASSERT_TRUE(conv2.has_value()) << conv2.error().message;
 
     // Solutions should match to machine precision
     auto sol1 = solver1.solution();
@@ -220,9 +220,8 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
     };
     solver.initialize(ic);
 
-    bool converged = solver.solve();
-
-    EXPECT_TRUE(converged);
+    auto status4 = solver.solve();
+    ASSERT_TRUE(status4.has_value()) << status4.error().message;
 
     // Verify solution decayed (heat equation with zero BCs)
     auto solution = solver.solution();
@@ -258,10 +257,10 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
     };
     solver.initialize(ic);
 
-    bool converged = solver.solve();
+    auto status5 = solver.solve();
 
     // With harsh convergence requirements, should fail
-    EXPECT_FALSE(converged);
+    EXPECT_FALSE(status5.has_value());
 }
 
 TEST(PDESolverTest, SnapshotRegistration) {
@@ -313,8 +312,8 @@ TEST(PDESolverTest, SnapshotCollection) {
     solver.register_snapshot(3, 1, &collector);  // step 3, tau_idx=1
 
     // Solve
-    bool converged = solver.solve();
-    ASSERT_TRUE(converged);
+    auto status6 = solver.solve();
+    ASSERT_TRUE(status6.has_value()) << status6.error().message;
 
     // Verify snapshots collected with correct user_indices
     ASSERT_EQ(collector.collected_indices.size(), 2u);
@@ -373,8 +372,8 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     solver.initialize(ic);
 
     // Solve
-    bool success = solver.solve();
-    EXPECT_TRUE(success);
+    auto status2 = solver.solve();
+    ASSERT_TRUE(status2.has_value()) << status2.error().message;
 
     // Verify against analytical solution
     auto solution = solver.solution();

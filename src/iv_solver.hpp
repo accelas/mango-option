@@ -2,6 +2,7 @@
 
 #include "root_finding.hpp"
 #include "common/ivcalc_trace.h"
+#include "src/expected.hpp"
 #include <optional>
 #include <string>
 #include <vector>
@@ -143,10 +144,11 @@ public:
 private:
     IVParams params_;
     IVConfig config_;
+    mutable std::optional<SolverError> last_solver_error_;
 
     /// Validate input parameters
-    /// @return Error message if invalid, std::nullopt if valid
-    std::optional<std::string> validate_params() const;
+    /// @return expected success or validation error message
+    expected<void, std::string> validate_params() const;
 
     /// Estimate upper bound for volatility search using intrinsic value approximation
     /// @return Upper bound estimate (typically 2.0-3.0 for reasonable markets)

@@ -14,6 +14,7 @@
 
 #include "src/american_option.hpp"
 #include <benchmark/benchmark.h>
+#include <stdexcept>
 
 // QuantLib includes
 #include <ql/quantlib.hpp>
@@ -95,7 +96,10 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     for (auto _ : state) {
         AmericanOptionSolver solver(params, grid);
         auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("mango-iv");
@@ -141,8 +145,12 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     grid.n_time = 1000;
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid); auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        AmericanOptionSolver solver(params, grid);
+        auto result = solver.solve();
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("mango-iv");
@@ -188,8 +196,12 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     grid.n_time = 1000;
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid); auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        AmericanOptionSolver solver(params, grid);
+        auto result = solver.solve();
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("mango-iv");
@@ -240,8 +252,12 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     grid.n_time = n_time;
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid); auto result = solver.solve();
-        benchmark::DoNotOptimize(result);
+        AmericanOptionSolver solver(params, grid);
+        auto result = solver.solve();
+        if (!result) {
+            throw std::runtime_error(result.error().message);
+        }
+        benchmark::DoNotOptimize(*result);
     }
 
     state.SetLabel("mango " + std::to_string(n_space) + "x" + std::to_string(n_time));

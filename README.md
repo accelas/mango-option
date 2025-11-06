@@ -158,9 +158,12 @@ auto initial_condition = [](std::span<const double> x, std::span<double> u) {
 solver.initialize(initial_condition);
 
 // Solve
-bool converged = solver.solve();
+auto status = solver.solve();
+if (!status) {
+    throw std::runtime_error(status.error().message);
+}
 
-// Access solution
+// Access solution after successful solve
 auto solution = solver.solution();
 ```
 

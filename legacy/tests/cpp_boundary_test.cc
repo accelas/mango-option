@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <iostream>
+#include <stdexcept>
 
 namespace mango {
 namespace {
@@ -41,6 +42,9 @@ TEST(BoundaryConditionBugTest, CPPBoundariesIgnoreTime) {
 
     AmericanOptionSolver cpp_solver(cpp_params, cpp_grid);
     auto cpp_result = cpp_solver.solve();
+    if (!cpp_result) {
+        throw std::runtime_error(cpp_result.error().message);
+    }
 
     // C solver
     OptionData c_option = {
@@ -69,10 +73,10 @@ TEST(BoundaryConditionBugTest, CPPBoundariesIgnoreTime) {
 
     // Print results for debugging
     std::cout << "\nBoundary Condition Bug Test:\n";
-    std::cout << "  C++ value: " << cpp_result.value << "\n";
+    std::cout << "  C++ value: " << cpp_result->value << "\n";
     std::cout << "  C value:   " << c_value << "\n";
-    std::cout << "  Diff:      " << std::abs(cpp_result.value - c_value) << "\n";
-    std::cout << "  C++ converged: " << (cpp_result.converged ? "yes" : "no") << "\n";
+    std::cout << "  Diff:      " << std::abs(cpp_result->value - c_value) << "\n";
+    std::cout << "  C++ converged: " << (cpp_result->converged ? "yes" : "no") << "\n";
     std::cout << "  C converged:   " << (c_result.status == 0 ? "yes" : "no") << "\n";
 
     // Cleanup
@@ -87,7 +91,7 @@ TEST(BoundaryConditionBugTest, CPPBoundariesIgnoreTime) {
     EXPECT_NEAR(c_value, 5.50, 1.0);  // C should be correct (within $1)
 
     // This will FAIL, demonstrating the bug:
-    EXPECT_NEAR(cpp_result.value, c_value, 0.50)
+    EXPECT_NEAR(cpp_result->value, c_value, 0.50);
         << "C++ value differs significantly from C value due to boundary condition bug";
 }
 
