@@ -3,7 +3,7 @@
 
 #include <math.h>
 #include <stdbool.h>
-#include "ivcalc_trace.h"
+#include "src/ivcalc_trace.h"
 
 // Brent's method for root finding (header-only)
 //

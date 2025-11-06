@@ -1,5 +1,5 @@
 #include "american_option.h"
-#include "ivcalc_trace.h"
+#include "src/ivcalc_trace.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>

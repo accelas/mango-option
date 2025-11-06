@@ -1,5 +1,5 @@
 #include "pde_solver.h"
-#include "ivcalc_trace.h"
+#include "src/ivcalc_trace.h"
 #include "tridiagonal.h"
 #include <stdlib.h>
 #include <string.h>
