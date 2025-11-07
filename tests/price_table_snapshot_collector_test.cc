@@ -21,19 +21,34 @@ TEST(PriceTableSnapshotCollectorTest, GammaFormulaValidation) {
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    // Mock PDE solution (parabola in S: V(S) = S²)
-    // This ensures ∂²V/∂S² = 2.0 everywhere
-    std::vector<double> x = {60.0, 80.0, 100.0, 120.0, 140.0};
-    std::vector<double> dx = {20.0, 20.0, 20.0, 20.0};
-    std::vector<double> V(x.size());
-    std::vector<double> dVdS(x.size());
-    std::vector<double> d2VdS2(x.size());
+    // Mock PDE solution in LOG-MONEYNESS coordinates
+    // PDE grid is x = ln(S/K), working with NORMALIZED prices
+    std::vector<double> S_values = {60.0, 80.0, 100.0, 120.0, 140.0};
+    std::vector<double> x(S_values.size());  // Log-moneyness grid
+    std::vector<double> V_norm(x.size());     // Normalized price = V_dollar / K_ref
+    std::vector<double> dVnorm_dx(x.size());  // ∂V_norm/∂x
+    std::vector<double> d2Vnorm_dx2(x.size());// ∂²V_norm/∂x²
 
+    // Convert S values to log-moneyness and compute derivatives
     for (size_t i = 0; i < x.size(); ++i) {
-        double S = x[i];
-        V[i] = S * S;              // V = S²
-        dVdS[i] = 2.0 * S;         // ∂V/∂S = 2S
-        d2VdS2[i] = 2.0;           // ∂²V/∂S² = 2 (constant)
+        double S = S_values[i];
+        x[i] = std::log(S / K_ref);  // x = ln(S/K)
+
+        // Function: V_dollar = S²
+        // Normalized: V_norm = S²/K_ref
+        // In log-moneyness: V_norm(x) = K_ref·e^(2x)
+        V_norm[i] = (S * S) / K_ref;
+
+        // Chain rule: ∂V_norm/∂x = 2·K_ref·e^(2x) = 2·S²/K_ref
+        dVnorm_dx[i] = 2.0 * (S * S) / K_ref;
+
+        // Second derivative: ∂²V_norm/∂x² = 4·K_ref·e^(2x) = 4·S²/K_ref
+        d2Vnorm_dx2[i] = 4.0 * (S * S) / K_ref;
+    }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
     }
 
     std::vector<double> Lu(x.size(), 0.0);
@@ -42,11 +57,11 @@ TEST(PriceTableSnapshotCollectorTest, GammaFormulaValidation) {
         .time = 0.5,
         .user_index = 0,
         .spatial_grid = std::span{x},
-        .dx = std::span{dx},
-        .solution = std::span{V},
+        .dx = std::span{dx_spacing},
+        .solution = std::span{V_norm},
         .spatial_operator = std::span{Lu},
-        .first_derivative = std::span{dVdS},
-        .second_derivative = std::span{d2VdS2}
+        .first_derivative = std::span{dVnorm_dx},
+        .second_derivative = std::span{d2Vnorm_dx2}
     };
 
     collector.collect(snapshot);
@@ -83,30 +98,41 @@ TEST(PriceTableSnapshotCollectorTest, ThetaInContinuationRegion) {
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    // Mock data with known Lu
-    std::vector<double> x = {80.0, 100.0, 120.0};
-    std::vector<double> dx = {20.0, 20.0};
-    std::vector<double> V = {20.0, 10.0, 5.0};
-    std::vector<double> Lu = {-0.5, -0.3, -0.2};  // Known spatial operator
-    std::vector<double> dV = {-0.5, -0.3, -0.2};
-    std::vector<double> d2V = {0.01, 0.01, 0.01};
+    // Mock data with known Lu - use LOG-MONEYNESS coordinates
+    // m=1.0 corresponds to x = ln(1.0) = 0
+    std::vector<double> S_values = {80.0, 100.0, 120.0};
+    std::vector<double> x(S_values.size());
+    for (size_t i = 0; i < S_values.size(); ++i) {
+        x[i] = std::log(S_values[i] / K_ref);
+    }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
+    }
+
+    // Normalized values (V_norm = V_dollar / K_ref)
+    std::vector<double> V_norm = {0.20, 0.10, 0.05};
+    std::vector<double> Lu_norm = {-0.005, -0.003, -0.002};  // Normalized spatial operator
+    std::vector<double> dVnorm_dx = {-0.005, -0.003, -0.002};
+    std::vector<double> d2Vnorm_dx2 = {0.0001, 0.0001, 0.0001};
 
     mango::Snapshot snapshot{
         .time = 0.5,
         .user_index = 0,
         .spatial_grid = std::span{x},
-        .dx = std::span{dx},
-        .solution = std::span{V},
-        .spatial_operator = std::span{Lu},
-        .first_derivative = std::span{dV},
-        .second_derivative = std::span{d2V}
+        .dx = std::span{dx_spacing},
+        .solution = std::span{V_norm},
+        .spatial_operator = std::span{Lu_norm},
+        .first_derivative = std::span{dVnorm_dx},
+        .second_derivative = std::span{d2Vnorm_dx2}
     };
 
     collector.collect(snapshot);
 
     auto thetas = collector.thetas();
 
-    // Theta should be -Lu = -(-0.3) = 0.3 at S=100 (m=1.0)
+    // Theta should be -K_ref * Lu_norm = -100 * (-0.003) = 0.3 at m=1.0
     EXPECT_NEAR(thetas[0], 0.3, 0.05);  // Allow interpolation error
 }
 
@@ -120,33 +146,44 @@ TEST(PriceTableSnapshotCollectorTest, ThetaAtExerciseBoundary) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = K_ref,
-        .exercise_type = mango::ExerciseType::AMERICAN
+        .exercise_type = mango::ExerciseType::AMERICAN,
+        .option_type = mango::OptionType::PUT
     };
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    // At m=0.5, S=50, obstacle = max(100-50, 0) = 50
-    std::vector<double> x = {30.0, 50.0, 70.0, 90.0, 110.0};
-    std::vector<double> dx = {20.0, 20.0, 20.0, 20.0};
-    std::vector<double> V(x.size());
-    std::vector<double> Lu(x.size(), -0.1);
-    std::vector<double> dV(x.size(), -1.0);
-    std::vector<double> d2V(x.size(), 0.01);
+    // At m=0.5, S=50, obstacle = max(K-S, 0) = 50
+    // Use LOG-MONEYNESS coordinates
+    std::vector<double> S_values = {30.0, 50.0, 70.0, 90.0, 110.0};
+    std::vector<double> x(S_values.size());
+    std::vector<double> V_norm(x.size());
 
-    // Set V = obstacle at exercise boundary
-    for (size_t i = 0; i < x.size(); ++i) {
-        V[i] = std::max(K_ref - x[i], 0.0);  // At exercise boundary
+    for (size_t i = 0; i < S_values.size(); ++i) {
+        double S = S_values[i];
+        x[i] = std::log(S / K_ref);
+
+        // Normalized obstacle for American put: max(K-S, 0) / K = max(1 - S/K, 0)
+        V_norm[i] = std::max(1.0 - S / K_ref, 0.0);
     }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
+    }
+
+    std::vector<double> Lu_norm(x.size(), -0.001);
+    std::vector<double> dVnorm_dx(x.size(), -0.01);
+    std::vector<double> d2Vnorm_dx2(x.size(), 0.0001);
 
     mango::Snapshot snapshot{
         .time = 0.5,
         .user_index = 0,
         .spatial_grid = std::span{x},
-        .dx = std::span{dx},
-        .solution = std::span{V},
-        .spatial_operator = std::span{Lu},
-        .first_derivative = std::span{dV},
-        .second_derivative = std::span{d2V}
+        .dx = std::span{dx_spacing},
+        .solution = std::span{V_norm},
+        .spatial_operator = std::span{Lu_norm},
+        .first_derivative = std::span{dVnorm_dx},
+        .second_derivative = std::span{d2Vnorm_dx2}
     };
 
     collector.collect(snapshot);
@@ -172,22 +209,33 @@ TEST(PriceTableSnapshotCollectorTest, VegaInterpolation) {
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    std::vector<double> x = {80.0, 100.0, 120.0};
-    std::vector<double> dx = {20.0, 20.0};
-    std::vector<double> V = {20.0, 10.0, 5.0};
-    std::vector<double> Lu = {-0.1, -0.1, -0.1};
-    std::vector<double> dV = {-0.5, -0.3, -0.2};
-    std::vector<double> d2V = {0.01, 0.01, 0.01};
+    // Use LOG-MONEYNESS coordinates
+    std::vector<double> S_values = {80.0, 100.0, 120.0};
+    std::vector<double> x(S_values.size());
+    for (size_t i = 0; i < S_values.size(); ++i) {
+        x[i] = std::log(S_values[i] / K_ref);
+    }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
+    }
+
+    // Normalized values
+    std::vector<double> V_norm = {0.20, 0.10, 0.05};
+    std::vector<double> Lu_norm = {-0.001, -0.001, -0.001};
+    std::vector<double> dVnorm_dx = {-0.005, -0.003, -0.002};
+    std::vector<double> d2Vnorm_dx2 = {0.0001, 0.0001, 0.0001};
 
     mango::Snapshot snapshot{
         .time = 0.5,
         .user_index = 0,
         .spatial_grid = std::span{x},
-        .dx = std::span{dx},
-        .solution = std::span{V},
-        .spatial_operator = std::span{Lu},
-        .first_derivative = std::span{dV},
-        .second_derivative = std::span{d2V}
+        .dx = std::span{dx_spacing},
+        .solution = std::span{V_norm},
+        .spatial_operator = std::span{Lu_norm},
+        .first_derivative = std::span{dVnorm_dx},
+        .second_derivative = std::span{d2Vnorm_dx2}
     };
 
     collector.collect(snapshot);
@@ -211,12 +259,23 @@ TEST(PriceTableSnapshotCollectorTest, SnapshotOrdering) {
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    std::vector<double> x = {80.0, 100.0, 120.0};
-    std::vector<double> dx = {20.0, 20.0};
-    std::vector<double> V = {20.0, 10.0, 5.0};
-    std::vector<double> Lu = {-0.1, -0.1, -0.1};
-    std::vector<double> dV = {-0.5, -0.3, -0.2};
-    std::vector<double> d2V = {0.01, 0.01, 0.01};
+    // Use LOG-MONEYNESS coordinates
+    std::vector<double> S_values = {80.0, 100.0, 120.0};
+    std::vector<double> x(S_values.size());
+    for (size_t i = 0; i < S_values.size(); ++i) {
+        x[i] = std::log(S_values[i] / K_ref);
+    }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
+    }
+
+    // Normalized values
+    std::vector<double> V_norm = {0.20, 0.10, 0.05};
+    std::vector<double> Lu_norm = {-0.001, -0.001, -0.001};
+    std::vector<double> dVnorm_dx = {-0.005, -0.003, -0.002};
+    std::vector<double> d2Vnorm_dx2 = {0.0001, 0.0001, 0.0001};
 
     // Collect snapshots in order: tau_idx=0, 1, 2
     for (size_t tau_idx = 0; tau_idx < 3; ++tau_idx) {
@@ -224,11 +283,11 @@ TEST(PriceTableSnapshotCollectorTest, SnapshotOrdering) {
             .time = tau[tau_idx],
             .user_index = tau_idx,  // user_index IS tau_idx
             .spatial_grid = std::span{x},
-            .dx = std::span{dx},
-            .solution = std::span{V},
-            .spatial_operator = std::span{Lu},
-            .first_derivative = std::span{dV},
-            .second_derivative = std::span{d2V}
+            .dx = std::span{dx_spacing},
+            .solution = std::span{V_norm},
+            .spatial_operator = std::span{Lu_norm},
+            .first_derivative = std::span{dVnorm_dx},
+            .second_derivative = std::span{d2Vnorm_dx2}
         };
 
         collector.collect(snapshot);
@@ -262,23 +321,33 @@ TEST(PriceTableSnapshotCollectorTest, InterpolatorsBuiltOnce) {
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    // Simple mock data
-    std::vector<double> x = {50.0, 100.0, 150.0};
-    std::vector<double> dx = {50.0, 50.0};
-    std::vector<double> V = {50.0, 10.0, 2.0};
-    std::vector<double> Lu = {0.1, 0.2, 0.1};
-    std::vector<double> dV = {-1.0, -0.5, -0.2};
-    std::vector<double> d2V = {0.05, 0.03, 0.01};
+    // Simple mock data - use LOG-MONEYNESS coordinates
+    std::vector<double> S_values = {50.0, 100.0, 150.0};
+    std::vector<double> x(S_values.size());
+    for (size_t i = 0; i < S_values.size(); ++i) {
+        x[i] = std::log(S_values[i] / 100.0);
+    }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
+    }
+
+    // Normalized values
+    std::vector<double> V_norm = {0.50, 0.10, 0.02};
+    std::vector<double> Lu_norm = {0.001, 0.002, 0.001};
+    std::vector<double> dVnorm_dx = {-0.01, -0.005, -0.002};
+    std::vector<double> d2Vnorm_dx2 = {0.0005, 0.0003, 0.0001};
 
     mango::Snapshot snapshot{
         .time = 0.5,
         .user_index = 0,
         .spatial_grid = std::span{x},
-        .dx = std::span{dx},
-        .solution = std::span{V},
-        .spatial_operator = std::span{Lu},
-        .first_derivative = std::span{dV},
-        .second_derivative = std::span{d2V}
+        .dx = std::span{dx_spacing},
+        .solution = std::span{V_norm},
+        .spatial_operator = std::span{Lu_norm},
+        .first_derivative = std::span{dVnorm_dx},
+        .second_derivative = std::span{d2Vnorm_dx2}
     };
 
     // This should complete quickly (not O(n²))

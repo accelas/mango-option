@@ -213,6 +213,11 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                 });
         }
 
+        // 6a. Register snapshots (if any requested)
+        for (const auto& req : snapshot_requests_) {
+            solver.register_snapshot(req.step_index, req.user_index, req.collector);
+        }
+
         // 7. Initialize with terminal condition (payoff at maturity)
         // In log-moneyness, obstacle is normalized: ψ = max(1 - exp(x), 0)
         // Initial condition must match (already normalized by K=1)
@@ -266,6 +271,11 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                 [div_jump](double t, auto x, auto u) {
                     div_jump(t, x, u);
                 });
+        }
+
+        // 6a. Register snapshots (if any requested)
+        for (const auto& req : snapshot_requests_) {
+            solver.register_snapshot(req.step_index, req.user_index, req.collector);
         }
 
         // 7. Initialize with terminal condition (payoff at maturity)

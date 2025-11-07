@@ -34,7 +34,8 @@ GTEST_LIBS := $(GTEST_DIR)/lib/libgtest.a $(GTEST_DIR)/lib/libgtest_main.a
 GTEST_LDFLAGS := -pthread
 
 # Source files
-LIB_SOURCES := $(SRC_DIR)/american_option.cpp $(SRC_DIR)/iv_solver.cpp
+LIB_SOURCES := $(SRC_DIR)/american_option.cpp $(SRC_DIR)/iv_solver.cpp \
+               $(SRC_DIR)/price_table_4d_builder.cpp $(SRC_DIR)/iv_solver_interpolated.cpp
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(LIB_SOURCES))
 
 # Library output
@@ -94,6 +95,14 @@ $(OBJ_DIR)/american_option.o: $(SRC_DIR)/american_option.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(CXXFLAGS_SIMD) $(CXXFLAGS_OMP) $(USDT_FLAG) $(INCLUDES) -c $< -o $@
 
 $(OBJ_DIR)/iv_solver.o: $(SRC_DIR)/iv_solver.cpp | $(OBJ_DIR)
+	@echo "Compiling: $<"
+	$(CXX) $(CXXFLAGS) $(CXXFLAGS_OMP) $(USDT_FLAG) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/price_table_4d_builder.o: $(SRC_DIR)/price_table_4d_builder.cpp | $(OBJ_DIR)
+	@echo "Compiling: $<"
+	$(CXX) $(CXXFLAGS) $(CXXFLAGS_OMP) $(USDT_FLAG) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/iv_solver_interpolated.o: $(SRC_DIR)/iv_solver_interpolated.cpp | $(OBJ_DIR)
 	@echo "Compiling: $<"
 	$(CXX) $(CXXFLAGS) $(CXXFLAGS_OMP) $(USDT_FLAG) $(INCLUDES) -c $< -o $@
 
