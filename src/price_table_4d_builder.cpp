@@ -159,6 +159,7 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
                     .volatility = volatility_[k],
                     .rate = rate_[l],
                     .continuous_dividend_yield = dividend_yield,
+                    .discrete_dividends = {},
                     .option_type = option_type
                 };
 

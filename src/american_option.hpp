@@ -129,6 +129,20 @@ public:
     expected<AmericanOptionResult, SolverError> solve();
 
     /**
+     * Register snapshot collection at specific step index.
+     *
+     * Must be called before solve(). Snapshots will be collected
+     * during the solve() call.
+     *
+     * @param step_index Step number (0-based) to collect snapshot
+     * @param user_index User-provided index for matching
+     * @param collector Callback to receive snapshot (must outlive solve())
+     */
+    void register_snapshot(size_t step_index, size_t user_index, SnapshotCollector* collector) {
+        snapshot_requests_.push_back({step_index, user_index, collector});
+    }
+
+    /**
      * Get the full solution surface (for debugging/analysis).
      *
      * @return Vector of option values across the spatial grid
@@ -145,6 +159,14 @@ private:
     // Solution state
     std::vector<double> solution_;
     bool solved_ = false;
+
+    // Snapshot requests
+    struct SnapshotRequest {
+        size_t step_index;
+        size_t user_index;
+        SnapshotCollector* collector;
+    };
+    std::vector<SnapshotRequest> snapshot_requests_;
 
     // Helper methods
     double compute_delta() const;
