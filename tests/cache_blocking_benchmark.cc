@@ -41,10 +41,10 @@ TEST(CacheBlockingBenchmark, LargeGridSpeedup) {
     solver_no_block.initialize(ic);
 
     auto start_no_block = std::chrono::high_resolution_clock::now();
-    bool conv1 = solver_no_block.solve();
+    auto result1 = solver_no_block.solve();
     auto end_no_block = std::chrono::high_resolution_clock::now();
 
-    ASSERT_TRUE(conv1);
+    ASSERT_TRUE(result1.has_value()) << "Solver failed: " << result1.error().message;
 
     double time_no_block = std::chrono::duration<double>(
         end_no_block - start_no_block).count();
@@ -58,10 +58,10 @@ TEST(CacheBlockingBenchmark, LargeGridSpeedup) {
     solver_block.initialize(ic);
 
     auto start_block = std::chrono::high_resolution_clock::now();
-    bool conv2 = solver_block.solve();
+    auto result2 = solver_block.solve();
     auto end_block = std::chrono::high_resolution_clock::now();
 
-    ASSERT_TRUE(conv2);
+    ASSERT_TRUE(result2.has_value()) << "Solver failed: " << result2.error().message;
 
     double time_block = std::chrono::duration<double>(
         end_block - start_block).count();

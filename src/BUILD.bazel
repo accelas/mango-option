@@ -36,6 +36,7 @@ cc_library(
     deps = [
         ":snapshot",
         ":snapshot_interpolator",
+        ":american_option",
     ],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
@@ -222,6 +223,130 @@ cc_library(
     hdrs = ["cubic_spline_solver.hpp"],
     deps = [":thomas_solver"],
     copts = ["-std=c++20", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_basis_1d",
+    hdrs = ["bspline_basis_1d.hpp"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_collocation_1d",
+    hdrs = ["bspline_collocation_1d.hpp"],
+    deps = [
+        ":bspline_basis_1d",
+        ":bspline_utils",
+        ":thomas_solver",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_utils",
+    hdrs = ["bspline_utils.hpp"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_4d",
+    hdrs = ["bspline_4d.hpp"],
+    deps = [":bspline_utils"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",  # Enable FMA instructions
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_fitter_4d_separable",
+    hdrs = ["bspline_fitter_4d_separable.hpp"],
+    deps = [
+        ":bspline_collocation_1d",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_fitter_4d",
+    hdrs = ["bspline_fitter_4d.hpp"],
+    deps = [
+        ":bspline_4d",
+        ":bspline_fitter_4d_separable",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_4d_builder",
+    srcs = ["price_table_4d_builder.cpp"],
+    hdrs = ["price_table_4d_builder.hpp"],
+    deps = [
+        ":american_option",
+        ":bspline_4d",
+        ":bspline_fitter_4d",
+        ":price_table_snapshot_collector",
+        ":trbdf2_config",
+        ":root_finding",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_solver_interpolated",
+    srcs = ["iv_solver_interpolated.cpp"],
+    hdrs = ["iv_solver_interpolated.hpp"],
+    deps = [
+        ":bspline_4d",
+        ":american_option",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
     visibility = ["//visibility:public"],
 )
 

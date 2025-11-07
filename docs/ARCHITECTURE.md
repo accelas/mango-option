@@ -33,6 +33,8 @@ graph TD
     ROOT[Root Finding<br/>root_finding.hpp<br/>- Brent's method<br/>- Newton's method]
 
     SPLINE[Cubic Spline Solver<br/>cubic_spline_solver.hpp]
+    PTABLE[PriceTable Builder<br/>price_table_4d_builder.hpp<br/>- Snapshot ingestion<br/>- Separable BSpline fit]
+    IVFAST[Fast IV Solver<br/>iv_solver_interpolated.cpp<br/>- 4D B-spline Newton]
 
     THOMAS[Thomas Solver<br/>thomas_solver.hpp<br/>- Tridiagonal solver]
 
@@ -45,8 +47,10 @@ graph TD
     PDE --> BC
     PDE --> NEWTON
     PDE --> SPLINE
+    SPLINE --> PTABLE
     NEWTON --> THOMAS
     SPLINE --> THOMAS
+    PTABLE --> IVFAST
 
     style IV fill:#e1f5ff,stroke:#333,stroke-width:2px,color:#000
     style AO fill:#fff4e1,stroke:#333,stroke-width:2px,color:#000
@@ -55,9 +59,22 @@ graph TD
     style BC fill:#e8f5e9,stroke:#333,stroke-width:2px,color:#000
     style ROOT fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style SPLINE fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style PTABLE fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
+    style IVFAST fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style THOMAS fill:#f0f0f0,stroke:#333,stroke-width:2px,color:#000
     style NEWTON fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
 ```
+
+### B-Spline Fast IV Path
+
+The accelerated IV workflow pre-computes a tensor-product cubic B-spline surface and reuses it for millions of IV queries:
+
+1. **Snapshot collection:** `PriceTableSnapshotCollector` builds `(m, τ)` slices for every `(σ, r)` pair.
+2. **Separable fitting:** `BSplineFitter4D` runs four passes of 1D collocation (m → τ → σ → r) using the shared `BSplineCollocation1D` solver.
+3. **Evaluation:** `BSpline4D_FMA` clamps queries, evaluates up to 4⁴ basis products with FMA accumulation, and feeds price/vega/gamma to the solver.
+4. **IV solving:** `IVSolverInterpolated` enforces adaptive volatility bounds that respect the surface and converges via Newton in 3‑5 iterations.
+
+Detailed design notes live in `docs/plans/2025-11-06-bspline-fast-iv-design.md`, and the 1D collocation contract is documented in `docs/bspline_collocation_problem.md`.
 
 ---
 
@@ -1335,4 +1352,3 @@ The mango-iv codebase implements a complete, production-ready suite for American
 - ✅ Adaptive grid refinement: <1bp IV error for 95% of validation points
 - ✅ Unified grid architecture: 20,000× memcpy reduction
 - ✅ Enables sub-millisecond trading applications
-
