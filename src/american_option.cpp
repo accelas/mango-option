@@ -15,6 +15,7 @@
 #include <span>
 #include <cmath>
 #include <vector>
+#include <optional>
 
 namespace mango {
 
@@ -158,7 +159,7 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 1. Get grid (from workspace if available, otherwise generate new)
-    GridBuffer<double> owned_grid_buffer;
+    std::optional<GridBuffer<double>> owned_grid_buffer;
     std::span<const double> x_grid;
 
     if (workspace_) {
@@ -167,7 +168,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     } else {
         // Standalone mode: generate new grid
         owned_grid_buffer = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate();
-        x_grid = owned_grid_buffer.span();
+        x_grid = owned_grid_buffer->span();
     }
 
     // 2. Setup time domain

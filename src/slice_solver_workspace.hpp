@@ -53,10 +53,8 @@ public:
         : x_min_(x_min)
         , x_max_(x_max)
         , n_space_(n_space)
+        , grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).generate())
     {
-        // Generate grid once (reused across all solvers)
-        grid_buffer_ = GridSpec<>::uniform(x_min, x_max, n_space).generate();
-
         // Create GridSpacing once (reused across all spatial operators)
         auto grid_view = GridView<double>(grid_buffer_.span());
         grid_spacing_ = std::make_shared<operators::GridSpacing<double>>(grid_view);
