@@ -233,7 +233,7 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
 
     auto result = iv_solver.solve(query);
 
-    ASSERT_TRUE(result.converged) << (result.error_message.has_value() ? *result.error_message : "");
+    ASSERT_TRUE(result.converged) << (result.failure_reason.has_value() ? *result.failure_reason : "");
 
     // Should recover the known volatility within reasonable tolerance
     // (B-spline approximation + Newton convergence → ~1-2% error acceptable)
@@ -354,7 +354,7 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
 
     auto result = iv_solver.solve(query);
 
-    ASSERT_TRUE(result.converged) << (result.error_message.has_value() ? *result.error_message : "");
+    ASSERT_TRUE(result.converged) << (result.failure_reason.has_value() ? *result.failure_reason : "");
     EXPECT_NEAR(result.implied_vol, known_sigma, 0.02);
 }
 
@@ -508,7 +508,7 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     auto result2 = iv_solver.solve(query2);
     // This should work because we compute moneyness as spot/K_ref
     // and scale the price appropriately
-    EXPECT_TRUE(result2.converged) << (result2.error_message.has_value() ? *result2.error_message : "");
+    EXPECT_TRUE(result2.converged) << (result2.failure_reason.has_value() ? *result2.failure_reason : "");
 }
 
 TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
@@ -597,7 +597,7 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
             << "Failed at m=" << scenario.m << " tau=" << scenario.tau
             << " sigma=" << scenario.sigma << " rate=" << scenario.rate
             << ". Error: "
-            << (result.error_message.has_value() ? *result.error_message : "");
+        << (result.failure_reason.has_value() ? *result.failure_reason : "");
         EXPECT_NEAR(result.implied_vol, scenario.sigma, 0.05);
     }
 }

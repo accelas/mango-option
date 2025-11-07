@@ -44,6 +44,7 @@
 
 #include "bspline_4d.hpp"
 #include "american_option.hpp"  // For OptionType enum
+#include "iv_types.hpp"
 #include <cmath>
 #include <optional>
 #include <string>
@@ -58,15 +59,6 @@ struct IVQuery {
     double maturity;      ///< Time to maturity in years
     double rate;          ///< Risk-free rate
     OptionType option_type = OptionType::PUT;  ///< CALL or PUT (default PUT for backwards compatibility)
-};
-
-/// Result of IV calculation
-struct IVResult {
-    double implied_vol;                      ///< Solved implied volatility
-    bool converged;                          ///< Convergence status
-    int iterations;                          ///< Number of Newton iterations
-    double final_error;                      ///< |Price(σ) - Market_Price|
-    std::optional<std::string> error_message; ///< Error description if failed
 };
 
 /// Configuration for IV solver
