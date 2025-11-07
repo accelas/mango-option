@@ -402,8 +402,9 @@ private:
         apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_.lu());
 
         // RHS = u^n + w1·L(u^n)
+        // Use FMA for SAXPY-style loop
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = u_old_[i] + w1 * workspace_.lu()[i];
+            rhs_[i] = std::fma(w1, workspace_.lu()[i], u_old_[i]);
         }
 
         // Initial guess: u* = u^n
@@ -449,8 +450,9 @@ private:
         const double w2 = config_.stage2_weight(dt);  // (1-γ)·dt/(2-γ)
 
         // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
+        // Use FMA: alpha*u_current[i] + beta*u_old[i]
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = alpha * u_current_[i] + beta * u_old_[i];
+            rhs_[i] = std::fma(alpha, u_current_[i], beta * u_old_[i]);
         }
 
         // Initial guess: u^{n+1} = u* (already in u_current_)
@@ -587,8 +589,9 @@ private:
                          std::span<double> residual) {
         // F(u) = u - rhs - coeff_dt·L(u) = 0
         // We want to solve u = rhs + coeff_dt·L(u)
+        // Use FMA: u[i] - rhs[i] - coeff_dt*Lu[i] = (u[i] - rhs[i]) + (-coeff_dt)*Lu[i]
         for (size_t i = 0; i < n_; ++i) {
-            residual[i] = u[i] - rhs[i] - coeff_dt * Lu[i];
+            residual[i] = std::fma(-coeff_dt, Lu[i], u[i] - rhs[i]);
         }
     }
 
@@ -596,10 +599,11 @@ private:
                                     std::span<const double> u_old) {
         double sum_sq_error = 0.0;
         double sum_sq_norm = 0.0;
+        // Use FMA for sum of squares: sum += x*x
         for (size_t i = 0; i < n_; ++i) {
             double diff = u_new[i] - u_old[i];
-            sum_sq_error += diff * diff;
-            sum_sq_norm += u_new[i] * u_new[i];
+            sum_sq_error = std::fma(diff, diff, sum_sq_error);
+            sum_sq_norm = std::fma(u_new[i], u_new[i], sum_sq_norm);
         }
         double rms_error = std::sqrt(sum_sq_error / n_);
         double rms_norm = std::sqrt(sum_sq_norm / n_);
