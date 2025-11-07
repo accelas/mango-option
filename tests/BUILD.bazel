@@ -340,6 +340,17 @@ cc_test(
 )
 
 cc_test(
+    name = "bspline_collocation_1d_test",
+    srcs = ["bspline_collocation_1d_test.cc"],
+    deps = [
+        "//src:bspline_collocation_1d",
+        "//src:bspline_4d",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra"],
+)
+
+cc_test(
     name = "bspline_4d_test",
     srcs = ["bspline_4d_test.cc"],
     deps = [
