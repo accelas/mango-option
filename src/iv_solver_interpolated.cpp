@@ -72,7 +72,15 @@ std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& q
         sigma_upper = 1.5;  // 150%
     }
 
-    return {config_.sigma_min, std::min(sigma_upper, config_.sigma_max)};
+    double sigma_min = std::max(config_.sigma_min, sigma_range_.first);
+    double sigma_max = std::min({sigma_upper, config_.sigma_max, sigma_range_.second});
+
+    if (sigma_min >= sigma_max) {
+        sigma_min = sigma_range_.first;
+        sigma_max = sigma_range_.second;
+    }
+
+    return {sigma_min, sigma_max};
 }
 
 IVResult IVSolverInterpolated::solve(const IVQuery& query) const {

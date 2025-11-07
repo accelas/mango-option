@@ -72,7 +72,8 @@ public:
         }
 
         // Check for duplicate or near-duplicate points
-        constexpr double MIN_SPACING = 1e-12;
+        // Accept very tightly clustered grids but block true duplicates.
+        constexpr double MIN_SPACING = 1e-14;
         for (size_t i = 1; i < n_; ++i) {
             double spacing = grid_[i] - grid_[i-1];
             if (spacing < MIN_SPACING) {
@@ -147,8 +148,8 @@ public:
                     max_residual, 0.0};
         }
 
-        // Estimate condition number (crude: max/min diagonal ratio)
-        double cond_est = estimate_condition();
+        // Estimate condition number via 1-norm bound
+        double cond_est = estimate_condition_number();
 
         return {coeffs, true, "", max_residual, cond_est};
     }
@@ -183,7 +184,7 @@ private:
             for (int k = 0; k < 4; ++k) {
                 int j = span - k;  // Basis function index
                 if (j >= 0 && j < static_cast<int>(n_)) {
-                    collocation_matrix_[i * n_ + j] = basis[k];
+                    collocation_matrix_[i * n_ + j] += basis[k];
                 }
             }
         }
@@ -194,7 +195,7 @@ private:
     /// @param rhs Right-hand side (function values)
     /// @param solution Output coefficients
     /// @return True if solve succeeded
-    bool solve_banded_system(const std::vector<double>& rhs, std::vector<double>& solution) {
+    bool solve_banded_system(const std::vector<double>& rhs, std::vector<double>& solution) const {
         // Copy to working arrays
         solution = rhs;
         std::vector<double> A = collocation_matrix_;
@@ -275,18 +276,43 @@ private:
         return max_res;
     }
 
-    /// Estimate condition number (crude: max/min diagonal ratio)
-    double estimate_condition() const {
-        double min_diag = std::numeric_limits<double>::max();
-        double max_diag = 0.0;
-
-        for (size_t i = 0; i < n_; ++i) {
-            double diag = std::abs(collocation_matrix_[i * n_ + i]);
-            min_diag = std::min(min_diag, diag);
-            max_diag = std::max(max_diag, diag);
+    /// Estimate 1-norm condition number: ||B||_1 * ||B^{-1}||_1
+    double estimate_condition_number() const {
+        // ||B||_1 = max column sum
+        double norm_B = 0.0;
+        for (size_t col = 0; col < n_; ++col) {
+            double col_sum = 0.0;
+            for (size_t row = 0; row < n_; ++row) {
+                col_sum += std::abs(collocation_matrix_[row * n_ + col]);
+            }
+            norm_B = std::max(norm_B, col_sum);
         }
 
-        return (min_diag > 0.0) ? (max_diag / min_diag) : 1e100;
+        if (norm_B == 0.0) {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        // Approximate ||B^{-1}||_1 by solving B x = e_j for each column
+        std::vector<double> rhs(n_, 0.0);
+        std::vector<double> solution(n_);
+        double max_col_sum = 0.0;
+
+        for (size_t j = 0; j < n_; ++j) {
+            std::fill(rhs.begin(), rhs.end(), 0.0);
+            rhs[j] = 1.0;
+
+            if (!solve_banded_system(rhs, solution)) {
+                return std::numeric_limits<double>::infinity();
+            }
+
+            double col_sum = 0.0;
+            for (double val : solution) {
+                col_sum += std::abs(val);
+            }
+            max_col_sum = std::max(max_col_sum, col_sum);
+        }
+
+        return norm_B * max_col_sum;
     }
 };
 

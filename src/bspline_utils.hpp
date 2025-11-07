@@ -10,6 +10,8 @@
 
 #include <vector>
 #include <algorithm>
+#include <limits>
+#include <cmath>
 
 namespace mango {
 
@@ -30,9 +32,31 @@ inline std::vector<double> clamped_knots_cubic(const std::vector<double>& x) {
     // Left clamp: repeat first point 4 times
     std::fill_n(t.begin(), 4, x.front());
 
-    // Interior knots
-    for (int i = 1; i < n - 1; ++i) {
-        t[3 + i] = x[i];
+    // Interior knots positioned strictly between data sites (midpoints)
+    if (n > 4) {
+        const int interior = n - 4;
+        const int intervals = n - 1;
+        for (int idx = 0; idx < interior; ++idx) {
+            const double ratio = static_cast<double>(idx + 1) /
+                                 static_cast<double>(interior + 1);
+            double pos = ratio * static_cast<double>(intervals);
+            int low = static_cast<int>(std::floor(pos));
+            if (low >= intervals) {
+                low = intervals - 1;
+            }
+            const double frac = pos - static_cast<double>(low);
+            const double left = x[low];
+            const double right = x[low + 1];
+            double knot = (1.0 - frac) * left + frac * right;
+
+            const double spacing = right - left;
+            const double eps = std::max(1e-12 * spacing,
+                                        std::numeric_limits<double>::epsilon() *
+                                            std::max(std::abs(right), 1.0));
+            knot = std::clamp(knot, left + eps, right - eps);
+
+            t[4 + idx] = knot;
+        }
     }
 
     // Right clamp: repeat last point 4 times
@@ -49,14 +73,23 @@ inline std::vector<double> clamped_knots_cubic(const std::vector<double>& x) {
 /// @param x Query point
 /// @return Knot span index
 inline int find_span_cubic(const std::vector<double>& t, double x) {
-    auto it = std::upper_bound(t.begin(), t.end(), x);
+    constexpr int DEGREE = 3;
+    const int n_ctrl = static_cast<int>(t.size()) - DEGREE - 1;
+    const int min_span = DEGREE;
+    const int max_span = std::max(min_span, n_ctrl - 1);
+
+    if (x <= t[min_span]) {
+        return min_span;
+    }
+    if (x >= t[n_ctrl]) {
+        return max_span;
+    }
+
+    auto it = std::upper_bound(t.begin() + min_span, t.begin() + n_ctrl + 1, x);
     int i = static_cast<int>(std::distance(t.begin(), it)) - 1;
 
-    // Clamp to valid range
-    if (i < 0) i = 0;
-    if (i >= static_cast<int>(t.size()) - 2) {
-        i = static_cast<int>(t.size()) - 2;
-    }
+    if (i < min_span) i = min_span;
+    if (i > max_span) i = max_span;
 
     return i;
 }
@@ -73,6 +106,15 @@ inline int find_span_cubic(const std::vector<double>& t, double x) {
 ///          N[0] corresponds to basis i, N[1] to i-1, N[2] to i-2, N[3] to i-3
 inline void cubic_basis_nonuniform(const std::vector<double>& t, int i, double x, double N[4]) {
     const int n = static_cast<int>(t.size());
+
+    // Ensure exact interpolation at the right boundary.
+    if (std::abs(x - t.back()) < 1e-14) {
+        N[0] = 1.0;
+        N[1] = 0.0;
+        N[2] = 0.0;
+        N[3] = 0.0;
+        return;
+    }
 
     // Degree 0: piecewise constants
     double N0[4] = {0, 0, 0, 0};
