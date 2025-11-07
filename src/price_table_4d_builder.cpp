@@ -7,6 +7,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -68,73 +69,59 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     const size_t Nv = volatility_.size();
     const size_t Nr = rate_.size();
 
+    // Total number of PDE solves
+    const size_t total_solves = Nm * Nt * Nv * Nr;
+
     // Allocate 4D price array
-    std::vector<double> prices_4d(Nm * Nt * Nv * Nr, 0.0);
+    std::vector<double> prices_4d(total_solves, 0.0);
 
     // Start timer
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Create batch of option parameters for each (σ, r) combination
+    // Create batch of ALL option parameters (m, tau, sigma, rate)
     std::vector<AmericanOptionParams> batch;
-    batch.reserve(Nv * Nr);
+    batch.reserve(total_solves);
 
-    for (size_t k = 0; k < Nv; ++k) {
-        for (size_t l = 0; l < Nr; ++l) {
-            // Use midpoint moneyness and maturity for reference spot calculation
-            const double m_mid = moneyness_[Nm / 2];
-            const double tau_mid = maturity_[Nt / 2];
+    for (size_t i = 0; i < Nm; ++i) {
+        for (size_t j = 0; j < Nt; ++j) {
+            for (size_t k = 0; k < Nv; ++k) {
+                for (size_t l = 0; l < Nr; ++l) {
+                    AmericanOptionParams params{
+                        .strike = K_ref_,
+                        .spot = moneyness_[i] * K_ref_,  // S = m * K
+                        .maturity = maturity_[j],
+                        .volatility = volatility_[k],
+                        .rate = rate_[l],
+                        .continuous_dividend_yield = dividend_yield,
+                        .option_type = option_type
+                    };
 
-            AmericanOptionParams params{
-                .strike = K_ref_,
-                .spot = m_mid * K_ref_,          // Representative spot
-                .maturity = tau_mid,              // Representative maturity
-                .volatility = volatility_[k],
-                .rate = rate_[l],
-                .continuous_dividend_yield = dividend_yield,
-                .option_type = option_type
-            };
-
-            batch.push_back(params);
-        }
-    }
-
-    // Solve all options using BatchAmericanOptionSolver
-    BatchAmericanOptionSolver solver;
-    auto results = solver.solve(batch, grid_config);
-
-    // Process results and fill 4D price array
-    size_t result_idx = 0;
-    for (size_t k = 0; k < Nv; ++k) {
-        for (size_t l = 0; l < Nr; ++l) {
-            const auto& result = results[result_idx++];
-
-            if (!result.converged) {
-                // For now, continue with zero prices (or could throw)
-                continue;
-            }
-
-            // For each (m, tau) point, compute price
-            // We need to re-solve with actual parameters since batch used midpoint
-            // This is a simplification - ideally we'd solve for each (m, tau, σ, r)
-            // For now, use the batch result as a first approximation
-
-            // TODO: Implement proper multi-point evaluation
-            // For now, fill with the single result value
-            for (size_t i = 0; i < Nm; ++i) {
-                for (size_t j = 0; j < Nt; ++j) {
-                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-
-                    // Scale by moneyness (rough approximation)
-                    const double m = moneyness_[i];
-                    const double tau = maturity_[j];
-
-                    // Simple scaling: price scales linearly with moneyness and sqrt(tau)
-                    // This is placeholder - proper implementation needs individual solves
-                    double scale = m * std::sqrt(tau / maturity_[Nt / 2]);
-                    prices_4d[idx_4d] = result.value * scale;
+                    batch.push_back(params);
                 }
             }
         }
+    }
+
+    // Solve all options using static method
+    auto results = BatchAmericanOptionSolver::solve_batch(batch, grid_config);
+
+    // Process results and fill 4D price array
+    size_t failed_count = 0;
+    for (size_t idx = 0; idx < total_solves; ++idx) {
+        const auto& result = results[idx];
+
+        if (result.has_value()) {
+            prices_4d[idx] = result.value().value;
+        } else {
+            // PDE solve failed - use NaN to mark invalid
+            prices_4d[idx] = std::numeric_limits<double>::quiet_NaN();
+            ++failed_count;
+        }
+    }
+
+    if (failed_count > 0) {
+        throw std::runtime_error("Failed to solve " + std::to_string(failed_count) +
+                                 " out of " + std::to_string(total_solves) + " PDEs");
     }
 
     // End timer
@@ -156,7 +143,7 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     return PriceTable4DResult{
         .evaluator = std::move(evaluator),
         .prices_4d = std::move(prices_4d),
-        .n_pde_solves = Nv * Nr,
+        .n_pde_solves = total_solves,
         .precompute_time_seconds = duration.count()
     };
 }

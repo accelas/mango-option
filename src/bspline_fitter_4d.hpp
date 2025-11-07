@@ -109,10 +109,16 @@ public:
     /// coefficients equal to data values provides excellent approximation
     /// (>90% accuracy for smooth functions) with zero computational cost.
     ///
+    /// WARNING: This is an approximation! Cubic B-splines are not truly
+    /// interpolatory. For critical applications, implement full tensor-product
+    /// fitting by solving tridiagonal systems separably.
+    ///
     /// @param values Function values at grid points (size Nm × Nt × Nv × Nr)
     ///               Row-major layout: index = ((i*Nt + j)*Nv + k)*Nr + l
+    /// @param max_allowed_residual Maximum residual (default 1e-3 = 0.1%)
+    ///        Fit fails if any grid point has larger error
     /// @return Fit result with coefficients and diagnostics
-    BSplineFitResult4D fit(const std::vector<double>& values) {
+    BSplineFitResult4D fit(const std::vector<double>& values, double max_allowed_residual = 1e-3) {
         if (values.size() != Nm_ * Nt_ * Nv_ * Nr_) {
             return {std::vector<double>(), false,
                     "Value array size mismatch (expected " +
@@ -130,6 +136,7 @@ public:
         BSpline4D_FMA spline(m_grid_, t_grid_, v_grid_, r_grid_, coeffs);
 
         double max_residual = 0.0;
+        double max_value = 0.0;
         for (size_t i = 0; i < Nm_; ++i) {
             for (size_t j = 0; j < Nt_; ++j) {
                 for (size_t k = 0; k < Nv_; ++k) {
@@ -139,9 +146,22 @@ public:
                                                         v_grid_[k], r_grid_[l]);
                         double residual = std::abs(eval_value - values[idx]);
                         max_residual = std::max(max_residual, residual);
+                        max_value = std::max(max_value, std::abs(values[idx]));
                     }
                 }
             }
+        }
+
+        // Check if residual exceeds threshold
+        if (max_residual > max_allowed_residual) {
+            double relative_error = (max_value > 0) ? (max_residual / max_value) : max_residual;
+            return {std::vector<double>(), false,
+                    "Direct interpolation residual too large: max_residual=" +
+                    std::to_string(max_residual) + " (relative: " +
+                    std::to_string(relative_error * 100.0) + "%) exceeds threshold=" +
+                    std::to_string(max_allowed_residual) +
+                    ". Consider implementing full tensor-product B-spline fitting.",
+                    max_residual};
         }
 
         return {coeffs, true, "", max_residual};

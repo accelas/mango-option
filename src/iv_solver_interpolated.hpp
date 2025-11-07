@@ -43,6 +43,7 @@
 #pragma once
 
 #include "bspline_4d.hpp"
+#include "american_option.hpp"  // For OptionType enum
 #include <cmath>
 #include <optional>
 #include <string>
@@ -56,6 +57,7 @@ struct IVQuery {
     double strike;        ///< Strike price (use K_ref if not specified)
     double maturity;      ///< Time to maturity in years
     double rate;          ///< Risk-free rate
+    OptionType option_type = OptionType::PUT;  ///< CALL or PUT (default PUT for backwards compatibility)
 };
 
 /// Result of IV calculation

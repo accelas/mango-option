@@ -7,15 +7,19 @@
 
 #pragma once
 
-#include "solver_common.hpp"
 #include <span>
 #include <vector>
 #include <cmath>
+#include <concepts>
 #include <optional>
 #include <string_view>
 #include <limits>
 
 namespace mango {
+
+/// Floating point concept for template constraints
+template<typename T>
+concept FloatingPoint = std::floating_point<T>;
 
 /// Result type for Thomas solver
 template<FloatingPoint T>

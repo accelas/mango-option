@@ -23,21 +23,40 @@ std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& q
         return "Maturity must be positive";
     }
 
-    // Check for arbitrage violations
-    const double intrinsic = std::max(query.strike - query.spot, 0.0);  // Put intrinsic
+    // Check for arbitrage violations (option-type specific)
+    double intrinsic;
+    double upper_bound;
+
+    if (query.option_type == OptionType::CALL) {
+        intrinsic = std::max(query.spot - query.strike, 0.0);  // Call intrinsic
+        upper_bound = query.spot;  // Call price cannot exceed spot
+    } else {  // PUT
+        intrinsic = std::max(query.strike - query.spot, 0.0);  // Put intrinsic
+        upper_bound = query.strike;  // Put price cannot exceed strike
+    }
+
     if (query.market_price < intrinsic) {
         return "Market price below intrinsic value (arbitrage)";
     }
-    if (query.market_price > query.strike) {
-        return "Put price above strike (arbitrage)";
+    if (query.market_price > upper_bound) {
+        const char* opt_type = (query.option_type == OptionType::CALL) ? "Call" : "Put";
+        const char* bound_type = (query.option_type == OptionType::CALL) ? "spot" : "strike";
+        return std::string(opt_type) + " price above " + bound_type + " (arbitrage)";
     }
 
     return std::nullopt;
 }
 
 std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& query) const {
+    // Compute intrinsic value based on option type
+    double intrinsic;
+    if (query.option_type == OptionType::CALL) {
+        intrinsic = std::max(query.spot - query.strike, 0.0);
+    } else {  // PUT
+        intrinsic = std::max(query.strike - query.spot, 0.0);
+    }
+
     // Analyze time value to set adaptive bounds
-    const double intrinsic = std::max(query.strike - query.spot, 0.0);
     const double time_value = query.market_price - intrinsic;
     const double time_value_pct = time_value / query.market_price;
 

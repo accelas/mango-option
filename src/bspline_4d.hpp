@@ -98,11 +98,13 @@ inline int find_span_cubic(const std::vector<double>& t, double x) {
 /// @param N Output: 4 basis function values N[0..3]
 ///          N[0] corresponds to basis i, N[1] to i-1, N[2] to i-2, N[3] to i-3
 inline void cubic_basis_nonuniform(const std::vector<double>& t, int i, double x, double N[4]) {
+    const int n = static_cast<int>(t.size());
+
     // Degree 0: piecewise constants
     double N0[4] = {0, 0, 0, 0};
     for (int k = 0; k < 4; ++k) {
         int idx = i - k;
-        if (idx >= 0 && idx + 1 < static_cast<int>(t.size())) {
+        if (idx >= 0 && idx + 1 < n) {
             N0[k] = (t[idx] <= x && x < t[idx + 1]) ? 1.0 : 0.0;
         }
     }
@@ -111,38 +113,46 @@ inline void cubic_basis_nonuniform(const std::vector<double>& t, int i, double x
     double N1[4] = {0, 0, 0, 0};
     for (int k = 0; k < 4; ++k) {
         int idx = i - k;
-        double leftDen  = t[idx + 1] - t[idx];
-        double rightDen = t[idx + 2] - t[idx + 1];
+        if (idx >= 0 && idx + 2 < n) {
+            double leftDen  = t[idx + 1] - t[idx];
+            double rightDen = t[idx + 2] - t[idx + 1];
 
-        double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N0[k] : 0.0;
-        double right = (rightDen > 0.0 && k > 0) ? (t[idx + 2] - x) / rightDen * N0[k - 1] : 0.0;
+            double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N0[k] : 0.0;
+            double right = (rightDen > 0.0 && k > 0) ? (t[idx + 2] - x) / rightDen * N0[k - 1] : 0.0;
 
-        N1[k] = left + right;
+            N1[k] = left + right;
+        }
     }
 
     // Degree 2: quadratic
     double N2[4] = {0, 0, 0, 0};
     for (int k = 0; k < 4; ++k) {
         int idx = i - k;
-        double leftDen  = t[idx + 2] - t[idx];
-        double rightDen = t[idx + 3] - t[idx + 1];
+        if (idx >= 0 && idx + 3 < n) {
+            double leftDen  = t[idx + 2] - t[idx];
+            double rightDen = t[idx + 3] - t[idx + 1];
 
-        double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N1[k] : 0.0;
-        double right = (rightDen > 0.0 && k > 0) ? (t[idx + 3] - x) / rightDen * N1[k - 1] : 0.0;
+            double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N1[k] : 0.0;
+            double right = (rightDen > 0.0 && k > 0) ? (t[idx + 3] - x) / rightDen * N1[k - 1] : 0.0;
 
-        N2[k] = left + right;
+            N2[k] = left + right;
+        }
     }
 
     // Degree 3: cubic
     for (int k = 0; k < 4; ++k) {
         int idx = i - k;
-        double leftDen  = t[idx + 3] - t[idx];
-        double rightDen = t[idx + 4] - t[idx + 1];
+        if (idx >= 0 && idx + 4 < n) {
+            double leftDen  = t[idx + 3] - t[idx];
+            double rightDen = t[idx + 4] - t[idx + 1];
 
-        double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N2[k] : 0.0;
-        double right = (rightDen > 0.0 && k > 0) ? (t[idx + 4] - x) / rightDen * N2[k - 1] : 0.0;
+            double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N2[k] : 0.0;
+            double right = (rightDen > 0.0 && k > 0) ? (t[idx + 4] - x) / rightDen * N2[k - 1] : 0.0;
 
-        N[k] = left + right;
+            N[k] = left + right;
+        } else {
+            N[k] = 0.0;
+        }
     }
 }
 
