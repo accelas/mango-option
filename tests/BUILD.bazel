@@ -350,17 +350,6 @@ cc_test(
 )
 
 cc_test(
-    name = "eigen_banded_solver_test",
-    srcs = ["eigen_banded_solver_test.cc"],
-    deps = [
-        "//src:eigen_banded_solver",
-        "//src:thomas_solver",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20", "-Wall", "-Wextra", "-O3"],
-)
-
-cc_test(
     name = "bspline_fitter_4d_test",
     srcs = ["bspline_fitter_4d_test.cc"],
     deps = [
