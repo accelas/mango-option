@@ -67,14 +67,15 @@ TEST(BSplineFitter4DTest, Construction) {
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    EXPECT_NO_THROW({
-        BSplineFitter4D fitter(m, t, v, r);
-        auto [Nm, Nt, Nv, Nr] = fitter.dimensions();
-        EXPECT_EQ(Nm, 10UL);
-        EXPECT_EQ(Nt, 8UL);
-        EXPECT_EQ(Nv, 6UL);
-        EXPECT_EQ(Nr, 5UL);
-    });
+    // Construction should not throw
+    BSplineFitter4D fitter(m, t, v, r);
+
+    // Check dimensions
+    auto [Nm, Nt, Nv, Nr] = fitter.dimensions();
+    EXPECT_EQ(Nm, 10UL);
+    EXPECT_EQ(Nt, 8UL);
+    EXPECT_EQ(Nv, 6UL);
+    EXPECT_EQ(Nr, 5UL);
 }
 
 TEST(BSplineFitter4DTest, InvalidConstruction) {
