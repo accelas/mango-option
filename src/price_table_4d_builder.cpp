@@ -6,6 +6,7 @@
 #include "price_table_4d_builder.hpp"
 #include "price_table_snapshot_collector.hpp"
 #include "american_option.hpp"
+#include "slice_solver_workspace.hpp"
 #include "trbdf2_config.hpp"
 #include "root_finding.hpp"
 #include <chrono>
@@ -144,6 +145,10 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
         }
     }
 
+    // Create shared workspace (reused across all solvers)
+    // This eliminates redundant grid generation and GridSpacing allocation
+    SliceSolverWorkspace workspace(grid_config.x_min, grid_config.x_max, grid_config.n_space);
+
     // Loop over (σ, r) pairs only - this is the separable batch approach
     size_t failed_count = 0;
 
@@ -173,8 +178,8 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
                 };
                 PriceTableSnapshotCollector collector(collector_config);
 
-                // Create American option solver
-                AmericanOptionSolver solver(params, grid_config,
+                // Create American option solver with shared workspace
+                AmericanOptionSolver solver(params, grid_config, workspace,
                                            TRBDF2Config{}, RootFindingConfig{});
 
                 // Register snapshots at all maturity points
