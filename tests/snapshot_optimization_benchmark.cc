@@ -104,7 +104,7 @@ TEST(SnapshotOptimizationBenchmark, CompareApproaches) {
             .moneyness = std::span{moneyness},
             .tau = std::span{tau},  // Full tau array for correct sizing
             .K_ref = K_ref,
-            .exercise_type = mango::ExerciseType::EUROPEAN
+            .option_type = mango::OptionType::PUT
         };
         mango::PriceTableSnapshotCollector collector(collector_config);
 

@@ -16,7 +16,7 @@ TEST(PriceTableSnapshotCollectorTest, GammaFormulaValidation) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = K_ref,
-        .exercise_type = mango::ExerciseType::EUROPEAN
+        .option_type = mango::OptionType::PUT
     };
 
     mango::PriceTableSnapshotCollector collector(config);
@@ -93,7 +93,7 @@ TEST(PriceTableSnapshotCollectorTest, ThetaInContinuationRegion) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = K_ref,
-        .exercise_type = mango::ExerciseType::EUROPEAN
+        .option_type = mango::OptionType::PUT
     };
 
     mango::PriceTableSnapshotCollector collector(config);
@@ -146,7 +146,6 @@ TEST(PriceTableSnapshotCollectorTest, ThetaAtExerciseBoundary) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = K_ref,
-        .exercise_type = mango::ExerciseType::AMERICAN,
         .option_type = mango::OptionType::PUT
     };
 
@@ -204,7 +203,7 @@ TEST(PriceTableSnapshotCollectorTest, VegaInterpolation) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = K_ref,
-        .exercise_type = mango::ExerciseType::EUROPEAN
+        .option_type = mango::OptionType::CALL
     };
 
     mango::PriceTableSnapshotCollector collector(config);
@@ -254,7 +253,7 @@ TEST(PriceTableSnapshotCollectorTest, SnapshotOrdering) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = K_ref,
-        .exercise_type = mango::ExerciseType::EUROPEAN
+        .option_type = mango::OptionType::CALL
     };
 
     mango::PriceTableSnapshotCollector collector(config);
@@ -316,7 +315,7 @@ TEST(PriceTableSnapshotCollectorTest, InterpolatorsBuiltOnce) {
         .moneyness = std::span{moneyness},
         .tau = std::span{tau},
         .K_ref = 100.0,
-        .exercise_type = mango::ExerciseType::EUROPEAN
+        .option_type = mango::OptionType::PUT
     };
 
     mango::PriceTableSnapshotCollector collector(config);
