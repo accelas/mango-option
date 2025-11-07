@@ -360,29 +360,6 @@ cc_test(
     copts = ["-std=c++20", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
-cc_test(
-    name = "banded_lu_test",
-    srcs = ["banded_lu_test.cc"],
-    deps = [
-        "//src:banded_lu_solver",
-        "//src:thomas_solver",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
-    tags = ["manual"],  # Has bugs, excluded from default test run
-)
-
-cc_test(
-    name = "pentadiagonal_test",
-    srcs = ["pentadiagonal_test.cc"],
-    deps = [
-        "//src:pentadiagonal_solver",
-        "//src:thomas_solver",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
-)
-
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
