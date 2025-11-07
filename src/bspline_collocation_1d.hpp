@@ -69,6 +69,25 @@ public:
             throw std::invalid_argument("Grid must be sorted");
         }
 
+        // Check for duplicate or near-duplicate points
+        constexpr double MIN_SPACING = 1e-12;
+        for (size_t i = 1; i < n_; ++i) {
+            double spacing = grid_[i] - grid_[i-1];
+            if (spacing < MIN_SPACING) {
+                throw std::invalid_argument(
+                    "Grid points too close together (spacing < 1e-12). "
+                    "Found grid[" + std::to_string(i-1) + "] = " + std::to_string(grid_[i-1]) +
+                    " and grid[" + std::to_string(i) + "] = " + std::to_string(grid_[i]) +
+                    " with spacing " + std::to_string(spacing)
+                );
+            }
+        }
+
+        // Check for zero-width grid
+        if (grid_.back() - grid_.front() < MIN_SPACING) {
+            throw std::invalid_argument("Grid has zero width (all points nearly identical)");
+        }
+
         // Build knot vector (clamped cubic)
         knots_ = clamped_knots_cubic(grid_);
 
@@ -88,6 +107,18 @@ public:
         if (values.size() != n_) {
             return {std::vector<double>(), false,
                     "Value array size mismatch", 0.0, 0.0};
+        }
+
+        // Validate input values for NaN/Inf
+        for (size_t i = 0; i < n_; ++i) {
+            if (std::isnan(values[i])) {
+                return {std::vector<double>(), false,
+                        "Input values contain NaN at index " + std::to_string(i), 0.0, 0.0};
+            }
+            if (std::isinf(values[i])) {
+                return {std::vector<double>(), false,
+                        "Input values contain infinite value at index " + std::to_string(i), 0.0, 0.0};
+            }
         }
 
         // Build collocation matrix

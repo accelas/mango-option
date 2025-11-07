@@ -436,3 +436,184 @@ TEST(BSpline4DTest, Accessors) {
     EXPECT_DOUBLE_EQ(spline.moneyness_grid().front(), 0.8);
     EXPECT_DOUBLE_EQ(spline.moneyness_grid().back(), 1.2);
 }
+
+// ============================================================================
+// Boundary Clamping and Edge Case Tests
+// ============================================================================
+
+TEST(BSpline4DTest, ExactBoundaryEvaluation) {
+    // Test evaluation exactly at grid boundaries
+    auto m = linspace(0.8, 1.2, 8);
+    auto t = linspace(0.1, 2.0, 6);
+    auto v = linspace(0.1, 0.5, 5);
+    auto r = linspace(0.0, 0.1, 4);
+
+    // Create known constant coefficients
+    std::vector<double> coeffs(8 * 6 * 5 * 4, 42.0);
+    BSpline4D_FMA spline(m, t, v, r, coeffs);
+
+    // Test all 16 corners
+    double val1 = spline.eval(m.front(), t.front(), v.front(), r.front());
+    double val2 = spline.eval(m.front(), t.front(), v.front(), r.back());
+    double val3 = spline.eval(m.front(), t.front(), v.back(), r.front());
+    double val4 = spline.eval(m.front(), t.front(), v.back(), r.back());
+    double val5 = spline.eval(m.front(), t.back(), v.front(), r.front());
+    double val6 = spline.eval(m.front(), t.back(), v.front(), r.back());
+    double val7 = spline.eval(m.front(), t.back(), v.back(), r.front());
+    double val8 = spline.eval(m.front(), t.back(), v.back(), r.back());
+    double val9 = spline.eval(m.back(), t.front(), v.front(), r.front());
+    double val10 = spline.eval(m.back(), t.front(), v.front(), r.back());
+    double val11 = spline.eval(m.back(), t.front(), v.back(), r.front());
+    double val12 = spline.eval(m.back(), t.front(), v.back(), r.back());
+    double val13 = spline.eval(m.back(), t.back(), v.front(), r.front());
+    double val14 = spline.eval(m.back(), t.back(), v.front(), r.back());
+    double val15 = spline.eval(m.back(), t.back(), v.back(), r.front());
+    double val16 = spline.eval(m.back(), t.back(), v.back(), r.back());
+
+    // All should be close to constant value (B-splines approximate)
+    EXPECT_NEAR(val1, 42.0, 5.0);
+    EXPECT_NEAR(val16, 42.0, 5.0);
+}
+
+TEST(BSpline4DTest, ClampingBehaviorOutsideBounds) {
+    // Test that queries outside grid bounds clamp to boundary coefficients
+    auto m = linspace(0.8, 1.2, 8);
+    auto t = linspace(0.1, 2.0, 6);
+    auto v = linspace(0.1, 0.5, 5);
+    auto r = linspace(0.0, 0.1, 4);
+
+    std::vector<double> coeffs(8 * 6 * 5 * 4, 10.0);
+    BSpline4D_FMA spline(m, t, v, r, coeffs);
+
+    // Query slightly past each axis boundary
+    double val_m_below = spline.eval(m.front() - 0.1, t.front(), v.front(), r.front());
+    double val_m_above = spline.eval(m.back() + 0.1, t.front(), v.front(), r.front());
+    double val_t_below = spline.eval(m.front(), t.front() - 0.05, v.front(), r.front());
+    double val_t_above = spline.eval(m.front(), t.back() + 0.5, v.front(), r.front());
+    double val_v_below = spline.eval(m.front(), t.front(), v.front() - 0.05, r.front());
+    double val_v_above = spline.eval(m.front(), t.front(), v.back() + 0.2, r.front());
+    double val_r_below = spline.eval(m.front(), t.front(), v.front(), r.front() - 0.01);
+    double val_r_above = spline.eval(m.front(), t.front(), v.front(), r.back() + 0.05);
+
+    // All should return finite values (clamped, not extrapolated)
+    EXPECT_FALSE(std::isnan(val_m_below));
+    EXPECT_FALSE(std::isinf(val_m_below));
+    EXPECT_FALSE(std::isnan(val_m_above));
+    EXPECT_FALSE(std::isinf(val_m_above));
+    EXPECT_FALSE(std::isnan(val_t_below));
+    EXPECT_FALSE(std::isnan(val_t_above));
+    EXPECT_FALSE(std::isnan(val_v_below));
+    EXPECT_FALSE(std::isnan(val_v_above));
+    EXPECT_FALSE(std::isnan(val_r_below));
+    EXPECT_FALSE(std::isnan(val_r_above));
+
+    // Values should be reasonable (close to constant)
+    EXPECT_GT(val_m_below, 5.0);
+    EXPECT_LT(val_m_below, 15.0);
+    EXPECT_GT(val_m_above, 5.0);
+    EXPECT_LT(val_m_above, 15.0);
+}
+
+TEST(BSpline4DTest, ExtremeBoundsClampingRegression) {
+    // Regression test: ensure clamping via std::nextafter works correctly
+    // at extreme out-of-bounds queries
+    auto m = linspace(0.8, 1.2, 8);
+    auto t = linspace(0.1, 2.0, 6);
+    auto v = linspace(0.1, 0.5, 5);
+    auto r = linspace(0.0, 0.1, 4);
+
+    std::vector<double> coeffs(8 * 6 * 5 * 4, 7.0);
+    BSpline4D_FMA spline(m, t, v, r, coeffs);
+
+    // Query WAY outside bounds (100× the grid range)
+    double val_extreme1 = spline.eval(-100.0, t.front(), v.front(), r.front());
+    double val_extreme2 = spline.eval(100.0, t.front(), v.front(), r.front());
+    double val_extreme3 = spline.eval(m.front(), -100.0, v.front(), r.front());
+    double val_extreme4 = spline.eval(m.front(), 100.0, v.front(), r.front());
+
+    // Should still clamp and return finite values
+    EXPECT_FALSE(std::isnan(val_extreme1));
+    EXPECT_FALSE(std::isinf(val_extreme1));
+    EXPECT_FALSE(std::isnan(val_extreme2));
+    EXPECT_FALSE(std::isinf(val_extreme2));
+    EXPECT_FALSE(std::isnan(val_extreme3));
+    EXPECT_FALSE(std::isnan(val_extreme4));
+
+    // Should be within reasonable range
+    EXPECT_GT(val_extreme1, 0.0);
+    EXPECT_LT(val_extreme1, 20.0);
+    EXPECT_GT(val_extreme2, 0.0);
+    EXPECT_LT(val_extreme2, 20.0);
+}
+
+TEST(BSpline4DTest, NaNPropagation) {
+    // Test that NaN coefficients propagate predictably
+    auto m = linspace(0.8, 1.2, 8);
+    auto t = linspace(0.1, 2.0, 6);
+    auto v = linspace(0.1, 0.5, 5);
+    auto r = linspace(0.0, 0.1, 4);
+
+    std::vector<double> coeffs(8 * 6 * 5 * 4, 5.0);
+
+    // Insert NaN at a specific coefficient index
+    coeffs[100] = std::numeric_limits<double>::quiet_NaN();
+
+    BSpline4D_FMA spline(m, t, v, r, coeffs);
+
+    // Query near the NaN coefficient region
+    // B-spline evaluation sums weighted coefficients, so NaN should propagate
+    double val1 = spline.eval(1.0, 0.5, 0.3, 0.05);
+
+    // At least some queries should produce NaN due to propagation
+    // (exact behavior depends on which basis functions are active)
+    bool has_nan = false;
+    for (int i = 0; i < 100; ++i) {
+        double mq = 0.8 + i * 0.004;  // Scan moneyness
+        double val = spline.eval(mq, 0.5, 0.3, 0.05);
+        if (std::isnan(val)) {
+            has_nan = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(has_nan) << "NaN coefficients should propagate to some queries";
+}
+
+TEST(BSpline4DTest, InfCoefficientHandling) {
+    // Test that Inf coefficients are handled (not ideal, but shouldn't crash)
+    auto m = linspace(0.8, 1.2, 8);
+    auto t = linspace(0.1, 2.0, 6);
+    auto v = linspace(0.1, 0.5, 5);
+    auto r = linspace(0.0, 0.1, 4);
+
+    std::vector<double> coeffs(8 * 6 * 5 * 4, 1.0);
+    coeffs[50] = std::numeric_limits<double>::infinity();
+
+    BSpline4D_FMA spline(m, t, v, r, coeffs);
+
+    // Should not crash, but may return Inf
+    EXPECT_NO_THROW({
+        double val = spline.eval(1.0, 0.5, 0.3, 0.05);
+        (void)val;  // May be Inf, but shouldn't crash
+    });
+}
+
+TEST(BSpline4DTest, AllZeroCoefficients) {
+    // Edge case: all coefficients are zero
+    auto m = linspace(0.8, 1.2, 8);
+    auto t = linspace(0.1, 2.0, 6);
+    auto v = linspace(0.1, 0.5, 5);
+    auto r = linspace(0.0, 0.1, 4);
+
+    std::vector<double> coeffs(8 * 6 * 5 * 4, 0.0);
+    BSpline4D_FMA spline(m, t, v, r, coeffs);
+
+    // Should return zero everywhere
+    double val1 = spline.eval(1.0, 0.5, 0.3, 0.05);
+    double val2 = spline.eval(m.front(), t.front(), v.front(), r.front());
+    double val3 = spline.eval(m.back(), t.back(), v.back(), r.back());
+
+    EXPECT_NEAR(val1, 0.0, kTolerance);
+    EXPECT_NEAR(val2, 0.0, kTolerance);
+    EXPECT_NEAR(val3, 0.0, kTolerance);
+}

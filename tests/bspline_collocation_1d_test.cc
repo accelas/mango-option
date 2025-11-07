@@ -260,3 +260,88 @@ TEST_F(BSplineCollocation1DTest, FailOnSizeMismatch) {
     EXPECT_FALSE(result.success);
     EXPECT_NE(result.error_message.find("mismatch"), std::string::npos);
 }
+
+// Test 13: Duplicate grid points
+TEST_F(BSplineCollocation1DTest, FailOnDuplicatePoints) {
+    std::vector<double> grid = {0.0, 0.5, 0.5, 1.0};  // Duplicate at 0.5
+    std::vector<double> values = {1.0, 2.0, 2.0, 3.0};
+
+    EXPECT_THROW({
+        BSplineCollocation1D solver(grid);
+    }, std::invalid_argument);
+}
+
+// Test 14: Nearly duplicate points (ill-conditioned)
+TEST_F(BSplineCollocation1DTest, IllConditionedNearDuplicates) {
+    std::vector<double> grid = {0.0, 0.1, 0.1 + 1e-14, 0.5, 1.0};
+    auto values = evaluate(grid, [](double x) { return x; });
+
+    BSplineCollocation1D solver(grid);
+    auto result = solver.fit(values);
+
+    // Should either fail or have extremely high condition number
+    if (result.success) {
+        EXPECT_GT(result.condition_estimate, 1e10);
+    } else {
+        EXPECT_NE(result.error_message.find("singular"), std::string::npos);
+    }
+}
+
+// Test 15: NaN in input values
+TEST_F(BSplineCollocation1DTest, FailOnNaNInput) {
+    auto grid = uniform_grid(0.0, 1.0, 10);
+    auto values = evaluate(grid, [](double x) { return x; });
+    values[5] = std::numeric_limits<double>::quiet_NaN();
+
+    BSplineCollocation1D solver(grid);
+    auto result = solver.fit(values);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.error_message.find("NaN"), std::string::npos);
+}
+
+// Test 16: Infinity in input values
+TEST_F(BSplineCollocation1DTest, FailOnInfInput) {
+    auto grid = uniform_grid(0.0, 1.0, 10);
+    auto values = evaluate(grid, [](double x) { return x; });
+    values[3] = std::numeric_limits<double>::infinity();
+
+    BSplineCollocation1D solver(grid);
+    auto result = solver.fit(values);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.error_message.find("infinite"), std::string::npos);
+}
+
+// Test 17: Extremely ill-conditioned system (clustering at boundaries)
+TEST_F(BSplineCollocation1DTest, ExtremelyClustered) {
+    // Create grid with severe clustering at left boundary
+    std::vector<double> grid;
+    for (int i = 0; i < 8; ++i) {
+        grid.push_back(i * 1e-10);  // 0, 1e-10, 2e-10, ..., 7e-10
+    }
+    grid.push_back(0.5);
+    grid.push_back(1.0);
+
+    auto values = evaluate(grid, [](double x) { return x; });
+
+    BSplineCollocation1D solver(grid);
+    auto result = solver.fit(values);
+
+    // Should either fail or have astronomical condition number
+    if (result.success) {
+        EXPECT_GT(result.condition_estimate, 1e12);
+    } else {
+        EXPECT_NE(result.error_message.find("singular"), std::string::npos);
+    }
+}
+
+// Test 18: Zero-width grid
+TEST_F(BSplineCollocation1DTest, FailOnZeroWidthGrid) {
+    std::vector<double> grid = {1.0, 1.0, 1.0, 1.0};  // All same value
+    std::vector<double> values = {5.0, 5.0, 5.0, 5.0};
+
+    EXPECT_THROW({
+        BSplineCollocation1D solver(grid);
+    }, std::invalid_argument);
+}
