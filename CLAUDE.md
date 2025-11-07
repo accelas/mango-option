@@ -761,7 +761,8 @@ For typical 4D price tables (200 solvers): **~320 KB saved**
 #include "src/american_option.hpp"
 
 // Create workspace once (reused across all solvers)
-SliceSolverWorkspace workspace(-3.0, 3.0, 101);  // x_min, x_max, n_space
+// Use shared_ptr for proper lifetime management
+auto workspace = std::make_shared<SliceSolverWorkspace>(-3.0, 3.0, 101);
 
 // Solve multiple options with different (σ, r, q) parameters
 for (auto [sigma, rate] : parameter_grid) {
@@ -782,7 +783,7 @@ for (auto [sigma, rate] : parameter_grid) {
         .x_max = 3.0
     };
 
-    // Solver reuses workspace grid and spacing
+    // Solver keeps workspace alive via shared_ptr
     AmericanOptionSolver solver(params, grid_config, workspace);
     auto result = solver.solve();
 }
@@ -790,10 +791,11 @@ for (auto [sigma, rate] : parameter_grid) {
 
 ### Key Points
 
-1. **Grid parameters must match**: workspace grid (x_min, x_max, n_space) must match grid_config
-2. **Thread-safe**: workspace is read-only during solve, safe for OpenMP parallel loops
-3. **Backward compatible**: existing code without workspace continues to work
-4. **Identical results**: workspace mode produces exactly the same numerical results as standalone mode
+1. **Lifetime safety**: Uses `std::shared_ptr` to ensure workspace outlives all solvers
+2. **Grid parameters must match**: workspace grid (x_min, x_max, n_space) must match grid_config
+3. **Thread-safe**: workspace is read-only during solve, safe for OpenMP parallel loops
+4. **Backward compatible**: existing code without workspace continues to work
+5. **Identical results**: workspace mode produces exactly the same numerical results as standalone mode
 
 ### When to Use
 

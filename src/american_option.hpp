@@ -132,15 +132,18 @@ public:
      * grid allocations across multiple solver instances. Use when
      * solving many options with same grid but different coefficients.
      *
+     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
+     * to ensure proper lifetime management.
+     *
      * @param params Option pricing parameters (including discrete dividends)
      * @param grid Numerical grid parameters (must match workspace)
-     * @param workspace Shared workspace with pre-allocated grid
+     * @param workspace Shared workspace with pre-allocated grid (keeps workspace alive)
      * @param trbdf2_config TR-BDF2 solver configuration
      * @param root_config Root finding configuration for Newton solver
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
                         const AmericanOptionGrid& grid,
-                        const SliceSolverWorkspace& workspace,
+                        std::shared_ptr<const SliceSolverWorkspace> workspace,
                         const TRBDF2Config& trbdf2_config = {},
                         const RootFindingConfig& root_config = {});
 
@@ -180,7 +183,8 @@ private:
     RootFindingConfig root_config_;
 
     // Workspace (optional - nullptr means standalone mode)
-    const SliceSolverWorkspace* workspace_ = nullptr;
+    // Uses shared_ptr to keep workspace alive for the solver's lifetime
+    std::shared_ptr<const SliceSolverWorkspace> workspace_;
 
     // Solution state
     std::vector<double> solution_;

@@ -46,8 +46,9 @@ TEST(AmericanOptionSolverTest, WorkspaceModeConstruction) {
     grid_config.n_space = 101;
     grid_config.n_time = 100;
 
-    // Create workspace
-    SliceSolverWorkspace workspace(grid_config.x_min, grid_config.x_max, grid_config.n_space);
+    // Create workspace with shared_ptr for proper lifetime management
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
     // Create solver with workspace
     AmericanOptionParams params{
@@ -57,7 +58,8 @@ TEST(AmericanOptionSolverTest, WorkspaceModeConstruction) {
         .volatility = 0.2,
         .rate = 0.05,
         .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT
+        .option_type = OptionType::PUT,
+        .discrete_dividends = {}
     };
 
     EXPECT_NO_THROW({
@@ -67,7 +69,7 @@ TEST(AmericanOptionSolverTest, WorkspaceModeConstruction) {
 
 TEST(AmericanOptionSolverTest, WorkspaceModeMismatchedGrid) {
     // Create workspace with specific grid
-    SliceSolverWorkspace workspace(-3.0, 3.0, 101);
+    auto workspace = std::make_shared<SliceSolverWorkspace>(-3.0, 3.0, 101);
 
     // Try to create solver with mismatched grid
     AmericanOptionGrid grid_config;
@@ -82,12 +84,37 @@ TEST(AmericanOptionSolverTest, WorkspaceModeMismatchedGrid) {
         .volatility = 0.2,
         .rate = 0.05,
         .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT
+        .option_type = OptionType::PUT,
+        .discrete_dividends = {}
     };
 
     // Should throw because grid parameters don't match workspace
     EXPECT_THROW({
         AmericanOptionSolver solver(params, grid_config, workspace);
+    }, std::invalid_argument);
+}
+
+TEST(AmericanOptionSolverTest, WorkspaceModeNullWorkspace) {
+    // Test that passing nullptr workspace throws
+    AmericanOptionGrid grid_config;
+    grid_config.x_min = -3.0;
+    grid_config.x_max = 3.0;
+    grid_config.n_space = 101;
+
+    AmericanOptionParams params{
+        .strike = 100.0,
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = 0.2,
+        .rate = 0.05,
+        .continuous_dividend_yield = 0.02,
+        .option_type = OptionType::PUT,
+        .discrete_dividends = {}
+    };
+
+    // Should throw because workspace is null
+    EXPECT_THROW({
+        AmericanOptionSolver solver(params, grid_config, nullptr);
     }, std::invalid_argument);
 }
 
@@ -99,8 +126,9 @@ TEST(AmericanOptionSolverTest, WorkspaceModeMultipleSolvers) {
     grid_config.n_space = 51;  // Smaller for faster test
     grid_config.n_time = 100;
 
-    // Create workspace once
-    SliceSolverWorkspace workspace(grid_config.x_min, grid_config.x_max, grid_config.n_space);
+    // Create workspace once with shared_ptr
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
     // Create multiple solvers with different parameters
     std::vector<double> volatilities = {0.15, 0.20, 0.25, 0.30};
@@ -115,7 +143,8 @@ TEST(AmericanOptionSolverTest, WorkspaceModeMultipleSolvers) {
                 .volatility = vol,
                 .rate = rate,
                 .continuous_dividend_yield = 0.02,
-                .option_type = OptionType::PUT
+                .option_type = OptionType::PUT,
+                .discrete_dividends = {}
             };
 
             // Create solver with shared workspace
@@ -147,7 +176,8 @@ TEST(AmericanOptionSolverTest, WorkspaceModeVsStandaloneConsistency) {
         .volatility = 0.2,
         .rate = 0.05,
         .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT
+        .option_type = OptionType::PUT,
+        .discrete_dividends = {}
     };
 
     // Solve in standalone mode
@@ -156,7 +186,8 @@ TEST(AmericanOptionSolverTest, WorkspaceModeVsStandaloneConsistency) {
     ASSERT_TRUE(result_standalone.has_value());
 
     // Solve in workspace mode
-    SliceSolverWorkspace workspace(grid_config.x_min, grid_config.x_max, grid_config.n_space);
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid_config.x_min, grid_config.x_max, grid_config.n_space);
     AmericanOptionSolver solver_workspace(params, grid_config, workspace);
     auto result_workspace = solver_workspace.solve();
     ASSERT_TRUE(result_workspace.has_value());

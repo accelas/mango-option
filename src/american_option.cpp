@@ -123,7 +123,6 @@ AmericanOptionSolver::AmericanOptionSolver(
     , grid_(grid)
     , trbdf2_config_(trbdf2_config)
     , root_config_(root_config)
-    , workspace_(nullptr)
 {
     // Validate parameters (includes discrete dividend validation)
     params_.validate();
@@ -133,27 +132,32 @@ AmericanOptionSolver::AmericanOptionSolver(
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
     const AmericanOptionGrid& grid,
-    const SliceSolverWorkspace& workspace,
+    std::shared_ptr<const SliceSolverWorkspace> workspace,
     const TRBDF2Config& trbdf2_config,
     const RootFindingConfig& root_config)
     : params_(params)
     , grid_(grid)
     , trbdf2_config_(trbdf2_config)
     , root_config_(root_config)
-    , workspace_(&workspace)
+    , workspace_(std::move(workspace))
 {
     // Validate parameters
     params_.validate();
     grid_.validate();
 
+    // Validate workspace is not null
+    if (!workspace_) {
+        throw std::invalid_argument("Workspace cannot be null");
+    }
+
     // Validate grid matches workspace
-    if (grid_.x_min != workspace.x_min() || grid_.x_max != workspace.x_max() ||
-        grid_.n_space != workspace.n_space()) {
+    if (grid_.x_min != workspace_->x_min() || grid_.x_max != workspace_->x_max() ||
+        grid_.n_space != workspace_->n_space()) {
         throw std::invalid_argument(
             "Grid parameters must match workspace "
-            "(x_min=" + std::to_string(workspace.x_min()) +
-            ", x_max=" + std::to_string(workspace.x_max()) +
-            ", n_space=" + std::to_string(workspace.n_space()) + ")");
+            "(x_min=" + std::to_string(workspace_->x_min()) +
+            ", x_max=" + std::to_string(workspace_->x_max()) +
+            ", n_space=" + std::to_string(workspace_->n_space()) + ")");
     }
 }
 
