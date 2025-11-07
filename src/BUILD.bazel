@@ -29,6 +29,7 @@ cc_library(
     deps = [
         ":snapshot",
         ":snapshot_interpolator",
+        ":american_option",
     ],
     copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
@@ -315,7 +316,10 @@ cc_library(
     name = "iv_solver_interpolated",
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],
-    deps = [":bspline_4d"],
+    deps = [
+        ":bspline_4d",
+        ":american_option",
+    ],
     copts = [
         "-std=c++20",
         "-Wall",
