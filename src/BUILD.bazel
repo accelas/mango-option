@@ -299,6 +299,9 @@ cc_library(
         ":american_option",
         ":bspline_4d",
         ":bspline_fitter_4d",
+        ":price_table_snapshot_collector",
+        ":trbdf2_config",
+        ":root_finding",
     ],
     copts = [
         "-std=c++20",
