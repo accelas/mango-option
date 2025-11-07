@@ -2,6 +2,7 @@
 
 #include "snapshot.hpp"
 #include "snapshot_interpolator.hpp"
+#include "american_option.hpp"  // For OptionType enum
 #include <span>
 #include <vector>
 #include <cmath>
@@ -18,6 +19,7 @@ struct PriceTableSnapshotCollectorConfig {
     std::span<const double> tau;
     double K_ref;
     ExerciseType exercise_type;
+    OptionType option_type;  // CALL or PUT (for American exercise boundary)
     const void* payoff_params = nullptr;
 };
 
@@ -32,6 +34,7 @@ public:
         , tau_(config.tau.begin(), config.tau.end())
         , K_ref_(config.K_ref)
         , exercise_type_(config.exercise_type)
+        , option_type_(config.option_type)
         , payoff_params_(config.payoff_params)
     {
         const size_t n = moneyness_.size() * tau_.size();
@@ -139,6 +142,7 @@ private:
     std::vector<double> tau_;
     double K_ref_;
     ExerciseType exercise_type_;
+    OptionType option_type_;
     const void* payoff_params_;
 
     std::vector<double> prices_;
@@ -147,8 +151,12 @@ private:
     std::vector<double> thetas_;
 
     double compute_american_obstacle(double S, double /*tau*/) const {
-        // American put payoff: max(K - S, 0)
-        return std::max(K_ref_ - S, 0.0);
+        // American option intrinsic value (exercise boundary)
+        if (option_type_ == OptionType::CALL) {
+            return std::max(S - K_ref_, 0.0);  // Call: max(S - K, 0)
+        } else {
+            return std::max(K_ref_ - S, 0.0);  // Put: max(K - S, 0)
+        }
     }
 };
 

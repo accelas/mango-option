@@ -87,6 +87,29 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     const size_t Nv = volatility_.size();
     const size_t Nr = rate_.size();
 
+    // Validate that requested moneyness range fits within PDE grid bounds
+    // CRITICAL: PDE works in log-moneyness x = ln(m), and SnapshotInterpolator
+    // uses natural cubic splines that extrapolate unpredictably outside knot domain.
+    // If any requested ln(m) lies outside [x_min, x_max], the interpolation
+    // will produce arbitrary extrapolation artifacts.
+    const double x_min_requested = std::log(moneyness_.front());
+    const double x_max_requested = std::log(moneyness_.back());
+
+    if (x_min_requested < grid_config.x_min || x_max_requested > grid_config.x_max) {
+        throw std::invalid_argument(
+            "Requested moneyness range [" + std::to_string(moneyness_.front()) + ", " +
+            std::to_string(moneyness_.back()) + "] in spot ratios "
+            "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
+            std::to_string(x_max_requested) + "], "
+            "which exceeds PDE grid bounds [" + std::to_string(grid_config.x_min) + ", " +
+            std::to_string(grid_config.x_max) + "]. "
+            "Either narrow the moneyness grid or expand the PDE x_min/x_max bounds. "
+            "Example: for moneyness [0.7, 1.5], use x_min <= " +
+            std::to_string(x_min_requested) + " and x_max >= " +
+            std::to_string(x_max_requested) + "."
+        );
+    }
+
     // Allocate 4D price array
     std::vector<double> prices_4d(Nm * Nt * Nv * Nr, 0.0);
 
@@ -145,6 +168,7 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
                     .tau = std::span{maturity_},
                     .K_ref = K_ref_,
                     .exercise_type = ExerciseType::AMERICAN,
+                    .option_type = option_type,  // CRITICAL: Pass option type for correct theta computation
                     .payoff_params = nullptr
                 };
                 PriceTableSnapshotCollector collector(collector_config);
