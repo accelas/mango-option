@@ -260,9 +260,10 @@ private:
 
         for (size_t i = 0; i < n_; ++i) {
             // Compute (B*c)[i]
+            // PERFORMANCE: Use FMA for tighter precision and better codegen
             double Bc_i = 0.0;
             for (size_t j = 0; j < n_; ++j) {
-                Bc_i += collocation_matrix_[i * n_ + j] * coeffs[j];
+                Bc_i = std::fma(collocation_matrix_[i * n_ + j], coeffs[j], Bc_i);
             }
 
             double residual = std::abs(Bc_i - values[i]);

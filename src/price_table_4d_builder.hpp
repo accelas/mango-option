@@ -42,12 +42,34 @@
 
 namespace mango {
 
+/// Statistics from B-spline fitting process
+struct BSplineFittingStats {
+    double max_residual_m = 0.0;       ///< Max residual along moneyness axis
+    double max_residual_tau = 0.0;     ///< Max residual along maturity axis
+    double max_residual_sigma = 0.0;   ///< Max residual along volatility axis
+    double max_residual_r = 0.0;       ///< Max residual along rate axis
+    double max_residual_overall = 0.0; ///< Max residual across all axes
+
+    double condition_m = 0.0;          ///< Condition number estimate (moneyness)
+    double condition_tau = 0.0;        ///< Condition number estimate (maturity)
+    double condition_sigma = 0.0;      ///< Condition number estimate (volatility)
+    double condition_r = 0.0;          ///< Condition number estimate (rate)
+    double condition_max = 0.0;        ///< Maximum condition number
+
+    size_t failed_slices_m = 0;        ///< Failed fits along moneyness
+    size_t failed_slices_tau = 0;      ///< Failed fits along maturity
+    size_t failed_slices_sigma = 0;    ///< Failed fits along volatility
+    size_t failed_slices_r = 0;        ///< Failed fits along rate
+    size_t failed_slices_total = 0;    ///< Total failed fits
+};
+
 /// Result of 4D price table building
 struct PriceTable4DResult {
     std::unique_ptr<BSpline4D_FMA> evaluator;  ///< Fast B-spline evaluator
     std::vector<double> prices_4d;              ///< Raw 4D price array
     size_t n_pde_solves;                        ///< Number of PDE solves performed
     double precompute_time_seconds;             ///< Wall-clock time for pre-computation
+    BSplineFittingStats fitting_stats;          ///< B-spline fitting diagnostics
 };
 
 /// 4D Price Table Builder
