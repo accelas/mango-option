@@ -23,8 +23,11 @@ namespace mango::operators {
  *   d²u/dx² = 2 * ((u[i+1] - u[i])/dx_right - (u[i] - u[i-1])/dx_left) / (dx_left + dx_right)
  *
  * Single Responsibility: Finite difference discretization
+ *
+ * Note: Uses std::fma for improved precision and performance, so T must be
+ * a standard floating-point type (float, double, long double).
  */
-template<typename T = double>
+template<std::floating_point T = double>
 class CenteredDifference {
 public:
     /**

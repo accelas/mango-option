@@ -39,7 +39,10 @@ concept HasJacobianCoefficients = requires(const PDE pde) {
 };
 
 /// SpatialOperator: Composes PDE, GridSpacing, and CenteredDifference
-template<typename PDE, typename T = double>
+///
+/// Note: Uses std::fma in Jacobian assembly for improved precision and performance.
+/// Therefore T must be a standard floating-point type (float, double, long double).
+template<typename PDE, std::floating_point T = double>
 class SpatialOperator {
 public:
     SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing)
