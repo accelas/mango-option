@@ -243,25 +243,9 @@ cc_library(
 )
 
 cc_library(
-    name = "eigen_banded_solver",
-    hdrs = ["eigen_banded_solver.hpp"],
-    deps = ["@eigen"],
-    copts = [
-        "-std=c++20",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "bspline_fitter_4d",
     hdrs = ["bspline_fitter_4d.hpp"],
-    deps = [
-        ":bspline_4d",
-        ":eigen_banded_solver",
-    ],
+    deps = [":bspline_4d"],
     copts = [
         "-std=c++20",
         "-Wall",
