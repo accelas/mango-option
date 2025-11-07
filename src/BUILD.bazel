@@ -170,6 +170,22 @@ cc_library(
 )
 
 cc_library(
+    name = "slice_solver_workspace",
+    hdrs = ["slice_solver_workspace.hpp"],
+    deps = [
+        ":grid",
+        "//src/operators:grid_spacing",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_option",
     srcs = ["american_option.cpp"],
     hdrs = ["american_option.hpp"],
@@ -177,6 +193,7 @@ cc_library(
         ":parallel",
         ":pde_solver",
         ":spatial_operators",
+        ":slice_solver_workspace",
         "//src/operators:operator_factory",
         "//src/operators:black_scholes_pde",
         ":expected",
@@ -314,6 +331,7 @@ cc_library(
     hdrs = ["price_table_4d_builder.hpp"],
     deps = [
         ":american_option",
+        ":slice_solver_workspace",
         ":bspline_4d",
         ":bspline_fitter_4d",
         ":price_table_snapshot_collector",

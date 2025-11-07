@@ -292,6 +292,18 @@ cc_test(
     copts = ["-std=c++20"],
 )
 
+cc_test(
+    name = "slice_solver_workspace_test",
+    size = "small",
+    srcs = ["slice_solver_workspace_test.cc"],
+    deps = [
+        "//src:slice_solver_workspace",
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
 
 cc_test(
     name = "operator_factory_test",
