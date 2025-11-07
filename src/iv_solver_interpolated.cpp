@@ -88,11 +88,12 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
     auto error = validate_query(query);
     if (error.has_value()) {
         return IVResult{
-            .implied_vol = 0.0,
             .converged = false,
             .iterations = 0,
+            .implied_vol = 0.0,
             .final_error = 0.0,
-            .error_message = *error
+            .failure_reason = *error,
+            .vega = std::nullopt
         };
     }
 
@@ -107,16 +108,17 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
     // Check if query is within surface bounds (before we start iterating)
     if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
         return IVResult{
-            .implied_vol = 0.0,
             .converged = false,
             .iterations = 0,
+            .implied_vol = 0.0,
             .final_error = 0.0,
-            .error_message = "Query parameters out of surface bounds. "
-                            "Moneyness: [" + std::to_string(m_range_.first) + ", " + std::to_string(m_range_.second) + "], "
-                            "Maturity: [" + std::to_string(tau_range_.first) + ", " + std::to_string(tau_range_.second) + "], "
-                            "Volatility: [" + std::to_string(sigma_range_.first) + ", " + std::to_string(sigma_range_.second) + "], "
-                            "Rate: [" + std::to_string(r_range_.first) + ", " + std::to_string(r_range_.second) + "]. "
-                            "Use PDE-based IV solver for out-of-grid queries."
+            .failure_reason = "Query parameters out of surface bounds. "
+                              "Moneyness: [" + std::to_string(m_range_.first) + ", " + std::to_string(m_range_.second) + "], "
+                              "Maturity: [" + std::to_string(tau_range_.first) + ", " + std::to_string(tau_range_.second) + "], "
+                              "Volatility: [" + std::to_string(sigma_range_.first) + ", " + std::to_string(sigma_range_.second) + "], "
+                              "Rate: [" + std::to_string(r_range_.first) + ", " + std::to_string(r_range_.second) + "]. "
+                              "Use PDE-based IV solver for out-of-grid queries.",
+            .vega = std::nullopt
         };
     }
 
@@ -124,51 +126,60 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
     double sigma = (sigma_min + sigma_max) / 2.0;
 
     // Newton-Raphson iterations
-    int iter = 0;
+    std::optional<double> last_vega = std::nullopt;
+    std::size_t iter = 0;
     double error_abs = 0.0;
 
-    for (; iter < config_.max_iterations; ++iter) {
+    const std::size_t max_iter = static_cast<std::size_t>(std::max(0, config_.max_iterations));
+
+    for (; iter < max_iter; ++iter) {
         // Check if current sigma is within surface bounds
         if (!is_in_bounds(query, sigma)) {
             return IVResult{
-                .implied_vol = sigma,
                 .converged = false,
                 .iterations = iter + 1,
+                .implied_vol = sigma,
                 .final_error = error_abs,
-                .error_message = "Newton iteration moved outside surface bounds"
+                .failure_reason = "Newton iteration moved outside surface bounds",
+                .vega = last_vega
             };
         }
 
         // Evaluate price at current volatility (with strike scaling)
         const double price = eval_price(moneyness, query.maturity, sigma, query.rate, query.strike);
 
-        // Compute error
-        error_abs = std::abs(price - query.market_price);
+    // Compute error
+    error_abs = std::abs(price - query.market_price);
 
-        // Check convergence
-        if (error_abs < config_.tolerance) {
-            return IVResult{
-                .implied_vol = sigma,
-                .converged = true,
-                .iterations = iter + 1,
-                .final_error = error_abs,
-                .error_message = std::nullopt
-            };
-        }
+    // Compute vega (∂Price/∂σ) with strike scaling
+    const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+    last_vega = vega;
 
-        // Compute vega (∂Price/∂σ) with strike scaling
-        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+    // Check convergence
+    if (error_abs < config_.tolerance) {
+        return IVResult{
+            .converged = true,
+            .iterations = iter + 1,
+            .implied_vol = sigma,
+            .final_error = error_abs,
+            .failure_reason = std::nullopt,
+            .vega = last_vega
+        };
+    }
 
         // Check for numerical issues
         if (std::abs(vega) < 1e-10) {
             return IVResult{
-                .implied_vol = sigma,
                 .converged = false,
                 .iterations = iter + 1,
+                .implied_vol = sigma,
                 .final_error = error_abs,
-                .error_message = "Vega too small (flat price surface)"
+                .failure_reason = "Vega too small (flat price surface)",
+                .vega = last_vega
             };
         }
+
+        last_vega = vega;
 
         // Newton step: σ_{n+1} = σ_n - f(σ_n)/f'(σ_n)
         const double f = price - query.market_price;
@@ -182,11 +193,12 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
             // Try to refine bounds
             if (iter > 10) {
                 return IVResult{
-                    .implied_vol = sigma,
                     .converged = false,
                     .iterations = iter + 1,
+                    .implied_vol = sigma,
                     .final_error = error_abs,
-                    .error_message = "Hit volatility bounds without convergence"
+                    .failure_reason = "Hit volatility bounds without convergence",
+                    .vega = last_vega
                 };
             }
         }
@@ -194,11 +206,12 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
 
     // Max iterations reached
     return IVResult{
-        .implied_vol = sigma,
         .converged = false,
         .iterations = iter,
+        .implied_vol = sigma,
         .final_error = error_abs,
-        .error_message = "Maximum iterations reached without convergence"
+        .failure_reason = "Maximum iterations reached without convergence",
+        .vega = last_vega
     };
 }
 

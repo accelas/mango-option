@@ -13,9 +13,7 @@
 #include "src/american_option.hpp"
 #include "src/bspline_4d.hpp"
 #include "src/bspline_fitter_4d.hpp"
-#define IVResult LegacyIVResult
 #include "src/iv_solver.hpp"
-#undef IVResult
 #include "src/iv_solver_interpolated.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
