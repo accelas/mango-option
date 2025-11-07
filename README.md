@@ -218,7 +218,7 @@ price_table_destroy(table);
 
 ### Pre-computed B-spline IV Surface
 
-To eliminate repeated PDE solves inside the IV loop, you can build a 4D B-spline surface over `(m, τ, σ, r)` once and reuse it for millions of queries. The interpolation-based IV solver currently targets **American puts only**—European IVs should continue to use analytic formulas.
+To eliminate repeated PDE solves inside the IV loop, you can build a 4D B-spline surface over `(m, τ, σ, r)` once and reuse it for millions of queries:
 
 ```bash
 # Analytic integration test for the full pipeline
