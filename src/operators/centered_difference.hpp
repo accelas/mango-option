@@ -133,6 +133,9 @@ public:
                           size_t start,
                           size_t end,
                           Evaluator&& eval) const {
+        // Note: SIMD on non-uniform grids less efficient due to per-point divisions,
+        // but modern compilers can still vectorize with proper hints
+        MANGO_PRAGMA_SIMD
         for (size_t i = start; i < end; ++i) {
             const T dx_left = spacing_.left_spacing(i);    // x[i] - x[i-1]
             const T dx_right = spacing_.right_spacing(i);  // x[i+1] - x[i]
@@ -166,6 +169,7 @@ public:
                 du_dx[i] = (u[i+1] - u[i-1]) * half_dx_inv;
             }
         } else {
+            MANGO_PRAGMA_SIMD
             for (size_t i = start; i < end; ++i) {
                 const T dx_left = spacing_.left_spacing(i);
                 const T dx_right = spacing_.right_spacing(i);
@@ -192,6 +196,7 @@ public:
                 d2u_dx2[i] = std::fma(u[i+1] + u[i-1], dx2_inv, -T(2)*u[i]*dx2_inv);
             }
         } else {
+            MANGO_PRAGMA_SIMD
             for (size_t i = start; i < end; ++i) {
                 const T dx_left = spacing_.left_spacing(i);
                 const T dx_right = spacing_.right_spacing(i);

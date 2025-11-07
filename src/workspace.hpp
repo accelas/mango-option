@@ -1,9 +1,12 @@
 #pragma once
 
 #include "cache_config.hpp"
-#include <vector>
 #include <span>
 #include <cstddef>
+#include <cstdlib>
+#include <new>
+#include <algorithm>
+#include <vector>
 
 namespace mango {
 
@@ -13,6 +16,9 @@ namespace mango {
 ///
 /// Manages all solver state in a single contiguous buffer for cache efficiency.
 /// Arrays: u_current, u_next, u_stage, rhs, Lu, psi (6n doubles total).
+///
+/// **64-byte alignment** - Uses aligned allocation for AVX-512 SIMD vectorization.
+/// The buffer is aligned to 64 bytes to enable efficient vector loads/stores.
 ///
 /// **Pre-computed dx array** - Grid spacing computed once during construction
 /// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
@@ -33,11 +39,20 @@ public:
     ///
     /// Allocates 6n doubles (u_current, u_next, u_stage, rhs, Lu, psi)
     /// plus (n-1) doubles for pre-computed dx array.
+    /// Memory is 64-byte aligned for AVX-512 SIMD operations.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
-        : buffer_(6 * n)  // u_current, u_next, u_stage, rhs, Lu, psi
+        : n_(n)
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)
     {
+        // Allocate 64-byte aligned buffer for SIMD vectorization
+        constexpr size_t alignment = 64;  // AVX-512 alignment
+        const size_t buffer_size = 6 * n;
+
+        buffer_ = static_cast<double*>(std::aligned_alloc(alignment, buffer_size * sizeof(double)));
+        if (buffer_ == nullptr) {
+            throw std::bad_alloc();
+        }
         // Pre-compute grid spacing once during initialization
         // CRITICAL: Avoids out-of-bounds access when processing cache blocks
         for (size_t i = 0; i < n - 1; ++i) {
@@ -46,13 +61,24 @@ public:
 
         // Set up array views as non-overlapping spans
         size_t offset = 0;
-        u_current_ = std::span{buffer_.data() + offset, n}; offset += n;
-        u_next_    = std::span{buffer_.data() + offset, n}; offset += n;
-        u_stage_   = std::span{buffer_.data() + offset, n}; offset += n;
-        rhs_       = std::span{buffer_.data() + offset, n}; offset += n;
-        lu_        = std::span{buffer_.data() + offset, n}; offset += n;
-        psi_       = std::span{buffer_.data() + offset, n}; offset += n;
+        u_current_ = std::span{buffer_ + offset, n}; offset += n;
+        u_next_    = std::span{buffer_ + offset, n}; offset += n;
+        u_stage_   = std::span{buffer_ + offset, n}; offset += n;
+        rhs_       = std::span{buffer_ + offset, n}; offset += n;
+        lu_        = std::span{buffer_ + offset, n}; offset += n;
+        psi_       = std::span{buffer_ + offset, n}; offset += n;
     }
+
+    /// Destructor - free aligned memory
+    ~WorkspaceStorage() {
+        std::free(buffer_);
+    }
+
+    // Disable copy/move to prevent double-free issues
+    WorkspaceStorage(const WorkspaceStorage&) = delete;
+    WorkspaceStorage& operator=(const WorkspaceStorage&) = delete;
+    WorkspaceStorage(WorkspaceStorage&&) = delete;
+    WorkspaceStorage& operator=(WorkspaceStorage&&) = delete;
 
     // Access to arrays
     std::span<double> u_current() { return u_current_; }
@@ -139,7 +165,8 @@ public:
     }
 
 private:
-    std::vector<double> buffer_;     // Single allocation for all arrays (CPU memory)
+    size_t n_;                       // Number of grid points
+    double* buffer_;                 // 64-byte aligned buffer for all arrays (CPU memory)
     CacheBlockConfig cache_config_;  // Cache-blocking configuration (CPU-only)
     std::vector<double> dx_;         // Pre-computed grid spacing
 
