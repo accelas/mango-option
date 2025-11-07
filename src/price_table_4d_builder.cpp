@@ -231,11 +231,39 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     auto evaluator = std::make_unique<BSpline4D_FMA>(
         moneyness_, maturity_, volatility_, rate_, fit_result.coefficients);
 
+    // Populate fitting statistics from result
+    BSplineFittingStats fitting_stats{
+        .max_residual_m = fit_result.max_residual_m,
+        .max_residual_tau = fit_result.max_residual_tau,
+        .max_residual_sigma = fit_result.max_residual_sigma,
+        .max_residual_r = fit_result.max_residual_r,
+        .max_residual_overall = fit_result.max_residual,
+        .condition_m = fit_result.condition_m,
+        .condition_tau = fit_result.condition_tau,
+        .condition_sigma = fit_result.condition_sigma,
+        .condition_r = fit_result.condition_r,
+        .condition_max = std::max({
+            fit_result.condition_m,
+            fit_result.condition_tau,
+            fit_result.condition_sigma,
+            fit_result.condition_r
+        }),
+        .failed_slices_m = fit_result.failed_slices_m,
+        .failed_slices_tau = fit_result.failed_slices_tau,
+        .failed_slices_sigma = fit_result.failed_slices_sigma,
+        .failed_slices_r = fit_result.failed_slices_r,
+        .failed_slices_total = fit_result.failed_slices_m +
+                               fit_result.failed_slices_tau +
+                               fit_result.failed_slices_sigma +
+                               fit_result.failed_slices_r
+    };
+
     return PriceTable4DResult{
         .evaluator = std::move(evaluator),
         .prices_4d = std::move(prices_4d),
         .n_pde_solves = Nv * Nr,  // Now correct: O(Nσ × Nr) not O(Nm × Nt × Nσ × Nr)
-        .precompute_time_seconds = duration.count()
+        .precompute_time_seconds = duration.count(),
+        .fitting_stats = fitting_stats
     };
 }
 

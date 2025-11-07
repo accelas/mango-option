@@ -44,6 +44,22 @@ struct BSplineFitResult4D {
     bool success;                       ///< Fit succeeded
     std::string error_message;          ///< Error description if failed
     double max_residual;                ///< Maximum absolute residual at grid points
+
+    // Detailed per-axis statistics (populated if success)
+    double max_residual_m = 0.0;       ///< Max residual along moneyness axis
+    double max_residual_tau = 0.0;     ///< Max residual along maturity axis
+    double max_residual_sigma = 0.0;   ///< Max residual along volatility axis
+    double max_residual_r = 0.0;       ///< Max residual along rate axis
+
+    double condition_m = 0.0;          ///< Condition number estimate (moneyness)
+    double condition_tau = 0.0;        ///< Condition number estimate (maturity)
+    double condition_sigma = 0.0;      ///< Condition number estimate (volatility)
+    double condition_r = 0.0;          ///< Condition number estimate (rate)
+
+    size_t failed_slices_m = 0;        ///< Failed fits along moneyness
+    size_t failed_slices_tau = 0;      ///< Failed fits along maturity
+    size_t failed_slices_sigma = 0;    ///< Failed fits along volatility
+    size_t failed_slices_r = 0;        ///< Failed fits along rate
 };
 
 /// Separable 4D B-spline coefficient fitter
@@ -112,8 +128,12 @@ public:
         auto sep_result = fitter.fit(values, tolerance);
 
         if (!sep_result.success) {
-            // Convert separable result to simple result (keep same interface)
-            return {std::vector<double>(), false, sep_result.error_message, 0.0};
+            return {
+                .coefficients = std::vector<double>(),
+                .success = false,
+                .error_message = sep_result.error_message,
+                .max_residual = 0.0
+            };
         }
 
         // Aggregate maximum residual across all axes
@@ -124,7 +144,25 @@ public:
             sep_result.max_residual_r
         });
 
-        return {sep_result.coefficients, true, "", max_residual};
+        // Return with full statistics
+        return {
+            .coefficients = sep_result.coefficients,
+            .success = true,
+            .error_message = "",
+            .max_residual = max_residual,
+            .max_residual_m = sep_result.max_residual_m,
+            .max_residual_tau = sep_result.max_residual_tau,
+            .max_residual_sigma = sep_result.max_residual_sigma,
+            .max_residual_r = sep_result.max_residual_r,
+            .condition_m = sep_result.condition_m,
+            .condition_tau = sep_result.condition_tau,
+            .condition_sigma = sep_result.condition_sigma,
+            .condition_r = sep_result.condition_r,
+            .failed_slices_m = sep_result.failed_slices_m,
+            .failed_slices_tau = sep_result.failed_slices_tau,
+            .failed_slices_sigma = sep_result.failed_slices_sigma,
+            .failed_slices_r = sep_result.failed_slices_r
+        };
     }
 
     /// Get detailed diagnostics from last fit (requires storing separable result)
