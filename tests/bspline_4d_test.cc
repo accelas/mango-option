@@ -555,28 +555,26 @@ TEST(BSpline4DTest, NaNPropagation) {
 
     std::vector<double> coeffs(8 * 6 * 5 * 4, 5.0);
 
-    // Insert NaN at a specific coefficient index
+    // Insert NaN at coefficient for (m_idx=0, t_idx=5, v_idx=0, r_idx=0)
+    // Index = 0*120 + 5*20 + 0*4 + 0 = 100
     coeffs[100] = std::numeric_limits<double>::quiet_NaN();
 
     BSpline4D_FMA spline(m, t, v, r, coeffs);
 
-    // Query near the NaN coefficient region
-    // B-spline evaluation sums weighted coefficients, so NaN should propagate
-    double val1 = spline.eval(1.0, 0.5, 0.3, 0.05);
+    // Query near the NaN coefficient region:
+    // Coefficient at (m[0]=0.8, t[5]=2.0, v[0]=0.1, r[0]=0.0)
+    // B-spline has compact support - need to query near these values
+    // for the NaN coefficient to be in the active basis functions
 
-    // At least some queries should produce NaN due to propagation
-    // (exact behavior depends on which basis functions are active)
-    bool has_nan = false;
-    for (int i = 0; i < 100; ++i) {
-        double mq = 0.8 + i * 0.004;  // Scan moneyness
-        double val = spline.eval(mq, 0.5, 0.3, 0.05);
-        if (std::isnan(val)) {
-            has_nan = true;
-            break;
-        }
-    }
+    // Query at the corner where the NaN coefficient is located
+    double val_at_nan = spline.eval(m[0], t[5], v[0], r[0]);
+    EXPECT_TRUE(std::isnan(val_at_nan))
+        << "Query at NaN coefficient location should return NaN";
 
-    EXPECT_TRUE(has_nan) << "NaN coefficients should propagate to some queries";
+    // Also verify a query far from the NaN doesn't get contaminated
+    double val_far = spline.eval(m.back(), t[0], v.back(), r.back());
+    EXPECT_FALSE(std::isnan(val_far))
+        << "Query far from NaN coefficient should not return NaN";
 }
 
 TEST(BSpline4DTest, InfCoefficientHandling) {
