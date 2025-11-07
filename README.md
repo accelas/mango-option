@@ -241,7 +241,7 @@ See `examples/` for complete working programs.
 | American option (single) | 21.7ms | TR-BDF2, 141 points × 1000 steps |
 | American option (batch of 64) | ~1.5ms wall | OpenMP parallelization |
 | American IV (FDM-based) | ~145ms | Brent's method with full PDE solve per iteration |
-| **American IV (B-spline surface)** | **~25 µs** | **Newton’s method over 4D tensor-product spline (<1 µs per price + vega)** |
+| **American IV (B-spline surface)** | **~1.1 µs** | **Newton’s method over 4D tensor-product spline (measured via `bazel run //benchmarks:component_performance -- --benchmark_filter=BSpline`)** |
 | Price table interpolation | ~0.5 µs | 4D cubic B-spline query |
 | Greeks (vega, gamma) | ~0.5 µs | Obtained from the same spline evaluation |
 

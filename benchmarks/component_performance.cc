@@ -11,13 +11,109 @@
  */
 
 #include "src/american_option.hpp"
+#include "src/bspline_4d.hpp"
+#include "src/bspline_fitter_4d.hpp"
+#define IVResult LegacyIVResult
 #include "src/iv_solver.hpp"
+#undef IVResult
+#include "src/iv_solver_interpolated.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
+#include <memory>
 #include <stdexcept>
+#include <vector>
 
 using namespace mango;
+
+namespace {
+
+double analytic_bs_price(double S, double K, double tau, double sigma, double r, OptionType type) {
+    if (tau <= 0.0) {
+        return (type == OptionType::CALL) ? std::max(S - K, 0.0) : std::max(K - S, 0.0);
+    }
+
+    const double sqrt_tau = std::sqrt(tau);
+    const double d1 = (std::log(S / K) + (r + 0.5 * sigma * sigma) * tau) / (sigma * sqrt_tau);
+    const double d2 = d1 - sigma * sqrt_tau;
+
+    auto Phi = [](double x) {
+        return 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)));
+    };
+
+    if (type == OptionType::CALL) {
+        return S * Phi(d1) - K * std::exp(-r * tau) * Phi(d2);
+    }
+
+    return K * std::exp(-r * tau) * Phi(-d2) - S * Phi(-d1);
+}
+
+struct AnalyticSurfaceFixture {
+    double K_ref;
+    std::vector<double> m_grid;
+    std::vector<double> tau_grid;
+    std::vector<double> sigma_grid;
+    std::vector<double> rate_grid;
+    std::unique_ptr<BSpline4D_FMA> evaluator;
+};
+
+const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
+    static AnalyticSurfaceFixture* fixture = [] {
+        auto fixture_ptr = std::make_unique<AnalyticSurfaceFixture>();
+        fixture_ptr->K_ref = 100.0;
+        fixture_ptr->m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+        fixture_ptr->tau_grid = {0.1, 0.5, 1.0, 2.0};
+        fixture_ptr->sigma_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
+        fixture_ptr->rate_grid = {0.0, 0.025, 0.05, 0.10};
+
+        const size_t Nm = fixture_ptr->m_grid.size();
+        const size_t Nt = fixture_ptr->tau_grid.size();
+        const size_t Nv = fixture_ptr->sigma_grid.size();
+        const size_t Nr = fixture_ptr->rate_grid.size();
+
+        std::vector<double> prices(Nm * Nt * Nv * Nr);
+        for (size_t i = 0; i < Nm; ++i) {
+            for (size_t j = 0; j < Nt; ++j) {
+                for (size_t k = 0; k < Nv; ++k) {
+                    for (size_t l = 0; l < Nr; ++l) {
+                        const size_t idx = ((i * Nt + j) * Nv + k) * Nr + l;
+                        prices[idx] = analytic_bs_price(
+                            fixture_ptr->m_grid[i] * fixture_ptr->K_ref,
+                            fixture_ptr->K_ref,
+                            fixture_ptr->tau_grid[j],
+                            fixture_ptr->sigma_grid[k],
+                            fixture_ptr->rate_grid[l],
+                            OptionType::PUT);
+                    }
+                }
+            }
+        }
+
+        BSplineFitter4D fitter(
+            fixture_ptr->m_grid,
+            fixture_ptr->tau_grid,
+            fixture_ptr->sigma_grid,
+            fixture_ptr->rate_grid);
+
+        auto fit_result = fitter.fit(prices);
+        if (!fit_result.success) {
+            throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
+        }
+
+        fixture_ptr->evaluator = std::make_unique<BSpline4D_FMA>(
+            fixture_ptr->m_grid,
+            fixture_ptr->tau_grid,
+            fixture_ptr->sigma_grid,
+            fixture_ptr->rate_grid,
+            fit_result.coefficients);
+
+        return fixture_ptr.release();
+    }();
+
+    return *fixture;
+}
+
+}  // namespace
 
 // ============================================================================
 // American Option Pricing Benchmarks
@@ -220,6 +316,43 @@ static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     state.SetLabel("ITM Put, T=2Y");
 }
 BENCHMARK(BM_ImpliedVol_ITM_Put);
+
+static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
+    const auto& surf = GetAnalyticSurfaceFixture();
+
+    IVSolverInterpolated solver(
+        *surf.evaluator,
+        surf.K_ref,
+        {surf.m_grid.front(), surf.m_grid.back()},
+        {surf.tau_grid.front(), surf.tau_grid.back()},
+        {surf.sigma_grid.front(), surf.sigma_grid.back()},
+        {surf.rate_grid.front(), surf.rate_grid.back()});
+
+    constexpr double spot = 103.5;
+    constexpr double strike = 100.0;
+    constexpr double maturity = 1.0;
+    constexpr double rate = 0.05;
+    constexpr double sigma_true = 0.20;
+
+    IVQuery query{
+        .market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT),
+        .spot = spot,
+        .strike = strike,
+        .maturity = maturity,
+        .rate = rate,
+        .option_type = OptionType::PUT};
+
+    for (auto _ : state) {
+        auto result = solver.solve(query);
+        if (!result.converged) {
+            throw std::runtime_error(result.error_message.value_or("Fast IV solver failed"));
+        }
+        benchmark::DoNotOptimize(result.implied_vol);
+    }
+
+    state.SetLabel("B-spline IV (table-based)");
+}
+BENCHMARK(BM_ImpliedVol_BSplineSurface);
 
 // ============================================================================
 // Grid Resolution Impact
