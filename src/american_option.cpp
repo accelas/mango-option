@@ -4,6 +4,7 @@
  */
 
 #include "src/american_option.hpp"
+#include "src/slice_solver_workspace.hpp"
 #include "src/boundary_conditions.hpp"
 #include "src/grid.hpp"
 #include "src/time_domain.hpp"
@@ -14,6 +15,7 @@
 #include <span>
 #include <cmath>
 #include <vector>
+#include <optional>
 
 namespace mango {
 
@@ -127,10 +129,51 @@ AmericanOptionSolver::AmericanOptionSolver(
     grid_.validate();
 }
 
+AmericanOptionSolver::AmericanOptionSolver(
+    const AmericanOptionParams& params,
+    const AmericanOptionGrid& grid,
+    std::shared_ptr<const SliceSolverWorkspace> workspace,
+    const TRBDF2Config& trbdf2_config,
+    const RootFindingConfig& root_config)
+    : params_(params)
+    , grid_(grid)
+    , trbdf2_config_(trbdf2_config)
+    , root_config_(root_config)
+    , workspace_(std::move(workspace))
+{
+    // Validate parameters
+    params_.validate();
+    grid_.validate();
+
+    // Validate workspace is not null
+    if (!workspace_) {
+        throw std::invalid_argument("Workspace cannot be null");
+    }
+
+    // Validate grid matches workspace
+    if (grid_.x_min != workspace_->x_min() || grid_.x_max != workspace_->x_max() ||
+        grid_.n_space != workspace_->n_space()) {
+        throw std::invalid_argument(
+            "Grid parameters must match workspace "
+            "(x_min=" + std::to_string(workspace_->x_min()) +
+            ", x_max=" + std::to_string(workspace_->x_max()) +
+            ", n_space=" + std::to_string(workspace_->n_space()) + ")");
+    }
+}
+
 expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // 1. Generate grid in log-moneyness coordinates
-    auto grid_buffer = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate();
-    auto x_grid = grid_buffer.span();
+    // 1. Get grid (from workspace if available, otherwise generate new)
+    std::optional<GridBuffer<double>> owned_grid_buffer;
+    std::span<const double> x_grid;
+
+    if (workspace_) {
+        // Workspace mode: reuse pre-allocated grid
+        x_grid = workspace_->grid_span();
+    } else {
+        // Standalone mode: generate new grid
+        owned_grid_buffer = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate();
+        x_grid = owned_grid_buffer->span();
+    }
 
     // 2. Setup time domain
     // For option pricing: solve forward in PDE time (backward in calendar time)
@@ -139,16 +182,31 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     TimeDomain time_domain(0.0, params_.maturity, params_.maturity / grid_.n_time);
 
     // 3. Create Black-Scholes operator in log-moneyness coordinates
-    // Use composed operator architecture for uniform grid fast path
-    auto grid_view = GridView<double>(x_grid);
-    auto bs_op = operators::create_spatial_operator(
-        operators::BlackScholesPDE<double>(
-            params_.volatility,
-            params_.rate,
-            params_.continuous_dividend_yield
-        ),
-        grid_view
-    );
+    // Use workspace GridSpacing if available, otherwise create new
+    auto bs_op = [&]() {
+        if (workspace_) {
+            // Workspace mode: reuse pre-allocated GridSpacing
+            return operators::create_spatial_operator(
+                operators::BlackScholesPDE<double>(
+                    params_.volatility,
+                    params_.rate,
+                    params_.continuous_dividend_yield
+                ),
+                workspace_->grid_spacing()
+            );
+        } else {
+            // Standalone mode: create new GridSpacing
+            auto grid_view = GridView<double>(x_grid);
+            return operators::create_spatial_operator(
+                operators::BlackScholesPDE<double>(
+                    params_.volatility,
+                    params_.rate,
+                    params_.continuous_dividend_yield
+                ),
+                grid_view
+            );
+        }
+    }();
 
     // 4. Setup boundary conditions (NORMALIZED by K=1)
     // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
