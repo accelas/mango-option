@@ -62,55 +62,68 @@ public:
         // Fill price table for all moneyness points
         for (size_t m_idx = 0; m_idx < moneyness_.size(); ++m_idx) {
             const double m = moneyness_[m_idx];
-            const double S = m * K_ref_;
+
+            // CRITICAL: The PDE works in log-moneyness space x = ln(S/K)
+            // snapshot.spatial_grid contains x values, NOT dollar spots
+            // snapshot.solution contains NORMALIZED prices V_norm = V_dollar / K
+
+            // Convert moneyness to log-moneyness: x = ln(m) = ln(S/K_ref)
+            const double x = std::log(m);
+            const double S = m * K_ref_;  // For later use in chain rule
 
             const size_t table_idx = m_idx * tau_.size() + tau_idx;
 
-            // Interpolate price
-            const double V = V_interp.eval(S);
-            prices_[table_idx] = V;
+            // Interpolate NORMALIZED price at log-moneyness x
+            const double V_norm = V_interp.eval(x);
 
-            // Interpolate delta from PDE data
-            // PDE provides ∂V/∂S directly (already in S-space)
-            const double dVdS = V_interp.eval_from_data(S, snapshot.first_derivative);
-            deltas_[table_idx] = dVdS;
+            // Convert to DOLLAR price: V_dollar = K_ref * V_norm
+            prices_[table_idx] = K_ref_ * V_norm;
 
-            // CRITICAL: Gamma computation with CORRECTED understanding
-            //
-            // The PDE solver works in S-space and computes:
-            //   - snapshot.solution: V(S)
-            //   - snapshot.first_derivative: ∂V/∂S
-            //   - snapshot.second_derivative: ∂²V/∂S²
-            //
-            // We want gamma = ∂²V/∂S², which the PDE provides DIRECTLY!
-            // No transformation needed - just interpolate!
-            //
-            // Mathematical note:
-            //   If we were working in moneyness space (m = S/K), the chain rule gives:
-            //     ∂V/∂S = (∂V/∂m) · (∂m/∂S) = (∂V/∂m) / K
-            //     ∂²V/∂S² = ∂/∂S[∂V/∂S] = (∂²V/∂m²) / K²
-            //
-            //   But the PDE snapshot is already in S-space, so we use it directly.
-            const double d2VdS2 = V_interp.eval_from_data(S, snapshot.second_derivative);
-            gammas_[table_idx] = d2VdS2;  // Already in S-space!
+            // Interpolate normalized delta from PDE data: dV_norm/dx
+            const double dVnorm_dx = V_interp.eval_from_data(x, snapshot.first_derivative);
+
+            // Transform to dollar delta using chain rule:
+            // V_dollar(S) = K_ref * V_norm(x(S)) where x = ln(S/K_ref)
+            // ∂V_dollar/∂S = K_ref * ∂V_norm/∂x * ∂x/∂S
+            //              = K_ref * dVnorm/dx * (1/S)
+            //              = (K_ref/S) * dVnorm/dx
+            const double delta_dollar = (K_ref_ / S) * dVnorm_dx;
+            deltas_[table_idx] = delta_dollar;
+
+            // Interpolate normalized second derivative: d²V_norm/dx²
+            const double d2Vnorm_dx2 = V_interp.eval_from_data(x, snapshot.second_derivative);
+
+            // Transform to dollar gamma using chain rule:
+            // gamma = ∂²V_dollar/∂S²
+            //       = ∂/∂S[(K_ref/S) * dV_norm/dx]
+            //       = K_ref * ∂/∂S[(1/S) * dV_norm/dx]
+            //       = K_ref * [(-1/S²) * dV_norm/dx + (1/S) * d(dV_norm/dx)/dS]
+            //       = K_ref * [(-1/S²) * dV_norm/dx + (1/S) * d²V_norm/dx² * dx/dS]
+            //       = K_ref * [(-1/S²) * dV_norm/dx + (1/S) * d²V_norm/dx² * (1/S)]
+            //       = (K_ref/S²) * [d²V_norm/dx² - dV_norm/dx]
+            const double gamma_dollar = (K_ref_ / (S * S)) * (d2Vnorm_dx2 - dVnorm_dx);
+            gammas_[table_idx] = gamma_dollar;
 
             // Theta computation
             if (exercise_type_ == ExerciseType::EUROPEAN) {
                 // European: theta = -L(V) everywhere
-                const double Lu = Lu_interp.eval(S);
-                thetas_[table_idx] = -Lu;
+                // L(V) is also in normalized space
+                const double Lu_norm = Lu_interp.eval(x);
+                const double Lu_dollar = K_ref_ * Lu_norm;
+                thetas_[table_idx] = -Lu_dollar;
             } else {
                 // American: theta = -L(V) in continuation region, NaN at boundary
                 const double obstacle = compute_american_obstacle(S, snapshot.time);
                 const double BOUNDARY_TOLERANCE = 1e-6;
 
-                if (std::abs(V - obstacle) < BOUNDARY_TOLERANCE) {
+                if (std::abs(prices_[table_idx] - obstacle) < BOUNDARY_TOLERANCE) {
                     // At exercise boundary
                     thetas_[table_idx] = std::numeric_limits<double>::quiet_NaN();
                 } else {
                     // In continuation region
-                    const double Lu = Lu_interp.eval(S);
-                    thetas_[table_idx] = -Lu;
+                    const double Lu_norm = Lu_interp.eval(x);
+                    const double Lu_dollar = K_ref_ * Lu_norm;
+                    thetas_[table_idx] = -Lu_dollar;
                 }
             }
         }

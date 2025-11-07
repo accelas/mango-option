@@ -88,8 +88,10 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
         };
     }
 
-    // Compute moneyness
-    const double moneyness = query.spot / query.strike;
+    // CRITICAL: Compute moneyness using K_ref, not query.strike!
+    // The price surface was built for strike = K_ref, so moneyness m = S/K_ref.
+    // We'll scale the result to match query.strike in eval_price().
+    const double moneyness = query.spot / K_ref_;
 
     // Get adaptive bounds
     auto [sigma_min, sigma_max] = adaptive_bounds(query);

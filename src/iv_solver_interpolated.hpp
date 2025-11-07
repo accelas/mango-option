@@ -157,7 +157,9 @@ private:
 
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {
-        const double m = query.spot / query.strike;
+        // CRITICAL: Use K_ref for moneyness, not query.strike!
+        // The surface is built with m = S/K_ref
+        const double m = query.spot / K_ref_;
 
         return m >= m_range_.first && m <= m_range_.second &&
                query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&

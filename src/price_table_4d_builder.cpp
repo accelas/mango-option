@@ -93,8 +93,9 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     for (size_t j = 0; j < Nt; ++j) {
         // PDE time t equals time-to-maturity τ
         step_indices[j] = static_cast<size_t>(std::round(maturity_[j] / dt));
-        // Clamp to valid range
-        step_indices[j] = std::min(step_indices[j], grid_config.n_time);
+        // Clamp to valid range [0, n_time-1]
+        // CRITICAL: PDESolver only calls process_snapshots for steps in [0, n_time-1]
+        step_indices[j] = std::min(step_indices[j], grid_config.n_time - 1);
     }
 
     // Loop over (σ, r) pairs only - this is the separable batch approach
