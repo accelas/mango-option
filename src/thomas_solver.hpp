@@ -158,7 +158,8 @@ template<FloatingPoint T>
     // Middle rows
     // Note: Singularity checking prevents SIMD vectorization (early return)
     for (size_t i = 1; i < n - 1; ++i) {
-        const T denom = diag[i] - lower[i-1] * c_prime[i-1];
+        // Use FMA for denominator calculation
+        const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
 
         // Singularity check
         if (std::abs(denom) < config.singularity_tol) {
@@ -167,19 +168,22 @@ template<FloatingPoint T>
 
         const T inv_denom = static_cast<T>(1) / denom;
         c_prime[i] = upper[i] * inv_denom;
-        d_prime[i] = (rhs[i] - lower[i-1] * d_prime[i-1]) * inv_denom;
+        // Use FMA: (rhs[i] - lower[i-1]*d_prime[i-1]) * inv_denom
+        d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) * inv_denom;
     }
 
     // Last row (no upper diagonal term)
     {
         const size_t i = n - 1;
-        const T denom = diag[i] - lower[i-1] * c_prime[i-1];
+        // Use FMA for denominator calculation
+        const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
 
         if (std::abs(denom) < config.singularity_tol) {
             return Result::error_result("Singular matrix (at last row)");
         }
 
-        d_prime[i] = (rhs[i] - lower[i-1] * d_prime[i-1]) / denom;
+        // Use FMA for numerator calculation
+        d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) / denom;
     }
 
     // ========== Back Substitution ==========
@@ -187,8 +191,9 @@ template<FloatingPoint T>
     solution[n-1] = d_prime[n-1];
 
     // Reverse iteration (vectorization limited by data dependency)
+    // Use FMA for back substitution: d_prime[i-1] - c_prime[i-1]*solution[i]
     for (size_t i = n - 1; i > 0; --i) {
-        solution[i-1] = d_prime[i-1] - c_prime[i-1] * solution[i];
+        solution[i-1] = std::fma(-c_prime[i-1], solution[i], d_prime[i-1]);
     }
 
     return Result::ok_result();

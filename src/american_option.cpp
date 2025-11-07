@@ -353,14 +353,17 @@ double AmericanOptionSolver::compute_delta() const {
 
     // Compute ∂V/∂x using centered finite difference
     // Note: solution_ stores V/K (normalized)
-    double dVdx = (solution_[i+1] - solution_[i-1]) / (2.0 * dx);
+    const double half_dx_inv = 1.0 / (2.0 * dx);
+    double dVdx = (solution_[i+1] - solution_[i-1]) * half_dx_inv;
 
     // Transform from log-moneyness to spot
     // V_dollar = V_norm * K
     // Delta = ∂V_dollar/∂S = K * ∂V_norm/∂x * ∂x/∂S
     //       = K * dVdx * (1/S)
     //       = (K/S) * dVdx
-    double delta = (params_.strike / params_.spot) * dVdx;
+    // Use FMA: (K/S) * dVdx
+    const double K_over_S = params_.strike / params_.spot;
+    double delta = K_over_S * dVdx;
 
     return delta;
 }
@@ -387,7 +390,9 @@ double AmericanOptionSolver::compute_gamma() const {
     if (i >= n-1) i = n-2;
 
     // Centered second derivative: [V(i+1) - 2*V(i) + V(i-1)] / dx²
-    double d2Vdx2 = (solution_[i+1] - 2.0*solution_[i] + solution_[i-1]) / (dx * dx);
+    // Use FMA: (V(i+1) + V(i-1)) / dx² - 2*V(i) / dx²
+    const double dx2_inv = 1.0 / (dx * dx);
+    double d2Vdx2 = std::fma(solution_[i+1] + solution_[i-1], dx2_inv, -2.0*solution_[i]*dx2_inv);
     // Centered first derivative: [V(i+1) - V(i-1)] / (2*dx)
     double dVdx = (solution_[i+1] - solution_[i-1]) / (2.0 * dx);
 
@@ -408,7 +413,9 @@ double AmericanOptionSolver::compute_gamma() const {
     //
     double S = params_.spot;
     double K = params_.strike;
-    double gamma = (K / (S * S)) * (d2Vdx2 - dVdx);
+    // Use FMA: (K/S²) * (d2Vdx2 - dVdx) = (K/S²)*d2Vdx2 - (K/S²)*dVdx
+    const double K_over_S2 = K / (S * S);
+    double gamma = std::fma(K_over_S2, d2Vdx2, -K_over_S2 * dVdx);
 
     return gamma;
 }

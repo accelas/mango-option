@@ -3,6 +3,7 @@
 #include "grid_spacing.hpp"
 #include "../parallel.hpp"
 #include <span>
+#include <cmath>
 
 namespace mango::operators {
 
@@ -22,8 +23,11 @@ namespace mango::operators {
  *   d²u/dx² = 2 * ((u[i+1] - u[i])/dx_right - (u[i] - u[i-1])/dx_left) / (dx_left + dx_right)
  *
  * Single Responsibility: Finite difference discretization
+ *
+ * Note: Uses std::fma for improved precision and performance, so T must be
+ * a standard floating-point type (float, double, long double).
  */
-template<typename T = double>
+template<std::floating_point T = double>
 class CenteredDifference {
 public:
     /**
@@ -50,8 +54,9 @@ public:
             const T dx_right = spacing_.spacing_at(i);
             const T w_left = dx_right / (dx_left + dx_right);
             const T w_right = dx_left / (dx_left + dx_right);
-            return w_left * (u[i] - u[i-1]) / dx_left
-                 + w_right * (u[i+1] - u[i]) / dx_right;
+            // Use FMA for the weighted sum
+            return std::fma(w_left, (u[i] - u[i-1]) / dx_left,
+                           w_right * (u[i+1] - u[i]) / dx_right);
         }
     }
 
@@ -64,7 +69,9 @@ public:
     T second_derivative(std::span<const T> u, size_t i) const {
         if (spacing_.is_uniform()) {
             // Uniform: (u[i+1] - 2*u[i] + u[i-1]) / dx²
-            return (u[i+1] - T(2)*u[i] + u[i-1]) * spacing_.spacing_inv_sq();
+            // Use FMA: (u[i+1] + u[i-1]) * dx2_inv - 2*u[i]*dx2_inv
+            return std::fma(u[i+1] + u[i-1], spacing_.spacing_inv_sq(),
+                           -T(2)*u[i]*spacing_.spacing_inv_sq());
         } else {
             // Non-uniform: 2 * ((u[i+1] - u[i])/dx_right - (u[i] - u[i-1])/dx_left) / (dx_left + dx_right)
             const T dx_left = spacing_.spacing_at(i - 1);
@@ -88,7 +95,9 @@ public:
         if (spacing_.is_uniform()) {
             // Uniform: optimize by computing both at once
             const T du_dx = (u[i+1] - u[i-1]) * spacing_.spacing_inv() * T(0.5);
-            const T d2u_dx2 = (u[i+1] - T(2)*u[i] + u[i-1]) * spacing_.spacing_inv_sq();
+            // Use FMA for second derivative
+            const T d2u_dx2 = std::fma(u[i+1] + u[i-1], spacing_.spacing_inv_sq(),
+                                      -T(2)*u[i]*spacing_.spacing_inv_sq());
             return {du_dx, d2u_dx2};
         } else {
             // Non-uniform: compute independently
@@ -110,7 +119,9 @@ public:
         MANGO_PRAGMA_SIMD
         for (size_t i = start; i < end; ++i) {
             const T du_dx = (u[i+1] - u[i-1]) * half_dx_inv;
-            const T d2u_dx2 = (u[i+1] - T(2)*u[i] + u[i-1]) * dx2_inv;
+            // d2u_dx2 = (u[i+1] + u[i-1] - 2*u[i]) * dx2_inv
+            // Use FMA: std::fma(x, y, z) = x*y + z
+            const T d2u_dx2 = std::fma(u[i+1] + u[i-1], dx2_inv, -T(2)*u[i]*dx2_inv);
             Lu[i] = eval(d2u_dx2, du_dx, u[i]);  // Lambda inlines away
         }
     }
@@ -130,8 +141,9 @@ public:
             // First derivative: weighted three-point (2nd order on non-uniform grids)
             const T w_left = dx_right / (dx_left + dx_right);
             const T w_right = dx_left / (dx_left + dx_right);
-            const T du_dx = w_left * (u[i] - u[i-1]) / dx_left
-                          + w_right * (u[i+1] - u[i]) / dx_right;
+            // Use FMA for the weighted sum
+            const T du_dx = std::fma(w_left, (u[i] - u[i-1]) / dx_left,
+                                     w_right * (u[i+1] - u[i]) / dx_right);
 
             // Second derivative: non-uniform centered difference
             const T forward_diff = (u[i+1] - u[i]) / dx_right;
@@ -160,8 +172,9 @@ public:
                 // Weighted three-point (2nd order on non-uniform grids)
                 const T w_left = dx_right / (dx_left + dx_right);
                 const T w_right = dx_left / (dx_left + dx_right);
-                du_dx[i] = w_left * (u[i] - u[i-1]) / dx_left
-                         + w_right * (u[i+1] - u[i]) / dx_right;
+                // Use FMA for the weighted sum
+                du_dx[i] = std::fma(w_left, (u[i] - u[i-1]) / dx_left,
+                                    w_right * (u[i+1] - u[i]) / dx_right);
             }
         }
     }
@@ -175,7 +188,8 @@ public:
             const T dx2_inv = spacing_.spacing_inv_sq();
             MANGO_PRAGMA_SIMD
             for (size_t i = start; i < end; ++i) {
-                d2u_dx2[i] = (u[i+1] - T(2)*u[i] + u[i-1]) * dx2_inv;
+                // Use FMA: (u[i+1] + u[i-1]) * dx2_inv - 2*u[i]*dx2_inv
+                d2u_dx2[i] = std::fma(u[i+1] + u[i-1], dx2_inv, -T(2)*u[i]*dx2_inv);
             }
         } else {
             for (size_t i = start; i < end; ++i) {
