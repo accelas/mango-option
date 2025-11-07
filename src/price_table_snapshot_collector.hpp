@@ -12,14 +12,11 @@
 
 namespace mango {
 
-enum class ExerciseType { EUROPEAN, AMERICAN };
-
 struct PriceTableSnapshotCollectorConfig {
     std::span<const double> moneyness;
     std::span<const double> tau;
     double K_ref;
-    ExerciseType exercise_type;
-    OptionType option_type;  // CALL or PUT (for American exercise boundary)
+    OptionType option_type = OptionType::CALL;  // Used for obstacle computation
     const void* payoff_params = nullptr;
 };
 
@@ -33,7 +30,6 @@ public:
         : moneyness_(config.moneyness.begin(), config.moneyness.end())
         , tau_(config.tau.begin(), config.tau.end())
         , K_ref_(config.K_ref)
-        , exercise_type_(config.exercise_type)
         , option_type_(config.option_type)
         , payoff_params_(config.payoff_params)
     {
@@ -112,26 +108,17 @@ public:
             gammas_[table_idx] = std::fma(gamma_scale, d2Vnorm_dx2, -gamma_scale * dVnorm_dx);
 
             // Theta computation
-            if (exercise_type_ == ExerciseType::EUROPEAN) {
-                // European: theta = -L(V) everywhere
-                // L(V) is also in normalized space
-                const double Lu_norm = Lu_interp.eval(x);
-                // PERFORMANCE: Use FMA-friendly form: theta = -(K_ref * Lu_norm)
-                thetas_[table_idx] = -(K_ref_ * Lu_norm);
-            } else {
-                // American: theta = -L(V) in continuation region, NaN at boundary
-                // PERFORMANCE: Use precomputed spot value
-                const double obstacle = compute_american_obstacle(S, snapshot.time);
-                const double BOUNDARY_TOLERANCE = 1e-6;
+            // American exercise: theta = -L(V) in continuation region, NaN at boundary
+            const double obstacle = compute_american_obstacle(S, snapshot.time);
+            const double BOUNDARY_TOLERANCE = 1e-6;
 
-                if (std::abs(prices_[table_idx] - obstacle) < BOUNDARY_TOLERANCE) {
-                    // At exercise boundary
-                    thetas_[table_idx] = std::numeric_limits<double>::quiet_NaN();
-                } else {
-                    // In continuation region
-                    const double Lu_norm = Lu_interp.eval(x);
-                    thetas_[table_idx] = -(K_ref_ * Lu_norm);
-                }
+            if (std::abs(prices_[table_idx] - obstacle) < BOUNDARY_TOLERANCE) {
+                // At exercise boundary
+                thetas_[table_idx] = std::numeric_limits<double>::quiet_NaN();
+            } else {
+                // In continuation region
+                const double Lu_norm = Lu_interp.eval(x);
+                thetas_[table_idx] = -(K_ref_ * Lu_norm);
             }
         }
     }
@@ -145,7 +132,6 @@ private:
     std::vector<double> moneyness_;
     std::vector<double> tau_;
     double K_ref_;
-    ExerciseType exercise_type_;
     OptionType option_type_;
     const void* payoff_params_;
 

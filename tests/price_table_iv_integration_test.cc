@@ -242,15 +242,16 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
         << " but expected " << known_sigma;
 }
 
-TEST(PriceTableIVIntegrationTest, CallOptionRejectedByFastSolver) {
+TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
+    // Same as above but for CALL options
     const double K_ref = 100.0;
-    const double known_sigma = 0.20;
-    const double known_r = 0.05;
+    const double known_sigma = 0.25;
+    const double known_r = 0.03;
 
-    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
-    std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
-    std::vector<double> volatility = {0.15, 0.18, 0.20, 0.25};
-    std::vector<double> rate = {0.02, 0.04, 0.05, 0.06};
+    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> maturity = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> rate = {0.0, 0.02, 0.03, 0.06};
 
     AnalyticSnapshotCollector collector(
         std::span{moneyness},
@@ -258,9 +259,10 @@ TEST(PriceTableIVIntegrationTest, CallOptionRejectedByFastSolver) {
         K_ref,
         known_sigma,
         known_r,
-        OptionType::PUT  // Build put surface; solver rejects calls before use
+        OptionType::CALL
     );
 
+    // Collect fake snapshots
     for (size_t tau_idx = 0; tau_idx < maturity.size(); ++tau_idx) {
         Snapshot fake_snapshot{
             .time = maturity[tau_idx],
@@ -275,31 +277,49 @@ TEST(PriceTableIVIntegrationTest, CallOptionRejectedByFastSolver) {
         collector.collect(fake_snapshot);
     }
 
+    auto prices_2d = collector.prices();
+    const auto sigma_ref_it = std::find(volatility.begin(), volatility.end(), known_sigma);
+    ASSERT_NE(sigma_ref_it, volatility.end());
+    const size_t sigma_ref_idx = static_cast<size_t>(std::distance(volatility.begin(), sigma_ref_it));
+    const auto rate_ref_it = std::find(rate.begin(), rate.end(), known_r);
+    ASSERT_NE(rate_ref_it, rate.end());
+    const size_t rate_ref_idx = static_cast<size_t>(std::distance(rate.begin(), rate_ref_it));
+
+    // Build 4D array
     const size_t Nm = moneyness.size();
     const size_t Nt = maturity.size();
     const size_t Nv = volatility.size();
     const size_t Nr = rate.size();
-    std::vector<double> prices_4d(Nm * Nt * Nv * Nr);
 
+    std::vector<double> prices_4d(Nm * Nt * Nv * Nr);
     for (size_t i = 0; i < Nm; ++i) {
         for (size_t j = 0; j < Nt; ++j) {
             for (size_t k = 0; k < Nv; ++k) {
                 for (size_t l = 0; l < Nr; ++l) {
-                    const size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                    prices_4d[idx_4d] = bs_price(
+                    size_t idx_2d = i * Nt + j;
+                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                    double price = bs_price(
                         moneyness[i] * K_ref,
                         K_ref,
                         maturity[j],
                         volatility[k],
                         rate[l],
-                        OptionType::PUT);
+                        OptionType::CALL);
+
+                    if (k == sigma_ref_idx && l == rate_ref_idx) {
+                        EXPECT_NEAR(price, prices_2d[idx_2d], 1e-9);
+                    }
+
+                    prices_4d[idx_4d] = price;
                 }
             }
         }
     }
 
+    // Build B-spline surface
     BSplineFitter4D fitter(moneyness, maturity, volatility, rate);
     auto fit_result = fitter.fit(prices_4d);
+
     ASSERT_TRUE(fit_result.success);
 
     auto evaluator = std::make_unique<BSpline4D_FMA>(
@@ -314,19 +334,28 @@ TEST(PriceTableIVIntegrationTest, CallOptionRejectedByFastSolver) {
         std::make_pair(rate.front(), rate.back())
     );
 
+    // Test recovery
+    double test_spot = 100.0;
+    double test_strike = K_ref;
+    double test_maturity = 0.5;
+    double test_rate = known_r;
+
+    double market_price = bs_price(test_spot, test_strike, test_maturity,
+                                   known_sigma, test_rate, OptionType::CALL);
+
     IVQuery query{
-        .market_price = 5.0,
-        .spot = 100.0,
-        .strike = K_ref,
-        .maturity = 0.5,
-        .rate = known_r,
+        .market_price = market_price,
+        .spot = test_spot,
+        .strike = test_strike,
+        .maturity = test_maturity,
+        .rate = test_rate,
         .option_type = OptionType::CALL
     };
 
     auto result = iv_solver.solve(query);
-    EXPECT_FALSE(result.converged);
-    ASSERT_TRUE(result.failure_reason.has_value());
-    EXPECT_NE(result.failure_reason->find("supports American puts"), std::string::npos);
+
+    ASSERT_TRUE(result.converged) << (result.failure_reason.has_value() ? *result.failure_reason : "");
+    EXPECT_NEAR(result.implied_vol, known_sigma, 0.02);
 }
 
 TEST(PriceTableIVIntegrationTest, MoneynessBoundsValidation) {
@@ -506,7 +535,7 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
                         maturity[j],
                         volatility[k],
                         rate[l],
-                        OptionType::PUT);
+                        OptionType::CALL);
                 }
             }
         }
@@ -553,12 +582,7 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
             scenario.tau,
             scenario.sigma,
             scenario.rate,
-            OptionType::PUT);
-
-        const double intrinsic = std::max(K_ref - spot, 0.0);
-        if (market_price <= intrinsic + 1e-6) {
-            continue;  // Skip degenerate cases where time value ≈ 0 (validation would reject)
-        }
+            OptionType::CALL);
 
         IVQuery query{
             .market_price = market_price,
@@ -566,7 +590,7 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
             .strike = K_ref,
             .maturity = scenario.tau,
             .rate = scenario.rate,
-            .option_type = OptionType::PUT};
+            .option_type = OptionType::CALL};
 
         auto result = iv_solver.solve(query);
         ASSERT_TRUE(result.converged)

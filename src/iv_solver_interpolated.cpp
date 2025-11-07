@@ -10,9 +10,6 @@
 namespace mango {
 
 std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& query) const {
-    if (query.option_type != OptionType::PUT) {
-        return "Interpolation IV solver currently supports American puts only";
-    }
     if (query.market_price <= 0.0) {
         return "Market price must be positive";
     }

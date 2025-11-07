@@ -168,7 +168,6 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
                     .moneyness = std::span{moneyness_},
                     .tau = std::span{maturity_},
                     .K_ref = K_ref_,
-                    .exercise_type = ExerciseType::AMERICAN,
                     .option_type = option_type,  // CRITICAL: Pass option type for correct theta computation
                     .payoff_params = nullptr
                 };
