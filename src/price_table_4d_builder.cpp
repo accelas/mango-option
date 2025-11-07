@@ -4,10 +4,15 @@
  */
 
 #include "price_table_4d_builder.hpp"
+#include "price_table_snapshot_collector.hpp"
+#include "american_option.hpp"
+#include "trbdf2_config.hpp"
+#include "root_finding.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -69,59 +74,97 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     const size_t Nv = volatility_.size();
     const size_t Nr = rate_.size();
 
-    // Total number of PDE solves
-    const size_t total_solves = Nm * Nt * Nv * Nr;
-
     // Allocate 4D price array
-    std::vector<double> prices_4d(total_solves, 0.0);
+    std::vector<double> prices_4d(Nm * Nt * Nv * Nr, 0.0);
 
     // Start timer
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Create batch of ALL option parameters (m, tau, sigma, rate)
-    std::vector<AmericanOptionParams> batch;
-    batch.reserve(total_solves);
+    // Key insight: For each (σ, r) pair, solve ONE PDE at max maturity
+    // and collect snapshots at all intermediate maturities.
+    // This gives us the full 2D (m, τ) surface with O(Nσ × Nr) solves
+    // instead of O(Nm × Nt × Nσ × Nr).
 
-    for (size_t i = 0; i < Nm; ++i) {
-        for (size_t j = 0; j < Nt; ++j) {
-            for (size_t k = 0; k < Nv; ++k) {
-                for (size_t l = 0; l < Nr; ++l) {
-                    AmericanOptionParams params{
-                        .strike = K_ref_,
-                        .spot = moneyness_[i] * K_ref_,  // S = m * K
-                        .maturity = maturity_[j],
-                        .volatility = volatility_[k],
-                        .rate = rate_[l],
-                        .continuous_dividend_yield = dividend_yield,
-                        .option_type = option_type
-                    };
+    const double T_max = maturity_.back();  // Maximum maturity
+    const double dt = T_max / grid_config.n_time;
 
-                    batch.push_back(params);
-                }
-            }
-        }
+    // Precompute step indices for each maturity
+    std::vector<size_t> step_indices(Nt);
+    for (size_t j = 0; j < Nt; ++j) {
+        // PDE time t equals time-to-maturity τ
+        step_indices[j] = static_cast<size_t>(std::round(maturity_[j] / dt));
+        // Clamp to valid range
+        step_indices[j] = std::min(step_indices[j], grid_config.n_time);
     }
 
-    // Solve all options using static method
-    auto results = BatchAmericanOptionSolver::solve_batch(batch, grid_config);
-
-    // Process results and fill 4D price array
+    // Loop over (σ, r) pairs only - this is the separable batch approach
     size_t failed_count = 0;
-    for (size_t idx = 0; idx < total_solves; ++idx) {
-        const auto& result = results[idx];
 
-        if (result.has_value()) {
-            prices_4d[idx] = result.value().value;
-        } else {
-            // PDE solve failed - use NaN to mark invalid
-            prices_4d[idx] = std::numeric_limits<double>::quiet_NaN();
-            ++failed_count;
+#pragma omp parallel for collapse(2) if(Nv * Nr > 4)
+    for (size_t k = 0; k < Nv; ++k) {
+        for (size_t l = 0; l < Nr; ++l) {
+            try {
+                // Set up AmericanOptionSolver for this (σ, r) pair
+                AmericanOptionParams params{
+                    .strike = K_ref_,
+                    .spot = K_ref_,  // Will be overridden by spatial grid
+                    .maturity = T_max,  // Solve to maximum maturity
+                    .volatility = volatility_[k],
+                    .rate = rate_[l],
+                    .continuous_dividend_yield = dividend_yield,
+                    .option_type = option_type
+                };
+
+                // Create snapshot collector for this (σ, r)
+                PriceTableSnapshotCollectorConfig collector_config{
+                    .moneyness = std::span{moneyness_},
+                    .tau = std::span{maturity_},
+                    .K_ref = K_ref_,
+                    .exercise_type = ExerciseType::AMERICAN,
+                    .payoff_params = nullptr
+                };
+                PriceTableSnapshotCollector collector(collector_config);
+
+                // Create American option solver
+                AmericanOptionSolver solver(params, grid_config,
+                                           TRBDF2Config{}, RootFindingConfig{});
+
+                // Register snapshots at all maturity points
+                for (size_t j = 0; j < Nt; ++j) {
+                    solver.register_snapshot(step_indices[j], j, &collector);
+                }
+
+                // Solve PDE (this will collect all snapshots)
+                auto result = solver.solve();
+
+                if (!result.has_value()) {
+#pragma omp atomic
+                    ++failed_count;
+                    continue;
+                }
+
+                // Extract the 2D (m, τ) surface from collector
+                auto prices_2d = collector.prices();
+
+                // Copy into 4D array at indices [:, :, k, l]
+                for (size_t i = 0; i < Nm; ++i) {
+                    for (size_t j = 0; j < Nt; ++j) {
+                        size_t idx_2d = i * Nt + j;
+                        size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                        prices_4d[idx_4d] = prices_2d[idx_2d];
+                    }
+                }
+
+            } catch (const std::exception& e) {
+#pragma omp atomic
+                ++failed_count;
+            }
         }
     }
 
     if (failed_count > 0) {
         throw std::runtime_error("Failed to solve " + std::to_string(failed_count) +
-                                 " out of " + std::to_string(total_solves) + " PDEs");
+                                 " out of " + std::to_string(Nv * Nr) + " PDEs");
     }
 
     // End timer
@@ -143,7 +186,7 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     return PriceTable4DResult{
         .evaluator = std::move(evaluator),
         .prices_4d = std::move(prices_4d),
-        .n_pde_solves = total_solves,
+        .n_pde_solves = Nv * Nr,  // Now correct: O(Nσ × Nr) not O(Nm × Nt × Nσ × Nr)
         .precompute_time_seconds = duration.count()
     };
 }
