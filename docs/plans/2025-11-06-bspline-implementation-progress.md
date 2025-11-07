@@ -73,9 +73,39 @@ Derivative eval:    ~54ns  (target: <150ns)   ✓
 3. Alternative: Use iterative solver (CG) for B-spline systems
 4. Or: Extend ThomasSolver to pentadiagonal case first
 
+## In Progress (Updated)
+
+### Pentadiagonal Solver (Second Attempt - Also Buggy)
+
+**Files:**
+- `src/pentadiagonal_solver.hpp` (290+ lines) - WIP
+- `tests/pentadiagonal_test.cc` (490+ lines)
+
+**Status:** Simpler than BandedLU but still has elimination bugs.
+
+**Test Results:** 6/12 passing
+- ✅ Invalid dimensions (error handling)
+- ✅ Diagonal dominance check
+- ✅ Single element case
+- ✅ Two element case
+- ✅ Performance tests (42µs for n=1000, 1µs for n=50)
+- ❌ Simple solve (residual errors)
+- ❌ Tridiagonal vs ThomasSolver (doesn't match)
+- ❌ B-spline collocation (residual errors)
+- ❌ Asymmetric pentadiagonal (residual errors)
+- ❌ Singular matrix detection (false positive)
+- ❌ Reusable workspace (accumulated errors)
+
+**Root Cause:** Forward elimination algorithm for pentadiagonal case has bugs in:
+1. Multiplier computation for 2nd subdiagonal
+2. RHS update logic
+3. Interaction between the two elimination steps
+
+**Performance:** Meets targets even with bugs (structure is correct)
+
 ## Not Started
 
-- SeparableBSplineFitter4D
+- SeparableBSplineFitter4D (blocked on solver)
 - PriceTable4DBuilder
 - BSplineSurface4D query layer
 - Soft-plus clamping
@@ -94,9 +124,34 @@ Derivative eval:    ~54ns  (target: <150ns)   ✓
 - BandedLU: 70% (structure done, algorithm buggy)
 - **Overall Week 1:** ~85% complete
 
-## Recommendations
+## Updated Recommendations (After Two Failed Attempts)
 
-### Option 1: Fix BandedLU (Conservative)
+### **Recommended: Use Eigen Library for Banded Systems**
+
+After two attempts at implementing banded solvers from scratch (BandedLU and Pentadiagonal), both with bugs in the factorization logic, the pragmatic solution is:
+
+**Use Eigen library** which has battle-tested implementations:
+- `Eigen::SparseLU` for general sparse systems
+- Or direct banded solver using Eigen's API
+- Estimated integration time: 1-2 hours
+- Zero debugging risk
+- Production-quality code
+
+**Why this makes sense:**
+- BSplineBasis1D is complete and working (100% tested) ✓
+- Solver is commodity infrastructure (not core IP)
+- Time better spent on separable fitter algorithm
+- Eigen is header-only, easy to integrate
+
+**Alternative: Debug Existing Solvers**
+
+### Option 1: Fix Pentadiagonal (Most Recent)
+- Current status: 6/12 tests passing
+- Elimination bugs in multiplier/RHS update
+- Estimated time: 4-6 hours of careful debugging
+- Risk: High (already failed twice)
+
+### Option 2: Fix BandedLU (Conservative)
 - Debug factorization using LAPACK DGBSV as reference
 - Estimated time: 2-4 hours
 - Risk: Medium (complex algorithm)
