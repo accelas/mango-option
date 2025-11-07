@@ -62,6 +62,19 @@ void PriceTable4DBuilder::validate_grids() const {
     if (volatility_.front() <= 0.0) {
         throw std::invalid_argument("Volatility must be positive");
     }
+
+    // Verify moneyness values are positive
+    // CRITICAL: PDE works in log-moneyness x = ln(m), so m must be > 0
+    // Moneyness grid should represent S/K_ref ratios, not raw spots
+    for (size_t i = 0; i < moneyness_.size(); ++i) {
+        if (moneyness_[i] <= 0.0) {
+            throw std::invalid_argument(
+                "Moneyness values must be positive (m = S/K_ref > 0). "
+                "Found m[" + std::to_string(i) + "] = " + std::to_string(moneyness_[i]) + ". "
+                "Note: moneyness represents spot ratios S/K_ref, not log-moneyness x = ln(S/K_ref)."
+            );
+        }
+    }
 }
 
 PriceTable4DResult PriceTable4DBuilder::precompute(
@@ -89,13 +102,23 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     const double dt = T_max / grid_config.n_time;
 
     // Precompute step indices for each maturity
+    // CRITICAL: PDESolver calls process_snapshots(step, t) where t = (step+1)*dt
+    // So to capture a snapshot at maturity τ, we need step k such that (k+1)*dt ≈ τ
+    // Therefore: k = round(τ/dt) - 1
     std::vector<size_t> step_indices(Nt);
     for (size_t j = 0; j < Nt; ++j) {
-        // PDE time t equals time-to-maturity τ
-        step_indices[j] = static_cast<size_t>(std::round(maturity_[j] / dt));
+        // Compute step index: k = round(τ/dt) - 1
+        double step_exact = maturity_[j] / dt - 1.0;
+        long long step_rounded = std::llround(step_exact);
+
         // Clamp to valid range [0, n_time-1]
-        // CRITICAL: PDESolver only calls process_snapshots for steps in [0, n_time-1]
-        step_indices[j] = std::min(step_indices[j], grid_config.n_time - 1);
+        if (step_rounded < 0) {
+            step_indices[j] = 0;  // Minimum maturity (at time dt)
+        } else if (step_rounded >= static_cast<long long>(grid_config.n_time)) {
+            step_indices[j] = grid_config.n_time - 1;  // Maximum maturity (at time n_time*dt)
+        } else {
+            step_indices[j] = static_cast<size_t>(step_rounded);
+        }
     }
 
     // Loop over (σ, r) pairs only - this is the separable batch approach
