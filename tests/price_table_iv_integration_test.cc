@@ -137,10 +137,11 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
             .time = maturity[tau_idx],
             .user_index = tau_idx,
             .spatial_grid = {},
+            .dx = {},
             .solution = {},
+            .spatial_operator = {},
             .first_derivative = {},
-            .second_derivative = {},
-            .spatial_operator = {}
+            .second_derivative = {}
         };
         collector.collect(fake_snapshot);
     }
@@ -171,7 +172,7 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     }
 
     // Build B-spline surface
-    PriceTable4DBuilder builder(moneyness, maturity, volatility, rate, K_ref);
+    auto builder = PriceTable4DBuilder::create(moneyness, maturity, volatility, rate, K_ref);
 
     // Fit B-spline coefficients
     BSplineFitter4D fitter(moneyness, maturity, volatility, rate);
@@ -248,10 +249,11 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
             .time = maturity[tau_idx],
             .user_index = tau_idx,
             .spatial_grid = {},
+            .dx = {},
             .solution = {},
+            .spatial_operator = {},
             .first_derivative = {},
-            .second_derivative = {},
-            .spatial_operator = {}
+            .second_derivative = {}
         };
         collector.collect(fake_snapshot);
     }
@@ -329,14 +331,13 @@ TEST(PriceTableIVIntegrationTest, MoneynessBoundsValidation) {
     std::vector<double> volatility = {0.20, 0.25};
     std::vector<double> rate = {0.05};
 
-    PriceTable4DBuilder builder(moneyness, maturity, volatility, rate, K_ref);
+    auto builder = PriceTable4DBuilder::create(moneyness, maturity, volatility, rate, K_ref);
 
-    AmericanOptionGrid grid_config{
-        .n_space = 51,
-        .n_time = 100,
-        .x_min = -0.10,  // Covers ln(0.9) ≈ -0.105
-        .x_max = 0.10    // Covers ln(1.1) ≈ 0.095
-    };
+    AmericanOptionGrid grid_config;
+    grid_config.n_space = 51;
+    grid_config.n_time = 100;
+    grid_config.x_min = -0.10;  // Covers ln(0.9) ≈ -0.105
+    grid_config.x_max = 0.10;   // Covers ln(1.1) ≈ 0.095
 
     // This should FAIL because ln(0.9) = -0.105 < -0.10
     EXPECT_THROW({
@@ -370,10 +371,11 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
             .time = maturity[tau_idx],
             .user_index = tau_idx,
             .spatial_grid = {},
+            .dx = {},
             .solution = {},
+            .spatial_operator = {},
             .first_derivative = {},
-            .second_derivative = {},
-            .spatial_operator = {}
+            .second_derivative = {}
         };
         collector.collect(fake_snapshot);
     }
