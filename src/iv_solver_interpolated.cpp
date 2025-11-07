@@ -94,6 +94,22 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
     // Get adaptive bounds
     auto [sigma_min, sigma_max] = adaptive_bounds(query);
 
+    // Check if query is within surface bounds (before we start iterating)
+    if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
+        return IVResult{
+            .implied_vol = 0.0,
+            .converged = false,
+            .iterations = 0,
+            .final_error = 0.0,
+            .error_message = "Query parameters out of surface bounds. "
+                            "Moneyness: [" + std::to_string(m_range_.first) + ", " + std::to_string(m_range_.second) + "], "
+                            "Maturity: [" + std::to_string(tau_range_.first) + ", " + std::to_string(tau_range_.second) + "], "
+                            "Volatility: [" + std::to_string(sigma_range_.first) + ", " + std::to_string(sigma_range_.second) + "], "
+                            "Rate: [" + std::to_string(r_range_.first) + ", " + std::to_string(r_range_.second) + "]. "
+                            "Use PDE-based IV solver for out-of-grid queries."
+        };
+    }
+
     // Initial guess: midpoint of bounds
     double sigma = (sigma_min + sigma_max) / 2.0;
 
@@ -102,8 +118,19 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
     double error_abs = 0.0;
 
     for (; iter < config_.max_iterations; ++iter) {
-        // Evaluate price at current volatility
-        const double price = eval_price(moneyness, query.maturity, sigma, query.rate);
+        // Check if current sigma is within surface bounds
+        if (!is_in_bounds(query, sigma)) {
+            return IVResult{
+                .implied_vol = sigma,
+                .converged = false,
+                .iterations = iter + 1,
+                .final_error = error_abs,
+                .error_message = "Newton iteration moved outside surface bounds"
+            };
+        }
+
+        // Evaluate price at current volatility (with strike scaling)
+        const double price = eval_price(moneyness, query.maturity, sigma, query.rate, query.strike);
 
         // Compute error
         error_abs = std::abs(price - query.market_price);
@@ -119,8 +146,8 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
             };
         }
 
-        // Compute vega (∂Price/∂σ)
-        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate);
+        // Compute vega (∂Price/∂σ) with strike scaling
+        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
 
         // Check for numerical issues
         if (std::abs(vega) < 1e-10) {

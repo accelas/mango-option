@@ -89,14 +89,26 @@ public:
     /// Constructor
     ///
     /// @param price_surface Pre-computed 4D B-spline price evaluator
-    /// @param K_ref Reference strike price used for moneyness calculation
+    /// @param K_ref Reference strike price used for price table construction
+    /// @param m_range Moneyness bounds (min, max) - queries outside are rejected
+    /// @param tau_range Maturity bounds (min, max)
+    /// @param sigma_range Volatility bounds (min, max)
+    /// @param r_range Rate bounds (min, max)
     /// @param config Solver configuration
     IVSolverInterpolated(
         const BSpline4D_FMA& price_surface,
         double K_ref,
+        std::pair<double, double> m_range,
+        std::pair<double, double> tau_range,
+        std::pair<double, double> sigma_range,
+        std::pair<double, double> r_range,
         const IVSolverConfig& config = {})
         : price_surface_(price_surface)
         , K_ref_(K_ref)
+        , m_range_(m_range)
+        , tau_range_(tau_range)
+        , sigma_range_(sigma_range)
+        , r_range_(r_range)
         , config_(config)
     {
         if (K_ref <= 0.0) {
@@ -113,21 +125,44 @@ public:
 private:
     const BSpline4D_FMA& price_surface_;
     double K_ref_;
+    std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
     IVSolverConfig config_;
 
-    /// Evaluate option price using B-spline interpolation
-    double eval_price(double moneyness, double maturity, double vol, double rate) const {
-        return price_surface_.eval(moneyness, maturity, vol, rate);
+    /// Evaluate option price using B-spline interpolation with strike scaling
+    ///
+    /// The price surface stores prices for reference strike K_ref.
+    /// For options with different strikes, we scale: V(K) = V(K_ref) * (K/K_ref)
+    ///
+    /// @param moneyness m = S/K
+    /// @param maturity Time to maturity
+    /// @param vol Volatility
+    /// @param rate Risk-free rate
+    /// @param strike Actual strike (for scaling)
+    /// @return Scaled price for given strike
+    double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const {
+        double price_Kref = price_surface_.eval(moneyness, maturity, vol, rate);
+        double scale_factor = strike / K_ref_;
+        return price_Kref * scale_factor;
     }
 
     /// Compute vega using finite differences
-    double compute_vega(double moneyness, double maturity, double vol, double rate) const {
+    double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const {
         const double eps = config_.vega_epsilon;
 
-        const double price_up = eval_price(moneyness, maturity, vol + eps, rate);
-        const double price_dn = eval_price(moneyness, maturity, vol - eps, rate);
+        const double price_up = eval_price(moneyness, maturity, vol + eps, rate, strike);
+        const double price_dn = eval_price(moneyness, maturity, vol - eps, rate, strike);
 
         return (price_up - price_dn) / (2.0 * eps);
+    }
+
+    /// Check if query parameters are within surface bounds
+    bool is_in_bounds(const IVQuery& query, double vol) const {
+        const double m = query.spot / query.strike;
+
+        return m >= m_range_.first && m <= m_range_.second &&
+               query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&
+               vol >= sigma_range_.first && vol <= sigma_range_.second &&
+               query.rate >= r_range_.first && query.rate <= r_range_.second;
     }
 
     /// Validate query parameters
