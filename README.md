@@ -17,15 +17,12 @@ The library combines **performance**, **flexibility**, and **correctness** with 
 
 ### Key Features
 
-- **American Option Pricing** - PDE-based solver using TR-BDF2 method (~22ms)
-- **American Option Implied Volatility** - FDM-based IV calculation using Brent's method (~145ms)
-- **General PDE Solver** - Template-based framework for custom parabolic PDEs
-- **Cubic Spline Interpolation** - Off-grid solution evaluation
-- **Price Table Pre-computation** - Fast lookups via interpolation (future: ~7.5µs IV)
-- **Adaptive Grid Presets** - Non-uniform spacing with 4-23× memory reduction
-- **Zero-Overhead Tracing** - USDT probes for production-safe diagnostics
-- **Batch Processing** - OpenMP parallelization for multiple calculations
-- **SIMD Vectorization** - Automatic vectorization via OpenMP pragmas
+- **American Option Pricing** – TR‑BDF2 PDE solver (~22 ms per valuation)
+- **Fast IV via B-splines** – Pre-computed 4D tensor-product cubic B-spline surfaces feed the Newton IV solver (<30 µs per query)
+- **Reference FDM IV** – Brent’s method backed by on-demand PDE solves (~145 ms) for calibration & regression testing
+- **General PDE Toolkit** – Template spatial operators, boundary conditions, and root finding
+- **Adaptive Price Tables** – Non-uniform grid presets with 4‑23× memory reduction
+- **Diagnostics & Performance** – USDT tracing, OpenMP batching, and SIMD-friendly layouts for production monitoring
 
 ---
 
@@ -218,6 +215,17 @@ price_table_destroy(table);
 - `GRID_PRESET_ADAPTIVE_FAST`: ~5K points, rapid prototyping
 - `GRID_PRESET_ADAPTIVE_BALANCED`: ~15K points, production-ready
 - `GRID_PRESET_ADAPTIVE_ACCURATE`: ~30K points, high-accuracy
+
+### Pre-computed B-spline IV Surface
+
+To eliminate repeated PDE solves inside the IV loop, you can build a 4D B-spline surface over `(m, τ, σ, r)` once and reuse it for millions of queries:
+
+```bash
+# Analytic integration test for the full pipeline
+bazel test //tests:price_table_iv_integration_test
+```
+
+The test harness fakes PDE snapshots with Black–Scholes prices, runs `PriceTable4DBuilder`, fits the separable cubic B-spline (`BSplineFitter4D`), and finally recovers the known volatility via `IVSolverInterpolated`. See the consolidated design note in `docs/plans/2025-11-06-bspline-fast-iv-design.md` for architectural details and `docs/bspline_collocation_problem.md` for the 1D solver contract.
 - `GRID_PRESET_UNIFORM`: ~112K points, baseline (no concentration)
 
 See `examples/` for complete working programs.
