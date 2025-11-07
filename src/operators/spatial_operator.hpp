@@ -7,6 +7,7 @@
 #include <memory>
 #include <concepts>
 #include <cassert>
+#include <cmath>
 
 namespace mango::operators {
 
@@ -123,9 +124,10 @@ public:
             const T dx_sq = dx * dx;
 
             // Jacobian of L(u): ∂L/∂u
-            const T jac_lower_coeff = a / dx_sq - b / (2.0 * dx);
-            const T jac_diag_coeff = -2.0 * a / dx_sq + c;
-            const T jac_upper_coeff = a / dx_sq + b / (2.0 * dx);
+            // Use FMA for coefficient computations
+            const T jac_lower_coeff = std::fma(a, T(1) / dx_sq, -b / (T(2) * dx));
+            const T jac_diag_coeff = std::fma(T(-2) * a, T(1) / dx_sq, c);
+            const T jac_upper_coeff = std::fma(a, T(1) / dx_sq, b / (T(2) * dx));
 
             // F(u) = u - rhs - coeff_dt·L(u)
             // ∂F/∂u = I - coeff_dt·∂L/∂u
