@@ -11,6 +11,7 @@
 #include "src/expected.hpp"
 #include "parallel.hpp"
 #include <vector>
+#include <memory>
 #include <stdexcept>
 #include <cmath>
 
