@@ -121,10 +121,11 @@ static void compare_scenario(
     grid.n_time = 2000;
 
     AmericanOptionSolver solver(mango_params, grid);
-    auto mango_result = solver.solve();
-    if (!mango_result) {
-        throw std::runtime_error(mango_result.error().message);
+    auto mango_result_expected = solver.solve();
+    if (!mango_result_expected) {
+        throw std::runtime_error(mango_result_expected.error().message);
     }
+    const AmericanOptionResult& mango_result = *mango_result_expected;
 
     // QuantLib pricing
     auto ql_result = price_american_option_quantlib(
@@ -132,12 +133,12 @@ static void compare_scenario(
         201, 2000);
 
     // Calculate errors
-    double price_error = std::abs(mango_result->value - ql_result.price);
+    double price_error = std::abs(mango_result.value - ql_result.price);
     double price_rel_error = price_error / ql_result.price * 100.0;
 
-    double delta_error = std::abs(mango_result->delta - ql_result.delta);
-    double gamma_error = std::abs(mango_result->gamma - ql_result.gamma);
-    double theta_error = std::abs(mango_result->theta - ql_result.theta);
+    double delta_error = std::abs(mango_result.delta - ql_result.delta);
+    double gamma_error = std::abs(mango_result.gamma - ql_result.gamma);
+    double theta_error = std::abs(mango_result.theta - ql_result.theta);
 
     // Report results (not part of benchmark timing)
     for (auto _ : state) {
@@ -150,7 +151,7 @@ static void compare_scenario(
 
     // Store custom counters
     state.counters["ql_price"] = ql_result.price;
-    state.counters["mango_price"] = mango_result->value;
+    state.counters["mango_price"] = mango_result.value;
     state.counters["price_abs_err"] = price_error;
     state.counters["price_rel_err_%"] = price_rel_error;
     state.counters["delta_abs_err"] = delta_error;
@@ -244,7 +245,11 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     grid.n_time = n_time;
 
     AmericanOptionSolver solver(params, grid);
-    auto result = solver.solve();
+    auto mango_result_expected = solver.solve();
+    if (!mango_result_expected) {
+        throw std::runtime_error(mango_result_expected.error().message);
+    }
+    const AmericanOptionResult& result = *mango_result_expected;
 
     // Error vs high-resolution reference
     double error = std::abs(result.value - ql_reference);
@@ -290,7 +295,11 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     grid.n_time = 2000;
 
     AmericanOptionSolver solver(mango_params, grid);
-    auto mango_result = solver.solve();
+    auto mango_result_expected = solver.solve();
+    if (!mango_result_expected) {
+        throw std::runtime_error(mango_result_expected.error().message);
+    }
+    const AmericanOptionResult& mango_result = *mango_result_expected;
 
     // QuantLib
     auto ql_result = price_american_option_quantlib(
