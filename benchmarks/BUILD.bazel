@@ -33,6 +33,9 @@ cc_binary(
     deps = [
         "//src:american_option",
         "//src:iv_solver",
+        "//src:bspline_4d",
+        "//src:bspline_fitter_4d",
+        "//src:iv_solver_interpolated",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],

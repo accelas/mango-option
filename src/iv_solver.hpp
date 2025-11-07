@@ -4,6 +4,7 @@
 #include "common/ivcalc_trace.h"
 #include "src/expected.hpp"
 #include "parallel.hpp"
+#include "iv_types.hpp"
 #include <optional>
 #include <string>
 #include <vector>
@@ -51,31 +52,6 @@ struct IVConfig {
 
     /// Maximum spot price for grid (S_max)
     double grid_s_max = 200.0;
-};
-
-/// Result from implied volatility calculation
-///
-/// Extends RootFindingResult with IV-specific information.
-struct IVResult {
-    /// Whether the solver converged to a solution
-    bool converged;
-
-    /// Number of iterations performed
-    size_t iterations;
-
-    /// The calculated implied volatility (if converged)
-    /// Value is only meaningful if converged == true
-    double implied_vol;
-
-    /// Final error measure (difference between theoretical and market price)
-    double final_error;
-
-    /// Optional failure diagnostic message
-    std::optional<std::string> failure_reason;
-
-    /// Optional vega (∂V/∂σ) at the solution
-    /// Useful for sensitivity analysis and Newton-based methods
-    std::optional<double> vega;
 };
 
 /// Implied Volatility Solver for American Options

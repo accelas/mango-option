@@ -339,6 +339,7 @@ cc_library(
     deps = [
         ":bspline_4d",
         ":american_option",
+        ":iv_types",
     ],
     copts = [
         "-std=c++20",
@@ -371,6 +372,13 @@ cc_library(
 )
 
 cc_library(
+    name = "iv_types",
+    hdrs = ["iv_types.hpp"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "iv_solver",
     srcs = ["iv_solver.cpp"],
     hdrs = ["iv_solver.hpp"],
@@ -379,6 +387,7 @@ cc_library(
         ":root_finding",
         ":brent",
         ":american_option",
+        ":iv_types",
         "//common:ivcalc_trace_hdr",
         ":expected",
     ],
