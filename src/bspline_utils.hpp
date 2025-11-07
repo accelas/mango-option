@@ -16,7 +16,10 @@ namespace mango {
 /// Create clamped knot vector for cubic B-splines
 ///
 /// For n data points, creates n+4 knots with repeated endpoints:
-/// [x[0], x[0], x[0], x[0], x[1], ..., x[n-2], x[n-1], x[n-1], x[n-1], x[n-1]]
+/// [x[0], x[0], x[0], x[0], x[1], ..., x[n-4], x[n-1], x[n-1], x[n-1], x[n-1]]
+///
+/// The interior knots x[1] through x[n-4] are placed between the clamped endpoints.
+/// This ensures the collocation matrix is non-singular (Schoenberg-Whitney condition).
 ///
 /// @param x Grid points (must be sorted)
 /// @return Clamped knot vector
