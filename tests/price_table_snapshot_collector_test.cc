@@ -21,19 +21,33 @@ TEST(PriceTableSnapshotCollectorTest, GammaFormulaValidation) {
 
     mango::PriceTableSnapshotCollector collector(config);
 
-    // Mock PDE solution (parabola in S: V(S) = S²)
-    // This ensures ∂²V/∂S² = 2.0 everywhere
-    std::vector<double> x = {60.0, 80.0, 100.0, 120.0, 140.0};
-    std::vector<double> dx = {20.0, 20.0, 20.0, 20.0};
+    // Mock PDE solution in LOG-MONEYNESS coordinates
+    // PDE grid is x = ln(S/K), NOT dollar values S
+    std::vector<double> S_values = {60.0, 80.0, 100.0, 120.0, 140.0};
+    std::vector<double> x(S_values.size());  // Log-moneyness grid
     std::vector<double> V(x.size());
-    std::vector<double> dVdS(x.size());
-    std::vector<double> d2VdS2(x.size());
+    std::vector<double> dVdx(x.size());      // ∂V/∂x (NOT ∂V/∂S)
+    std::vector<double> d2Vdx2(x.size());    // ∂²V/∂x² (NOT ∂²V/∂S²)
 
+    // Convert S values to log-moneyness and compute derivatives
     for (size_t i = 0; i < x.size(); ++i) {
-        double S = x[i];
-        V[i] = S * S;              // V = S²
-        dVdS[i] = 2.0 * S;         // ∂V/∂S = 2S
-        d2VdS2[i] = 2.0;           // ∂²V/∂S² = 2 (constant)
+        double S = S_values[i];
+        x[i] = std::log(S / K_ref);  // x = ln(S/K)
+
+        // Function: V = S² (in dollar space)
+        // In log-moneyness: V(x) = K²·exp(2x)
+        V[i] = S * S;
+
+        // Chain rule: ∂V/∂x = (∂V/∂S) · (∂S/∂x) = (2S) · (S) = 2S²
+        dVdx[i] = 2.0 * S * S;
+
+        // Second derivative: ∂²V/∂x² = ∂/∂x(2S²) = 2·2S·S = 4S²
+        d2Vdx2[i] = 4.0 * S * S;
+    }
+
+    std::vector<double> dx_spacing(x.size() - 1);
+    for (size_t i = 0; i < x.size() - 1; ++i) {
+        dx_spacing[i] = x[i+1] - x[i];
     }
 
     std::vector<double> Lu(x.size(), 0.0);
@@ -42,11 +56,11 @@ TEST(PriceTableSnapshotCollectorTest, GammaFormulaValidation) {
         .time = 0.5,
         .user_index = 0,
         .spatial_grid = std::span{x},
-        .dx = std::span{dx},
+        .dx = std::span{dx_spacing},
         .solution = std::span{V},
         .spatial_operator = std::span{Lu},
-        .first_derivative = std::span{dVdS},
-        .second_derivative = std::span{d2VdS2}
+        .first_derivative = std::span{dVdx},
+        .second_derivative = std::span{d2Vdx2}
     };
 
     collector.collect(snapshot);
