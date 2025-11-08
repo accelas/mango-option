@@ -73,10 +73,17 @@ TEST(CacheBlockingBenchmark, ConfigParameterIgnored) {
     std::cout << "Low threshold: " << time2 << "s" << std::endl;
     std::cout << "Ratio: " << ratio << "x" << std::endl;
 
-    // Since cache blocking is removed, both should run at the same speed
-    // Allow for 10% variation due to system noise
-    EXPECT_NEAR(ratio, 1.0, 0.1)
-        << "Both configs should perform identically (cache blocking removed)";
+    // Since cache blocking is removed, both should produce identical solutions
+    // (wall-clock timing is not deterministic in CI, so we compare solutions)
+    auto sol1 = solver1.solution();
+    auto sol2 = solver2.solution();
+
+    ASSERT_EQ(sol1.size(), sol2.size());
+    for (size_t i = 0; i < sol1.size(); ++i) {
+        EXPECT_NEAR(sol1[i], sol2[i], 1e-12)
+            << "Solutions differ at i=" << i
+            << " (cache blocking should not affect numerical results)";
+    }
 
     std::cout << "NOTE: Cache blocking has been removed. The cache_blocking_threshold "
               << "parameter is ignored.\n"
