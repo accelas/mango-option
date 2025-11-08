@@ -43,6 +43,36 @@ cc_binary(
 )
 
 cc_binary(
+    name = "readme_benchmarks",
+    srcs = ["readme_benchmarks.cc"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src:american_option",
+        "//src:slice_solver_workspace",
+        "//src:iv_solver",
+        "//src:iv_solver_interpolated",
+        "//src:bspline_4d",
+        "//src:bspline_fitter_4d",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "quantlib_performance",
     srcs = ["quantlib_performance.cc"],
     copts = [
