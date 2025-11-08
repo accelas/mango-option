@@ -110,49 +110,33 @@ This scheme provides:
 - Second-order accuracy
 - Good damping properties for high-frequency errors
 
-### Cache-Blocking Optimization
+### Cache Blocking (Removed)
 
-**Transparent optimization** for large grids (n ≥ 5000):
+**Note:** Cache blocking was previously attempted but has been removed because the implementation was ineffective.
 
-```cpp
-mango::TRBDF2Config config;
-config.cache_blocking_threshold = 5000;  // Default threshold
-```
+**Why it was removed:**
+- The blocked path still passed full array spans to the stencil operators
+- Stencil accesses `u[i-1]`, `u[i]`, `u[i+1]` which can span multiple cache blocks
+- Added loop/branch overhead without any cache locality benefit
+- On large grids, this resulted in slower performance than single-pass evaluation
 
-**How it works:**
-- Small grids (n < threshold): Single-block evaluation (zero overhead)
-- Large grids (n ≥ threshold): Multi-block evaluation with L1 cache optimization
-- **Speedup:** Hardware-dependent (1-8x depending on CPU cache architecture)
-  - Measured: 1.05x on test system (n=10,000)
-  - Best case: 4-8x on systems with small L1 cache relative to problem size
+**What would be needed for true cache blocking:**
+- Materialize block-local buffers with halo zones
+- Copy block data from global arrays into cache-friendly buffers
+- Run stencil on local buffers
+- Copy results back to global arrays
+- This adds complexity and copy overhead that may not pay off on modern CPUs with large L2/L3 caches
 
-**Architecture:**
-- Spatial operators expose dual methods: `operator()` (full-array) and `apply_block()` (block-aware)
-- PDESolver automatically selects strategy based on grid size
-- Newton solver uses same blocking strategy for consistency
+**Current implementation:**
+- All grid sizes use single-pass evaluation (direct call to `spatial_op_.apply()`)
+- All cache blocking infrastructure has been removed (parameter, methods, tests)
+- `TRBDF2Config` no longer has a `cache_blocking_threshold` field
 
-**Block parameters:**
-- Target block size: ~1000 points (24 KB working set fits in L1 cache)
-- Overlap: 1 point (required for 3-point stencil)
-- Blocks computed automatically: `n_blocks = ceil(n / 1000)`
-
-**Numerical equivalence:**
-- Blocked execution produces **identical results** to full-array (machine precision)
-- All tests verify equivalence to 1e-12 tolerance
-- Safe to use in production without validation runs
-
-**Performance characteristics:**
-- Greatest benefit when memory bandwidth is bottleneck
-- Reduced benefit when:
-  - Hardware has large L1/L2 caches (>128 KB)
-  - Problem fits entirely in cache
-  - Convergence iterations dominate runtime
-- Benchmark available: `bazel test //tests:cache_blocking_benchmark`
-
-**Opt-out:**
-```cpp
-config.cache_blocking_threshold = 1000000;  // Effectively disable
-```
+**For developers:**
+If cache blocking becomes important in the future, it will need to be re-implemented from scratch with:
+1. Profiling to confirm memory bandwidth is the bottleneck (not computation or convergence)
+2. True blocking with local buffers and halo zones (not just index ranges)
+3. Careful benchmarking to ensure speedup justifies added complexity
 
 ### Implicit Solver
 

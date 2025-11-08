@@ -246,7 +246,7 @@ private:
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid, config_.cache_blocking_threshold);
+        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid);
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }
@@ -374,31 +374,20 @@ private:
         right_bc_.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
     }
 
-    /// Apply spatial operator with cache-blocking for large grids
+    /// Apply spatial operator (single-pass evaluation)
+    ///
+    /// Note: Cache blocking was previously attempted but removed because it was
+    /// ineffective. The blocked path still passed full arrays to the stencil,
+    /// defeating locality benefits while adding loop overhead. True blocking would
+    /// require materializing block-local buffers with halos, which adds complexity
+    /// without clear benefit on modern CPUs with large caches.
     void apply_operator_with_blocking(double t,
                                       std::span<const double> u,
                                       std::span<double> Lu) {
         const size_t n = grid_.size();
 
-        // Small grid: use full-array path (no blocking overhead)
-        if (workspace_->cache_config().n_blocks == 1) {
-            spatial_op_.apply(t, u, Lu);
-            // Zero boundary values (BCs will override after)
-            Lu[0] = Lu[n-1] = 0.0;
-            return;
-        }
-
-        // Large grid: blocked evaluation
-        for (size_t block = 0; block < workspace_->cache_config().n_blocks; ++block) {
-            auto [interior_start, interior_end] =
-                workspace_->get_block_interior_range(block);
-
-            // Skip boundary-only blocks
-            if (interior_start >= interior_end) continue;
-
-            // Call apply_interior on this block
-            spatial_op_.apply_interior(t, u, Lu, interior_start, interior_end);
-        }
+        // Direct evaluation (no blocking)
+        spatial_op_.apply(t, u, Lu);
 
         // Zero boundary values (BCs will override after)
         Lu[0] = Lu[n-1] = 0.0;
