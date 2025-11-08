@@ -11,6 +11,7 @@
 #include "snapshot.hpp"
 #include "jacobian_view.hpp"
 #include "src/expected.hpp"
+#include <memory>
 #include <span>
 #include <vector>
 #include <functional>
@@ -83,7 +84,8 @@ public:
               const BoundaryL& left_bc,
               const BoundaryR& right_bc,
               const SpatialOp& spatial_op,
-              std::optional<ObstacleCallback> obstacle = std::nullopt)
+              std::optional<ObstacleCallback> obstacle = std::nullopt,
+              WorkspaceStorage* external_workspace = nullptr)
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -93,16 +95,17 @@ public:
         , spatial_op_(spatial_op)
         , obstacle_(std::move(obstacle))
         , n_(grid.size())
-        , workspace_(n_, grid, config_.cache_blocking_threshold)
+        , workspace_owner_(nullptr)
+        , workspace_(nullptr)
         , u_current_(n_)
         , u_old_(n_)
         , rhs_(n_)
-        , newton_ws_(n_, workspace_)
+        , newton_ws_(n_, acquire_workspace(grid, external_workspace))
     {
         // Initialize grid information for legacy operators that need it
         // (e.g., LaplacianOperator) via set_grid() if present
-        if constexpr (requires { spatial_op_.set_grid(grid, workspace_.dx()); }) {
-            spatial_op_.set_grid(grid, workspace_.dx());
+        if constexpr (requires { spatial_op_.set_grid(grid, workspace_->dx()); }) {
+            spatial_op_.set_grid(grid, workspace_->dx());
         }
     }
 
@@ -210,7 +213,8 @@ private:
     size_t n_;
 
     // Workspace for cache blocking
-    WorkspaceStorage workspace_;
+    std::unique_ptr<WorkspaceStorage> workspace_owner_;
+    WorkspaceStorage* workspace_;
 
     // Solution storage
     std::vector<double> u_current_;  // u^{n+1} or u^{n+γ}
@@ -236,6 +240,16 @@ private:
     // Workspace for derivatives
     std::vector<double> du_dx_;
     std::vector<double> d2u_dx2_;
+
+    WorkspaceStorage& acquire_workspace(std::span<const double> grid, WorkspaceStorage* external_workspace) {
+        if (external_workspace) {
+            workspace_ = external_workspace;
+            return *workspace_;
+        }
+        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid, config_.cache_blocking_threshold);
+        workspace_ = workspace_owner_.get();
+        return *workspace_;
+    }
 
     /// Process snapshots at current step index
     void process_snapshots(size_t step_idx, double t_current) {
@@ -267,9 +281,9 @@ private:
                 .time = t_current,
                 .user_index = req.user_index,
                 .spatial_grid = grid_,
-                .dx = workspace_.dx(),
+                .dx = workspace_->dx(),
                 .solution = std::span{u_current_},
-                .spatial_operator = workspace_.lu(),
+                .spatial_operator = workspace_->lu(),
                 .first_derivative = std::span{du_dx_},
                 .second_derivative = std::span{d2u_dx2_},
                 .problem_params = nullptr
@@ -332,7 +346,7 @@ private:
     void apply_obstacle(double t, std::span<double> u) {
         if (!obstacle_) return;
 
-        auto psi = workspace_.psi_buffer();
+        auto psi = workspace_->psi_buffer();
         (*obstacle_)(t, grid_, psi);
 
         // Project: u[i] = max(u[i], psi[i])
@@ -345,7 +359,7 @@ private:
 
     /// Apply boundary conditions
     void apply_boundary_conditions(std::span<double> u, double t) {
-        auto dx_span = workspace_.dx();
+        auto dx_span = workspace_->dx();
 
         // Left boundary
         double x_left = grid_[0];
@@ -367,7 +381,7 @@ private:
         const size_t n = grid_.size();
 
         // Small grid: use full-array path (no blocking overhead)
-        if (workspace_.cache_config().n_blocks == 1) {
+        if (workspace_->cache_config().n_blocks == 1) {
             spatial_op_.apply(t, u, Lu);
             // Zero boundary values (BCs will override after)
             Lu[0] = Lu[n-1] = 0.0;
@@ -375,9 +389,9 @@ private:
         }
 
         // Large grid: blocked evaluation
-        for (size_t block = 0; block < workspace_.cache_config().n_blocks; ++block) {
+        for (size_t block = 0; block < workspace_->cache_config().n_blocks; ++block) {
             auto [interior_start, interior_end] =
-                workspace_.get_block_interior_range(block);
+                workspace_->get_block_interior_range(block);
 
             // Skip boundary-only blocks
             if (interior_start >= interior_end) continue;
@@ -399,12 +413,12 @@ private:
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
-        apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_.lu());
+        apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_->lu());
 
         // RHS = u^n + w1·L(u^n)
         // Use FMA for SAXPY-style loop
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(w1, workspace_.lu()[i], u_old_[i]);
+            rhs_[i] = std::fma(w1, workspace_->lu()[i], u_old_[i]);
         }
 
         // Initial guess: u* = u^n
@@ -526,10 +540,10 @@ private:
         // Newton iteration
         for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
             // Evaluate L(u)
-            apply_operator_with_blocking(t, u, workspace_.lu());
+            apply_operator_with_blocking(t, u, workspace_->lu());
 
             // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
-            compute_residual(u, coeff_dt, workspace_.lu(), rhs,
+            compute_residual(u, coeff_dt, workspace_->lu(), rhs,
                            newton_ws_.residual());
 
             // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
@@ -654,7 +668,7 @@ private:
                                           std::span<const double> u, double eps) {
         // Initialize u_perturb and compute baseline L(u)
         std::copy(u.begin(), u.end(), newton_ws_.u_perturb().begin());
-        apply_operator_with_blocking(t, u, workspace_.lu());
+        apply_operator_with_blocking(t, u, workspace_->lu());
 
         // Interior points: tridiagonal structure via finite differences
         // J = ∂F/∂u where F(u) = u - rhs - coeff_dt·L(u)
@@ -663,21 +677,21 @@ private:
             // Diagonal: ∂F/∂u_i = 1 - coeff_dt·∂L_i/∂u_i
             newton_ws_.u_perturb()[i] = u[i] + eps;
             apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
-            double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_->lu()[i]) / eps;
             newton_ws_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
             newton_ws_.u_perturb()[i] = u[i];
 
             // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
             newton_ws_.u_perturb()[i - 1] = u[i - 1] + eps;
             apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
-            double dLi_duim1 = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            double dLi_duim1 = (newton_ws_.Lu_perturb()[i] - workspace_->lu()[i]) / eps;
             newton_ws_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
             newton_ws_.u_perturb()[i - 1] = u[i - 1];
 
             // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
             newton_ws_.u_perturb()[i + 1] = u[i + 1] + eps;
             apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
-            double dLi_duip1 = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            double dLi_duip1 = (newton_ws_.Lu_perturb()[i] - workspace_->lu()[i]) / eps;
             newton_ws_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
             newton_ws_.u_perturb()[i + 1] = u[i + 1];
         }
@@ -694,13 +708,13 @@ private:
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             newton_ws_.u_perturb()[0] = u[0] + eps;
             apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
-            double dL0_du0 = (newton_ws_.Lu_perturb()[0] - workspace_.lu()[0]) / eps;
+            double dL0_du0 = (newton_ws_.Lu_perturb()[0] - workspace_->lu()[0]) / eps;
             newton_ws_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
             newton_ws_.u_perturb()[0] = u[0];
 
             newton_ws_.u_perturb()[1] = u[1] + eps;
             apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
-            double dL0_du1 = (newton_ws_.Lu_perturb()[0] - workspace_.lu()[0]) / eps;
+            double dL0_du1 = (newton_ws_.Lu_perturb()[0] - workspace_->lu()[0]) / eps;
             newton_ws_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
             newton_ws_.u_perturb()[1] = u[1];
         }
@@ -714,7 +728,7 @@ private:
             size_t i = n_ - 1;
             newton_ws_.u_perturb()[i] = u[i] + eps;
             apply_operator_with_blocking(t, newton_ws_.u_perturb(), newton_ws_.Lu_perturb());
-            double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_.lu()[i]) / eps;
+            double dLi_dui = (newton_ws_.Lu_perturb()[i] - workspace_->lu()[i]) / eps;
             newton_ws_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
             newton_ws_.u_perturb()[i] = u[i];
         }

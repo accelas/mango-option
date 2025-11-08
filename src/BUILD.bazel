@@ -156,6 +156,9 @@ cc_library(
 cc_library(
     name = "spatial_operators",
     hdrs = ["spatial_operators.hpp"],
+    deps = [
+        ":parallel",
+    ],
     copts = [
         "-std=c++20",
         "-Wall",
@@ -177,6 +180,7 @@ cc_library(
         ":parallel",
         ":pde_solver",
         ":spatial_operators",
+        ":slice_solver_workspace",
         "//src/operators:operator_factory",
         "//src/operators:black_scholes_pde",
         ":expected",
@@ -314,6 +318,7 @@ cc_library(
     hdrs = ["price_table_4d_builder.hpp"],
     deps = [
         ":american_option",
+        ":slice_solver_workspace",
         ":bspline_4d",
         ":bspline_fitter_4d",
         ":price_table_snapshot_collector",
@@ -329,6 +334,18 @@ cc_library(
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "slice_solver_workspace",
+    hdrs = ["slice_solver_workspace.hpp"],
+    deps = [
+        ":workspace",
+        ":grid",
+        "//src/operators:grid_spacing",
+    ],
+    copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
 )
 

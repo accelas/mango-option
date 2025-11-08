@@ -61,14 +61,9 @@ public:
         // Snapshot user_index IS the tau index
         const size_t tau_idx = snapshot.user_index;
 
-        // PERFORMANCE FIX: Build interpolators ONCE outside loop
-        // We build interpolators for V and Lu only
-        // Derivatives will use eval_from_data() with PDE-computed arrays
-        SnapshotInterpolator V_interp, Lu_interp;
-
         // Build interpolators (grid should always be valid from PDE solver)
-        auto V_error = V_interp.build(snapshot.spatial_grid, snapshot.solution);
-        auto Lu_error = Lu_interp.build(snapshot.spatial_grid, snapshot.spatial_operator);
+        auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
+        auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
 
         // Assert on failure - indicates programming error in PDE solver
         assert(!V_error.has_value() && "Failed to build value interpolator");
@@ -85,13 +80,13 @@ public:
             const size_t table_idx = m_idx * tau_.size() + tau_idx;
 
             // Interpolate NORMALIZED price at log-moneyness x
-            const double V_norm = V_interp.eval(x);
+            const double V_norm = value_interp_.eval(x);
 
             // Convert to DOLLAR price: V_dollar = K_ref * V_norm
             prices_[table_idx] = K_ref_ * V_norm;
 
             // Interpolate normalized delta from PDE data: dV_norm/dx
-            const double dVnorm_dx = V_interp.eval_from_data(x, snapshot.first_derivative);
+            const double dVnorm_dx = value_interp_.eval_from_data(x, snapshot.first_derivative);
 
             // Transform to dollar delta using chain rule:
             // PERFORMANCE: Use FMA for better precision and potential FMA instruction
@@ -99,7 +94,7 @@ public:
             deltas_[table_idx] = delta_scale * dVnorm_dx;
 
             // Interpolate normalized second derivative: d²V_norm/dx²
-            const double d2Vnorm_dx2 = V_interp.eval_from_data(x, snapshot.second_derivative);
+            const double d2Vnorm_dx2 = value_interp_.eval_from_data(x, snapshot.second_derivative);
 
             // Transform to dollar gamma using chain rule:
             // gamma = (K_ref/S²) * [d²V_norm/dx² - dV_norm/dx]
@@ -117,7 +112,7 @@ public:
                 thetas_[table_idx] = std::numeric_limits<double>::quiet_NaN();
             } else {
                 // In continuation region
-                const double Lu_norm = Lu_interp.eval(x);
+                const double Lu_norm = lu_interp_.eval(x);
                 thetas_[table_idx] = -(K_ref_ * Lu_norm);
             }
         }
@@ -145,6 +140,9 @@ private:
     std::vector<double> spot_values_;    ///< Cached S = m * K_ref
     std::vector<double> inv_spot_;       ///< Cached 1/S
     std::vector<double> inv_spot_sq_;    ///< Cached 1/S²
+
+    SnapshotInterpolator value_interp_;
+    SnapshotInterpolator lu_interp_;
 
     double compute_american_obstacle(double S, double /*tau*/) const {
         // American option intrinsic value (exercise boundary)
