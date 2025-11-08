@@ -12,16 +12,30 @@ TEST(Integration5DPriceTableTest, GridSetupWithDividendDimension) {
     // Step 1: Create 5D price table grid
     mango::MultiGridBuffer price_table_grid;
 
-    price_table_grid.add_axis(mango::GridAxis::Moneyness,
-                              mango::GridSpec<>::log_spaced(0.7, 1.3, 10));
-    price_table_grid.add_axis(mango::GridAxis::Maturity,
-                              mango::GridSpec<>::uniform(0.027, 2.0, 8));
-    price_table_grid.add_axis(mango::GridAxis::Volatility,
-                              mango::GridSpec<>::uniform(0.10, 0.50, 5));
-    price_table_grid.add_axis(mango::GridAxis::Rate,
-                              mango::GridSpec<>::uniform(0.0, 0.10, 4));
-    price_table_grid.add_axis(mango::GridAxis::Dividend,
-                              mango::GridSpec<>::uniform(0.0, 0.05, 3));
+    auto moneyness_spec = mango::GridSpec<>::log_spaced(0.7, 1.3, 10);
+    ASSERT_TRUE(moneyness_spec.has_value());
+    auto result1 = price_table_grid.add_axis(mango::GridAxis::Moneyness, *moneyness_spec);
+    EXPECT_TRUE(result1.has_value());
+
+    auto maturity_spec = mango::GridSpec<>::uniform(0.027, 2.0, 8);
+    ASSERT_TRUE(maturity_spec.has_value());
+    auto result2 = price_table_grid.add_axis(mango::GridAxis::Maturity, *maturity_spec);
+    EXPECT_TRUE(result2.has_value());
+
+    auto volatility_spec = mango::GridSpec<>::uniform(0.10, 0.50, 5);
+    ASSERT_TRUE(volatility_spec.has_value());
+    auto result3 = price_table_grid.add_axis(mango::GridAxis::Volatility, *volatility_spec);
+    EXPECT_TRUE(result3.has_value());
+
+    auto rate_spec = mango::GridSpec<>::uniform(0.0, 0.10, 4);
+    ASSERT_TRUE(rate_spec.has_value());
+    auto result4 = price_table_grid.add_axis(mango::GridAxis::Rate, *rate_spec);
+    EXPECT_TRUE(result4.has_value());
+
+    auto dividend_spec = mango::GridSpec<>::uniform(0.0, 0.05, 3);
+    ASSERT_TRUE(dividend_spec.has_value());
+    auto result5 = price_table_grid.add_axis(mango::GridAxis::Dividend, *dividend_spec);
+    EXPECT_TRUE(result5.has_value());
 
     // Verify grid dimensions
     EXPECT_EQ(price_table_grid.n_axes(), 5);
@@ -29,7 +43,9 @@ TEST(Integration5DPriceTableTest, GridSetupWithDividendDimension) {
     EXPECT_EQ(price_table_grid.total_points(), expected_combinations);
 
     // Step 2: Extract dividend axis and verify spacing
-    auto dividend_axis = price_table_grid.axis_view(mango::GridAxis::Dividend);
+    auto dividend_axis_result = price_table_grid.axis_view(mango::GridAxis::Dividend);
+    EXPECT_TRUE(dividend_axis_result.has_value());
+    auto dividend_axis = dividend_axis_result.value();
     EXPECT_EQ(dividend_axis.size(), 3);
     EXPECT_DOUBLE_EQ(dividend_axis[0], 0.0);    // No dividend
     EXPECT_DOUBLE_EQ(dividend_axis[1], 0.025);  // 2.5% yield
@@ -38,7 +54,8 @@ TEST(Integration5DPriceTableTest, GridSetupWithDividendDimension) {
     // Step 3: Create PDE solver spatial grid (for a single parameter combination)
     // This would be created once per parameter combination during precompute
     auto pde_grid_spec = mango::GridSpec<>::log_spaced(50.0, 150.0, 101);
-    auto pde_grid = pde_grid_spec.generate();
+    ASSERT_TRUE(pde_grid_spec.has_value());
+    auto pde_grid = pde_grid_spec->generate();
 
     // Step 4: Create workspace for this PDE solve
     mango::WorkspaceStorage workspace(pde_grid.size(), pde_grid.span());
@@ -72,16 +89,29 @@ TEST(Integration5DPriceTableTest, GridSetupWithDividendDimension) {
 TEST(Integration5DPriceTableTest, DividendAffectsPriceCalculation) {
     // Create small 2D slice: dividend × rate
     mango::MultiGridBuffer grid;
-    grid.add_axis(mango::GridAxis::Dividend, mango::GridSpec<>::uniform(0.0, 0.04, 3));
-    grid.add_axis(mango::GridAxis::Rate,     mango::GridSpec<>::uniform(0.02, 0.06, 3));
+    auto dividend_spec = mango::GridSpec<>::uniform(0.0, 0.04, 3);
+    ASSERT_TRUE(dividend_spec.has_value());
+    auto result1 = grid.add_axis(mango::GridAxis::Dividend, *dividend_spec);
+    EXPECT_TRUE(result1.has_value());
+
+    auto rate_spec = mango::GridSpec<>::uniform(0.02, 0.06, 3);
+    ASSERT_TRUE(rate_spec.has_value());
+    auto result2 = grid.add_axis(mango::GridAxis::Rate,     *rate_spec);
+    EXPECT_TRUE(result2.has_value());
 
     // PDE solver grid (same for all parameter combinations)
     auto pde_spec = mango::GridSpec<>::uniform(80.0, 120.0, 41);
-    auto pde_grid = pde_spec.generate();
+    ASSERT_TRUE(pde_spec.has_value());
+    auto pde_grid = pde_spec->generate();
     mango::WorkspaceStorage workspace(pde_grid.size(), pde_grid.span());
 
-    auto div_axis = grid.axis_view(mango::GridAxis::Dividend);
-    auto rate_axis = grid.axis_view(mango::GridAxis::Rate);
+    auto div_axis_result = grid.axis_view(mango::GridAxis::Dividend);
+    EXPECT_TRUE(div_axis_result.has_value());
+    auto div_axis = div_axis_result.value();
+
+    auto rate_axis_result = grid.axis_view(mango::GridAxis::Rate);
+    EXPECT_TRUE(rate_axis_result.has_value());
+    auto rate_axis = rate_axis_result.value();
 
     // Test two parameter combinations with different dividends
     double r = rate_axis[1];  // r = 0.04

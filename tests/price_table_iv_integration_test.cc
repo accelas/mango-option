@@ -19,6 +19,7 @@
 #include "src/iv_solver_interpolated.hpp"
 #include "src/american_option.hpp"
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -193,9 +194,10 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     // Build B-spline surface
     auto builder = PriceTable4DBuilder::create(moneyness, maturity, volatility, rate, K_ref);
 
-    // Fit B-spline coefficients
-    BSplineFitter4D fitter(moneyness, maturity, volatility, rate);
-    auto fit_result = fitter.fit(prices_4d);
+    // Fit B-spline coefficients using factory pattern
+    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
+    auto fit_result = fitter_result.value().fit(prices_4d);
 
     ASSERT_TRUE(fit_result.success) << fit_result.error_message;
 
@@ -317,8 +319,9 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
     }
 
     // Build B-spline surface
-    BSplineFitter4D fitter(moneyness, maturity, volatility, rate);
-    auto fit_result = fitter.fit(prices_4d);
+    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
+    auto fit_result = fitter_result.value().fit(prices_4d);
 
     ASSERT_TRUE(fit_result.success);
 
@@ -377,9 +380,9 @@ TEST(PriceTableIVIntegrationTest, MoneynessBoundsValidation) {
     grid_config.x_max = 0.10;   // Covers ln(1.1) ≈ 0.095
 
     // This should FAIL because ln(0.9) = -0.105 < -0.10
-    EXPECT_THROW({
-        builder.precompute(OptionType::PUT, grid_config, 0.0);
-    }, std::invalid_argument);
+    auto result = builder.precompute(OptionType::PUT, grid_config, 0.0);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_THAT(result.error(), testing::HasSubstr("exceeds PDE grid bounds"));
 }
 
 TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
@@ -456,8 +459,9 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
         }
     }
 
-    BSplineFitter4D fitter(moneyness, maturity, volatility, rate);
-    auto fit_result = fitter.fit(prices_4d);
+    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
+    auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
     auto evaluator = std::make_unique<BSpline4D_FMA>(
@@ -541,8 +545,9 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
         }
     }
 
-    BSplineFitter4D fitter(moneyness, maturity, volatility, rate);
-    auto fit_result = fitter.fit(prices_4d);
+    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
+    auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
     auto evaluator = std::make_unique<BSpline4D_FMA>(

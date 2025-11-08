@@ -15,7 +15,7 @@ namespace {
 TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     // Create grid
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 51);
-    auto grid = grid_spec.generate();
+    auto grid = grid_spec.value().generate();
 
     TimeDomain time(0.0, 1.0, 0.01);
 
@@ -64,7 +64,7 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
 TEST(ObstacleTest, TimeVaryingObstacle) {
     // Create grid
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 51);
-    auto grid = grid_spec.generate();
+    auto grid = grid_spec.value().generate();
 
     TimeDomain time(0.0, 1.0, 0.01);
 
@@ -104,7 +104,7 @@ TEST(ObstacleTest, TimeVaryingObstacle) {
 TEST(ObstacleTest, NoObstacleOptional) {
     // Create grid
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 51);
-    auto grid = grid_spec.generate();
+    auto grid = grid_spec.value().generate();
 
     TimeDomain time(0.0, 0.1, 0.01);
 

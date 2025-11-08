@@ -69,10 +69,22 @@ public:
         : m_grid_(m_grid), t_grid_(t_grid), v_grid_(v_grid), r_grid_(r_grid)
         , Nm_(m_grid.size()), Nt_(t_grid.size()), Nv_(v_grid.size()), Nr_(r_grid.size())
     {
-        solver_m_ = std::make_unique<BSplineCollocation1D>(m_grid_);
-        solver_t_ = std::make_unique<BSplineCollocation1D>(t_grid_);
-        solver_v_ = std::make_unique<BSplineCollocation1D>(v_grid_);
-        solver_r_ = std::make_unique<BSplineCollocation1D>(r_grid_);
+        // Create 1D solvers for each axis using factory method
+        auto m_result = BSplineCollocation1D::create(m_grid_);
+        auto t_result = BSplineCollocation1D::create(t_grid_);
+        auto v_result = BSplineCollocation1D::create(v_grid_);
+        auto r_result = BSplineCollocation1D::create(r_grid_);
+
+        // Since this is a benchmark and grids are assumed valid, we throw on failure
+        if (!m_result.has_value() || !t_result.has_value() ||
+            !v_result.has_value() || !r_result.has_value()) {
+            throw std::runtime_error("Failed to create BSplineCollocation1D solvers in benchmark");
+        }
+
+        solver_m_ = std::make_unique<BSplineCollocation1D>(std::move(m_result.value()));
+        solver_t_ = std::make_unique<BSplineCollocation1D>(std::move(t_result.value()));
+        solver_v_ = std::make_unique<BSplineCollocation1D>(std::move(v_result.value()));
+        solver_r_ = std::make_unique<BSplineCollocation1D>(std::move(r_result.value()));
     }
 
     std::vector<double> fit(const std::vector<double>& values, double tolerance = 1e-6) {
@@ -214,7 +226,12 @@ int main() {
         }, 5);
 
         // Benchmark NEW order (r → σ → τ → m)
-        BSplineFitter4DSeparable fitter_new(m_grid, t_grid, v_grid, r_grid);
+        auto fitter_new_result = BSplineFitter4DSeparable::create(m_grid, t_grid, v_grid, r_grid);
+        if (!fitter_new_result) {
+            std::cerr << "Failed to create fitter: " << fitter_new_result.error() << std::endl;
+            return 1;
+        }
+        auto& fitter_new = fitter_new_result.value();
         auto new_time = benchmark([&]() {
             auto result = fitter_new.fit(values, 1e-6);
         }, 5);

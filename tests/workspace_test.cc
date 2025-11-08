@@ -3,8 +3,9 @@
 #include <gtest/gtest.h>
 
 TEST(WorkspaceStorageTest, PreComputedDxArray) {
-    auto spec = mango::GridSpec<>::uniform(0.0, 10.0, 6);
-    auto grid = spec.generate();  // Points: 0, 2, 4, 6, 8, 10
+    auto result = mango::GridSpec<>::uniform(0.0, 10.0, 6);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();  // Points: 0, 2, 4, 6, 8, 10
 
     mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
@@ -19,8 +20,9 @@ TEST(WorkspaceStorageTest, PreComputedDxArray) {
 
 TEST(WorkspaceStorageTest, PsiBufferAvailable) {
     const size_t n = 100;
-    auto spec = mango::GridSpec<>::uniform(0.0, 1.0, n);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::uniform(0.0, 1.0, n);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
 
     mango::WorkspaceStorage ws(grid.size(), grid.span());
 

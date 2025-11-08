@@ -15,8 +15,12 @@ int main() {
     // IC: u(x, 0) = sin(πx)
 
     const size_t n = 101;
-    auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, n);
-    auto grid_buffer = grid_spec.generate();
+    auto grid_spec_result = mango::GridSpec<double>::uniform(0.0, 1.0, n);
+    if (!grid_spec_result) {
+        std::cerr << "Failed to create grid spec: " << grid_spec_result.error() << "\n";
+        return 1;
+    }
+    auto grid_buffer = grid_spec_result->generate();
 
     mango::TimeDomain time(0.0, 0.1, 0.001);
 

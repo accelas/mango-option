@@ -11,3 +11,13 @@ cc_binary(
     ],
     copts = ["-std=c++20"],
 )
+
+cc_binary(
+    name = "example_expected_validation",
+    srcs = ["example_expected_validation.cpp"],
+    deps = [
+        "//src:american_option",
+        "//src:slice_solver_workspace",
+    ],
+    copts = ["-std=c++20"],
+)

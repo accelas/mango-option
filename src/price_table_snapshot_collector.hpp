@@ -3,6 +3,7 @@
 #include "snapshot.hpp"
 #include "snapshot_interpolator.hpp"
 #include "american_option.hpp"  // For OptionType enum
+#include "expected.hpp"
 #include <span>
 #include <vector>
 #include <cmath>
@@ -71,7 +72,10 @@ public:
         }
     }
 
-    void collect(const Snapshot& snapshot) override {
+    /// Collect snapshot data with exception-safe expected pattern
+    /// @param snapshot Read-only snapshot data
+    /// @return expected<void, std::string> - success or error message
+    expected<void, std::string> collect_expected(const Snapshot& snapshot) {
         // FIXED: Use user_index to match tau directly (no float comparison!)
         // Snapshot user_index IS the tau index
         const size_t tau_idx = snapshot.user_index;
@@ -84,18 +88,14 @@ public:
             // Grid changed or first snapshot: build interpolators from scratch
             auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
             if (V_error.has_value()) {
-                throw std::runtime_error(
-                    std::string("Failed to build value interpolator: ") +
-                    std::string(V_error.value())
-                );
+                return unexpected(std::string("Failed to build value interpolator: ") +
+                                std::string(V_error.value()));
             }
 
             auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
             if (Lu_error.has_value()) {
-                throw std::runtime_error(
-                    std::string("Failed to build spatial operator interpolator: ") +
-                    std::string(Lu_error.value())
-                );
+                return unexpected(std::string("Failed to build spatial operator interpolator: ") +
+                                std::string(Lu_error.value()));
             }
 
             // Cache the grid
@@ -105,18 +105,14 @@ public:
             // Grid same as before: fast rebuild with new data
             auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
             if (V_error.has_value()) {
-                throw std::runtime_error(
-                    std::string("Failed to rebuild value interpolator: ") +
-                    std::string(V_error.value())
-                );
+                return unexpected(std::string("Failed to rebuild value interpolator: ") +
+                                std::string(V_error.value()));
             }
 
             auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
             if (Lu_error.has_value()) {
-                throw std::runtime_error(
-                    std::string("Failed to rebuild spatial operator interpolator: ") +
-                    std::string(Lu_error.value())
-                );
+                return unexpected(std::string("Failed to rebuild spatial operator interpolator: ") +
+                                std::string(Lu_error.value()));
             }
         }
 
@@ -173,6 +169,16 @@ public:
                 const double Lu_norm = lu_interp_.eval(x);
                 thetas_[table_idx] = -(K_ref_ * Lu_norm);
             }
+        }
+
+        return {};  // Success
+    }
+
+    /// Legacy collect method - delegates to expected pattern but throws on error
+    void collect(const Snapshot& snapshot) override {
+        auto result = collect_expected(snapshot);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error());
         }
     }
 

@@ -57,7 +57,7 @@ public:
     SliceSolverWorkspace(double x_min,
                          double x_max,
                          size_t n_space)
-        : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).generate())
+        : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
         , grid_view_(grid_buffer_.span())
         , grid_spacing_(std::make_shared<operators::GridSpacing<double>>(grid_view_))
         , workspace_(std::make_shared<WorkspaceStorage>(n_space, grid_view_.span()))

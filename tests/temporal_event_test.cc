@@ -15,7 +15,8 @@ namespace {
 TEST(TemporalEventTest, EventAppliedAfterStep) {
     // Create grid
     auto grid_spec = GridSpec<double>::uniform(-1.0, 1.0, 51);
-    auto grid = grid_spec.generate();
+    ASSERT_TRUE(grid_spec.has_value());
+    auto grid = grid_spec->generate();
 
     TimeDomain time(0.0, 1.0, 0.1);
 

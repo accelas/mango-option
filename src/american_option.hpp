@@ -43,7 +43,7 @@ struct AmericanOptionParams {
     /// Can be used simultaneously with continuous_dividend_yield
     std::vector<std::pair<double, double>> discrete_dividends;
 
-    /// Validate parameters
+    /// Validate parameters (exception-based)
     void validate() const {
         if (strike <= 0.0) throw std::invalid_argument("Strike must be positive");
         if (spot <= 0.0) throw std::invalid_argument("Spot must be positive");
@@ -61,6 +61,46 @@ struct AmericanOptionParams {
                 throw std::invalid_argument("Discrete dividend amount must be non-negative");
             }
         }
+    }
+
+    /// Validate parameters (expected-based)
+    static expected<void, std::string> validate_expected(const AmericanOptionParams& params) {
+        // Check strike
+        if (params.strike <= 0.0) {
+            return unexpected("Strike must be positive");
+        }
+
+        // Check spot
+        if (params.spot <= 0.0) {
+            return unexpected("Spot must be positive");
+        }
+
+        // Check maturity
+        if (params.maturity <= 0.0) {
+            return unexpected("Maturity must be positive");
+        }
+
+        // Check volatility
+        if (params.volatility <= 0.0) {
+            return unexpected("Volatility must be positive");
+        }
+
+        // Check continuous dividend yield (rate can be negative)
+        if (params.continuous_dividend_yield < 0.0) {
+            return unexpected("Continuous dividend yield must be non-negative");
+        }
+
+        // Validate discrete dividends
+        for (const auto& [time, amount] : params.discrete_dividends) {
+            if (time < 0.0 || time > params.maturity) {
+                return unexpected("Discrete dividend time must be in [0, maturity]");
+            }
+            if (amount < 0.0) {
+                return unexpected("Discrete dividend amount must be non-negative");
+            }
+        }
+
+        return {};
     }
 };
 
@@ -80,10 +120,25 @@ struct AmericanOptionGrid {
         , x_min(-3.0)
         , x_max(3.0) {}
 
+    /// Validate grid parameters (exception-based)
     void validate() const {
         if (n_space < 10) throw std::invalid_argument("n_space must be >= 10");
         if (n_time < 10) throw std::invalid_argument("n_time must be >= 10");
         if (x_min >= x_max) throw std::invalid_argument("x_min must be < x_max");
+    }
+
+    /// Validate grid parameters (expected-based)
+    static expected<void, std::string> validate_expected(const AmericanOptionGrid& grid) {
+        if (grid.n_space < 10) {
+            return unexpected("n_space must be >= 10");
+        }
+        if (grid.n_time < 10) {
+            return unexpected("n_time must be >= 10");
+        }
+        if (grid.x_min >= grid.x_max) {
+            return unexpected("x_min must be < x_max");
+        }
+        return {};
     }
 };
 
@@ -148,6 +203,47 @@ public:
                         std::shared_ptr<SliceSolverWorkspace> workspace,
                         const TRBDF2Config& trbdf2_config = {},
                         const RootFindingConfig& root_config = {});
+
+    /**
+     * Factory method with expected-based validation (standard mode).
+     *
+     * Creates an AmericanOptionSolver with validation returning expected<void, std::string>.
+     * This provides a non-throwing alternative to the constructor.
+     *
+     * @param params Option pricing parameters (including discrete dividends)
+     * @param grid Numerical grid parameters
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration for Newton solver
+     * @return Expected containing solver on success, error message on failure
+     */
+    static expected<AmericanOptionSolver, std::string> create(
+        const AmericanOptionParams& params,
+        const AmericanOptionGrid& grid,
+        const TRBDF2Config& trbdf2_config = {},
+        const RootFindingConfig& root_config = {});
+
+    /**
+     * Factory method with expected-based validation (workspace mode).
+     *
+     * Creates an AmericanOptionSolver with validation returning expected<void, std::string>.
+     * This provides a non-throwing alternative to the constructor.
+     *
+     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
+     * to ensure proper lifetime management.
+     *
+     * @param params Option pricing parameters (including discrete dividends)
+     * @param grid Numerical grid parameters (must match workspace)
+     * @param workspace Shared workspace with pre-allocated grid (keeps workspace alive)
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration for Newton solver
+     * @return Expected containing solver on success, error message on failure
+     */
+    static expected<AmericanOptionSolver, std::string> create_with_workspace(
+        const AmericanOptionParams& params,
+        const AmericanOptionGrid& grid,
+        std::shared_ptr<SliceSolverWorkspace> workspace,
+        const TRBDF2Config& trbdf2_config = {},
+        const RootFindingConfig& root_config = {});
 
     /**
      * Solve for option value and Greeks.

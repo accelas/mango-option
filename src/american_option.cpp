@@ -162,6 +162,80 @@ AmericanOptionSolver::AmericanOptionSolver(
     }
 }
 
+// ============================================================================
+// Factory methods with expected-based validation
+// ============================================================================
+
+expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
+    const AmericanOptionParams& params,
+    const AmericanOptionGrid& grid,
+    const TRBDF2Config& trbdf2_config,
+    const RootFindingConfig& root_config) {
+
+    // Validate parameters using expected-based validation
+    auto params_result = AmericanOptionParams::validate_expected(params);
+    if (!params_result.has_value()) {
+        return unexpected(params_result.error());
+    }
+
+    auto grid_result = AmericanOptionGrid::validate_expected(grid);
+    if (!grid_result.has_value()) {
+        return unexpected(grid_result.error());
+    }
+
+    try {
+        // All validations passed, create solver
+        return AmericanOptionSolver(params, grid, trbdf2_config, root_config);
+    } catch (const std::exception& e) {
+        return unexpected(std::string("Failed to create solver: ") + e.what());
+    }
+}
+
+expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create_with_workspace(
+    const AmericanOptionParams& params,
+    const AmericanOptionGrid& grid,
+    std::shared_ptr<SliceSolverWorkspace> workspace,
+    const TRBDF2Config& trbdf2_config,
+    const RootFindingConfig& root_config) {
+
+    // Validate parameters using expected-based validation
+    auto params_result = AmericanOptionParams::validate_expected(params);
+    if (!params_result.has_value()) {
+        return unexpected(params_result.error());
+    }
+
+    auto grid_result = AmericanOptionGrid::validate_expected(grid);
+    if (!grid_result.has_value()) {
+        return unexpected(grid_result.error());
+    }
+
+    // Validate workspace
+    if (!workspace) {
+        return unexpected("Workspace cannot be null");
+    }
+
+    // Validate grid matches workspace
+    if (grid.x_min != workspace->x_min() || grid.x_max != workspace->x_max() ||
+        grid.n_space != workspace->n_space()) {
+        return unexpected(
+            "Grid parameters must match workspace "
+            "(x_min=" + std::to_string(workspace->x_min()) +
+            ", x_max=" + std::to_string(workspace->x_max()) +
+            ", n_space=" + std::to_string(workspace->n_space()) + ")");
+    }
+
+    try {
+        // All validations passed, create solver
+        return AmericanOptionSolver(params, grid, workspace, trbdf2_config, root_config);
+    } catch (const std::exception& e) {
+        return unexpected(std::string("Failed to create solver: ") + e.what());
+    }
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
 expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 1. Acquire grid (reuse workspace grid if available)
     std::optional<GridBuffer<double>> owned_grid_buffer;
@@ -174,7 +248,14 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         shared_spacing = workspace_->grid_spacing();
         external_workspace = workspace_->workspace().get();
     } else {
-        owned_grid_buffer.emplace(GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate());
+        auto grid_result = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space);
+        if (!grid_result.has_value()) {
+            return unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Failed to create uniform grid: " + grid_result.error()
+            });
+        }
+        owned_grid_buffer.emplace(grid_result.value().generate());
         x_grid = owned_grid_buffer->span();
     }
 

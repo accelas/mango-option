@@ -10,7 +10,7 @@ TEST(BlackScholesOperatorTest, EquityOperatorBasic) {
     mango::EquityBlackScholesOperator op(0.05, 0.2);
 
     // Create simple grid
-    auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41);
+    auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41).value();
     auto grid = spec.generate();
     mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
@@ -35,7 +35,7 @@ TEST(BlackScholesOperatorTest, EquityOperatorParabolic) {
     // Test with u(S) = S^2 (delta = 2S, gamma = 2)
     mango::EquityBlackScholesOperator op(0.05, 0.2);
 
-    auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21);
+    auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21).value();
     auto grid = spec.generate();
     mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
@@ -61,7 +61,7 @@ TEST(BlackScholesOperatorTest, IndexOperatorWithDividend) {
     // Create operator with dividend yield q=0.03
     mango::IndexBlackScholesOperator op(0.05, 0.2, 0.03);
 
-    auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41);
+    auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41).value();
     auto grid = spec.generate();
     mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
@@ -89,7 +89,7 @@ TEST(BlackScholesOperatorTest, IndexVsEquityDifference) {
     mango::EquityBlackScholesOperator equity_op(r, sigma);
     mango::IndexBlackScholesOperator index_op(r, sigma, q);
 
-    auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21);
+    auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21).value();
     auto grid = spec.generate();
     mango::WorkspaceStorage workspace(grid.size(), grid.span());
 
@@ -118,7 +118,7 @@ TEST(BlackScholesOperatorTest, IndexVsEquityDifference) {
 TEST(BlackScholesOperatorTest, OperatorUsesPrecomputedDx) {
     // Create non-uniform grid to ensure dx matters
     auto spec = mango::GridSpec<>::sinh_spaced(50.0, 150.0, 21, 1.5);
-    auto grid = spec.generate();
+    auto grid = spec.value().generate();
 
     // Create workspace with pre-computed dx
     mango::WorkspaceStorage workspace(grid.size(), grid.span());
@@ -290,7 +290,7 @@ TEST(IndexBlackScholesOperatorTest, ApplyBlockMiddleBlock) {
 TEST(SpatialOperatorsTest, FirstDerivativeParabola) {
     // Test ∂/∂x(x²) = 2x on uniform grid
     const size_t n = 5;
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
     mango::WorkspaceStorage ws(n, grid.span());
 
     std::vector<double> u(n);
@@ -318,7 +318,7 @@ TEST(SpatialOperatorsTest, FirstDerivativeParabola) {
 TEST(SpatialOperatorsTest, SecondDerivativeParabola) {
     // Test ∂²/∂x²(x²) = 2 on uniform grid
     const size_t n = 5;
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
     mango::WorkspaceStorage ws(n, grid.span());
 
     std::vector<double> u(n);

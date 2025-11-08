@@ -19,6 +19,16 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_expected_test",
+    srcs = ["grid_expected_test.cc"],
+    deps = [
+        "//src:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "multigrid_test",
     srcs = ["multigrid_test.cc"],
     deps = [
@@ -172,6 +182,28 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_snapshot_collector_expected_test",
+    srcs = ["price_table_snapshot_collector_expected_test.cc"],
+    deps = [
+        "//src:price_table_snapshot_collector",
+        "//src:snapshot",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
+    name = "minimal_expected_test",
+    srcs = ["minimal_expected_test.cc"],
+    deps = [
+        "//src:price_table_snapshot_collector",
+        "//src:snapshot",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "snapshot_optimization_benchmark",
     srcs = ["snapshot_optimization_benchmark.cc"],
     deps = [
@@ -269,6 +301,17 @@ cc_test(
 )
 
 cc_test(
+    name = "american_option_expected_validation_test",
+    size = "small",
+    srcs = ["american_option_expected_validation_test.cc"],
+    deps = [
+        "//src:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20"],
+)
+
+cc_test(
     name = "slice_solver_workspace_test",
     size = "small",
     srcs = ["slice_solver_workspace_test.cc"],
@@ -355,6 +398,16 @@ cc_test(
     deps = [
         "//src:bspline_fitter_4d",
         "//src:bspline_4d",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++20", "-Wall", "-Wextra", "-O3", "-march=native"],
+)
+
+cc_test(
+    name = "bspline_fitter_4d_separable_test",
+    srcs = ["bspline_fitter_4d_separable_test.cc"],
+    deps = [
+        "//src:bspline_fitter_4d_separable",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20", "-Wall", "-Wextra", "-O3", "-march=native"],
