@@ -32,6 +32,7 @@ cc_binary(
     linkstatic = True,  # Static link our library code
     deps = [
         "//src:american_option",
+        "//src:slice_solver_workspace",
         "//src:iv_solver",
         "//src:bspline_4d",
         "//src:bspline_fitter_4d",
