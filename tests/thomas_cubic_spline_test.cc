@@ -10,6 +10,7 @@
 #include <vector>
 #include <cmath>
 #include <numbers>
+#include <string_view>
 
 using namespace mango;
 

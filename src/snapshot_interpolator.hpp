@@ -102,20 +102,26 @@ public:
     ///
     /// Uses cubic spline interpolation for smoothness.
     ///
+    /// PERFORMANCE: Caches the derived spline and only rebuilds when data changes.
+    /// Multiple calls with the same data array will reuse the cached spline.
+    ///
     /// @param x_eval Evaluation point
     /// @param data Pre-computed values at grid points (same grid as build())
     /// @return Interpolated value
-    [[nodiscard]] double eval_from_data(double x_eval, std::span<const double> data) const noexcept {
+    [[nodiscard]] double eval_from_data(double x_eval, std::span<const double> data) const {
         if (x_.empty() || data.size() != x_.size()) {
             return 0.0;
         }
 
         // Build a temporary cubic spline for the derivative data
-        // PERFORMANCE: Uses cached grid structure via rebuild_same_grid in derived_spline_
-        // This is much faster than building from scratch
+        // PERFORMANCE: Caches the derived spline and only rebuilds when data changes
 
-        // Lazy initialization of derived spline
-        if (!derived_spline_built_ || derived_data_.size() != data.size()) {
+        // Check if we need to rebuild (first time, size changed, or data changed)
+        const bool size_changed = derived_data_.size() != data.size();
+        const bool data_changed = !derived_spline_built_ || size_changed ||
+                                  !std::equal(derived_data_.begin(), derived_data_.end(), data.begin());
+
+        if (!derived_spline_built_ || size_changed) {
             // First time or size changed: build from scratch
             auto error = derived_spline_.build(std::span{x_}, data);
             if (error.has_value()) {
@@ -124,8 +130,8 @@ public:
             }
             derived_spline_built_ = true;
             derived_data_.assign(data.begin(), data.end());
-        } else {
-            // Grid same, just rebuild with new data (fast path)
+        } else if (data_changed) {
+            // Data changed but grid same: fast rebuild
             auto error = derived_spline_.rebuild_same_grid(data);
             if (error.has_value()) {
                 // Fallback to linear interpolation on error
@@ -133,6 +139,7 @@ public:
             }
             derived_data_.assign(data.begin(), data.end());
         }
+        // else: Data unchanged, reuse cached derived_spline_
 
         return derived_spline_.eval(x_eval);
     }
