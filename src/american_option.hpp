@@ -10,7 +10,9 @@
 #include "src/spatial_operators.hpp"
 #include "src/expected.hpp"
 #include "parallel.hpp"
+#include "slice_solver_workspace.hpp"
 #include <vector>
+#include <memory>
 #include <stdexcept>
 #include <cmath>
 
@@ -123,6 +125,15 @@ public:
                         const RootFindingConfig& root_config = {});
 
     /**
+     * Constructor that reuses a pre-allocated slice workspace (grid + storage).
+     */
+    AmericanOptionSolver(const AmericanOptionParams& params,
+                        const AmericanOptionGrid& grid,
+                        std::shared_ptr<SliceSolverWorkspace> workspace,
+                        const TRBDF2Config& trbdf2_config = {},
+                        const RootFindingConfig& root_config = {});
+
+    /**
      * Solve for option value and Greeks.
      *
      * @return Result containing option value and Greeks
@@ -160,6 +171,7 @@ private:
     // Solution state
     std::vector<double> solution_;
     bool solved_ = false;
+    std::shared_ptr<SliceSolverWorkspace> workspace_;
 
     // Snapshot requests
     struct SnapshotRequest {
