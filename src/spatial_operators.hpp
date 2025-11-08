@@ -1,5 +1,6 @@
 #pragma once
 
+#include "parallel.hpp"
 #include <span>
 #include <cstddef>
 #include <vector>
@@ -45,6 +46,7 @@ public:
         Lu[0] = Lu[n-1] = 0.0;
 
         // Interior points: centered finite differences
+        MANGO_PRAGMA_SIMD
         for (size_t i = 1; i < n - 1; ++i) {
             const double dx_left = dx[i-1];   // x[i] - x[i-1]
             const double dx_right = dx[i];     // x[i+1] - x[i]
@@ -81,6 +83,7 @@ public:
 
         const size_t interior_count = Lu_interior.size();
 
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < interior_count; ++i) {
             const size_t j = i + halo_left;  // Index in u_with_halo
             const size_t global_idx = base_idx + i;
@@ -107,6 +110,7 @@ public:
         if (n < 2) return;
 
         // Interior: centered difference
+        MANGO_PRAGMA_SIMD
         for (size_t i = 1; i < n - 1; ++i) {
             double dx_total = dx[i] + dx[i-1];
             du[i] = (u[i+1] - u[i-1]) / dx_total;
@@ -129,6 +133,7 @@ public:
         }
 
         // Interior: centered difference
+        MANGO_PRAGMA_SIMD
         for (size_t i = 1; i < n - 1; ++i) {
             double left_slope = (u[i] - u[i-1]) / dx[i-1];
             double right_slope = (u[i+1] - u[i]) / dx[i];
@@ -165,6 +170,7 @@ public:
                        size_t start,
                        size_t end) const {
         // Interior points: centered finite differences
+        MANGO_PRAGMA_SIMD
         for (size_t i = start; i < end; ++i) {
             const double dx_left = dx_[i-1];   // x[i] - x[i-1]
             const double dx_right = dx_[i];     // x[i+1] - x[i]
@@ -234,6 +240,7 @@ public:
         Lu[0] = Lu[n-1] = 0.0;
 
         // Interior points: centered finite differences using pre-computed dx
+        MANGO_PRAGMA_SIMD
         for (size_t i = 1; i < n - 1; ++i) {
             const double S_i = S[i];
 
@@ -279,6 +286,7 @@ public:
 
         const size_t interior_count = Lu_interior.size();
 
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < interior_count; ++i) {
             const size_t j = i + halo_left;
             const size_t global_idx = base_idx + i;
@@ -349,6 +357,7 @@ public:
         Lu[0] = Lu[n-1] = 0.0;
 
         // Interior points: use pre-computed dx
+        MANGO_PRAGMA_SIMD
         for (size_t i = 1; i < n - 1; ++i) {
             const double S_i = S[i];
 
@@ -394,6 +403,7 @@ public:
 
         const size_t interior_count = Lu_interior.size();
 
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < interior_count; ++i) {
             const size_t j = i + halo_left;
             const size_t global_idx = base_idx + i;

@@ -10,6 +10,7 @@
 #include "src/spatial_operators.hpp"
 #include "src/expected.hpp"
 #include "parallel.hpp"
+#include "slice_solver_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -127,7 +128,7 @@ public:
                         const RootFindingConfig& root_config = {});
 
     /**
-     * Constructor (workspace mode - reuses grid and spacing).
+     * Constructor (workspace mode - reuses grid, spacing, and storage).
      *
      * This constructor enables efficient batch solving by reusing
      * grid allocations across multiple solver instances. Use when
@@ -144,7 +145,7 @@ public:
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
                         const AmericanOptionGrid& grid,
-                        std::shared_ptr<const SliceSolverWorkspace> workspace,
+                        std::shared_ptr<SliceSolverWorkspace> workspace,
                         const TRBDF2Config& trbdf2_config = {},
                         const RootFindingConfig& root_config = {});
 
@@ -185,7 +186,7 @@ private:
 
     // Workspace (optional - nullptr means standalone mode)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
-    std::shared_ptr<const SliceSolverWorkspace> workspace_;
+    std::shared_ptr<SliceSolverWorkspace> workspace_;
 
     // Solution state
     std::vector<double> solution_;

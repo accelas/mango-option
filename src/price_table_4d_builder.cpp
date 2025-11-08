@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 
 #ifdef _OPENMP
@@ -153,66 +154,130 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
 
     // Loop over (σ, r) pairs only - this is the separable batch approach
     size_t failed_count = 0;
+    const bool enable_parallel = (Nv * Nr > 4);
 
-#pragma omp parallel for collapse(2) if(Nv * Nr > 4)
-    for (size_t k = 0; k < Nv; ++k) {
-        for (size_t l = 0; l < Nr; ++l) {
-            try {
-                // Set up AmericanOptionSolver for this (σ, r) pair
-                AmericanOptionParams params{
-                    .strike = K_ref_,
-                    .spot = K_ref_,  // Will be overridden by spatial grid
-                    .maturity = T_max,  // Solve to maximum maturity
-                    .volatility = volatility_[k],
-                    .rate = rate_[l],
-                    .continuous_dividend_yield = dividend_yield,
-                    .option_type = option_type,
-                    .discrete_dividends = {}
-                };
+    if (enable_parallel) {
+#pragma omp parallel
+        {
+            auto thread_workspace = std::make_shared<SliceSolverWorkspace>(
+                grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
-                // Create snapshot collector for this (σ, r)
-                PriceTableSnapshotCollectorConfig collector_config{
-                    .moneyness = std::span{moneyness_},
-                    .tau = std::span{maturity_},
-                    .K_ref = K_ref_,
-                    .option_type = option_type,  // CRITICAL: Pass option type for correct theta computation
-                    .payoff_params = nullptr
-                };
-                PriceTableSnapshotCollector collector(collector_config);
+#pragma omp for collapse(2) schedule(dynamic, 1)
+            for (size_t k = 0; k < Nv; ++k) {
+                for (size_t l = 0; l < Nr; ++l) {
+                    try {
+                        AmericanOptionParams params{
+                            .strike = K_ref_,
+                            .spot = K_ref_,
+                            .maturity = T_max,
+                            .volatility = volatility_[k],
+                            .rate = rate_[l],
+                            .continuous_dividend_yield = dividend_yield,
+                            .option_type = option_type,
+                            .discrete_dividends = {}
+                        };
 
-                // Create American option solver with shared workspace
-                AmericanOptionSolver solver(params, grid_config, workspace,
-                                           TRBDF2Config{}, RootFindingConfig{});
+                        PriceTableSnapshotCollectorConfig collector_config{
+                            .moneyness = std::span{moneyness_},
+                            .tau = std::span{maturity_},
+                            .K_ref = K_ref_,
+                            .option_type = option_type,
+                            .payoff_params = nullptr
+                        };
+                        PriceTableSnapshotCollector collector(collector_config);
 
-                // Register snapshots at all maturity points
-                for (size_t j = 0; j < Nt; ++j) {
-                    solver.register_snapshot(step_indices[j], j, &collector);
-                }
+                        AmericanOptionSolver solver(
+                            params,
+                            grid_config,
+                            thread_workspace,
+                            TRBDF2Config{},
+                            RootFindingConfig{});
 
-                // Solve PDE (this will collect all snapshots)
-                auto result = solver.solve();
+                        for (size_t j = 0; j < Nt; ++j) {
+                            solver.register_snapshot(step_indices[j], j, &collector);
+                        }
 
-                if (!result.has_value()) {
+                        auto result = solver.solve();
+
+                        if (!result.has_value()) {
 #pragma omp atomic
-                    ++failed_count;
-                    continue;
-                }
+                            ++failed_count;
+                            continue;
+                        }
 
-                // Extract the 2D (m, τ) surface from collector
-                auto prices_2d = collector.prices();
+                        auto prices_2d = collector.prices();
+                        for (size_t i = 0; i < Nm; ++i) {
+                            for (size_t j = 0; j < Nt; ++j) {
+                                size_t idx_2d = i * Nt + j;
+                                size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                                prices_4d[idx_4d] = prices_2d[idx_2d];
+                            }
+                        }
 
-                // Copy into 4D array at indices [:, :, k, l]
-                for (size_t i = 0; i < Nm; ++i) {
-                    for (size_t j = 0; j < Nt; ++j) {
-                        size_t idx_2d = i * Nt + j;
-                        size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                        prices_4d[idx_4d] = prices_2d[idx_2d];
+                    } catch (const std::exception&) {
+#pragma omp atomic
+                        ++failed_count;
                     }
                 }
+            }
+        }
+    } else {
+        auto workspace = std::make_shared<SliceSolverWorkspace>(
+            grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
-            } catch (const std::exception& e) {
-#pragma omp atomic
-                ++failed_count;
+        for (size_t k = 0; k < Nv; ++k) {
+            for (size_t l = 0; l < Nr; ++l) {
+                try {
+                    AmericanOptionParams params{
+                        .strike = K_ref_,
+                        .spot = K_ref_,
+                        .maturity = T_max,
+                        .volatility = volatility_[k],
+                        .rate = rate_[l],
+                        .continuous_dividend_yield = dividend_yield,
+                        .option_type = option_type,
+                        .discrete_dividends = {}
+                    };
+
+                    PriceTableSnapshotCollectorConfig collector_config{
+                        .moneyness = std::span{moneyness_},
+                        .tau = std::span{maturity_},
+                        .K_ref = K_ref_,
+                        .option_type = option_type,
+                        .payoff_params = nullptr
+                    };
+                    PriceTableSnapshotCollector collector(collector_config);
+
+                    AmericanOptionSolver solver(
+                        params,
+                        grid_config,
+                        workspace,
+                        TRBDF2Config{},
+                        RootFindingConfig{});
+
+                    for (size_t j = 0; j < Nt; ++j) {
+                        solver.register_snapshot(step_indices[j], j, &collector);
+                    }
+
+                    auto result = solver.solve();
+
+                    if (!result.has_value()) {
+                        ++failed_count;
+                        continue;
+                    }
+
+                    auto prices_2d = collector.prices();
+                    for (size_t i = 0; i < Nm; ++i) {
+                        for (size_t j = 0; j < Nt; ++j) {
+                            size_t idx_2d = i * Nt + j;
+                            size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                            prices_4d[idx_4d] = prices_2d[idx_2d];
+                        }
+                    }
+
+                } catch (const std::exception&) {
+                    ++failed_count;
+                }
             }
         }
     }

@@ -156,6 +156,9 @@ cc_library(
 cc_library(
     name = "spatial_operators",
     hdrs = ["spatial_operators.hpp"],
+    deps = [
+        ":parallel",
+    ],
     copts = [
         "-std=c++20",
         "-Wall",
@@ -165,22 +168,6 @@ cc_library(
         "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
         "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
         "-ftree-vectorize",   # Enable auto-vectorization
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "slice_solver_workspace",
-    hdrs = ["slice_solver_workspace.hpp"],
-    deps = [
-        ":grid",
-        "//src/operators:grid_spacing",
-    ],
-    copts = [
-        "-std=c++20",
-        "-Wall",
-        "-Wextra",
-        "-O3",
     ],
     visibility = ["//visibility:public"],
 )
@@ -347,6 +334,18 @@ cc_library(
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "slice_solver_workspace",
+    hdrs = ["slice_solver_workspace.hpp"],
+    deps = [
+        ":workspace",
+        ":grid",
+        "//src/operators:grid_spacing",
+    ],
+    copts = ["-std=c++20"],
     visibility = ["//visibility:public"],
 )
 
