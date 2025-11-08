@@ -246,7 +246,7 @@ private:
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid, config_.cache_blocking_threshold);
+        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid);
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }

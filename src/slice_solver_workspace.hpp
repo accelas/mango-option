@@ -53,16 +53,14 @@ public:
      * @param x_min Minimum log-moneyness
      * @param x_max Maximum log-moneyness
      * @param n_space Number of spatial grid points
-     * @param cache_block_threshold Threshold for cache blocking (default: 5000)
      */
     SliceSolverWorkspace(double x_min,
                          double x_max,
-                         size_t n_space,
-                         size_t cache_block_threshold = 5000)
+                         size_t n_space)
         : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).generate())
         , grid_view_(grid_buffer_.span())
         , grid_spacing_(std::make_shared<operators::GridSpacing<double>>(grid_view_))
-        , workspace_(std::make_shared<WorkspaceStorage>(n_space, grid_view_.span(), cache_block_threshold))
+        , workspace_(std::make_shared<WorkspaceStorage>(n_space, grid_view_.span()))
     {}
 
     /// Spatial grid span

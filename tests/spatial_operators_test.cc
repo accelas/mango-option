@@ -291,7 +291,7 @@ TEST(SpatialOperatorsTest, FirstDerivativeParabola) {
     // Test ∂/∂x(x²) = 2x on uniform grid
     const size_t n = 5;
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
-    mango::WorkspaceStorage ws(n, grid.span(), 10000);
+    mango::WorkspaceStorage ws(n, grid.span());
 
     std::vector<double> u(n);
     for (size_t i = 0; i < n; ++i) {
@@ -319,7 +319,7 @@ TEST(SpatialOperatorsTest, SecondDerivativeParabola) {
     // Test ∂²/∂x²(x²) = 2 on uniform grid
     const size_t n = 5;
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
-    mango::WorkspaceStorage ws(n, grid.span(), 10000);
+    mango::WorkspaceStorage ws(n, grid.span());
 
     std::vector<double> u(n);
     for (size_t i = 0; i < n; ++i) {

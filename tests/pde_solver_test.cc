@@ -35,9 +35,8 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Time domain
     mango::TimeDomain time(0.0, 0.1, 0.001);  // 100 time steps
 
-    // TR-BDF2 config (force single block for small grid)
+    // TR-BDF2 config
     mango::TRBDF2Config trbdf2;
-    trbdf2.cache_blocking_threshold = 10000;
 
     // Root-finding config
     mango::RootFindingConfig root_config;
@@ -91,9 +90,8 @@ TEST(PDESolverTest, NewtonConvergence) {
     // Time domain
     mango::TimeDomain time(0.0, 0.1, 0.01);  // 10 steps
 
-    // TR-BDF2 config (force single block)
+    // TR-BDF2 config
     mango::TRBDF2Config config;
-    config.cache_blocking_threshold = 10000;
 
     // Root-finding config
     mango::RootFindingConfig root_config;
@@ -133,65 +131,6 @@ TEST(PDESolverTest, NewtonConvergence) {
     EXPECT_NEAR(solution[mid], expected, 0.01);  // 1% tolerance
 }
 
-TEST(PDESolverTest, CacheBlockingConfigIgnored) {
-    // Verify that cache_blocking_threshold config is ignored
-    // Both configs should produce identical results (blocking removed)
-
-    // Heat equation: du/dt = D * d2u/dx2
-    mango::LaplacianOperator op(0.1);
-
-    // Grid n=101
-    std::vector<double> grid(101);
-    for (size_t i = 0; i < grid.size(); ++i) {
-        grid[i] = static_cast<double>(i) / 100.0;
-    }
-
-    mango::TimeDomain time{0.0, 0.1, 0.01};
-    mango::RootFindingConfig root_config;
-
-    // Dirichlet BCs: u(0)=0, u(1)=0
-    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
-    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
-
-    // Solver 1: High threshold (should have no effect)
-    mango::TRBDF2Config config1;
-    config1.cache_blocking_threshold = 10000;
-
-    mango::PDESolver solver1(grid, time, config1, root_config, left_bc, right_bc, op);
-
-    // Solver 2: Low threshold (should also have no effect)
-    mango::TRBDF2Config config2;
-    config2.cache_blocking_threshold = 20;
-
-    mango::PDESolver solver2(grid, time, config2, root_config, left_bc, right_bc, op);
-
-    // Same initial condition: Gaussian
-    const double pi = std::numbers::pi;
-    auto ic = [pi](std::span<const double> x, std::span<double> u) {
-        for (size_t i = 0; i < x.size(); ++i) {
-            double dx = x[i] - 0.5;
-            u[i] = std::exp(-50.0 * dx * dx);
-        }
-    };
-
-    solver1.initialize(ic);
-    solver2.initialize(ic);
-
-    auto conv1 = solver1.solve();
-    auto conv2 = solver2.solve();
-
-    ASSERT_TRUE(conv1.has_value()) << conv1.error().message;
-    ASSERT_TRUE(conv2.has_value()) << conv2.error().message;
-
-    // Solutions should match to machine precision
-    auto sol1 = solver1.solution();
-    auto sol2 = solver2.solution();
-
-    for (size_t i = 0; i < sol1.size(); ++i) {
-        EXPECT_NEAR(sol1[i], sol2[i], 1e-12) << "Mismatch at i=" << i;
-    }
-}
-
 TEST(PDESolverTest, UsesNewtonSolverForStages) {
     // Setup PDE solver with Newton integration
     const size_t n = 101;
@@ -199,7 +138,6 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
 
     mango::TimeDomain time{0.0, 0.1, 0.01};
     mango::TRBDF2Config trbdf2_config;
-    trbdf2_config.cache_blocking_threshold = 10000;  // Force single block
     mango::RootFindingConfig root_config{.max_iter = 20, .tolerance = 1e-6};
 
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -237,7 +175,6 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
 
     mango::TimeDomain time{0.0, 1.0, 0.5};  // Large dt
     mango::TRBDF2Config trbdf2_config;
-    trbdf2_config.cache_blocking_threshold = 10000;  // Force single block
     mango::RootFindingConfig root_config{.max_iter = 2, .tolerance = 1e-12};  // Hard to converge
 
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -346,9 +283,8 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     // Time domain
     mango::TimeDomain time(0.0, 0.1, 0.001);  // 100 time steps
 
-    // TR-BDF2 config (force single block for small grid)
+    // TR-BDF2 config
     mango::TRBDF2Config trbdf2;
-    trbdf2.cache_blocking_threshold = 10000;
 
     // Root-finding config
     mango::RootFindingConfig root_config;

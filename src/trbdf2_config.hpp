@@ -22,9 +22,6 @@ struct TRBDF2Config {
     /// Stage 1 parameter (γ = 2 - √2)
     double gamma = 2.0 - std::sqrt(2.0);
 
-    /// Cache blocking threshold (apply blocking when n >= threshold)
-    size_t cache_blocking_threshold = 5000;
-
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;
 

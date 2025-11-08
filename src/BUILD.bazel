@@ -75,18 +75,6 @@ cc_library(
 )
 
 cc_library(
-    name = "cache_config",
-    hdrs = ["cache_config.hpp"],
-    copts = [
-        "-std=c++20",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "jacobian_view",
     hdrs = ["jacobian_view.hpp"],
     copts = [
@@ -101,7 +89,7 @@ cc_library(
 cc_library(
     name = "workspace",
     hdrs = ["workspace.hpp"],
-    deps = [":cache_config"],
+    deps = [],
     copts = [
         "-std=c++20",
         "-Wall",
