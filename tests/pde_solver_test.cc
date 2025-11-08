@@ -133,14 +133,14 @@ TEST(PDESolverTest, NewtonConvergence) {
     EXPECT_NEAR(solution[mid], expected, 0.01);  // 1% tolerance
 }
 
-TEST(PDESolverTest, CacheBlockingCorrectness) {
-    // Compare single-block vs multi-block on same PDE
-    // Should produce identical results
+TEST(PDESolverTest, CacheBlockingConfigIgnored) {
+    // Verify that cache_blocking_threshold config is ignored
+    // Both configs should produce identical results (blocking removed)
 
     // Heat equation: du/dt = D * d2u/dx2
     mango::LaplacianOperator op(0.1);
 
-    // Grid n=101 (force different blocking strategies via config)
+    // Grid n=101
     std::vector<double> grid(101);
     for (size_t i = 0; i < grid.size(); ++i) {
         grid[i] = static_cast<double>(i) / 100.0;
@@ -153,15 +153,15 @@ TEST(PDESolverTest, CacheBlockingCorrectness) {
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
-    // Solver 1: Force single block
+    // Solver 1: High threshold (should have no effect)
     mango::TRBDF2Config config1;
-    config1.cache_blocking_threshold = 10000;  // Above n=101, so n_blocks=1
+    config1.cache_blocking_threshold = 10000;
 
     mango::PDESolver solver1(grid, time, config1, root_config, left_bc, right_bc, op);
 
-    // Solver 2: Force multi-block
+    // Solver 2: Low threshold (should also have no effect)
     mango::TRBDF2Config config2;
-    config2.cache_blocking_threshold = 20;  // Below n=101, so n_blocks > 1
+    config2.cache_blocking_threshold = 20;
 
     mango::PDESolver solver2(grid, time, config2, root_config, left_bc, right_bc, op);
 

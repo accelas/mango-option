@@ -5,8 +5,10 @@
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>
+#include <cmath>
 
-TEST(CacheBlockingBenchmark, LargeGridSpeedup) {
+TEST(CacheBlockingBenchmark, ConfigParameterIgnored) {
+    // Verify that cache_blocking_threshold is now ignored (cache blocking removed)
     // Heat equation on large grid
     mango::LaplacianOperator op(0.1);
 
@@ -32,55 +34,51 @@ TEST(CacheBlockingBenchmark, LargeGridSpeedup) {
         }
     };
 
-    // Benchmark: No blocking
-    mango::TRBDF2Config config_no_block;
-    config_no_block.cache_blocking_threshold = 100000;  // Disable
+    // Run with threshold set high (should have no effect)
+    mango::TRBDF2Config config1;
+    config1.cache_blocking_threshold = 100000;
 
-    mango::PDESolver solver_no_block(grid.span(), time, config_no_block, root_config,
-                               left_bc, right_bc, op);
-    solver_no_block.initialize(ic);
+    mango::PDESolver solver1(grid.span(), time, config1, root_config,
+                             left_bc, right_bc, op);
+    solver1.initialize(ic);
 
-    auto start_no_block = std::chrono::high_resolution_clock::now();
-    auto result1 = solver_no_block.solve();
-    auto end_no_block = std::chrono::high_resolution_clock::now();
+    auto start1 = std::chrono::high_resolution_clock::now();
+    auto result1 = solver1.solve();
+    auto end1 = std::chrono::high_resolution_clock::now();
 
     ASSERT_TRUE(result1.has_value()) << "Solver failed: " << result1.error().message;
 
-    double time_no_block = std::chrono::duration<double>(
-        end_no_block - start_no_block).count();
+    double time1 = std::chrono::duration<double>(end1 - start1).count();
 
-    // Benchmark: With blocking
-    mango::TRBDF2Config config_block;
-    config_block.cache_blocking_threshold = 5000;  // Enable
+    // Run with threshold set low (should still have no effect)
+    mango::TRBDF2Config config2;
+    config2.cache_blocking_threshold = 5000;
 
-    mango::PDESolver solver_block(grid.span(), time, config_block, root_config,
-                           left_bc, right_bc, op);
-    solver_block.initialize(ic);
+    mango::PDESolver solver2(grid.span(), time, config2, root_config,
+                             left_bc, right_bc, op);
+    solver2.initialize(ic);
 
-    auto start_block = std::chrono::high_resolution_clock::now();
-    auto result2 = solver_block.solve();
-    auto end_block = std::chrono::high_resolution_clock::now();
+    auto start2 = std::chrono::high_resolution_clock::now();
+    auto result2 = solver2.solve();
+    auto end2 = std::chrono::high_resolution_clock::now();
 
     ASSERT_TRUE(result2.has_value()) << "Solver failed: " << result2.error().message;
 
-    double time_block = std::chrono::duration<double>(
-        end_block - start_block).count();
+    double time2 = std::chrono::duration<double>(end2 - start2).count();
 
-    double speedup = time_no_block / time_block;
+    double ratio = time1 / time2;
 
-    std::cout << "\n=== Cache-Blocking Benchmark (n=" << n << ") ===" << std::endl;
-    std::cout << "No blocking: " << time_no_block << "s" << std::endl;
-    std::cout << "With blocking: " << time_block << "s" << std::endl;
-    std::cout << "Speedup: " << speedup << "x" << std::endl;
+    std::cout << "\n=== Cache-Blocking Config Test (n=" << n << ") ===" << std::endl;
+    std::cout << "High threshold: " << time1 << "s" << std::endl;
+    std::cout << "Low threshold: " << time2 << "s" << std::endl;
+    std::cout << "Ratio: " << ratio << "x" << std::endl;
 
-    // Note: Speedup is highly hardware-dependent (CPU cache sizes vary)
-    // Design targets 4-8x on typical hardware with 32KB L1 cache
-    // Conservative test: expect at least modest improvement
-    EXPECT_GE(speedup, 1.0) << "Cache-blocking should not be slower than no blocking";
+    // Since cache blocking is removed, both should run at the same speed
+    // Allow for 10% variation due to system noise
+    EXPECT_NEAR(ratio, 1.0, 0.1)
+        << "Both configs should perform identically (cache blocking removed)";
 
-    if (speedup >= 2.0) {
-        std::cout << "SUCCESS: Achieved target speedup of 2x or better!" << std::endl;
-    } else {
-        std::cout << "NOTE: Speedup < 2x may indicate hardware with large cache or memory bottleneck elsewhere" << std::endl;
-    }
+    std::cout << "NOTE: Cache blocking has been removed. The cache_blocking_threshold "
+              << "parameter is ignored.\n"
+              << "Both configurations now use single-pass evaluation." << std::endl;
 }
