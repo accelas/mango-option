@@ -61,13 +61,31 @@ public:
         // Snapshot user_index IS the tau index
         const size_t tau_idx = snapshot.user_index;
 
-        // Build interpolators (grid should always be valid from PDE solver)
-        auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
-        auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
+        // PERFORMANCE: Cache grid and reuse interpolators
+        // For a given (σ,r) pair, all snapshots share the same spatial grid
+        const bool grid_changed = !grids_match(snapshot.spatial_grid);
 
-        // Assert on failure - indicates programming error in PDE solver
-        assert(!V_error.has_value() && "Failed to build value interpolator");
-        assert(!Lu_error.has_value() && "Failed to build spatial operator interpolator");
+        if (grid_changed || !interpolators_built_) {
+            // Grid changed or first snapshot: build interpolators from scratch
+            auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
+            auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
+
+            // Assert on failure - indicates programming error in PDE solver
+            assert(!V_error.has_value() && "Failed to build value interpolator");
+            assert(!Lu_error.has_value() && "Failed to build spatial operator interpolator");
+
+            // Cache the grid
+            cached_grid_.assign(snapshot.spatial_grid.begin(), snapshot.spatial_grid.end());
+            interpolators_built_ = true;
+        } else {
+            // Grid same as before: fast rebuild with new data
+            auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
+            auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
+
+            // Assert on failure - indicates programming error
+            assert(!V_error.has_value() && "Failed to rebuild value interpolator");
+            assert(!Lu_error.has_value() && "Failed to rebuild spatial operator interpolator");
+        }
 
         // Fill price table for all moneyness points
         for (size_t m_idx = 0; m_idx < moneyness_.size(); ++m_idx) {
@@ -124,6 +142,16 @@ public:
     std::span<const double> thetas() const { return thetas_; }
 
 private:
+    /// Check if spatial grid matches cached grid
+    [[nodiscard]] bool grids_match(std::span<const double> grid) const noexcept {
+        if (cached_grid_.size() != grid.size()) {
+            return false;
+        }
+        // Grid should be identical (not just approximately equal)
+        // because it comes from the same solver instance
+        return std::equal(cached_grid_.begin(), cached_grid_.end(), grid.begin());
+    }
+
     std::vector<double> moneyness_;
     std::vector<double> tau_;
     double K_ref_;
@@ -143,6 +171,10 @@ private:
 
     SnapshotInterpolator value_interp_;
     SnapshotInterpolator lu_interp_;
+
+    // PERFORMANCE: Cached spatial grid for fast rebuild detection
+    std::vector<double> cached_grid_;
+    bool interpolators_built_ = false;
 
     double compute_american_obstacle(double S, double /*tau*/) const {
         // American option intrinsic value (exercise boundary)

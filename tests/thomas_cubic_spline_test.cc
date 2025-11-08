@@ -294,6 +294,58 @@ TEST(CubicSplineTest, DomainQuery) {
     EXPECT_EQ(spline.size(), 4);
 }
 
+TEST(CubicSplineTest, RebuildSameGrid) {
+    // Test rebuild_same_grid functionality
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0, 4.0};
+    std::vector<double> y1 = {0.0, 1.0, 4.0, 9.0, 16.0};  // y = x²
+    std::vector<double> y2 = {0.0, 2.0, 4.0, 6.0, 8.0};   // y = 2x
+
+    CubicSpline<double> spline;
+
+    // Build with first dataset
+    auto error1 = spline.build(std::span{x}, std::span{y1});
+    ASSERT_FALSE(error1.has_value());
+
+    // Verify first dataset
+    double val1 = spline.eval(1.5);
+    EXPECT_GT(val1, 0.0);  // Should be some value for x²
+
+    // Rebuild with second dataset on same grid
+    auto error2 = spline.rebuild_same_grid(std::span{y2});
+    ASSERT_FALSE(error2.has_value());
+
+    // Verify second dataset (linear function)
+    EXPECT_NEAR(spline.eval(0.5), 1.0, 1e-10);
+    EXPECT_NEAR(spline.eval(1.5), 3.0, 1e-10);
+    EXPECT_NEAR(spline.eval(2.5), 5.0, 1e-10);
+
+    // Derivative should be ~2 for linear function
+    EXPECT_NEAR(spline.eval_derivative(1.0), 2.0, 1e-10);
+    EXPECT_NEAR(spline.eval_derivative(2.0), 2.0, 1e-10);
+}
+
+TEST(CubicSplineTest, RebuildSameGridValidation) {
+    // Test rebuild_same_grid error handling
+    CubicSpline<double> spline;
+    std::vector<double> y = {1.0, 2.0, 3.0};
+
+    // Should fail if build() hasn't been called
+    auto error = spline.rebuild_same_grid(std::span{y});
+    EXPECT_TRUE(error.has_value());
+    EXPECT_NE(error.value().find("Must call build()"), std::string_view::npos);
+
+    // Build first
+    std::vector<double> x = {0.0, 1.0, 2.0};
+    auto build_error = spline.build(std::span{x}, std::span{y});
+    ASSERT_FALSE(build_error.has_value());
+
+    // Should fail with wrong size
+    std::vector<double> y_wrong = {1.0, 2.0};  // Wrong size
+    auto error2 = spline.rebuild_same_grid(std::span{y_wrong});
+    EXPECT_TRUE(error2.has_value());
+    EXPECT_NE(error2.value().find("size must match"), std::string_view::npos);
+}
+
 // ========== Performance/Benchmark Tests ==========
 
 TEST(CubicSplineTest, LargeDataset) {
