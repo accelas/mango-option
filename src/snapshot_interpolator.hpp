@@ -102,8 +102,9 @@ public:
     ///
     /// Uses cubic spline interpolation for smoothness.
     ///
-    /// PERFORMANCE: Caches the derived spline and only rebuilds when data changes.
-    /// Multiple calls with the same data array will reuse the cached spline.
+    /// PERFORMANCE: Uses pointer-based caching to avoid thrashing when
+    /// alternating between different arrays (e.g., first and second derivatives).
+    /// Maintains a small LRU cache of derived splines keyed by data pointer.
     ///
     /// @param x_eval Evaluation point
     /// @param data Pre-computed values at grid points (same grid as build())
@@ -113,35 +114,35 @@ public:
             return 0.0;
         }
 
-        // Build a temporary cubic spline for the derivative data
-        // PERFORMANCE: Caches the derived spline and only rebuilds when data changes
+        // PERFORMANCE: Use pointer-based cache to handle alternating arrays
+        // (e.g., first_derivative vs second_derivative in the same loop)
+        const double* data_ptr = data.data();
 
-        // Check if we need to rebuild (first time, size changed, or data changed)
-        const bool size_changed = derived_data_.size() != data.size();
-        const bool data_changed = !derived_spline_built_ || size_changed ||
-                                  !std::equal(derived_data_.begin(), derived_data_.end(), data.begin());
-
-        if (!derived_spline_built_ || size_changed) {
-            // First time or size changed: build from scratch
-            auto error = derived_spline_.build(std::span{x_}, data);
-            if (error.has_value()) {
-                // Fallback to linear interpolation on error
-                return eval_from_data_linear(x_eval, data);
-            }
-            derived_spline_built_ = true;
-            derived_data_.assign(data.begin(), data.end());
-        } else if (data_changed) {
-            // Data changed but grid same: fast rebuild
-            auto error = derived_spline_.rebuild_same_grid(data);
-            if (error.has_value()) {
-                // Fallback to linear interpolation on error
-                return eval_from_data_linear(x_eval, data);
-            }
-            derived_data_.assign(data.begin(), data.end());
+        // Check cache slots (we cache 2 most recently used splines)
+        if (cache_[0].data_ptr == data_ptr && cache_[0].built) {
+            // Cache hit in slot 0
+            return cache_[0].spline.eval(x_eval);
         }
-        // else: Data unchanged, reuse cached derived_spline_
+        if (cache_[1].data_ptr == data_ptr && cache_[1].built) {
+            // Cache hit in slot 1, promote to slot 0 (LRU)
+            std::swap(cache_[0], cache_[1]);
+            return cache_[0].spline.eval(x_eval);
+        }
 
-        return derived_spline_.eval(x_eval);
+        // Cache miss: evict LRU (slot 1) and build in slot 0
+        cache_[1] = std::move(cache_[0]);  // Demote slot 0 to slot 1
+
+        auto error = cache_[0].spline.build(std::span{x_}, data);
+        if (error.has_value()) {
+            // Fallback to linear interpolation on error
+            cache_[0].built = false;
+            cache_[0].data_ptr = nullptr;
+            return eval_from_data_linear(x_eval, data);
+        }
+
+        cache_[0].built = true;
+        cache_[0].data_ptr = data_ptr;
+        return cache_[0].spline.eval(x_eval);
     }
 
     /// Check if spline has been built
@@ -155,14 +156,21 @@ public:
     }
 
 private:
+    /// Cache entry for derived splines
+    struct DerivedSplineCache {
+        CubicSpline<double> spline;
+        const double* data_ptr = nullptr;  ///< Pointer identity for cache key
+        bool built = false;
+    };
+
     /// Invalidate derived spline cache
     ///
     /// CRITICAL: Must be called whenever the grid (x_) changes.
     /// The derived spline caches interval widths from x_, so a grid
     /// change makes its cached state invalid.
     void invalidate_derived_spline() noexcept {
-        derived_spline_built_ = false;
-        derived_data_.clear();
+        cache_[0] = DerivedSplineCache{};
+        cache_[1] = DerivedSplineCache{};
     }
 
     /// Linear interpolation fallback
@@ -195,10 +203,9 @@ private:
     std::vector<double> y_;  // Values (for eval_from_data)
     bool built_ = false;
 
-    // Cached spline for derivative data (mutable for lazy initialization in const methods)
-    mutable CubicSpline<double> derived_spline_;
-    mutable std::vector<double> derived_data_;
-    mutable bool derived_spline_built_ = false;
+    // LRU cache for derived splines (size 2: handles first + second derivative)
+    // Mutable for lazy initialization in const eval_from_data
+    mutable DerivedSplineCache cache_[2];
 };
 
 }  // namespace mango
