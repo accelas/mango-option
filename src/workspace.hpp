@@ -1,7 +1,8 @@
 #pragma once
 
 #include "cache_config.hpp"
-#include "aligned_allocator.hpp"
+#include "aligned_memory_resource.hpp"
+#include <memory_resource>
 #include <vector>
 #include <span>
 #include <cstddef>
@@ -15,9 +16,9 @@ namespace mango {
 /// Manages all solver state in a single contiguous buffer for cache efficiency.
 /// Arrays: u_current, u_next, u_stage, rhs, Lu, psi (6n doubles total).
 ///
-/// **64-byte alignment** - Uses aligned allocator for AVX-512 SIMD vectorization.
-/// The buffer is aligned to 64 bytes to enable efficient vector loads/stores.
-/// Portable across Windows (MSVC), macOS, and Linux.
+/// **64-byte alignment** - Uses PMR with aligned memory resource for AVX-512
+/// SIMD vectorization. The buffer is aligned to 64 bytes for efficient vector
+/// loads/stores. Portable across Windows (MSVC), macOS, and Linux.
 ///
 /// **Pre-computed dx array** - Grid spacing computed once during construction
 /// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
@@ -26,7 +27,7 @@ namespace mango {
 /// - n < 5000: Single block (no blocking overhead)
 /// - n ≥ 5000: L1-blocked (~1000 points per block, ~32 KB working set)
 ///
-/// **Value semantics** - Movable and copyable via std::vector's implementations.
+/// **Value semantics** - Movable and copyable via PMR vector's implementations.
 ///
 /// Future GPU version (v2.1) will use SYCL unified shared memory (USM)
 /// with explicit device allocation and host-device synchronization.
@@ -42,7 +43,8 @@ public:
     /// plus (n-1) doubles for pre-computed dx array.
     /// Memory is 64-byte aligned for AVX-512 SIMD operations.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
-        : buffer_(6 * n)  // 64-byte aligned allocation via AlignedAllocator
+        : aligned_resource_(64)  // 64-byte alignment for AVX-512
+        , buffer_(6 * n, &aligned_resource_)
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)
     {
@@ -147,9 +149,10 @@ public:
     }
 
 private:
-    std::vector<double, AlignedAllocator<double, 64>> buffer_;  // 64-byte aligned buffer for all arrays
-    CacheBlockConfig cache_config_;  // Cache-blocking configuration (CPU-only)
-    std::vector<double> dx_;         // Pre-computed grid spacing
+    AlignedMemoryResource aligned_resource_;  // PMR memory resource for 64-byte alignment
+    std::pmr::vector<double> buffer_;         // PMR vector using aligned resource
+    CacheBlockConfig cache_config_;           // Cache-blocking configuration (CPU-only)
+    std::vector<double> dx_;                  // Pre-computed grid spacing
 
     // Spans into buffer_
     std::span<double> u_current_;
