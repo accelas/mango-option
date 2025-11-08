@@ -123,3 +123,21 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "bspline_cache_locality",
+    srcs = ["bspline_cache_locality.cc"],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src:bspline_fitter_4d_separable",
+        "//src:bspline_collocation_1d",
+    ],
+    tags = ["benchmark", "manual"],
+)

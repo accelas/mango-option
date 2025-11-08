@@ -6,30 +6,35 @@
  * a massive dense system. Instead of solving one (Nm·Nt·Nv·Nr)² system,
  * we solve many small 1D systems sequentially along each axis.
  *
- * Algorithm:
+ * Algorithm (cache-optimized axis order):
  *   Input: f(m_i, τ_j, σ_k, r_l) - function values on 4D grid
+ *   Memory layout: ((i*Nt + j)*Nv + k)*Nr + l (row-major, r fastest-varying)
  *
- *   Step 1: Fit along m for each fixed (j,k,l)
- *     For each (j,k,l): solve B_m * c_m = f[:,j,k,l]
- *     → produces c(m, τ_j, σ_k, r_l)
+ *   Step 1: Fit along r for each fixed (i,j,k) [stride=1, contiguous]
+ *     For each (i,j,k): solve B_r * c_r = f[i,j,k,:]
+ *     → produces c(m_i, τ_j, σ_k, r)
  *
- *   Step 2: Fit along τ for each fixed (i,k,l)
- *     For each (i,k,l): solve B_τ * c_τ = c[i,:,k,l]
- *     → produces c(m_i, τ, σ_k, r_l)
- *
- *   Step 3: Fit along σ for each fixed (i,j,l)
+ *   Step 2: Fit along σ for each fixed (i,j,l) [stride=Nr, small jumps]
  *     For each (i,j,l): solve B_σ * c_σ = c[i,j,:,l]
  *     → produces c(m_i, τ_j, σ, r_l)
  *
- *   Step 4: Fit along r for each fixed (i,j,k)
- *     For each (i,j,k): solve B_r * c_r = c[i,j,k,:]
- *     → produces c(m_i, τ_j, σ_k, r) - final coefficients
+ *   Step 3: Fit along τ for each fixed (i,k,l) [stride=Nv*Nr, medium jumps]
+ *     For each (i,k,l): solve B_τ * c_τ = c[i,:,k,l]
+ *     → produces c(m_i, τ, σ_k, r_l)
+ *
+ *   Step 4: Fit along m for each fixed (j,k,l) [stride=Nt*Nv*Nr, large jumps]
+ *     For each (j,k,l): solve B_m * c_m = c[:,j,k,l]
+ *     → produces c(m, τ_j, σ_k, r_l) - final coefficients
  *
  * Performance: O(Nm³ + Nt³ + Nσ³ + Nr³) for all tridiagonal solves
- *              For 50×30×20×10: ~5ms fitting time
+ *              Cache-optimized axis order improves memory bandwidth utilization
+ *              For 50×30×20×10: ~5ms fitting time (cache-optimized)
  *
  * Memory: Works in-place, modifying the tensor as we go
  *         Peak memory: O(Nm·Nt·Nv·Nr) - just the tensor itself
+ *
+ * Cache Optimization: Processing axes in order of increasing memory stride
+ *                     (r → σ → τ → m) minimizes cache misses in early passes
  */
 
 #pragma once
@@ -107,6 +112,9 @@ public:
     /// @param values Function values at grid points (row-major: i*Nt*Nv*Nr + j*Nv*Nr + k*Nr + l)
     /// @param tolerance Max allowed residual per axis (default 1e-6)
     /// @return Fit result with coefficients and diagnostics
+    ///
+    /// @note Axis order optimized for cache locality (r → σ → τ → m)
+    ///       Processing fastest-varying dimensions first minimizes cache misses
     BSplineFit4DSeparableResult fit(const std::vector<double>& values, double tolerance = 1e-6) {
         if (values.size() != Nm_ * Nt_ * Nv_ * Nr_) {
             return {std::vector<double>(), false,
@@ -123,23 +131,19 @@ public:
         result.failed_slices_sigma = 0;
         result.failed_slices_r = 0;
 
-        // Step 1: Fit along m-axis (for each fixed j,k,l)
-        if (!fit_axis_m(coeffs, tolerance, result)) {
+        // CACHE-OPTIMIZED AXIS ORDER (fastest-varying to slowest-varying)
+        // Memory layout: ((i*Nt + j)*Nv + k)*Nr + l
+        // Strides: r=1, σ=Nr, τ=Nv*Nr, m=Nt*Nv*Nr
+        //
+        // Step 1: r-axis (stride=1, contiguous access)
+        if (!fit_axis_r(coeffs, tolerance, result)) {
             result.success = false;
-            result.error_message = "Failed fitting along m-axis: " +
-                                   std::to_string(result.failed_slices_m) + " slices failed";
+            result.error_message = "Failed fitting along r-axis: " +
+                                   std::to_string(result.failed_slices_r) + " slices failed";
             return result;
         }
 
-        // Step 2: Fit along τ-axis (for each fixed i,k,l)
-        if (!fit_axis_tau(coeffs, tolerance, result)) {
-            result.success = false;
-            result.error_message = "Failed fitting along τ-axis: " +
-                                   std::to_string(result.failed_slices_tau) + " slices failed";
-            return result;
-        }
-
-        // Step 3: Fit along σ-axis (for each fixed i,j,l)
+        // Step 2: σ-axis (stride=Nr, small jumps)
         if (!fit_axis_sigma(coeffs, tolerance, result)) {
             result.success = false;
             result.error_message = "Failed fitting along σ-axis: " +
@@ -147,11 +151,19 @@ public:
             return result;
         }
 
-        // Step 4: Fit along r-axis (for each fixed i,j,k)
-        if (!fit_axis_r(coeffs, tolerance, result)) {
+        // Step 3: τ-axis (stride=Nv*Nr, medium jumps)
+        if (!fit_axis_tau(coeffs, tolerance, result)) {
             result.success = false;
-            result.error_message = "Failed fitting along r-axis: " +
-                                   std::to_string(result.failed_slices_r) + " slices failed";
+            result.error_message = "Failed fitting along τ-axis: " +
+                                   std::to_string(result.failed_slices_tau) + " slices failed";
+            return result;
+        }
+
+        // Step 4: m-axis (stride=Nt*Nv*Nr, large jumps - done last)
+        if (!fit_axis_m(coeffs, tolerance, result)) {
+            result.success = false;
+            result.error_message = "Failed fitting along m-axis: " +
+                                   std::to_string(result.failed_slices_m) + " slices failed";
             return result;
         }
 
