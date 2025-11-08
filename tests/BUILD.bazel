@@ -336,6 +336,7 @@ cc_test(
     deps = [
         "//src:thomas_solver",
         "//src:cubic_spline_solver",
+        "//src:snapshot_interpolator",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++20"],
