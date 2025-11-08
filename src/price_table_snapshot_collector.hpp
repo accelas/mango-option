@@ -120,6 +120,11 @@ public:
             }
         }
 
+        // PERFORMANCE: Capture epoch after rebuild for O(1) cache freshness checks
+        // The epoch increments on every rebuild_same_grid(), allowing derivative
+        // cache to detect buffer reuse without O(n) content comparison
+        const uint64_t value_epoch = value_interp_.current_epoch();
+
         // Fill price table for all moneyness points
         for (size_t m_idx = 0; m_idx < moneyness_.size(); ++m_idx) {
             // PERFORMANCE: Use precomputed values instead of recomputing
@@ -137,7 +142,8 @@ public:
             prices_[table_idx] = K_ref_ * V_norm;
 
             // Interpolate normalized delta from PDE data: dV_norm/dx
-            const double dVnorm_dx = value_interp_.eval_from_data(x, snapshot.first_derivative);
+            // Pass epoch for O(1) cache freshness check (avoids O(n) std::equal)
+            const double dVnorm_dx = value_interp_.eval_from_data(x, snapshot.first_derivative, value_epoch);
 
             // Transform to dollar delta using chain rule:
             // PERFORMANCE: Use FMA for better precision and potential FMA instruction
@@ -145,7 +151,8 @@ public:
             deltas_[table_idx] = delta_scale * dVnorm_dx;
 
             // Interpolate normalized second derivative: d²V_norm/dx²
-            const double d2Vnorm_dx2 = value_interp_.eval_from_data(x, snapshot.second_derivative);
+            // Pass epoch for O(1) cache freshness check
+            const double d2Vnorm_dx2 = value_interp_.eval_from_data(x, snapshot.second_derivative, value_epoch);
 
             // Transform to dollar gamma using chain rule:
             // gamma = (K_ref/S²) * [d²V_norm/dx² - dV_norm/dx]

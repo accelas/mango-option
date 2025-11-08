@@ -83,7 +83,21 @@ public:
 
         // Update stored y-values
         y_.assign(y.begin(), y.end());
+
+        // Bump epoch to invalidate stale derivative caches
+        ++data_epoch_;
+
         return std::nullopt;
+    }
+
+    /// Get current data epoch
+    ///
+    /// The epoch increments whenever rebuild_same_grid() succeeds.
+    /// Callers can use this to track data freshness for derivative caches.
+    ///
+    /// @return Current epoch value
+    [[nodiscard]] uint64_t current_epoch() const noexcept {
+        return data_epoch_;
     }
 
     /// Evaluate interpolant
@@ -102,44 +116,38 @@ public:
     ///
     /// Uses cubic spline interpolation for smoothness.
     ///
-    /// PERFORMANCE: Uses hybrid pointer+content caching to avoid thrashing when
+    /// PERFORMANCE: Uses epoch-based caching to avoid thrashing when
     /// alternating between different arrays (e.g., first and second derivatives).
-    /// Maintains a 2-slot LRU cache. Pointers are used as a fast cache key,
-    /// but contents are compared when pointers match to detect reused buffers.
+    /// Maintains a 2-slot LRU cache. Cache entries are keyed by (pointer, epoch)
+    /// for O(1) freshness checks without O(n) content comparison.
     ///
     /// @param x_eval Evaluation point
     /// @param data Pre-computed values at grid points (same grid as build())
+    /// @param epoch Data epoch from current_epoch() after rebuild_same_grid()
     /// @return Interpolated value
-    [[nodiscard]] double eval_from_data(double x_eval, std::span<const double> data) const {
+    [[nodiscard]] double eval_from_data(double x_eval, std::span<const double> data, uint64_t epoch) const {
         if (x_.empty() || data.size() != x_.size()) {
             return 0.0;
         }
 
-        // PERFORMANCE: Hybrid cache using pointer + content comparison
+        // PERFORMANCE: Epoch-based cache using pointer + epoch comparison (O(1))
         // Handles both alternating arrays AND reused buffers with changed values
         const double* data_ptr = data.data();
 
-        // Check cache[0]: pointer match + content comparison
-        if (cache_[0].data_ptr == data_ptr && cache_[0].built) {
-            // Pointer matches: check if contents also match (handles buffer reuse)
-            if (std::equal(cache_[0].data.begin(), cache_[0].data.end(), data.begin())) {
-                // Cache hit: same pointer, same contents
-                return cache_[0].spline.eval(x_eval);
-            }
-            // Pointer matches but contents changed: treat as miss, rebuild this slot
+        // Check cache[0]: pointer match + epoch match
+        if (cache_[0].data_ptr == data_ptr && cache_[0].built && cache_[0].epoch == epoch) {
+            // Cache hit: same pointer, same epoch
+            return cache_[0].spline.eval(x_eval);
         }
 
-        // Check cache[1]: pointer match + content comparison
-        if (cache_[1].data_ptr == data_ptr && cache_[1].built) {
-            if (std::equal(cache_[1].data.begin(), cache_[1].data.end(), data.begin())) {
-                // Cache hit in slot 1: promote to slot 0 (LRU)
-                std::swap(cache_[0], cache_[1]);
-                return cache_[0].spline.eval(x_eval);
-            }
-            // Pointer matches but contents changed: treat as miss
+        // Check cache[1]: pointer match + epoch match
+        if (cache_[1].data_ptr == data_ptr && cache_[1].built && cache_[1].epoch == epoch) {
+            // Cache hit in slot 1: promote to slot 0 (LRU)
+            std::swap(cache_[0], cache_[1]);
+            return cache_[0].spline.eval(x_eval);
         }
 
-        // Cache miss (or contents changed): rebuild
+        // Cache miss (pointer or epoch mismatch): rebuild
         // Evict LRU (slot 1) and build in slot 0
         cache_[1] = std::move(cache_[0]);  // Demote slot 0 to slot 1
 
@@ -148,13 +156,13 @@ public:
             // Fallback to linear interpolation on error
             cache_[0].built = false;
             cache_[0].data_ptr = nullptr;
-            cache_[0].data.clear();
+            cache_[0].epoch = 0;
             return eval_from_data_linear(x_eval, data);
         }
 
         cache_[0].built = true;
         cache_[0].data_ptr = data_ptr;
-        cache_[0].data.assign(data.begin(), data.end());  // Store copy for comparison
+        cache_[0].epoch = epoch;
         return cache_[0].spline.eval(x_eval);
     }
 
@@ -173,7 +181,7 @@ private:
     struct DerivedSplineCache {
         CubicSpline<double> spline;
         const double* data_ptr = nullptr;     ///< Pointer for fast lookup
-        std::vector<double> data;             ///< Copy of data for content comparison
+        uint64_t epoch = 0;                   ///< Data epoch for O(1) freshness check
         bool built = false;
     };
 
@@ -216,6 +224,9 @@ private:
     std::vector<double> x_;  // Grid points (for eval_from_data)
     std::vector<double> y_;  // Values (for eval_from_data)
     bool built_ = false;
+
+    // Epoch counter for tracking data freshness (incremented on rebuild_same_grid)
+    uint64_t data_epoch_ = 0;
 
     // LRU cache for derived splines (size 2: handles first + second derivative)
     // Mutable for lazy initialization in const eval_from_data
