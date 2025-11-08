@@ -40,6 +40,7 @@
 #pragma once
 
 #include "bspline_collocation_1d.hpp"
+#include "expected.hpp"
 #include <vector>
 #include <string>
 #include <cmath>
@@ -77,34 +78,24 @@ struct BSplineFit4DSeparableResult {
 /// Works in-place to minimize memory usage.
 class BSplineFitter4DSeparable {
 public:
-    /// Constructor
+    /// Create fitter with validation
     ///
     /// @param m_grid Moneyness grid (sorted, ≥4 points)
     /// @param t_grid Maturity grid (sorted, ≥4 points)
     /// @param v_grid Volatility grid (sorted, ≥4 points)
     /// @param r_grid Rate grid (sorted, ≥4 points)
-    BSplineFitter4DSeparable(std::vector<double> m_grid,
-                             std::vector<double> t_grid,
-                             std::vector<double> v_grid,
-                             std::vector<double> r_grid)
-        : m_grid_(std::move(m_grid))
-        , t_grid_(std::move(t_grid))
-        , v_grid_(std::move(v_grid))
-        , r_grid_(std::move(r_grid))
-        , Nm_(m_grid_.size())
-        , Nt_(t_grid_.size())
-        , Nv_(v_grid_.size())
-        , Nr_(r_grid_.size())
+    /// @return Fitter instance or error message
+    static expected<BSplineFitter4DSeparable, std::string> create(
+        std::vector<double> m_grid,
+        std::vector<double> t_grid,
+        std::vector<double> v_grid,
+        std::vector<double> r_grid)
     {
-        if (Nm_ < 4 || Nt_ < 4 || Nv_ < 4 || Nr_ < 4) {
-            throw std::invalid_argument("All grids must have ≥4 points");
+        if (m_grid.size() < 4 || t_grid.size() < 4 || v_grid.size() < 4 || r_grid.size() < 4) {
+            return unexpected("All grids must have ≥4 points for cubic B-splines");
         }
-
-        // Create 1D solvers for each axis
-        solver_m_ = std::make_unique<BSplineCollocation1D>(m_grid_);
-        solver_t_ = std::make_unique<BSplineCollocation1D>(t_grid_);
-        solver_v_ = std::make_unique<BSplineCollocation1D>(v_grid_);
-        solver_r_ = std::make_unique<BSplineCollocation1D>(r_grid_);
+        return BSplineFitter4DSeparable(std::move(m_grid), std::move(t_grid),
+                                       std::move(v_grid), std::move(r_grid));
     }
 
     /// Fit B-spline coefficients via separable collocation
@@ -172,6 +163,43 @@ public:
     }
 
 private:
+    /// Private constructor for factory method
+    BSplineFitter4DSeparable(std::vector<double> m_grid,
+                             std::vector<double> t_grid,
+                             std::vector<double> v_grid,
+                             std::vector<double> r_grid)
+        : m_grid_(std::move(m_grid))
+        , t_grid_(std::move(t_grid))
+        , v_grid_(std::move(v_grid))
+        , r_grid_(std::move(r_grid))
+        , Nm_(m_grid_.size())
+        , Nt_(t_grid_.size())
+        , Nv_(v_grid_.size())
+        , Nr_(r_grid_.size())
+    {
+        // Create 1D solvers for each axis using factory method
+        auto m_result = BSplineCollocation1D::create(m_grid_);
+        auto t_result = BSplineCollocation1D::create(t_grid_);
+        auto v_result = BSplineCollocation1D::create(v_grid_);
+        auto r_result = BSplineCollocation1D::create(r_grid_);
+
+        // The factory methods should never fail here since the grids were already validated
+        // in the create() method of this class, but we check for completeness
+        if (!m_result.has_value() || !t_result.has_value() ||
+            !v_result.has_value() || !r_result.has_value()) {
+            throw std::runtime_error("Failed to create BSplineCollocation1D solvers: " +
+                                   (m_result.has_value() ? "" : m_result.error()) +
+                                   (t_result.has_value() ? "" : t_result.error()) +
+                                   (v_result.has_value() ? "" : v_result.error()) +
+                                   (r_result.has_value() ? "" : r_result.error()));
+        }
+
+        solver_m_ = std::make_unique<BSplineCollocation1D>(std::move(m_result.value()));
+        solver_t_ = std::make_unique<BSplineCollocation1D>(std::move(t_result.value()));
+        solver_v_ = std::make_unique<BSplineCollocation1D>(std::move(v_result.value()));
+        solver_r_ = std::make_unique<BSplineCollocation1D>(std::move(r_result.value()));
+    }
+
     std::vector<double> m_grid_, t_grid_, v_grid_, r_grid_;
     size_t Nm_, Nt_, Nv_, Nr_;
 

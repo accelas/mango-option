@@ -22,21 +22,21 @@
 
 namespace mango {
 
-void PriceTable4DBuilder::validate_grids() const {
+expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
     if (moneyness_.size() < 4) {
-        throw std::invalid_argument("Moneyness grid must have ≥4 points for cubic B-splines");
+        return unexpected("Moneyness grid must have ≥4 points for cubic B-splines");
     }
     if (maturity_.size() < 4) {
-        throw std::invalid_argument("Maturity grid must have ≥4 points for cubic B-splines");
+        return unexpected("Maturity grid must have ≥4 points for cubic B-splines");
     }
     if (volatility_.size() < 4) {
-        throw std::invalid_argument("Volatility grid must have ≥4 points for cubic B-splines");
+        return unexpected("Volatility grid must have ≥4 points for cubic B-splines");
     }
     if (rate_.size() < 4) {
-        throw std::invalid_argument("Rate grid must have ≥4 points for cubic B-splines");
+        return unexpected("Rate grid must have ≥4 points for cubic B-splines");
     }
     if (K_ref_ <= 0.0) {
-        throw std::invalid_argument("Reference strike K_ref must be positive");
+        return unexpected("Reference strike K_ref must be positive");
     }
 
     // Verify sorted
@@ -45,24 +45,24 @@ void PriceTable4DBuilder::validate_grids() const {
     };
 
     if (!is_sorted(moneyness_)) {
-        throw std::invalid_argument("Moneyness grid must be sorted");
+        return unexpected("Moneyness grid must be sorted");
     }
     if (!is_sorted(maturity_)) {
-        throw std::invalid_argument("Maturity grid must be sorted");
+        return unexpected("Maturity grid must be sorted");
     }
     if (!is_sorted(volatility_)) {
-        throw std::invalid_argument("Volatility grid must be sorted");
+        return unexpected("Volatility grid must be sorted");
     }
     if (!is_sorted(rate_)) {
-        throw std::invalid_argument("Rate grid must be sorted");
+        return unexpected("Rate grid must be sorted");
     }
 
     // Verify positive
     if (maturity_.front() <= 0.0) {
-        throw std::invalid_argument("Maturity must be positive");
+        return unexpected("Maturity must be positive");
     }
     if (volatility_.front() <= 0.0) {
-        throw std::invalid_argument("Volatility must be positive");
+        return unexpected("Volatility must be positive");
     }
 
     // Verify moneyness values are positive
@@ -70,16 +70,18 @@ void PriceTable4DBuilder::validate_grids() const {
     // Moneyness grid should represent S/K_ref ratios, not raw spots
     for (size_t i = 0; i < moneyness_.size(); ++i) {
         if (moneyness_[i] <= 0.0) {
-            throw std::invalid_argument(
+            return unexpected(
                 "Moneyness values must be positive (m = S/K_ref > 0). "
                 "Found m[" + std::to_string(i) + "] = " + std::to_string(moneyness_[i]) + ". "
                 "Note: moneyness represents spot ratios S/K_ref, not log-moneyness x = ln(S/K_ref)."
             );
         }
     }
+
+    return {};
 }
 
-PriceTable4DResult PriceTable4DBuilder::precompute(
+expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     OptionType option_type,
     const AmericanOptionGrid& grid_config,
     double dividend_yield)
@@ -98,7 +100,7 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     const double x_max_requested = std::log(moneyness_.back());
 
     if (x_min_requested < grid_config.x_min || x_max_requested > grid_config.x_max) {
-        throw std::invalid_argument(
+        return unexpected(
             "Requested moneyness range [" + std::to_string(moneyness_.front()) + ", " +
             std::to_string(moneyness_.back()) + "] in spot ratios "
             "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
@@ -283,20 +285,23 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
     }
 
     if (failed_count > 0) {
-        throw std::runtime_error("Failed to solve " + std::to_string(failed_count) +
-                                 " out of " + std::to_string(Nv * Nr) + " PDEs");
+        return unexpected("Failed to solve " + std::to_string(failed_count) +
+                         " out of " + std::to_string(Nv * Nr) + " PDEs");
     }
 
     // End timer
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration<double>(end_time - start_time);
 
-    // Fit B-spline coefficients
-    BSplineFitter4D fitter(moneyness_, maturity_, volatility_, rate_);
-    auto fit_result = fitter.fit(prices_4d);
+    // Fit B-spline coefficients using factory pattern
+    auto fitter_result = BSplineFitter4D::create(moneyness_, maturity_, volatility_, rate_);
+    if (!fitter_result.has_value()) {
+        return unexpected("B-spline fitter creation failed: " + fitter_result.error());
+    }
+    auto fit_result = fitter_result.value().fit(prices_4d);
 
     if (!fit_result.success) {
-        throw std::runtime_error("B-spline fitting failed: " + fit_result.error_message);
+        return unexpected("B-spline fitting failed: " + fit_result.error_message);
     }
 
     // Create evaluator

@@ -20,10 +20,14 @@
  * Accuracy: Residuals <1e-6 at all grid points (validated per-axis)
  *
  * Usage:
- *   BSplineFitter4D fitter(m_grid, t_grid, v_grid, r_grid);
- *   auto result = fitter.fit(prices_4d);
- *   if (result.success) {
- *       // Use result.coefficients with BSpline4D_FMA
+ *   auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+ *   if (fitter_result.has_value()) {
+ *       auto result = fitter_result.value().fit(prices_4d);
+ *       if (result.success) {
+ *           // Use result.coefficients with BSpline4D_FMA
+ *       }
+ *   } else {
+ *       // Handle creation error: fitter_result.error()
  *   }
  */
 
@@ -31,6 +35,7 @@
 
 #include "bspline_fitter_4d_separable.hpp"
 #include "bspline_4d.hpp"
+#include "expected.hpp"
 #include <vector>
 #include <stdexcept>
 #include <cmath>
@@ -71,27 +76,31 @@ struct BSplineFitResult4D {
 /// Time: O(n·m·p·q) for all 1D fits
 class BSplineFitter4D {
 public:
-    /// Construct fitter for given grids
+    /// Factory method to create BSplineFitter4D with validation
     ///
     /// @param m_grid Moneyness grid (sorted, ≥4 points)
     /// @param t_grid Maturity grid (sorted, ≥4 points)
     /// @param v_grid Volatility grid (sorted, ≥4 points)
     /// @param r_grid Rate grid (sorted, ≥4 points)
-    BSplineFitter4D(std::vector<double> m_grid,
-                    std::vector<double> t_grid,
-                    std::vector<double> v_grid,
-                    std::vector<double> r_grid)
-        : m_grid_(std::move(m_grid)),
-          t_grid_(std::move(t_grid)),
-          v_grid_(std::move(v_grid)),
-          r_grid_(std::move(r_grid)),
-          Nm_(m_grid_.size()),
-          Nt_(t_grid_.size()),
-          Nv_(v_grid_.size()),
-          Nr_(r_grid_.size())
-    {
-        if (Nm_ < 4 || Nt_ < 4 || Nv_ < 4 || Nr_ < 4) {
-            throw std::invalid_argument("All grids must have ≥4 points for cubic B-splines");
+    /// @return expected<BSplineFitter4D, std::string> - success or error message
+    static expected<BSplineFitter4D, std::string> create(
+        std::vector<double> m_grid,
+        std::vector<double> t_grid,
+        std::vector<double> v_grid,
+        std::vector<double> r_grid) {
+
+        // Validate grid sizes
+        if (m_grid.size() < 4) {
+            return unexpected(std::string("Moneyness grid must have ≥4 points for cubic B-splines"));
+        }
+        if (t_grid.size() < 4) {
+            return unexpected(std::string("Maturity grid must have ≥4 points for cubic B-splines"));
+        }
+        if (v_grid.size() < 4) {
+            return unexpected(std::string("Volatility grid must have ≥4 points for cubic B-splines"));
+        }
+        if (r_grid.size() < 4) {
+            return unexpected(std::string("Rate grid must have ≥4 points for cubic B-splines"));
         }
 
         // Verify grids are sorted
@@ -99,16 +108,21 @@ public:
             return std::is_sorted(v.begin(), v.end());
         };
 
-        if (!is_sorted(m_grid_) || !is_sorted(t_grid_) ||
-            !is_sorted(v_grid_) || !is_sorted(r_grid_)) {
-            throw std::invalid_argument("All grids must be sorted in ascending order");
+        if (!is_sorted(m_grid)) {
+            return unexpected(std::string("Moneyness grid must be sorted in ascending order"));
+        }
+        if (!is_sorted(t_grid)) {
+            return unexpected(std::string("Maturity grid must be sorted in ascending order"));
+        }
+        if (!is_sorted(v_grid)) {
+            return unexpected(std::string("Volatility grid must be sorted in ascending order"));
+        }
+        if (!is_sorted(r_grid)) {
+            return unexpected(std::string("Rate grid must be sorted in ascending order"));
         }
 
-        // Pre-compute knot vectors (for validation/future use)
-        tm_ = clamped_knots_cubic(m_grid_);
-        tt_ = clamped_knots_cubic(t_grid_);
-        tv_ = clamped_knots_cubic(v_grid_);
-        tr_ = clamped_knots_cubic(r_grid_);
+        // All validations passed, create the fitter
+        return BSplineFitter4D(std::move(m_grid), std::move(t_grid), std::move(v_grid), std::move(r_grid));
     }
 
     /// Fit B-spline coefficients via separable collocation
@@ -121,8 +135,17 @@ public:
     /// @param tolerance Maximum residual per axis (default 1e-6)
     /// @return Fit result with coefficients and diagnostics
     BSplineFitResult4D fit(const std::vector<double>& values, double tolerance = 1e-6) {
-        // Create separable fitter
-        BSplineFitter4DSeparable fitter(m_grid_, t_grid_, v_grid_, r_grid_);
+        // Create separable fitter using factory pattern
+        auto fitter_result = BSplineFitter4DSeparable::create(m_grid_, t_grid_, v_grid_, r_grid_);
+        if (!fitter_result.has_value()) {
+            return {
+                .coefficients = std::vector<double>(),
+                .success = false,
+                .error_message = fitter_result.error(),
+                .max_residual = 0.0
+            };
+        }
+        auto& fitter = fitter_result.value();
 
         // Perform separable fitting
         auto sep_result = fitter.fit(values, tolerance);
@@ -176,6 +199,35 @@ public:
     }
 
 private:
+    /// Private constructor - use factory method create() instead
+    ///
+    /// @param m_grid Moneyness grid (already validated by factory)
+    /// @param t_grid Maturity grid (already validated by factory)
+    /// @param v_grid Volatility grid (already validated by factory)
+    /// @param r_grid Rate grid (already validated by factory)
+    BSplineFitter4D(std::vector<double> m_grid,
+                    std::vector<double> t_grid,
+                    std::vector<double> v_grid,
+                    std::vector<double> r_grid)
+        : m_grid_(std::move(m_grid)),
+          t_grid_(std::move(t_grid)),
+          v_grid_(std::move(v_grid)),
+          r_grid_(std::move(r_grid)),
+          Nm_(m_grid_.size()),
+          Nt_(t_grid_.size()),
+          Nv_(v_grid_.size()),
+          Nr_(r_grid_.size())
+    {
+        // Pre-compute knot vectors (no validation needed - done by factory)
+        tm_ = clamped_knots_cubic(m_grid_);
+        tt_ = clamped_knots_cubic(t_grid_);
+        tv_ = clamped_knots_cubic(v_grid_);
+        tr_ = clamped_knots_cubic(r_grid_);
+    }
+
+    // Friend declaration for factory method to access private constructor
+    friend expected<BSplineFitter4D, std::string> create(
+        std::vector<double>, std::vector<double>, std::vector<double>, std::vector<double>);
     std::vector<double> m_grid_;  ///< Moneyness grid
     std::vector<double> t_grid_;  ///< Maturity grid
     std::vector<double> v_grid_;  ///< Volatility grid

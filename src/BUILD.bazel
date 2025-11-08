@@ -45,6 +45,9 @@ cc_library(
 cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
+    deps = [
+        ":expected",
+    ],
     copts = [
         "-std=c++20",
         "-Wall",
@@ -57,7 +60,10 @@ cc_library(
 cc_library(
     name = "multigrid",
     hdrs = ["multigrid.hpp"],
-    deps = [":grid"],
+    deps = [
+        ":grid",
+        ":expected",
+    ],
     copts = ["-std=c++20", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
@@ -237,6 +243,7 @@ cc_library(
         ":bspline_basis_1d",
         ":bspline_utils",
         ":thomas_solver",
+        ":expected",
     ],
     copts = [
         "-std=c++20",
@@ -273,6 +280,7 @@ cc_library(
     hdrs = ["bspline_fitter_4d_separable.hpp"],
     deps = [
         ":bspline_collocation_1d",
+        ":expected",
     ],
     copts = [
         "-std=c++20",

@@ -36,6 +36,7 @@
 #include "american_option.hpp"
 #include "bspline_4d.hpp"
 #include "bspline_fitter_4d.hpp"
+#include "expected.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -116,7 +117,7 @@ public:
     /// @param grid_config PDE grid configuration
     /// @param dividend_yield Continuous dividend yield (default: 0)
     /// @return Result with fitted B-spline evaluator
-    PriceTable4DResult precompute(
+    expected<PriceTable4DResult, std::string> precompute(
         OptionType option_type,
         const AmericanOptionGrid& grid_config,
         double dividend_yield = 0.0);
@@ -139,10 +140,13 @@ private:
         , rate_(std::move(rate))
         , K_ref_(K_ref)
     {
-        validate_grids();
+        auto validation_result = validate_grids();
+        if (!validation_result) {
+            throw std::invalid_argument(validation_result.error());
+        }
     }
 
-    void validate_grids() const;
+    expected<void, std::string> validate_grids() const;
 
     std::vector<double> moneyness_;
     std::vector<double> maturity_;

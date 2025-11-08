@@ -33,6 +33,7 @@
 #include "bspline_basis_1d.hpp"
 #include "bspline_utils.hpp"
 #include "thomas_solver.hpp"
+#include "expected.hpp"
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -57,40 +58,58 @@ struct BSplineCollocation1DResult {
 /// that make the B-spline interpolate the given data.
 class BSplineCollocation1D {
 public:
-    /// Constructor
+    /// Factory method to create BSplineCollocation1D instance
     ///
     /// @param grid Data grid points (sorted, ≥4 points)
+    /// @return expected<BSplineCollocation1D, std::string> containing either the solver or error message
+    static expected<BSplineCollocation1D, std::string> create(std::vector<double> grid) {
+        try {
+            // Validate grid size
+            if (grid.size() < 4) {
+                return unexpected(std::string("Grid must have ≥4 points for cubic B-splines, got ") +
+                               std::to_string(grid.size()) + " points");
+            }
+
+            // Validate grid is sorted
+            if (!std::is_sorted(grid.begin(), grid.end())) {
+                return unexpected(std::string("Grid must be sorted in ascending order"));
+            }
+
+            // Check for duplicate or near-duplicate points
+            // Accept very tightly clustered grids but block true duplicates.
+            constexpr double MIN_SPACING = 1e-14;
+            for (size_t i = 1; i < grid.size(); ++i) {
+                double spacing = grid[i] - grid[i-1];
+                if (spacing < MIN_SPACING) {
+                    return unexpected(
+                        std::string("Grid points too close together (spacing < 1e-14). ") +
+                        "Found grid[" + std::to_string(i-1) + "] = " + std::to_string(grid[i-1]) +
+                        " and grid[" + std::to_string(i) + "] = " + std::to_string(grid[i]) +
+                        " with spacing " + std::to_string(spacing)
+                    );
+                }
+            }
+
+            // Check for zero-width grid
+            if (grid.back() - grid.front() < MIN_SPACING) {
+                return unexpected(std::string("Grid has zero width (all points nearly identical)"));
+            }
+
+            // All validations passed - create the solver
+            return BSplineCollocation1D(std::move(grid));
+        } catch (const std::exception& e) {
+            return unexpected(std::string("BSplineCollocation1D creation failed: ") + e.what());
+        }
+    }
+
+private:
+    /// Constructor (private - use factory method)
+    ///
+    /// @param grid Data grid points (validated)
     explicit BSplineCollocation1D(std::vector<double> grid)
         : grid_(std::move(grid))
         , n_(grid_.size())
     {
-        if (n_ < 4) {
-            throw std::invalid_argument("Grid must have ≥4 points for cubic B-splines");
-        }
-        if (!std::is_sorted(grid_.begin(), grid_.end())) {
-            throw std::invalid_argument("Grid must be sorted");
-        }
-
-        // Check for duplicate or near-duplicate points
-        // Accept very tightly clustered grids but block true duplicates.
-        constexpr double MIN_SPACING = 1e-14;
-        for (size_t i = 1; i < n_; ++i) {
-            double spacing = grid_[i] - grid_[i-1];
-            if (spacing < MIN_SPACING) {
-                throw std::invalid_argument(
-                    "Grid points too close together (spacing < 1e-12). "
-                    "Found grid[" + std::to_string(i-1) + "] = " + std::to_string(grid_[i-1]) +
-                    " and grid[" + std::to_string(i) + "] = " + std::to_string(grid_[i]) +
-                    " with spacing " + std::to_string(spacing)
-                );
-            }
-        }
-
-        // Check for zero-width grid
-        if (grid_.back() - grid_.front() < MIN_SPACING) {
-            throw std::invalid_argument("Grid has zero width (all points nearly identical)");
-        }
-
         // Build knot vector (clamped cubic)
         knots_ = clamped_knots_cubic(grid_);
 
@@ -98,6 +117,8 @@ public:
         band_values_.resize(n_ * 4, 0.0);
         band_col_start_.resize(n_, 0);
     }
+
+public:
 
     /// Fit B-spline coefficients via collocation
     ///

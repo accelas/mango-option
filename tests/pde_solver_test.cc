@@ -30,7 +30,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     const double pi = std::numbers::pi;
 
     // Create grid
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 51).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 51).value().generate();
 
     // Time domain
     mango::TimeDomain time(0.0, 0.1, 0.001);  // 100 time steps
@@ -85,7 +85,7 @@ TEST(PDESolverTest, NewtonConvergence) {
     const double pi = std::numbers::pi;
 
     // Create grid
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
 
     // Time domain
     mango::TimeDomain time(0.0, 0.1, 0.01);  // 10 steps
@@ -134,7 +134,7 @@ TEST(PDESolverTest, NewtonConvergence) {
 TEST(PDESolverTest, UsesNewtonSolverForStages) {
     // Setup PDE solver with Newton integration
     const size_t n = 101;
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
 
     mango::TimeDomain time{0.0, 0.1, 0.01};
     mango::TRBDF2Config trbdf2_config;
@@ -171,7 +171,7 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
 TEST(PDESolverTest, NewtonConvergenceReported) {
     // Test that Newton convergence failures propagate
     const size_t n = 51;
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
 
     mango::TimeDomain time{0.0, 1.0, 0.5};  // Large dt
     mango::TRBDF2Config trbdf2_config;
@@ -202,7 +202,7 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
 
 TEST(PDESolverTest, SnapshotRegistration) {
     mango::LaplacianOperator op(0.1);
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 11).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 11).value().generate();
     mango::TimeDomain time(0.0, 1.0, 0.1);  // 10 steps
     mango::RootFindingConfig root_config;
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -224,7 +224,7 @@ TEST(PDESolverTest, SnapshotRegistration) {
 TEST(PDESolverTest, SnapshotCollection) {
     // Heat equation
     mango::LaplacianOperator op(0.1);
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 21).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 21).value().generate();
     mango::TimeDomain time(0.0, 1.0, 0.25);  // 4 steps: 0.25, 0.5, 0.75, 1.0
     mango::RootFindingConfig root_config;
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -271,7 +271,7 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     const double pi = std::numbers::pi;
 
     // Create grid
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 51).generate();
+    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 51).value().generate();
     auto grid_view = mango::GridView<double>(grid.span());
 
     // Create new spatial operator using factory

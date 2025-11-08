@@ -5,6 +5,7 @@
 #include <memory>
 #include <cmath>
 #include <stdexcept>
+#include "src/expected.hpp"
 
 namespace mango {
 
@@ -34,38 +35,38 @@ public:
     };
 
     // Factory methods for common grid types
-    static GridSpec uniform(T x_min, T x_max, size_t n_points) {
+    static expected<GridSpec, std::string> uniform(T x_min, T x_max, size_t n_points) {
         if (n_points < 2) {
-            throw std::invalid_argument("Grid must have at least 2 points");
+            return unexpected<std::string>("Grid must have at least 2 points");
         }
         if (x_min >= x_max) {
-            throw std::invalid_argument("x_min must be less than x_max");
+            return unexpected<std::string>("x_min must be less than x_max");
         }
         return GridSpec(Type::Uniform, x_min, x_max, n_points);
     }
 
-    static GridSpec log_spaced(T x_min, T x_max, size_t n_points) {
+    static expected<GridSpec, std::string> log_spaced(T x_min, T x_max, size_t n_points) {
         if (n_points < 2) {
-            throw std::invalid_argument("Grid must have at least 2 points");
+            return unexpected<std::string>("Grid must have at least 2 points");
         }
         if (x_min <= 0 || x_max <= 0) {
-            throw std::invalid_argument("Log-spaced grid requires positive bounds");
+            return unexpected<std::string>("Log-spaced grid requires positive bounds");
         }
         if (x_min >= x_max) {
-            throw std::invalid_argument("x_min must be less than x_max");
+            return unexpected<std::string>("x_min must be less than x_max");
         }
         return GridSpec(Type::LogSpaced, x_min, x_max, n_points);
     }
 
-    static GridSpec sinh_spaced(T x_min, T x_max, size_t n_points, T concentration = T(1.0)) {
+    static expected<GridSpec, std::string> sinh_spaced(T x_min, T x_max, size_t n_points, T concentration = T(1.0)) {
         if (n_points < 2) {
-            throw std::invalid_argument("Grid must have at least 2 points");
+            return unexpected<std::string>("Grid must have at least 2 points");
         }
         if (x_min >= x_max) {
-            throw std::invalid_argument("x_min must be less than x_max");
+            return unexpected<std::string>("x_min must be less than x_max");
         }
         if (concentration <= 0) {
-            throw std::invalid_argument("Concentration parameter must be positive");
+            return unexpected<std::string>("Concentration parameter must be positive");
         }
         return GridSpec(Type::SinhSpaced, x_min, x_max, n_points, concentration);
     }

@@ -2,6 +2,8 @@
 
 #include <string>
 #include <cstddef>
+#include <variant>
+#include <optional>
 #include "3rd/tl/expected.hpp"
 
 namespace mango {
@@ -20,6 +22,7 @@ enum class SolverErrorCode {
     Stage2ConvergenceFailure,
     LinearSolveFailure,
     InvalidConfiguration,
+    InvalidState,  // Added for state validation errors
     Unknown
 };
 

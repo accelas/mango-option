@@ -1,6 +1,7 @@
 #pragma once
 
 #include "grid.hpp"
+#include "expected.hpp"
 #include <unordered_map>
 #include <stdexcept>
 #include <numeric>
@@ -32,13 +33,13 @@ public:
     ///
     /// @param axis Axis identifier (e.g., GridAxis::Moneyness)
     /// @param spec Grid specification for this axis
-    ///
-    /// Throws std::runtime_error if axis already exists.
-    void add_axis(GridAxis axis, const GridSpec<>& spec) {
+    /// @return Success indicator or error message
+    expected<void, std::string> add_axis(GridAxis axis, const GridSpec<>& spec) {
         if (buffers_.contains(axis)) {
-            throw std::runtime_error("Axis already exists in MultiGridBuffer");
+            return unexpected("Axis already exists in MultiGridBuffer");
         }
         buffers_.emplace(axis, spec.generate());
+        return {};
     }
 
     /// Check if an axis exists
@@ -49,11 +50,13 @@ public:
     /// Get size of a specific axis
     ///
     /// @param axis Axis identifier
-    /// @return Number of points along this axis
-    ///
-    /// Throws std::out_of_range if axis does not exist.
-    size_t axis_size(GridAxis axis) const {
-        return buffers_.at(axis).size();
+    /// @return Number of points along this axis or error message
+    expected<size_t, std::string> axis_size(GridAxis axis) const {
+        auto it = buffers_.find(axis);
+        if (it == buffers_.end()) {
+            return unexpected("Axis not found in MultiGridBuffer");
+        }
+        return it->second.size();
     }
 
     /// Get total number of grid points (product of all axis sizes)
@@ -71,11 +74,13 @@ public:
     /// Get view of axis data
     ///
     /// @param axis Axis identifier
-    /// @return Span view of grid points for this axis
-    ///
-    /// Throws std::out_of_range if axis does not exist.
-    std::span<const double> axis_view(GridAxis axis) const {
-        return buffers_.at(axis).span();
+    /// @return Span view of grid points for this axis or error message
+    expected<std::span<const double>, std::string> axis_view(GridAxis axis) const {
+        auto it = buffers_.find(axis);
+        if (it == buffers_.end()) {
+            return unexpected("Axis not found in MultiGridBuffer");
+        }
+        return it->second.span();
     }
 
     /// Get number of axes

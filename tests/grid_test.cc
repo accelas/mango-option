@@ -2,8 +2,9 @@
 #include <gtest/gtest.h>
 
 TEST(GridSpecTest, UniformGridGeneration) {
-    auto spec = mango::GridSpec<>::uniform(0.0, 1.0, 11);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
 
     EXPECT_EQ(grid.size(), 11);
     EXPECT_DOUBLE_EQ(grid[0], 0.0);
@@ -12,8 +13,9 @@ TEST(GridSpecTest, UniformGridGeneration) {
 }
 
 TEST(GridSpecTest, UniformGridSpacing) {
-    auto spec = mango::GridSpec<>::uniform(0.0, 10.0, 6);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::uniform(0.0, 10.0, 6);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
 
     // Points should be: 0, 2, 4, 6, 8, 10
     for (size_t i = 0; i < 6; ++i) {
@@ -22,8 +24,9 @@ TEST(GridSpecTest, UniformGridSpacing) {
 }
 
 TEST(GridSpecTest, LogSpacedGridGeneration) {
-    auto spec = mango::GridSpec<>::log_spaced(1.0, 100.0, 5);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::log_spaced(1.0, 100.0, 5);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
 
     EXPECT_EQ(grid.size(), 5);
     EXPECT_DOUBLE_EQ(grid[0], 1.0);
@@ -33,8 +36,9 @@ TEST(GridSpecTest, LogSpacedGridGeneration) {
 }
 
 TEST(GridSpecTest, SinhSpacedGridGeneration) {
-    auto spec = mango::GridSpec<>::sinh_spaced(0.0, 1.0, 11, 2.0);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::sinh_spaced(0.0, 1.0, 11, 2.0);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
 
     EXPECT_EQ(grid.size(), 11);
     EXPECT_DOUBLE_EQ(grid[0], 0.0);
@@ -43,8 +47,9 @@ TEST(GridSpecTest, SinhSpacedGridGeneration) {
 }
 
 TEST(GridViewTest, ViewFromBuffer) {
-    auto spec = mango::GridSpec<>::uniform(0.0, 10.0, 6);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::uniform(0.0, 10.0, 6);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
     auto view = grid.view();
 
     EXPECT_EQ(view.size(), 6);
@@ -53,8 +58,9 @@ TEST(GridViewTest, ViewFromBuffer) {
 }
 
 TEST(GridViewTest, ViewIsCheapToCopy) {
-    auto spec = mango::GridSpec<>::uniform(0.0, 1.0, 11);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
     auto view1 = grid.view();
     auto view2 = view1;  // Copy view (cheap)
 
@@ -71,8 +77,9 @@ TEST(GridViewTest, ViewFromSpan) {
 }
 
 TEST(GridViewTest, GridBoundaryAccessors) {
-    auto spec = mango::GridSpec<>::uniform(0.0, 10.0, 6);
-    auto grid = spec.generate();
+    auto result = mango::GridSpec<>::uniform(0.0, 10.0, 6);
+    ASSERT_TRUE(result.has_value());
+    auto grid = result.value().generate();
     auto view = grid.view();
 
     EXPECT_DOUBLE_EQ(view.x_min(), 0.0);
@@ -80,12 +87,14 @@ TEST(GridViewTest, GridBoundaryAccessors) {
 }
 
 TEST(GridViewTest, UniformGridDetection) {
-    auto uniform_spec = mango::GridSpec<>::uniform(0.0, 1.0, 11);
-    auto uniform_grid = uniform_spec.generate();
+    auto uniform_result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    ASSERT_TRUE(uniform_result.has_value());
+    auto uniform_grid = uniform_result.value().generate();
     EXPECT_TRUE(uniform_grid.view().is_uniform());
 
-    auto log_spec = mango::GridSpec<>::log_spaced(1.0, 100.0, 11);
-    auto log_grid = log_spec.generate();
+    auto log_result = mango::GridSpec<>::log_spaced(1.0, 100.0, 11);
+    ASSERT_TRUE(log_result.has_value());
+    auto log_grid = log_result.value().generate();
     EXPECT_FALSE(log_grid.view().is_uniform());
 }
 
