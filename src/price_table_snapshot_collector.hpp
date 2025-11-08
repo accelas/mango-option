@@ -8,7 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
-#include <cassert>
+#include <stdexcept>
 
 namespace mango {
 
@@ -24,6 +24,21 @@ struct PriceTableSnapshotCollectorConfig {
 ///
 /// PERFORMANCE: Builds interpolators ONCE per snapshot (not O(n²))
 /// CORRECTNESS: PDE provides ∂²V/∂S² directly - no transformation needed!
+///
+/// OPTIMIZATION: Caches spatial grid and reuses interpolators when grid unchanged.
+/// For a (σ,r) slice with N maturities sharing the same spatial grid:
+///   - 1 full build (first snapshot) + (N-1) fast rebuilds (remaining snapshots)
+///   - Typical speedup: 2-3x for precomputation workloads
+///
+/// THREAD-SAFETY: NOT thread-safe. Each collector instance must be used
+/// by a single thread only. For parallel precomputation, each thread should
+/// create its own collector instance. The cached state (interpolators, grid)
+/// is not protected by synchronization.
+///
+/// INVARIANTS:
+///   - After first collect(): interpolators_built_ == true
+///   - cached_grid_ contains the spatial grid from the most recent snapshot
+///   - value_interp_ and lu_interp_ are valid and ready for evaluation
 class PriceTableSnapshotCollector : public SnapshotCollector {
 public:
     explicit PriceTableSnapshotCollector(const PriceTableSnapshotCollectorConfig& config)
@@ -68,11 +83,20 @@ public:
         if (grid_changed || !interpolators_built_) {
             // Grid changed or first snapshot: build interpolators from scratch
             auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
-            auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
+            if (V_error.has_value()) {
+                throw std::runtime_error(
+                    std::string("Failed to build value interpolator: ") +
+                    std::string(V_error.value())
+                );
+            }
 
-            // Assert on failure - indicates programming error in PDE solver
-            assert(!V_error.has_value() && "Failed to build value interpolator");
-            assert(!Lu_error.has_value() && "Failed to build spatial operator interpolator");
+            auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
+            if (Lu_error.has_value()) {
+                throw std::runtime_error(
+                    std::string("Failed to build spatial operator interpolator: ") +
+                    std::string(Lu_error.value())
+                );
+            }
 
             // Cache the grid
             cached_grid_.assign(snapshot.spatial_grid.begin(), snapshot.spatial_grid.end());
@@ -80,11 +104,20 @@ public:
         } else {
             // Grid same as before: fast rebuild with new data
             auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
-            auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
+            if (V_error.has_value()) {
+                throw std::runtime_error(
+                    std::string("Failed to rebuild value interpolator: ") +
+                    std::string(V_error.value())
+                );
+            }
 
-            // Assert on failure - indicates programming error
-            assert(!V_error.has_value() && "Failed to rebuild value interpolator");
-            assert(!Lu_error.has_value() && "Failed to rebuild spatial operator interpolator");
+            auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
+            if (Lu_error.has_value()) {
+                throw std::runtime_error(
+                    std::string("Failed to rebuild spatial operator interpolator: ") +
+                    std::string(Lu_error.value())
+                );
+            }
         }
 
         // Fill price table for all moneyness points

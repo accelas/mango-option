@@ -38,6 +38,11 @@ public:
         // This prevents state corruption if build fails
         built_ = false;
 
+        // CRITICAL: Invalidate derived spline cache when grid changes
+        // The derived spline caches interval widths (h_) from the grid,
+        // so it must be rebuilt from scratch when x_ changes
+        invalidate_derived_spline();
+
         // Build cubic spline first (validates input)
         auto error = spline_.build(x, y);
         if (error.has_value()) {
@@ -143,6 +148,16 @@ public:
     }
 
 private:
+    /// Invalidate derived spline cache
+    ///
+    /// CRITICAL: Must be called whenever the grid (x_) changes.
+    /// The derived spline caches interval widths from x_, so a grid
+    /// change makes its cached state invalid.
+    void invalidate_derived_spline() noexcept {
+        derived_spline_built_ = false;
+        derived_data_.clear();
+    }
+
     /// Linear interpolation fallback
     [[nodiscard]] double eval_from_data_linear(double x_eval, std::span<const double> data) const noexcept {
         // Find bracketing interval using binary search

@@ -5,6 +5,7 @@
 
 #include "src/thomas_solver.hpp"
 #include "src/cubic_spline_solver.hpp"
+#include "src/snapshot_interpolator.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
@@ -371,4 +372,166 @@ TEST(CubicSplineTest, LargeDataset) {
 
         EXPECT_NEAR(y_interp, y_exact, 1e-6);
     }
+}
+
+TEST(CubicSplineTest, NonUniformGrid) {
+    // Test with non-uniform grid spacing
+    std::vector<double> x = {0.0, 0.1, 0.5, 1.0, 2.0, 5.0};
+    std::vector<double> y(x.size());
+
+    for (size_t i = 0; i < x.size(); ++i) {
+        y[i] = std::exp(-x[i]);  // Exponential decay
+    }
+
+    CubicSpline<double> spline;
+    auto error = spline.build(std::span{x}, std::span{y});
+    ASSERT_FALSE(error.has_value());
+
+    // Rebuild with different data
+    for (size_t i = 0; i < y.size(); ++i) {
+        y[i] = 1.0 / (1.0 + x[i]);  // Different function
+    }
+
+    error = spline.rebuild_same_grid(std::span{y});
+    ASSERT_FALSE(error.has_value());
+
+    // Verify new function is interpolated
+    double val = spline.eval(0.75);
+    double expected = 1.0 / (1.0 + 0.75);
+    EXPECT_NEAR(val, expected, 0.1);  // Natural splines have some error
+}
+
+TEST(CubicSplineTest, RepeatedRebuilds) {
+    // Test that repeated rebuilds don't degrade
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0, 4.0};
+    std::vector<double> y = {0.0, 1.0, 4.0, 9.0, 16.0};
+
+    CubicSpline<double> spline;
+    auto error = spline.build(std::span{x}, std::span{y});
+    ASSERT_FALSE(error.has_value());
+
+    // Rebuild 100 times with different data
+    for (int i = 0; i < 100; ++i) {
+        for (size_t j = 0; j < y.size(); ++j) {
+            y[j] = static_cast<double>(i + j);
+        }
+        error = spline.rebuild_same_grid(std::span{y});
+        ASSERT_FALSE(error.has_value()) << "Rebuild " << i << " failed";
+    }
+
+    // Verify final rebuild produces correct values
+    EXPECT_NEAR(spline.eval(0.0), y[0], 1e-10);
+}
+
+// ========== Snapshot Interpolator Tests ==========
+
+TEST(SnapshotInterpolatorTest, DerivedSplineInvalidatedOnGridChange) {
+    // CRITICAL TEST: Derived spline must be invalidated when grid changes
+    SnapshotInterpolator interp;
+
+    // Build with first grid
+    std::vector<double> x1 = {0.0, 1.0, 2.0, 3.0, 4.0};
+    std::vector<double> y1 = {0.0, 1.0, 4.0, 9.0, 16.0};  // y = x²
+    std::vector<double> deriv1 = {0.0, 2.0, 4.0, 6.0, 8.0};  // dy/dx = 2x
+
+    auto error = interp.build(std::span{x1}, std::span{y1});
+    ASSERT_FALSE(error.has_value());
+
+    // Evaluate derivative (this caches derived spline)
+    double d1 = interp.eval_from_data(1.5, std::span{deriv1});
+    EXPECT_NEAR(d1, 3.0, 0.2);  // Should be ~3.0 for linear derivative
+
+    // Change grid (same size but different values)
+    std::vector<double> x2 = {0.0, 0.5, 1.0, 1.5, 2.0};  // Different spacing!
+    std::vector<double> y2 = {0.0, 0.5, 1.0, 1.5, 2.0};  // y = x (linear)
+    std::vector<double> deriv2 = {1.0, 1.0, 1.0, 1.0, 1.0};  // dy/dx = 1 (constant)
+
+    error = interp.build(std::span{x2}, std::span{y2});
+    ASSERT_FALSE(error.has_value());
+
+    // Evaluate derivative on new grid
+    // If derived spline was NOT invalidated, this would use old grid structure
+    // and produce wrong results
+    double d2 = interp.eval_from_data(0.75, std::span{deriv2});
+    EXPECT_NEAR(d2, 1.0, 0.2);  // Should be ~1.0 for constant derivative
+
+    // Value interpolation should also work correctly
+    double v2 = interp.eval(0.75);
+    EXPECT_NEAR(v2, 0.75, 0.1);  // Linear function
+}
+
+TEST(SnapshotInterpolatorTest, RebuildSameGridPreservesDerivedCache) {
+    // Test that rebuild_same_grid correctly updates derived spline
+    SnapshotInterpolator interp;
+
+    std::vector<double> x = {0.0, 1.0, 2.0, 3.0, 4.0};
+    std::vector<double> y1 = {0.0, 1.0, 4.0, 9.0, 16.0};
+    std::vector<double> deriv1 = {0.0, 2.0, 4.0, 6.0, 8.0};
+
+    auto error = interp.build(std::span{x}, std::span{y1});
+    ASSERT_FALSE(error.has_value());
+
+    // Evaluate derivative (caches derived spline)
+    double d1 = interp.eval_from_data(1.5, std::span{deriv1});
+    EXPECT_GT(std::abs(d1), 0.0);
+
+    // Rebuild with same grid but different y-values
+    std::vector<double> y2 = {0.0, 2.0, 4.0, 6.0, 8.0};  // y = 2x
+    std::vector<double> deriv2 = {2.0, 2.0, 2.0, 2.0, 2.0};  // dy/dx = 2
+
+    error = interp.rebuild_same_grid(std::span{y2});
+    ASSERT_FALSE(error.has_value());
+
+    // Evaluate derivative (should use cached grid structure)
+    double d2 = interp.eval_from_data(1.5, std::span{deriv2});
+    EXPECT_NEAR(d2, 2.0, 0.2);
+}
+
+TEST(SnapshotInterpolatorTest, ErrorHandlingChain) {
+    SnapshotInterpolator interp;
+    std::vector<double> y = {1.0, 2.0, 3.0};
+
+    // rebuild_same_grid before build should fail
+    auto error = interp.rebuild_same_grid(std::span{y});
+    EXPECT_TRUE(error.has_value());
+    EXPECT_NE(error.value().find("Must call build()"), std::string_view::npos);
+
+    // Build successfully
+    std::vector<double> x = {0.0, 1.0, 2.0};
+    error = interp.build(std::span{x}, std::span{y});
+    ASSERT_FALSE(error.has_value());
+
+    // rebuild_same_grid with wrong size should fail and invalidate interpolator
+    std::vector<double> y_wrong = {1.0, 2.0};
+    error = interp.rebuild_same_grid(std::span{y_wrong});
+    EXPECT_TRUE(error.has_value());
+    EXPECT_FALSE(interp.is_built());  // Interpolator should be invalidated
+
+    // After error, must rebuild from scratch (not just rebuild_same_grid)
+    std::vector<double> y_correct = {4.0, 5.0, 6.0};
+    error = interp.build(std::span{x}, std::span{y_correct});
+    EXPECT_FALSE(error.has_value());
+    EXPECT_TRUE(interp.is_built());
+}
+
+TEST(SnapshotInterpolatorTest, DerivedSplineFallbackOnError) {
+    // Test that derived spline falls back to linear on build error
+    SnapshotInterpolator interp;
+
+    // Build with valid data
+    std::vector<double> x = {0.0, 1.0, 2.0};
+    std::vector<double> y = {0.0, 1.0, 4.0};
+
+    auto error = interp.build(std::span{x}, std::span{y});
+    ASSERT_FALSE(error.has_value());
+
+    // eval_from_data with empty data should fallback to linear (return 0)
+    std::vector<double> empty_data;
+    double result = interp.eval_from_data(0.5, std::span{empty_data});
+    EXPECT_EQ(result, 0.0);
+
+    // eval_from_data with valid data should work
+    std::vector<double> valid_data = {1.0, 2.0, 3.0};
+    result = interp.eval_from_data(0.5, std::span{valid_data});
+    EXPECT_GT(std::abs(result), 0.0);
 }
