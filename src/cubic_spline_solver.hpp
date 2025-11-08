@@ -102,15 +102,18 @@ public:
         d_.resize(n_intervals);
 
         // Compute interval widths (h[i] = x[i+1] - x[i])
-        std::vector<T> h(n_intervals);
+        h_.resize(n_intervals);
         for (size_t i = 0; i < n_intervals; ++i) {
-            h[i] = x[i+1] - x[i];
+            h_[i] = x[i+1] - x[i];
         }
+
+        // Store config for rebuild_same_grid
+        config_ = config;
 
         // Build tridiagonal system for second derivatives
         // Natural boundary: c[0] = c[n-1] = 0
         if (config.boundary_type == SplineBoundary::NATURAL) {
-            if (!build_natural_spline(h, config.thomas_config)) {
+            if (!build_natural_spline(h_, config.thomas_config)) {
                 return "Thomas solver failed (singular matrix)";
             }
         } else {
@@ -118,7 +121,44 @@ public:
         }
 
         // Compute cubic coefficients from second derivatives
-        compute_coefficients(h);
+        compute_coefficients(h_);
+
+        return std::nullopt;  // Success
+    }
+
+    /// Rebuild spline with new y-values on the same x-grid
+    ///
+    /// PERFORMANCE: Reuses cached interval widths and grid structure.
+    /// Much faster than build() when only y-values change.
+    ///
+    /// @param y New Y-coordinates (must match existing grid size)
+    /// @return Optional error message (nullopt on success)
+    ///
+    /// @pre build() must have been called successfully at least once
+    [[nodiscard]] std::optional<std::string_view> rebuild_same_grid(
+        std::span<const T> y)
+    {
+        if (x_.empty()) {
+            return "Must call build() before rebuild_same_grid()";
+        }
+        if (y.size() != y_.size()) {
+            return "Y size must match existing grid";
+        }
+
+        // Update y-values
+        y_.assign(y.begin(), y.end());
+
+        // Rebuild spline using cached interval widths
+        if (config_.boundary_type == SplineBoundary::NATURAL) {
+            if (!build_natural_spline(h_, config_.thomas_config)) {
+                return "Thomas solver failed (singular matrix)";
+            }
+        } else {
+            return "Only NATURAL boundary conditions implemented";
+        }
+
+        // Compute cubic coefficients from second derivatives
+        compute_coefficients(h_);
 
         return std::nullopt;  // Success
     }
@@ -192,6 +232,10 @@ private:
     std::vector<T> b_;  ///< Linear terms (n-1)
     std::vector<T> c_;  ///< Quadratic terms (n)
     std::vector<T> d_;  ///< Cubic terms (n-1)
+
+    // Cached data for rebuild_same_grid
+    std::vector<T> h_;  ///< Cached interval widths (n-1)
+    CubicSplineConfig<T> config_;  ///< Cached spline configuration
 
     /// Build natural cubic spline (second derivative boundary conditions)
     bool build_natural_spline(
