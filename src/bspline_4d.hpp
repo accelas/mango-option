@@ -159,23 +159,21 @@ public:
                     const std::size_t base =
                         (((std::size_t)im_idx * Nt_ + jt_idx) * Nv_ + kv_idx) * Nr_;
 
-                    // FMA accumulation for innermost dimension
-                    // sum += coeff[...] * wtabc * wr[d]
+                    // Compute valid range for rate dimension (d ∈ [0,3])
+                    // We access coefficient at index (lr - d), which must satisfy 0 <= lr - d < Nr_
+                    // This gives: max(0, lr - Nr_ + 1) <= d <= min(3, lr)
+                    const int d_min = std::max(0, lr - (Nr_ - 1));
+                    const int d_max = std::min(3, lr);
 
-                    if (int lr0 = lr - 0; static_cast<unsigned>(lr0) < static_cast<unsigned>(Nr_)) {
-                        sum = std::fma(c_[base + lr0], wtabc * wr[0], sum);
-                    }
+                    // Get pointer to coefficient block for efficient streaming
+                    const double* coeff_block = c_.data() + base;
 
-                    if (int lr1 = lr - 1; static_cast<unsigned>(lr1) < static_cast<unsigned>(Nr_)) {
-                        sum = std::fma(c_[base + lr1], wtabc * wr[1], sum);
-                    }
-
-                    if (int lr2 = lr - 2; static_cast<unsigned>(lr2) < static_cast<unsigned>(Nr_)) {
-                        sum = std::fma(c_[base + lr2], wtabc * wr[2], sum);
-                    }
-
-                    if (int lr3 = lr - 3; static_cast<unsigned>(lr3) < static_cast<unsigned>(Nr_)) {
-                        sum = std::fma(c_[base + lr3], wtabc * wr[3], sum);
+                    // Stream coefficients with no per-iteration branches
+                    // This replaces 4 separate if blocks with a tight loop,
+                    // improving ILP and enabling CPU prefetching
+                    for (int d = d_min; d <= d_max; ++d) {
+                        const int lr_idx = lr - d;
+                        sum = std::fma(coeff_block[lr_idx], wtabc * wr[d], sum);
                     }
                 }
             }
