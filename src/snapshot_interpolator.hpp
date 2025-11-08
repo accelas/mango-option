@@ -102,9 +102,10 @@ public:
     ///
     /// Uses cubic spline interpolation for smoothness.
     ///
-    /// PERFORMANCE: Uses pointer-based caching to avoid thrashing when
+    /// PERFORMANCE: Uses hybrid pointer+content caching to avoid thrashing when
     /// alternating between different arrays (e.g., first and second derivatives).
-    /// Maintains a small LRU cache of derived splines keyed by data pointer.
+    /// Maintains a 2-slot LRU cache. Pointers are used as a fast cache key,
+    /// but contents are compared when pointers match to detect reused buffers.
     ///
     /// @param x_eval Evaluation point
     /// @param data Pre-computed values at grid points (same grid as build())
@@ -114,22 +115,32 @@ public:
             return 0.0;
         }
 
-        // PERFORMANCE: Use pointer-based cache to handle alternating arrays
-        // (e.g., first_derivative vs second_derivative in the same loop)
+        // PERFORMANCE: Hybrid cache using pointer + content comparison
+        // Handles both alternating arrays AND reused buffers with changed values
         const double* data_ptr = data.data();
 
-        // Check cache slots (we cache 2 most recently used splines)
+        // Check cache[0]: pointer match + content comparison
         if (cache_[0].data_ptr == data_ptr && cache_[0].built) {
-            // Cache hit in slot 0
-            return cache_[0].spline.eval(x_eval);
-        }
-        if (cache_[1].data_ptr == data_ptr && cache_[1].built) {
-            // Cache hit in slot 1, promote to slot 0 (LRU)
-            std::swap(cache_[0], cache_[1]);
-            return cache_[0].spline.eval(x_eval);
+            // Pointer matches: check if contents also match (handles buffer reuse)
+            if (std::equal(cache_[0].data.begin(), cache_[0].data.end(), data.begin())) {
+                // Cache hit: same pointer, same contents
+                return cache_[0].spline.eval(x_eval);
+            }
+            // Pointer matches but contents changed: treat as miss, rebuild this slot
         }
 
-        // Cache miss: evict LRU (slot 1) and build in slot 0
+        // Check cache[1]: pointer match + content comparison
+        if (cache_[1].data_ptr == data_ptr && cache_[1].built) {
+            if (std::equal(cache_[1].data.begin(), cache_[1].data.end(), data.begin())) {
+                // Cache hit in slot 1: promote to slot 0 (LRU)
+                std::swap(cache_[0], cache_[1]);
+                return cache_[0].spline.eval(x_eval);
+            }
+            // Pointer matches but contents changed: treat as miss
+        }
+
+        // Cache miss (or contents changed): rebuild
+        // Evict LRU (slot 1) and build in slot 0
         cache_[1] = std::move(cache_[0]);  // Demote slot 0 to slot 1
 
         auto error = cache_[0].spline.build(std::span{x_}, data);
@@ -137,11 +148,13 @@ public:
             // Fallback to linear interpolation on error
             cache_[0].built = false;
             cache_[0].data_ptr = nullptr;
+            cache_[0].data.clear();
             return eval_from_data_linear(x_eval, data);
         }
 
         cache_[0].built = true;
         cache_[0].data_ptr = data_ptr;
+        cache_[0].data.assign(data.begin(), data.end());  // Store copy for comparison
         return cache_[0].spline.eval(x_eval);
     }
 
@@ -159,7 +172,8 @@ private:
     /// Cache entry for derived splines
     struct DerivedSplineCache {
         CubicSpline<double> spline;
-        const double* data_ptr = nullptr;  ///< Pointer identity for cache key
+        const double* data_ptr = nullptr;     ///< Pointer for fast lookup
+        std::vector<double> data;             ///< Copy of data for content comparison
         bool built = false;
     };
 
