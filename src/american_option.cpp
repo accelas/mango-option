@@ -4,6 +4,7 @@
  */
 
 #include "src/american_option.hpp"
+#include "src/slice_solver_workspace.hpp"
 #include "src/boundary_conditions.hpp"
 #include "src/grid.hpp"
 #include "src/time_domain.hpp"
@@ -141,15 +142,23 @@ AmericanOptionSolver::AmericanOptionSolver(
     , root_config_(root_config)
     , workspace_(std::move(workspace))
 {
+    // Validate parameters
     params_.validate();
     grid_.validate();
+
+    // Validate workspace is not null
     if (!workspace_) {
-        throw std::invalid_argument("SliceSolverWorkspace cannot be null");
+        throw std::invalid_argument("Workspace cannot be null");
     }
-    if (workspace_->n_space() != grid_.n_space ||
-        std::abs(workspace_->x_min() - grid_.x_min) > 1e-12 ||
-        std::abs(workspace_->x_max() - grid_.x_max) > 1e-12) {
-        throw std::invalid_argument("Workspace grid does not match solver grid configuration");
+
+    // Validate grid matches workspace
+    if (grid_.x_min != workspace_->x_min() || grid_.x_max != workspace_->x_max() ||
+        grid_.n_space != workspace_->n_space()) {
+        throw std::invalid_argument(
+            "Grid parameters must match workspace "
+            "(x_min=" + std::to_string(workspace_->x_min()) +
+            ", x_max=" + std::to_string(workspace_->x_max()) +
+            ", n_space=" + std::to_string(workspace_->n_space()) + ")");
     }
 }
 

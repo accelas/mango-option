@@ -146,6 +146,12 @@ PriceTable4DResult PriceTable4DBuilder::precompute(
         }
     }
 
+    // Create shared workspace (reused across all solvers)
+    // This eliminates redundant grid generation and GridSpacing allocation
+    // Use shared_ptr to ensure proper lifetime management
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid_config.x_min, grid_config.x_max, grid_config.n_space);
+
     // Loop over (σ, r) pairs only - this is the separable batch approach
     size_t failed_count = 0;
     const bool enable_parallel = (Nv * Nr > 4);

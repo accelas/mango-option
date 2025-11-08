@@ -741,6 +741,82 @@ pde_free_grid(&grid);
 double u_at_x = pde_solver_interpolate(solver, 0.123);
 ```
 
+## Slice Solver Workspace (Reusable PDE Solving)
+
+When building price tables or solving many PDEs that differ only in coefficients (volatility, interest rate, dividend yield), you can avoid redundant allocations by using a **SliceSolverWorkspace**.
+
+### Performance Benefits
+
+The workspace eliminates per-solver allocations:
+- **Grid buffer**: ~800 bytes per reuse
+- **GridSpacing**: ~800 bytes per reuse
+- **Total savings**: ~1.6 KB per solver instance
+
+For typical 4D price tables (200 solvers): **~320 KB saved**
+
+### Usage Pattern
+
+```cpp
+#include "src/slice_solver_workspace.hpp"
+#include "src/american_option.hpp"
+
+// Create workspace once (reused across all solvers)
+// Use shared_ptr for proper lifetime management
+auto workspace = std::make_shared<SliceSolverWorkspace>(-3.0, 3.0, 101);
+
+// Solve multiple options with different (σ, r, q) parameters
+for (auto [sigma, rate] : parameter_grid) {
+    AmericanOptionParams params{
+        .strike = 100.0,
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = sigma,
+        .rate = rate,
+        .continuous_dividend_yield = 0.02,
+        .option_type = OptionType::PUT
+    };
+
+    AmericanOptionGrid grid_config{
+        .n_space = 101,
+        .n_time = 1000,
+        .x_min = -3.0,
+        .x_max = 3.0
+    };
+
+    // Solver keeps workspace alive via shared_ptr
+    AmericanOptionSolver solver(params, grid_config, workspace);
+    auto result = solver.solve();
+}
+```
+
+### Key Points
+
+1. **Lifetime safety**: Uses `std::shared_ptr` to ensure workspace outlives all solvers
+2. **Grid parameters must match**: workspace grid (x_min, x_max, n_space) must match grid_config
+3. **Thread-safe**: workspace is read-only during solve, safe for OpenMP parallel loops
+4. **Backward compatible**: existing code without workspace continues to work
+5. **Identical results**: workspace mode produces exactly the same numerical results as standalone mode
+
+### When to Use
+
+✅ **Use workspace mode when:**
+- Building price tables (many solves with same grid, different coefficients)
+- Parameter sweeps (σ, r, q variations)
+- Batch processing of options
+
+❌ **Use standalone mode when:**
+- Single option pricing
+- Grid parameters vary across solves
+- Prototype/debugging code
+
+### Implementation Details
+
+The workspace pre-allocates:
+- **Grid buffer**: Spatial grid points (uniform spacing in log-moneyness)
+- **GridSpacing**: Precomputed spacing metrics (dx, inverse dx, etc.)
+
+Both are shared via `shared_ptr` across all solver instances using the workspace.
+
 ## Price Table Pre-computation Workflow
 
 The price table module provides fast option pricing through pre-computed lookup tables. This is ideal for applications requiring thousands of pricing queries where computation time dominates.

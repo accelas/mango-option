@@ -102,6 +102,9 @@ struct AmericanOptionResult {
         : value(0.0), delta(0.0), gamma(0.0), theta(0.0), converged(false) {}
 };
 
+// Forward declaration
+class SliceSolverWorkspace;
+
 /**
  * American option pricing solver using finite difference method.
  *
@@ -112,7 +115,7 @@ struct AmericanOptionResult {
 class AmericanOptionSolver {
 public:
     /**
-     * Constructor.
+     * Constructor (standard mode - creates own grid).
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param grid Numerical grid parameters
@@ -125,7 +128,20 @@ public:
                         const RootFindingConfig& root_config = {});
 
     /**
-     * Constructor that reuses a pre-allocated slice workspace (grid + storage).
+     * Constructor (workspace mode - reuses grid, spacing, and storage).
+     *
+     * This constructor enables efficient batch solving by reusing
+     * grid allocations across multiple solver instances. Use when
+     * solving many options with same grid but different coefficients.
+     *
+     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
+     * to ensure proper lifetime management.
+     *
+     * @param params Option pricing parameters (including discrete dividends)
+     * @param grid Numerical grid parameters (must match workspace)
+     * @param workspace Shared workspace with pre-allocated grid (keeps workspace alive)
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration for Newton solver
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
                         const AmericanOptionGrid& grid,
@@ -168,10 +184,13 @@ private:
     TRBDF2Config trbdf2_config_;
     RootFindingConfig root_config_;
 
+    // Workspace (optional - nullptr means standalone mode)
+    // Uses shared_ptr to keep workspace alive for the solver's lifetime
+    std::shared_ptr<SliceSolverWorkspace> workspace_;
+
     // Solution state
     std::vector<double> solution_;
     bool solved_ = false;
-    std::shared_ptr<SliceSolverWorkspace> workspace_;
 
     // Snapshot requests
     struct SnapshotRequest {
