@@ -6,6 +6,7 @@
 #include <vector>
 #include <span>
 #include <cstddef>
+#include <memory>
 
 namespace mango {
 
@@ -17,8 +18,8 @@ namespace mango {
 /// Arrays: u_current, u_next, u_stage, rhs, Lu, psi (6n doubles total).
 ///
 /// **64-byte alignment** - Uses PMR with aligned memory resource for AVX-512
-/// SIMD vectorization. The buffer is aligned to 64 bytes for efficient vector
-/// loads/stores. Portable across Windows (MSVC), macOS, and Linux.
+/// SIMD vectorization. Single allocation via monotonic_buffer_resource backed
+/// by aligned allocation. Portable across Windows (MSVC), macOS, and Linux.
 ///
 /// **Pre-computed dx array** - Grid spacing computed once during construction
 /// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
@@ -44,7 +45,9 @@ public:
     /// Memory is 64-byte aligned for AVX-512 SIMD operations.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
         : aligned_resource_(64)  // 64-byte alignment for AVX-512
-        , buffer_(6 * n, &aligned_resource_)
+        , aligned_buffer_(allocate_aligned_buffer(6 * n))
+        , monotonic_resource_(aligned_buffer_.get(), 6 * n * sizeof(double), &aligned_resource_)
+        , buffer_(6 * n, &monotonic_resource_)
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)
     {
@@ -149,10 +152,29 @@ public:
     }
 
 private:
-    AlignedMemoryResource aligned_resource_;  // PMR memory resource for 64-byte alignment
-    std::pmr::vector<double> buffer_;         // PMR vector using aligned resource
-    CacheBlockConfig cache_config_;           // Cache-blocking configuration (CPU-only)
-    std::vector<double> dx_;                  // Pre-computed grid spacing
+    // Custom deleter for aligned buffer
+    struct AlignedDeleter {
+        AlignedMemoryResource* resource;
+
+        void operator()(double* ptr) const {
+            if (ptr && resource) {
+                resource->deallocate(ptr, 0, 64);
+            }
+        }
+    };
+
+    // Allocate aligned buffer using the aligned resource
+    std::unique_ptr<double[], AlignedDeleter> allocate_aligned_buffer(size_t n) {
+        double* ptr = static_cast<double*>(aligned_resource_.allocate(n * sizeof(double), 64));
+        return std::unique_ptr<double[], AlignedDeleter>(ptr, AlignedDeleter{&aligned_resource_});
+    }
+
+    AlignedMemoryResource aligned_resource_;                      // PMR aligned allocator
+    std::unique_ptr<double[], AlignedDeleter> aligned_buffer_;    // Single 64-byte aligned buffer
+    std::pmr::monotonic_buffer_resource monotonic_resource_;      // Fast monotonic allocator
+    std::pmr::vector<double> buffer_;                             // PMR vector using monotonic resource
+    CacheBlockConfig cache_config_;                               // Cache-blocking configuration
+    std::vector<double> dx_;                                      // Pre-computed grid spacing
 
     // Spans into buffer_
     std::span<double> u_current_;
