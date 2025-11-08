@@ -123,6 +123,7 @@ AmericanOptionSolver::AmericanOptionSolver(
     , grid_(grid)
     , trbdf2_config_(trbdf2_config)
     , root_config_(root_config)
+    , workspace_(nullptr)
 {
     // Validate parameters (includes discrete dividend validation)
     params_.validate();
@@ -132,7 +133,7 @@ AmericanOptionSolver::AmericanOptionSolver(
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
     const AmericanOptionGrid& grid,
-    std::shared_ptr<const SliceSolverWorkspace> workspace,
+    std::shared_ptr<SliceSolverWorkspace> workspace,
     const TRBDF2Config& trbdf2_config,
     const RootFindingConfig& root_config)
     : params_(params)
@@ -162,16 +163,18 @@ AmericanOptionSolver::AmericanOptionSolver(
 }
 
 expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // 1. Get grid (from workspace if available, otherwise generate new)
+    // 1. Acquire grid (reuse workspace grid if available)
     std::optional<GridBuffer<double>> owned_grid_buffer;
     std::span<const double> x_grid;
+    std::shared_ptr<operators::GridSpacing<double>> shared_spacing;
+    WorkspaceStorage* external_workspace = nullptr;
 
     if (workspace_) {
-        // Workspace mode: reuse pre-allocated grid
         x_grid = workspace_->grid_span();
+        shared_spacing = workspace_->grid_spacing();
+        external_workspace = workspace_->workspace().get();
     } else {
-        // Standalone mode: generate new grid
-        owned_grid_buffer = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate();
+        owned_grid_buffer.emplace(GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space).generate());
         x_grid = owned_grid_buffer->span();
     }
 
@@ -182,31 +185,18 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     TimeDomain time_domain(0.0, params_.maturity, params_.maturity / grid_.n_time);
 
     // 3. Create Black-Scholes operator in log-moneyness coordinates
-    // Use workspace GridSpacing if available, otherwise create new
-    auto bs_op = [&]() {
-        if (workspace_) {
-            // Workspace mode: reuse pre-allocated GridSpacing
-            return operators::create_spatial_operator(
-                operators::BlackScholesPDE<double>(
-                    params_.volatility,
-                    params_.rate,
-                    params_.continuous_dividend_yield
-                ),
-                workspace_->grid_spacing()
-            );
-        } else {
-            // Standalone mode: create new GridSpacing
-            auto grid_view = GridView<double>(x_grid);
-            return operators::create_spatial_operator(
-                operators::BlackScholesPDE<double>(
-                    params_.volatility,
-                    params_.rate,
-                    params_.continuous_dividend_yield
-                ),
-                grid_view
-            );
+    auto make_operator = [&]() {
+        auto pde = operators::BlackScholesPDE<double>(
+            params_.volatility,
+            params_.rate,
+            params_.continuous_dividend_yield);
+        if (shared_spacing) {
+            return operators::create_spatial_operator(std::move(pde), shared_spacing);
         }
-    }();
+        auto grid_view = GridView<double>(x_grid);
+        return operators::create_spatial_operator(std::move(pde), grid_view);
+    };
+    auto bs_op = make_operator();
 
     // 4. Setup boundary conditions (NORMALIZED by K=1)
     // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
@@ -252,7 +242,8 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                         [](double t, auto x, auto psi) {
                             AmericanPutObstacle obstacle;
                             obstacle(t, x, psi);
-                        });
+                        },
+                        external_workspace);
 
         // 6. Register discrete dividends as temporal events
         // Convert from calendar time (years from now) to solver time (backward time)
@@ -295,7 +286,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
         // 9. Extract solution
         auto solution_view = solver.solution();
-        solution_ = std::vector<double>(solution_view.begin(), solution_view.end());
+        solution_.assign(solution_view.begin(), solution_view.end());
         solved_ = true;
 
         // 10. Interpolate to current spot price and denormalize
@@ -312,7 +303,8 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                         [](double t, auto x, auto psi) {
                             AmericanCallObstacle obstacle;
                             obstacle(t, x, psi);
-                        });
+                        },
+                        external_workspace);
 
         // 6. Register discrete dividends as temporal events
         // Convert from calendar time (years from now) to solver time (backward time)
@@ -354,7 +346,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
         // 9. Extract solution
         auto solution_view = solver.solution();
-        solution_ = std::vector<double>(solution_view.begin(), solution_view.end());
+        solution_.assign(solution_view.begin(), solution_view.end());
         solved_ = true;
 
         // 10. Interpolate to current spot price and denormalize

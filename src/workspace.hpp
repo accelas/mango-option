@@ -4,6 +4,8 @@
 #include <vector>
 #include <span>
 #include <cstddef>
+#include <cstdlib>
+#include <new>
 
 namespace mango {
 
@@ -13,6 +15,9 @@ namespace mango {
 ///
 /// Manages all solver state in a single contiguous buffer for cache efficiency.
 /// Arrays: u_current, u_next, u_stage, rhs, Lu, psi (6n doubles total).
+///
+/// **64-byte alignment** - Backing storage is allocated via std::aligned_alloc
+/// so AVX/AVX-512 kernels can safely use aligned loads/stores.
 ///
 /// **Pre-computed dx array** - Grid spacing computed once during construction
 /// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
@@ -33,8 +38,10 @@ public:
     ///
     /// Allocates 6n doubles (u_current, u_next, u_stage, rhs, Lu, psi)
     /// plus (n-1) doubles for pre-computed dx array.
+    /// Memory is 64-byte aligned for AVX-512 SIMD operations.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
-        : buffer_(6 * n)  // u_current, u_next, u_stage, rhs, Lu, psi
+        : n_(n)
+        , buffer_(allocate_aligned(6 * n))
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)
     {
@@ -44,14 +51,36 @@ public:
             dx_[i] = grid[i + 1] - grid[i];
         }
 
-        // Set up array views as non-overlapping spans
-        size_t offset = 0;
-        u_current_ = std::span{buffer_.data() + offset, n}; offset += n;
-        u_next_    = std::span{buffer_.data() + offset, n}; offset += n;
-        u_stage_   = std::span{buffer_.data() + offset, n}; offset += n;
-        rhs_       = std::span{buffer_.data() + offset, n}; offset += n;
-        lu_        = std::span{buffer_.data() + offset, n}; offset += n;
-        psi_       = std::span{buffer_.data() + offset, n}; offset += n;
+        assign_spans();
+    }
+
+    ~WorkspaceStorage() {
+        std::free(buffer_);
+    }
+
+    WorkspaceStorage(const WorkspaceStorage&) = delete;
+    WorkspaceStorage& operator=(const WorkspaceStorage&) = delete;
+
+    WorkspaceStorage(WorkspaceStorage&& other) noexcept
+        : n_(other.n_)
+        , buffer_(other.buffer_)
+        , cache_config_(other.cache_config_)
+        , dx_(std::move(other.dx_))
+    {
+        other.buffer_ = nullptr;
+        assign_spans();
+    }
+
+    WorkspaceStorage& operator=(WorkspaceStorage&& other) noexcept {
+        if (this == &other) return *this;
+        std::free(buffer_);
+        n_ = other.n_;
+        buffer_ = other.buffer_;
+        cache_config_ = other.cache_config_;
+        dx_ = std::move(other.dx_);
+        other.buffer_ = nullptr;
+        assign_spans();
+        return *this;
     }
 
     // Access to arrays
@@ -139,9 +168,35 @@ public:
     }
 
 private:
-    std::vector<double> buffer_;     // Single allocation for all arrays (CPU memory)
-    CacheBlockConfig cache_config_;  // Cache-blocking configuration (CPU-only)
-    std::vector<double> dx_;         // Pre-computed grid spacing
+    static double* allocate_aligned(size_t count) {
+        const std::size_t alignment = 64;
+        std::size_t bytes = count * sizeof(double);
+        std::size_t padded = ((bytes + alignment - 1) / alignment) * alignment;
+        void* ptr = std::aligned_alloc(alignment, padded);
+        if (!ptr) {
+            throw std::bad_alloc();
+        }
+        return static_cast<double*>(ptr);
+    }
+
+    void assign_spans() {
+        if (!buffer_) {
+            u_current_ = u_next_ = u_stage_ = rhs_ = lu_ = psi_ = {};
+            return;
+        }
+        size_t offset = 0;
+        u_current_ = std::span{buffer_ + offset, n_}; offset += n_;
+        u_next_    = std::span{buffer_ + offset, n_}; offset += n_;
+        u_stage_   = std::span{buffer_ + offset, n_}; offset += n_;
+        rhs_       = std::span{buffer_ + offset, n_}; offset += n_;
+        lu_        = std::span{buffer_ + offset, n_}; offset += n_;
+        psi_       = std::span{buffer_ + offset, n_};
+    }
+
+    size_t n_{0};
+    double* buffer_{nullptr};
+    CacheBlockConfig cache_config_;
+    std::vector<double> dx_;
 
     // Spans into buffer_
     std::span<double> u_current_;
