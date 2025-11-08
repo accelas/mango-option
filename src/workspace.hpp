@@ -1,12 +1,11 @@
 #pragma once
 
 #include "cache_config.hpp"
-#include "aligned_memory_resource.hpp"
-#include <memory_resource>
 #include <vector>
 #include <span>
 #include <cstddef>
-#include <memory>
+#include <cstdlib>
+#include <new>
 
 namespace mango {
 
@@ -17,9 +16,8 @@ namespace mango {
 /// Manages all solver state in a single contiguous buffer for cache efficiency.
 /// Arrays: u_current, u_next, u_stage, rhs, Lu, psi (6n doubles total).
 ///
-/// **64-byte alignment** - Uses PMR with aligned memory resource for AVX-512
-/// SIMD vectorization. Single allocation via monotonic_buffer_resource backed
-/// by aligned allocation. Portable across Windows (MSVC), macOS, and Linux.
+/// **64-byte alignment** - Backing storage is allocated via std::aligned_alloc
+/// so AVX/AVX-512 kernels can safely use aligned loads/stores.
 ///
 /// **Pre-computed dx array** - Grid spacing computed once during construction
 /// to avoid redundant S[i+1] - S[i] calculations in stencil operations.
@@ -27,8 +25,6 @@ namespace mango {
 /// **Cache-blocking** - Adaptive strategy based on grid size:
 /// - n < 5000: Single block (no blocking overhead)
 /// - n ≥ 5000: L1-blocked (~1000 points per block, ~32 KB working set)
-///
-/// **Value semantics** - Movable and copyable via PMR vector's implementations.
 ///
 /// Future GPU version (v2.1) will use SYCL unified shared memory (USM)
 /// with explicit device allocation and host-device synchronization.
@@ -44,10 +40,8 @@ public:
     /// plus (n-1) doubles for pre-computed dx array.
     /// Memory is 64-byte aligned for AVX-512 SIMD operations.
     explicit WorkspaceStorage(size_t n, std::span<const double> grid, size_t threshold = 5000)
-        : aligned_resource_(64)  // 64-byte alignment for AVX-512
-        , aligned_buffer_(allocate_aligned_buffer(6 * n))
-        , monotonic_resource_(aligned_buffer_.get(), 6 * n * sizeof(double), &aligned_resource_)
-        , buffer_(6 * n, &monotonic_resource_)
+        : n_(n)
+        , buffer_(allocate_aligned(6 * n))
         , cache_config_(CacheBlockConfig::adaptive(n, threshold))
         , dx_(n - 1)
     {
@@ -57,14 +51,36 @@ public:
             dx_[i] = grid[i + 1] - grid[i];
         }
 
-        // Set up array views as non-overlapping spans
-        size_t offset = 0;
-        u_current_ = std::span{buffer_.data() + offset, n}; offset += n;
-        u_next_    = std::span{buffer_.data() + offset, n}; offset += n;
-        u_stage_   = std::span{buffer_.data() + offset, n}; offset += n;
-        rhs_       = std::span{buffer_.data() + offset, n}; offset += n;
-        lu_        = std::span{buffer_.data() + offset, n}; offset += n;
-        psi_       = std::span{buffer_.data() + offset, n}; offset += n;
+        assign_spans();
+    }
+
+    ~WorkspaceStorage() {
+        std::free(buffer_);
+    }
+
+    WorkspaceStorage(const WorkspaceStorage&) = delete;
+    WorkspaceStorage& operator=(const WorkspaceStorage&) = delete;
+
+    WorkspaceStorage(WorkspaceStorage&& other) noexcept
+        : n_(other.n_)
+        , buffer_(other.buffer_)
+        , cache_config_(other.cache_config_)
+        , dx_(std::move(other.dx_))
+    {
+        other.buffer_ = nullptr;
+        assign_spans();
+    }
+
+    WorkspaceStorage& operator=(WorkspaceStorage&& other) noexcept {
+        if (this == &other) return *this;
+        std::free(buffer_);
+        n_ = other.n_;
+        buffer_ = other.buffer_;
+        cache_config_ = other.cache_config_;
+        dx_ = std::move(other.dx_);
+        other.buffer_ = nullptr;
+        assign_spans();
+        return *this;
     }
 
     // Access to arrays
@@ -152,29 +168,35 @@ public:
     }
 
 private:
-    // Custom deleter for aligned buffer
-    struct AlignedDeleter {
-        AlignedMemoryResource* resource;
-
-        void operator()(double* ptr) const {
-            if (ptr && resource) {
-                resource->deallocate(ptr, 0, 64);
-            }
+    static double* allocate_aligned(size_t count) {
+        const std::size_t alignment = 64;
+        std::size_t bytes = count * sizeof(double);
+        std::size_t padded = ((bytes + alignment - 1) / alignment) * alignment;
+        void* ptr = std::aligned_alloc(alignment, padded);
+        if (!ptr) {
+            throw std::bad_alloc();
         }
-    };
-
-    // Allocate aligned buffer using the aligned resource
-    std::unique_ptr<double[], AlignedDeleter> allocate_aligned_buffer(size_t n) {
-        double* ptr = static_cast<double*>(aligned_resource_.allocate(n * sizeof(double), 64));
-        return std::unique_ptr<double[], AlignedDeleter>(ptr, AlignedDeleter{&aligned_resource_});
+        return static_cast<double*>(ptr);
     }
 
-    AlignedMemoryResource aligned_resource_;                      // PMR aligned allocator
-    std::unique_ptr<double[], AlignedDeleter> aligned_buffer_;    // Single 64-byte aligned buffer
-    std::pmr::monotonic_buffer_resource monotonic_resource_;      // Fast monotonic allocator
-    std::pmr::vector<double> buffer_;                             // PMR vector using monotonic resource
-    CacheBlockConfig cache_config_;                               // Cache-blocking configuration
-    std::vector<double> dx_;                                      // Pre-computed grid spacing
+    void assign_spans() {
+        if (!buffer_) {
+            u_current_ = u_next_ = u_stage_ = rhs_ = lu_ = psi_ = {};
+            return;
+        }
+        size_t offset = 0;
+        u_current_ = std::span{buffer_ + offset, n_}; offset += n_;
+        u_next_    = std::span{buffer_ + offset, n_}; offset += n_;
+        u_stage_   = std::span{buffer_ + offset, n_}; offset += n_;
+        rhs_       = std::span{buffer_ + offset, n_}; offset += n_;
+        lu_        = std::span{buffer_ + offset, n_}; offset += n_;
+        psi_       = std::span{buffer_ + offset, n_};
+    }
+
+    size_t n_{0};
+    double* buffer_{nullptr};
+    CacheBlockConfig cache_config_;
+    std::vector<double> dx_;
 
     // Spans into buffer_
     std::span<double> u_current_;
