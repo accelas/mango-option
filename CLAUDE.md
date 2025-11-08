@@ -129,14 +129,14 @@ This scheme provides:
 
 **Current implementation:**
 - All grid sizes use single-pass evaluation (direct call to `spatial_op_.apply()`)
-- The `cache_blocking_threshold` config parameter is ignored
-- Infrastructure in `workspace.hpp` (`get_block_with_halo()`) is preserved for future use
+- All cache blocking infrastructure has been removed (parameter, methods, tests)
+- `TRBDF2Config` no longer has a `cache_blocking_threshold` field
 
 **For developers:**
-If cache blocking becomes important in the future, consider:
-1. Profile to confirm memory bandwidth is the bottleneck (not computation or convergence)
-2. Implement true blocking with local buffers (see `workspace.hpp:146` for infrastructure)
-3. Benchmark carefully to ensure speedup justifies added complexity
+If cache blocking becomes important in the future, it will need to be re-implemented from scratch with:
+1. Profiling to confirm memory bandwidth is the bottleneck (not computation or convergence)
+2. True blocking with local buffers and halo zones (not just index ranges)
+3. Careful benchmarking to ensure speedup justifies added complexity
 
 ### Implicit Solver
 
