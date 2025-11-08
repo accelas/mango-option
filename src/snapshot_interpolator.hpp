@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cubic_spline_solver.hpp"
+#include <cstdint>
 #include <span>
 #include <vector>
 #include <optional>
