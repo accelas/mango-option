@@ -11,6 +11,7 @@
  */
 
 #include "src/american_option.hpp"
+#include "src/slice_solver_workspace.hpp"
 #include "src/bspline_4d.hpp"
 #include "src/bspline_fitter_4d.hpp"
 #include "src/iv_solver.hpp"
@@ -132,9 +133,11 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     AmericanOptionGrid grid;
     grid.n_space = state.range(0);
     grid.n_time = 1000;
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid.x_min, grid.x_max, grid.n_space);
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, grid, workspace);
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
@@ -161,9 +164,11 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     AmericanOptionGrid grid;
     grid.n_space = 101;
     grid.n_time = state.range(0);
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid.x_min, grid.x_max, grid.n_space);
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, grid, workspace);
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
@@ -190,9 +195,11 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     AmericanOptionGrid grid;
     grid.n_space = 101;
     grid.n_time = 1000;
+    auto workspace = std::make_shared<SliceSolverWorkspace>(
+        grid.x_min, grid.x_max, grid.n_space);
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, grid, workspace);
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
