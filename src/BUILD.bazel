@@ -415,3 +415,20 @@ cc_library(
     linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "interpolation_table_storage",
+    srcs = ["interpolation_table_storage_v2.cpp"],
+    hdrs = ["interpolation_table_storage_v2.hpp"],
+    deps = [
+        ":bspline_4d",
+        ":expected",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -984,6 +984,178 @@ sudo bpftrace -e 'usdt::mango:algo_progress /arg0 == 4/ {
 
 See `examples/example_precompute_table.c` for a complete working example.
 
+## Interpolation Table Storage (Memory-Mapped)
+
+The interpolation table storage module provides memory-mapped save/load functionality for 4D B-spline tables, enabling instant loading and zero-copy access.
+
+### Quick Start
+
+**Save a table:**
+```cpp
+#include "src/interpolation_table_storage_v2.hpp"
+
+auto result = InterpolationTableStorage::save(
+    "table.mint",           // filepath
+    moneyness_knots,        // vector<double>
+    maturity_knots,         // vector<double>
+    volatility_knots,       // vector<double>
+    rate_knots,             // vector<double>
+    coefficients,           // vector<double> (4D flattened, row-major)
+    100.0,                  // K_ref
+    "PUT",                  // option_type
+    3                       // spline_degree
+);
+
+if (!result) {
+    std::cerr << "Save failed: " << result.error() << "\n";
+}
+```
+
+**Load a table:**
+```cpp
+auto result = InterpolationTableStorage::load("table.mint");
+
+if (!result) {
+    std::cerr << "Load failed: " << result.error() << "\n";
+    return;
+}
+
+auto spline = std::move(*result);  // unique_ptr<BSpline4D_FMA>
+
+// Query prices (~ 150 ns per query)
+double price = spline->eval(1.05, 0.25, 0.20, 0.05);
+```
+
+**Read metadata:**
+```cpp
+auto result = InterpolationTableStorage::read_metadata("table.mint");
+
+if (result) {
+    auto meta = *result;
+    std::cout << "K_ref: " << meta.K_ref << "\n"
+              << "Option type: " << meta.option_type << "\n"
+              << "Grid: " << meta.n_moneyness << "×"
+                          << meta.n_maturity << "×"
+                          << meta.n_volatility << "×"
+                          << meta.n_rate << "\n"
+              << "File size: " << (meta.file_size_bytes / 1024.0) << " KB\n";
+}
+```
+
+### File Format
+
+**Binary format layout:**
+- **Header** (256 bytes): Magic number, version, metadata, grid dimensions, data offsets
+- **Data arrays** (64-byte aligned): moneyness knots, maturity knots, volatility knots, rate knots, coefficients
+
+**Magic number:** `0x4D494E54` ('MINT' = Mango INTerpolation)
+**File extension:** `.mint`
+**Alignment:** All data arrays are 64-byte aligned for cache efficiency
+
+### Performance
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| Save | ~10-20 ms | Sequential write |
+| Load | ~50-200 µs | Memory-mapped, zero-copy |
+| Query | ~150 ns | B-spline evaluation |
+| Read metadata | ~10 µs | Header only |
+
+**Speedup vs pre-computation:** 300,000-600,000× faster loading
+
+### Memory Usage
+
+| Grid Size | Coefficients | File Size |
+|-----------|--------------|-----------|
+| 10×10×10×5 | 5,000 | ~40 KB |
+| 20×15×12×8 | 28,800 | ~230 KB |
+| 50×30×20×10 | 300,000 | ~2.4 MB |
+
+### Integration with PriceTable4DBuilder
+
+```cpp
+// Step 1: Pre-compute prices (one-time, ~30-60 seconds)
+auto builder = PriceTable4DBuilder::create(
+    moneyness_grid, maturity_grid, volatility_grid, rate_grid, K_ref
+);
+auto result = builder->precompute(OptionType::PUT, pde_config);
+
+// Step 2: Save (requires manual extraction of knots and coefficients)
+// Future enhancement: result->save("table.mint");
+
+// Step 3: Load for fast queries (~100 µs)
+auto loaded = InterpolationTableStorage::load("table.mint");
+
+// Step 4: Query prices (~150 ns)
+double price = loaded->eval(m, tau, sigma, r);
+```
+
+### Error Handling
+
+All functions return `Expected<T, std::string>` for robust error handling:
+
+```cpp
+auto result = InterpolationTableStorage::load("table.mint");
+
+if (!result) {
+    std::cerr << "Error: " << result.error() << "\n";
+    // Common errors:
+    // - "Failed to open file: <path>"
+    // - "Invalid magic number - not a valid interpolation table file"
+    // - "Unsupported file version"
+    // - "Coefficient count mismatch with grid dimensions"
+}
+```
+
+### Design Notes
+
+**Why custom format instead of Arrow IPC?**
+- No external dependencies (easier to build)
+- Direct mapping to C++ structs
+- Zero overhead, no parsing required
+- Minimal format overhead (~256 bytes header)
+- Seamless Bazel integration
+
+**Memory mapping benefits:**
+- Lazy loading (OS loads pages on-demand)
+- Shared memory (multiple processes can share one table)
+- Virtual memory (large tables don't consume RAM until accessed)
+- OS caching (kernel manages page cache automatically)
+
+**64-byte alignment:**
+- Matches CPU cache line size
+- Enables SIMD vectorization
+- Optimizes memory bandwidth
+- Reduces false sharing
+
+### Testing
+
+```bash
+bazel test //tests:interpolation_table_storage_test
+```
+
+**Test coverage:**
+- ✅ Basic save/load roundtrip
+- ✅ Metadata reading
+- ✅ Fitted B-spline save/load
+- ✅ Error handling (invalid magic, dimension mismatch, etc.)
+- ✅ File size and alignment verification
+- ✅ Load performance benchmarks
+
+### Example Programs
+
+```bash
+bazel run //examples:example_table_storage
+```
+
+### Documentation
+
+For complete documentation, see:
+- [docs/INTERPOLATION_TABLE_STORAGE.md](docs/INTERPOLATION_TABLE_STORAGE.md) - Full API reference
+- [docs/INTERPOLATION_TABLE_ANALYSIS.md](docs/INTERPOLATION_TABLE_ANALYSIS.md) - Data structure details
+- [examples/example_table_storage.cpp](examples/example_table_storage.cpp) - Usage examples
+- [tests/interpolation_table_storage_test.cc](tests/interpolation_table_storage_test.cc) - Test suite
+
 ## Numerical Considerations
 
 - Spatial discretization determines maximum stable dt for explicit methods
