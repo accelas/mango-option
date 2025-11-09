@@ -2,21 +2,21 @@ cc_library(
     name = "expected",
     hdrs = ["expected.hpp"],
     deps = ["//3rd/tl:expected"],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "parallel",
     hdrs = ["parallel.hpp"],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "snapshot",
     hdrs = ["snapshot.hpp"],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -26,7 +26,7 @@ cc_library(
     deps = [
         ":cubic_spline_solver",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -38,7 +38,7 @@ cc_library(
         ":snapshot_interpolator",
         ":american_option",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -49,7 +49,7 @@ cc_library(
         ":expected",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -64,7 +64,7 @@ cc_library(
         ":grid",
         ":expected",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
@@ -72,7 +72,7 @@ cc_library(
     name = "boundary_conditions",
     hdrs = ["boundary_conditions.hpp"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -84,7 +84,7 @@ cc_library(
     name = "jacobian_view",
     hdrs = ["jacobian_view.hpp"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -97,7 +97,7 @@ cc_library(
     hdrs = ["workspace.hpp"],
     deps = [],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -109,7 +109,7 @@ cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -125,7 +125,7 @@ cc_library(
         "//common:ivcalc_trace_hdr",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -139,7 +139,7 @@ cc_library(
     hdrs = ["newton_workspace.hpp"],
     deps = [":workspace"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -154,7 +154,7 @@ cc_library(
         ":parallel",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-Werror",
@@ -180,7 +180,7 @@ cc_library(
         ":expected",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-Werror",
@@ -198,21 +198,21 @@ cc_library(
 cc_library(
     name = "time_domain",
     hdrs = ["time_domain.hpp"],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "trbdf2_config",
     hdrs = ["trbdf2_config.hpp"],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "thomas_solver",
     hdrs = ["thomas_solver.hpp"],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
@@ -220,7 +220,7 @@ cc_library(
     name = "cubic_spline_solver",
     hdrs = ["cubic_spline_solver.hpp"],
     deps = [":thomas_solver"],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
@@ -228,7 +228,7 @@ cc_library(
     name = "bspline_basis_1d",
     hdrs = ["bspline_basis_1d.hpp"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -246,7 +246,7 @@ cc_library(
         ":expected",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -257,7 +257,7 @@ cc_library(
 cc_library(
     name = "bspline_utils",
     hdrs = ["bspline_utils.hpp"],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -266,7 +266,7 @@ cc_library(
     hdrs = ["bspline_4d.hpp"],
     deps = [":bspline_utils"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -283,7 +283,7 @@ cc_library(
         ":expected",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -299,7 +299,7 @@ cc_library(
         ":bspline_fitter_4d_separable",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -322,7 +322,7 @@ cc_library(
         ":root_finding",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -341,7 +341,7 @@ cc_library(
         ":grid",
         "//src/operators:grid_spacing",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -355,7 +355,7 @@ cc_library(
         ":iv_types",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -380,14 +380,14 @@ cc_library(
         ":jacobian_view",
         ":expected",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "iv_types",
     hdrs = ["iv_types.hpp"],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -405,7 +405,7 @@ cc_library(
         ":expected",
     ],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",

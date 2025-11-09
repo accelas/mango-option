@@ -9,7 +9,7 @@ cc_binary(
         "//src:grid",
         "//src:time_domain",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_binary(
@@ -19,5 +19,5 @@ cc_binary(
         "//src:american_option",
         "//src:slice_solver_workspace",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )

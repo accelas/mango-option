@@ -227,7 +227,7 @@ cc_test(
         "//legacy/src:cubic_spline",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     tags = ["manual"],
 )
 
@@ -240,6 +240,6 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-fopenmp-simd"],
     tags = ["manual"],
 )
