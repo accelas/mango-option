@@ -1,0 +1,13 @@
+# Python dependencies for mango-iv option data downloader
+#
+# Install with: pip install -r requirements.txt
+
+# Data download
+yfinance>=0.2.32
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database (included in Python stdlib, but listed for clarity)
+# sqlite3 - included in Python standard library

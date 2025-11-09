@@ -1,0 +1,23 @@
+load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
+
+pybind_extension(
+    name = "mango_iv",
+    srcs = ["mango_bindings.cpp"],
+    deps = [
+        "//src:iv_solver",
+        "//src:american_option",
+        "//src:root_finding",
+        "//src:iv_types",
+        "//src:expected",
+    ],
+    copts = [
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-fopenmp",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)

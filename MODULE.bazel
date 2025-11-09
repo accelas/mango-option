@@ -2,3 +2,5 @@
 
 bazel_dep(name = "googletest", version = "1.14.0")
 bazel_dep(name = "google_benchmark", version = "1.9.4")
+bazel_dep(name = "pybind11_bazel", version = "2.11.1")
+bazel_dep(name = "rules_python", version = "0.27.1")
