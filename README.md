@@ -2,13 +2,13 @@
 
 **Research-grade numerical library for option pricing and implied volatility calculation**
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C++20](https://img.shields.io/badge/C++-20-blue)]() [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C++23](https://img.shields.io/badge/C++-23-blue)]() [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
 
 ---
 
 ## What is mango-iv?
 
-**mango-iv** is a modern C++20 library that solves two fundamental problems in quantitative finance:
+**mango-iv** is a modern C++23 library that solves two fundamental problems in quantitative finance:
 
 1. **American Option Pricing**: Calculate fair prices using finite-difference PDE solver
 2. **American Option Implied Volatility**: Invert market prices to extract implied volatility
@@ -31,7 +31,7 @@ The library combines **performance**, **flexibility**, and **correctness** with 
 ### Prerequisites
 
 - **Bazel** (build system)
-- **GCC 10+** or **Clang 13+** with C++20 support
+- **GCC 10+** or **Clang 13+** with C++23 support
 - **GoogleTest** (automatically fetched by Bazel)
 
 Optional:
@@ -260,7 +260,7 @@ See `examples/` for complete working programs.
 
 ```
 mango-iv/
-├── src/                           # Core library (C++20)
+├── src/                           # Core library (C++23)
 │   ├── iv_solver.{hpp,cpp}        # American IV calculation
 │   ├── american_option.hpp        # American option pricing
 │   ├── pde_solver.hpp             # General PDE solver (TR-BDF2)
@@ -277,7 +277,7 @@ mango-iv/
 │   ├── thomas_solver.hpp          # Tridiagonal solver
 │   ├── newton_workspace.hpp       # Newton solver workspace
 │   ├── root_finding.hpp           # Root-finding utilities
-│   └── ...                        # Other C++20 modules
+│   └── ...                        # Other C++23 modules
 │
 ├── examples/                      # Demonstration programs
 │   └── example_newton_solver.cc   # Example PDE solving
@@ -312,7 +312,7 @@ mango-iv/
 3. **Type Safety** - Strong typing with concepts, compile-time checks, no void* pointers
 4. **Correctness First** - Well-established methods, comprehensive tests, QuantLib validation
 5. **Zero-Overhead Diagnostics** - USDT tracing (no printf in library code)
-6. **Research-Friendly** - Modern C++20, clear code, extensive documentation
+6. **Research-Friendly** - Modern C++23, clear code, extensive documentation
 
 ---
 
@@ -373,7 +373,7 @@ See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
 
 | Feature | mango-iv | QuantLib | PyQL | Bloomberg API |
 |---------|---------|----------|------|---------------|
-| **Language** | C++20 | C++17 | Python | C++/Python |
+| **Language** | C++23 | C++17 | Python | C++/Python |
 | **License** | Open-source | BSD | BSD | Proprietary |
 | **American options** | ✅ PDE (TR-BDF2) | ✅ Multiple methods | ✅ Via QuantLib | ✅ |
 | **Implied volatility** | ✅ Brent's | ✅ Newton/Brent | ✅ | ✅ |
