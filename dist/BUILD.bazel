@@ -1,0 +1,217 @@
+# Distribution packaging rules for mango-iv
+#
+# This file defines targets for creating distributable packages of the library.
+#
+# Usage:
+#   bazel build //dist:mango-iv-dist          # Full distribution (headers, docs, examples)
+#   bazel build //dist:mango-iv-headers       # Headers-only package
+#   bazel build //dist:mango-iv-dev           # Development package (headers + examples)
+#
+# Output:
+#   bazel-bin/dist/mango-iv-dist.tar.gz       # Full distribution tarball
+#   bazel-bin/dist/mango-iv-headers.tar.gz    # Headers-only tarball
+#   bazel-bin/dist/mango-iv-dev.tar.gz        # Development tarball
+
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "pkg_filegroup", "strip_prefix")
+
+# Package version (update this for releases)
+VERSION = "0.1.0"
+
+# Collect all library headers
+pkg_files(
+    name = "lib_headers",
+    srcs = [
+        "//src:american_option.hpp",
+        "//src:boundary_conditions.hpp",
+        "//src:brent.hpp",
+        "//src:bspline_4d.hpp",
+        "//src:bspline_basis_1d.hpp",
+        "//src:bspline_collocation_1d.hpp",
+        "//src:bspline_fitter_4d.hpp",
+        "//src:bspline_fitter_4d_separable.hpp",
+        "//src:bspline_utils.hpp",
+        "//src:cubic_spline_solver.hpp",
+        "//src:expected.hpp",
+        "//src:grid.hpp",
+        "//src:iv_solver.hpp",
+        "//src:iv_solver_interpolated.hpp",
+        "//src:iv_types.hpp",
+        "//src:jacobian_view.hpp",
+        "//src:multigrid.hpp",
+        "//src:newton_workspace.hpp",
+        "//src:parallel.hpp",
+        "//src:pde_solver.hpp",
+        "//src:price_table_4d_builder.hpp",
+        "//src:price_table_snapshot_collector.hpp",
+        "//src:root_finding.hpp",
+        "//src:slice_solver_workspace.hpp",
+        "//src:snapshot.hpp",
+        "//src:snapshot_interpolator.hpp",
+        "//src:spatial_operators.hpp",
+        "//src:thomas_solver.hpp",
+        "//src:time_domain.hpp",
+        "//src:trbdf2_config.hpp",
+        "//src:workspace.hpp",
+    ],
+    prefix = "include/mango",
+    strip_prefix = strip_prefix.from_pkg(""),
+)
+
+# Collect operator headers
+pkg_files(
+    name = "operator_headers",
+    srcs = [
+        "//src/operators:black_scholes_pde.hpp",
+        "//src/operators:grid_spacing.hpp",
+        "//src/operators:operator_factory.hpp",
+    ],
+    prefix = "include/mango/operators",
+    strip_prefix = strip_prefix.from_pkg(""),
+)
+
+# Collect common headers
+pkg_files(
+    name = "common_headers",
+    srcs = [
+        "//common:ivcalc_trace.h",
+    ],
+    prefix = "include/mango/common",
+    strip_prefix = strip_prefix.from_pkg(""),
+)
+
+# Collect third-party headers
+pkg_files(
+    name = "third_party_headers",
+    srcs = [
+        "//3rd/tl:expected.hpp",
+    ],
+    prefix = "include/mango/3rd/tl",
+    strip_prefix = strip_prefix.from_pkg(""),
+)
+
+# Group all headers together
+pkg_filegroup(
+    name = "all_headers",
+    srcs = [
+        ":lib_headers",
+        ":operator_headers",
+        ":common_headers",
+        ":third_party_headers",
+    ],
+)
+
+# Collect documentation files
+pkg_files(
+    name = "docs",
+    srcs = [
+        "//:README.md",
+        "//:CLAUDE.md",
+        "//:TRACING.md",
+        "//:TRACING_QUICKSTART.md",
+    ],
+    prefix = "docs",
+    strip_prefix = strip_prefix.from_root(""),
+)
+
+# Collect BUILD files for reference
+pkg_files(
+    name = "build_files",
+    srcs = [
+        "//:MODULE.bazel",
+        "//src:BUILD.bazel",
+        "//src/operators:BUILD.bazel",
+        "//common:BUILD.bazel",
+        "//examples:BUILD.bazel",
+    ],
+    prefix = "build",
+    strip_prefix = strip_prefix.from_root(""),
+)
+
+# Collect example source files
+pkg_files(
+    name = "examples_src",
+    srcs = [
+        "//examples:example_newton_solver.cc",
+        "//examples:example_expected_validation.cpp",
+    ],
+    prefix = "examples",
+    strip_prefix = strip_prefix.from_pkg(""),
+)
+
+# Create VERSION file
+genrule(
+    name = "version_file",
+    outs = ["VERSION"],
+    cmd = "echo '" + VERSION + "' > $@",
+)
+
+pkg_files(
+    name = "version",
+    srcs = [":version_file"],
+    prefix = "",
+)
+
+# Headers-only package (minimal, for users who just want to link)
+pkg_tar(
+    name = "mango-iv-headers",
+    srcs = [
+        ":all_headers",
+        ":version",
+    ],
+    extension = "tar.gz",
+    package_dir = "mango-iv-" + VERSION,
+    strip_prefix = "/",
+)
+
+# Development package (headers + examples + build files)
+pkg_tar(
+    name = "mango-iv-dev",
+    srcs = [
+        ":all_headers",
+        ":docs",
+        ":examples_src",
+        ":build_files",
+        ":version",
+    ],
+    extension = "tar.gz",
+    package_dir = "mango-iv-" + VERSION,
+    strip_prefix = "/",
+)
+
+# Full distribution (everything above)
+pkg_tar(
+    name = "mango-iv-dist",
+    srcs = [
+        ":all_headers",
+        ":docs",
+        ":examples_src",
+        ":build_files",
+        ":version",
+    ],
+    extension = "tar.gz",
+    package_dir = "mango-iv-" + VERSION,
+    strip_prefix = "/",
+)
+
+# Binary distribution with benchmark executables
+pkg_tar(
+    name = "mango-iv-benchmarks",
+    srcs = [
+        "//benchmarks:component_performance",
+        "//benchmarks:readme_benchmarks",
+    ],
+    extension = "tar.gz",
+    package_dir = "mango-iv-" + VERSION + "/bin",
+    mode = "0755",
+)
+
+# Combined package: library + binaries
+pkg_tar(
+    name = "mango-iv-complete",
+    deps = [
+        ":mango-iv-dist",
+        ":mango-iv-benchmarks",
+    ],
+    extension = "tar.gz",
+)

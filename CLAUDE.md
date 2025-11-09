@@ -42,6 +42,49 @@ bazel build //tests:quantlib_benchmark
 bazel clean
 ```
 
+### Distribution Packaging
+
+The project includes packaging targets for creating distributable archives:
+
+```bash
+# Build distribution packages
+bazel build //dist:mango-iv-dist          # Full distribution (headers, docs, examples)
+bazel build //dist:mango-iv-headers       # Headers-only package
+bazel build //dist:mango-iv-dev           # Development package (headers + examples + build files)
+bazel build //dist:mango-iv-benchmarks    # Benchmark binaries
+bazel build //dist:mango-iv-complete      # Complete package (library + binaries)
+
+# Extract the generated tarball
+tar -xzf bazel-bin/dist/mango-iv-dist.tar.gz
+```
+
+**Distribution packages include:**
+- **mango-iv-headers**: Minimal package with library headers only
+- **mango-iv-dev**: Headers, examples, BUILD files, and documentation
+- **mango-iv-dist**: Complete source distribution (same as dev currently)
+- **mango-iv-benchmarks**: Compiled benchmark executables
+- **mango-iv-complete**: Combined package with both library and binaries
+
+**Package structure:**
+```
+mango-iv-0.1.0/
+├── include/mango/              # All library headers
+│   ├── american_option.hpp
+│   ├── iv_solver.hpp
+│   ├── pde_solver.hpp
+│   ├── operators/              # Spatial operator headers
+│   ├── common/                 # Common utilities
+│   └── 3rd/tl/                 # Third-party dependencies
+├── docs/                       # Documentation
+│   ├── README.md
+│   ├── CLAUDE.md
+│   ├── TRACING.md
+│   └── TRACING_QUICKSTART.md
+├── examples/                   # Example source code
+├── build/                      # BUILD files for reference
+└── VERSION                     # Package version
+```
+
 ## Project Structure
 
 ```
