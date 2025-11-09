@@ -55,7 +55,7 @@ struct InterpolationTableHeader {
     uint64_t coefficients_offset;
 
     char option_type_str[16];    // "PUT" or "CALL"
-    char reserved[128];          // Reserved for future use
+    char reserved[136];          // Reserved for future use
 };
 #pragma pack(pop)
 
@@ -75,9 +75,9 @@ public:
      * @param K_ref Reference strike price
      * @param option_type "PUT" or "CALL"
      * @param spline_degree Degree of B-spline basis (typically 3 for cubic)
-     * @return Expected<void, string> Success or error message
+     * @return expected<void, string> Success or error message
      */
-    static Expected<void, std::string> save(
+    static expected<void, std::string> save(
         const std::string& filepath,
         const std::vector<double>& moneyness_knots,
         const std::vector<double>& maturity_knots,
@@ -93,13 +93,13 @@ public:
      * Load interpolation table from disk using memory mapping
      *
      * @param filepath Path to the saved table
-     * @return Expected<unique_ptr<BSpline4D_FMA>, string> Loaded evaluator or error
+     * @return expected<unique_ptr<BSpline4D_FMA>, string> Loaded evaluator or error
      *
      * The returned evaluator uses memory-mapped data for zero-copy access.
      * The memory mapping is managed internally and persists as long as the
      * evaluator exists.
      */
-    static Expected<std::unique_ptr<BSpline4D_FMA>, std::string> load(
+    static expected<std::unique_ptr<BSpline4D_FMA>, std::string> load(
         const std::string& filepath
     );
 
@@ -122,15 +122,15 @@ public:
      * Read metadata without loading the full table
      *
      * @param filepath Path to the saved table
-     * @return Expected<TableMetadata, string> Metadata or error
+     * @return expected<TableMetadata, string> Metadata or error
      */
-    static Expected<TableMetadata, std::string> read_metadata(
+    static expected<TableMetadata, std::string> read_metadata(
         const std::string& filepath
     );
 
 private:
     // Helper to validate header
-    static Expected<void, std::string> validate_header(const InterpolationTableHeader& header);
+    static expected<void, std::string> validate_header(const InterpolationTableHeader& header);
 };
 
 } // namespace mango

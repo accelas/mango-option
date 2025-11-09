@@ -35,15 +35,18 @@ GTEST_LDFLAGS := -pthread
 
 # Source files
 LIB_SOURCES := $(SRC_DIR)/american_option.cpp $(SRC_DIR)/iv_solver.cpp \
-               $(SRC_DIR)/price_table_4d_builder.cpp $(SRC_DIR)/iv_solver_interpolated.cpp
+               $(SRC_DIR)/price_table_4d_builder.cpp $(SRC_DIR)/iv_solver_interpolated.cpp \
+               $(SRC_DIR)/interpolation_table_storage_v2.cpp
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(LIB_SOURCES))
 
 # Library output
 STATIC_LIB := $(LIB_DIR)/libmango.a
 
 # Example sources
-EXAMPLE_SOURCES := $(wildcard $(EXAMPLE_DIR)/*.cc)
-EXAMPLE_BINS := $(patsubst $(EXAMPLE_DIR)/%.cc,$(BIN_DIR)/%,$(EXAMPLE_SOURCES))
+EXAMPLE_SOURCES_CC := $(wildcard $(EXAMPLE_DIR)/*.cc)
+EXAMPLE_SOURCES_CPP := $(wildcard $(EXAMPLE_DIR)/*.cpp)
+EXAMPLE_BINS := $(patsubst $(EXAMPLE_DIR)/%.cc,$(BIN_DIR)/%,$(EXAMPLE_SOURCES_CC)) \
+                $(patsubst $(EXAMPLE_DIR)/%.cpp,$(BIN_DIR)/%,$(EXAMPLE_SOURCES_CPP))
 
 # Test sources (only built if GoogleTest is available)
 # Exclude american_option_test.cc - it's a legacy C test
@@ -106,10 +109,18 @@ $(OBJ_DIR)/iv_solver_interpolated.o: $(SRC_DIR)/iv_solver_interpolated.cpp | $(O
 	@echo "Compiling: $<"
 	$(CXX) $(CXXFLAGS) $(CXXFLAGS_OMP) $(USDT_FLAG) $(INCLUDES) -c $< -o $@
 
+$(OBJ_DIR)/interpolation_table_storage_v2.o: $(SRC_DIR)/interpolation_table_storage_v2.cpp | $(OBJ_DIR)
+	@echo "Compiling: $<"
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
 # Build examples
 examples: $(EXAMPLE_BINS)
 
 $(BIN_DIR)/example_%: $(EXAMPLE_DIR)/example_%.cc $(STATIC_LIB) | $(BIN_DIR)
+	@echo "Building example: $@"
+	$(CXX) $(CXXFLAGS) $(CXXFLAGS_SIMD) $(INCLUDES) $< $(STATIC_LIB) $(LDFLAGS_OMP) -o $@
+
+$(BIN_DIR)/example_%: $(EXAMPLE_DIR)/example_%.cpp $(STATIC_LIB) | $(BIN_DIR)
 	@echo "Building example: $@"
 	$(CXX) $(CXXFLAGS) $(CXXFLAGS_SIMD) $(INCLUDES) $< $(STATIC_LIB) $(LDFLAGS_OMP) -o $@
 

@@ -45,33 +45,33 @@ private:
 
 } // anonymous namespace
 
-Expected<void, std::string> InterpolationTableStorage::validate_header(
+expected<void, std::string> InterpolationTableStorage::validate_header(
     const InterpolationTableHeader& header
 ) {
     if (header.magic != MAGIC) {
-        return Unexpected("Invalid magic number - not a valid interpolation table file");
+        return unexpected("Invalid magic number - not a valid interpolation table file");
     }
     if (header.version != VERSION) {
-        return Unexpected("Unsupported file version");
+        return unexpected("Unsupported file version");
     }
     if (header.spline_degree < 1 || header.spline_degree > 10) {
-        return Unexpected("Invalid spline degree");
+        return unexpected("Invalid spline degree");
     }
     if (header.n_moneyness < 2 || header.n_maturity < 2 ||
         header.n_volatility < 2 || header.n_rate < 2) {
-        return Unexpected("Grid dimensions too small");
+        return unexpected("Grid dimensions too small");
     }
 
     size_t expected_coeffs = header.n_moneyness * header.n_maturity *
                             header.n_volatility * header.n_rate;
     if (header.n_coefficients != expected_coeffs) {
-        return Unexpected("Coefficient count mismatch with grid dimensions");
+        return unexpected("Coefficient count mismatch with grid dimensions");
     }
 
     return {};
 }
 
-Expected<void, std::string> InterpolationTableStorage::save(
+expected<void, std::string> InterpolationTableStorage::save(
     const std::string& filepath,
     const std::vector<double>& moneyness_knots,
     const std::vector<double>& maturity_knots,
@@ -85,17 +85,17 @@ Expected<void, std::string> InterpolationTableStorage::save(
     // Validate inputs
     if (moneyness_knots.empty() || maturity_knots.empty() ||
         volatility_knots.empty() || rate_knots.empty()) {
-        return Unexpected("Empty knot vectors not allowed");
+        return unexpected("Empty knot vectors not allowed");
     }
 
     size_t expected_coeffs = moneyness_knots.size() * maturity_knots.size() *
                             volatility_knots.size() * rate_knots.size();
     if (coefficients.size() != expected_coeffs) {
-        return Unexpected("Coefficient array size mismatch");
+        return unexpected("Coefficient array size mismatch");
     }
 
     if (option_type != "PUT" && option_type != "CALL") {
-        return Unexpected("option_type must be 'PUT' or 'CALL'");
+        return unexpected("option_type must be 'PUT' or 'CALL'");
     }
 
     // Create header
@@ -138,13 +138,13 @@ Expected<void, std::string> InterpolationTableStorage::save(
     // Open file for writing
     std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
     if (!file) {
-        return Unexpected("Failed to open file for writing: " + filepath);
+        return unexpected("Failed to open file for writing: " + filepath);
     }
 
     // Write header
     file.write(reinterpret_cast<const char*>(&header), sizeof(header));
     if (!file) {
-        return Unexpected("Failed to write header");
+        return unexpected("Failed to write header");
     }
 
     // Helper to write aligned array
@@ -161,56 +161,56 @@ Expected<void, std::string> InterpolationTableStorage::save(
 
     // Write all arrays
     if (!write_aligned_array(header.moneyness_offset, moneyness_knots)) {
-        return Unexpected("Failed to write moneyness knots");
+        return unexpected("Failed to write moneyness knots");
     }
     if (!write_aligned_array(header.maturity_offset, maturity_knots)) {
-        return Unexpected("Failed to write maturity knots");
+        return unexpected("Failed to write maturity knots");
     }
     if (!write_aligned_array(header.volatility_offset, volatility_knots)) {
-        return Unexpected("Failed to write volatility knots");
+        return unexpected("Failed to write volatility knots");
     }
     if (!write_aligned_array(header.rate_offset, rate_knots)) {
-        return Unexpected("Failed to write rate knots");
+        return unexpected("Failed to write rate knots");
     }
     if (!write_aligned_array(header.coefficients_offset, coefficients)) {
-        return Unexpected("Failed to write coefficients");
+        return unexpected("Failed to write coefficients");
     }
 
     file.close();
     if (!file) {
-        return Unexpected("Failed to close file properly");
+        return unexpected("Failed to close file properly");
     }
 
     return {};
 }
 
-Expected<std::unique_ptr<BSpline4D_FMA>, std::string> InterpolationTableStorage::load(
+expected<std::unique_ptr<BSpline4D_FMA>, std::string> InterpolationTableStorage::load(
     const std::string& filepath
 ) {
     // Open file
     int fd = open(filepath.c_str(), O_RDONLY);
     if (fd < 0) {
-        return Unexpected("Failed to open file: " + filepath);
+        return unexpected("Failed to open file: " + filepath);
     }
 
     // Get file size
     struct stat st;
     if (fstat(fd, &st) < 0) {
         close(fd);
-        return Unexpected("Failed to stat file");
+        return unexpected("Failed to stat file");
     }
     size_t file_size = st.st_size;
 
     if (file_size < sizeof(InterpolationTableHeader)) {
         close(fd);
-        return Unexpected("File too small to contain valid header");
+        return unexpected("File too small to contain valid header");
     }
 
     // Memory map the file
     void* addr = mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (addr == MAP_FAILED) {
         close(fd);
-        return Unexpected("Failed to memory map file");
+        return unexpected("Failed to memory map file");
     }
 
     // Create RAII wrapper (will clean up on any error return)
@@ -220,7 +220,7 @@ Expected<std::unique_ptr<BSpline4D_FMA>, std::string> InterpolationTableStorage:
     const auto* header = static_cast<const InterpolationTableHeader*>(mapped_file->data());
     auto validation = validate_header(*header);
     if (!validation) {
-        return Unexpected(validation.error());
+        return unexpected(validation.error());
     }
 
     // Extract data pointers from mapped memory
@@ -248,23 +248,23 @@ Expected<std::unique_ptr<BSpline4D_FMA>, std::string> InterpolationTableStorage:
     );
 }
 
-Expected<InterpolationTableStorage::TableMetadata, std::string>
+expected<InterpolationTableStorage::TableMetadata, std::string>
 InterpolationTableStorage::read_metadata(const std::string& filepath) {
     // Open file and read just the header
     std::ifstream file(filepath, std::ios::binary);
     if (!file) {
-        return Unexpected("Failed to open file: " + filepath);
+        return unexpected("Failed to open file: " + filepath);
     }
 
     InterpolationTableHeader header;
     file.read(reinterpret_cast<char*>(&header), sizeof(header));
     if (!file) {
-        return Unexpected("Failed to read header");
+        return unexpected("Failed to read header");
     }
 
     auto validation = validate_header(header);
     if (!validation) {
-        return Unexpected(validation.error());
+        return unexpected(validation.error());
     }
 
     // Get file size

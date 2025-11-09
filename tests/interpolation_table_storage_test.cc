@@ -10,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <vector>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -40,11 +41,11 @@ protected:
 
 // Test basic save and load roundtrip
 TEST_F(InterpolationTableStorageTest, BasicSaveLoad) {
-    // Create simple test data
+    // Create simple test data (minimum 4 points per dimension for cubic B-splines)
     std::vector<double> m_knots = {0.8, 0.9, 1.0, 1.1, 1.2};
     std::vector<double> tau_knots = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> v_knots = {0.15, 0.20, 0.25, 0.30};
-    std::vector<double> r_knots = {0.02, 0.04, 0.06};
+    std::vector<double> r_knots = {0.02, 0.04, 0.06, 0.08};
 
     // Create coefficients (just sequential numbers for testing)
     size_t n_coeffs = m_knots.size() * tau_knots.size() * v_knots.size() * r_knots.size();
@@ -80,9 +81,9 @@ TEST_F(InterpolationTableStorageTest, BasicSaveLoad) {
 // Test metadata reading
 TEST_F(InterpolationTableStorageTest, ReadMetadata) {
     std::vector<double> m_knots = {0.8, 0.9, 1.0, 1.1, 1.2};
-    std::vector<double> tau_knots = {0.1, 0.5, 1.0};
-    std::vector<double> v_knots = {0.15, 0.20, 0.25};
-    std::vector<double> r_knots = {0.02, 0.04};
+    std::vector<double> tau_knots = {0.1, 0.5, 1.0, 1.5};
+    std::vector<double> v_knots = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_knots = {0.02, 0.04, 0.06, 0.08};
 
     size_t n_coeffs = m_knots.size() * tau_knots.size() * v_knots.size() * r_knots.size();
     std::vector<double> coefficients(n_coeffs, 1.0);
@@ -105,9 +106,9 @@ TEST_F(InterpolationTableStorageTest, ReadMetadata) {
     EXPECT_EQ(meta.option_type, "CALL");
     EXPECT_EQ(meta.spline_degree, 3);
     EXPECT_EQ(meta.n_moneyness, 5);
-    EXPECT_EQ(meta.n_maturity, 3);
-    EXPECT_EQ(meta.n_volatility, 3);
-    EXPECT_EQ(meta.n_rate, 2);
+    EXPECT_EQ(meta.n_maturity, 4);
+    EXPECT_EQ(meta.n_volatility, 4);
+    EXPECT_EQ(meta.n_rate, 4);
     EXPECT_EQ(meta.n_coefficients, n_coeffs);
     EXPECT_GT(meta.file_size_bytes, 0);
 }
@@ -119,11 +120,11 @@ TEST_F(InterpolationTableStorageTest, FittedSplineSaveLoad) {
         return m + tau + v + r;
     };
 
-    // Create grids
+    // Create grids (minimum 4 points per dimension for cubic B-splines)
     std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
-    std::vector<double> tau_grid = {0.25, 0.5, 1.0};
-    std::vector<double> v_grid = {0.15, 0.20, 0.25};
-    std::vector<double> r_grid = {0.02, 0.05};
+    std::vector<double> tau_grid = {0.25, 0.5, 0.75, 1.0};
+    std::vector<double> v_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.04, 0.06, 0.08};
 
     // Generate data
     size_t n_data = m_grid.size() * tau_grid.size() * v_grid.size() * r_grid.size();
@@ -140,11 +141,14 @@ TEST_F(InterpolationTableStorageTest, FittedSplineSaveLoad) {
     }
 
     // Fit B-spline
-    BSplineFitter4D fitter;
-    auto fit_result = fitter.fit(m_grid, tau_grid, v_grid, r_grid, data);
-    ASSERT_TRUE(fit_result) << "Fitting failed: " << fit_result.error();
+    auto fitter_result = BSplineFitter4D::create(m_grid, tau_grid, v_grid, r_grid);
+    ASSERT_TRUE(fitter_result.has_value()) << "Fitter creation failed: " << fitter_result.error();
 
-    auto coeffs = *fit_result;
+    auto& fitter = fitter_result.value();
+    auto fit_result = fitter.fit(data);
+    ASSERT_TRUE(fit_result.success) << "Fitting failed: " << fit_result.error_message;
+
+    auto coeffs = fit_result.coefficients;
 
     std::string filepath = get_test_file_path("test_fitted.mint");
 
@@ -255,7 +259,7 @@ TEST_F(InterpolationTableStorageTest, FileSizeAndAlignment) {
     std::vector<double> m_knots = {0.8, 0.9, 1.0, 1.1};
     std::vector<double> tau_knots = {0.1, 0.5, 1.0};
     std::vector<double> v_knots = {0.15, 0.20};
-    std::vector<double> r_knots = {0.02, 0.04};
+    std::vector<double> r_knots = {0.02, 0.04, 0.06, 0.08};
 
     size_t n_coeffs = m_knots.size() * tau_knots.size() * v_knots.size() * r_knots.size();
     std::vector<double> coefficients(n_coeffs, 1.0);
