@@ -3,7 +3,7 @@
 
 # Compiler settings
 CXX := g++
-CXXFLAGS := -std=c++20 -Wall -Wextra -O3 -march=native
+CXXFLAGS := -std=c++23 -Wall -Wextra -O3 -march=native
 CXXFLAGS_SIMD := -fopenmp-simd -ftree-vectorize
 CXXFLAGS_OMP := -fopenmp
 LDFLAGS :=
@@ -47,7 +47,8 @@ EXAMPLE_BINS := $(patsubst $(EXAMPLE_DIR)/%.cc,$(BIN_DIR)/%,$(EXAMPLE_SOURCES))
 
 # Test sources (only built if GoogleTest is available)
 # Exclude american_option_test.cc - it's a legacy C test
-TEST_SOURCES := $(filter-out $(TEST_DIR)/american_option_test.cc,$(wildcard $(TEST_DIR)/*.cc))
+# Exclude snapshot_optimization_benchmark.cc - it's a manual/slow benchmark
+TEST_SOURCES := $(filter-out $(TEST_DIR)/american_option_test.cc $(TEST_DIR)/snapshot_optimization_benchmark.cc,$(wildcard $(TEST_DIR)/*.cc))
 TEST_BINS := $(patsubst $(TEST_DIR)/%.cc,$(BIN_DIR)/test_%,$(TEST_SOURCES))
 
 # Phony targets

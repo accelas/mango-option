@@ -5,7 +5,7 @@ cc_test(
         "//src:snapshot",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -15,7 +15,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -25,7 +25,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -37,7 +37,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -47,7 +47,7 @@ cc_test(
         "//src:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -58,7 +58,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -68,7 +68,7 @@ cc_test(
         "//src:root_finding",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -79,7 +79,7 @@ cc_test(
         "//src:root_finding",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -91,7 +91,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -103,7 +103,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -120,7 +120,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -134,7 +134,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -145,7 +145,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -156,7 +156,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -167,7 +167,7 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -178,7 +178,7 @@ cc_test(
         "//src:snapshot",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -189,7 +189,7 @@ cc_test(
         "//src:snapshot",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -200,7 +200,7 @@ cc_test(
         "//src:snapshot",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -213,7 +213,7 @@ cc_test(
         "//src:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
     tags = ["manual", "slow"],  # Excluded from fast CI: benchmark takes ~30-60s
 )
 
@@ -224,7 +224,7 @@ cc_test(
         "//src:iv_solver",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -237,7 +237,7 @@ cc_test(
         "//src:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -250,7 +250,7 @@ cc_test(
         "//src:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -261,7 +261,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -273,7 +273,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-fopenmp-simd"],
+    copts = ["-std=c++23", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -286,7 +286,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -297,7 +297,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -308,7 +308,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -320,7 +320,7 @@ cc_test(
         "//src:american_option",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-fopenmp"],
+    copts = ["-std=c++23", "-fopenmp"],
     linkopts = ["-fopenmp"],
 )
 
@@ -333,7 +333,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -346,7 +346,7 @@ cc_test(
         "//src:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -358,7 +358,7 @@ cc_test(
         "//src:snapshot_interpolator",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20"],
+    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -368,7 +368,7 @@ cc_test(
         "//src:bspline_basis_1d",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -379,7 +379,7 @@ cc_test(
         "//src:bspline_4d",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 cc_test(
@@ -389,7 +389,7 @@ cc_test(
         "//src:bspline_4d",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
 cc_test(
@@ -400,7 +400,7 @@ cc_test(
         "//src:bspline_4d",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
 cc_test(
@@ -410,7 +410,7 @@ cc_test(
         "//src:bspline_fitter_4d_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
 cc_test(
@@ -425,7 +425,7 @@ cc_test(
         "//src:bspline_4d",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++20", "-Wall", "-Wextra"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
 # Test suites defined for convenience
