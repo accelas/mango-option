@@ -123,6 +123,236 @@ Point i: u₁[i], u₂[i], u₃[i], u₄[i], u₅[i], u₆[i], u₇[i], u₈[i]
 - ✅ Cache-friendly: Process one spatial point across all options
 - ✅ Natural for stencil operations: neighbors already in cache
 
+---
+
+### How SoA Interacts with CPU Cache System
+
+**Critical insight:** SoA helps when computation is **spatial-first** (iterate over grid points), hurts when **batch-first** (iterate over options).
+
+#### Cache Line Fundamentals
+
+**Cache line size:** 64 bytes = 8 doubles = 1 SIMD vector (AVX-512)
+
+```
+Memory layout (SoA):
+┌─────────────── Cache Line 1 (64 bytes) ───────────────┐
+│ u[0,0]  u[0,1]  u[0,2]  u[0,3]  u[0,4]  u[0,5]  u[0,6]  u[0,7] │
+└────────────────────────────────────────────────────────────────┘
+  point 0, all 8 options (perfectly aligned for AVX-512)
+
+┌─────────────── Cache Line 2 (64 bytes) ───────────────┐
+│ u[1,0]  u[1,1]  u[1,2]  u[1,3]  u[1,4]  u[1,5]  u[1,6]  u[1,7] │
+└────────────────────────────────────────────────────────────────┘
+  point 1, all 8 options
+```
+
+**Key property:** One cache line = one SIMD load = all 8 options at one grid point.
+
+#### Access Pattern Analysis
+
+##### Pattern 1: Spatial-First (SoA WINS)
+
+```cpp
+// Process all options at each grid point (PDE stencil operations)
+for (size_t i = 1; i < n_points - 1; ++i) {
+    // Load u[i-1, :], u[i, :], u[i+1, :] for all 8 options
+    Vec u_prev = load_simd(&u[i-1, 0]);  // Cache line (i-1)
+    Vec u_curr = load_simd(&u[i,   0]);  // Cache line (i)
+    Vec u_next = load_simd(&u[i+1, 0]);  // Cache line (i+1)
+
+    // Compute stencil: (u[i-1] - 2u[i] + u[i+1]) / dx²
+    Vec laplacian = (u_prev - 2.0*u_curr + u_next) / (dx*dx);
+
+    store_simd(&result[i, 0], laplacian);
+}
+```
+
+**Cache behavior (SoA):**
+- Load 3 cache lines per iteration: (i-1), (i), (i+1)
+- **Sequential access:** Lines (i), (i+1) are adjacent in memory
+- **Prefetcher-friendly:** Hardware prefetcher predicts next access
+- **Reuse:** Line (i+1) becomes (i) in next iteration (stays in L1)
+- **Total cache lines accessed:** ~n_points (reuse factor: ~3×)
+- **Cache misses:** ~n_points / 8 (one per 8 iterations as cache warms)
+
+**Compare to AoS (Array-of-Structures):**
+```cpp
+// AoS: Each option is contiguous
+// u[option][point] layout
+for (size_t i = 1; i < n_points - 1; ++i) {
+    for (size_t opt = 0; opt < 8; ++opt) {
+        // Strided access: jump n_points between options
+        double u_prev = u[opt][i-1];  // Cache miss every option
+        double u_curr = u[opt][i];    // Cache miss
+        double u_next = u[opt][i+1];  // Cache miss
+
+        result[opt][i] = (u_prev - 2*u_curr + u_next) / (dx*dx);
+    }
+}
+```
+
+**Cache behavior (AoS):**
+- Each option's array is 101 points × 8 bytes = 808 bytes (13 cache lines)
+- **Strided access:** Jump 808 bytes between options (no spatial locality)
+- **No prefetching:** Prefetcher cannot predict cross-array jumps
+- **No reuse:** By the time we process option 8, option 1's data is evicted
+- **Total cache lines accessed:** 3 × n_points × 8 = 2400 lines (vs 303 for SoA)
+- **Cache misses:** ~8× more than SoA
+
+**SoA wins: 8× fewer cache lines, perfect prefetching**
+
+##### Pattern 2: Batch-First (SoA LOSES)
+
+```cpp
+// Process each option independently (e.g., different convergence rates)
+for (size_t opt = 0; opt < 8; ++opt) {
+    for (size_t i = 0; i < n_points; ++i) {
+        // Must extract scalar from SoA layout
+        double value = u[i, opt];  // ❌ Stride = 8 doubles = 64 bytes
+
+        // Process single option...
+        result[i, opt] = some_function(value);
+    }
+}
+```
+
+**Cache behavior (SoA):**
+- Each access reads 1 double from a cache line containing 8 doubles
+- **Wastage:** 7/8 of cache line unused (87.5% wasted bandwidth)
+- **Stride = 64 bytes:** Jump one cache line per access (worst-case stride)
+- **Cache thrashing:** Loading 101 points × 8 lines = 808 cache lines
+- **No reuse:** By the time we return to option 1, L1 cache is blown
+
+**AoS would win here:** Sequential access within each option's array.
+
+#### Hybrid Access Pattern (Real PDE Solver)
+
+Real PDE solver does **mostly spatial-first** with occasional **batch-first** operations:
+
+```cpp
+// TR-BDF2 time stepping (typical iteration)
+for (size_t step = 0; step < n_steps; ++step) {
+    // ✅ SPATIAL-FIRST: Stencil operations (95% of compute)
+    for (size_t i = 1; i < n_points - 1; ++i) {
+        Vec laplacian = compute_stencil_simd(&u[i, 0]);     // SoA wins
+        Vec source = compute_source_simd(&u[i, 0], t);      // SoA wins
+        store_simd(&rhs[i, 0], laplacian + source);         // SoA wins
+    }
+
+    // ✅ SPATIAL-FIRST: Tridiagonal solve (per-option, but vectorized)
+    thomas_solve_batched(matrix, rhs, u_next);  // Operates on columns (SoA wins)
+
+    // ❌ BATCH-FIRST: Convergence check (rare, 5% of compute)
+    bool all_converged = true;
+    for (size_t opt = 0; opt < 8; ++opt) {
+        double error = compute_error_scalar(u_next, opt);  // SoA loses
+        if (error > tol) all_converged = false;
+    }
+}
+```
+
+**SoA net benefit:** 95% of operations are spatial-first → **~7× speedup overall**
+
+#### Cache Hierarchy Impact
+
+**L1 Cache (32KB per core):**
+- SoA working set: 32 points × 8 options × 3 arrays × 8 bytes = **6KB** ✅ Fits
+- Allows processing 32-point tiles entirely in L1
+- Hot loop (stencil + solve) never touches L2
+
+**L2 Cache (256KB per core):**
+- Full grid: 101 points × 8 options × 3 arrays × 8 bytes = **19KB** ✅ Fits easily
+- Entire batched solver state fits in L2
+- Prefetcher keeps L1 fed from L2 (10-cycle latency)
+
+**L3 Cache (shared, MB-scale):**
+- Multiple batches can coexist
+- OpenMP threads don't thrash each other
+
+**Memory Bandwidth (DRAM):**
+- SoA: Sequential access → full bandwidth utilization (~50 GB/s)
+- AoS: Random access → reduced bandwidth (~10-20 GB/s due to latency)
+
+#### When SoA Breaks Down
+
+**1. Asynchronous convergence (different iteration counts per option):**
+```cpp
+// Options converge at different rates → cannot vectorize
+while (!all_converged) {
+    for (size_t opt = 0; opt < 8; ++opt) {
+        if (!converged[opt]) {
+            // Must process single option → SoA penalty
+            newton_step_scalar(opt);  // ❌ Stride-8 access
+        }
+    }
+}
+```
+
+**Mitigation:** Dynamic compaction or masked operations (see Asynchronous Convergence section)
+
+**2. Per-option boundary conditions:**
+```cpp
+// Each option has different strike → different obstacle
+for (size_t opt = 0; opt < 8; ++opt) {
+    double obstacle = max(K[opt] - S, 0.0);  // ❌ Scalar per option
+    for (size_t i = 0; i < n_points; ++i) {
+        u[i, opt] = max(u[i, opt], obstacle);  // ❌ Batch-first
+    }
+}
+```
+
+**Mitigation:** Vectorize obstacle computation, use masked stores
+
+**3. Option-specific diagnostics:**
+```cpp
+// Compute per-option statistics → inherently batch-first
+for (size_t opt = 0; opt < 8; ++opt) {
+    double max_val = -INFINITY;
+    for (size_t i = 0; i < n_points; ++i) {
+        max_val = max(max_val, u[i, opt]);  // ❌ Stride-8 reduction
+    }
+    stats[opt] = max_val;
+}
+```
+
+**Mitigation:** Horizontal reductions on SIMD vectors (expensive but better than serial)
+
+#### Prefetcher Behavior
+
+**Hardware prefetcher assumptions:**
+- Detects sequential access: A[i], A[i+1], A[i+2], ...
+- Prefetches next 4-8 cache lines ahead
+- **Critical:** Assumes constant stride
+
+**SoA spatial-first:**
+```cpp
+&u[i, 0] → &u[i+1, 0] → &u[i+2, 0]
+Stride: 64 bytes (1 cache line) ✅ Prefetcher recognizes pattern
+```
+
+**SoA batch-first:**
+```cpp
+&u[i, 0] → &u[i, 8] → &u[i, 16]
+Stride: 64 bytes BUT jumping within same cache line region
+Prefetcher confused (looks like random access) ❌
+```
+
+#### Summary: When to Use SoA
+
+✅ **Use SoA when:**
+- Computation is **spatial-first** (iterate over grid points)
+- All options processed **synchronously** (same iteration count)
+- Stencil operations dominate (PDE solvers, image processing)
+- Working set fits in L2 cache
+
+❌ **Avoid SoA when:**
+- Computation is **batch-first** (iterate over options)
+- Options diverge (different convergence rates, early exits)
+- Per-option logic dominates (statistics, conditionals)
+- Batch size is very large (thrashes cache)
+
+**For this PDE solver:** SoA is correct choice because **95% of compute is spatial-first stencil operations**.
+
 ### Tiled Layout for Cache Blocking
 
 ```cpp
