@@ -30,16 +30,33 @@ namespace {
  *
  * Intrinsic value: ψ(x) = max(1 - exp(x), 0)
  * where x = ln(S/K).
+ *
+ * PERFORMANCE OPTIMIZATION (Issue #141):
+ * Caches exp(x[i]) values since the grid is fixed throughout PDE solve.
+ * This eliminates billions of redundant exp() evaluations during Newton iterations.
  */
 class AmericanPutObstacle {
 public:
     void operator()(double, std::span<const double> x,
                     std::span<double> psi) const {
+        // Lazy initialization: cache exp(x) on first call
+        if (exp_cache_.empty()) {
+            exp_cache_.resize(x.size());
+            #pragma omp simd
+            for (size_t i = 0; i < x.size(); ++i) {
+                exp_cache_[i] = std::exp(x[i]);
+            }
+        }
+
+        // Fast path: use cached values
         #pragma omp simd
         for (size_t i = 0; i < x.size(); ++i) {
-            psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+            psi[i] = std::max(1.0 - exp_cache_[i], 0.0);
         }
     }
+
+private:
+    mutable std::vector<double> exp_cache_;  // Cached exp(x[i]) values
 };
 
 /**
@@ -47,16 +64,33 @@ public:
  *
  * Intrinsic value: ψ(x) = max(exp(x) - 1, 0)
  * where x = ln(S/K).
+ *
+ * PERFORMANCE OPTIMIZATION (Issue #141):
+ * Caches exp(x[i]) values since the grid is fixed throughout PDE solve.
+ * This eliminates billions of redundant exp() evaluations during Newton iterations.
  */
 class AmericanCallObstacle {
 public:
     void operator()(double, std::span<const double> x,
                     std::span<double> psi) const {
+        // Lazy initialization: cache exp(x) on first call
+        if (exp_cache_.empty()) {
+            exp_cache_.resize(x.size());
+            #pragma omp simd
+            for (size_t i = 0; i < x.size(); ++i) {
+                exp_cache_[i] = std::exp(x[i]);
+            }
+        }
+
+        // Fast path: use cached values
         #pragma omp simd
         for (size_t i = 0; i < x.size(); ++i) {
-            psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+            psi[i] = std::max(exp_cache_[i] - 1.0, 0.0);
         }
     }
+
+private:
+    mutable std::vector<double> exp_cache_;  // Cached exp(x[i]) values
 };
 
 /**

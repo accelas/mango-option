@@ -57,6 +57,19 @@ struct ThomasConfig {
 
     /// Whether to check for diagonal dominance (stricter condition)
     bool check_diagonal_dominance = false;
+
+    /// Skip singularity checks (PERFORMANCE OPTIMIZATION - Issue #141)
+    ///
+    /// When true, skips per-row singularity checks to enable SIMD vectorization.
+    /// Only use when matrix is known to be well-conditioned (e.g., from PDE
+    /// discretization with stable schemes).
+    ///
+    /// WARNING: Using this on ill-conditioned matrices will produce incorrect
+    /// results without error detection. Use only when:
+    /// 1. Matrix structure guarantees non-singularity (e.g., M-matrix)
+    /// 2. Upstream validation ensures well-conditioning
+    /// 3. Performance profiling shows singularity checks are a bottleneck
+    bool skip_singularity_checks = false;
 };
 
 /// Thomas Algorithm for Tridiagonal Systems (Modern C++20)
@@ -156,20 +169,33 @@ template<FloatingPoint T>
     d_prime[0] = rhs[0] / diag[0];
 
     // Middle rows
-    // Note: Singularity checking prevents SIMD vectorization (early return)
-    for (size_t i = 1; i < n - 1; ++i) {
-        // Use FMA for denominator calculation
-        const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
-
-        // Singularity check
-        if (std::abs(denom) < config.singularity_tol) {
-            return Result::error_result("Singular or ill-conditioned matrix");
+    if (config.skip_singularity_checks) {
+        // FAST PATH: No checks, SIMD-friendly (Issue #141)
+        // Compiler can auto-vectorize this loop without early returns
+        #pragma omp simd
+        for (size_t i = 1; i < n - 1; ++i) {
+            const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
+            const T inv_denom = static_cast<T>(1) / denom;
+            c_prime[i] = upper[i] * inv_denom;
+            d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) * inv_denom;
         }
+    } else {
+        // SAFE PATH: Check for singularity on each row
+        // Note: Early return prevents SIMD vectorization
+        for (size_t i = 1; i < n - 1; ++i) {
+            // Use FMA for denominator calculation
+            const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
 
-        const T inv_denom = static_cast<T>(1) / denom;
-        c_prime[i] = upper[i] * inv_denom;
-        // Use FMA: (rhs[i] - lower[i-1]*d_prime[i-1]) * inv_denom
-        d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) * inv_denom;
+            // Singularity check
+            if (std::abs(denom) < config.singularity_tol) {
+                return Result::error_result("Singular or ill-conditioned matrix");
+            }
+
+            const T inv_denom = static_cast<T>(1) / denom;
+            c_prime[i] = upper[i] * inv_denom;
+            // Use FMA: (rhs[i] - lower[i-1]*d_prime[i-1]) * inv_denom
+            d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) * inv_denom;
+        }
     }
 
     // Last row (no upper diagonal term)
@@ -178,8 +204,10 @@ template<FloatingPoint T>
         // Use FMA for denominator calculation
         const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
 
-        if (std::abs(denom) < config.singularity_tol) {
-            return Result::error_result("Singular matrix (at last row)");
+        if (!config.skip_singularity_checks) {
+            if (std::abs(denom) < config.singularity_tol) {
+                return Result::error_result("Singular matrix (at last row)");
+            }
         }
 
         // Use FMA for numerator calculation
