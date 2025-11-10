@@ -355,6 +355,8 @@ Prefetcher confused (looks like random access) ❌
 
 ### Tiled Layout for Cache Blocking
 
+**IMPORTANT:** Tiled layout requires dimensions divisible by tile size OR explicit padding.
+
 ```cpp
 template <typename Extents, size_t TileRows, size_t TileCols>
 struct layout_tiled {
@@ -367,7 +369,8 @@ struct layout_tiled {
         size_t in_i   = i % TileRows;
         size_t in_j   = j % TileCols;
 
-        size_t num_tile_cols = extents_.extent(1) / TileCols;
+        // Ceiling division for partial tiles
+        size_t num_tile_cols = (extents_.extent(1) + TileCols - 1) / TileCols;
 
         // Tile offset + interior offset
         return (tile_i * num_tile_cols + tile_j) * (TileRows * TileCols)
@@ -378,11 +381,11 @@ struct layout_tiled {
 };
 ```
 
-**Usage:**
+**Usage for exact multiples:**
 ```cpp
-// 101 spatial points × 8 options, tiled as [32×8] blocks
-constexpr size_t N = 101;
-constexpr size_t Batch = 8;
+// 96 spatial points × 8 options, tiled as [32×8] blocks (exact fit)
+constexpr size_t N = 96;  // Divisible by TileRows=32
+constexpr size_t Batch = 8;  // Matches TileCols=8
 
 std::pmr::vector<double> data(N * Batch);
 
@@ -394,9 +397,58 @@ std::mdspan<double,
 // Access: u_batch[i, lane] - layout handles cache-friendly indexing
 ```
 
+**Usage for non-multiples (requires padding):**
+```cpp
+// 101 spatial points × 5 options (NOT divisible by tile size)
+constexpr size_t N = 101;  // 101 % 32 = 5 (partial tile)
+constexpr size_t Batch = 5;  // 5 < 8 (partial tile)
+constexpr size_t TileRows = 32;
+constexpr size_t TileCols = 8;
+
+// Calculate padded dimensions
+constexpr size_t N_padded = ((N + TileRows - 1) / TileRows) * TileRows;  // 128
+constexpr size_t Batch_padded = ((Batch + TileCols - 1) / TileCols) * TileCols;  // 8
+
+// Allocate with padding
+std::pmr::vector<double> data(N_padded * Batch_padded);  // 128 × 8 = 1024
+
+std::mdspan<double,
+            std::dextents<size_t, 2>,
+            layout_tiled<std::dextents<size_t, 2>, 32, 8>>
+    u_batch(data.data(), N, Batch);  // Logical extent: 101 × 5
+
+// Access: u_batch[i, lane] works for i < 101, lane < 5
+// Padding elements (i ≥ 101 or lane ≥ 5) are unused but present in memory
+```
+
+**Fallback for ragged batches:**
+```cpp
+// For option chains with non-SIMD-friendly sizes (e.g., 5, 9, 11 strikes)
+// Option 1: Use standard row-major layout (no tiling)
+std::mdspan<double, std::dextents<size_t, 2>, std::layout_right>
+    u_batch(data.data(), N, Batch);  // Row-major: [i][lane]
+
+// Option 2: Pad to next SIMD width (wastes memory but enables tiling)
+size_t Batch_simd = ((Batch + 7) / 8) * 8;  // Round up to multiple of 8
+std::pmr::vector<double> data_padded(N * Batch_simd);
+
+// Option 3: Process in SIMD-sized chunks + scalar tail
+for (size_t b = 0; b < Batch; b += 8) {
+    size_t chunk_size = std::min(8, Batch - b);
+    if (chunk_size == 8) {
+        // Full SIMD batch with tiled layout
+    } else {
+        // Partial batch: use scalar fallback or masked SIMD
+    }
+}
+```
+
 **Tile size selection:**
 - TileRows = 32: Fits in L1 cache (32 points × 8 lanes × 8 bytes = 2KB)
 - TileCols = 8: Match AVX-512 width (one SIMD vector per row)
+- **For production:** Validate dimensions or add runtime checks
+
+**Design recommendation:** For option chain IV solver, use padding strategy (Option 2) since memory waste is minimal (few KB) and code is simpler than chunking.
 
 ---
 
@@ -1877,17 +1929,163 @@ if (iter > 6 && active_count < VecSize / 2) {
 
 ---
 
+### Asynchronous Convergence for PDE-Dominated Phase
+
+**CRITICAL GAP:** The above strategies only cover interpolation-based IV (Part 2). For PDE-based IV (Part 1), we need to handle async convergence in the **TR-BDF2 time stepping loop**, not just Newton updates.
+
+**Challenge:** Each Newton iteration requires full PDE solve (~120ms). Can't just mask lanes—must avoid launching PDE solves for converged options.
+
+#### Strategy A: Per-Option Convergence Flags (Simplest)
+
+```cpp
+// Batched IV solver with PDE pricing
+template<size_t BatchSize>
+class BatchedPDEIVSolver {
+    bool converged_[BatchSize] = {false};  // Track per-option convergence
+
+    void solve_iv_newton() {
+        for (int iter = 0; iter < max_newton_iter; ++iter) {
+            // Check if all converged
+            if (std::all_of(converged_, converged_ + BatchSize, [](bool c) { return c; })) {
+                return;  // Early exit
+            }
+
+            // Solve PDE for ALL options (even converged ones)
+            // ISSUE: Wastes compute on converged options
+            batched_pde_solver_.solve_timestep();
+
+            // Newton updates only for non-converged
+            for (size_t opt = 0; opt < BatchSize; ++opt) {
+                if (converged_[opt]) continue;  // Skip
+
+                double price = extract_price(opt);
+                double error = target_[opt] - price;
+
+                if (std::abs(error) < tol) {
+                    converged_[opt] = true;
+                    results_[opt].sigma = current_sigma_[opt];
+                } else {
+                    // Update sigma for next iteration
+                    current_sigma_[opt] += compute_newton_step(error, vega_[opt]);
+                }
+            }
+        }
+    }
+};
+```
+
+**Pros:** Simple, no SoA restructuring
+**Cons:** Wastes PDE compute on converged options (still solving 8 PDEs even if 7 converged)
+
+#### Strategy B: Dynamic Compaction with PDE Re-initialization (Best)
+
+```cpp
+template<size_t MaxBatchSize>
+class CompactedPDEIVSolver {
+    struct ActiveBatch {
+        size_t count;  // Active options (≤ MaxBatchSize)
+        std::array<size_t, MaxBatchSize> original_idx;  // Map to input
+        std::array<double, MaxBatchSize> sigma;
+        std::array<double, MaxBatchSize> target_price;
+
+        // SoA PDE state (compacted)
+        BatchedPDESolver<MaxBatchSize> pde_solver;
+    };
+
+    void solve_compacted() {
+        ActiveBatch active;
+        active.count = input_queries_.size();
+
+        // Initialize
+        for (size_t i = 0; i < active.count; ++i) {
+            active.original_idx[i] = i;
+            active.sigma[i] = queries_[i].vol_guess;
+            active.target_price[i] = queries_[i].market_price;
+        }
+
+        for (int iter = 0; iter < max_newton_iter && active.count > 0; ++iter) {
+            // Solve PDE for ONLY active options
+            active.pde_solver.solve(active.sigma, active.count);  // Pass count
+
+            // Extract prices and check convergence
+            ActiveBatch new_active;
+            new_active.count = 0;
+
+            for (size_t i = 0; i < active.count; ++i) {
+                double price = active.pde_solver.get_price(i);
+                double error = active.target_price[i] - price;
+
+                if (std::abs(error) < tol) {
+                    // Converged - write result
+                    size_t orig = active.original_idx[i];
+                    results_[orig] = {active.sigma[i], true, iter + 1};
+                } else {
+                    // Still active - compact to new batch
+                    new_active.original_idx[new_active.count] = active.original_idx[i];
+                    new_active.sigma[new_active.count] = active.sigma[i] + newton_step(error);
+                    new_active.target_price[new_active.count] = active.target_price[i];
+                    new_active.count++;
+                }
+            }
+
+            // Re-initialize PDE solver with compacted batch
+            if (new_active.count > 0 && new_active.count < active.count) {
+                new_active.pde_solver.reinitialize(new_active.sigma, new_active.count);
+            }
+
+            active = std::move(new_active);
+        }
+    }
+};
+```
+
+**Key insight:** When batch shrinks (e.g., 8 → 5 → 2), re-initialize PDE solver with smaller batch to avoid wasted work.
+
+**Pros:**
+- Only solves PDEs for active options (no wasted compute)
+- Effective batch size adjusts dynamically
+- Can switch to scalar solver when count = 1
+
+**Cons:**
+- Re-initialization overhead (copying state arrays, updating mdspan views)
+- More complex implementation
+
+#### Performance Impact
+
+**Strategy A (masked convergence):**
+- Iteration 1: Solve 8 PDEs (all active)
+- Iteration 2: Solve 8 PDEs (even if 5 converged) ❌ 62% waste
+- Iteration 3: Solve 8 PDEs (even if 7 converged) ❌ 87% waste
+- Total: Always 8 × N_iters PDEs
+
+**Strategy B (compacted):**
+- Iteration 1: Solve 8 PDEs
+- Iteration 2: Compact to 5 → solve 5 PDEs (round up to 8 for SIMD)
+- Iteration 3: Compact to 2 → switch to scalar solver
+- Total: ~50% fewer PDEs for typical convergence spread
+
+**Recommendation for Phase 1 (PDE-based IV):**
+Start with Strategy A for simplicity, profile, then upgrade to Strategy B if PDE compute dominates.
+
+**For Phase 2 (interpolation-based IV):**
+Use compaction strategies from earlier section (much cheaper to compact when eval is ~10ns vs 120ms).
+
+---
+
 ### Recommendation
 
 **Start with:** Strategy 1 (masked lanes) for simplicity
 - Good enough for option chains (8-20 strikes, similar convergence)
 - AVX-512 makes masking nearly free
+- **For PDE phase:** Use Strategy A (per-option flags, accept waste)
 
 **Upgrade to:** Strategy 2 (compaction) if profiling shows low utilization
 - Worthwhile when: std_dev(iterations) > 3 or batch_size > 32
+- **For PDE phase:** Use Strategy B (compaction + reinit) to avoid wasted PDE solves
 
 **Production systems:** Strategy 3 (queue + compaction)
 - Essential for calibration engines processing 1000s of options
+- **For PDE phase:** Strategy B mandatory (can't afford 87% compute waste)
 
 ---
 
