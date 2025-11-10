@@ -1612,21 +1612,35 @@ std::array<BSplineCoefficients4D, BatchSize> coeffs_array;  // 8 × 2.4 MB = 19.
             workspace.reset();  // Safe: workspace is thread-local
         }
 
-        // Step 3: Use BatchedBSpline4D for efficient query evaluation
-        // (queries batched, coefficients scalar)
-        auto spline = BatchedBSpline4D<BatchSize>::create(
-            m_grid, t_grid, v_grid, r_grid, coeffs_array[0]).value();  // One spline
+        // Step 3: Store coefficients for each strike in price table
+        // Each of the 8 strikes gets its own scalar spline (from coeffs_array[0..7])
+        // This is price table construction, not query-time evaluation
+        for (size_t b = 0; b < BatchSize; ++b) {
+            // Store strike b's spline in price table
+            price_table.add_strike_surface(params[b].strike, coeffs_array[b]);
+        }
 
-        // Query example: option chain Greeks (8 strikes, same maturity/vol/rate)
-        std::array<double, BatchSize> strikes = {95, 96, 97, 98, 99, 100, 101, 102};
-        std::array<double, BatchSize> prices = spline.eval(
-            strikes,  // Different moneyness
+        // Later: Query-time evaluation (Part 2 - interpolation-based IV)
+        // This uses a SINGLE spline for ONE strike, batching across σ guesses
+        // Example: Find IV for strike K=100 with 8 different σ initial guesses
+
+        const auto& spline_K100 = price_table.get_strike_surface(100.0);  // One spline
+        auto batched_spline = BatchedBSpline4D<8>::create(
+            m_grid, t_grid, v_grid, r_grid, spline_K100).value();
+
+        // Batch 8 queries for SAME strike, DIFFERENT σ guesses (Newton iterations)
+        std::array<double, 8> sigma_guesses = {0.18, 0.19, 0.20, 0.21, 0.22, 0.23, 0.24, 0.25};
+        std::array<double, 8> prices = batched_spline.eval(
+            {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},  // Same moneyness (K=100)
             {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},  // Same maturity
-            {0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20},  // Same vol
+            sigma_guesses,                              // Different σ (Newton search)
             {0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05});  // Same rate
 
-        // prices[0..7] now contains 8 interpolated option prices (in 10-15ns each!)
-        // Coefficient broadcast makes this efficient despite scalar storage
+        // prices[0..7] = option values at 8 different σ (for Newton/Brent iteration)
+
+        // NOTE: For option chain pricing (different strikes), you call each strike's
+        // spline separately (can parallelize across strikes with OpenMP):
+        // for (strike in chain) { price[strike] = spline[strike].eval_scalar(...); }
     }
 }
 ```
@@ -2041,6 +2055,118 @@ class CompactedPDEIVSolver {
 ```
 
 **Key insight:** When batch shrinks (e.g., 8 → 5 → 2), re-initialize PDE solver with smaller batch to avoid wasted work.
+
+#### Implementing PDE Solver Compaction (Technical Details)
+
+**Challenge:** `BatchedPDESolver<BatchSize>` has compile-time fixed size, but we need runtime variable active count.
+
+**Solution: Runtime masking with compile-time capacity**
+
+```cpp
+template<size_t MaxBatchSize>
+class BatchedPDESolver {
+public:
+    // Constructor takes compile-time max, runtime active count
+    BatchedPDESolver(const Grid& grid, const TimeDomain& time,
+                     ThreadWorkspace& workspace, size_t active_count = MaxBatchSize)
+        : active_count_(active_count)
+        , max_batch_size_(MaxBatchSize)
+    {
+        // Allocate for MaxBatchSize, but only use first active_count lanes
+        u_soa_ = workspace.allocate_temp<double>(grid.n_points * MaxBatchSize);
+        // ... other arrays
+    }
+
+    // Reinitialize with smaller active count (no reallocation)
+    void set_active_count(size_t new_count) {
+        assert(new_count <= max_batch_size_);
+        active_count_ = new_count;
+        // No reallocation - just mask operations to first new_count lanes
+    }
+
+    void solve_timestep() {
+        // Process only active lanes (mask the rest)
+        for (size_t i = 0; i < n_points; ++i) {
+            // Load SIMD vector (MaxBatchSize width)
+            Vec u_vec = load_simd(&u_soa_[i * MaxBatchSize]);
+
+            // Compute (operates on all lanes, but we'll mask stores)
+            Vec laplacian = compute_stencil_simd(u_vec);
+
+            // Store only active lanes
+            if (active_count_ == MaxBatchSize) {
+                // Full batch: normal store
+                store_simd(&u_next_[i * MaxBatchSize], laplacian);
+            } else {
+                // Partial batch: masked store
+                alignas(64) double result[MaxBatchSize];
+                laplacian.copy_to(result, stdx::element_aligned);
+
+                for (size_t lane = 0; lane < active_count_; ++lane) {
+                    u_next_[i * MaxBatchSize + lane] = result[lane];
+                }
+                // Lanes >= active_count_ are not updated (don't care)
+            }
+        }
+    }
+
+    // Extract result for lane (only valid for lane < active_count_)
+    double get_price(size_t lane) const {
+        assert(lane < active_count_);
+        return u_soa_[target_index * MaxBatchSize + lane];
+    }
+
+private:
+    size_t active_count_;      // Runtime active count
+    size_t max_batch_size_;    // Compile-time capacity
+    std::pmr::vector<double> u_soa_;  // Always MaxBatchSize wide
+};
+```
+
+**Key design decisions:**
+
+1. **No reallocation:** Arrays stay MaxBatchSize width, just mask operations
+   - Avoids mdspan resizing complexity
+   - Simplifies PMR arena management
+   - Small waste (unused lanes) acceptable for flexibility
+
+2. **Masked stores for partial batches:**
+   - Full batch (active_count == MaxBatchSize): Direct SIMD store
+   - Partial batch: Scalar loop for active lanes only
+   - Overhead: ~1-2 cycles per point (negligible vs 120ms PDE solve)
+
+3. **mdspan extents stay fixed:**
+   ```cpp
+   // mdspan always sees MaxBatchSize columns
+   std::mdspan<double, std::dextents<size_t, 2>> u_view(
+       u_soa_.data(), n_points, MaxBatchSize);  // Fixed extent
+
+   // Access logic respects active_count_
+   for (size_t lane = 0; lane < active_count_; ++lane) {
+       u_view[i, lane] = ...;  // Only touch active lanes
+   }
+   ```
+
+4. **Padding in memory layout:**
+   - If active_count = 5, lanes 5-7 contain garbage (don't care)
+   - Next compaction (active_count = 2) overwrites lanes 0-1, leaves 2-7 stale
+   - Safe because we only read/write lanes < active_count_
+
+**Alternative: Dynamic mdspan with submdspan (more complex)**
+
+```cpp
+// Create subview with smaller extent
+auto active_view = std::submdspan(
+    u_full_view,              // Full view [n_points, MaxBatchSize]
+    std::full_extent,         // All rows
+    std::tuple{0, active_count_}  // First active_count_ columns only
+);
+// Now active_view has runtime extent [n_points, active_count_]
+```
+
+**Cons:** Requires C++26 `std::submdspan` (not in C++23), more complex indexing.
+
+**Recommendation:** Use runtime masking (first approach) for simplicity and C++23 compatibility.
 
 **Pros:**
 - Only solves PDEs for active options (no wasted compute)
