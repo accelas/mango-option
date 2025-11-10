@@ -267,6 +267,71 @@ auto c_diag = workspace.allocate_temp<double>(n * batch);
 - B-spline fitting temporaries: ~3.6 MB peak (collocation matrices, n²)
 - Workspace size: 4MB accommodates both use cases
 
+### Threading Safety: Critical Rules
+
+**RULE 1: ThreadWorkspace MUST be thread-local**
+```cpp
+// ✅ CORRECT: Workspace inside #pragma omp parallel block
+#pragma omp parallel
+{
+    ThreadWorkspace workspace(1 << 22);  // Each thread gets own arena
+
+    #pragma omp for
+    for (size_t i = 0; i < n; ++i) {
+        // Use workspace...
+        workspace.reset();  // Safe: thread-local
+    }
+}
+
+// ❌ WRONG: Shared workspace (race condition!)
+ThreadWorkspace workspace(1 << 22);  // Shared across threads
+#pragma omp parallel for
+for (size_t i = 0; i < n; ++i) {
+    // Use workspace...  // RACE: multiple threads call reset()!
+    workspace.reset();   // CRASH or corruption
+}
+```
+
+**RULE 2: Never use `#pragma omp parallel for` with workspace**
+```cpp
+// ❌ WRONG: No place for thread-local workspace
+#pragma omp parallel for
+for (size_t i = 0; i < n; ++i) {
+    ThreadWorkspace workspace(...);  // Created/destroyed every iteration!
+}
+
+// ✅ CORRECT: Split into parallel + for
+#pragma omp parallel
+{
+    ThreadWorkspace workspace(...);  // Created once per thread
+    #pragma omp for
+    for (size_t i = 0; i < n; ++i) {
+        // Use workspace...
+    }
+}
+```
+
+**RULE 3: workspace.reset() is safe only for thread-local workspaces**
+- `reset()` modifies internal state (arena pointer, allocation count)
+- Multiple threads calling `reset()` on shared workspace → **undefined behavior**
+- Thread-local workspaces: safe to reset as often as needed
+
+**RULE 4: Write-once shared output is safe**
+```cpp
+std::vector<Result> results(n);  // Shared output array
+
+#pragma omp parallel
+{
+    ThreadWorkspace workspace(...);  // Thread-local
+
+    #pragma omp for
+    for (size_t i = 0; i < n; ++i) {
+        auto result = compute(workspace, i);
+        results[i] = result;  // Safe: each i processed by ONE thread
+    }
+}
+```
+
 ---
 
 ## SIMD Implementation
@@ -933,26 +998,40 @@ std::array<BSplineCoefficients4D, BatchSize> coeffs_array;  // 8 × 2.4 MB = 19.
 **Fitting workflow (remains standard):**
 ```cpp
 // Process BatchSize PDEs in parallel → BatchSize scalar coefficient arrays
-#pragma omp parallel for
-for (size_t b = 0; b < BatchSize; ++b) {
-    // Solve PDE for option b
-    auto prices_b = solve_pde(params[b]);  // Scalar 4D: [Nm][Nt][Nv][Nr]
+// CRITICAL: Use #pragma omp parallel, NOT #pragma omp parallel for
+// Each thread needs its own ThreadWorkspace (thread-local storage)
 
-    // Fit scalar B-spline coefficients (standard algorithm, no SoA)
-    auto fitter = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid).value();
-    auto coeffs_b = fitter.fit(prices_b);  // Scalar 4D output
+#pragma omp parallel
+{
+    // Thread-local workspace (no race conditions)
+    ThreadWorkspace workspace(1 << 22);  // 4MB per thread
 
-    // Store scalar coefficients
-    coeffs_array[b] = coeffs_b.coefficients;  // 2.4 MB per spline
+    #pragma omp for
+    for (size_t b = 0; b < BatchSize; ++b) {
+        // Solve PDE for option b
+        auto prices_b = solve_pde(params[b]);  // Scalar 4D: [Nm][Nt][Nv][Nr]
+
+        // Fit scalar B-spline coefficients (standard algorithm, no SoA)
+        auto fitter = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid).value();
+        auto coeffs_b = fitter.fit(prices_b, workspace);  // Pass workspace
+
+        // Store scalar coefficients
+        coeffs_array[b] = coeffs_b.coefficients;  // 2.4 MB per spline
+
+        workspace.reset();  // Safe: each thread resets its own workspace
+    }
 }
 ```
 
-**No special "batched fitting" needed:** Use existing scalar fitting algorithm in parallel.
+**Threading safety:**
+- ✅ ThreadWorkspace is thread-local (declared inside `#pragma omp parallel`)
+- ✅ Each thread gets independent 4MB arena (no false sharing)
+- ✅ `workspace.reset()` only touches thread-local data (no race)
 
 **Memory efficiency:**
 - Each fit uses ~5KB workspace (1D slices)
-- Per-thread PMR arena: 4MB
-- Output: BatchSize × 2.4 MB (stored separately)
+- Per-thread PMR arena: 4MB (thread-local, safe)
+- Output: BatchSize × 2.4 MB (stored in shared `coeffs_array`, write-once per index)
 
 #### Complete Integration: Batched Queries with Scalar Coefficients
 
@@ -973,6 +1052,8 @@ for (size_t b = 0; b < BatchSize; ++b) {
         workspace.reset();
 
         // Step 2: Fit scalar B-spline coefficients (one per option)
+        // NOTE: Sequential loop inside parallel region is safe
+        // Each thread processes different batch_idx, so no race on workspace
         std::array<BSplineCoefficients4D, BatchSize> coeffs_array;
         for (size_t b = 0; b < BatchSize; ++b) {
             // Extract scalar prices for option b
@@ -983,7 +1064,7 @@ for (size_t b = 0; b < BatchSize; ++b) {
             auto fit_result = fitter.fit(prices_b, workspace);
             coeffs_array[b] = BSplineCoefficients4D{/* ... */};  // 2.4 MB
 
-            workspace.reset();
+            workspace.reset();  // Safe: workspace is thread-local
         }
 
         // Step 3: Use BatchedBSpline4D for efficient query evaluation
