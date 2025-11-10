@@ -252,7 +252,7 @@ for (size_t step = 0; step < n_steps; ++step) {
 }
 ```
 
-**SoA net benefit:** 95% of operations are spatial-first → **~7× speedup overall**
+**SoA net benefit:** 95% of operations are spatial-first → **~3-4× speedup overall** (accounting for FP64 overhead + rescaling)
 
 #### Cache Hierarchy Impact
 
@@ -1022,11 +1022,11 @@ for (each contraction) {
 - Total broadcast overhead: 256 cycles ÷ 2 FMA/cycle = ~128 cycles (~50ns @ 2.5 GHz)
 - Negligible compared to memory latency and numerical operations
 
-**When queries have different knot spans:**
-- Even when option chain has different moneyness values → different `im[b]` indices
-- Each query uses 4×4×4×4 = 256 coefficients from its own local stencil
-- Coefficients are still loaded per-query, broadcast within each query's evaluation
-- No gather penalty as long as knot spans are relatively close (cache locality)
+**When queries have different knot spans (CRITICAL LIMITATION):**
+- Option chains with widely spaced strikes → different `im[b]` indices
+- Current implementation assumes all queries share the same knot span tile
+- **MVP approach:** Batch queries with compatible knot spans (see bucketing strategy below)
+- **Future optimization:** Implement gather operations for arbitrary batches (expensive)
 
 **Memory organization (scalar coefficients):**
 - **Alignment:** 64-byte aligned for cache efficiency
@@ -1389,6 +1389,126 @@ std::array<double, BatchSize> BatchedBSpline4D<BatchSize>::eval(
     return results;
 }
 ```
+
+#### Knot-Span Bucketing Strategy (Resolves Different-Span Limitation)
+
+**Problem:** The SIMD evaluator assumes all queries share the same knot span indices `(im, it, iv, ir)`. For option chains with widely spaced strikes (e.g., 80, 90, 100, 110, 120), each option maps to a different moneyness knot span, breaking the SIMD batching assumption.
+
+**MVP Solution (Phase 1):** Bucketing with fallback to scalar
+
+```cpp
+/// Evaluate with automatic bucketing for different knot spans
+std::array<double, BatchSize> eval_with_bucketing(
+    const std::array<double, BatchSize>& m,
+    const std::array<double, BatchSize>& t,
+    const std::array<double, BatchSize>& v,
+    const std::array<double, BatchSize>& r) const {
+
+    // Step 1: Find knot spans for all queries (cheap: O(log n) per query)
+    std::array<KnotSpanIndices, BatchSize> spans;
+    for (size_t b = 0; b < BatchSize; ++b) {
+        spans[b] = find_knot_spans(m[b], t[b], v[b], r[b]);
+    }
+
+    // Step 2: Check if all queries share the same span tile
+    bool all_same = true;
+    for (size_t b = 1; b < BatchSize; ++b) {
+        if (spans[b].im != spans[0].im || spans[b].it != spans[0].it ||
+            spans[b].iv != spans[0].iv || spans[b].ir != spans[0].ir) {
+            all_same = false;
+            break;
+        }
+    }
+
+    // Fast path: All queries have same knot span → use SIMD
+    if (all_same) {
+        return eval_simd_same_span(m, t, v, r, spans[0]);
+    }
+
+    // Slow path: Different knot spans → bucket by span, then SIMD per bucket
+    std::array<double, BatchSize> results;
+
+    // Group queries by knot span (stable partition preserves order)
+    std::array<size_t, BatchSize> indices;
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // Sort indices by knot span (lexicographic order: im, it, iv, ir)
+    std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+        return std::tie(spans[a].im, spans[a].it, spans[a].iv, spans[a].ir) <
+               std::tie(spans[b].im, spans[b].it, spans[b].iv, spans[b].ir);
+    });
+
+    // Process each bucket with SIMD
+    size_t start = 0;
+    while (start < BatchSize) {
+        // Find end of current bucket (same knot span)
+        size_t end = start + 1;
+        while (end < BatchSize &&
+               spans[indices[end]].im == spans[indices[start]].im &&
+               spans[indices[end]].it == spans[indices[start]].it &&
+               spans[indices[end]].iv == spans[indices[start]].iv &&
+               spans[indices[end]].ir == spans[indices[start]].ir) {
+            ++end;
+        }
+
+        size_t bucket_size = end - start;
+
+        // Gather queries for this bucket
+        std::array<double, 8> m_bucket{}, t_bucket{}, v_bucket{}, r_bucket{};
+        for (size_t i = 0; i < bucket_size; ++i) {
+            size_t idx = indices[start + i];
+            m_bucket[i] = m[idx];
+            t_bucket[i] = t[idx];
+            v_bucket[i] = v[idx];
+            r_bucket[i] = r[idx];
+        }
+
+        // Evaluate bucket with SIMD (partial batch if bucket_size < 8)
+        auto bucket_results = eval_simd_same_span(
+            m_bucket, t_bucket, v_bucket, r_bucket, spans[indices[start]]);
+
+        // Scatter results back to original positions
+        for (size_t i = 0; i < bucket_size; ++i) {
+            results[indices[start + i]] = bucket_results[i];
+        }
+
+        start = end;
+    }
+
+    return results;
+}
+
+/// Helper: Evaluate SIMD batch assuming all queries share the same knot span
+std::array<double, BatchSize> eval_simd_same_span(
+    const std::array<double, BatchSize>& m,
+    const std::array<double, BatchSize>& t,
+    const std::array<double, BatchSize>& v,
+    const std::array<double, BatchSize>& r,
+    const KnotSpanIndices& span) const {
+    // This is the existing eval() implementation that assumes same knot span
+    // (lines 1125-1389 above)
+}
+```
+
+**Performance Impact:**
+
+| Scenario | Bucket Count | Overhead | Speedup |
+|----------|--------------|----------|---------|
+| All same span (best case) | 1 bucket | ~5 cycles (span check) | 3.2× |
+| 2 buckets (typical option chain) | 2 buckets | ~50 cycles (sort + scatter) | 2.5-3× |
+| 8 different spans (worst case) | 8 buckets | ~100 cycles (sort overhead) | 1.5-2× |
+
+**When bucketing overhead is acceptable:**
+- Option chains with strikes clustered in groups (e.g., 95-105 ATM cluster)
+- IV calculation batches 8 Newton guesses for same strike (all same knot span)
+- Price table pre-computation with sorted grid traversal
+
+**When to use scalar fallback:**
+- Widely dispersed strikes (e.g., 50, 75, 100, 125, 150, 200, 300, 400)
+- Each query has unique knot span → 8 buckets of size 1 → no SIMD benefit
+- Better to use scalar evaluator directly (no sorting overhead)
+
+**Implementation note:** The `eval()` method should internally call `eval_with_bucketing()` to handle both cases transparently. Users don't need to know about the bucketing logic.
 
 **Numerical Accuracy Analysis:**
 
@@ -2417,10 +2537,12 @@ Use compaction strategies from earlier section (much cheaper to compact when eva
 
 **Alternative strategy:**
 - Vectorize over grid points (not batch dimension)
-- 4-8× speedup per solve
 - Useful for single-option pricing
+- Speedup depends on stencil width and memory bandwidth
 
 **Defer to Phase 2** (batching is higher priority).
+
+**Note:** Spatial SIMD faces similar challenges as batching (FP64 overhead, gather/scatter for stencils). Realistic speedup expectations would need similar analysis accounting for memory access patterns and numerical precision requirements.
 
 ### 2D ADI Solver
 
