@@ -986,6 +986,308 @@ for (size_t j = 0; j < Nt; ++j) {
 
 ---
 
+## Handling Asynchronous Convergence in Batched Newton
+
+**Critical Challenge:** In batched IV solving, different options converge at different iterations:
+- ATM options: 3-5 iterations
+- Deep ITM/OTM: 6-10 iterations
+- Near boundaries: May fail or hit max_iter
+
+**Problem:** "Dead lanes" waste SIMD width when some options finish early.
+
+### Strategy 1: Masked Lanes (Simplest)
+
+Keep fixed SIMD width, disable converged lanes using masks.
+
+**Best for:** AVX-512 (native masked ops), option chains with similar convergence behavior.
+
+```cpp
+template<size_t BatchSize>
+std::array<IVResult, BatchSize> solve_masked(
+    const BatchedBSpline4D<BatchSize>& spline,
+    const std::array<IVQuery, BatchSize>& queries)
+{
+    using Vec = stdx::native_simd<double>;
+    constexpr size_t VecSize = Vec::size();
+
+    // Initialize state
+    Vec sigma[BatchSize / VecSize];
+    Vec target[BatchSize / VecSize];
+    stdx::fixed_size_simd<bool, VecSize> active_mask[BatchSize / VecSize];
+
+    // Load initial data
+    for (size_t vec_idx = 0; vec_idx < BatchSize / VecSize; ++vec_idx) {
+        active_mask[vec_idx] = stdx::fixed_size_simd<bool, VecSize>(true);  // All active
+        // ... load sigma, target ...
+    }
+
+    // Newton iteration with masking
+    for (int iter = 0; iter < max_iter; ++iter) {
+        // Evaluate prices (masked)
+        for (size_t vec_idx = 0; vec_idx < BatchSize / VecSize; ++vec_idx) {
+            if (!stdx::any_of(active_mask[vec_idx])) continue;  // Skip fully converged vectors
+
+            // Evaluate B-spline for active lanes only
+            Vec prices = evaluate_masked(spline, queries, sigma[vec_idx], active_mask[vec_idx]);
+            Vec vegas = evaluate_vega_masked(spline, queries, sigma[vec_idx], active_mask[vec_idx]);
+
+            // Newton update (masked)
+            Vec error = target[vec_idx] - prices;
+            Vec delta = error / stdx::max(stdx::abs(vegas), Vec(1e-8));
+
+            // Conditional update: only active lanes
+            stdx::where(active_mask[vec_idx], sigma[vec_idx]) += delta * 0.8;
+
+            // Check convergence
+            auto converged = (stdx::abs(error) < Vec(tolerance)) && active_mask[vec_idx];
+            active_mask[vec_idx] = active_mask[vec_idx] && !converged;
+        }
+
+        // Early exit if all converged
+        bool any_active = false;
+        for (size_t vec_idx = 0; vec_idx < BatchSize / VecSize; ++vec_idx) {
+            if (stdx::any_of(active_mask[vec_idx])) {
+                any_active = true;
+                break;
+            }
+        }
+        if (!any_active) break;
+    }
+
+    // Extract results...
+}
+```
+
+**Performance characteristics:**
+- ✅ Simple implementation (no data movement)
+- ✅ SIMD width constant (no recompilation)
+- ⚠️ Wasted cycles on converged lanes (masked ops still execute)
+- **Best case:** All converge in similar iterations → ~8× speedup
+- **Worst case:** 1 option takes 10 iters, 7 finish in 3 → ~3× effective speedup
+
+**AVX-512 advantage:** True masked operations (zero cost for disabled lanes).
+**AVX2 fallback:** Use blended ops (`_mm256_blendv_pd`) - some cost remains.
+
+---
+
+### Strategy 2: Dynamic Compaction (Best Utilization)
+
+Remove converged options, compact remaining to fill SIMD lanes.
+
+**Best for:** Large batches (100+ options), wide convergence spread, high-throughput scenarios.
+
+```cpp
+template<size_t MaxBatchSize>
+class DynamicBatchedIVSolver {
+public:
+    struct ActiveOption {
+        size_t original_idx;  // Map back to input
+        double moneyness;
+        double maturity;
+        double sigma;
+        double target_price;
+        double last_error;
+    };
+
+    std::vector<IVResult> solve_compacted(
+        const BatchedBSpline4D<8>& spline,
+        const std::vector<IVQuery>& queries)
+    {
+        constexpr size_t VecSize = 8;  // AVX-512
+        std::vector<IVResult> results(queries.size());
+
+        // SoA active working set
+        std::vector<double> m_active, tau_active, sigma_active, target_active;
+        std::vector<size_t> original_idx;
+
+        // Initialize from queries
+        for (size_t i = 0; i < queries.size(); ++i) {
+            m_active.push_back(queries[i].moneyness);
+            tau_active.push_back(queries[i].maturity);
+            sigma_active.push_back(queries[i].vol_guess);
+            target_active.push_back(queries[i].market_price);
+            original_idx.push_back(i);
+        }
+
+        size_t active_count = queries.size();
+
+        // Newton iteration with compaction
+        for (int iter = 0; iter < max_iter && active_count > 0; ++iter) {
+            // Process in SIMD batches of VecSize
+            size_t new_active_count = 0;
+
+            for (size_t batch_start = 0; batch_start < active_count; batch_start += VecSize) {
+                size_t batch_size = std::min(VecSize, active_count - batch_start);
+
+                // Load batch into SIMD (with padding if partial)
+                std::array<double, VecSize> m_batch, tau_batch, sigma_batch, target_batch;
+                for (size_t i = 0; i < batch_size; ++i) {
+                    m_batch[i] = m_active[batch_start + i];
+                    tau_batch[i] = tau_active[batch_start + i];
+                    sigma_batch[i] = sigma_active[batch_start + i];
+                    target_batch[i] = target_active[batch_start + i];
+                }
+
+                // Evaluate (SIMD)
+                auto prices = spline.eval(m_batch, tau_batch, sigma_batch,
+                                         std::array<double, VecSize>{0.05, /*...*/});
+                auto vegas = compute_vega(spline, m_batch, tau_batch, sigma_batch);
+
+                // Newton updates
+                for (size_t i = 0; i < batch_size; ++i) {
+                    double error = target_batch[i] - prices[i];
+                    double delta = error / std::max(std::abs(vegas[i]), 1e-8);
+                    double sigma_new = sigma_batch[i] + 0.8 * delta;
+
+                    // Convergence check
+                    if (std::abs(error) < tolerance && std::abs(delta) < tolerance) {
+                        // Converged - write result
+                        size_t orig_idx = original_idx[batch_start + i];
+                        results[orig_idx] = {sigma_new, true, iter + 1, std::abs(error), {}};
+                    } else {
+                        // Still active - compact to front
+                        m_active[new_active_count] = m_batch[i];
+                        tau_active[new_active_count] = tau_batch[i];
+                        sigma_active[new_active_count] = sigma_new;
+                        target_active[new_active_count] = target_batch[i];
+                        original_idx[new_active_count] = original_idx[batch_start + i];
+                        new_active_count++;
+                    }
+                }
+            }
+
+            active_count = new_active_count;
+        }
+
+        // Handle non-converged (active_count > 0 after max_iter)
+        for (size_t i = 0; i < active_count; ++i) {
+            size_t orig_idx = original_idx[i];
+            results[orig_idx] = {sigma_active[i], false, max_iter,
+                               std::abs(target_active[i] - /* last price */),
+                               "Max iterations exceeded"};
+        }
+
+        return results;
+    }
+};
+```
+
+**Performance characteristics:**
+- ✅ Near-perfect SIMD utilization (always fills lanes)
+- ✅ Handles pathological cases (3 iterations vs 10 iterations)
+- ⚠️ Some overhead from compaction (swaps + index tracking)
+- **Best case:** Same as Strategy 1 (~8× speedup)
+- **Worst case (ragged):** ~6-7× speedup (vs ~3× for masked)
+
+**Memory layout benefit:** SoA makes compaction cheap (swap 8 doubles, not entire structs).
+
+---
+
+### Strategy 3: Work-Stealing Queues (Production Scale)
+
+Combine Strategy 2 with global work queue for multi-threaded throughput.
+
+**Best for:** Overnight calibration, surface generation, batch processing 1000s of options.
+
+```cpp
+class WorkStealingIVEngine {
+public:
+    struct WorkQueue {
+        std::mutex mutex;
+        std::vector<IVQuery> pending;
+        std::vector<IVResult> results;
+
+        std::optional<std::array<IVQuery, 8>> take_batch() {
+            std::lock_guard lock(mutex);
+            if (pending.size() < 8) {
+                if (pending.empty()) return std::nullopt;
+                // Partial batch - pad or handle specially
+            }
+
+            std::array<IVQuery, 8> batch;
+            std::copy_n(pending.end() - 8, 8, batch.begin());
+            pending.resize(pending.size() - 8);
+            return batch;
+        }
+
+        void return_results(const std::array<IVResult, 8>& batch_results) {
+            std::lock_guard lock(mutex);
+            results.insert(results.end(), batch_results.begin(), batch_results.end());
+        }
+    };
+
+    void solve_parallel(const std::vector<IVQuery>& all_queries) {
+        WorkQueue queue;
+        queue.pending = all_queries;
+        queue.results.reserve(all_queries.size());
+
+        #pragma omp parallel
+        {
+            ThreadWorkspace workspace(1 << 22);
+            BatchedBSpline4D<8> spline = /* ... */;
+            DynamicBatchedIVSolver<8> solver;
+
+            while (true) {
+                auto batch = queue.take_batch();
+                if (!batch.has_value()) break;
+
+                // Solve batch with Strategy 2 (compaction inside)
+                auto batch_results = solver.solve_compacted(spline, *batch);
+
+                queue.return_results(batch_results);
+                workspace.reset();
+            }
+        }
+
+        // All results in queue.results
+    }
+};
+```
+
+**Performance characteristics:**
+- ✅ Maximum throughput (scales across cores)
+- ✅ Natural load balancing (threads steal work)
+- ✅ SIMD stays full (compaction + fresh work)
+- ⚠️ Slight latency per job (queue overhead)
+- **Throughput:** 1000 options / (125 batches × 15ms) ≈ **533 options/sec/core**
+- **16 cores:** ~8500 options/sec
+
+---
+
+### Handling Pathological Outliers
+
+If 1-2 options take 10+ iterations while most finish in 3-5:
+
+```cpp
+// Inside compaction loop:
+if (iter > 6 && active_count < VecSize / 2) {
+    // Eject slow options to scalar fallback
+    for (size_t i = 0; i < active_count; ++i) {
+        results[original_idx[i]] = solve_scalar_fallback(
+            spline, {m_active[i], tau_active[i], sigma_active[i], target_active[i]});
+    }
+    active_count = 0;  // Early exit
+}
+```
+
+**Prevents:** Tail drag where 7 lanes idle waiting for 1 slow option.
+
+---
+
+### Recommendation
+
+**Start with:** Strategy 1 (masked lanes) for simplicity
+- Good enough for option chains (8-20 strikes, similar convergence)
+- AVX-512 makes masking nearly free
+
+**Upgrade to:** Strategy 2 (compaction) if profiling shows low utilization
+- Worthwhile when: std_dev(iterations) > 3 or batch_size > 32
+
+**Production systems:** Strategy 3 (queue + compaction)
+- Essential for calibration engines processing 1000s of options
+
+---
+
 ## Performance Targets
 
 ### Batched IV Solver
