@@ -1644,15 +1644,46 @@ if (iter > 6 && active_count < VecSize / 2) {
 
 ### Memory Overhead
 
-**Per-batch working set:**
-- Persistent state: 3 × (101 points × 8 batch × 8 bytes) = **19KB**
-- Temporaries (per time step): 5 × 19KB = **95KB**
-- Total: **~114KB per batch** (fits in L2 cache)
+**Reality: Batching increases memory usage (acceptable tradeoff for 5-8× speedup)**
 
-**Comparison to sequential:**
-- Sequential: 8 × 19KB = 152KB (separate solver instances)
-- Batched: 114KB (shared grid, tiled layout)
-- Memory savings: **25%**
+**Per-option memory usage:**
+- **Serial:** ~15KB per option (single state vectors)
+  - 3 arrays × (101 points × 8 bytes) ≈ 2.4KB persistent
+  - Temporaries: ~12KB per option
+- **Batched:** ~19KB per option (27% increase)
+  - 3 arrays × (101 points × 8 batch × 8 bytes) = 19KB persistent state
+  - Must keep 8 option states in cache simultaneously
+  - Larger temporaries for batched operations
+
+**Why memory increases:**
+1. **Persistent state:** 3 × (n_points × batch_size) vs 3 × n_points
+   - Serial: 3 × 101 = 303 doubles per option
+   - Batched: 3 × 101 × 8 = 2424 doubles for 8 options
+   - Per-option: 303 doubles vs 303 doubles (same), BUT held simultaneously
+2. **Working set pressure:** Batched solver must keep all 8 states hot
+   - Serial: only 1 state active (better L1 utilization)
+   - Batched: 8 states compete for cache (worse locality per option)
+3. **Temporary buffers:** Batched operations need larger scratch space
+   - SIMD temporaries: 8× larger than scalar
+   - mdspan views: additional bookkeeping
+
+**Total memory for 8 options:**
+- Serial: 8 × 15KB = **120KB** (8 independent solver instances)
+- Batched: 8 × 19KB = **152KB** (single batched instance)
+- **Memory overhead: +27% (32KB increase)**
+
+**But this is acceptable because:**
+- ✅ **5-8× throughput improvement** far outweighs 27% memory cost
+- ✅ Still fits comfortably in L2 cache (256KB typical)
+- ✅ Enables option chain IV in 360ms vs 2.4s
+- ✅ Memory cost is amortized across 8 options
+
+**Cache hierarchy impact:**
+- L1 (32KB): Single-option state fits perfectly
+- L2 (256KB): Batched working set (152KB) fits comfortably
+- L3 (shared): Contention reduced vs 8 sequential solves
+
+**Design principle:** Accept modest memory increase for massive throughput gain.
 
 ---
 
