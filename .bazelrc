@@ -5,3 +5,12 @@
 build --color=yes
 test --color=yes
 test --test_output=errors
+
+# Performance optimizations (Issue #141)
+# Enable OpenMP for SIMD pragmas
+build --copt=-fopenmp
+build --linkopt=-fopenmp
+
+# Parallel LTO compilation (speeds up link time)
+build --copt=-flto=auto
+build --linkopt=-flto=auto
