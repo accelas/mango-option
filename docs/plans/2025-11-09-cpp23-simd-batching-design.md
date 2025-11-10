@@ -1427,27 +1427,46 @@ std::array<double, BatchSize> BatchedBSpline4D<BatchSize>::eval(
 #### Expected Performance
 
 **Baseline (scalar, current):**
-- 256 FMAs × 0.5 cycles (FMA throughput) = **128 cycles**
-- Memory: 256 × 8 bytes = 2KB → ~50 cycles (L1 cache)
-- **Total: ~180 cycles** ≈ 100-200ns @ 2.5 GHz
+- Tensor-product: 4+4+4+4 = 16 contractions (sum-factorization)
+- Each contraction: 4 FMAs × 0.5 cycles = 2 cycles
+- Total compute: 16 × 2 = **32 cycles**
+- Memory: 256 coefficients × 8 bytes = 2KB → ~50 cycles (L1 cache)
+- Basis evaluation: ~30 cycles (4 Cox-de Boor recursions)
+- **Total: ~112 cycles** ≈ **45ns @ 2.5 GHz**
 
-**Batched SIMD (this design):**
-- FP32 inner: 256 FMAs / (16 lanes × 2 FMA units) = **8 cycles per micro-block** × 16 blocks = **128 cycles**
-- Memory (SoA): Contiguous loads, same 2KB footprint → ~50 cycles
-- FP64 reduction: 16 blocks × 2 cycles = **32 cycles**
-- **Total: ~210 cycles for 8 queries** ≈ **26 cycles per query** ≈ **10-15ns @ 2.5 GHz**
+**Batched SIMD (this design with FP64 + rescaling):**
+- Code uses `stdx::native_simd<double>` → **8 lanes (FP64)** on AVX-512
+- Each contraction: 4 × 4 coefficient loads + broadcasts = ~16 cycles
+  - Load scalar coefficient: 1 cycle
+  - Broadcast to 8 lanes: 1 cycle
+  - FMA: 0.5 cycles × 8 lanes / 2 FMA units = 2 cycles
+  - Subtotal per 4-term dot product: (1+1+2) × 4 = **16 cycles**
+- Power-of-two rescaling per contraction:
+  - 8 × frexp calls: ~24 cycles (3 cycles each, scalar operation)
+  - 8 × ldexp calls at end: ~24 cycles
+  - Subtotal: **48 cycles rescaling overhead**
+- Total per contraction: 16 + 48÷4 = **28 cycles** (amortized rescaling)
+- 4 contractions: 28 × 4 = **112 cycles compute**
+- Memory: Same 2KB, but sequential access across 8 queries → ~50 cycles
+- Basis evaluation (batched): 4 × 8 evaluations = ~120 cycles
+- **Total: ~282 cycles for 8 queries** ≈ **35 cycles per query** ≈ **14ns @ 2.5 GHz**
 
-**Speedup: 180/26 ≈ 7× per query** (close to theoretical 8× SIMD width)
+**Speedup: 112/35 ≈ 3.2× per query** (not 8× due to rescaling overhead)
 
-**Why not full 8×:**
-- Overhead from FP32↔FP64 conversion (~10-15 cycles)
-- Kahan compensation adds 3 ops per block
-- Cache/memory bandwidth (still bottleneck at high throughput)
+**Why not 8× speedup:**
+- Scalar frexp/ldexp operations: ~48 cycles overhead per batch (not vectorized)
+- Coefficient broadcast: 1 cycle overhead × 256 = 256 cycles total
+- Basis evaluation: partially serialized (knot span search)
+- Memory bandwidth: still bottleneck for cache-cold data
+
+**Realistic speedup estimate: 2.5-4× for typical workloads**
 
 **Practical throughput:**
-- Serial: 1 / 180 cycles = **14M queries/sec** (single core)
-- Batched: 8 / 210 cycles = **95M queries/sec** (single core, 8-way batches)
-- **Speedup: 6.8×** (matches your 2-6× estimate for real-world workloads)
+- Serial: 1 / 112 cycles = **22M queries/sec** (single core)
+- Batched: 8 / 282 cycles = **71M queries/sec** (single core, 8-way batches)
+- **Actual speedup: 3.2×** (more realistic than original 7× claim)
+
+**Note:** If rescaling overhead proves excessive, could switch to FP32 inner loop with FP64 accumulation (reduces rescaling need), but requires accuracy validation for Greeks.
 
 #### Batched Fitting: Scalar Output (NOT SoA)
 
@@ -1898,42 +1917,50 @@ if (iter > 6 && active_count < VecSize / 2) {
 
 **Per-option memory usage:**
 - **Serial:** ~15KB per option (single state vectors)
-  - 3 arrays × (101 points × 8 bytes) ≈ 2.4KB persistent
-  - Temporaries: ~12KB per option
+  - 3 arrays × (101 points × 8 bytes) = 2.4KB persistent state per option
+  - Temporaries: ~12KB per option (tridiagonal solver workspace, RHS arrays)
 - **Batched:** ~19KB per option (27% increase)
-  - 3 arrays × (101 points × 8 batch × 8 bytes) = 19KB persistent state
-  - Must keep 8 option states in cache simultaneously
-  - Larger temporaries for batched operations
+  - Persistent state: **19KB total for batch of 8** = 2.4KB per option (same as serial!)
+    - 3 arrays × (101 points × 8 batch × 8 bytes) = 19KB shared across 8 options
+  - BUT: Must keep all 8 option states hot simultaneously (worse L1 utilization)
+  - Temporaries: ~14KB per option (SIMD workspace slightly larger)
 
-**Why memory increases:**
-1. **Persistent state:** 3 × (n_points × batch_size) vs 3 × n_points
-   - Serial: 3 × 101 = 303 doubles per option
-   - Batched: 3 × 101 × 8 = 2424 doubles for 8 options
-   - Per-option: 303 doubles vs 303 doubles (same), BUT held simultaneously
-2. **Working set pressure:** Batched solver must keep all 8 states hot
-   - Serial: only 1 state active (better L1 utilization)
-   - Batched: 8 states compete for cache (worse locality per option)
-3. **Temporary buffers:** Batched operations need larger scratch space
-   - SIMD temporaries: 8× larger than scalar
-   - mdspan views: additional bookkeeping
+**Why memory appears to increase:**
+1. **Persistent state (per-batch vs per-option accounting):**
+   - Serial: 3 × 101 = 303 doubles = 2.4KB **per option** × 8 options = **19.2KB total**
+   - Batched: 3 × 101 × 8 = 2424 doubles = **19.2KB total for batch**
+   - **Same persistent memory!** But held in single SoA array vs 8 separate arrays
+2. **Working set pressure (cache utilization):**
+   - Serial: Process 1 option at a time → 2.4KB active (fits L1)
+   - Batched: All 8 options active simultaneously → 19.2KB working set (fits L2, not L1)
+   - **Cache impact:** Serial has better L1 utilization, batched uses L2
+3. **Temporary buffers (slight increase):**
+   - Serial: ~12KB temporaries per option (scalar operations)
+   - Batched: ~14KB temporaries per option (SIMD workspace + alignment)
+   - **Actual increase:** 2KB per option from SIMD bookkeeping
 
 **Total memory for 8 options:**
-- Serial: 8 × 15KB = **120KB** (8 independent solver instances)
-- Batched: 8 × 19KB = **152KB** (single batched instance)
-- **Memory overhead: +27% (32KB increase)**
+- Serial: 8 × (2.4KB + 12KB) = **115KB** (8 independent solver instances)
+- Batched: 19.2KB + 8 × 14KB = **131KB** (single batched instance)
+- **Memory overhead: +14% (16KB increase)** - less than originally claimed!
+
+**Where the increase comes from:**
+- NOT from persistent state (same: 19.2KB)
+- FROM temporaries: 8 × 14KB vs 8 × 12KB = +16KB
+- FROM cache pressure: L2 vs L1 (performance impact, not size)
 
 **But this is acceptable because:**
-- ✅ **5-8× throughput improvement** far outweighs 27% memory cost
-- ✅ Still fits comfortably in L2 cache (256KB typical)
-- ✅ Enables option chain IV in 360ms vs 2.4s
-- ✅ Memory cost is amortized across 8 options
+- ✅ **3-4× throughput improvement** (realistic estimate) far outweighs 14% memory cost
+- ✅ Still fits comfortably in L2 cache (131KB vs 256KB typical)
+- ✅ Enables option chain IV in ~500ms vs 2.4s
+- ✅ Memory cost is mostly from SIMD temporaries, not persistent state
 
 **Cache hierarchy impact:**
-- L1 (32KB): Single-option state fits perfectly
-- L2 (256KB): Batched working set (152KB) fits comfortably
-- L3 (shared): Contention reduced vs 8 sequential solves
+- L1 (32KB): Serial uses L1 perfectly (2.4KB per option)
+- L2 (256KB): Batched uses L2 (19.2KB working set + 112KB temps = 131KB total)
+- **Tradeoff:** Serial has better cache locality, batched has better throughput
 
-**Design principle:** Accept modest memory increase for massive throughput gain.
+**Design principle:** Accept 14% memory increase and L2 cache usage for 3-4× throughput gain.
 
 ---
 
