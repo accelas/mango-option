@@ -597,74 +597,116 @@ double c_soa_[Nm][Nt][Nv][Nr][BatchSize];  // Batch dimension innermost
 - ✅ **Greeks scan:** Delta-hedging across small moneyness range → adjacent tiles
 - ✅ **Calibration:** Fitting entire vol surface → systematic sweep over (m, τ, σ, r)
 
-#### SoA Coefficient Memory Layout
+#### Correct Memory Layout: Scalar Coefficients, Batched Queries
 
+**CRITICAL:** Coefficients are stored as **4D scalar arrays**, NOT 5D SoA. Batch dimension is latent (query-time only).
+
+**Why 5D SoA is wrong:**
 ```cpp
-/// SoA coefficient storage for batched B-spline evaluation
-template<size_t BatchSize>
-struct BatchedBSplineCoefficients {
+// ❌ WRONG: 5D coefficient storage
+double c_soa_[Nm][Nt][Nv][Nr][BatchSize];  // 50×30×20×10×8 = 19.2 MB per spline
+// For 2000 splines in price table: 19.2 MB × 2000 = 38.4 GB (impractical!)
+```
+
+**Correct approach:**
+```cpp
+// ✅ CORRECT: 4D scalar coefficient storage
+struct BSplineCoefficients4D {
     size_t Nm, Nt, Nv, Nr;  // Grid dimensions
 
-    // Coefficients: [Nm][Nt][Nv][Nr][BatchSize]
-    // Total size: Nm × Nt × Nv × Nr × BatchSize × 8 bytes
-    // Example (50×30×20×10×8): ~2.3 MB
+    // Coefficients: [Nm][Nt][Nv][Nr] (NO batch dimension)
+    // Total size: Nm × Nt × Nv × Nr × 8 bytes
+    // Example (50×30×20×10): 2.4 MB per spline
     alignas(64) std::vector<double> data;
 
-    // Accessor with correct layout
-    double& operator()(size_t i, size_t j, size_t k, size_t l, size_t batch) {
-        size_t idx = ((((i * Nt + j) * Nv + k) * Nr + l) * BatchSize + batch);
-        return data[idx];
+    // Scalar accessor
+    double& operator()(size_t i, size_t j, size_t k, size_t l) {
+        return data[((i * Nt + j) * Nv + k) * Nr + l];
     }
 
-    const double& operator()(size_t i, size_t j, size_t k, size_t l, size_t batch) const {
-        size_t idx = ((((i * Nt + j) * Nv + k) * Nr + l) * BatchSize + batch);
-        return data[idx];
-    }
-
-    // mdspan view for tile-friendly access
-    using CoeffLayout = layout_tiled<dextents<5>, 4, 4, 4, 4, BatchSize>;
-    auto as_mdspan() {
-        return mdspan<double, dextents<5>, CoeffLayout>(
-            data.data(), Nm, Nt, Nv, Nr, BatchSize);
+    const double& operator()(size_t i, size_t j, size_t k, size_t l) const {
+        return data[((i * Nt + j) * Nv + k) * Nr + l];
     }
 };
 ```
 
-**Memory organization:**
-- **Alignment:** 64-byte aligned for AVX-512 (8 doubles per cacheline)
-- **Tile size:** `(4, 4, 4, 4, BatchSize)` = 256 × BatchSize coefficients per tile
-  - For BatchSize=8: 256 × 8 × 8 bytes = **16 KB per tile** (fits in L1 cache)
-  - For BatchSize=16: 256 × 16 × 8 bytes = **32 KB per tile** (still L1-friendly)
-- **Layout:** Batch dimension is innermost for contiguous SIMD loads
+**Memory savings:**
+- **Scalar storage:** 2.4 MB × 2000 splines = **4.8 GB** (reasonable)
+- **5D SoA storage:** 19.2 MB × 2000 splines = **38.4 GB** (impractical)
+- **Savings: 8× reduction** (BatchSize factor eliminated)
 
-**Tile design rationale:**
-- `4×4×4×4` matches cubic B-spline stencil (4 nonzero basis per dimension)
-- Single query touches exactly one tile (256 coefficients)
-- Nearby queries (option chains, Greeks) share cache tiles
-- Prefetching next tile during eval hides memory latency
+**Batch dimension is query-time, not storage:**
+```cpp
+// Queries in SoA layout (batch dimension here)
+std::array<double, BatchSize> m_queries = {0.95, 1.0, 1.05, ...};  // 8 strikes
+std::array<double, BatchSize> tau_queries = {1.0, 1.0, 1.0, ...};  // Same maturity
+
+// Coefficients are scalar (shared across all queries)
+BSplineCoefficients4D coeffs;  // 2.4 MB, ONE copy
+
+// SIMD evaluation: broadcast coefficient → lanes
+for (size_t i = 0; i < 256; ++i) {  // 4×4×4×4 tensor-product stencil
+    double coeff_scalar = coeffs(a, b, c, d);  // Load once
+
+    // Broadcast to SIMD lanes
+    Vec8 coeff_vec = Vec8(coeff_scalar);  // _mm512_set1_pd on AVX-512
+
+    // SIMD FMA across 8 queries
+    result_vec = stdx::fma(coeff_vec, weight_vec, result_vec);
+}
+```
+
+**Why broadcasting is efficient:**
+- Cubic B-spline stencil: 256 coefficients per query
+- Broadcast cost: 1 cycle (replicate scalar → 8 lanes)
+- FMA throughput: 2 per cycle (AVX-512)
+- **Bottleneck:** Memory bandwidth (loading 256 coefficients), NOT broadcast
+
+**Alternative for scattered queries (tile-based):**
+```cpp
+// If queries fall in different tiles, use gather within tile
+// For L1-resident tile (4×4×4×4 = 2KB), gather acceptable
+
+alignas(64) int64_t indices[8] = {idx0, idx1, idx2, ...};  // Per-query offsets
+Vec8 coeff_vec = _mm512_i64gather_pd(indices, &coeffs.data[tile_base], 8);
+
+// Gather within tile: ~5-7 cycles (vs 20+ for random gather)
+// Acceptable because tile fits L1 cache
+```
+
+**Memory organization (scalar coefficients):**
+- **Alignment:** 64-byte aligned for cache efficiency
+- **Tile size:** `(4, 4, 4, 4)` = 256 coefficients = **2KB per tile** (L1-friendly)
+- **No batch dimension:** Coefficients shared across all queries
+- **Storage per spline:** 2.4 MB (vs 19.2 MB for wrong 5D approach)
 
 #### Batched B-Spline Evaluation API
 
 ```cpp
 /// Batched 4D B-spline evaluator with SIMD acceleration
+/// Uses SCALAR coefficient storage, batches queries only
 template<size_t BatchSize = 8>
 class BatchedBSpline4D {
 public:
-    /// Factory method with SoA coefficients
+    /// Factory method with scalar coefficients (NOT SoA)
     static expected<BatchedBSpline4D, std::string> create(
         std::vector<double> m_grid,
         std::vector<double> t_grid,
         std::vector<double> v_grid,
         std::vector<double> r_grid,
-        BatchedBSplineCoefficients<BatchSize> coefficients);
+        BSplineCoefficients4D coefficients);  // Scalar, not batched!
 
-    /// Evaluate BatchSize queries simultaneously
-    /// All queries must be at same (i, j, k, l) logical indices for optimal performance
+    /// Evaluate BatchSize queries simultaneously (query-SoA, coefficient-scalar)
     /// @param m Moneyness values (BatchSize queries)
     /// @param t Maturity values
     /// @param v Volatility values
     /// @param r Rate values
     /// @return Array of interpolated values
+    ///
+    /// Implementation strategy:
+    /// - Load scalar coefficient once: coeffs(i,j,k,l)
+    /// - Broadcast to SIMD lanes: Vec8(coeff_scalar)
+    /// - FMA with per-query weights: fma(coeff_vec, weight_vec, result_vec)
     [[gnu::target_clones("avx512f", "avx2", "sse2", "default")]]
     std::array<double, BatchSize> eval(
         const std::array<double, BatchSize>& m,
@@ -672,15 +714,14 @@ public:
         const std::array<double, BatchSize>& v,
         const std::array<double, BatchSize>& r) const;
 
-    /// Scalar adapter for single queries (uses batched path internally)
+    /// Scalar adapter for single queries (standard path, not batched)
     double eval_scalar(double m, double t, double v, double r) const {
-        std::array<double, BatchSize> m_batch, t_batch, v_batch, r_batch;
-        m_batch.fill(m); t_batch.fill(t); v_batch.fill(v); r_batch.fill(r);
-        return eval(m_batch, t_batch, v_batch, r_batch)[0];
+        // Use existing scalar BSpline4D_FMA implementation
+        // No batching overhead for single queries
     }
 
 private:
-    BatchedBSplineCoefficients<BatchSize> coeffs_;
+    BSplineCoefficients4D coeffs_;  // Scalar 4D (NOT 5D SoA!)
     std::vector<double> m_grid_, t_grid_, v_grid_, r_grid_;
     std::vector<double> tm_, tt_, tv_, tr_;  // Knot vectors
     size_t Nm_, Nt_, Nv_, Nr_;
@@ -762,29 +803,18 @@ std::array<double, BatchSize> BatchedBSpline4D<BatchSize>::eval(
                             for (int b = block_b; b < block_b + 2; ++b) {
                                 for (int c = block_c; c < block_c + 2; ++c) {
                                     for (int d = block_d; d < block_d + 2; ++d) {
-                                        // Load coefficients (SoA → contiguous!)
-                                        size_t coeff_base = coeffs_.linear_index(
+                                        // Load scalar coefficient (shared across all queries)
+                                        double coeff64_scalar = coeffs_(
                                             im[lane] - 3 + a,
                                             it[lane] - 3 + b,
                                             iv[lane] - 3 + c,
-                                            ir[lane] - 3 + d,
-                                            lane);
+                                            ir[lane] - 3 + d);
 
-                                        // SIMD load: VecSize coefficients at once
-                                        alignas(64) double coeff64[VecSize];
-                                        for (size_t i = 0; i < VecSize; ++i) {
-                                            coeff64[i] = coeffs_.data[coeff_base + i];
-                                        }
+                                        // Cast to FP32 and broadcast to all lanes
+                                        float coeff32_scalar = static_cast<float>(coeff64_scalar);
+                                        Vec32 c32 = Vec32(coeff32_scalar);  // Broadcast: replicate scalar → 8 lanes
 
-                                        // Cast to FP32 for bandwidth
-                                        alignas(64) float coeff32[VecSize];
-                                        for (size_t i = 0; i < VecSize; ++i) {
-                                            coeff32[i] = static_cast<float>(coeff64[i]);
-                                        }
-                                        Vec32 c32;
-                                        c32.copy_from(coeff32, stdx::element_aligned);
-
-                                        // Compute weight product (FP32)
+                                        // Compute weight products (FP32, per-query)
                                         alignas(64) float weight32[VecSize];
                                         for (size_t i = 0; i < VecSize; ++i) {
                                             weight32[i] = wm_fp32[a][lane + i]
@@ -795,7 +825,10 @@ std::array<double, BatchSize> BatchedBSpline4D<BatchSize>::eval(
                                         Vec32 w32;
                                         w32.copy_from(weight32, stdx::element_aligned);
 
-                                        // FMA in FP32 (8× or 16× wide depending on ISA)
+                                        // FMA in FP32: same coefficient × different weights per query
+                                        // c32 = [coeff, coeff, coeff, ...] (broadcast)
+                                        // w32 = [w0, w1, w2, ...] (per-query)
+                                        // result = [coeff*w0, coeff*w1, coeff*w2, ...] (8-way parallel)
                                         sum32 = stdx::fma(c32, w32, sum32);
                                     }
                                 }
@@ -878,72 +911,60 @@ std::array<double, BatchSize> BatchedBSpline4D<BatchSize>::eval(
 - Batched: 8 / 210 cycles = **95M queries/sec** (single core, 8-way batches)
 - **Speedup: 6.8×** (matches your 2-6× estimate for real-world workloads)
 
-#### Batched Fitting: SoA Output from Separable Algorithm
+#### Batched Fitting: Scalar Output (NOT SoA)
 
-To avoid transposing scalar coefficients → SoA, modify `BSplineFitter4DSeparable` to output SoA directly:
+**CRITICAL:** Fitting produces **scalar 4D coefficients for each spline**, not a single 5D SoA tensor.
 
+**Wrong approach (what we're NOT doing):**
 ```cpp
-template<size_t BatchSize>
-class BatchedBSplineFitter4D {
-public:
-    static expected<BatchedBSplineFitter4D, std::string> create(
-        std::vector<double> m_grid,  // Shared grid
-        std::vector<double> t_grid,
-        std::vector<double> v_grid,
-        std::vector<double> r_grid);
-
-    /// Fit BatchSize price tables simultaneously
-    /// @param prices SoA layout: [Nm][Nt][Nv][Nr][BatchSize]
-    /// @param workspace PMR arena for temporaries
-    /// @return SoA coefficients ready for BatchedBSpline4D
-    expected<BatchedBSplineCoefficients<BatchSize>, std::string> fit(
-        const std::vector<double>& prices,  // [Nm * Nt * Nv * Nr * BatchSize]
-        ThreadWorkspace& workspace);
-};
+// ❌ WRONG: Fit all BatchSize splines into single 5D SoA tensor
+BatchedBSplineCoefficients<8> coeffs_soa;  // [Nm][Nt][Nv][Nr][8] = 19.2 MB
 ```
 
-**Key modification:** Separable fitting along each axis processes BatchSize systems simultaneously:
-
+**Correct approach:**
 ```cpp
-// Example: fitting along moneyness axis (r → σ → τ → m order)
-for (size_t j = 0; j < Nt; ++j) {
-    for (size_t k = 0; k < Nv; ++k) {
-        for (size_t l = 0; l < Nr; ++l) {
-            // Extract slice: prices_slice[i, batch] for all i ∈ [0, Nm)
-            std::pmr::vector<double> prices_slice(Nm * BatchSize, workspace.allocator());
-            for (size_t i = 0; i < Nm; ++i) {
-                for (size_t b = 0; b < BatchSize; ++b) {
-                    prices_slice[i * BatchSize + b] = prices[((i*Nt+j)*Nv+k)*Nr+l)*BatchSize + b];
-                }
-            }
+// ✅ CORRECT: Fit BatchSize splines independently, each gets scalar 4D coefficients
+std::array<BSplineCoefficients4D, BatchSize> coeffs_array;  // 8 × 2.4 MB = 19.2 MB total
 
-            // Fit 1D collocation (operates on SoA slice)
-            auto coeffs_slice = fit_1d_soa<BatchSize>(m_grid, prices_slice, workspace);
+// But stored separately (not in single tensor)
+// Each spline: coeffs_array[b](i, j, k, l)  // Scalar 4D
+```
 
-            // Write back to SoA coefficient array
-            for (size_t i = 0; i < Nm; ++i) {
-                for (size_t b = 0; b < BatchSize; ++b) {
-                    coeffs(i, j, k, l, b) = coeffs_slice[i * BatchSize + b];
-                }
-            }
-        }
-    }
+**Fitting workflow (remains standard):**
+```cpp
+// Process BatchSize PDEs in parallel → BatchSize scalar coefficient arrays
+#pragma omp parallel for
+for (size_t b = 0; b < BatchSize; ++b) {
+    // Solve PDE for option b
+    auto prices_b = solve_pde(params[b]);  // Scalar 4D: [Nm][Nt][Nv][Nr]
+
+    // Fit scalar B-spline coefficients (standard algorithm, no SoA)
+    auto fitter = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid).value();
+    auto coeffs_b = fitter.fit(prices_b);  // Scalar 4D output
+
+    // Store scalar coefficients
+    coeffs_array[b] = coeffs_b.coefficients;  // 2.4 MB per spline
 }
 ```
 
-**Memory efficiency:** Reuses workspace for each 1D fit (~5KB per fit), total workspace = 4MB.
+**No special "batched fitting" needed:** Use existing scalar fitting algorithm in parallel.
 
-#### Complete Integration: Price Table → Batched Interpolation
+**Memory efficiency:**
+- Each fit uses ~5KB workspace (1D slices)
+- Per-thread PMR arena: 4MB
+- Output: BatchSize × 2.4 MB (stored separately)
+
+#### Complete Integration: Batched Queries with Scalar Coefficients
 
 ```cpp
-// Full workflow: PDE solving → Fitting → Interpolation
+// Full workflow: PDE solving → Fitting (scalar) → Batched Queries
 #pragma omp parallel
 {
     ThreadWorkspace workspace(1 << 22);  // 4MB per thread
 
     #pragma omp for
     for (size_t batch_idx = 0; batch_idx < n_batches; ++batch_idx) {
-        // Step 1: Solve BatchSize American option PDEs
+        // Step 1: Solve BatchSize American option PDEs (can use batched PDE solver)
         std::array<AmericanOptionParams, BatchSize> params = get_batch_params(batch_idx);
         BatchedPDESolver<BatchSize> pde_solver(grid, time, workspace);
         pde_solver.initialize(params);
@@ -951,16 +972,24 @@ for (size_t j = 0; j < Nt; ++j) {
 
         workspace.reset();
 
-        // Step 2: Fit B-spline coefficients (SoA → SoA)
-        auto fitter = BatchedBSplineFitter4D<BatchSize>::create(
-            m_grid, t_grid, v_grid, r_grid).value();
-        auto coeffs = fitter.fit(pde_result.prices, workspace);
+        // Step 2: Fit scalar B-spline coefficients (one per option)
+        std::array<BSplineCoefficients4D, BatchSize> coeffs_array;
+        for (size_t b = 0; b < BatchSize; ++b) {
+            // Extract scalar prices for option b
+            auto prices_b = extract_scalar_prices(pde_result.prices, b);
 
-        workspace.reset();
+            // Fit using standard scalar algorithm
+            auto fitter = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid).value();
+            auto fit_result = fitter.fit(prices_b, workspace);
+            coeffs_array[b] = BSplineCoefficients4D{/* ... */};  // 2.4 MB
 
-        // Step 3: Store or use batched spline
+            workspace.reset();
+        }
+
+        // Step 3: Use BatchedBSpline4D for efficient query evaluation
+        // (queries batched, coefficients scalar)
         auto spline = BatchedBSpline4D<BatchSize>::create(
-            m_grid, t_grid, v_grid, r_grid, coeffs.value()).value();
+            m_grid, t_grid, v_grid, r_grid, coeffs_array[0]).value();  // One spline
 
         // Query example: option chain Greeks (8 strikes, same maturity/vol/rate)
         std::array<double, BatchSize> strikes = {95, 96, 97, 98, 99, 100, 101, 102};
@@ -971,6 +1000,7 @@ for (size_t j = 0; j < Nt; ++j) {
             {0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05});  // Same rate
 
         // prices[0..7] now contains 8 interpolated option prices (in 10-15ns each!)
+        // Coefficient broadcast makes this efficient despite scalar storage
     }
 }
 ```
