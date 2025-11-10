@@ -14,14 +14,15 @@ This document describes the architecture for upgrading mango-iv to use C++23 fea
 
 **Accelerate IV calculation for option chains via SIMD batching:**
 - Process 8 options simultaneously using structure-of-arrays (SoA) layout
-- Target 8× throughput improvement (8 IVs in time of 1)
+- **Target: 3-4× throughput improvement** (realistic estimate with FP64 + rescaling overhead)
 - Focus on real-world use case: IV surface construction from market data
 
 ### Success Criteria
 
 - Batch IV solver API for option chains (8 strikes simultaneously)
-- ~360ms to compute IV for 20-strike chain (vs 2.4s serial)
+- **~600-750ms to compute IV for 20-strike chain** (vs 2.4s serial, 3-4× improvement)
 - Clean separation: memory allocation, layout, numerical algorithms
+- **Memory overhead: +14%** (from SIMD temporaries, acceptable for throughput gain)
 - Future-proof for mixed-precision kernels (API only, not implemented)
 
 ### C++23 Features Used
@@ -2101,23 +2102,23 @@ Use compaction strategies from earlier section (much cheaper to compact when eva
 **Batched IV calculation (8 options):**
 - Method: Batched Newton with SoA PDE solver
 - Grid: Same (101 × 1000)
-- Time: ~120ms for 8 options simultaneously
-- Speedup: **8× throughput**
+- Time: **~300-360ms for 8 options** (realistic with FP64 + rescaling overhead)
+- Speedup: **3-4× throughput** (not theoretical 8× due to scalar frexp/ldexp)
 
 **Option chain (20 strikes):**
 - Current: 20 × 120ms = **2.4 seconds** (serial)
-- Batched: ⌈20/8⌉ × 120ms = 3 × 120ms = **~360ms**
-- Speedup: **~6.7×**
+- Batched: ⌈20/8⌉ × 300ms ≈ **~600-750ms** (3 batches of 8, 8, 4 strikes)
+- Speedup: **3-4×** (realistic accounting for overhead)
 
 ### Memory Overhead
 
-**Reality: Batching increases memory usage (acceptable tradeoff for 5-8× speedup)**
+**Reality: Batching increases memory usage by 14% (acceptable tradeoff for 3-4× speedup)**
 
 **Per-option memory usage:**
 - **Serial:** ~15KB per option (single state vectors)
   - 3 arrays × (101 points × 8 bytes) = 2.4KB persistent state per option
   - Temporaries: ~12KB per option (tridiagonal solver workspace, RHS arrays)
-- **Batched:** ~19KB per option (27% increase)
+- **Batched:** ~16.4KB per option (+14% increase, NOT 27%)
   - Persistent state: **19KB total for batch of 8** = 2.4KB per option (same as serial!)
     - 3 arrays × (101 points × 8 batch × 8 bytes) = 19KB shared across 8 options
   - BUT: Must keep all 8 option states hot simultaneously (worse L1 utilization)
@@ -2381,9 +2382,9 @@ copts = ["-std=c++23"]
 
 ### Performance Metrics
 
-- [x] Batched IV solver: 8× throughput vs serial (AVX-512)
-- [x] 20-strike chain: <400ms total time (vs 2.4s baseline)
-- [x] Memory overhead: <150KB per batch (L2 cache-friendly)
+- [ ] Batched IV solver: **3-4× throughput vs serial** (realistic with FP64 + rescaling)
+- [ ] 20-strike chain: **<750ms total time** (vs 2.4s baseline, 3-4× improvement)
+- [ ] Memory overhead: **~131KB per batch** (+14% vs serial, L2 cache-friendly)
 
 ### Code Quality Metrics
 
