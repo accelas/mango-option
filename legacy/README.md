@@ -1,6 +1,6 @@
 # Legacy C Implementation
 
-This folder contains the original C23 implementation of the mango-iv PDE solver and option pricing library. The code has been moved here as the project transitions to the C++20 implementation in `src/cpp/`.
+This folder contains the original C23 implementation of the mango-iv PDE solver and option pricing library. The code has been moved here as the project transitions to the C++23 implementation in `src/cpp/`.
 
 ## Contents
 
@@ -34,18 +34,18 @@ This folder contains the original C23 implementation of the mango-iv PDE solver 
 
 ## Migration
 
-The active C++20 implementation provides equivalent (and often enhanced) functionality:
+The active C++23 implementation provides equivalent (and often enhanced) functionality:
 
-| Legacy C | C++20 Replacement |
+| Legacy C | C++23 Replacement |
 |----------|-------------------|
 | `src/pde_solver.c` | `src/cpp/pde_solver.hpp` |
 | `src/american_option.c` | `src/cpp/american_option.hpp` |
 | `src/implied_volatility.c` | `src/cpp/iv_solver.hpp` |
 | `src/cubic_spline.c` | `src/cpp/cubic_spline.hpp` (via tridiagonal_solver) |
-| `src/price_table.c` | C++20 price table (in development) |
-| `src/interp_cubic.c` | C++20 interpolation (in development) |
+| `src/price_table.c` | C++23 price table (in development) |
+| `src/interp_cubic.c` | C++23 interpolation (in development) |
 
-For new development, please use the C++20 API in `src/cpp/`.
+For new development, please use the C++23 API in `src/cpp/`.
 
 ## Building
 
@@ -102,7 +102,7 @@ The `manual` tag ensures these targets:
 
 ## Documentation
 
-Original documentation may reference this C code. The primary documentation has been updated for the C++20 implementation. See:
+Original documentation may reference this C code. The primary documentation has been updated for the C++23 implementation. See:
 - `CLAUDE.md` - Updated project guide
 - `docs/ARCHITECTURE.md` - Architectural overview
-- C++20 API documentation in header files
+- C++23 API documentation in header files

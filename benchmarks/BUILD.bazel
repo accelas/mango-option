@@ -16,7 +16,7 @@ cc_binary(
     name = "component_performance",
     srcs = ["component_performance.cc"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -46,7 +46,7 @@ cc_binary(
     name = "readme_benchmarks",
     srcs = ["readme_benchmarks.cc"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -76,7 +76,7 @@ cc_binary(
     name = "quantlib_performance",
     srcs = ["quantlib_performance.cc"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -102,7 +102,7 @@ cc_binary(
     name = "quantlib_accuracy",
     srcs = ["quantlib_accuracy.cc"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -128,7 +128,7 @@ cc_binary(
     name = "bspline_cache_locality",
     srcs = ["bspline_cache_locality.cc"],
     copts = [
-        "-std=c++20",
+        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",

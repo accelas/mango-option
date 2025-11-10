@@ -473,6 +473,20 @@ TEST(BSpline4DTest, ExactBoundaryEvaluation) {
 
     // All should be close to constant value (B-splines approximate)
     EXPECT_NEAR(val1, 42.0, 5.0);
+    EXPECT_NEAR(val2, 42.0, 5.0);
+    EXPECT_NEAR(val3, 42.0, 5.0);
+    EXPECT_NEAR(val4, 42.0, 5.0);
+    EXPECT_NEAR(val5, 42.0, 5.0);
+    EXPECT_NEAR(val6, 42.0, 5.0);
+    EXPECT_NEAR(val7, 42.0, 5.0);
+    EXPECT_NEAR(val8, 42.0, 5.0);
+    EXPECT_NEAR(val9, 42.0, 5.0);
+    EXPECT_NEAR(val10, 42.0, 5.0);
+    EXPECT_NEAR(val11, 42.0, 5.0);
+    EXPECT_NEAR(val12, 42.0, 5.0);
+    EXPECT_NEAR(val13, 42.0, 5.0);
+    EXPECT_NEAR(val14, 42.0, 5.0);
+    EXPECT_NEAR(val15, 42.0, 5.0);
     EXPECT_NEAR(val16, 42.0, 5.0);
 }
 
