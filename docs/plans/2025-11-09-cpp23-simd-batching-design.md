@@ -861,49 +861,26 @@ for (size_t i = 0; i < 8; ++i) {
 
 **Problem:** Current B-spline evaluation is scalar (~100-200ns per query). For calibration, Greeks computation, and IV surface generation, we need to evaluate thousands of queries. How do we apply SIMD to 4D tensor-product B-splines?
 
-**Solution:** Store coefficients in **SoA layout** and vectorize the tensor-product accumulation using `std::experimental::simd`.
+**Solution:** Store coefficients as **scalar 4D arrays** (one per spline), batch **queries** in SoA layout, and vectorize the tensor-product accumulation using `std::experimental::simd`.
 
-#### Key Insight: SoA Coefficients Eliminate Gathers
+#### Key Insight: Scalar Coefficients + Batched Queries
 
-**The critical realization:** When queries have **similar logical coordinates** in 4D space, SoA coefficient layout provides contiguous memory access.
+**CRITICAL DESIGN DECISION:** Coefficients are stored as **4D scalar arrays** (NOT 5D SoA). Only query coordinates are batched.
 
-**Scalar coefficient layout (current):**
 ```cpp
-// Single system: coefficients in AoS
-double c_scalar_[Nm * Nt * Nv * Nr];  // Row-major: ((i*Nt + j)*Nv + k)*Nr + l
-
-// Query 0 at (i0, j0, k0, l0): needs c_[idx0]
-// Query 1 at (i1, j1, k1, l1): needs c_[idx1]  // Different index!
-// → Gather required → slow
-```
-
-**SoA coefficient layout (batched):**
-```cpp
-// BatchSize systems: coefficients in SoA
-double c_soa_[Nm][Nt][Nv][Nr][BatchSize];  // Batch dimension innermost
-
-// All BatchSize queries at same (i, j, k, l):
-// Load: c_soa_[i][j][k][l][0..BatchSize-1] → contiguous! → fast SIMD load
-```
-
-**When queries have similar coordinates:**
-- ✅ **Option chain:** Same maturity/vol/rate, different strikes → nearby moneyness indices
-- ✅ **IV Newton:** Iterating σ for same strike/maturity → same (m, τ) indices
-- ✅ **Greeks scan:** Delta-hedging across small moneyness range → adjacent tiles
-- ✅ **Calibration:** Fitting entire vol surface → systematic sweep over (m, τ, σ, r)
-
-#### Correct Memory Layout: Scalar Coefficients, Batched Queries
-
-**CRITICAL:** Coefficients are stored as **4D scalar arrays**, NOT 5D SoA. Batch dimension is latent (query-time only).
-
-**Why 5D SoA is wrong:**
-```cpp
-// ❌ WRONG: 5D coefficient storage
+// ❌ WRONG: 5D coefficient storage (DO NOT DO THIS)
 double c_soa_[Nm][Nt][Nv][Nr][BatchSize];  // 50×30×20×10×8 = 19.2 MB per spline
 // For 2000 splines in price table: 19.2 MB × 2000 = 38.4 GB (impractical!)
+// Memory bloat: 8× larger due to batch dimension in storage
 ```
 
-**Correct approach:**
+**Why this is impractical:**
+- Each spline would store BatchSize copies of coefficients
+- Price table with 2000 splines: 38.4 GB vs 4.8 GB (scalar)
+- Batch dimension should be **latent** (query-time only, not materialized)
+- Broadcasting scalar coefficients is cheap (1 cycle), memory bandwidth is the bottleneck
+
+**Correct approach - Scalar 4D coefficient storage:**
 ```cpp
 // ✅ CORRECT: 4D scalar coefficient storage
 struct BSplineCoefficients4D {
@@ -925,49 +902,78 @@ struct BSplineCoefficients4D {
 };
 ```
 
-**Memory savings:**
-- **Scalar storage:** 2.4 MB × 2000 splines = **4.8 GB** (reasonable)
-- **5D SoA storage:** 19.2 MB × 2000 splines = **38.4 GB** (impractical)
-- **Savings: 8× reduction** (BatchSize factor eliminated)
+**Memory comparison:**
+- **Scalar storage (correct):** 2.4 MB × 2000 splines = **4.8 GB** ✅
+- **5D SoA storage (wrong):** 19.2 MB × 2000 splines = **38.4 GB** ❌
+- **Savings: 8× reduction** by keeping batch dimension latent
 
-**Batch dimension is query-time, not storage:**
+#### How Batched Evaluation Works
+
+**Batch dimension is query-time only:**
+
 ```cpp
-// Queries in SoA layout (batch dimension here)
-std::array<double, BatchSize> m_queries = {0.95, 1.0, 1.05, ...};  // 8 strikes
-std::array<double, BatchSize> tau_queries = {1.0, 1.0, 1.0, ...};  // Same maturity
+// Step 1: Queries are batched in SoA layout
+std::array<double, BatchSize> m_queries    = {0.95, 1.0, 1.05, 1.10, ...};  // 8 strikes
+std::array<double, BatchSize> tau_queries  = {1.0, 1.0, 1.0, 1.0, ...};     // Same maturity
+std::array<double, BatchSize> sigma_queries = {0.20, 0.20, 0.20, 0.20, ...}; // Same vol
+std::array<double, BatchSize> r_queries     = {0.05, 0.05, 0.05, 0.05, ...}; // Same rate
 
-// Coefficients are scalar (shared across all queries)
-BSplineCoefficients4D coeffs;  // 2.4 MB, ONE copy
+// Step 2: Find knot spans for each query (per-lane)
+int im[BatchSize], it[BatchSize], iv[BatchSize], ir[BatchSize];
+for (size_t b = 0; b < BatchSize; ++b) {
+    im[b] = find_span_cubic(tm_, m_queries[b]);     // Each query may have different span
+    it[b] = find_span_cubic(tt_, tau_queries[b]);
+    iv[b] = find_span_cubic(tv_, sigma_queries[b]);
+    ir[b] = find_span_cubic(tr_, r_queries[b]);
+}
 
-// SIMD evaluation: broadcast coefficient → lanes
-for (size_t i = 0; i < 256; ++i) {  // 4×4×4×4 tensor-product stencil
-    double coeff_scalar = coeffs(a, b, c, d);  // Load once
+// Step 3: Evaluate basis functions for each query
+double wm[4][BatchSize];  // Column-major: wm[basis_idx][query_idx]
+double wt[4][BatchSize];
+double wv[4][BatchSize];
+double wr[4][BatchSize];
 
-    // Broadcast to SIMD lanes
-    Vec8 coeff_vec = Vec8(coeff_scalar);  // _mm512_set1_pd on AVX-512
+for (size_t b = 0; b < BatchSize; ++b) {
+    cubic_basis_nonuniform(tm_, im[b], m_queries[b], &wm[0][b]);
+    cubic_basis_nonuniform(tt_, it[b], tau_queries[b], &wt[0][b]);
+    cubic_basis_nonuniform(tv_, iv[b], sigma_queries[b], &wv[0][b]);
+    cubic_basis_nonuniform(tr_, ir[b], r_queries[b], &wr[0][b]);
+}
 
-    // SIMD FMA across 8 queries
-    result_vec = stdx::fma(coeff_vec, weight_vec, result_vec);
+// Step 4: Tensor-product sum (4×4×4×4 = 256 terms per query)
+//         Coefficients are SCALAR (loaded once, broadcast to all lanes)
+//         Weights are per-query (SIMD vectors)
+for (each contraction) {
+    // Load scalar coefficient (shared across all queries)
+    double c = coeffs_(i, j, k, l);  // ✅ Scalar load
+
+    // Broadcast to SIMD lanes (1 cycle overhead)
+    Vec c_broadcast = Vec(c);  // Same coefficient for all 8 queries
+
+    // Load per-query weights (SIMD load)
+    Vec w_vec;
+    w_vec.copy_from(&w[idx][0], stdx::element_aligned);  // 8 different weights
+
+    // Multiply-accumulate
+    result_vec = stdx::fma(c_broadcast, w_vec, result_vec);
 }
 ```
 
+**Key insight:** Broadcasting scalar coefficients is cheap (1 cycle), memory bandwidth for loading 256 coefficients is the bottleneck. Storing 5D SoA would only save broadcast overhead while causing 8× memory bloat.
+
 **Why broadcasting is efficient:**
-- Cubic B-spline stencil: 256 coefficients per query
-- Broadcast cost: 1 cycle (replicate scalar → 8 lanes)
+- Cubic B-spline stencil: 256 coefficients per query (via sum-factorization: 4+4+4+4 contractions)
+- Broadcast cost: 1 cycle per coefficient (replicate scalar → 8 lanes)
 - FMA throughput: 2 per cycle (AVX-512)
-- **Bottleneck:** Memory bandwidth (loading 256 coefficients), NOT broadcast
+- **Bottleneck:** Memory bandwidth (loading 256 coefficients), NOT broadcast overhead
+- Total broadcast overhead: 256 cycles ÷ 2 FMA/cycle = ~128 cycles (~50ns @ 2.5 GHz)
+- Negligible compared to memory latency and numerical operations
 
-**Alternative for scattered queries (tile-based):**
-```cpp
-// If queries fall in different tiles, use gather within tile
-// For L1-resident tile (4×4×4×4 = 2KB), gather acceptable
-
-alignas(64) int64_t indices[8] = {idx0, idx1, idx2, ...};  // Per-query offsets
-Vec8 coeff_vec = _mm512_i64gather_pd(indices, &coeffs.data[tile_base], 8);
-
-// Gather within tile: ~5-7 cycles (vs 20+ for random gather)
-// Acceptable because tile fits L1 cache
-```
+**When queries have different knot spans:**
+- Even when option chain has different moneyness values → different `im[b]` indices
+- Each query uses 4×4×4×4 = 256 coefficients from its own local stencil
+- Coefficients are still loaded per-query, broadcast within each query's evaluation
+- No gather penalty as long as knot spans are relatively close (cache locality)
 
 **Memory organization (scalar coefficients):**
 - **Alignment:** 64-byte aligned for cache efficiency
@@ -1099,16 +1105,30 @@ std::array<double, BatchSize> BatchedBSpline4D<BatchSize>::eval(
         alignas(64) int exponent_r[VecSize] = {0};  // Accumulated from r-contraction
         alignas(64) int exponent_v[VecSize] = {0};  // Accumulated from v-contraction
         alignas(64) int exponent_t[VecSize] = {0};  // Accumulated from t-contraction
-        alignas(64) int exponent_m[VecSize] = {0};  // Accumulated from m-contraction
+        // Note: No exponent_m needed - final rescaling uses total of r+v+t exponents
 
         // Contraction 1: Contract along r (innermost)
         // T(i,j,k) = Σₗ C(i,j,k,l) · wᵣ[l]
+        //
+        // CRITICAL LIMITATION: This code assumes all queries in the SIMD vector
+        // have the SAME knot spans (im[lane] == im[lane+1] == ... == im[lane+VecSize-1]).
+        // This is only true when queries are very close in parameter space.
+        //
+        // For option chains with widely spaced strikes, knot spans will differ,
+        // requiring either:
+        // 1. Scalar fallback for each query (no SIMD benefit)
+        // 2. Gather operations to load different coefficients per lane (expensive)
+        // 3. Process queries with same knot span in batches (sorting/bucketing)
+        //
+        // TODO: Implement Strategy 3 (bucket queries by knot span tile)
+        //
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
                 for (int k = 0; k < 4; ++k) {
                     // 4-term dot product (pairwise order for stability)
 
-                    // Load 4 coefficients (broadcast each to SIMD lanes)
+                    // Load 4 coefficients from FIRST query's knot span
+                    // NOTE: Assumes all lanes have same knot span (see limitation above)
                     double c0 = coeffs_(im[lane]-3+i, it[lane]-3+j, iv[lane]-3+k, ir[lane]-3+0);
                     double c1 = coeffs_(im[lane]-3+i, it[lane]-3+j, iv[lane]-3+k, ir[lane]-3+1);
                     double c2 = coeffs_(im[lane]-3+i, it[lane]-3+j, iv[lane]-3+k, ir[lane]-3+2);
