@@ -1852,8 +1852,8 @@ std::array<IVResult, BatchSize> solve_masked(
 - ✅ Simple implementation (no data movement)
 - ✅ SIMD width constant (no recompilation)
 - ⚠️ Wasted cycles on converged lanes (masked ops still execute)
-- **Best case:** All converge in similar iterations → ~8× speedup
-- **Worst case:** 1 option takes 10 iters, 7 finish in 3 → ~3× effective speedup
+- **Best case:** All converge in similar iterations → ~3-4× speedup (realistic with overhead)
+- **Worst case:** 1 option takes 10 iters, 7 finish in 3 → ~1.5-2× effective speedup
 
 **AVX-512 advantage:** True masked operations (zero cost for disabled lanes).
 **AVX2 fallback:** Use blended ops (`_mm256_blendv_pd`) - some cost remains.
@@ -1966,8 +1966,8 @@ public:
 - ✅ Near-perfect SIMD utilization (always fills lanes)
 - ✅ Handles pathological cases (3 iterations vs 10 iterations)
 - ⚠️ Some overhead from compaction (swaps + index tracking)
-- **Best case:** Same as Strategy 1 (~8× speedup)
-- **Worst case (ragged):** ~6-7× speedup (vs ~3× for masked)
+- **Best case:** Same as Strategy 1 (~3-4× speedup, realistic with overhead)
+- **Worst case (ragged):** ~2.5-3× speedup (vs ~1.5-2× for masked)
 
 **Memory layout benefit:** SoA makes compaction cheap (swap 8 doubles, not entire structs).
 
