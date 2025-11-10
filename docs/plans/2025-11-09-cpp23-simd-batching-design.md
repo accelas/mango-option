@@ -2201,18 +2201,22 @@ Use compaction strategies from earlier section (much cheaper to compact when eva
 
 ### Recommendation
 
-**Start with:** Strategy 1 (masked lanes) for simplicity
+**Phase 1 (MVP):** Strategy 1 (masked lanes)
 - Good enough for option chains (8-20 strikes, similar convergence)
 - AVX-512 makes masking nearly free
-- **For PDE phase:** Use Strategy A (per-option flags, accept waste)
+- **For all modules:** Use Strategy A (per-option flags, accept some waste)
+- **Rationale:** Simple implementation, gets us to 3-4× speedup quickly
 
-**Upgrade to:** Strategy 2 (compaction) if profiling shows low utilization
-- Worthwhile when: std_dev(iterations) > 3 or batch_size > 32
-- **For PDE phase:** Use Strategy B (compaction + reinit) to avoid wasted PDE solves
+**Phase 2 (Before Production):** Strategy 2 (compaction) after profiling
+- **Trigger:** If profiling shows >50% wasted compute on PDE solves
+- **Worthwhile when:** std_dev(iterations) > 3 or batch_size > 32
+- **For PDE phase:** Upgrade to Strategy B (compaction + reinit)
+- **For other modules:** Keep Strategy A (overhead is negligible)
 
-**Production systems:** Strategy 3 (queue + compaction)
+**Production Scale:** Strategy 3 (queue + compaction)
 - Essential for calibration engines processing 1000s of options
-- **For PDE phase:** Strategy B mandatory (can't afford 87% compute waste)
+- **For PDE phase:** Strategy B mandatory (can't afford sustained waste)
+- **For other modules:** Queue-based batching for throughput optimization
 
 ---
 
@@ -2380,8 +2384,8 @@ Use compaction strategies from earlier section (much cheaper to compact when eva
 
 **Performance Regression:**
 - Benchmark batched vs serial IV solver
-- Verify 8× speedup on AVX-512
-- Verify 4× speedup on AVX2 (fallback)
+- Verify 3-4× speedup on AVX-512 (realistic with FP64 + rescaling)
+- Verify 2-3× speedup on AVX2 (fallback, 4 lanes)
 
 ### Validation
 
@@ -2492,7 +2496,7 @@ copts = ["-std=c++23"]
 - *Likelihood:* Low
 - *Impact:* Medium
 - *Mitigation:* Benchmarking throughout development, profiling with perf
-- *Verification:* Early prototypes validate 8× speedup assumption
+- *Verification:* Early prototypes validate 3-4× speedup assumption (realistic with FP64 + rescaling overhead)
 
 ### Schedule Risks
 
