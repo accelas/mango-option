@@ -258,7 +258,7 @@ cc_test(
     name = "centered_difference_test",
     srcs = ["centered_difference_test.cc"],
     deps = [
-        "//src/operators:centered_difference",
+        "//src/operators:centered_difference_scalar",
         "//src/operators:grid_spacing",
         "//src:grid",
         "@googletest//:gtest_main",
