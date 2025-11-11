@@ -27,6 +27,10 @@ This collection of scripts provides an end-to-end workflow for:
 - **`requirements.txt`** - Python dependencies (pip-compatible)
 - **`.python-version`** - Python version specification for uv
 
+### Examples
+- **`examples/simple_iv_calculation.py`** - Download and calculate IV for a single ticker
+- **`examples/README.md`** - Example documentation and usage guide
+
 ## Setup
 
 ### 1. Build the C++ Python Bindings
@@ -84,6 +88,21 @@ Or install the module in development mode (recommended):
 # Create a symlink in your Python environment
 ln -s ${BAZEL_BIN}/python/mango_iv.so $(python -c "import site; print(site.getsitepackages()[0])")/
 ```
+
+## Quick Start
+
+### Example: Calculate IV for a single ticker
+
+For a quick demonstration, see the example script:
+
+```bash
+# From scripts/ directory
+python examples/simple_iv_calculation.py AAPL
+```
+
+This will download option data and calculate IV for the nearest expiration, displaying results for ATM options.
+
+**See [examples/README.md](examples/README.md) for more examples and detailed usage.**
 
 ## Usage
 
