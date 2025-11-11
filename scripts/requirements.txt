@@ -1,0 +1,19 @@
+# Python dependencies for mango-iv option data downloader
+#
+# Recommended: Use uv (fast, modern package manager)
+#   uv sync
+#
+# Alternative: Use pip
+#   pip install -r requirements.txt
+#
+# Note: For full dependency management, see pyproject.toml
+
+# Data download
+yfinance>=0.2.32
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database (included in Python stdlib, but listed for clarity)
+# sqlite3 - included in Python standard library
