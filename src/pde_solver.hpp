@@ -103,8 +103,8 @@ public:
         , u_current_(n_)
         , u_old_(n_)
         , rhs_(n_)
-        , isa_target_(cpu::select_isa_target())
         , newton_ws_(n_, acquire_workspace(grid, external_workspace))
+        , isa_target_(cpu::select_isa_target())
     {
         #ifndef NDEBUG
         std::cout << "PDESolver ISA target: " << cpu::isa_target_name(isa_target_) << "\n";
@@ -232,6 +232,9 @@ private:
     // Newton workspace (for implicit stage solving)
     NewtonWorkspace newton_ws_;
 
+    // ISA target for diagnostic logging (must be after newton_ws_)
+    cpu::ISATarget isa_target_;
+
     // Snapshot collection
     struct SnapshotRequest {
         size_t step_index;        // CHANGED: use step index not time
@@ -248,9 +251,6 @@ private:
     // Workspace for derivatives
     std::vector<double> du_dx_;
     std::vector<double> d2u_dx2_;
-
-    // ISA target for diagnostic logging
-    cpu::ISATarget isa_target_;
 
     PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {
