@@ -3,7 +3,7 @@
 #include "grid_spacing.hpp"
 #include "centered_difference_scalar.hpp"
 #include "centered_difference_simd_backend.hpp"
-#include "../cpu/feature_detection.hpp"
+#include "src/support/cpu/feature_detection.hpp"
 #include <span>
 #include <memory>
 #include <cassert>
