@@ -1,5 +1,5 @@
 #include "src/newton_workspace.hpp"
-#include "src/workspace.hpp"
+#include "src/memory/pde_workspace.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
@@ -11,7 +11,7 @@ TEST(NewtonWorkspaceTest, CorrectAllocationSizes) {
         grid_data[i] = static_cast<double>(i) / (n - 1);
     }
 
-    mango::WorkspaceStorage pde_ws(n, std::span{grid_data});
+    mango::PDEWorkspace pde_ws(n, std::span{grid_data});
     mango::NewtonWorkspace newton_ws(n, pde_ws);
 
     // Owned arrays
@@ -36,7 +36,7 @@ TEST(NewtonWorkspaceTest, BorrowedArraysPointToWorkspace) {
         grid_data[i] = static_cast<double>(i) / (n - 1);
     }
 
-    mango::WorkspaceStorage pde_ws(n, std::span{grid_data});
+    mango::PDEWorkspace pde_ws(n, std::span{grid_data});
     mango::NewtonWorkspace newton_ws(n, pde_ws);
 
     // Verify borrowed arrays point to correct workspace arrays
@@ -52,7 +52,7 @@ TEST(NewtonWorkspaceTest, OwnedArraysAreDistinct) {
         grid_data[i] = static_cast<double>(i) / (n - 1);
     }
 
-    mango::WorkspaceStorage pde_ws(n, std::span{grid_data});
+    mango::PDEWorkspace pde_ws(n, std::span{grid_data});
     mango::NewtonWorkspace newton_ws(n, pde_ws);
 
     // Owned arrays should not overlap

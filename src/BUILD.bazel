@@ -1,3 +1,6 @@
+# Memory management targets are defined in //src/memory:BUILD.bazel
+# Use //src/memory:unified_memory_resource, //src/memory:workspace_base, //src/memory:pde_workspace
+
 cc_library(
     name = "expected",
     hdrs = ["expected.hpp"],
@@ -93,19 +96,6 @@ cc_library(
 )
 
 cc_library(
-    name = "workspace",
-    hdrs = ["workspace.hpp"],
-    deps = [],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
     copts = [
@@ -137,7 +127,7 @@ cc_library(
 cc_library(
     name = "newton_workspace",
     hdrs = ["newton_workspace.hpp"],
-    deps = [":workspace"],
+    deps = ["//src/memory:pde_workspace"],
     copts = [
         "-std=c++23",
         "-Wall",
@@ -337,7 +327,7 @@ cc_library(
     name = "slice_solver_workspace",
     hdrs = ["slice_solver_workspace.hpp"],
     deps = [
-        ":workspace",
+        "//src/memory:pde_workspace",
         ":grid",
         "//src/operators:grid_spacing",
     ],
@@ -369,7 +359,9 @@ cc_library(
     hdrs = ["pde_solver.hpp"],
     deps = [
         ":grid",
-        ":workspace",
+        "//src/memory:pde_workspace",
+        "//src/cpu:feature_detection",
+        "//src/operators:centered_difference_facade",
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",

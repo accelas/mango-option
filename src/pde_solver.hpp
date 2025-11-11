@@ -1,7 +1,9 @@
 #pragma once
 
 #include "grid.hpp"
-#include "workspace.hpp"
+#include "memory/pde_workspace.hpp"
+#include "cpu/feature_detection.hpp"
+#include "operators/centered_difference_facade.hpp"
 #include "boundary_conditions.hpp"
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <iostream>
 
 namespace mango {
 
@@ -83,16 +86,16 @@ public:
               const RootFindingConfig& root_config,
               const BoundaryL& left_bc,
               const BoundaryR& right_bc,
-              const SpatialOp& spatial_op,
+              SpatialOp spatial_op,  // Pass by value, move into member
               std::optional<ObstacleCallback> obstacle = std::nullopt,
-              WorkspaceStorage* external_workspace = nullptr)
+              PDEWorkspace* external_workspace = nullptr)
         : grid_(grid)
         , time_(time)
         , config_(config)
         , root_config_(root_config)
         , left_bc_(left_bc)
         , right_bc_(right_bc)
-        , spatial_op_(spatial_op)
+        , spatial_op_(std::move(spatial_op))
         , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_owner_(nullptr)
@@ -101,7 +104,12 @@ public:
         , u_old_(n_)
         , rhs_(n_)
         , newton_ws_(n_, acquire_workspace(grid, external_workspace))
+        , isa_target_(cpu::select_isa_target())
     {
+        #ifndef NDEBUG
+        std::cout << "PDESolver ISA target: " << cpu::isa_target_name(isa_target_) << "\n";
+        #endif
+
         // Initialize grid information for legacy operators that need it
         // (e.g., LaplacianOperator) via set_grid() if present
         if constexpr (requires { spatial_op_.set_grid(grid, workspace_->dx()); }) {
@@ -213,8 +221,8 @@ private:
     size_t n_;
 
     // Workspace for cache blocking
-    std::unique_ptr<WorkspaceStorage> workspace_owner_;
-    WorkspaceStorage* workspace_;
+    std::unique_ptr<PDEWorkspace> workspace_owner_;
+    PDEWorkspace* workspace_;
 
     // Solution storage
     std::vector<double> u_current_;  // u^{n+1} or u^{n+γ}
@@ -223,6 +231,9 @@ private:
 
     // Newton workspace (for implicit stage solving)
     NewtonWorkspace newton_ws_;
+
+    // ISA target for diagnostic logging (must be after newton_ws_)
+    cpu::ISATarget isa_target_;
 
     // Snapshot collection
     struct SnapshotRequest {
@@ -241,12 +252,12 @@ private:
     std::vector<double> du_dx_;
     std::vector<double> d2u_dx2_;
 
-    WorkspaceStorage& acquire_workspace(std::span<const double> grid, WorkspaceStorage* external_workspace) {
+    PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid);
+        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }

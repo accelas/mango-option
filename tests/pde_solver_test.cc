@@ -5,6 +5,7 @@
 #include "src/snapshot.hpp"
 #include "src/operators/operator_factory.hpp"
 #include "src/operators/laplacian_pde.hpp"
+#include "src/memory/pde_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
@@ -320,4 +321,17 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
         double expected = std::sin(pi * x) * decay;
         EXPECT_NEAR(solution[i], expected, 5e-4);  // 0.05% relative error
     }
+}
+
+TEST(PDESolverTest, PDEWorkspaceIntegration) {
+    // Verify PDEWorkspace is drop-in replacement for WorkspaceStorage
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
+
+    // This test will pass once we switch to PDEWorkspace
+    mango::PDEWorkspace workspace(101, grid.span());
+
+    EXPECT_EQ(workspace.u_current().size(), 101);
+    EXPECT_EQ(workspace.dx().size(), 100);
 }

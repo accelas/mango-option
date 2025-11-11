@@ -241,7 +241,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     std::optional<GridBuffer<double>> owned_grid_buffer;
     std::span<const double> x_grid;
     std::shared_ptr<operators::GridSpacing<double>> shared_spacing;
-    WorkspaceStorage* external_workspace = nullptr;
+    PDEWorkspace* external_workspace = nullptr;
 
     if (workspace_) {
         x_grid = workspace_->grid_span();

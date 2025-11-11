@@ -1,0 +1,25 @@
+cc_library(
+    name = "unified_memory_resource",
+    hdrs = ["unified_memory_resource.hpp"],
+    visibility = ["//visibility:public"],
+    copts = ["-std=c++23"],
+)
+
+cc_library(
+    name = "workspace_base",
+    hdrs = ["workspace_base.hpp"],
+    visibility = ["//visibility:public"],
+    deps = [":unified_memory_resource"],
+    copts = ["-std=c++23"],
+)
+
+cc_library(
+    name = "pde_workspace",
+    hdrs = ["pde_workspace.hpp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":unified_memory_resource",
+        ":workspace_base",
+    ],
+    copts = ["-std=c++23"],
+)
