@@ -9,14 +9,30 @@
 namespace mango::operators {
 
 /**
- * GridSpacing: Computes and caches grid spacing information
+ * GridSpacing: Grid spacing information for finite difference operators
  *
- * This adapter wraps a GridView and provides efficient access to spacing
- * information needed for finite difference stencils. For uniform grids,
- * spacing is constant (computed once). For non-uniform grids, per-point
- * spacing is pre-computed and cached.
+ * For UNIFORM grids:
+ *   - Stores constant spacing (dx, dx_inv, dx_inv_sq)
+ *   - Zero memory overhead for precomputed arrays
  *
- * Single Responsibility: Grid metric computation
+ * For NON-UNIFORM grids:
+ *   - Eagerly precomputes weight arrays during construction:
+ *     * dx_left_inv[i]   = 1 / (x[i] - x[i-1])
+ *     * dx_right_inv[i]  = 1 / (x[i+1] - x[i])
+ *     * dx_center_inv[i] = 2 / (dx_left + dx_right)
+ *     * w_left[i]        = dx_right / (dx_left + dx_right)
+ *     * w_right[i]       = dx_left / (dx_left + dx_right)
+ *   - Single contiguous buffer (5×(n-2)×8 bytes, ~4KB for n=100)
+ *   - Zero-copy span accessors (fail-fast if called on uniform grid)
+ *
+ * USE CASE:
+ *   Tanh-clustered grids for adaptive mesh refinement around strikes/barriers
+ *   in option pricing. Grids are fixed during PDE solve, so one-time
+ *   precomputation cost (~1-2 µs) is amortized over many time steps.
+ *
+ * SIMD INTEGRATION:
+ *   CenteredDifferenceSIMD loads precomputed arrays via element_aligned spans,
+ *   avoiding per-lane divisions. Expected speedup: 3-6x over scalar non-uniform.
  */
 template<typename T = double>
 class GridSpacing {

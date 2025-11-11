@@ -18,6 +18,29 @@ namespace stdx = std::experimental;
  * Replaces scalar std::fma with std::experimental::simd operations.
  * Uses [[gnu::target_clones]] for ISA-specific code generation.
  *
+ * SUPPORTED GRIDS:
+ * - Uniform: Uses constant spacing (spacing_inv, spacing_inv_sq)
+ * - Non-uniform: Uses precomputed weight arrays from GridSpacing
+ *
+ * NON-UNIFORM GRID SUPPORT:
+ * For non-uniform (tanh-clustered) grids, GridSpacing precomputes:
+ *   dx_left_inv[i], dx_right_inv[i], dx_center_inv[i], w_left[i], w_right[i]
+ * in a single contiguous buffer during construction.
+ *
+ * SIMD kernels load these values via zero-copy spans, avoiding per-lane
+ * divisions. Expected speedup: 3-6x over scalar non-uniform code.
+ *
+ * USAGE:
+ *   // Explicit dispatch (performance-critical paths)
+ *   if (spacing.is_uniform()) {
+ *     stencil.compute_second_derivative_uniform(u, d2u_dx2, 1, n-1);
+ *   } else {
+ *     stencil.compute_second_derivative_non_uniform(u, d2u_dx2, 1, n-1);
+ *   }
+ *
+ *   // Convenience wrapper (tests, examples)
+ *   stencil.compute_second_derivative(u, d2u_dx2, 1, n-1);  // Auto-dispatch
+ *
  * REQUIREMENTS:
  * - Input spans must be PADDED (use workspace.u_current_padded(), etc.)
  * - start must be ≥ 1 (no boundary point)
