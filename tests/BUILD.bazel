@@ -494,4 +494,5 @@ cc_test(
         "//src:cpu_features",
         "@googletest//:gtest_main",
     ],
+    tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
 )
