@@ -8,7 +8,12 @@
 
 namespace mango {
 
-/// Workspace storage for PDE solver arrays
+/// WorkspaceStorage: DEPRECATED - Use PDEWorkspace instead
+///
+/// @deprecated Replaced by mango::PDEWorkspace with std::pmr allocation
+///             and full SoA layout. This class will be removed in v3.0.
+///
+/// Migration: Replace `WorkspaceStorage` with `PDEWorkspace` (drop-in compatible)
 ///
 /// **CPU-only implementation** - SYCL GPU specialization deferred to v2.1.
 ///
@@ -23,7 +28,7 @@ namespace mango {
 ///
 /// Future GPU version (v2.1) will use SYCL unified shared memory (USM)
 /// with explicit device allocation and host-device synchronization.
-class WorkspaceStorage {
+class [[deprecated("Use PDEWorkspace instead")]] WorkspaceStorage {
 public:
     /// Construct workspace for n grid points
     ///
