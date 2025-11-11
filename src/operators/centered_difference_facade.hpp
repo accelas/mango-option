@@ -25,8 +25,7 @@ public:
     explicit CenteredDifference(const GridSpacing<double>& spacing,
                                 Mode mode = Mode::Auto);
 
-    // Public API - keeps [[gnu::target_clones]] for consistent symbols
-    [[gnu::target_clones("default","avx2","avx512f")]]
+    // Public API - virtual dispatch happens after IFUNC resolution
     void compute_second_derivative(std::span<const double> u,
                                    std::span<double> d2u_dx2,
                                    size_t start, size_t end) const {
@@ -35,7 +34,6 @@ public:
         impl_->compute_second_derivative(u, d2u_dx2, start, end);
     }
 
-    [[gnu::target_clones("default","avx2","avx512f")]]
     void compute_first_derivative(std::span<const double> u,
                                   std::span<double> du_dx,
                                   size_t start, size_t end) const {
@@ -44,7 +42,6 @@ public:
         impl_->compute_first_derivative(u, du_dx, start, end);
     }
 
-    [[gnu::target_clones("default","avx2","avx512f")]]
     void compute_second_derivative_tiled(std::span<const double> u,
                                          std::span<double> d2u_dx2,
                                          size_t start, size_t end) const {
