@@ -64,7 +64,6 @@ cc_test(
     name = "brent_cpp_test",
     srcs = ["brent_cpp_test.cc"],
     deps = [
-        "//src/core:brent",
         "//src/core:root_finding",
         "@googletest//:gtest_main",
     ],

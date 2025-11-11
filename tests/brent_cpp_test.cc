@@ -1,4 +1,4 @@
-#include "src/core/brent.hpp"
+#include "src/core/root_finding.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

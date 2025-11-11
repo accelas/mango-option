@@ -51,20 +51,7 @@ cc_library(
 cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "brent",
-    hdrs = ["brent.hpp"],
     deps = [
-        ":root_finding",
         "//common:ivcalc_trace_hdr",
     ],
     copts = [

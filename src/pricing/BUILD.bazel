@@ -96,7 +96,6 @@ cc_library(
     deps = [
         "//src/utils:parallel",
         "//src/core:root_finding",
-        "//src/core:brent",
         ":american_option",
         ":iv_types",
         "//common:ivcalc_trace_hdr",
