@@ -83,3 +83,16 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "centered_difference_facade",
+    hdrs = ["centered_difference_facade.hpp"],
+    deps = [
+        ":centered_difference_scalar",
+        ":centered_difference_simd_backend",
+        ":grid_spacing",
+        "//src/cpu:feature_detection",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

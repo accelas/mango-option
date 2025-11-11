@@ -24,13 +24,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "cpu_features",
-    hdrs = ["cpu/feature_detection.hpp"],
-    visibility = ["//visibility:public"],
-    copts = ["-std=c++23"],
-    deps = [],
-)
 
 cc_library(
     name = "expected",
@@ -391,7 +384,7 @@ cc_library(
     deps = [
         ":grid",
         ":pde_workspace",
-        ":cpu_features",
+        "//src/cpu:feature_detection",
         "//src/operators:centered_difference_simd",
         ":boundary_conditions",
         ":time_domain",
