@@ -33,6 +33,10 @@ enum class ISATarget {
  * AVX/AVX-512 require OS support for YMM/ZMM register state.
  * Without this check, CPUID may report AVX support but executing
  * AVX instructions will SIGILL.
+ *
+ * SAFETY: __attribute__((target("xsave"))) ensures compiler generates
+ * code compatible with xsave-enabled CPUs. The OSXSAVE check before
+ * _xgetbv() ensures the CPU actually supports the instruction.
  */
 __attribute__((target("xsave")))
 inline bool check_os_avx_support() {
@@ -43,10 +47,13 @@ inline bool check_os_avx_support() {
         return false;
     }
 
+    // CRITICAL: Must check OSXSAVE before calling _xgetbv()
+    // Without OSXSAVE, _xgetbv() will cause SIGILL
     if ((ecx & bit_OSXSAVE) == 0) {
         return false;  // OS hasn't enabled xsave
     }
 
+    // SAFE: OSXSAVE confirmed, _xgetbv() is now safe to call
     // Check XCR0 register via XGETBV
     // XCR0[1] = SSE state, XCR0[2] = YMM state
     unsigned long long xcr0 = _xgetbv(0);
