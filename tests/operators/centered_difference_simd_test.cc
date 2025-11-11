@@ -132,3 +132,26 @@ TEST(CenteredDifferenceSIMDTest, NonUniformSecondDerivative) {
         EXPECT_NEAR(d2u_dx2[i], 2.0, 0.05) << "at index " << i;
     }
 }
+
+TEST(CenteredDifferenceSIMDTest, NonUniformFirstDerivative) {
+    // Non-uniform grid
+    std::vector<double> x(11);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+    // Test function: f(x) = x^2, f'(x) = 2x
+    std::vector<double> u(11);
+    for (size_t i = 0; i < 11; ++i) u[i] = x[i] * x[i];
+
+    std::vector<double> du_dx(11, 0.0);
+    stencil.compute_first_derivative_non_uniform(u, du_dx, 1, 10);
+
+    // Should be close to 2*x
+    for (size_t i = 1; i < 10; ++i) {
+        EXPECT_NEAR(du_dx[i], 2.0 * x[i], 0.02) << "at index " << i;
+    }
+}

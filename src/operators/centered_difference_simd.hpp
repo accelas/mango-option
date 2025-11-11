@@ -193,6 +193,71 @@ public:
         }
     }
 
+    /**
+     * First derivative (vectorized, non-uniform grid)
+     *
+     * Uses precomputed weight arrays from GridSpacing to achieve second-order
+     * accuracy on non-uniform grids. SIMD kernel loads w_left, w_right,
+     * dx_left_inv, dx_right_inv for each point.
+     * Scalar tail uses same precomputed arrays for exact numerical match.
+     *
+     * Formula: du/dx = w_left * (u[i] - u[i-1])/dx_left + w_right * (u[i+1] - u[i])/dx_right
+     * where w_left = dx_right / (dx_left + dx_right), w_right = dx_left / (dx_left + dx_right)
+     */
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_first_derivative_non_uniform(
+        std::span<const T> u,
+        std::span<T> du_dx,
+        size_t start,
+        size_t end) const
+    {
+        assert(start >= 1 && "start must allow u[i-1] access");
+        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
+        assert(!spacing_.is_uniform() && "Use compute_first_derivative_uniform for uniform grids");
+
+        // Get precomputed arrays
+        auto w_left = spacing_.w_left();
+        auto w_right = spacing_.w_right();
+        auto dx_left_inv = spacing_.dx_left_inv();
+        auto dx_right_inv = spacing_.dx_right_inv();
+
+        // Vectorized main loop
+        size_t i = start;
+        for (; i + simd_width <= end; i += simd_width) {
+            // Load u values
+            simd_t u_left, u_center, u_right;
+            u_left.copy_from(u.data() + i - 1, stdx::element_aligned);
+            u_center.copy_from(u.data() + i, stdx::element_aligned);
+            u_right.copy_from(u.data() + i + 1, stdx::element_aligned);
+
+            // Load precomputed weights and inverses
+            simd_t wl, wr, dxl_inv, dxr_inv;
+            wl.copy_from(w_left.data() + i - 1, stdx::element_aligned);
+            wr.copy_from(w_right.data() + i - 1, stdx::element_aligned);
+            dxl_inv.copy_from(dx_left_inv.data() + i - 1, stdx::element_aligned);
+            dxr_inv.copy_from(dx_right_inv.data() + i - 1, stdx::element_aligned);
+
+            // du/dx = w_left * (u[i] - u[i-1])/dx_left + w_right * (u[i+1] - u[i])/dx_right
+            const simd_t term1 = wl * (u_center - u_left) * dxl_inv;
+            const simd_t term2 = wr * (u_right - u_center) * dxr_inv;
+            const simd_t result = term1 + term2;
+
+            result.copy_to(du_dx.data() + i, stdx::element_aligned);
+        }
+
+        // Scalar tail: use precomputed values
+        for (; i < end; ++i) {
+            const T wl = w_left[i - 1];
+            const T wr = w_right[i - 1];
+            const T dxl_inv = dx_left_inv[i - 1];
+            const T dxr_inv = dx_right_inv[i - 1];
+
+            const T term1 = wl * (u[i] - u[i-1]) * dxl_inv;
+            const T term2 = wr * (u[i+1] - u[i]) * dxr_inv;
+            du_dx[i] = term1 + term2;
+        }
+    }
+
     size_t tile_size() const { return l1_tile_size_; }
 
 private:
