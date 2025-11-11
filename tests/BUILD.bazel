@@ -459,6 +459,16 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "feature_detection_test",
+    srcs = ["cpu/feature_detection_test.cc"],
+    deps = [
+        "//src:cpu_features",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
