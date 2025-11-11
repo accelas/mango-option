@@ -1,4 +1,12 @@
 cc_library(
+    name = "unified_memory_resource",
+    hdrs = ["memory/unified_memory_resource.hpp"],
+    visibility = ["//visibility:public"],
+    copts = ["-std=c++23"],
+    deps = [],
+)
+
+cc_library(
     name = "expected",
     hdrs = ["expected.hpp"],
     deps = ["//3rd/tl:expected"],
