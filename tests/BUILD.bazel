@@ -87,7 +87,7 @@ cc_test(
     srcs = ["newton_workspace_test.cc"],
     deps = [
         "//src:newton_workspace",
-        "//src:workspace",
+        "//src:pde_workspace",
         "//src:grid",
         "@googletest//:gtest_main",
     ],
