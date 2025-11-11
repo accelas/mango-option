@@ -1,6 +1,6 @@
-#include "src/spatial_operators.hpp"
-#include "src/memory/pde_workspace.hpp"
-#include "src/grid.hpp"
+#include "src/pde/core/spatial_operators.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
+#include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

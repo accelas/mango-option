@@ -31,12 +31,12 @@ cc_binary(
     ],
     linkstatic = True,  # Static link our library code
     deps = [
-        "//src:american_option",
-        "//src:slice_solver_workspace",
-        "//src:iv_solver",
-        "//src:bspline_4d",
-        "//src:bspline_fitter_4d",
-        "//src:iv_solver_interpolated",
+        "//src/option:american_option",
+        "//src/option:slice_solver_workspace",
+        "//src/option:iv_solver",
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
+        "//src/option:iv_solver_interpolated",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -61,12 +61,12 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src:american_option",
-        "//src:slice_solver_workspace",
-        "//src:iv_solver",
-        "//src:iv_solver_interpolated",
-        "//src:bspline_4d",
-        "//src:bspline_fitter_4d",
+        "//src/option:american_option",
+        "//src/option:slice_solver_workspace",
+        "//src/option:iv_solver",
+        "//src/option:iv_solver_interpolated",
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -92,7 +92,7 @@ cc_binary(
     ],
     linkstatic = True,  # Static link our library code
     deps = [
-        "//src:american_option",
+        "//src/option:american_option",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -118,7 +118,7 @@ cc_binary(
     ],
     linkstatic = True,  # Static link our library code
     deps = [
-        "//src:american_option",
+        "//src/option:american_option",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -136,8 +136,8 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src:bspline_fitter_4d_separable",
-        "//src:bspline_collocation_1d",
+        "//src/interpolation:bspline_fitter_4d_separable",
+        "//src/interpolation:bspline_collocation_1d",
     ],
     tags = ["benchmark", "manual"],
 )

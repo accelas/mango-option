@@ -145,7 +145,7 @@ The Makefile system is intended as a **temporary workaround** for environments w
 If you encounter missing header errors, ensure all header files are present:
 ```bash
 ls src/*.hpp
-ls src/operators/*.hpp
+ls src/pde/operators/*.hpp
 ls common/*.h
 ```
 

@@ -1,4 +1,4 @@
-#include "src/trbdf2_config.hpp"
+#include "src/pde/core/trbdf2_config.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

@@ -3,7 +3,7 @@
  * @brief Tests for expected-based validation of AmericanOption constructors
  */
 
-#include "src/american_option.hpp"
+#include "src/option/american_option.hpp"
 #include <gtest/gtest.h>
 #include <string>
 

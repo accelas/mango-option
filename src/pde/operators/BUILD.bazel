@@ -1,0 +1,79 @@
+cc_library(
+    name = "grid_spacing",
+    hdrs = ["grid_spacing.hpp"],
+    deps = ["//src/pde/core:grid"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "black_scholes_pde",
+    hdrs = ["black_scholes_pde.hpp"],
+    deps = [":grid_spacing"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "laplacian_pde",
+    hdrs = ["laplacian_pde.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "spatial_operator",
+    hdrs = ["spatial_operator.hpp"],
+    deps = [
+        ":grid_spacing",
+        ":centered_difference_facade",
+        "//src/pde/core:grid",
+        "//src/pde/core:jacobian_view",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "operator_factory",
+    hdrs = ["operator_factory.hpp"],
+    deps = [
+        ":spatial_operator",
+        ":grid_spacing",
+        "//src/pde/core:grid",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "centered_difference_scalar",
+    hdrs = ["centered_difference_scalar.hpp"],
+    deps = [
+        ":grid_spacing",
+        "//src/support:parallel",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "centered_difference_simd_backend",
+    hdrs = ["centered_difference_simd_backend.hpp"],
+    deps = [":grid_spacing"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "centered_difference_facade",
+    hdrs = ["centered_difference_facade.hpp"],
+    deps = [
+        ":centered_difference_scalar",
+        ":centered_difference_simd_backend",
+        ":grid_spacing",
+        "//src/support/cpu:feature_detection",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

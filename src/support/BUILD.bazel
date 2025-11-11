@@ -1,0 +1,21 @@
+cc_library(
+    name = "expected",
+    hdrs = ["expected.hpp"],
+    deps = ["//3rd/tl:expected"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "parallel",
+    hdrs = ["parallel.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "error_types",
+    hdrs = ["error_types.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

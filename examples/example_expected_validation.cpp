@@ -3,7 +3,7 @@
  * @brief Example demonstrating expected-based validation for AmericanOption constructors
  */
 
-#include "src/american_option.hpp"
+#include "src/option/american_option.hpp"
 #include <iostream>
 #include <iomanip>
 

@@ -11,7 +11,7 @@
  * - Performance (<100ns per basis evaluation)
  */
 
-#include "src/bspline_basis_1d.hpp"
+#include "src/interpolation/bspline_basis_1d.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numeric>
