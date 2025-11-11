@@ -4,6 +4,7 @@
 #include <span>
 #include <cassert>
 #include <algorithm>
+#include <vector>
 
 namespace mango {
 
@@ -26,11 +27,15 @@ namespace mango {
 class PDEWorkspace : public WorkspaceBase {
 public:
     explicit PDEWorkspace(size_t n, std::span<const double> grid,
+                         size_t batch_width = 0,  // NEW: 0 = single-contract mode
                          size_t initial_buffer_size = 1024 * 1024)
         : WorkspaceBase(initial_buffer_size)
         , n_(n)
         , padded_n_(pad_to_simd(n))
         , grid_(grid)
+        , batch_width_(batch_width)  // NEW
+        , u_batch_(nullptr)           // NEW
+        , lu_batch_(nullptr)          // NEW
     {
         assert(!grid.empty() && "grid must not be empty");
         assert(grid.size() == n && "grid size must match n");
@@ -150,6 +155,19 @@ private:
     double* lu_;
     double* psi_;
     double* dx_;
+
+    // Batch support
+    size_t batch_width_;  // 0 = single-contract, >0 = batch mode
+
+    // AoS buffers (for horizontal SIMD stencil)
+    double* u_batch_;   // [n * batch_width]
+    double* lu_batch_;  // [n * batch_width]
+
+    // Per-lane SoA buffers (for Newton machinery)
+    std::vector<double*> u_lane_buffers_;   // batch_width buffers of [n]
+    std::vector<double*> lu_lane_buffers_;  // batch_width buffers of [n]
+    std::vector<std::span<double>> u_lanes_;
+    std::vector<std::span<const double>> lu_lanes_;
 };
 
 } // namespace mango
