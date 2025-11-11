@@ -1,5 +1,7 @@
 #pragma once
 
+#warning "This header is deprecated. Use centered_difference_facade.hpp with Mode::Scalar instead."
+
 #include "grid_spacing.hpp"
 #include "../parallel.hpp"
 #include <span>
