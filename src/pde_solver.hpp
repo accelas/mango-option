@@ -2,6 +2,8 @@
 
 #include "grid.hpp"
 #include "memory/pde_workspace.hpp"
+#include "cpu/feature_detection.hpp"
+#include "operators/centered_difference_simd.hpp"
 #include "boundary_conditions.hpp"
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <iostream>
 
 namespace mango {
 
@@ -100,8 +103,13 @@ public:
         , u_current_(n_)
         , u_old_(n_)
         , rhs_(n_)
+        , isa_target_(cpu::select_isa_target())
         , newton_ws_(n_, acquire_workspace(grid, external_workspace))
     {
+        #ifndef NDEBUG
+        std::cout << "PDESolver ISA target: " << cpu::isa_target_name(isa_target_) << "\n";
+        #endif
+
         // Initialize grid information for legacy operators that need it
         // (e.g., LaplacianOperator) via set_grid() if present
         if constexpr (requires { spatial_op_.set_grid(grid, workspace_->dx()); }) {
@@ -240,6 +248,9 @@ private:
     // Workspace for derivatives
     std::vector<double> du_dx_;
     std::vector<double> d2u_dx2_;
+
+    // ISA target for diagnostic logging
+    cpu::ISATarget isa_target_;
 
     PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {

@@ -484,3 +484,14 @@ cc_test(
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
+
+cc_test(
+    name = "pde_solver_simd_benchmark",
+    srcs = ["pde_solver_simd_benchmark.cc"],
+    copts = ["-std=c++23"],
+    deps = [
+        "//src:pde_solver",
+        "//src:cpu_features",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -404,6 +404,8 @@ cc_library(
     deps = [
         ":grid",
         ":pde_workspace",
+        ":cpu_features",
+        "//src/operators:centered_difference_simd",
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",
