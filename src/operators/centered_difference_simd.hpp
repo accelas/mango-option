@@ -258,6 +258,58 @@ public:
         }
     }
 
+    /**
+     * Convenience wrapper for second derivative (automatic dispatch)
+     *
+     * Automatically dispatches to uniform or non-uniform implementation
+     * based on grid type. Both variants get ISA-specific code generation
+     * via [[gnu::target_clones]].
+     *
+     * Use this for tests, examples, or when grid type is runtime-determined.
+     * For performance-critical paths with known grid type at compile time,
+     * prefer explicit compute_second_derivative_uniform() or
+     * compute_second_derivative_non_uniform() to avoid branch overhead.
+     */
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_second_derivative(
+        std::span<const T> u,
+        std::span<T> d2u_dx2,
+        size_t start,
+        size_t end) const
+    {
+        if (spacing_.is_uniform()) {
+            compute_second_derivative_uniform(u, d2u_dx2, start, end);
+        } else {
+            compute_second_derivative_non_uniform(u, d2u_dx2, start, end);
+        }
+    }
+
+    /**
+     * Convenience wrapper for first derivative (automatic dispatch)
+     *
+     * Automatically dispatches to uniform or non-uniform implementation
+     * based on grid type. Both variants get ISA-specific code generation
+     * via [[gnu::target_clones]].
+     *
+     * Use this for tests, examples, or when grid type is runtime-determined.
+     * For performance-critical paths with known grid type at compile time,
+     * prefer explicit compute_first_derivative_uniform() or
+     * compute_first_derivative_non_uniform() to avoid branch overhead.
+     */
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_first_derivative(
+        std::span<const T> u,
+        std::span<T> du_dx,
+        size_t start,
+        size_t end) const
+    {
+        if (spacing_.is_uniform()) {
+            compute_first_derivative_uniform(u, du_dx, start, end);
+        } else {
+            compute_first_derivative_non_uniform(u, du_dx, start, end);
+        }
+    }
+
     size_t tile_size() const { return l1_tile_size_; }
 
 private:

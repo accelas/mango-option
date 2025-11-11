@@ -277,3 +277,103 @@ TEST(CenteredDifferenceSIMDTest, UniformFirstDerivativeMatchesScalar) {
         EXPECT_DOUBLE_EQ(du_dx_simd[i], du_dx_scalar[i]);
     }
 }
+
+TEST(CenteredDifferenceSIMDTest, ConvenienceWrapperDispatchesCorrectly) {
+    // Test uniform grid
+    {
+        std::vector<double> x(11);
+        for (size_t i = 0; i < 11; ++i) x[i] = i * 0.1;
+        auto grid = mango::GridView<double>(x);
+        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+        std::vector<double> u(11);
+        for (size_t i = 0; i < 11; ++i) u[i] = x[i] * x[i];
+
+        std::vector<double> d2u_explicit(11, 0.0);
+        stencil.compute_second_derivative_uniform(u, d2u_explicit, 1, 10);
+
+        std::vector<double> d2u_wrapper(11, 0.0);
+        stencil.compute_second_derivative(u, d2u_wrapper, 1, 10);
+
+        // Wrapper should dispatch to uniform method
+        for (size_t i = 1; i < 10; ++i) {
+            EXPECT_DOUBLE_EQ(d2u_wrapper[i], d2u_explicit[i]);
+        }
+    }
+
+    // Test non-uniform grid
+    {
+        std::vector<double> x(11);
+        x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+        x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+        auto grid = mango::GridView<double>(x);
+        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+        std::vector<double> u(11);
+        for (size_t i = 0; i < 11; ++i) u[i] = x[i] * x[i];
+
+        std::vector<double> d2u_explicit(11, 0.0);
+        stencil.compute_second_derivative_non_uniform(u, d2u_explicit, 1, 10);
+
+        std::vector<double> d2u_wrapper(11, 0.0);
+        stencil.compute_second_derivative(u, d2u_wrapper, 1, 10);
+
+        // Wrapper should dispatch to non-uniform method
+        for (size_t i = 1; i < 10; ++i) {
+            EXPECT_DOUBLE_EQ(d2u_wrapper[i], d2u_explicit[i]);
+        }
+    }
+}
+
+TEST(CenteredDifferenceSIMDTest, FirstDerivativeWrapperDispatchesCorrectly) {
+    // Test uniform grid
+    {
+        std::vector<double> x(11);
+        for (size_t i = 0; i < 11; ++i) x[i] = i * 0.1;
+        auto grid = mango::GridView<double>(x);
+        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+        std::vector<double> u(11);
+        for (size_t i = 0; i < 11; ++i) u[i] = x[i] * x[i];
+
+        std::vector<double> du_explicit(11, 0.0);
+        stencil.compute_first_derivative_uniform(u, du_explicit, 1, 10);
+
+        std::vector<double> du_wrapper(11, 0.0);
+        stencil.compute_first_derivative(u, du_wrapper, 1, 10);
+
+        // Wrapper should dispatch to uniform method
+        for (size_t i = 1; i < 10; ++i) {
+            EXPECT_DOUBLE_EQ(du_wrapper[i], du_explicit[i]);
+        }
+    }
+
+    // Test non-uniform grid
+    {
+        std::vector<double> x(11);
+        x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+        x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+        auto grid = mango::GridView<double>(x);
+        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+        std::vector<double> u(11);
+        for (size_t i = 0; i < 11; ++i) u[i] = x[i] * x[i];
+
+        std::vector<double> du_explicit(11, 0.0);
+        stencil.compute_first_derivative_non_uniform(u, du_explicit, 1, 10);
+
+        std::vector<double> du_wrapper(11, 0.0);
+        stencil.compute_first_derivative(u, du_wrapper, 1, 10);
+
+        // Wrapper should dispatch to non-uniform method
+        for (size_t i = 1; i < 10; ++i) {
+            EXPECT_DOUBLE_EQ(du_wrapper[i], du_explicit[i]);
+        }
+    }
+}
