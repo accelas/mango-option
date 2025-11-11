@@ -472,6 +472,18 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "centered_difference_facade_test",
+    srcs = ["centered_difference_facade_test.cc"],
+    deps = [
+        "//src/operators:centered_difference_facade",
+        "//src/operators:grid_spacing",
+        "//src:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
