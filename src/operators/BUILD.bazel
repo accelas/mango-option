@@ -1,7 +1,7 @@
 cc_library(
     name = "grid_spacing",
     hdrs = ["grid_spacing.hpp"],
-    deps = ["//src:grid"],
+    deps = ["//src/core:grid"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
@@ -27,8 +27,8 @@ cc_library(
     deps = [
         ":grid_spacing",
         ":centered_difference_facade",
-        "//src:grid",
-        "//src:jacobian_view",
+        "//src/core:grid",
+        "//src/core:jacobian_view",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -40,7 +40,7 @@ cc_library(
     deps = [
         ":spatial_operator",
         ":grid_spacing",
-        "//src:grid",
+        "//src/core:grid",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -59,7 +59,7 @@ cc_library(
     hdrs = ["centered_difference_scalar.hpp"],
     deps = [
         ":grid_spacing",
-        "//src:parallel",
+        "//src/utils:parallel",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],

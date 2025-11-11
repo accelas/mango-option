@@ -4,11 +4,11 @@ pybind_extension(
     name = "mango_iv",
     srcs = ["mango_bindings.cpp"],
     deps = [
-        "//src:iv_solver",
-        "//src:american_option",
-        "//src:root_finding",
-        "//src:iv_types",
-        "//src:expected",
+        "//src/pricing:iv_solver",
+        "//src/pricing:american_option",
+        "//src/core:root_finding",
+        "//src/pricing:iv_types",
+        "//src/utils:expected",
     ],
     copts = [
         "-std=c++20",

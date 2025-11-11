@@ -1,6 +1,6 @@
 #pragma once
 
-#include "parallel.hpp"
+#include "src/utils/parallel.hpp"
 #include <span>
 #include <cstddef>
 #include <vector>

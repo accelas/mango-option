@@ -5,7 +5,7 @@
 #include <memory>
 #include <cmath>
 #include <stdexcept>
-#include "src/expected.hpp"
+#include "src/utils/expected.hpp"
 
 namespace mango {
 

@@ -33,9 +33,9 @@
 
 #pragma once
 
-#include "bspline_fitter_4d_separable.hpp"
-#include "bspline_4d.hpp"
-#include "expected.hpp"
+#include "src/interpolation/bspline_fitter_4d_separable.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/utils/expected.hpp"
 #include <vector>
 #include <stdexcept>
 #include <cmath>

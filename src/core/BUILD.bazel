@@ -1,0 +1,153 @@
+cc_library(
+    name = "grid",
+    hdrs = ["grid.hpp"],
+    deps = [
+        "//src/utils:expected",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "multigrid",
+    hdrs = ["multigrid.hpp"],
+    deps = [
+        ":grid",
+        "//src/utils:expected",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "boundary_conditions",
+    hdrs = ["boundary_conditions.hpp"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "jacobian_view",
+    hdrs = ["jacobian_view.hpp"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "root_finding",
+    hdrs = ["root_finding.hpp"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "brent",
+    hdrs = ["brent.hpp"],
+    deps = [
+        ":root_finding",
+        "//common:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "newton_workspace",
+    hdrs = ["newton_workspace.hpp"],
+    deps = ["//src/memory:pde_workspace"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "spatial_operators",
+    hdrs = ["spatial_operators.hpp"],
+    deps = [
+        "//src/utils:parallel",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-ftree-vectorize",   # Enable auto-vectorization
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "time_domain",
+    hdrs = ["time_domain.hpp"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "trbdf2_config",
+    hdrs = ["trbdf2_config.hpp"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "thomas_solver",
+    hdrs = ["thomas_solver.hpp"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "pde_solver",
+    hdrs = ["pde_solver.hpp"],
+    deps = [
+        ":grid",
+        "//src/memory:pde_workspace",
+        "//src/cpu:feature_detection",
+        "//src/operators:centered_difference_facade",
+        ":boundary_conditions",
+        ":time_domain",
+        ":trbdf2_config",
+        ":thomas_solver",
+        ":newton_workspace",
+        ":root_finding",
+        "//src/pricing:snapshot",
+        ":jacobian_view",
+        "//src/utils:expected",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)

@@ -2,7 +2,7 @@
 
 #include "grid_spacing.hpp"
 #include "centered_difference_facade.hpp"
-#include "../jacobian_view.hpp"
+#include "src/core/jacobian_view.hpp"
 #include <span>
 #include <memory>
 #include <concepts>

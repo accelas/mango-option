@@ -1,6 +1,6 @@
 #pragma once
 
-#include "root_finding.hpp"
+#include "src/core/root_finding.hpp"
 #include "common/ivcalc_trace.h"
 #include <concepts>
 #include <cmath>

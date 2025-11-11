@@ -32,7 +32,7 @@
 
 #pragma once
 
-#include "bspline_utils.hpp"
+#include "src/interpolation/bspline_utils.hpp"
 #include <vector>
 #include <algorithm>
 #include <cassert>

@@ -1,7 +1,7 @@
 #include "src/operators/centered_difference_simd_backend.hpp"
 #include "src/operators/centered_difference_scalar.hpp"
 #include "src/operators/grid_spacing.hpp"
-#include "src/grid.hpp"
+#include "src/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>

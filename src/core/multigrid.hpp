@@ -1,7 +1,7 @@
 #pragma once
 
-#include "grid.hpp"
-#include "expected.hpp"
+#include "src/core/grid.hpp"
+#include "src/utils/expected.hpp"
 #include <unordered_map>
 #include <stdexcept>
 #include <numeric>

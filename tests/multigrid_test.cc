@@ -1,5 +1,5 @@
-#include "src/multigrid.hpp"
-#include "src/grid.hpp"
+#include "src/core/multigrid.hpp"
+#include "src/core/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(MultiGridBufferTest, TwoAxisCreation) {

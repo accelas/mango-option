@@ -3,7 +3,7 @@
  * @brief Implementation of interpolation-based IV solver
  */
 
-#include "iv_solver_interpolated.hpp"
+#include "src/pricing/iv_solver_interpolated.hpp"
 #include <algorithm>
 #include <cmath>
 

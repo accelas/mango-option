@@ -3,8 +3,8 @@
  * @brief Tests for SliceSolverWorkspace and workspace-mode AmericanOptionSolver
  */
 
-#include "src/slice_solver_workspace.hpp"
-#include "src/american_option.hpp"
+#include "src/pricing/slice_solver_workspace.hpp"
+#include "src/pricing/american_option.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

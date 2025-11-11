@@ -1,4 +1,4 @@
-#include "src/thomas_solver.hpp"
+#include "src/core/thomas_solver.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

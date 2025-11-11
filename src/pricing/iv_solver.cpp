@@ -1,6 +1,6 @@
-#include "iv_solver.hpp"
-#include "brent.hpp"
-#include "american_option.hpp"
+#include "src/pricing/iv_solver.hpp"
+#include "src/core/brent.hpp"
+#include "src/pricing/american_option.hpp"
 #include <cmath>
 #include <algorithm>
 

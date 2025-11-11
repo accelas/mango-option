@@ -1,4 +1,4 @@
-#include "src/pde_solver.hpp"
+#include "src/core/pde_solver.hpp"
 #include "src/cpu/feature_detection.hpp"
 #include <gtest/gtest.h>
 #include <chrono>

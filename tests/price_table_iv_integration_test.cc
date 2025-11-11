@@ -14,10 +14,10 @@
  * - Coordinate transformations (log-moneyness)
  */
 
-#include "src/price_table_4d_builder.hpp"
-#include "src/price_table_snapshot_collector.hpp"
-#include "src/iv_solver_interpolated.hpp"
-#include "src/american_option.hpp"
+#include "src/pricing/price_table_4d_builder.hpp"
+#include "src/pricing/price_table_snapshot_collector.hpp"
+#include "src/pricing/iv_solver_interpolated.hpp"
+#include "src/pricing/american_option.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <algorithm>

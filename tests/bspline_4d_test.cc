@@ -10,7 +10,7 @@
  * - Comparison with 1D basis evaluation
  */
 
-#include "src/bspline_4d.hpp"
+#include "src/interpolation/bspline_4d.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <random>

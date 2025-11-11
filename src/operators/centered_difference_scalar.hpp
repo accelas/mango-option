@@ -1,7 +1,7 @@
 #pragma once
 
 #include "grid_spacing.hpp"
-#include "../parallel.hpp"
+#include "src/utils/parallel.hpp"
 #include <span>
 #include <cmath>
 #include <cassert>

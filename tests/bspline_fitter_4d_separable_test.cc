@@ -9,7 +9,7 @@
  * - Integration with evaluation
  */
 
-#include "src/bspline_fitter_4d_separable.hpp"
+#include "src/interpolation/bspline_fitter_4d_separable.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "root_finding.hpp"
+#include "src/core/root_finding.hpp"
 #include "common/ivcalc_trace.h"
-#include "src/expected.hpp"
-#include "parallel.hpp"
-#include "iv_types.hpp"
+#include "src/utils/expected.hpp"
+#include "src/utils/parallel.hpp"
+#include "src/pricing/iv_types.hpp"
 #include <optional>
 #include <string>
 #include <vector>

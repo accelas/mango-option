@@ -39,8 +39,8 @@
 
 #pragma once
 
-#include "bspline_collocation_1d.hpp"
-#include "expected.hpp"
+#include "src/interpolation/bspline_collocation_1d.hpp"
+#include "src/utils/expected.hpp"
 #include <vector>
 #include <string>
 #include <cmath>

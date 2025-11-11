@@ -1,0 +1,134 @@
+cc_library(
+    name = "snapshot",
+    hdrs = ["snapshot.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "slice_solver_workspace",
+    hdrs = ["slice_solver_workspace.hpp"],
+    deps = [
+        "//src/memory:pde_workspace",
+        "//src/core:grid",
+        "//src/operators:grid_spacing",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "american_option",
+    srcs = ["american_option.cpp"],
+    hdrs = ["american_option.hpp"],
+    deps = [
+        "//src/utils:parallel",
+        "//src/core:pde_solver",
+        "//src/core:spatial_operators",
+        ":slice_solver_workspace",
+        "//src/operators:operator_factory",
+        "//src/operators:black_scholes_pde",
+        "//src/utils:expected",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-O3",
+        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
+        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
+        "-fopenmp",           # Enable OpenMP for batch API parallelization
+        "-ftree-vectorize",   # Enable auto-vectorization
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_snapshot_collector",
+    hdrs = ["price_table_snapshot_collector.hpp"],
+    deps = [
+        ":snapshot",
+        "//src/interpolation:snapshot_interpolator",
+        ":american_option",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_4d_builder",
+    srcs = ["price_table_4d_builder.cpp"],
+    hdrs = ["price_table_4d_builder.hpp"],
+    deps = [
+        ":american_option",
+        ":slice_solver_workspace",
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
+        ":price_table_snapshot_collector",
+        "//src/core:trbdf2_config",
+        "//src/core:root_finding",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_types",
+    hdrs = ["iv_types.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_solver",
+    srcs = ["iv_solver.cpp"],
+    hdrs = ["iv_solver.hpp"],
+    deps = [
+        "//src/utils:parallel",
+        "//src/core:root_finding",
+        "//src/core:brent",
+        ":american_option",
+        ":iv_types",
+        "//common:ivcalc_trace_hdr",
+        "//src/utils:expected",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-fopenmp",  # Enable OpenMP for batch API parallelization
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_solver_interpolated",
+    srcs = ["iv_solver_interpolated.cpp"],
+    hdrs = ["iv_solver_interpolated.hpp"],
+    deps = [
+        "//src/interpolation:bspline_4d",
+        ":american_option",
+        ":iv_types",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    visibility = ["//visibility:public"],
+)

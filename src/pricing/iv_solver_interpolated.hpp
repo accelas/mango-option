@@ -42,9 +42,9 @@
 
 #pragma once
 
-#include "bspline_4d.hpp"
-#include "american_option.hpp"  // For OptionType enum
-#include "iv_types.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/pricing/american_option.hpp"  // For OptionType enum
+#include "src/pricing/iv_types.hpp"
 #include <cmath>
 #include <optional>
 #include <string>

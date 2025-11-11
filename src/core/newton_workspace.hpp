@@ -1,6 +1,6 @@
 #pragma once
 
-#include "memory/pde_workspace.hpp"
+#include "src/memory/pde_workspace.hpp"
 #include <vector>
 #include <span>
 #include <cstddef>

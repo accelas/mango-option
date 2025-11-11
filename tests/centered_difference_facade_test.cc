@@ -1,6 +1,6 @@
 #include "src/operators/centered_difference_facade.hpp"
 #include "src/operators/grid_spacing.hpp"
-#include "src/grid.hpp"
+#include "src/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

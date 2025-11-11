@@ -1,5 +1,5 @@
 #include "src/memory/pde_workspace.hpp"
-#include "src/grid.hpp"
+#include "src/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 

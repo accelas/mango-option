@@ -30,10 +30,10 @@
 
 #pragma once
 
-#include "bspline_basis_1d.hpp"
-#include "bspline_utils.hpp"
-#include "thomas_solver.hpp"
-#include "expected.hpp"
+#include "src/interpolation/bspline_basis_1d.hpp"
+#include "src/interpolation/bspline_utils.hpp"
+#include "src/core/thomas_solver.hpp"
+#include "src/utils/expected.hpp"
 #include <vector>
 #include <cmath>
 #include <algorithm>
