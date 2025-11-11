@@ -85,9 +85,9 @@ public:
         d2u_dx2_buf.resize(n);
         du_dx_buf.resize(n);
 
-        // Zero only the region we'll use to avoid stale values
-        std::fill(d2u_dx2_buf.begin(), d2u_dx2_buf.end(), T(0));
-        std::fill(du_dx_buf.begin(), du_dx_buf.end(), T(0));
+        // Zero only the active range to avoid stale values (optimization)
+        std::fill(d2u_dx2_buf.begin() + start, d2u_dx2_buf.begin() + end, T(0));
+        std::fill(du_dx_buf.begin() + start, du_dx_buf.begin() + end, T(0));
 
         // Compute derivatives using facade
         stencil_->compute_second_derivative(u, std::span<T>(d2u_dx2_buf), start, end);
