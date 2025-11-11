@@ -107,10 +107,48 @@ public:
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
 
+    // Batch mode queries
+    bool has_batch() const { return batch_width_ > 0; }
+    size_t batch_width() const { return batch_width_; }
+
 private:
     void allocate_and_initialize() {
         allocate_arrays();
         precompute_grid_spacing();
+        allocate_batch_buffers();  // NEW
+    }
+
+    void allocate_batch_buffers() {
+        if (batch_width_ == 0) return;  // Single-contract mode
+
+        const size_t aos_size = padded_n_ * batch_width_;
+        const size_t aos_bytes = aos_size * sizeof(double);
+
+        // Allocate AoS buffers
+        u_batch_ = static_cast<double*>(resource_.allocate(aos_bytes));
+        lu_batch_ = static_cast<double*>(resource_.allocate(aos_bytes));
+
+        // Zero-initialize
+        std::fill(u_batch_, u_batch_ + aos_size, 0.0);
+        std::fill(lu_batch_, lu_batch_ + aos_size, 0.0);
+
+        // Allocate per-lane SoA buffers
+        const size_t lane_bytes = padded_n_ * sizeof(double);
+        u_lane_buffers_.resize(batch_width_);
+        lu_lane_buffers_.resize(batch_width_);
+        u_lanes_.reserve(batch_width_);
+        lu_lanes_.reserve(batch_width_);
+
+        for (size_t lane = 0; lane < batch_width_; ++lane) {
+            u_lane_buffers_[lane] = static_cast<double*>(resource_.allocate(lane_bytes));
+            lu_lane_buffers_[lane] = static_cast<double*>(resource_.allocate(lane_bytes));
+
+            std::fill(u_lane_buffers_[lane], u_lane_buffers_[lane] + padded_n_, 0.0);
+            std::fill(lu_lane_buffers_[lane], lu_lane_buffers_[lane] + padded_n_, 0.0);
+
+            u_lanes_.push_back(std::span<double>{u_lane_buffers_[lane], n_});
+            lu_lanes_.push_back(std::span<const double>{lu_lane_buffers_[lane], n_});
+        }
     }
 
     void allocate_arrays() {
