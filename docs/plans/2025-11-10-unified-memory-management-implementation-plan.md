@@ -17,7 +17,7 @@
 ### Task 1: Create UnifiedMemoryResource header
 
 **Files:**
-- Create: `src/memory/unified_memory_resource.hpp`
+- Create: `src/pde/memory/unified_memory_resource.hpp`
 - Test: `tests/memory/unified_memory_resource_test.cc`
 - Modify: `src/BUILD.bazel` (add memory library)
 - Modify: `tests/BUILD.bazel` (add memory tests)
@@ -27,7 +27,7 @@
 Create `tests/memory/unified_memory_resource_test.cc`:
 
 ```cpp
-#include "src/memory/unified_memory_resource.hpp"
+#include "src/pde/memory/unified_memory_resource.hpp"
 #include <gtest/gtest.h>
 
 TEST(UnifiedMemoryResourceTest, BasicAllocation) {
@@ -73,11 +73,11 @@ TEST(UnifiedMemoryResourceTest, ResetClearsMemory) {
 bazel test //tests/memory:unified_memory_resource_test
 ```
 
-Expected: Build fails with "No such file or directory: src/memory/unified_memory_resource.hpp"
+Expected: Build fails with "No such file or directory: src/pde/memory/unified_memory_resource.hpp"
 
 **Step 3: Create UnifiedMemoryResource implementation**
 
-Create `src/memory/unified_memory_resource.hpp`:
+Create `src/pde/memory/unified_memory_resource.hpp`:
 
 ```cpp
 #pragma once
@@ -178,7 +178,7 @@ Expected: All tests PASS
 
 ```bash
 mkdir -p src/memory tests/memory
-git add src/memory/unified_memory_resource.hpp
+git add src/pde/memory/unified_memory_resource.hpp
 git add tests/memory/unified_memory_resource_test.cc
 git add src/BUILD.bazel tests/BUILD.bazel
 git commit -m "feat: add UnifiedMemoryResource with std::pmr
@@ -198,7 +198,7 @@ Part of unified memory management refactor (Phase 1/5)."
 ### Task 2: Create WorkspaceBase with tiling infrastructure
 
 **Files:**
-- Create: `src/memory/workspace_base.hpp`
+- Create: `src/pde/memory/workspace_base.hpp`
 - Test: `tests/memory/workspace_base_test.cc`
 - Modify: `src/BUILD.bazel`
 - Modify: `tests/BUILD.bazel`
@@ -208,7 +208,7 @@ Part of unified memory management refactor (Phase 1/5)."
 Create `tests/memory/workspace_base_test.cc`:
 
 ```cpp
-#include "src/memory/workspace_base.hpp"
+#include "src/pde/memory/workspace_base.hpp"
 #include <gtest/gtest.h>
 
 TEST(WorkspaceBaseTest, TileMetadataGeneration) {
@@ -258,11 +258,11 @@ TEST(WorkspaceBaseTest, BytesAllocatedTracking) {
 bazel test //tests/memory:workspace_base_test
 ```
 
-Expected: Build fails with "No such file or directory: src/memory/workspace_base.hpp"
+Expected: Build fails with "No such file or directory: src/pde/memory/workspace_base.hpp"
 
 **Step 3: Create WorkspaceBase implementation**
 
-Create `src/memory/workspace_base.hpp`:
+Create `src/pde/memory/workspace_base.hpp`:
 
 ```cpp
 #pragma once
@@ -375,7 +375,7 @@ Expected: All tests PASS (tile_info bounds checking only in debug builds)
 **Step 6: Commit**
 
 ```bash
-git add src/memory/workspace_base.hpp
+git add src/pde/memory/workspace_base.hpp
 git add tests/memory/workspace_base_test.cc
 git add src/BUILD.bazel tests/BUILD.bazel
 git commit -m "feat: add WorkspaceBase with tiling infrastructure
@@ -397,7 +397,7 @@ Part of unified memory management refactor (Phase 1/5)."
 ### Task 3: Create PDEWorkspace header
 
 **Files:**
-- Create: `src/memory/pde_workspace.hpp`
+- Create: `src/pde/memory/pde_workspace.hpp`
 - Test: `tests/memory/pde_workspace_test.cc`
 - Modify: `src/BUILD.bazel`
 - Modify: `tests/BUILD.bazel`
@@ -407,7 +407,7 @@ Part of unified memory management refactor (Phase 1/5)."
 Create `tests/memory/pde_workspace_test.cc`:
 
 ```cpp
-#include "src/memory/pde_workspace.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -521,11 +521,11 @@ TEST(PDEWorkspaceTest, TileMetadata) {
 bazel test //tests/memory:pde_workspace_test
 ```
 
-Expected: Build fails with "No such file or directory: src/memory/pde_workspace.hpp"
+Expected: Build fails with "No such file or directory: src/pde/memory/pde_workspace.hpp"
 
 **Step 3: Create PDEWorkspace implementation**
 
-Create `src/memory/pde_workspace.hpp`:
+Create `src/pde/memory/pde_workspace.hpp`:
 
 ```cpp
 #pragma once
@@ -710,7 +710,7 @@ Expected: All tests PASS
 **Step 6: Commit**
 
 ```bash
-git add src/memory/pde_workspace.hpp
+git add src/pde/memory/pde_workspace.hpp
 git add tests/memory/pde_workspace_test.cc
 git add src/BUILD.bazel tests/BUILD.bazel
 git commit -m "feat: add PDEWorkspace with full SoA layout
@@ -734,7 +734,7 @@ Part of unified memory management refactor (Phase 2/5)."
 ### Task 4: Create CPU feature detection
 
 **Files:**
-- Create: `src/cpu/feature_detection.hpp`
+- Create: `src/support/cpu/feature_detection.hpp`
 - Test: `tests/cpu/feature_detection_test.cc`
 - Modify: `src/BUILD.bazel`
 - Modify: `tests/BUILD.bazel`
@@ -744,7 +744,7 @@ Part of unified memory management refactor (Phase 2/5)."
 Create `tests/cpu/feature_detection_test.cc`:
 
 ```cpp
-#include "src/cpu/feature_detection.hpp"
+#include "src/support/cpu/feature_detection.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -790,7 +790,7 @@ Expected: Build fails
 
 **Step 3: Create CPU feature detection implementation**
 
-Create `src/cpu/feature_detection.hpp`:
+Create `src/support/cpu/feature_detection.hpp`:
 
 ```cpp
 #pragma once
@@ -974,7 +974,7 @@ Expected: Tests PASS with diagnostic output showing detected CPU features
 **Step 6: Commit**
 
 ```bash
-git add src/cpu/feature_detection.hpp
+git add src/support/cpu/feature_detection.hpp
 git add tests/cpu/feature_detection_test.cc
 git add src/BUILD.bazel tests/BUILD.bazel
 git commit -m "feat: add CPU feature detection with OS support validation
@@ -994,7 +994,7 @@ Part of unified memory management refactor (Phase 3/5)."
 ### Task 5: Create SIMD stencil operator with target_clones
 
 **Files:**
-- Create: `src/operators/centered_difference_simd.hpp`
+- Create: `src/pde/operators/centered_difference_simd.hpp`
 - Test: `tests/operators/centered_difference_simd_test.cc`
 - Modify: `src/BUILD.bazel`
 - Modify: `tests/BUILD.bazel`
@@ -1004,8 +1004,8 @@ Part of unified memory management refactor (Phase 3/5)."
 Create `tests/operators/centered_difference_simd_test.cc`:
 
 ```cpp
-#include "src/operators/centered_difference_simd.hpp"
-#include "src/operators/grid_spacing.hpp"
+#include "src/pde/operators/centered_difference_simd.hpp"
+#include "src/pde/operators/grid_spacing.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
@@ -1122,7 +1122,7 @@ Expected: Build fails
 
 **Step 3: Create SIMD operator implementation**
 
-Create `src/operators/centered_difference_simd.hpp`:
+Create `src/pde/operators/centered_difference_simd.hpp`:
 
 ```cpp
 #pragma once
@@ -1322,7 +1322,7 @@ Expected: Should see `.default`, `.avx2`, `.avx512f` suffixes
 **Step 7: Commit**
 
 ```bash
-git add src/operators/centered_difference_simd.hpp
+git add src/pde/operators/centered_difference_simd.hpp
 git add tests/operators/centered_difference_simd_test.cc
 git add src/BUILD.bazel tests/BUILD.bazel
 git commit -m "feat: add CenteredDifferenceSIMD with target_clones
@@ -1476,7 +1476,7 @@ Create `tests/pde_solver_simd_benchmark.cc`:
 
 ```cpp
 #include "src/pde_solver.hpp"
-#include "src/cpu/feature_detection.hpp"
+#include "src/support/cpu/feature_detection.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>
@@ -1590,7 +1590,7 @@ auto u = workspace.u_current();
 
 **After:**
 \`\`\`cpp
-#include "src/memory/pde_workspace.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
 PDEWorkspace workspace(n, grid);
 auto u = workspace.u_current();  // Same API!
 \`\`\`

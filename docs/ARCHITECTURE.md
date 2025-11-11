@@ -231,7 +231,7 @@ From `iv_solver_test.cc`:
 ### File Locations
 - **Header**: `src/american_option.hpp`
 - **Tests**: `tests/american_option_test.cc`
-- **Related**: `src/operators/black_scholes_pde.hpp` (Black-Scholes operator)
+- **Related**: `src/pde/operators/black_scholes_pde.hpp` (Black-Scholes operator)
 
 ### Core Data Structures
 
@@ -470,7 +470,7 @@ From `american_option_test.cc`:
 ### File Locations
 - **Header**: `src/pde_solver.hpp`
 - **Tests**: `tests/pde_solver_test.cc`
-- **Operators**: `src/operators/` directory
+- **Operators**: `src/pde/operators/` directory
 - **Example**: `examples/example_newton_solver.cc`
 
 ### Overview

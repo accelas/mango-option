@@ -1,5 +1,5 @@
-#include "src/grid.hpp"
-#include "src/expected.hpp"
+#include "src/pde/core/grid.hpp"
+#include "src/support/expected.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;

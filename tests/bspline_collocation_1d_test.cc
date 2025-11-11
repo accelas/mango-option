@@ -3,8 +3,8 @@
  * @brief Unit tests for 1D B-spline collocation solver
  */
 
-#include "src/bspline_collocation_1d.hpp"
-#include "src/bspline_4d.hpp"  // For evaluation
+#include "src/interpolation/bspline_collocation_1d.hpp"
+#include "src/interpolation/bspline_4d.hpp"  // For evaluation
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>

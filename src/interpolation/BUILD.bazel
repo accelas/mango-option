@@ -1,0 +1,101 @@
+cc_library(
+    name = "cubic_spline_solver",
+    hdrs = ["cubic_spline_solver.hpp"],
+    deps = ["//src/pde/core:thomas_solver"],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "snapshot_interpolator",
+    hdrs = ["snapshot_interpolator.hpp"],
+    deps = [
+        ":cubic_spline_solver",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_basis_1d",
+    hdrs = ["bspline_basis_1d.hpp"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_utils",
+    hdrs = ["bspline_utils.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_collocation_1d",
+    hdrs = ["bspline_collocation_1d.hpp"],
+    deps = [
+        ":bspline_basis_1d",
+        ":bspline_utils",
+        "//src/pde/core:thomas_solver",
+        "//src/support:expected",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_4d",
+    hdrs = ["bspline_4d.hpp"],
+    deps = [":bspline_utils"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",  # Enable FMA instructions
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_fitter_4d_separable",
+    hdrs = ["bspline_fitter_4d_separable.hpp"],
+    deps = [
+        ":bspline_collocation_1d",
+        "//src/support:expected",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_fitter_4d",
+    hdrs = ["bspline_fitter_4d.hpp"],
+    deps = [
+        ":bspline_4d",
+        ":bspline_fitter_4d_separable",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -54,7 +54,7 @@ Two separate implementations:
 ### File Structure
 
 ```
-src/operators/
+src/pde/operators/
 ├── centered_difference.hpp              # Public façade
 ├── centered_difference_scalar.hpp       # ScalarBackend (internal)
 ├── centered_difference_simd.hpp         # SimdBackend (internal)
@@ -478,6 +478,6 @@ auto simd = CenteredDifference(spacing, CenteredDifference::Mode::Simd);
 
 ## References
 
-- Current implementations: `src/operators/centered_difference.hpp`, `src/operators/centered_difference_simd.hpp`
-- CPU detection: `src/cpu/feature_detection.hpp`
-- Usage: `src/operators/spatial_operator.hpp`
+- Current implementations: `src/pde/operators/centered_difference.hpp`, `src/pde/operators/centered_difference_simd.hpp`
+- CPU detection: `src/support/cpu/feature_detection.hpp`
+- Usage: `src/pde/operators/spatial_operator.hpp`

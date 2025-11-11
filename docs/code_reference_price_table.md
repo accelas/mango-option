@@ -53,16 +53,16 @@
     - Constructor: lines 29-57
     - collect() method: lines 59-124
 
-/home/user/mango-iv/src/operators/operator_factory.hpp (31 lines)
+/home/user/mango-iv/src/pde/operators/operator_factory.hpp (31 lines)
     - Factory function: create_spatial_operator(PDE, GridView)
     - Factory overload: create_spatial_operator(PDE, shared_ptr<GridSpacing>)
 
-/home/user/mango-iv/src/operators/spatial_operator.hpp (200+ lines)
+/home/user/mango-iv/src/pde/operators/spatial_operator.hpp (200+ lines)
     - Template class: SpatialOperator<PDE, T>
     - Constructor: lines 48-52
     - apply() method: lines 62-89
 
-/home/user/mango-iv/src/operators/grid_spacing.hpp (120+ lines)
+/home/user/mango-iv/src/pde/operators/grid_spacing.hpp (120+ lines)
     - Template class: GridSpacing<T>
     - Constructor: lines 28-47
     - spacing() method: lines 53-56
@@ -209,7 +209,7 @@ For each (σ, r) pair:
 
 **BlackScholesPDE:**
 ```cpp
-File: src/operators/black_scholes_pde.hpp (not shown but referenced)
+File: src/pde/operators/black_scholes_pde.hpp (not shown but referenced)
 - Constructor stores σ and r
 - operator()(t, d2u, du, u) uses σ²/2 and r in computation
 - Jacobian coefficients computed from σ and r
@@ -314,7 +314,7 @@ Solution: Move to PriceTable4DBuilder::precompute() before loop
 ```cpp
 Function: create_spatial_operator(PDE, GridView) 
          → create_spatial_operator(PDE, shared_ptr<GridSpacing>)
-File: src/operators/operator_factory.hpp
+File: src/pde/operators/operator_factory.hpp
 
 Current: GridSpacing created Nσ × Nr times via first overload
 Target: Use second overload to reuse GridSpacing

@@ -13,13 +13,13 @@
 ## Task 1: Create ScalarBackend (Extract from CenteredDifference)
 
 **Files:**
-- Create: `src/operators/centered_difference_scalar.hpp`
-- Reference: `src/operators/centered_difference.hpp` (current scalar implementation)
+- Create: `src/pde/operators/centered_difference_scalar.hpp`
+- Reference: `src/pde/operators/centered_difference.hpp` (current scalar implementation)
 - Test: Will add tests in Task 5
 
 **Step 1: Copy current CenteredDifference to ScalarBackend template**
 
-Create `src/operators/centered_difference_scalar.hpp` with the class renamed to `ScalarBackend<T>`:
+Create `src/pde/operators/centered_difference_scalar.hpp` with the class renamed to `ScalarBackend<T>`:
 
 ```cpp
 #pragma once
@@ -165,7 +165,7 @@ Expected: SUCCESS (header-only, will compile when included)
 **Step 3: Commit**
 
 ```bash
-git add src/operators/centered_difference_scalar.hpp
+git add src/pde/operators/centered_difference_scalar.hpp
 git commit -m "feat: add ScalarBackend extracted from CenteredDifference
 
 Extracted scalar implementation to ScalarBackend template.
@@ -184,12 +184,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 2: Create SimdBackend (Rename CenteredDifferenceSIMD)
 
 **Files:**
-- Create: `src/operators/centered_difference_simd_backend.hpp`
-- Reference: `src/operators/centered_difference_simd.hpp` (current SIMD implementation)
+- Create: `src/pde/operators/centered_difference_simd_backend.hpp`
+- Reference: `src/pde/operators/centered_difference_simd.hpp` (current SIMD implementation)
 
 **Step 1: Copy current CenteredDifferenceSIMD to SimdBackend**
 
-Create `src/operators/centered_difference_simd_backend.hpp` by copying the entire contents of `centered_difference_simd.hpp` and renaming the class:
+Create `src/pde/operators/centered_difference_simd_backend.hpp` by copying the entire contents of `centered_difference_simd.hpp` and renaming the class:
 
 ```cpp
 #pragma once
@@ -294,7 +294,7 @@ Expected: SUCCESS
 **Step 3: Commit**
 
 ```bash
-git add src/operators/centered_difference_simd_backend.hpp
+git add src/pde/operators/centered_difference_simd_backend.hpp
 git commit -m "feat: add SimdBackend (rename of CenteredDifferenceSIMD)
 
 Pure rename with zero implementation changes.
@@ -312,12 +312,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 3: Implement CenteredDifference Façade
 
 **Files:**
-- Create: `src/operators/centered_difference_facade.hpp`
-- Reference: `src/cpu/feature_detection.hpp` (for CPU detection)
+- Create: `src/pde/operators/centered_difference_facade.hpp`
+- Reference: `src/support/cpu/feature_detection.hpp` (for CPU detection)
 
 **Step 1: Write façade header**
 
-Create `src/operators/centered_difference_facade.hpp`:
+Create `src/pde/operators/centered_difference_facade.hpp`:
 
 ```cpp
 #pragma once
@@ -460,7 +460,7 @@ Expected: SUCCESS
 **Step 3: Commit**
 
 ```bash
-git add src/operators/centered_difference_facade.hpp
+git add src/pde/operators/centered_difference_facade.hpp
 git commit -m "feat: add CenteredDifference façade with Mode enum
 
 Implements façade + backend pattern with automatic ISA selection:
@@ -478,11 +478,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 4: Add BUILD.bazel Targets for New Files
 
 **Files:**
-- Modify: `src/operators/BUILD.bazel`
+- Modify: `src/pde/operators/BUILD.bazel`
 
 **Step 1: Add cc_library targets for backends and façade**
 
-Add to `src/operators/BUILD.bazel`:
+Add to `src/pde/operators/BUILD.bazel`:
 
 ```python
 cc_library(
@@ -526,7 +526,7 @@ Expected: SUCCESS (all 3 targets build)
 **Step 3: Commit**
 
 ```bash
-git add src/operators/BUILD.bazel
+git add src/pde/operators/BUILD.bazel
 git commit -m "build: add Bazel targets for unified CenteredDifference
 
 Added cc_library targets:
@@ -552,8 +552,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `tests/centered_difference_facade_test.cc`:
 
 ```cpp
-#include "src/operators/centered_difference_facade.hpp"
-#include "src/operators/grid_spacing.hpp"
+#include "src/pde/operators/centered_difference_facade.hpp"
+#include "src/pde/operators/grid_spacing.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
@@ -754,10 +754,10 @@ Modify `tests/centered_difference_simd_test.cc`:
 Change includes:
 ```cpp
 // Old:
-#include "src/operators/centered_difference_simd.hpp"
+#include "src/pde/operators/centered_difference_simd.hpp"
 
 // New:
-#include "src/operators/centered_difference_facade.hpp"
+#include "src/pde/operators/centered_difference_facade.hpp"
 ```
 
 Change test instantiations:
@@ -866,12 +866,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 9: Deprecate Old Headers (Add Warnings)
 
 **Files:**
-- Modify: `src/operators/centered_difference.hpp` (old scalar version)
-- Modify: `src/operators/centered_difference_simd.hpp` (old SIMD version)
+- Modify: `src/pde/operators/centered_difference.hpp` (old scalar version)
+- Modify: `src/pde/operators/centered_difference_simd.hpp` (old SIMD version)
 
 **Step 1: Add deprecation warnings to old headers**
 
-Add to top of `src/operators/centered_difference.hpp`:
+Add to top of `src/pde/operators/centered_difference.hpp`:
 
 ```cpp
 #pragma once
@@ -881,7 +881,7 @@ Add to top of `src/operators/centered_difference.hpp`:
 // Keep existing implementation for now...
 ```
 
-Add to top of `src/operators/centered_difference_simd.hpp`:
+Add to top of `src/pde/operators/centered_difference_simd.hpp`:
 
 ```cpp
 #pragma once
@@ -900,7 +900,7 @@ Expected: See deprecation warnings
 **Step 3: Commit**
 
 ```bash
-git add src/operators/centered_difference.hpp src/operators/centered_difference_simd.hpp
+git add src/pde/operators/centered_difference.hpp src/pde/operators/centered_difference_simd.hpp
 git commit -m "deprecate: add warnings to old CenteredDifference headers
 
 Added #warning directives to guide users toward façade.
@@ -964,8 +964,8 @@ Ready for production use with Mode::Auto."
 After all call sites migrate to façade:
 
 1. **Remove old headers:**
-   - Delete `src/operators/centered_difference.hpp` (old scalar)
-   - Delete `src/operators/centered_difference_simd.hpp` (old SIMD)
+   - Delete `src/pde/operators/centered_difference.hpp` (old scalar)
+   - Delete `src/pde/operators/centered_difference_simd.hpp` (old SIMD)
 
 2. **Make backends truly internal:**
    - Move `centered_difference_scalar.hpp` → `internal/centered_difference_scalar.hpp`
@@ -1002,5 +1002,5 @@ auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start
 ### References
 
 - Design doc: `docs/plans/2025-11-11-unified-centered-difference-design.md`
-- CPU detection: `src/cpu/feature_detection.hpp`
-- Current SIMD impl: `src/operators/centered_difference_simd.hpp`
+- CPU detection: `src/support/cpu/feature_detection.hpp`
+- Current SIMD impl: `src/pde/operators/centered_difference_simd.hpp`

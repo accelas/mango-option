@@ -79,11 +79,11 @@ std::cout << "Option value: " << value << "\n";
 
 ### 3. Custom PDE Solving
 
-**Files**: `src/pde_solver.hpp`, `src/operators/*.hpp`
+**Files**: `src/pde_solver.hpp`, `src/pde/operators/*.hpp`
 
 ```cpp
 #include "src/pde_solver.hpp"
-#include "src/operators/laplacian_pde.hpp"
+#include "src/pde/operators/laplacian_pde.hpp"
 #include "src/boundary_conditions.hpp"
 
 // Create spatial grid
@@ -168,7 +168,7 @@ std::optional<std::string> error_message;
 
 ## Creating Custom Operators
 
-**File**: `src/operators/spatial_operator.hpp`
+**File**: `src/pde/operators/spatial_operator.hpp`
 
 Implement the SpatialOperator concept:
 
@@ -385,7 +385,7 @@ double gamma = (price_up + price_down - 2*price) / (ds * ds);
 | American IV calculation | `src/iv_solver.{hpp,cpp}` |
 | American options | `src/american_option.hpp` |
 | PDE solver | `src/pde_solver.hpp` |
-| Spatial operators | `src/operators/*.hpp` |
+| Spatial operators | `src/pde/operators/*.hpp` |
 | Boundary conditions | `src/boundary_conditions.hpp` |
 | Root finding | `src/root_finding.hpp` |
 | Interpolation | `src/cubic_spline_solver.hpp` |

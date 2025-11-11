@@ -223,7 +223,7 @@ cc_test(
     name = "snapshot_interpolator_test",
     srcs = ["snapshot_interpolator_test.cc"],
     deps = [
-        "//src:snapshot_interpolator",
+        "//src/interpolation:snapshot_interpolator",
         "//legacy/src:cubic_spline",
         "@googletest//:gtest_main",
     ],
@@ -237,7 +237,7 @@ cc_test(
     srcs = ["cpp_boundary_test.cc"],
     deps = [
         "//legacy/src:american_option",
-        "//src:american_option",
+        "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-fopenmp-simd"],

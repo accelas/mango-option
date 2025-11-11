@@ -3,9 +3,9 @@
  * @brief Test modern C++20 Thomas solver and cubic spline
  */
 
-#include "src/thomas_solver.hpp"
-#include "src/cubic_spline_solver.hpp"
-#include "src/snapshot_interpolator.hpp"
+#include "src/pde/core/thomas_solver.hpp"
+#include "src/interpolation/cubic_spline_solver.hpp"
+#include "src/interpolation/snapshot_interpolator.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

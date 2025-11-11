@@ -516,7 +516,7 @@ TEST(SpatialOperatorTest, NonUniformSIMDIntegration) {
 ## Implementation Tasks
 
 ### Task 1: Extend GridSpacing with Precomputed Arrays
-**File**: `src/operators/grid_spacing.hpp`
+**File**: `src/pde/operators/grid_spacing.hpp`
 
 **Changes**:
 1. Add `std::vector<T> precomputed_` member
@@ -532,7 +532,7 @@ TEST(SpatialOperatorTest, NonUniformSIMDIntegration) {
 5. Verify all tests pass
 
 ### Task 2: Add Non-Uniform Methods to CenteredDifferenceSIMD
-**File**: `src/operators/centered_difference_simd.hpp`
+**File**: `src/pde/operators/centered_difference_simd.hpp`
 
 **Changes**:
 1. Add `compute_second_derivative_non_uniform()`
@@ -548,7 +548,7 @@ TEST(SpatialOperatorTest, NonUniformSIMDIntegration) {
 5. Run on different CPUs (AVX2, AVX-512)
 
 ### Task 3: Add Convenience Wrappers
-**File**: `src/operators/centered_difference_simd.hpp`
+**File**: `src/pde/operators/centered_difference_simd.hpp`
 
 **Changes**:
 1. Add `compute_second_derivative()` wrapper
@@ -562,7 +562,7 @@ TEST(SpatialOperatorTest, NonUniformSIMDIntegration) {
 4. Verify tests pass
 
 ### Task 4: Update SpatialOperator (Optional)
-**File**: `src/operators/spatial_operator.hpp`
+**File**: `src/pde/operators/spatial_operator.hpp`
 
 **Changes**:
 - SpatialOperator already dispatches based on `spacing_->is_uniform()`
@@ -625,8 +625,8 @@ if (spacing.is_uniform()) {
 
 ## References
 
-- **Old scalar implementation**: `src/operators/centered_difference.hpp`
-- **Uniform SIMD implementation**: `src/operators/centered_difference_simd.hpp`
-- **GridSpacing**: `src/operators/grid_spacing.hpp`
-- **SpatialOperator**: `src/operators/spatial_operator.hpp`
+- **Old scalar implementation**: `src/pde/operators/centered_difference.hpp`
+- **Uniform SIMD implementation**: `src/pde/operators/centered_difference_simd.hpp`
+- **GridSpacing**: `src/pde/operators/grid_spacing.hpp`
+- **SpatialOperator**: `src/pde/operators/spatial_operator.hpp`
 - **Memory management refactor**: `docs/plans/2025-11-10-unified-memory-management-c++23-refactor.md`

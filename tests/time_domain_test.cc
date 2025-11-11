@@ -1,4 +1,4 @@
-#include "src/time_domain.hpp"
+#include "src/pde/core/time_domain.hpp"
 #include <gtest/gtest.h>
 
 TEST(TimeDomainTest, BasicConfiguration) {
