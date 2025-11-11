@@ -57,6 +57,16 @@ public:
     std::span<const double> psi_buffer() const { return {psi_, n_}; }
 
     // Padded accessors for SIMD kernels
+    //
+    // CRITICAL: Padded spans do NOT include front guard cells!
+    // - Stencil operators accessing u[i-1] must use start >= 1
+    // - Boundary points (i=0, i=n-1) handled separately by boundary condition code
+    // - Padding is ONLY at the tail for safe SIMD overread
+    //
+    // Example safe usage:
+    //   auto u_padded = workspace.u_current_padded();
+    //   operator.compute(u_padded, Lu, start=1, end=n-1);  // ✓ Safe
+    //   operator.compute(u_padded, Lu, start=0, end=n);    // ✗ UNSAFE: u[-1] access!
     std::span<double> u_current_padded() { return {u_current_, padded_n_}; }
     std::span<const double> u_current_padded() const { return {u_current_, padded_n_}; }
 
@@ -71,6 +81,11 @@ public:
     std::span<const double> dx_padded() const { return {dx_, pad_to_simd(n_ - 1)}; }
 
     /// Tile metadata for this workspace
+    ///
+    /// NOTE: Currently unused in production code. Reserved for future multi-level
+    /// cache tiling optimizations (L1/L2/L3 blocking). The infrastructure exists
+    /// but benchmarking showed no benefit on modern CPUs with large caches.
+    /// See CLAUDE.md "Cache Blocking (Removed)" section for details.
     TileMetadata tile_info(size_t tile_idx, size_t num_tiles) const {
         return WorkspaceBase::tile_info(n_, tile_idx, num_tiles);
     }
