@@ -117,6 +117,7 @@ cc_test(
         "//src:snapshot",
         "//src/operators:operator_factory",
         "//src/operators:laplacian_pde",
+        "//src:pde_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

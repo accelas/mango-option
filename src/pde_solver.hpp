@@ -1,7 +1,7 @@
 #pragma once
 
 #include "grid.hpp"
-#include "workspace.hpp"
+#include "memory/pde_workspace.hpp"
 #include "boundary_conditions.hpp"
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
@@ -85,7 +85,7 @@ public:
               const BoundaryR& right_bc,
               const SpatialOp& spatial_op,
               std::optional<ObstacleCallback> obstacle = std::nullopt,
-              WorkspaceStorage* external_workspace = nullptr)
+              PDEWorkspace* external_workspace = nullptr)
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -213,8 +213,8 @@ private:
     size_t n_;
 
     // Workspace for cache blocking
-    std::unique_ptr<WorkspaceStorage> workspace_owner_;
-    WorkspaceStorage* workspace_;
+    std::unique_ptr<PDEWorkspace> workspace_owner_;
+    PDEWorkspace* workspace_;
 
     // Solution storage
     std::vector<double> u_current_;  // u^{n+1} or u^{n+γ}
@@ -241,12 +241,12 @@ private:
     std::vector<double> du_dx_;
     std::vector<double> d2u_dx2_;
 
-    WorkspaceStorage& acquire_workspace(std::span<const double> grid, WorkspaceStorage* external_workspace) {
+    PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<WorkspaceStorage>(n_, grid);
+        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }

@@ -171,7 +171,7 @@ cc_library(
 cc_library(
     name = "newton_workspace",
     hdrs = ["newton_workspace.hpp"],
-    deps = [":workspace"],
+    deps = [":pde_workspace"],
     copts = [
         "-std=c++23",
         "-Wall",
@@ -403,7 +403,7 @@ cc_library(
     hdrs = ["pde_solver.hpp"],
     deps = [
         ":grid",
-        ":workspace",
+        ":pde_workspace",
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",
