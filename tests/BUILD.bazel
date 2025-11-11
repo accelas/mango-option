@@ -464,6 +464,8 @@ cc_test(
     srcs = ["operators/centered_difference_simd_test.cc"],
     deps = [
         "//src/operators:centered_difference_simd",
+        "//src/operators:centered_difference",
+        "//src/operators:grid_spacing",
         "//src:grid",
         "@googletest//:gtest_main",
     ],

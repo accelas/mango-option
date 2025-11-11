@@ -1,4 +1,5 @@
 #include "src/operators/centered_difference_simd.hpp"
+#include "src/operators/centered_difference.hpp"
 #include "src/operators/grid_spacing.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
@@ -153,5 +154,126 @@ TEST(CenteredDifferenceSIMDTest, NonUniformFirstDerivative) {
     // Should be close to 2*x
     for (size_t i = 1; i < 10; ++i) {
         EXPECT_NEAR(du_dx[i], 2.0 * x[i], 0.02) << "at index " << i;
+    }
+}
+
+TEST(CenteredDifferenceSIMDTest, NonUniformSecondDerivativeMatchesScalar) {
+    // Non-uniform grid
+    std::vector<double> x(11);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+
+    // Scalar baseline (old CenteredDifference)
+    auto scalar_stencil = mango::operators::CenteredDifference<double>(spacing);
+
+    // SIMD version
+    auto simd_stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+    // Test function: f(x) = sin(x)
+    std::vector<double> u(11);
+    for (size_t i = 0; i < 11; ++i) u[i] = std::sin(x[i]);
+
+    // Compute with scalar
+    std::vector<double> d2u_dx2_scalar(11, 0.0);
+    scalar_stencil.compute_all_second(u, d2u_dx2_scalar, 1, 10);
+
+    // Compute with SIMD
+    std::vector<double> d2u_dx2_simd(11, 0.0);
+    simd_stencil.compute_second_derivative_non_uniform(u, d2u_dx2_simd, 1, 10);
+
+    // NOTE: SIMD uses precomputed 1/dx_center, scalar recomputes dx_center then divides.
+    // Floating-point non-associativity causes tiny rounding differences (~1e-15).
+    // This is acceptable - both are numerically correct. Use tight tolerance to catch
+    // actual bugs (indexing errors, wrong formula, etc.) while allowing FP rounding.
+    for (size_t i = 1; i < 10; ++i) {
+        EXPECT_NEAR(d2u_dx2_simd[i], d2u_dx2_scalar[i], 1e-14)
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(CenteredDifferenceSIMDTest, NonUniformFirstDerivativeMatchesScalar) {
+    // Non-uniform grid
+    std::vector<double> x(11);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+
+    auto scalar_stencil = mango::operators::CenteredDifference<double>(spacing);
+    auto simd_stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+    std::vector<double> u(11);
+    for (size_t i = 0; i < 11; ++i) u[i] = std::sin(x[i]);
+
+    std::vector<double> du_dx_scalar(11, 0.0);
+    scalar_stencil.compute_all_first(u, du_dx_scalar, 1, 10);
+
+    std::vector<double> du_dx_simd(11, 0.0);
+    simd_stencil.compute_first_derivative_non_uniform(u, du_dx_simd, 1, 10);
+
+    for (size_t i = 1; i < 10; ++i) {
+        EXPECT_DOUBLE_EQ(du_dx_simd[i], du_dx_scalar[i]);
+    }
+}
+
+TEST(CenteredDifferenceSIMDTest, UniformSecondDerivativeMatchesScalar) {
+    // Uniform grid
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
+
+    auto spacing = mango::operators::GridSpacing<double>(grid.view());
+
+    // Scalar baseline
+    auto scalar_stencil = mango::operators::CenteredDifference<double>(spacing);
+
+    // SIMD version
+    auto simd_stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+    // Test function: f(x) = sin(x)
+    std::vector<double> u(11);
+    for (size_t i = 0; i < 11; ++i) u[i] = std::sin(grid.span()[i]);
+
+    // Compute with scalar
+    std::vector<double> d2u_dx2_scalar(11, 0.0);
+    scalar_stencil.compute_all_second(u, d2u_dx2_scalar, 1, 10);
+
+    // Compute with SIMD
+    std::vector<double> d2u_dx2_simd(11, 0.0);
+    simd_stencil.compute_second_derivative_uniform(u, d2u_dx2_simd, 1, 10);
+
+    // Should match EXACTLY (no tolerance)
+    for (size_t i = 1; i < 10; ++i) {
+        EXPECT_DOUBLE_EQ(d2u_dx2_simd[i], d2u_dx2_scalar[i])
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(CenteredDifferenceSIMDTest, UniformFirstDerivativeMatchesScalar) {
+    // Uniform grid
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
+
+    auto spacing = mango::operators::GridSpacing<double>(grid.view());
+
+    auto scalar_stencil = mango::operators::CenteredDifference<double>(spacing);
+    auto simd_stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+    std::vector<double> u(11);
+    for (size_t i = 0; i < 11; ++i) u[i] = std::sin(grid.span()[i]);
+
+    std::vector<double> du_dx_scalar(11, 0.0);
+    scalar_stencil.compute_all_first(u, du_dx_scalar, 1, 10);
+
+    std::vector<double> du_dx_simd(11, 0.0);
+    simd_stencil.compute_first_derivative_uniform(u, du_dx_simd, 1, 10);
+
+    for (size_t i = 1; i < 10; ++i) {
+        EXPECT_DOUBLE_EQ(du_dx_simd[i], du_dx_scalar[i]);
     }
 }
