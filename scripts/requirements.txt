@@ -1,6 +1,12 @@
 # Python dependencies for mango-iv option data downloader
 #
-# Install with: pip install -r requirements.txt
+# Recommended: Use uv (fast, modern package manager)
+#   uv sync
+#
+# Alternative: Use pip
+#   pip install -r requirements.txt
+#
+# Note: For full dependency management, see pyproject.toml
 
 # Data download
 yfinance>=0.2.32

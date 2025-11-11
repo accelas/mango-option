@@ -23,7 +23,9 @@ This collection of scripts provides an end-to-end workflow for:
 - **`__init__.py`** - Package initialization
 
 ### Configuration
-- **`requirements.txt`** - Python dependencies
+- **`pyproject.toml`** - Python project configuration (uv/pip)
+- **`requirements.txt`** - Python dependencies (pip-compatible)
+- **`.python-version`** - Python version specification for uv
 
 ## Setup
 
@@ -39,6 +41,25 @@ bazel build //python:mango_iv
 This creates a Python extension module that wraps the C++ IV solver.
 
 ### 2. Install Python Dependencies
+
+**Recommended: Use uv (fast, modern package manager)**
+
+```bash
+cd scripts
+
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment and install dependencies
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate  # On Linux/macOS
+# or
+.venv\Scripts\activate     # On Windows
+```
+
+**Alternative: Use pip**
 
 ```bash
 cd scripts
