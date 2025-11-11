@@ -20,6 +20,12 @@ namespace mango {
 /// - Lu: Read-only during Jacobian build, safe to reference
 ///
 /// **Memory reduction:** 11n → 8n allocated (27% reduction in Newton-specific memory)
+///
+/// **INVALIDATION WARNING:**
+/// - Borrowed spans become INVALID if PDEWorkspace::reset() is called
+/// - If reset() is called on the parent PDEWorkspace, NewtonWorkspace must be reconstructed
+/// - Current design: PDEWorkspace::reset() is rarely needed (only for grid changes)
+/// - Future: If reset() becomes common, consider adding rebind() method
 class NewtonWorkspace {
 public:
     /// Construct workspace borrowing scratch arrays from PDE workspace
