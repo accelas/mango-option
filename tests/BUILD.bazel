@@ -486,3 +486,12 @@ cc_test(
     ],
     tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
 )
+
+cc_test(
+    name = "batch_transpose_benchmark",
+    srcs = ["batch_transpose_benchmark.cc"],
+    deps = [
+        "@google_benchmark//:benchmark_main",
+    ],
+    copts = ["-std=c++23"],
+)
