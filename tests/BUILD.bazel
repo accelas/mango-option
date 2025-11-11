@@ -438,6 +438,16 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "workspace_base_test",
+    srcs = ["memory/workspace_base_test.cc"],
+    deps = [
+        "//src:workspace_base",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
