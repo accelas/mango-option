@@ -1,9 +1,5 @@
-// Tests use deprecated WorkspaceStorage for backward compatibility verification
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
 #include "src/spatial_operators.hpp"
-#include "src/workspace.hpp"
+#include "src/memory/pde_workspace.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
@@ -16,7 +12,7 @@ TEST(BlackScholesOperatorTest, EquityOperatorBasic) {
     // Create simple grid
     auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41).value();
     auto grid = spec.generate();
-    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    mango::PDEWorkspace workspace(grid.size(), grid.span());
 
     // Test input: linear function u(S) = S (delta = 1, gamma = 0)
     auto u = workspace.u_current();
@@ -41,7 +37,7 @@ TEST(BlackScholesOperatorTest, EquityOperatorParabolic) {
 
     auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21).value();
     auto grid = spec.generate();
-    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    mango::PDEWorkspace workspace(grid.size(), grid.span());
 
     auto u = workspace.u_current();
     for (size_t i = 0; i < 21; ++i) {
@@ -67,7 +63,7 @@ TEST(BlackScholesOperatorTest, IndexOperatorWithDividend) {
 
     auto spec = mango::GridSpec<>::uniform(80.0, 120.0, 41).value();
     auto grid = spec.generate();
-    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    mango::PDEWorkspace workspace(grid.size(), grid.span());
 
     // Test with u(S) = S (delta = 1, gamma = 0)
     auto u = workspace.u_current();
@@ -95,7 +91,7 @@ TEST(BlackScholesOperatorTest, IndexVsEquityDifference) {
 
     auto spec = mango::GridSpec<>::uniform(90.0, 110.0, 21).value();
     auto grid = spec.generate();
-    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    mango::PDEWorkspace workspace(grid.size(), grid.span());
 
     auto u = workspace.u_current();
     for (size_t i = 0; i < 21; ++i) {
@@ -125,7 +121,7 @@ TEST(BlackScholesOperatorTest, OperatorUsesPrecomputedDx) {
     auto grid = spec.value().generate();
 
     // Create workspace with pre-computed dx
-    mango::WorkspaceStorage workspace(grid.size(), grid.span());
+    mango::PDEWorkspace workspace(grid.size(), grid.span());
 
     // Initialize test function u(S) = S
     auto u = workspace.u_current();
@@ -295,7 +291,7 @@ TEST(SpatialOperatorsTest, FirstDerivativeParabola) {
     // Test ∂/∂x(x²) = 2x on uniform grid
     const size_t n = 5;
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
-    mango::WorkspaceStorage ws(n, grid.span());
+    mango::PDEWorkspace ws(n, grid.span());
 
     std::vector<double> u(n);
     for (size_t i = 0; i < n; ++i) {
@@ -323,7 +319,7 @@ TEST(SpatialOperatorsTest, SecondDerivativeParabola) {
     // Test ∂²/∂x²(x²) = 2 on uniform grid
     const size_t n = 5;
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
-    mango::WorkspaceStorage ws(n, grid.span());
+    mango::PDEWorkspace ws(n, grid.span());
 
     std::vector<double> u(n);
     for (size_t i = 0; i < n; ++i) {
@@ -344,5 +340,3 @@ TEST(SpatialOperatorsTest, SecondDerivativeParabola) {
     EXPECT_DOUBLE_EQ(d2u[0], 0.0);
     EXPECT_DOUBLE_EQ(d2u[n-1], 0.0);
 }
-
-#pragma GCC diagnostic pop

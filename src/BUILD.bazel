@@ -127,19 +127,6 @@ cc_library(
 )
 
 cc_library(
-    name = "workspace",
-    hdrs = ["workspace.hpp"],
-    deps = [],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
     copts = [
@@ -371,7 +358,7 @@ cc_library(
     name = "slice_solver_workspace",
     hdrs = ["slice_solver_workspace.hpp"],
     deps = [
-        ":workspace",
+        ":pde_workspace",
         ":grid",
         "//src/operators:grid_spacing",
     ],

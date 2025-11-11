@@ -51,17 +51,6 @@ cc_test(
 )
 
 cc_test(
-    name = "workspace_test",
-    srcs = ["workspace_test.cc"],
-    deps = [
-        "//src:workspace",
-        "//src:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "root_finding_test",
     srcs = ["root_finding_test.cc"],
     deps = [
@@ -99,7 +88,7 @@ cc_test(
     srcs = ["spatial_operators_test.cc"],
     deps = [
         "//src:spatial_operators",
-        "//src:workspace",
+        "//src:pde_workspace",
         "//src:grid",
         "@googletest//:gtest_main",
     ],
@@ -129,7 +118,7 @@ cc_test(
     srcs = ["integration_5d_price_table_test.cc"],
     deps = [
         "//src:multigrid",
-        "//src:workspace",
+        "//src:pde_workspace",
         "//src:spatial_operators",
         "//src:grid",
         "@googletest//:gtest",
