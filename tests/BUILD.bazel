@@ -448,6 +448,17 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "pde_workspace_test",
+    srcs = ["memory/pde_workspace_test.cc"],
+    deps = [
+        "//src:pde_workspace",
+        "//src:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow

@@ -15,6 +15,16 @@ cc_library(
 )
 
 cc_library(
+    name = "pde_workspace",
+    hdrs = ["memory/pde_workspace.hpp"],
+    visibility = ["//visibility:public"],
+    copts = ["-std=c++23"],
+    deps = [
+        ":workspace_base",
+    ],
+)
+
+cc_library(
     name = "expected",
     hdrs = ["expected.hpp"],
     deps = ["//3rd/tl:expected"],
