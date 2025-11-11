@@ -1,6 +1,6 @@
 #pragma once
 
-#include "workspace.hpp"
+#include "memory/pde_workspace.hpp"
 #include <vector>
 #include <span>
 #include <cstddef>
@@ -11,7 +11,7 @@ namespace mango {
 ///
 /// **Memory Strategy (Hybrid Allocation):**
 /// - Allocates: 8n doubles (Jacobian: 3n-2, residual: n, delta_u: n, u_old: n, tridiag: 2n)
-/// - Borrows: 2n doubles from WorkspaceStorage as scratch space (u_stage, rhs)
+/// - Borrows: 2n doubles from PDEWorkspace as scratch space (u_stage, rhs)
 /// - Total: 8n allocated + 2n borrowed (vs. 11n if everything owned)
 ///
 /// **Safety of borrowing:**
@@ -20,13 +20,19 @@ namespace mango {
 /// - Lu: Read-only during Jacobian build, safe to reference
 ///
 /// **Memory reduction:** 11n → 8n allocated (27% reduction in Newton-specific memory)
+///
+/// **INVALIDATION WARNING:**
+/// - Borrowed spans become INVALID if PDEWorkspace::reset() is called
+/// - If reset() is called on the parent PDEWorkspace, NewtonWorkspace must be reconstructed
+/// - Current design: PDEWorkspace::reset() is rarely needed (only for grid changes)
+/// - Future: If reset() becomes common, consider adding rebind() method
 class NewtonWorkspace {
 public:
     /// Construct workspace borrowing scratch arrays from PDE workspace
     ///
     /// @param n Grid size
     /// @param pde_ws PDE workspace to borrow scratch space from
-    NewtonWorkspace(size_t n, WorkspaceStorage& pde_ws)
+    NewtonWorkspace(size_t n, PDEWorkspace& pde_ws)
         : n_(n)
         , buffer_(compute_buffer_size(n))
         , Lu_(pde_ws.lu())
@@ -63,7 +69,7 @@ private:
     std::span<double> u_old_;               // n
     std::span<double> tridiag_workspace_;   // 2n (CRITICAL: Thomas needs 2n)
 
-    // Borrowed spans (point into WorkspaceStorage)
+    // Borrowed spans (point into PDEWorkspace)
     std::span<double> Lu_;          // n (read-only during Jacobian)
     std::span<double> u_perturb_;   // n (scratch, from u_stage)
     std::span<double> Lu_perturb_;  // n (scratch, from rhs)

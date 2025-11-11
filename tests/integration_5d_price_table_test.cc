@@ -1,5 +1,5 @@
 #include "src/multigrid.hpp"
-#include "src/workspace.hpp"
+#include "src/memory/pde_workspace.hpp"
 #include "src/spatial_operators.hpp"
 #include "src/grid.hpp"
 #include <gtest/gtest.h>
@@ -58,7 +58,7 @@ TEST(Integration5DPriceTableTest, GridSetupWithDividendDimension) {
     auto pde_grid = pde_grid_spec->generate();
 
     // Step 4: Create workspace for this PDE solve
-    mango::WorkspaceStorage workspace(pde_grid.size(), pde_grid.span());
+    mango::PDEWorkspace workspace(pde_grid.size(), pde_grid.span());
 
     // Verify workspace has pre-computed dx
     EXPECT_EQ(workspace.dx().size(), 100);  // n-1 spacing values
@@ -103,7 +103,7 @@ TEST(Integration5DPriceTableTest, DividendAffectsPriceCalculation) {
     auto pde_spec = mango::GridSpec<>::uniform(80.0, 120.0, 41);
     ASSERT_TRUE(pde_spec.has_value());
     auto pde_grid = pde_spec->generate();
-    mango::WorkspaceStorage workspace(pde_grid.size(), pde_grid.span());
+    mango::PDEWorkspace workspace(pde_grid.size(), pde_grid.span());
 
     auto div_axis_result = grid.axis_view(mango::GridAxis::Dividend);
     EXPECT_TRUE(div_axis_result.has_value());

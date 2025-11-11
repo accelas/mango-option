@@ -169,6 +169,45 @@ for (size_t i = 1; i < n - 1; i++) {
 
 Enables compiler to generate AVX2/AVX-512 instructions for parallel computation.
 
+### CenteredDifference: Automatic ISA Selection
+
+The `CenteredDifference` stencil operator automatically selects the optimal backend based on CPU capabilities:
+
+**Mode Enum:**
+- **Mode::Auto** (default): Runtime CPU detection + OS XSAVE check chooses Scalar or SIMD
+- **Mode::Scalar**: Force scalar backend (for testing/debugging)
+- **Mode::Simd**: Force SIMD backend (for testing/benchmarking)
+
+**Production Usage:**
+```cpp
+// Always use Mode::Auto in production code
+auto spacing = GridSpacing<double>(grid);
+auto stencil = CenteredDifference(spacing);  // Auto-selects optimal backend
+```
+
+**Test Usage:**
+```cpp
+// Tests can force specific backends for regression testing
+auto scalar = CenteredDifference(spacing, CenteredDifference::Mode::Scalar);
+auto simd = CenteredDifference(spacing, CenteredDifference::Mode::Simd);
+
+// Compare results
+scalar.compute_second_derivative(u, d2u_scalar, 1, n-1);
+simd.compute_second_derivative(u, d2u_simd, 1, n-1);
+EXPECT_NEAR(d2u_scalar[i], d2u_simd[i], 1e-14);  // Allow FP rounding
+```
+
+**Performance Characteristics:**
+- Virtual dispatch overhead: ~5-10ns per call
+- Negligible vs computation cost (~5,000ns for 100-point grid)
+- Both backends use precomputed arrays on non-uniform grids
+- SIMD backend: 3-6x speedup via explicit vectorization
+
+**Architecture:**
+- Façade + Backend pattern (similar to strategy pattern)
+- ScalarBackend: `#pragma omp simd` for compiler auto-vectorization
+- SimdBackend: `std::experimental::simd` + `[[gnu::target_clones]]` for multi-ISA
+
 ### Cubic Spline Interpolation
 
 Natural cubic splines allow evaluation of solutions at arbitrary off-grid points:

@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "workspace.hpp"
+#include "memory/pde_workspace.hpp"
 #include "operators/grid_spacing.hpp"
 #include "grid.hpp"
 #include <memory>
@@ -24,7 +24,7 @@ namespace mango {
  * - Same spatial grid structure
  * - Different PDE coefficients (σ, r, q)
  *
- * Pre-allocates the spatial grid, GridSpacing metadata, and WorkspaceStorage so
+ * Pre-allocates the spatial grid, GridSpacing metadata, and PDEWorkspace so
  * multiple PDE solves that share the same grid can reuse SIMD-aligned buffers
  * without repeated heap traffic. Intended to be owned per-thread in OpenMP regions.
  *
@@ -41,7 +41,7 @@ namespace mango {
  * Memory savings (vs creating grid+spacing+workspace per solver):
  * - Grid buffer: ~800 bytes per reuse
  * - GridSpacing: ~800 bytes per reuse
- * - WorkspaceStorage: ~10n doubles per reuse (SIMD-aligned)
+ * - PDEWorkspace: ~10n doubles per reuse (SIMD-aligned)
  *
  * For 200 solvers (typical 4D table): significant savings
  */
@@ -60,7 +60,7 @@ public:
         : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
         , grid_view_(grid_buffer_.span())
         , grid_spacing_(std::make_shared<operators::GridSpacing<double>>(grid_view_))
-        , workspace_(std::make_shared<WorkspaceStorage>(n_space, grid_view_.span()))
+        , workspace_(std::make_shared<PDEWorkspace>(n_space, grid_view_.span()))
     {}
 
     /// Spatial grid span
@@ -69,8 +69,8 @@ public:
     /// Shared GridSpacing for spatial operators
     std::shared_ptr<operators::GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
 
-    /// Shared WorkspaceStorage for PDESolver internals
-    std::shared_ptr<WorkspaceStorage> workspace() const { return workspace_; }
+    /// Shared PDEWorkspace for PDESolver internals
+    std::shared_ptr<PDEWorkspace> workspace() const { return workspace_; }
 
     /// Grid parameters (for validation)
     double x_min() const { return grid_view_.span().front(); }
@@ -81,7 +81,7 @@ private:
     GridBuffer<double> grid_buffer_;
     GridView<double> grid_view_;
     std::shared_ptr<operators::GridSpacing<double>> grid_spacing_;
-    std::shared_ptr<WorkspaceStorage> workspace_;
+    std::shared_ptr<PDEWorkspace> workspace_;
 };
 
 }  // namespace mango

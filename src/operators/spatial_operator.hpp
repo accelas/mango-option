@@ -1,7 +1,7 @@
 #pragma once
 
 #include "grid_spacing.hpp"
-#include "centered_difference.hpp"
+#include "centered_difference_facade.hpp"
 #include "../jacobian_view.hpp"
 #include <span>
 #include <memory>
@@ -48,8 +48,14 @@ public:
     SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing)
         : pde_(std::move(pde))
         , spacing_(std::move(spacing))
-        , stencil_(*spacing_)
+        , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
     {}
+
+    // Default copy/move (shared_ptr makes it copyable)
+    SpatialOperator(const SpatialOperator&) = default;
+    SpatialOperator& operator=(const SpatialOperator&) = default;
+    SpatialOperator(SpatialOperator&&) = default;
+    SpatialOperator& operator=(SpatialOperator&&) = default;
 
     /// Get interior range for this stencil (3-point: [1, n-1))
     /// Precondition: n >= GridSpacing<T>::min_stencil_size() (i.e., n >= 3)
@@ -71,20 +77,29 @@ public:
                        std::span<T> Lu,
                        size_t start,
                        size_t end) const {
-        // Create evaluator lambda that handles time parameter
-        auto eval = [&](T d2u, T du, T val) -> T {
-            if constexpr (TimeDependentPDE<PDE>) {
-                return pde_(t, d2u, du, val);  // Time-dependent PDE
-            } else {
-                return pde_(d2u, du, val);     // Time-independent PDE
-            }
-        };
+        // Temporary buffers for derivatives
+        thread_local std::vector<T> d2u_dx2_buf;
+        thread_local std::vector<T> du_dx_buf;
 
-        // Dispatch to appropriate stencil strategy
-        if (spacing_->is_uniform()) {
-            stencil_.apply_uniform(u, Lu, start, end, eval);
-        } else {
-            stencil_.apply_non_uniform(u, Lu, start, end, eval);
+        const size_t n = u.size();
+        d2u_dx2_buf.resize(n);
+        du_dx_buf.resize(n);
+
+        // Zero only the active range to avoid stale values (optimization)
+        std::fill(d2u_dx2_buf.begin() + start, d2u_dx2_buf.begin() + end, T(0));
+        std::fill(du_dx_buf.begin() + start, du_dx_buf.begin() + end, T(0));
+
+        // Compute derivatives using facade
+        stencil_->compute_second_derivative(u, std::span<T>(d2u_dx2_buf), start, end);
+        stencil_->compute_first_derivative(u, std::span<T>(du_dx_buf), start, end);
+
+        // Apply PDE operator to combine derivatives
+        for (size_t i = start; i < end; ++i) {
+            if constexpr (TimeDependentPDE<PDE>) {
+                Lu[i] = pde_(t, d2u_dx2_buf[i], du_dx_buf[i], u[i]);
+            } else {
+                Lu[i] = pde_(d2u_dx2_buf[i], du_dx_buf[i], u[i]);
+            }
         }
     }
 
@@ -92,13 +107,13 @@ public:
     void compute_first_derivative(std::span<const T> u,
                                  std::span<T> du_dx) const {
         const auto range = interior_range(u.size());
-        stencil_.compute_all_first(u, du_dx, range.start, range.end);
+        stencil_->compute_first_derivative(u, du_dx, range.start, range.end);
     }
 
     void compute_second_derivative(std::span<const T> u,
                                   std::span<T> d2u_dx2) const {
         const auto range = interior_range(u.size());
-        stencil_.compute_all_second(u, d2u_dx2, range.start, range.end);
+        stencil_->compute_second_derivative(u, d2u_dx2, range.start, range.end);
     }
 
     /// Assemble analytical Jacobian for PDEs with constant coefficients
@@ -181,7 +196,7 @@ public:
 private:
     PDE pde_;  // Owned by value (PDEs are typically small)
     std::shared_ptr<GridSpacing<T>> spacing_;
-    CenteredDifference<T> stencil_;
+    std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
 };
 
 } // namespace mango::operators
