@@ -64,3 +64,14 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "centered_difference_scalar",
+    hdrs = ["centered_difference_scalar.hpp"],
+    deps = [
+        ":grid_spacing",
+        "//src:parallel",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
