@@ -3,7 +3,7 @@
 #include "grid.hpp"
 #include "memory/pde_workspace.hpp"
 #include "cpu/feature_detection.hpp"
-#include "operators/centered_difference_simd.hpp"
+#include "operators/centered_difference_facade.hpp"
 #include "boundary_conditions.hpp"
 #include "time_domain.hpp"
 #include "trbdf2_config.hpp"
@@ -86,7 +86,7 @@ public:
               const RootFindingConfig& root_config,
               const BoundaryL& left_bc,
               const BoundaryR& right_bc,
-              const SpatialOp& spatial_op,
+              SpatialOp spatial_op,  // Pass by value, move into member
               std::optional<ObstacleCallback> obstacle = std::nullopt,
               PDEWorkspace* external_workspace = nullptr)
         : grid_(grid)
@@ -95,7 +95,7 @@ public:
         , root_config_(root_config)
         , left_bc_(left_bc)
         , right_bc_(right_bc)
-        , spatial_op_(spatial_op)
+        , spatial_op_(std::move(spatial_op))
         , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_owner_(nullptr)

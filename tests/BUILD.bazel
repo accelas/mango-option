@@ -76,7 +76,7 @@ cc_test(
     srcs = ["newton_workspace_test.cc"],
     deps = [
         "//src:newton_workspace",
-        "//src:pde_workspace",
+        "//src/memory:pde_workspace",
         "//src:grid",
         "@googletest//:gtest_main",
     ],
@@ -88,7 +88,7 @@ cc_test(
     srcs = ["spatial_operators_test.cc"],
     deps = [
         "//src:spatial_operators",
-        "//src:pde_workspace",
+        "//src/memory:pde_workspace",
         "//src:grid",
         "@googletest//:gtest_main",
     ],
@@ -106,7 +106,7 @@ cc_test(
         "//src:snapshot",
         "//src/operators:operator_factory",
         "//src/operators:laplacian_pde",
-        "//src:pde_workspace",
+        "//src/memory:pde_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -118,7 +118,7 @@ cc_test(
     srcs = ["integration_5d_price_table_test.cc"],
     deps = [
         "//src:multigrid",
-        "//src:pde_workspace",
+        "//src/memory:pde_workspace",
         "//src:spatial_operators",
         "//src:grid",
         "@googletest//:gtest",
@@ -252,18 +252,6 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "centered_difference_test",
-    srcs = ["centered_difference_test.cc"],
-    deps = [
-        "//src/operators:centered_difference_scalar",
-        "//src/operators:grid_spacing",
-        "//src:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-fopenmp-simd"],
 )
 
 cc_test(
@@ -422,7 +410,7 @@ cc_test(
     name = "unified_memory_resource_test",
     srcs = ["memory/unified_memory_resource_test.cc"],
     deps = [
-        "//src:unified_memory_resource",
+        "//src/memory:unified_memory_resource",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -432,7 +420,7 @@ cc_test(
     name = "workspace_base_test",
     srcs = ["memory/workspace_base_test.cc"],
     deps = [
-        "//src:workspace_base",
+        "//src/memory:workspace_base",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -442,7 +430,7 @@ cc_test(
     name = "pde_workspace_test",
     srcs = ["memory/pde_workspace_test.cc"],
     deps = [
-        "//src:pde_workspace",
+        "//src/memory:pde_workspace",
         "//src:grid",
         "@googletest//:gtest_main",
     ],
@@ -463,8 +451,8 @@ cc_test(
     name = "centered_difference_simd_test",
     srcs = ["operators/centered_difference_simd_test.cc"],
     deps = [
-        "//src/operators:centered_difference_simd",
-        "//src/operators:centered_difference",
+        "//src/operators:centered_difference_simd_backend",
+        "//src/operators:centered_difference_scalar",
         "//src/operators:grid_spacing",
         "//src:grid",
         "@googletest//:gtest_main",

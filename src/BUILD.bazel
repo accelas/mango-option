@@ -1,29 +1,5 @@
-cc_library(
-    name = "unified_memory_resource",
-    hdrs = ["memory/unified_memory_resource.hpp"],
-    visibility = ["//visibility:public"],
-    copts = ["-std=c++23"],
-    deps = [],
-)
-
-cc_library(
-    name = "workspace_base",
-    hdrs = ["memory/workspace_base.hpp"],
-    visibility = ["//visibility:public"],
-    copts = ["-std=c++23"],
-    deps = [":unified_memory_resource"],
-)
-
-cc_library(
-    name = "pde_workspace",
-    hdrs = ["memory/pde_workspace.hpp"],
-    visibility = ["//visibility:public"],
-    copts = ["-std=c++23"],
-    deps = [
-        ":workspace_base",
-    ],
-)
-
+# Memory management targets are defined in //src/memory:BUILD.bazel
+# Use //src/memory:unified_memory_resource, //src/memory:workspace_base, //src/memory:pde_workspace
 
 cc_library(
     name = "expected",
@@ -151,7 +127,7 @@ cc_library(
 cc_library(
     name = "newton_workspace",
     hdrs = ["newton_workspace.hpp"],
-    deps = [":pde_workspace"],
+    deps = ["//src/memory:pde_workspace"],
     copts = [
         "-std=c++23",
         "-Wall",
@@ -351,7 +327,7 @@ cc_library(
     name = "slice_solver_workspace",
     hdrs = ["slice_solver_workspace.hpp"],
     deps = [
-        ":pde_workspace",
+        "//src/memory:pde_workspace",
         ":grid",
         "//src/operators:grid_spacing",
     ],
@@ -383,9 +359,9 @@ cc_library(
     hdrs = ["pde_solver.hpp"],
     deps = [
         ":grid",
-        ":pde_workspace",
+        "//src/memory:pde_workspace",
         "//src/cpu:feature_detection",
-        "//src/operators:centered_difference_simd",
+        "//src/operators:centered_difference_facade",
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",

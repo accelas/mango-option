@@ -25,6 +25,12 @@ public:
     explicit CenteredDifference(const GridSpacing<double>& spacing,
                                 Mode mode = Mode::Auto);
 
+    // Movable but not copyable (owns unique_ptr)
+    CenteredDifference(const CenteredDifference&) = delete;
+    CenteredDifference& operator=(const CenteredDifference&) = delete;
+    CenteredDifference(CenteredDifference&&) = default;
+    CenteredDifference& operator=(CenteredDifference&&) = default;
+
     // Public API - virtual dispatch happens after IFUNC resolution
     void compute_second_derivative(std::span<const double> u,
                                    std::span<double> d2u_dx2,
