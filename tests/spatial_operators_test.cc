@@ -1,3 +1,7 @@
+// Tests use deprecated WorkspaceStorage for backward compatibility verification
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "src/spatial_operators.hpp"
 #include "src/workspace.hpp"
 #include "src/grid.hpp"
@@ -340,3 +344,5 @@ TEST(SpatialOperatorsTest, SecondDerivativeParabola) {
     EXPECT_DOUBLE_EQ(d2u[0], 0.0);
     EXPECT_DOUBLE_EQ(d2u[n-1], 0.0);
 }
+
+#pragma GCC diagnostic pop

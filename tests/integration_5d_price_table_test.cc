@@ -1,3 +1,7 @@
+// Tests use deprecated WorkspaceStorage for backward compatibility verification
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "src/multigrid.hpp"
 #include "src/workspace.hpp"
 #include "src/spatial_operators.hpp"
@@ -145,3 +149,5 @@ TEST(Integration5DPriceTableTest, DividendAffectsPriceCalculation) {
 
     // This confirms dividend dimension properly affects PDE operator
 }
+
+#pragma GCC diagnostic pop
