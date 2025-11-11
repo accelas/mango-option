@@ -109,3 +109,26 @@ TEST(CenteredDifferenceSIMDTest, PaddedArraySafety) {
     // Padding should remain zero
     EXPECT_DOUBLE_EQ(d2u_dx2[10], 0.0);
 }
+
+TEST(CenteredDifferenceSIMDTest, NonUniformSecondDerivative) {
+    // Non-uniform grid (tanh-clustered)
+    std::vector<double> x(11);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto stencil = mango::operators::CenteredDifferenceSIMD<double>(spacing);
+
+    // Test function: f(x) = x^2, f''(x) = 2
+    std::vector<double> u(11);
+    for (size_t i = 0; i < 11; ++i) u[i] = x[i] * x[i];
+
+    std::vector<double> d2u_dx2(11, 0.0);
+    stencil.compute_second_derivative_non_uniform(u, d2u_dx2, 1, 10);
+
+    // Should be close to 2.0 (with truncation error)
+    for (size_t i = 1; i < 10; ++i) {
+        EXPECT_NEAR(d2u_dx2[i], 2.0, 0.05) << "at index " << i;
+    }
+}
