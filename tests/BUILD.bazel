@@ -495,3 +495,12 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "batch_transpose_test",
+    srcs = ["batch_transpose_test.cc"],
+    deps = [
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
