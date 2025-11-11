@@ -56,3 +56,11 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "centered_difference_simd",
+    hdrs = ["centered_difference_simd.hpp"],
+    deps = [":grid_spacing"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

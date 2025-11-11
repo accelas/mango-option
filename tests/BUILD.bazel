@@ -469,6 +469,17 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "centered_difference_simd_test",
+    srcs = ["operators/centered_difference_simd_test.cc"],
+    deps = [
+        "//src/operators:centered_difference_simd",
+        "//src:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
