@@ -453,7 +453,7 @@ cc_test(
     name = "feature_detection_test",
     srcs = ["cpu/feature_detection_test.cc"],
     deps = [
-        "//src:cpu_features",
+        "//src/cpu:feature_detection",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -494,7 +494,7 @@ cc_test(
     copts = ["-std=c++23"],
     deps = [
         "//src:pde_solver",
-        "//src:cpu_features",
+        "//src/cpu:feature_detection",
         "@googletest//:gtest_main",
     ],
     tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
