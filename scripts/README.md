@@ -28,7 +28,8 @@ This collection of scripts provides an end-to-end workflow for:
 - **`.python-version`** - Python version specification for uv
 
 ### Examples
-- **`examples/simple_iv_calculation.py`** - Download and calculate IV for a single ticker
+- **`examples/simple_iv_calculation.py`** - Download and calculate IV for a single ticker (beginner)
+- **`examples/iv_price_table_example.py`** - Build price table and use interpolation (advanced)
 - **`examples/README.md`** - Example documentation and usage guide
 
 ## Setup
