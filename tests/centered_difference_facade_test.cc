@@ -18,7 +18,7 @@ TEST(CenteredDifferenceFacadeTest, AutoModeWorks) {
     auto spacing = GridSpacing<double>(grid);
 
     // Mode::Auto should select backend automatically
-    CenteredDifference stencil(spacing);  // Mode::Auto by default
+    CenteredDifference<double>stencil(spacing);  // Mode::Auto by default
 
     // Test with f(x) = x²
     std::vector<double> u(11);
@@ -45,7 +45,7 @@ TEST(CenteredDifferenceFacadeTest, ScalarModeWorks) {
     auto spacing = GridSpacing<double>(grid);
 
     // Force scalar backend
-    CenteredDifference stencil(spacing, CenteredDifference::Mode::Scalar);
+    CenteredDifference<double>stencil(spacing, CenteredDifference<double>::Mode::Scalar);
 
     std::vector<double> u(11);
     for (size_t i = 0; i < 11; ++i) {
@@ -70,7 +70,7 @@ TEST(CenteredDifferenceFacadeTest, SimdModeWorks) {
     auto spacing = GridSpacing<double>(grid);
 
     // Force SIMD backend
-    CenteredDifference stencil(spacing, CenteredDifference::Mode::Simd);
+    CenteredDifference<double>stencil(spacing, CenteredDifference<double>::Mode::Simd);
 
     std::vector<double> u(11);
     for (size_t i = 0; i < 11; ++i) {
@@ -94,8 +94,8 @@ TEST(CenteredDifferenceFacadeTest, ScalarVsSimdMatch) {
     auto grid = GridView<double>(x);
     auto spacing = GridSpacing<double>(grid);
 
-    CenteredDifference scalar_stencil(spacing, CenteredDifference::Mode::Scalar);
-    CenteredDifference simd_stencil(spacing, CenteredDifference::Mode::Simd);
+    CenteredDifference<double>scalar_stencil(spacing, CenteredDifference<double>::Mode::Scalar);
+    CenteredDifference<double>simd_stencil(spacing, CenteredDifference<double>::Mode::Simd);
 
     std::vector<double> u(11);
     for (size_t i = 0; i < 11; ++i) {

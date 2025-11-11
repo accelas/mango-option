@@ -7,6 +7,7 @@
 #include <span>
 #include <memory>
 #include <cassert>
+#include <concepts>
 
 namespace mango::operators {
 
@@ -17,12 +18,15 @@ namespace mango::operators {
  * Mode::Scalar/Simd force specific backend (for testing).
  *
  * Virtual dispatch overhead: ~5-10ns per call (negligible vs computation).
+ *
+ * @tparam T Floating-point type (float, double, long double)
  */
+template<std::floating_point T = double>
 class CenteredDifference {
 public:
     enum class Mode { Auto, Scalar, Simd };
 
-    explicit CenteredDifference(const GridSpacing<double>& spacing,
+    explicit CenteredDifference(const GridSpacing<T>& spacing,
                                 Mode mode = Mode::Auto);
 
     // Movable but not copyable (owns unique_ptr)
@@ -32,24 +36,24 @@ public:
     CenteredDifference& operator=(CenteredDifference&&) = default;
 
     // Public API - virtual dispatch happens after IFUNC resolution
-    void compute_second_derivative(std::span<const double> u,
-                                   std::span<double> d2u_dx2,
+    void compute_second_derivative(std::span<const T> u,
+                                   std::span<T> d2u_dx2,
                                    size_t start, size_t end) const {
         assert(start >= 1 && "start must allow u[i-1] access");
         assert(end <= u.size() - 1 && "end must allow u[i+1] access");
         impl_->compute_second_derivative(u, d2u_dx2, start, end);
     }
 
-    void compute_first_derivative(std::span<const double> u,
-                                  std::span<double> du_dx,
+    void compute_first_derivative(std::span<const T> u,
+                                  std::span<T> du_dx,
                                   size_t start, size_t end) const {
         assert(start >= 1 && "start must allow u[i-1] access");
         assert(end <= u.size() - 1 && "end must allow u[i+1] access");
         impl_->compute_first_derivative(u, du_dx, start, end);
     }
 
-    void compute_second_derivative_tiled(std::span<const double> u,
-                                         std::span<double> d2u_dx2,
+    void compute_second_derivative_tiled(std::span<const T> u,
+                                         std::span<T> d2u_dx2,
                                          size_t start, size_t end) const {
         assert(start >= 1 && "start must allow u[i-1] access");
         assert(end <= u.size() - 1 && "end must allow u[i+1] access");
@@ -60,13 +64,13 @@ private:
     struct BackendInterface {
         virtual ~BackendInterface() = default;
         virtual void compute_second_derivative(
-            std::span<const double> u, std::span<double> d2u_dx2,
+            std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const = 0;
         virtual void compute_first_derivative(
-            std::span<const double> u, std::span<double> du_dx,
+            std::span<const T> u, std::span<T> du_dx,
             size_t start, size_t end) const = 0;
         virtual void compute_second_derivative_tiled(
-            std::span<const double> u, std::span<double> d2u_dx2,
+            std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const = 0;
     };
 
@@ -74,23 +78,23 @@ private:
     struct BackendImpl final : BackendInterface {
         Backend backend_;
 
-        explicit BackendImpl(const GridSpacing<double>& spacing)
+        explicit BackendImpl(const GridSpacing<T>& spacing)
             : backend_(spacing) {}
 
         void compute_second_derivative(
-            std::span<const double> u, std::span<double> d2u_dx2,
+            std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const override {
             backend_.compute_second_derivative(u, d2u_dx2, start, end);
         }
 
         void compute_first_derivative(
-            std::span<const double> u, std::span<double> du_dx,
+            std::span<const T> u, std::span<T> du_dx,
             size_t start, size_t end) const override {
             backend_.compute_first_derivative(u, du_dx, start, end);
         }
 
         void compute_second_derivative_tiled(
-            std::span<const double> u, std::span<double> d2u_dx2,
+            std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const override {
             backend_.compute_second_derivative_tiled(u, d2u_dx2, start, end);
         }
@@ -100,8 +104,9 @@ private:
 };
 
 // Constructor implementation
-inline CenteredDifference::CenteredDifference(const GridSpacing<double>& spacing,
-                                              Mode mode)
+template<std::floating_point T>
+inline CenteredDifference<T>::CenteredDifference(const GridSpacing<T>& spacing,
+                                                  Mode mode)
 {
     if (mode == Mode::Auto) {
         // Check CPU features AND OS support
@@ -118,10 +123,10 @@ inline CenteredDifference::CenteredDifference(const GridSpacing<double>& spacing
 
     switch (mode) {
         case Mode::Scalar:
-            impl_ = std::make_unique<BackendImpl<ScalarBackend<double>>>(spacing);
+            impl_ = std::make_unique<BackendImpl<ScalarBackend<T>>>(spacing);
             break;
         case Mode::Simd:
-            impl_ = std::make_unique<BackendImpl<SimdBackend<double>>>(spacing);
+            impl_ = std::make_unique<BackendImpl<SimdBackend<T>>>(spacing);
             break;
         case Mode::Auto:
             // Already resolved above

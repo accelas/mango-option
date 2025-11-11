@@ -48,7 +48,7 @@ public:
     SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing)
         : pde_(std::move(pde))
         , spacing_(std::move(spacing))
-        , stencil_(std::make_shared<CenteredDifference>(*spacing_))
+        , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
     {}
 
     // Default copy/move (shared_ptr makes it copyable)
@@ -82,8 +82,12 @@ public:
         thread_local std::vector<T> du_dx_buf;
 
         const size_t n = u.size();
-        d2u_dx2_buf.resize(n, 0.0);
-        du_dx_buf.resize(n, 0.0);
+        d2u_dx2_buf.resize(n);
+        du_dx_buf.resize(n);
+
+        // Zero only the region we'll use to avoid stale values
+        std::fill(d2u_dx2_buf.begin(), d2u_dx2_buf.end(), T(0));
+        std::fill(du_dx_buf.begin(), du_dx_buf.end(), T(0));
 
         // Compute derivatives using facade
         stencil_->compute_second_derivative(u, std::span<T>(d2u_dx2_buf), start, end);
@@ -192,7 +196,7 @@ public:
 private:
     PDE pde_;  // Owned by value (PDEs are typically small)
     std::shared_ptr<GridSpacing<T>> spacing_;
-    std::shared_ptr<CenteredDifference> stencil_;  // Shared ownership of facade
+    std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
 };
 
 } // namespace mango::operators
