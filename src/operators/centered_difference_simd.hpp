@@ -110,6 +110,7 @@ public:
      * Tiled second derivative (cache-friendly)
      *
      * Operator decides tile size based on stencil width and cache target.
+     * Automatically dispatches to uniform or non-uniform implementation.
      */
     [[gnu::target_clones("default","avx2","avx512f")]]
     void compute_second_derivative_tiled(
@@ -123,7 +124,11 @@ public:
 
         for (size_t tile_start = start; tile_start < end; tile_start += l1_tile_size_) {
             const size_t tile_end = std::min(tile_start + l1_tile_size_, end);
-            compute_second_derivative_uniform(u, d2u_dx2, tile_start, tile_end);
+            if (spacing_.is_uniform()) {
+                compute_second_derivative_uniform(u, d2u_dx2, tile_start, tile_end);
+            } else {
+                compute_second_derivative_non_uniform(u, d2u_dx2, tile_start, tile_end);
+            }
         }
     }
 

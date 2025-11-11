@@ -133,30 +133,35 @@ public:
     // Returns precomputed values for interior points i=1..n-2 (n-2 points)
     std::span<const T> dx_left_inv() const {
         assert(!is_uniform_ && "dx_left_inv only available for non-uniform grids");
+        assert(n_ >= min_stencil_size() && "Grid too small for stencil operations");
         const size_t interior_count = n_ - 2;
         return {precomputed_.data(), interior_count};
     }
 
     std::span<const T> dx_right_inv() const {
         assert(!is_uniform_ && "dx_right_inv only available for non-uniform grids");
+        assert(n_ >= min_stencil_size() && "Grid too small for stencil operations");
         const size_t interior_count = n_ - 2;
         return {precomputed_.data() + interior_count, interior_count};
     }
 
     std::span<const T> dx_center_inv() const {
         assert(!is_uniform_ && "dx_center_inv only available for non-uniform grids");
+        assert(n_ >= min_stencil_size() && "Grid too small for stencil operations");
         const size_t interior_count = n_ - 2;
         return {precomputed_.data() + 2 * interior_count, interior_count};
     }
 
     std::span<const T> w_left() const {
         assert(!is_uniform_ && "w_left only available for non-uniform grids");
+        assert(n_ >= min_stencil_size() && "Grid too small for stencil operations");
         const size_t interior_count = n_ - 2;
         return {precomputed_.data() + 3 * interior_count, interior_count};
     }
 
     std::span<const T> w_right() const {
         assert(!is_uniform_ && "w_right only available for non-uniform grids");
+        assert(n_ >= min_stencil_size() && "Grid too small for stencil operations");
         const size_t interior_count = n_ - 2;
         return {precomputed_.data() + 4 * interior_count, interior_count};
     }
