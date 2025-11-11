@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/core/grid.hpp"
+#include "src/pde/core/grid.hpp"
 #include <vector>
 #include <span>
 #include <cmath>

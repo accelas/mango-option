@@ -5,8 +5,8 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "src/pricing/iv_solver.hpp"
-#include "src/pricing/american_option.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/american_option.hpp"
 
 namespace py = pybind11;
 

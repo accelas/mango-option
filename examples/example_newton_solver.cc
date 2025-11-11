@@ -1,9 +1,9 @@
-#include "src/core/pde_solver.hpp"
-#include "src/core/boundary_conditions.hpp"
-#include "src/core/spatial_operators.hpp"
-#include "src/core/root_finding.hpp"
-#include "src/core/grid.hpp"
-#include "src/core/time_domain.hpp"
+#include "src/pde/core/pde_solver.hpp"
+#include "src/pde/core/boundary_conditions.hpp"
+#include "src/pde/core/spatial_operators.hpp"
+#include "src/pde/core/root_finding.hpp"
+#include "src/pde/core/grid.hpp"
+#include "src/pde/core/time_domain.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>

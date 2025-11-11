@@ -1,6 +1,6 @@
 # All library targets have been reorganized into subdirectories:
 #
-# - Core PDE solver components: //src/core:BUILD.bazel
+# - Core PDE solver components: //src/pde/core:BUILD.bazel
 #   (grid, multigrid, boundary_conditions, jacobian_view, root_finding, brent,
 #    newton_workspace, spatial_operators, time_domain, trbdf2_config, thomas_solver, pde_solver)
 #
@@ -8,18 +8,18 @@
 #   (cubic_spline_solver, snapshot_interpolator, bspline_4d, bspline_basis_1d,
 #    bspline_collocation_1d, bspline_fitter_4d, bspline_fitter_4d_separable, bspline_utils)
 #
-# - Pricing models: //src/pricing:BUILD.bazel
+# - Pricing models: //src/option:BUILD.bazel
 #   (snapshot, american_option, slice_solver_workspace, price_table_4d_builder,
 #    price_table_snapshot_collector, iv_solver, iv_solver_interpolated, iv_types)
 #
-# - Utilities: //src/utils:BUILD.bazel
+# - Utilities: //src/support:BUILD.bazel
 #   (expected, parallel, error_types)
 #
-# - Memory management: //src/memory:BUILD.bazel
+# - Memory management: //src/pde/memory:BUILD.bazel
 #   (unified_memory_resource, workspace_base, pde_workspace)
 #
-# - Operators: //src/operators:BUILD.bazel
+# - Operators: //src/pde/operators:BUILD.bazel
 #   (grid_spacing, operator_factory, centered_difference_facade, black_scholes_pde, etc.)
 #
-# - CPU features: //src/cpu:BUILD.bazel
+# - CPU features: //src/support/cpu:BUILD.bazel
 #   (feature_detection)

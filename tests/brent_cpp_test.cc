@@ -1,4 +1,4 @@
-#include "src/core/root_finding.hpp"
+#include "src/pde/core/root_finding.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

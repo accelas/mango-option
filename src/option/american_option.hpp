@@ -6,11 +6,11 @@
 #ifndef MANGO_AMERICAN_OPTION_HPP
 #define MANGO_AMERICAN_OPTION_HPP
 
-#include "src/core/pde_solver.hpp"
-#include "src/core/spatial_operators.hpp"
-#include "src/utils/expected.hpp"
-#include "src/utils/parallel.hpp"
-#include "src/pricing/slice_solver_workspace.hpp"
+#include "src/pde/core/pde_solver.hpp"
+#include "src/pde/core/spatial_operators.hpp"
+#include "src/support/expected.hpp"
+#include "src/support/parallel.hpp"
+#include "src/option/slice_solver_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>

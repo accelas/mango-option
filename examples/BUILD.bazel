@@ -2,12 +2,12 @@ cc_binary(
     name = "example_newton_solver",
     srcs = ["example_newton_solver.cc"],
     deps = [
-        "//src/core:pde_solver",
-        "//src/core:boundary_conditions",
-        "//src/core:spatial_operators",
-        "//src/core:root_finding",
-        "//src/core:grid",
-        "//src/core:time_domain",
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/core:spatial_operators",
+        "//src/pde/core:root_finding",
+        "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
     ],
     copts = ["-std=c++23"],
 )
@@ -16,8 +16,8 @@ cc_binary(
     name = "example_expected_validation",
     srcs = ["example_expected_validation.cpp"],
     deps = [
-        "//src/pricing:american_option",
-        "//src/pricing:slice_solver_workspace",
+        "//src/option:american_option",
+        "//src/option:slice_solver_workspace",
     ],
     copts = ["-std=c++23"],
 )

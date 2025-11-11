@@ -33,10 +33,10 @@
 
 #pragma once
 
-#include "src/pricing/american_option.hpp"
+#include "src/option/american_option.hpp"
 #include "src/interpolation/bspline_4d.hpp"
 #include "src/interpolation/bspline_fitter_4d.hpp"
-#include "src/utils/expected.hpp"
+#include "src/support/expected.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>

@@ -120,7 +120,7 @@ American put price: $6.0842
 
 ```cpp
 #include "src/pde_solver.hpp"
-#include "src/operators/laplacian_pde.hpp"
+#include "src/pde/operators/laplacian_pde.hpp"
 #include "src/boundary_conditions.hpp"
 
 // Create spatial grid

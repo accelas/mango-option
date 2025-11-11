@@ -1,6 +1,6 @@
-#include "src/pricing/iv_solver.hpp"
-#include "src/core/root_finding.hpp"
-#include "src/pricing/american_option.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/pde/core/root_finding.hpp"
+#include "src/option/american_option.hpp"
 #include <cmath>
 #include <algorithm>
 

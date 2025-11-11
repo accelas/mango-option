@@ -1,6 +1,6 @@
-#include "src/core/newton_workspace.hpp"
-#include "src/memory/pde_workspace.hpp"
-#include "src/core/grid.hpp"
+#include "src/pde/core/newton_workspace.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
+#include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

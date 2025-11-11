@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "src/core/thomas_solver.hpp"
+#include "src/pde/core/thomas_solver.hpp"
 #include <span>
 #include <vector>
 #include <optional>

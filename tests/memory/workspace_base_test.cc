@@ -1,4 +1,4 @@
-#include "src/memory/workspace_base.hpp"
+#include "src/pde/memory/workspace_base.hpp"
 #include <gtest/gtest.h>
 
 TEST(WorkspaceBaseTest, TileMetadataGeneration) {

@@ -31,12 +31,12 @@ cc_binary(
     ],
     linkstatic = True,  # Static link our library code
     deps = [
-        "//src/pricing:american_option",
-        "//src/pricing:slice_solver_workspace",
-        "//src/pricing:iv_solver",
+        "//src/option:american_option",
+        "//src/option:slice_solver_workspace",
+        "//src/option:iv_solver",
         "//src/interpolation:bspline_4d",
         "//src/interpolation:bspline_fitter_4d",
-        "//src/pricing:iv_solver_interpolated",
+        "//src/option:iv_solver_interpolated",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -61,10 +61,10 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src/pricing:american_option",
-        "//src/pricing:slice_solver_workspace",
-        "//src/pricing:iv_solver",
-        "//src/pricing:iv_solver_interpolated",
+        "//src/option:american_option",
+        "//src/option:slice_solver_workspace",
+        "//src/option:iv_solver",
+        "//src/option:iv_solver_interpolated",
         "//src/interpolation:bspline_4d",
         "//src/interpolation:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
@@ -92,7 +92,7 @@ cc_binary(
     ],
     linkstatic = True,  # Static link our library code
     deps = [
-        "//src/pricing:american_option",
+        "//src/option:american_option",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -118,7 +118,7 @@ cc_binary(
     ],
     linkstatic = True,  # Static link our library code
     deps = [
-        "//src/pricing:american_option",
+        "//src/option:american_option",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],

@@ -40,7 +40,7 @@
 #pragma once
 
 #include "src/interpolation/bspline_collocation_1d.hpp"
-#include "src/utils/expected.hpp"
+#include "src/support/expected.hpp"
 #include <vector>
 #include <string>
 #include <cmath>

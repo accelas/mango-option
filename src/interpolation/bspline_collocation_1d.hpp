@@ -32,8 +32,8 @@
 
 #include "src/interpolation/bspline_basis_1d.hpp"
 #include "src/interpolation/bspline_utils.hpp"
-#include "src/core/thomas_solver.hpp"
-#include "src/utils/expected.hpp"
+#include "src/pde/core/thomas_solver.hpp"
+#include "src/support/expected.hpp"
 #include <vector>
 #include <cmath>
 #include <algorithm>

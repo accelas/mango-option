@@ -237,7 +237,7 @@ cc_test(
     srcs = ["cpp_boundary_test.cc"],
     deps = [
         "//legacy/src:american_option",
-        "//src/pricing:american_option",
+        "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-fopenmp-simd"],

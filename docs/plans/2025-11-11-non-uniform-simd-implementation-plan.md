@@ -13,7 +13,7 @@
 ## Task 1: Add Precomputation to GridSpacing
 
 **Files:**
-- Modify: `src/operators/grid_spacing.hpp` (add precomputed_ member, constructor logic)
+- Modify: `src/pde/operators/grid_spacing.hpp` (add precomputed_ member, constructor logic)
 - Test: `tests/operators/grid_spacing_test.cc` (new tests for precomputation)
 
 ### Step 1: Write failing test for non-uniform precomputation
@@ -57,7 +57,7 @@ Expected: FAIL with "no member named 'dx_left_inv' in 'GridSpacing'"
 ### Step 3: Implement precomputation in GridSpacing
 
 ```cpp
-// In src/operators/grid_spacing.hpp
+// In src/pde/operators/grid_spacing.hpp
 
 template<std::floating_point T = double>
 class GridSpacing {
@@ -162,7 +162,7 @@ Expected: PASS (death test catches assertion)
 ### Step 7: Commit
 
 ```bash
-git add src/operators/grid_spacing.hpp tests/operators/grid_spacing_test.cc
+git add src/pde/operators/grid_spacing.hpp tests/operators/grid_spacing_test.cc
 git commit -m "Add precomputed spacing arrays to GridSpacing
 
 For non-uniform grids, eagerly precompute dx_left_inv, dx_right_inv,
@@ -178,7 +178,7 @@ uniform grids for fail-fast behavior."
 ## Task 2: Add compute_second_derivative_non_uniform to CenteredDifferenceSIMD
 
 **Files:**
-- Modify: `src/operators/centered_difference_simd.hpp` (add new method)
+- Modify: `src/pde/operators/centered_difference_simd.hpp` (add new method)
 - Test: `tests/operators/centered_difference_simd_test.cc` (numerical correctness)
 
 ### Step 1: Write numerical correctness test
@@ -220,7 +220,7 @@ Expected: FAIL with "no member named 'compute_second_derivative_non_uniform'"
 ### Step 3: Implement non-uniform second derivative kernel
 
 ```cpp
-// In src/operators/centered_difference_simd.hpp
+// In src/pde/operators/centered_difference_simd.hpp
 
 [[gnu::target_clones("default","avx2","avx512f")]]
 void compute_second_derivative_non_uniform(
@@ -283,7 +283,7 @@ Expected: PASS
 ### Step 5: Commit
 
 ```bash
-git add src/operators/centered_difference_simd.hpp tests/operators/centered_difference_simd_test.cc
+git add src/pde/operators/centered_difference_simd.hpp tests/operators/centered_difference_simd_test.cc
 git commit -m "Add compute_second_derivative_non_uniform to CenteredDifferenceSIMD
 
 SIMD kernel loads precomputed dx_left_inv, dx_right_inv, dx_center_inv
@@ -296,7 +296,7 @@ for exact numerical match."
 ## Task 3: Add compute_first_derivative_non_uniform to CenteredDifferenceSIMD
 
 **Files:**
-- Modify: `src/operators/centered_difference_simd.hpp` (add new method)
+- Modify: `src/pde/operators/centered_difference_simd.hpp` (add new method)
 - Test: `tests/operators/centered_difference_simd_test.cc` (numerical correctness)
 
 ### Step 1: Write numerical correctness test
@@ -338,7 +338,7 @@ Expected: FAIL with "no member named 'compute_first_derivative_non_uniform'"
 ### Step 3: Implement non-uniform first derivative kernel
 
 ```cpp
-// In src/operators/centered_difference_simd.hpp
+// In src/pde/operators/centered_difference_simd.hpp
 
 [[gnu::target_clones("default","avx2","avx512f")]]
 void compute_first_derivative_non_uniform(
@@ -404,7 +404,7 @@ Expected: PASS
 ### Step 5: Commit
 
 ```bash
-git add src/operators/centered_difference_simd.hpp tests/operators/centered_difference_simd_test.cc
+git add src/pde/operators/centered_difference_simd.hpp tests/operators/centered_difference_simd_test.cc
 git commit -m "Add compute_first_derivative_non_uniform to CenteredDifferenceSIMD
 
 SIMD kernel loads precomputed w_left, w_right, dx_left_inv, dx_right_inv
@@ -521,7 +521,7 @@ indexing mistakes."
 ## Task 5: Add Convenience Wrappers with target_clones
 
 **Files:**
-- Modify: `src/operators/centered_difference_simd.hpp` (add wrapper methods)
+- Modify: `src/pde/operators/centered_difference_simd.hpp` (add wrapper methods)
 - Test: `tests/operators/centered_difference_simd_test.cc` (wrapper dispatch tests)
 
 ### Step 1: Write wrapper dispatch test
@@ -590,7 +590,7 @@ Expected: FAIL with "no member named 'compute_second_derivative'"
 ### Step 3: Implement convenience wrappers
 
 ```cpp
-// In src/operators/centered_difference_simd.hpp
+// In src/pde/operators/centered_difference_simd.hpp
 
 // Convenience wrapper for second derivative (automatic dispatch)
 [[gnu::target_clones("default","avx2","avx512f")]]
@@ -630,7 +630,7 @@ Expected: PASS
 ### Step 5: Commit
 
 ```bash
-git add src/operators/centered_difference_simd.hpp tests/operators/centered_difference_simd_test.cc
+git add src/pde/operators/centered_difference_simd.hpp tests/operators/centered_difference_simd_test.cc
 git commit -m "Add convenience wrappers for automatic uniform/non-uniform dispatch
 
 Both wrappers get [[gnu::target_clones]] for ISA-specific variants.
@@ -683,13 +683,13 @@ Expected: All grid_spacing and centered_difference_simd tests PASS
 ## Task 7: Update Documentation
 
 **Files:**
-- Modify: `src/operators/centered_difference_simd.hpp` (class documentation)
-- Modify: `src/operators/grid_spacing.hpp` (precomputation documentation)
+- Modify: `src/pde/operators/centered_difference_simd.hpp` (class documentation)
+- Modify: `src/pde/operators/grid_spacing.hpp` (precomputation documentation)
 
 ### Step 1: Update CenteredDifferenceSIMD class documentation
 
 ```cpp
-// In src/operators/centered_difference_simd.hpp
+// In src/pde/operators/centered_difference_simd.hpp
 
 /**
  * CenteredDifferenceSIMD: Vectorized stencil operator
@@ -735,7 +735,7 @@ class CenteredDifferenceSIMD {
 ### Step 2: Update GridSpacing precomputation documentation
 
 ```cpp
-// In src/operators/grid_spacing.hpp
+// In src/pde/operators/grid_spacing.hpp
 
 /**
  * GridSpacing: Grid spacing information for finite difference operators
@@ -772,7 +772,7 @@ class GridSpacing {
 ### Step 3: Commit
 
 ```bash
-git add src/operators/centered_difference_simd.hpp src/operators/grid_spacing.hpp
+git add src/pde/operators/centered_difference_simd.hpp src/pde/operators/grid_spacing.hpp
 git commit -m "Update documentation for non-uniform grid support
 
 Document precomputation strategy, memory layout, usage patterns, and

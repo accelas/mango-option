@@ -2,7 +2,7 @@ cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
     deps = [
-        "//src/utils:expected",
+        "//src/support:expected",
     ],
     copts = [
         "-std=c++23",
@@ -18,7 +18,7 @@ cc_library(
     hdrs = ["multigrid.hpp"],
     deps = [
         ":grid",
-        "//src/utils:expected",
+        "//src/support:expected",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
@@ -67,7 +67,7 @@ cc_library(
 cc_library(
     name = "newton_workspace",
     hdrs = ["newton_workspace.hpp"],
-    deps = ["//src/memory:pde_workspace"],
+    deps = ["//src/pde/memory:pde_workspace"],
     copts = [
         "-std=c++23",
         "-Wall",
@@ -81,7 +81,7 @@ cc_library(
     name = "spatial_operators",
     hdrs = ["spatial_operators.hpp"],
     deps = [
-        "//src/utils:parallel",
+        "//src/support:parallel",
     ],
     copts = [
         "-std=c++23",
@@ -122,18 +122,18 @@ cc_library(
     hdrs = ["pde_solver.hpp"],
     deps = [
         ":grid",
-        "//src/memory:pde_workspace",
-        "//src/cpu:feature_detection",
-        "//src/operators:centered_difference_facade",
+        "//src/pde/memory:pde_workspace",
+        "//src/support/cpu:feature_detection",
+        "//src/pde/operators:centered_difference_facade",
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",
         ":thomas_solver",
         ":newton_workspace",
         ":root_finding",
-        "//src/pricing:snapshot",
+        "//src/option:snapshot",
         ":jacobian_view",
-        "//src/utils:expected",
+        "//src/support:expected",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],

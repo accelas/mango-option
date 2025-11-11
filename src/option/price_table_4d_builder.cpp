@@ -3,12 +3,12 @@
  * @brief Implementation of 4D price table builder
  */
 
-#include "src/pricing/price_table_4d_builder.hpp"
-#include "src/pricing/price_table_snapshot_collector.hpp"
-#include "src/pricing/american_option.hpp"
-#include "src/pricing/slice_solver_workspace.hpp"
-#include "src/core/trbdf2_config.hpp"
-#include "src/core/root_finding.hpp"
+#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_snapshot_collector.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/slice_solver_workspace.hpp"
+#include "src/pde/core/trbdf2_config.hpp"
+#include "src/pde/core/root_finding.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>

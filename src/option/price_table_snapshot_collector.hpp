@@ -1,9 +1,9 @@
 #pragma once
 
-#include "src/pricing/snapshot.hpp"
+#include "src/option/snapshot.hpp"
 #include "src/interpolation/snapshot_interpolator.hpp"
-#include "src/pricing/american_option.hpp"  // For OptionType enum
-#include "src/utils/expected.hpp"
+#include "src/option/american_option.hpp"  // For OptionType enum
+#include "src/support/expected.hpp"
 #include <span>
 #include <vector>
 #include <cmath>

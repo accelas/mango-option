@@ -9,9 +9,9 @@
 
 #pragma once
 
-#include "src/memory/pde_workspace.hpp"
-#include "src/operators/grid_spacing.hpp"
-#include "src/core/grid.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
+#include "src/pde/operators/grid_spacing.hpp"
+#include "src/pde/core/grid.hpp"
 #include <memory>
 #include <span>
 

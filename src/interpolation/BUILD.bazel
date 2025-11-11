@@ -1,7 +1,7 @@
 cc_library(
     name = "cubic_spline_solver",
     hdrs = ["cubic_spline_solver.hpp"],
-    deps = ["//src/core:thomas_solver"],
+    deps = ["//src/pde/core:thomas_solver"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
@@ -41,8 +41,8 @@ cc_library(
     deps = [
         ":bspline_basis_1d",
         ":bspline_utils",
-        "//src/core:thomas_solver",
-        "//src/utils:expected",
+        "//src/pde/core:thomas_solver",
+        "//src/support:expected",
     ],
     copts = [
         "-std=c++23",
@@ -72,7 +72,7 @@ cc_library(
     hdrs = ["bspline_fitter_4d_separable.hpp"],
     deps = [
         ":bspline_collocation_1d",
-        "//src/utils:expected",
+        "//src/support:expected",
     ],
     copts = [
         "-std=c++23",

@@ -1,5 +1,5 @@
-#include "src/core/pde_solver.hpp"
-#include "src/cpu/feature_detection.hpp"
+#include "src/pde/core/pde_solver.hpp"
+#include "src/support/cpu/feature_detection.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>

@@ -2,7 +2,7 @@
 
 #include "spatial_operator.hpp"
 #include "grid_spacing.hpp"
-#include "src/core/grid.hpp"
+#include "src/pde/core/grid.hpp"
 #include <memory>
 
 namespace mango::operators {

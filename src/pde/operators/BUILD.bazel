@@ -1,7 +1,7 @@
 cc_library(
     name = "grid_spacing",
     hdrs = ["grid_spacing.hpp"],
-    deps = ["//src/core:grid"],
+    deps = ["//src/pde/core:grid"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
@@ -27,8 +27,8 @@ cc_library(
     deps = [
         ":grid_spacing",
         ":centered_difference_facade",
-        "//src/core:grid",
-        "//src/core:jacobian_view",
+        "//src/pde/core:grid",
+        "//src/pde/core:jacobian_view",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -40,16 +40,8 @@ cc_library(
     deps = [
         ":spatial_operator",
         ":grid_spacing",
-        "//src/core:grid",
+        "//src/pde/core:grid",
     ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "centered_difference_simd",
-    hdrs = ["centered_difference_simd.hpp"],
-    deps = [":grid_spacing"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
@@ -59,7 +51,7 @@ cc_library(
     hdrs = ["centered_difference_scalar.hpp"],
     deps = [
         ":grid_spacing",
-        "//src/utils:parallel",
+        "//src/support:parallel",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -80,7 +72,7 @@ cc_library(
         ":centered_difference_scalar",
         ":centered_difference_simd_backend",
         ":grid_spacing",
-        "//src/cpu:feature_detection",
+        "//src/support/cpu:feature_detection",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
