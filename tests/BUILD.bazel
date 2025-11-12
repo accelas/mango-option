@@ -437,6 +437,17 @@ cc_test(
 )
 
 cc_test(
+    name = "pde_workspace_batch_test",
+    srcs = ["memory/pde_workspace_batch_test.cc"],
+    deps = [
+        "//src/pde/memory:pde_workspace",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
     name = "feature_detection_test",
     srcs = ["cpu/feature_detection_test.cc"],
     deps = [
