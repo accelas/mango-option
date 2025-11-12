@@ -241,3 +241,301 @@ TEST(SimdBackendBatch, FirstDerivativePartialBatch) {
         }
     }
 }
+
+// ============================================================================
+// Non-Uniform Grid Batch Tests
+// ============================================================================
+
+TEST(SimdBackendBatch, NonUniformSecondDerivativeBitwiseMatch) {
+    constexpr size_t n = 11;
+    const size_t batch_width = stdx::native_simd<double>::size();
+
+    // Create non-uniform grid (tanh-clustered)
+    std::vector<double> x(n);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    // Setup test data (batched)
+    std::vector<double> u_batch(n * batch_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            u_batch[i * batch_width + lane] = x[i] * x[i] + lane * 0.01;
+        }
+    }
+
+    // Compute batch second derivative
+    std::vector<double> d2u_batch(n * batch_width);
+    backend.compute_second_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{d2u_batch}, batch_width, 1, n-1);
+
+    // Compute single-contract second derivatives (one per lane)
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        std::vector<double> u_single(n);
+        std::vector<double> d2u_single(n);
+
+        // Extract lane from batch
+        for (size_t i = 0; i < n; ++i) {
+            u_single[i] = u_batch[i * batch_width + lane];
+        }
+
+        // Compute using single-contract path
+        backend.compute_second_derivative_non_uniform(
+            std::span{u_single}, std::span{d2u_single}, 1, n-1);
+
+        // Compare results (bitwise for interior points)
+        for (size_t i = 1; i < n-1; ++i) {
+            EXPECT_EQ(d2u_batch[i * batch_width + lane], d2u_single[i])
+                << "Mismatch at lane=" << lane << " i=" << i;
+        }
+    }
+}
+
+TEST(SimdBackendBatch, NonUniformFirstDerivativeBitwiseMatch) {
+    constexpr size_t n = 11;
+    const size_t batch_width = stdx::native_simd<double>::size();
+
+    // Create non-uniform grid
+    std::vector<double> x(n);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    // Setup test data
+    std::vector<double> u_batch(n * batch_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            u_batch[i * batch_width + lane] = x[i] * x[i] + lane * 0.01;
+        }
+    }
+
+    // Compute batch first derivative
+    std::vector<double> du_batch(n * batch_width);
+    backend.compute_first_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{du_batch}, batch_width, 1, n-1);
+
+    // Compare with single-contract
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        std::vector<double> u_single(n), du_single(n);
+        for (size_t i = 0; i < n; ++i) {
+            u_single[i] = u_batch[i * batch_width + lane];
+        }
+
+        backend.compute_first_derivative_non_uniform(
+            std::span{u_single}, std::span{du_single}, 1, n-1);
+
+        for (size_t i = 1; i < n-1; ++i) {
+            EXPECT_EQ(du_batch[i * batch_width + lane], du_single[i])
+                << "Mismatch at lane=" << lane << " i=" << i;
+        }
+    }
+}
+
+TEST(SimdBackendBatch, NonUniformSecondDerivativePartialBatch) {
+    constexpr size_t n = 11;
+    const size_t batch_width = stdx::native_simd<double>::size();
+    const size_t partial_width = batch_width / 2 + 1;  // Not multiple of SIMD width
+
+    // Create non-uniform grid
+    std::vector<double> x(n);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    // Setup test data with partial batch width
+    std::vector<double> u_batch(n * partial_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < partial_width; ++lane) {
+            u_batch[i * partial_width + lane] = std::sin(x[i]) + lane * 0.01;
+        }
+    }
+
+    std::vector<double> d2u_batch(n * partial_width);
+    backend.compute_second_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{d2u_batch}, partial_width, 1, n-1);
+
+    // Verify all lanes including scalar tail
+    for (size_t lane = 0; lane < partial_width; ++lane) {
+        std::vector<double> u_single(n), d2u_single(n);
+        for (size_t i = 0; i < n; ++i) {
+            u_single[i] = u_batch[i * partial_width + lane];
+        }
+
+        backend.compute_second_derivative_non_uniform(
+            std::span{u_single}, std::span{d2u_single}, 1, n-1);
+
+        for (size_t i = 1; i < n-1; ++i) {
+            EXPECT_EQ(d2u_batch[i * partial_width + lane], d2u_single[i])
+                << "Mismatch at lane=" << lane << " i=" << i;
+        }
+    }
+}
+
+TEST(SimdBackendBatch, NonUniformFirstDerivativePartialBatch) {
+    constexpr size_t n = 11;
+    const size_t batch_width = stdx::native_simd<double>::size();
+    const size_t partial_width = batch_width / 2 + 1;
+
+    // Create non-uniform grid
+    std::vector<double> x(n);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    std::vector<double> u_batch(n * partial_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < partial_width; ++lane) {
+            u_batch[i * partial_width + lane] = std::sin(x[i]) + lane * 0.01;
+        }
+    }
+
+    std::vector<double> du_batch(n * partial_width);
+    backend.compute_first_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{du_batch}, partial_width, 1, n-1);
+
+    for (size_t lane = 0; lane < partial_width; ++lane) {
+        std::vector<double> u_single(n), du_single(n);
+        for (size_t i = 0; i < n; ++i) {
+            u_single[i] = u_batch[i * partial_width + lane];
+        }
+
+        backend.compute_first_derivative_non_uniform(
+            std::span{u_single}, std::span{du_single}, 1, n-1);
+
+        for (size_t i = 1; i < n-1; ++i) {
+            EXPECT_EQ(du_batch[i * partial_width + lane], du_single[i])
+                << "Mismatch at lane=" << lane << " i=" << i;
+        }
+    }
+}
+
+TEST(SimdBackendBatch, NonUniformBoundaryNotTouched) {
+    constexpr size_t n = 11;
+    const size_t batch_width = stdx::native_simd<double>::size();
+
+    // Create non-uniform grid
+    std::vector<double> x(n);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    std::vector<double> u_batch(n * batch_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            u_batch[i * batch_width + lane] = std::sin(x[i]);
+        }
+    }
+
+    // Initialize d2u_batch with sentinel values at boundaries
+    std::vector<double> d2u_batch(n * batch_width, -999.0);
+
+    backend.compute_second_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{d2u_batch}, batch_width, 1, n-1);
+
+    // Verify boundaries remain untouched
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        EXPECT_DOUBLE_EQ(d2u_batch[0 * batch_width + lane], -999.0)
+            << "Left boundary should not be modified at lane=" << lane;
+        EXPECT_DOUBLE_EQ(d2u_batch[(n-1) * batch_width + lane], -999.0)
+            << "Right boundary should not be modified at lane=" << lane;
+    }
+}
+
+TEST(SimdBackendBatch, NonUniformAutoDispatch) {
+    constexpr size_t n = 11;
+    const size_t batch_width = stdx::native_simd<double>::size();
+
+    // Create non-uniform grid
+    std::vector<double> x(n);
+    x[0] = -1.0; x[1] = -0.8; x[2] = -0.5; x[3] = -0.2; x[4] = -0.05;
+    x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    // Setup test data
+    std::vector<double> u_batch(n * batch_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            u_batch[i * batch_width + lane] = x[i] * x[i] + lane * 0.01;
+        }
+    }
+
+    // Use auto-dispatch wrapper (should select non-uniform path)
+    std::vector<double> d2u_batch_auto(n * batch_width);
+    backend.compute_second_derivative_batch(
+        std::span{u_batch}, std::span{d2u_batch_auto}, batch_width, 1, n-1);
+
+    // Compare with explicit non-uniform call
+    std::vector<double> d2u_batch_explicit(n * batch_width);
+    backend.compute_second_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{d2u_batch_explicit}, batch_width, 1, n-1);
+
+    for (size_t i = 1; i < n-1; ++i) {
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            EXPECT_EQ(d2u_batch_auto[i * batch_width + lane],
+                     d2u_batch_explicit[i * batch_width + lane])
+                << "Auto-dispatch mismatch at i=" << i << " lane=" << lane;
+        }
+    }
+}
+
+TEST(SimdBackendBatch, NonUniformVaryingGridSpacing) {
+    constexpr size_t n = 21;
+    const size_t batch_width = stdx::native_simd<double>::size();
+
+    // Create grid with highly varying spacing ratios
+    std::vector<double> x(n);
+    for (size_t i = 0; i < n; ++i) {
+        double t = static_cast<double>(i) / (n - 1);
+        x[i] = std::tanh(3.0 * (2.0 * t - 1.0));  // tanh clustering around center
+    }
+
+    auto grid = mango::GridView<double>(x);
+    auto spacing = mango::operators::GridSpacing<double>(grid);
+    mango::operators::SimdBackend<double> backend(spacing);
+
+    // Test with smooth function f(x) = exp(x)
+    std::vector<double> u_batch(n * batch_width);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            u_batch[i * batch_width + lane] = std::exp(x[i] + lane * 0.001);
+        }
+    }
+
+    std::vector<double> d2u_batch(n * batch_width);
+    backend.compute_second_derivative_batch_non_uniform(
+        std::span{u_batch}, std::span{d2u_batch}, batch_width, 1, n-1);
+
+    // Verify against single-contract computation
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        std::vector<double> u_single(n), d2u_single(n);
+        for (size_t i = 0; i < n; ++i) {
+            u_single[i] = u_batch[i * batch_width + lane];
+        }
+
+        backend.compute_second_derivative_non_uniform(
+            std::span{u_single}, std::span{d2u_single}, 1, n-1);
+
+        for (size_t i = 1; i < n-1; ++i) {
+            EXPECT_EQ(d2u_batch[i * batch_width + lane], d2u_single[i])
+                << "Mismatch at lane=" << lane << " i=" << i;
+        }
+    }
+}

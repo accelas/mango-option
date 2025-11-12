@@ -353,6 +353,20 @@ public:
         size_t batch_width,
         size_t start, size_t end) const;
 
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_second_derivative_batch_non_uniform(
+        std::span<const T> u_batch,
+        std::span<T> d2u_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_first_derivative_batch_non_uniform(
+        std::span<const T> u_batch,
+        std::span<T> du_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
     // Convenience wrapper (auto-dispatch uniform/non-uniform)
     void compute_second_derivative_batch(
         std::span<const T> u_batch,
@@ -466,6 +480,130 @@ void SimdBackend<T>::compute_first_derivative_batch_uniform(
     }
 }
 
+template<std::floating_point T>
+void SimdBackend<T>::compute_second_derivative_batch_non_uniform(
+    std::span<const T> u_batch,
+    std::span<T> d2u_batch,
+    size_t batch_width,
+    size_t start, size_t end) const
+{
+    assert(start >= 1 && "start must allow u[i-1] access");
+    assert((end + 1) * batch_width <= u_batch.size() && "end must allow u[i+1] access");
+    assert(!spacing_.is_uniform() && "Use compute_second_derivative_batch_uniform");
+
+    // Get precomputed arrays (zero-copy spans)
+    auto dx_left_inv = spacing_.dx_left_inv();
+    auto dx_right_inv = spacing_.dx_right_inv();
+    auto dx_center_inv = spacing_.dx_center_inv();
+
+    // Loop over grid points (outer)
+    for (size_t i = start; i < end; ++i) {
+        // Load precomputed spacing inverses for this grid point
+        const T dxl_inv_scalar = dx_left_inv[i - 1];
+        const T dxr_inv_scalar = dx_right_inv[i - 1];
+        const T dxc_inv_scalar = dx_center_inv[i - 1];
+
+        // Broadcast to SIMD vectors (constant across lanes for this grid point)
+        const simd_t dxl_inv(dxl_inv_scalar);
+        const simd_t dxr_inv(dxr_inv_scalar);
+        const simd_t dxc_inv(dxc_inv_scalar);
+
+        // Loop over contract batches (inner - vectorized)
+        size_t lane = 0;
+        for (; lane + simd_t::size() <= batch_width; lane += simd_t::size()) {
+            // Horizontal load: contracts [lane..lane+simd_t::size()) at grid point i
+            simd_t u_left, u_center, u_right;
+            u_left.copy_from(&u_batch[(i-1)*batch_width + lane],
+                           stdx::element_aligned);
+            u_center.copy_from(&u_batch[i*batch_width + lane],
+                             stdx::element_aligned);
+            u_right.copy_from(&u_batch[(i+1)*batch_width + lane],
+                            stdx::element_aligned);
+
+            // d²u/dx² = ((u[i+1] - u[i])/dx_right - (u[i] - u[i-1])/dx_left) / dx_center
+            const simd_t forward_diff = (u_right - u_center) * dxr_inv;
+            const simd_t backward_diff = (u_center - u_left) * dxl_inv;
+            const simd_t result = (forward_diff - backward_diff) * dxc_inv;
+
+            result.copy_to(&d2u_batch[i*batch_width + lane],
+                          stdx::element_aligned);
+        }
+
+        // Scalar tail for remaining contracts
+        for (; lane < batch_width; ++lane) {
+            size_t idx = i * batch_width + lane;
+            const T forward_diff = (u_batch[(i+1)*batch_width + lane] -
+                                   u_batch[idx]) * dxr_inv_scalar;
+            const T backward_diff = (u_batch[idx] -
+                                    u_batch[(i-1)*batch_width + lane]) * dxl_inv_scalar;
+            d2u_batch[idx] = (forward_diff - backward_diff) * dxc_inv_scalar;
+        }
+    }
+}
+
+template<std::floating_point T>
+void SimdBackend<T>::compute_first_derivative_batch_non_uniform(
+    std::span<const T> u_batch,
+    std::span<T> du_batch,
+    size_t batch_width,
+    size_t start, size_t end) const
+{
+    assert(start >= 1 && "start must allow u[i-1] access");
+    assert((end + 1) * batch_width <= u_batch.size() && "end must allow u[i+1] access");
+    assert(!spacing_.is_uniform() && "Use compute_first_derivative_batch_uniform");
+
+    // Get precomputed arrays
+    auto w_left = spacing_.w_left();
+    auto w_right = spacing_.w_right();
+    auto dx_left_inv = spacing_.dx_left_inv();
+    auto dx_right_inv = spacing_.dx_right_inv();
+
+    // Loop over grid points
+    for (size_t i = start; i < end; ++i) {
+        // Load precomputed weights and inverses for this grid point
+        const T wl_scalar = w_left[i - 1];
+        const T wr_scalar = w_right[i - 1];
+        const T dxl_inv_scalar = dx_left_inv[i - 1];
+        const T dxr_inv_scalar = dx_right_inv[i - 1];
+
+        // Broadcast to SIMD vectors
+        const simd_t wl(wl_scalar);
+        const simd_t wr(wr_scalar);
+        const simd_t dxl_inv(dxl_inv_scalar);
+        const simd_t dxr_inv(dxr_inv_scalar);
+
+        // Vectorized contract batches
+        size_t lane = 0;
+        for (; lane + simd_t::size() <= batch_width; lane += simd_t::size()) {
+            simd_t u_left, u_center, u_right;
+            u_left.copy_from(&u_batch[(i-1)*batch_width + lane],
+                           stdx::element_aligned);
+            u_center.copy_from(&u_batch[i*batch_width + lane],
+                             stdx::element_aligned);
+            u_right.copy_from(&u_batch[(i+1)*batch_width + lane],
+                            stdx::element_aligned);
+
+            // du/dx = w_left * (u[i] - u[i-1])/dx_left + w_right * (u[i+1] - u[i])/dx_right
+            const simd_t term1 = wl * (u_center - u_left) * dxl_inv;
+            const simd_t term2 = wr * (u_right - u_center) * dxr_inv;
+            const simd_t result = term1 + term2;
+
+            result.copy_to(&du_batch[i*batch_width + lane],
+                          stdx::element_aligned);
+        }
+
+        // Scalar tail
+        for (; lane < batch_width; ++lane) {
+            size_t idx = i * batch_width + lane;
+            const T term1 = wl_scalar * (u_batch[idx] -
+                                        u_batch[(i-1)*batch_width + lane]) * dxl_inv_scalar;
+            const T term2 = wr_scalar * (u_batch[(i+1)*batch_width + lane] -
+                                        u_batch[idx]) * dxr_inv_scalar;
+            du_batch[idx] = term1 + term2;
+        }
+    }
+}
+
 // Convenience wrappers with auto-dispatch
 template<std::floating_point T>
 void SimdBackend<T>::compute_second_derivative_batch(
@@ -478,8 +616,8 @@ void SimdBackend<T>::compute_second_derivative_batch(
         compute_second_derivative_batch_uniform(u_batch, d2u_batch,
                                                batch_width, start, end);
     } else {
-        // TODO: implement non-uniform variant in next phase
-        throw std::runtime_error("Non-uniform batch not yet implemented");
+        compute_second_derivative_batch_non_uniform(u_batch, d2u_batch,
+                                                   batch_width, start, end);
     }
 }
 
@@ -494,8 +632,8 @@ void SimdBackend<T>::compute_first_derivative_batch(
         compute_first_derivative_batch_uniform(u_batch, du_batch,
                                               batch_width, start, end);
     } else {
-        // TODO: implement non-uniform variant in next phase
-        throw std::runtime_error("Non-uniform batch not yet implemented");
+        compute_first_derivative_batch_non_uniform(u_batch, du_batch,
+                                                  batch_width, start, end);
     }
 }
 
