@@ -180,15 +180,30 @@ public:
     ///
     /// @param coeff_dt TR-BDF2 weight coefficient
     /// @param jac Jacobian view to populate
+    /// @param lane Optional lane index for batch mode (required if batch mode)
     void assemble_jacobian([[maybe_unused]] double coeff_dt,
-                          JacobianView& jac) const
+                          JacobianView& jac,
+                          std::optional<size_t> lane = std::nullopt) const
         requires HasJacobianCoefficients<PDE>
     {
-        // Get PDE coefficients (single-contract mode only)
-        assert(pde_.has_value() && "Jacobian assembly requires single-contract mode");
-        const T a = pde_->second_derivative_coeff();  // σ²/2
-        const T b = pde_->first_derivative_coeff();   // r - d - σ²/2
-        const T c = -pde_->discount_rate();           // -r
+        // Detect batch vs single-contract mode
+        const bool is_batch = !pdes_.empty();
+
+        // Get PDE coefficients based on mode
+        T a, b, c;
+        if (is_batch) {
+            assert(lane.has_value() && "Batch mode requires lane index");
+            assert(*lane < pdes_.size() && "Lane index out of bounds");
+            const PDE& lane_pde = pdes_[*lane];
+            a = lane_pde.second_derivative_coeff();  // σ²/2
+            b = lane_pde.first_derivative_coeff();   // r - d - σ²/2
+            c = -lane_pde.discount_rate();           // -r
+        } else {
+            assert(pde_.has_value() && "Single-contract mode requires pde_");
+            a = pde_->second_derivative_coeff();  // σ²/2
+            b = pde_->first_derivative_coeff();   // r - d - σ²/2
+            c = -pde_->discount_rate();           // -r
+        }
 
         const size_t n = jac.size();
 

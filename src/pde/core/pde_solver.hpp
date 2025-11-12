@@ -27,8 +27,8 @@ namespace mango {
 
 /// Concept to detect spatial operators with analytical Jacobian capability
 template<typename SpatialOp>
-concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, JacobianView jac) {
-    { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
+concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, JacobianView jac, std::optional<size_t> lane) {
+    { op.assemble_jacobian(coeff_dt, jac, lane) } -> std::same_as<void>;
 };
 
 // Temporal event callback signature
@@ -694,8 +694,11 @@ private:
         // Apply BCs to initial guess
         apply_boundary_conditions(u, t);
 
-        // Quasi-Newton: Build Jacobian once and reuse
-        build_jacobian(t, coeff_dt, u, eps);
+        // Quasi-Newton: Build Jacobian once and reuse (single-contract only)
+        // In batch mode, Jacobian is built per-lane inside the Newton loop
+        if (!is_batched) {
+            build_jacobian(t, coeff_dt, u, eps, std::nullopt);
+        }
 
         // Copy initial guess
         std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
@@ -737,6 +740,11 @@ private:
                 auto lu_lane = is_batched ? workspace_->lu_lane(lane) : workspace_->lu();
                 // Lane-aware RHS: each contract has its own RHS from TR-BDF2 staging
                 auto rhs_lane = is_batched ? workspace_->rhs_lane(lane) : rhs;
+
+                // Build per-lane Jacobian in batch mode
+                if (is_batched) {
+                    build_jacobian(t, coeff_dt, u_lane, eps, lane);
+                }
 
                 // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
                 compute_residual(u_lane, coeff_dt, lu_lane, rhs_lane,
@@ -849,14 +857,15 @@ private:
     }
 
     void build_jacobian(double t, double coeff_dt,
-                       std::span<const double> u, double eps) {
+                       std::span<const double> u, double eps,
+                       std::optional<size_t> lane) {
         // Dispatch to analytical or finite-difference Jacobian
         if constexpr (HasAnalyticalJacobian<SpatialOp>) {
             // Analytical Jacobian (O(n) - fast path)
             JacobianView jac(newton_ws_.jacobian_lower(),
                            newton_ws_.jacobian_diag(),
                            newton_ws_.jacobian_upper());
-            spatial_op_.assemble_jacobian(coeff_dt, jac);
+            spatial_op_.assemble_jacobian(coeff_dt, jac, lane);
         } else {
             // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
             build_jacobian_finite_difference(t, coeff_dt, u, eps);
