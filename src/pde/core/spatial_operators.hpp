@@ -197,6 +197,33 @@ public:
         compute_second_derivative(grid_, u, d2u, dx_);
     }
 
+    /// Apply operator to batch (AoS layout) - for batch PDE solver
+    void apply_interior_batch([[maybe_unused]] double t,
+                             std::span<const double> u_batch,
+                             std::span<double> lu_batch,
+                             size_t batch_width,
+                             size_t start, size_t end) const {
+        // Interior points: centered finite differences
+        // Note: LaplacianOperator uses same D for all lanes (no per-lane parameterization)
+        for (size_t i = start; i < end; ++i) {
+            for (size_t lane = 0; lane < batch_width; ++lane) {
+                size_t idx = i * batch_width + lane;
+
+                const double dx_left = dx_[i-1];   // x[i] - x[i-1]
+                const double dx_right = dx_[i];     // x[i+1] - x[i]
+                const double dx_center = 0.5 * (dx_left + dx_right);
+
+                // Second derivative: d2u/dx2
+                const double d2u = (u_batch[(i+1)*batch_width + lane] - u_batch[idx]) / dx_right
+                                 - (u_batch[idx] - u_batch[(i-1)*batch_width + lane]) / dx_left;
+                const double d2u_dx2 = d2u / dx_center;
+
+                // Laplacian operator: L(u) = D * d2u/dx2
+                lu_batch[idx] = D_ * d2u_dx2;
+            }
+        }
+    }
+
 private:
     double D_;  // Diffusion coefficient
     mutable std::span<const double> grid_;  // Grid points (set by PDESolver via set_grid)

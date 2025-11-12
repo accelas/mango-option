@@ -8,6 +8,8 @@
 #include <concepts>
 #include <cassert>
 #include <cmath>
+#include <optional>
+#include <vector>
 
 namespace mango::operators {
 
@@ -45,8 +47,18 @@ concept HasJacobianCoefficients = requires(const PDE pde) {
 template<typename PDE, std::floating_point T = double>
 class SpatialOperator {
 public:
+    // Single-contract mode: one PDE for all applications
     SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing)
         : pde_(std::move(pde))
+        , pdes_()  // Empty for single-contract mode
+        , spacing_(std::move(spacing))
+        , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
+    {}
+
+    // Batch mode: per-lane PDEs for heterogeneous parameters
+    SpatialOperator(std::vector<PDE> pdes, std::shared_ptr<GridSpacing<T>> spacing)
+        : pde_(std::nullopt)  // No single PDE in batch mode
+        , pdes_(std::move(pdes))
         , spacing_(std::move(spacing))
         , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
     {}
@@ -94,11 +106,12 @@ public:
         stencil_->compute_first_derivative(u, std::span<T>(du_dx_buf), start, end);
 
         // Apply PDE operator to combine derivatives
+        assert(pde_.has_value() && "Single-contract mode requires pde_ to be set");
         for (size_t i = start; i < end; ++i) {
             if constexpr (TimeDependentPDE<PDE>) {
-                Lu[i] = pde_(t, d2u_dx2_buf[i], du_dx_buf[i], u[i]);
+                Lu[i] = (*pde_)(t, d2u_dx2_buf[i], du_dx_buf[i], u[i]);
             } else {
-                Lu[i] = pde_(d2u_dx2_buf[i], du_dx_buf[i], u[i]);
+                Lu[i] = (*pde_)(d2u_dx2_buf[i], du_dx_buf[i], u[i]);
             }
         }
     }
@@ -129,14 +142,17 @@ public:
         stencil_->compute_first_derivative_batch(u_batch, std::span<T>(du_dx_buf),
                                                 batch_width, start, end);
 
-        // Apply PDE operator lane-wise
+        // Apply PDE operator lane-wise (with per-lane PDE support)
+        const bool is_batch_mode = !pdes_.empty();
         for (size_t i = start; i < end; ++i) {
             for (size_t lane = 0; lane < batch_width; ++lane) {
                 size_t idx = i * batch_width + lane;
+                const PDE& lane_pde = is_batch_mode ? pdes_[lane] : *pde_;
+
                 if constexpr (TimeDependentPDE<PDE>) {
-                    lu_batch[idx] = pde_(t, d2u_dx2_buf[idx], du_dx_buf[idx], u_batch[idx]);
+                    lu_batch[idx] = lane_pde(t, d2u_dx2_buf[idx], du_dx_buf[idx], u_batch[idx]);
                 } else {
-                    lu_batch[idx] = pde_(d2u_dx2_buf[idx], du_dx_buf[idx], u_batch[idx]);
+                    lu_batch[idx] = lane_pde(d2u_dx2_buf[idx], du_dx_buf[idx], u_batch[idx]);
                 }
             }
         }
@@ -168,10 +184,11 @@ public:
                           JacobianView& jac) const
         requires HasJacobianCoefficients<PDE>
     {
-        // Get PDE coefficients
-        const T a = pde_.second_derivative_coeff();  // σ²/2
-        const T b = pde_.first_derivative_coeff();   // r - d - σ²/2
-        const T c = -pde_.discount_rate();           // -r
+        // Get PDE coefficients (single-contract mode only)
+        assert(pde_.has_value() && "Jacobian assembly requires single-contract mode");
+        const T a = pde_->second_derivative_coeff();  // σ²/2
+        const T b = pde_->first_derivative_coeff();   // r - d - σ²/2
+        const T c = -pde_->discount_rate();           // -r
 
         const size_t n = jac.size();
 
@@ -233,7 +250,8 @@ public:
     }
 
 private:
-    PDE pde_;  // Owned by value (PDEs are typically small)
+    std::optional<PDE> pde_;  // Single-contract mode: one PDE instance
+    std::vector<PDE> pdes_;  // Batch mode: per-lane PDE instances
     std::shared_ptr<GridSpacing<T>> spacing_;
     std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
 };
