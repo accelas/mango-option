@@ -108,7 +108,39 @@ public:
                              std::span<const T> u_batch,
                              std::span<T> lu_batch,
                              size_t batch_width,
-                             size_t start, size_t end) const;
+                             size_t start, size_t end) const {
+        const size_t n = u_batch.size() / batch_width;
+
+        // Temporary buffers for derivatives (AoS layout)
+        thread_local std::vector<T> d2u_dx2_buf;
+        thread_local std::vector<T> du_dx_buf;
+        d2u_dx2_buf.resize(n * batch_width);
+        du_dx_buf.resize(n * batch_width);
+
+        // Zero the active range
+        const size_t start_idx = start * batch_width;
+        const size_t end_idx = end * batch_width;
+        std::fill(d2u_dx2_buf.begin() + start_idx, d2u_dx2_buf.begin() + end_idx, T(0));
+        std::fill(du_dx_buf.begin() + start_idx, du_dx_buf.begin() + end_idx, T(0));
+
+        // Compute derivatives using batched stencil
+        stencil_->compute_second_derivative_batch(u_batch, std::span<T>(d2u_dx2_buf),
+                                                 batch_width, start, end);
+        stencil_->compute_first_derivative_batch(u_batch, std::span<T>(du_dx_buf),
+                                                batch_width, start, end);
+
+        // Apply PDE operator lane-wise
+        for (size_t i = start; i < end; ++i) {
+            for (size_t lane = 0; lane < batch_width; ++lane) {
+                size_t idx = i * batch_width + lane;
+                if constexpr (TimeDependentPDE<PDE>) {
+                    lu_batch[idx] = pde_(t, d2u_dx2_buf[idx], du_dx_buf[idx], u_batch[idx]);
+                } else {
+                    lu_batch[idx] = pde_(d2u_dx2_buf[idx], du_dx_buf[idx], u_batch[idx]);
+                }
+            }
+        }
+    }
 
     /// Greeks computation (delegates to stencil)
     void compute_first_derivative(std::span<const T> u,
