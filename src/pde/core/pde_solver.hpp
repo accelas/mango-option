@@ -581,9 +581,11 @@ private:
             for (size_t lane = 0; lane < n_lanes; ++lane) {
                 auto u_lane = is_batched ? workspace_->u_lane(lane) : u;
                 auto lu_lane = is_batched ? workspace_->lu_lane(lane) : workspace_->lu();
+                // Lane-aware RHS: each contract has its own RHS from TR-BDF2 staging
+                auto rhs_lane = is_batched ? workspace_->rhs_lane(lane) : rhs;
 
                 // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
-                compute_residual(u_lane, coeff_dt, lu_lane, rhs,
+                compute_residual(u_lane, coeff_dt, lu_lane, rhs_lane,
                                newton_ws_.residual());
 
                 // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
