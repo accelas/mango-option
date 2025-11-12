@@ -325,7 +325,8 @@ private:
 
                 // Validate collector count matches batch width
                 if (req.lane_collectors.size() != n_lanes) {
-                    // TODO: Log error or throw exception
+                    // Programming error: mismatched collector count
+                    assert(false && "Collector count must match batch_width");
                     ++next_snapshot_idx_;
                     continue;
                 }
