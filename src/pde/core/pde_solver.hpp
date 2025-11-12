@@ -546,6 +546,9 @@ private:
         // Copy initial guess
         std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
 
+        // Track max error across all lanes (for final return)
+        double max_error = 0.0;
+
         // Newton iteration
         for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
             // Batched or single-contract stencil
@@ -558,58 +561,67 @@ private:
                 apply_operator_with_blocking(t, u, workspace_->lu());
             }
 
-            // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
-            compute_residual(u, coeff_dt, workspace_->lu(), rhs,
-                           newton_ws_.residual());
+            // Per-lane Newton machinery
+            bool all_converged = true;
+            max_error = 0.0;  // Reset for this iteration
 
-            // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
-            apply_bc_to_residual(newton_ws_.residual(), u, t);
+            for (size_t lane = 0; lane < n_lanes; ++lane) {
+                auto u_lane = is_batched ? workspace_->u_lane(lane) : u;
+                auto lu_lane = is_batched ? workspace_->lu_lane(lane) : workspace_->lu();
 
-            // Newton method: Solve J·δu = -F(u), then update u ← u + δu
-            // Negate residual for RHS
-            for (size_t i = 0; i < n_; ++i) {
-                newton_ws_.residual()[i] = -newton_ws_.residual()[i];
+                // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
+                compute_residual(u_lane, coeff_dt, lu_lane, rhs,
+                               newton_ws_.residual());
+
+                // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
+                apply_bc_to_residual(newton_ws_.residual(), u_lane, t);
+
+                // Newton method: Solve J·δu = -F(u), then update u ← u + δu
+                // Negate residual for RHS
+                for (size_t i = 0; i < n_; ++i) {
+                    newton_ws_.residual()[i] = -newton_ws_.residual()[i];
+                }
+
+                // Solve J·δu = -F(u) using Thomas algorithm
+                auto result = solve_thomas<double>(
+                    newton_ws_.jacobian_lower(),
+                    newton_ws_.jacobian_diag(),
+                    newton_ws_.jacobian_upper(),
+                    newton_ws_.residual(),
+                    newton_ws_.delta_u(),
+                    newton_ws_.tridiag_workspace()
+                );
+
+                if (!result.ok()) {
+                    return {false, iter, std::numeric_limits<double>::infinity(),
+                           "Singular Jacobian", std::nullopt};
+                }
+
+                // Update: u ← u + δu
+                for (size_t i = 0; i < n_; ++i) {
+                    u_lane[i] += newton_ws_.delta_u()[i];
+                }
+
+                // Apply obstacle projection BEFORE boundary conditions
+                apply_obstacle(t, u_lane);
+                apply_boundary_conditions(u_lane, t);
+
+                // Check convergence via step delta
+                double error_lane = compute_step_delta_error(u_lane, newton_ws_.u_old());
+                max_error = std::max(max_error, error_lane);
+                all_converged &= (error_lane < root_config_.tolerance);
+
+                // Prepare for next iteration
+                std::copy(u_lane.begin(), u_lane.end(), newton_ws_.u_old().begin());
             }
 
-            // Solve J·δu = -F(u) using Thomas algorithm
-            auto result = solve_thomas<double>(
-                newton_ws_.jacobian_lower(),
-                newton_ws_.jacobian_diag(),
-                newton_ws_.jacobian_upper(),
-                newton_ws_.residual(),
-                newton_ws_.delta_u(),
-                newton_ws_.tridiag_workspace()
-            );
-
-            if (!result.ok()) {
-                return {false, iter, std::numeric_limits<double>::infinity(),
-                       "Singular Jacobian", std::nullopt};
+            // Exit when ALL lanes converged
+            if (all_converged) {
+                return {true, iter + 1, max_error, std::nullopt, std::nullopt};
             }
-
-            // Update: u ← u + δu
-            for (size_t i = 0; i < n_; ++i) {
-                u[i] += newton_ws_.delta_u()[i];
-            }
-
-            // Apply obstacle projection BEFORE boundary conditions
-            // This ensures complementarity: u ≥ ψ
-            apply_obstacle(t, u);
-
-            apply_boundary_conditions(u, t);
-
-            // Check convergence via step delta
-            double error = compute_step_delta_error(u, newton_ws_.u_old());
-
-            if (error < root_config_.tolerance) {
-                return {true, iter + 1, error, std::nullopt, std::nullopt};
-            }
-
-            // Prepare for next iteration
-            std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
         }
 
-        return {false, root_config_.max_iter,
-               compute_step_delta_error(u, newton_ws_.u_old()),
+        return {false, root_config_.max_iter, max_error,
                "Max iterations reached", std::nullopt};
     }
 
