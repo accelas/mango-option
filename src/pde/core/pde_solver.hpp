@@ -734,6 +734,36 @@ private:
         }
     }
 
+    /// Apply operator to batch (AoS layout)
+    ///
+    /// Applies the spatial operator to a batch of contracts using Array-of-Structs
+    /// layout where u_batch[i * batch_width + lane] is contract `lane` at grid point `i`.
+    ///
+    /// Note: Cache blocking was previously attempted but removed because it was
+    /// ineffective. The blocked path still passed full arrays to the stencil,
+    /// defeating locality benefits while adding loop overhead. True blocking would
+    /// require materializing block-local buffers with halos. See CLAUDE.md for details.
+    ///
+    /// @param t Time at which to evaluate operator
+    /// @param u_batch Input solution batch (size: n * batch_width, AoS layout)
+    /// @param lu_batch Output operator result (size: n * batch_width, AoS layout)
+    /// @param batch_width Number of contracts in batch
+    void apply_operator_with_blocking_batch(double t,
+                                           std::span<const double> u_batch,
+                                           std::span<double> lu_batch,
+                                           size_t batch_width) {
+        const size_t n = u_batch.size() / batch_width;
+
+        // Direct evaluation (no cache blocking - see CLAUDE.md)
+        spatial_op_.apply_interior_batch(t, u_batch, lu_batch, batch_width, 1, n-1);
+
+        // Zero boundary values (BCs will override after)
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            lu_batch[lane] = 0.0;  // Left boundary
+            lu_batch[(n-1)*batch_width + lane] = 0.0;  // Right boundary
+        }
+    }
+
 };
 
 }  // namespace mango
