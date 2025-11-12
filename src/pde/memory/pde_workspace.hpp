@@ -185,6 +185,46 @@ public:
         }
     }
 
+    /**
+     * Scatter AoS batch slice back to per-lane SoA buffers
+     *
+     * Performs vectorized transpose from Array-of-Structures batch slice
+     * to per-lane Structure-of-Arrays layout. Inverse operation of
+     * pack_to_batch_slice(). Uses std::experimental::simd for optimal
+     * performance with scalar tail handling.
+     *
+     * Memory layout transformation:
+     *   AoS: lu_batch[i*W + 0], lu_batch[i*W + 1], ..., lu_batch[i*W + W-1]  (interleaved)
+     *   SoA: lu_lane[0][i], lu_lane[1][i], ..., lu_lane[W-1][i]  (W separate arrays)
+     *
+     * PRECONDITION: batch_width_ > 0 (batch mode enabled)
+     */
+    void scatter_from_batch_slice() {
+        assert(batch_width_ > 0 && "scatter requires batch mode");
+
+        using simd_t = std::experimental::native_simd<double>;
+        constexpr size_t simd_width = simd_t::size();
+
+        for (size_t i = 0; i < n_; ++i) {
+            size_t lane = 0;
+
+            // Vectorized transpose
+            for (; lane + simd_width <= batch_width_; lane += simd_width) {
+                simd_t chunk;
+                chunk.copy_from(&lu_batch_[i * batch_width_ + lane],
+                               std::experimental::element_aligned);
+                for (size_t k = 0; k < simd_width; ++k) {
+                    lu_lane_buffers_[lane + k][i] = chunk[k];
+                }
+            }
+
+            // Scalar tail
+            for (; lane < batch_width_; ++lane) {
+                lu_lane_buffers_[lane][i] = lu_batch_[i * batch_width_ + lane];
+            }
+        }
+    }
+
 private:
     void allocate_and_initialize() {
         allocate_arrays();
