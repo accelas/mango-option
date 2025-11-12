@@ -38,6 +38,49 @@ TEST(SliceSolverWorkspaceTest, GridSpacingReuse) {
     EXPECT_EQ(spacing1.get(), spacing2.get());
 }
 
+TEST(SliceSolverWorkspaceTest, BatchWidthSingleContractMode) {
+    // Default construction (single-contract mode)
+    SliceSolverWorkspace workspace(-3.0, 3.0, 101);
+
+    // Verify batch_width is 0 (single-contract mode)
+    EXPECT_EQ(workspace.batch_width(), 0);
+    EXPECT_FALSE(workspace.has_batch());
+
+    // Verify workspace propagates batch_width=0 to PDEWorkspace
+    auto pde_workspace = workspace.workspace();
+    EXPECT_FALSE(pde_workspace->has_batch());
+    EXPECT_EQ(pde_workspace->batch_width(), 0);
+}
+
+TEST(SliceSolverWorkspaceTest, BatchWidthBatchMode) {
+    // Construct with batch_width=4
+    constexpr size_t batch_width = 4;
+    SliceSolverWorkspace workspace(-3.0, 3.0, 101, batch_width);
+
+    // Verify batch_width is set correctly
+    EXPECT_EQ(workspace.batch_width(), batch_width);
+    EXPECT_TRUE(workspace.has_batch());
+
+    // Verify workspace propagates batch_width to PDEWorkspace
+    auto pde_workspace = workspace.workspace();
+    EXPECT_TRUE(pde_workspace->has_batch());
+    EXPECT_EQ(pde_workspace->batch_width(), batch_width);
+
+    // Verify batch buffers are accessible (doesn't throw)
+    EXPECT_NO_THROW({
+        auto batch_slice = pde_workspace->batch_slice();
+        EXPECT_EQ(batch_slice.size(), 101 * batch_width);
+    });
+
+    // Verify per-lane buffers are accessible
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        EXPECT_NO_THROW({
+            auto u_lane = pde_workspace->u_lane(lane);
+            EXPECT_EQ(u_lane.size(), 101);
+        });
+    }
+}
+
 TEST(AmericanOptionSolverTest, WorkspaceModeConstruction) {
     // Setup common parameters
     AmericanOptionGrid grid_config;

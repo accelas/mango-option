@@ -28,7 +28,11 @@ namespace mango {
  * multiple PDE solves that share the same grid can reuse SIMD-aligned buffers
  * without repeated heap traffic. Intended to be owned per-thread in OpenMP regions.
  *
- * Example usage:
+ * Supports both single-contract and batch modes:
+ * - Single-contract (batch_width=0): Traditional per-contract solving
+ * - Batch mode (batch_width>0): Cross-contract vectorization for parallel solves
+ *
+ * Example usage (single-contract):
  * ```cpp
  * SliceSolverWorkspace workspace(x_min, x_max, n_space);
  *
@@ -38,10 +42,19 @@ namespace mango {
  * }
  * ```
  *
+ * Example usage (batch mode):
+ * ```cpp
+ * SliceSolverWorkspace workspace(x_min, x_max, n_space, batch_width);
+ *
+ * // Solve multiple contracts simultaneously with cross-contract vectorization
+ * BatchAmericanOptionSolver batch_solver(params_batch, grid_config, workspace);
+ * auto results = batch_solver.solve();
+ * ```
+ *
  * Memory savings (vs creating grid+spacing+workspace per solver):
  * - Grid buffer: ~800 bytes per reuse
  * - GridSpacing: ~800 bytes per reuse
- * - PDEWorkspace: ~10n doubles per reuse (SIMD-aligned)
+ * - PDEWorkspace: ~10n doubles per reuse (single-contract), ~10n*batch_width (batch)
  *
  * For 200 solvers (typical 4D table): significant savings
  */
@@ -53,14 +66,17 @@ public:
      * @param x_min Minimum log-moneyness
      * @param x_max Maximum log-moneyness
      * @param n_space Number of spatial grid points
+     * @param batch_width Batch width (0 = single-contract mode, >0 = batch mode)
      */
     SliceSolverWorkspace(double x_min,
                          double x_max,
-                         size_t n_space)
+                         size_t n_space,
+                         size_t batch_width = 0)
         : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
         , grid_view_(grid_buffer_.span())
         , grid_spacing_(std::make_shared<operators::GridSpacing<double>>(grid_view_))
-        , workspace_(std::make_shared<PDEWorkspace>(n_space, grid_view_.span()))
+        , workspace_(std::make_shared<PDEWorkspace>(n_space, grid_view_.span(), batch_width))
+        , batch_width_(batch_width)
     {}
 
     /// Spatial grid span
@@ -77,11 +93,16 @@ public:
     double x_max() const { return grid_view_.span().back(); }
     size_t n_space() const { return grid_view_.span().size(); }
 
+    /// Batch mode queries
+    size_t batch_width() const { return batch_width_; }
+    bool has_batch() const { return batch_width_ > 0; }
+
 private:
     GridBuffer<double> grid_buffer_;
     GridView<double> grid_view_;
     std::shared_ptr<operators::GridSpacing<double>> grid_spacing_;
     std::shared_ptr<PDEWorkspace> workspace_;
+    size_t batch_width_;
 };
 
 }  // namespace mango
