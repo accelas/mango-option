@@ -428,4 +428,44 @@ void SimdBackend<T>::compute_second_derivative_batch_uniform(
     }
 }
 
+template<std::floating_point T>
+void SimdBackend<T>::compute_first_derivative_batch_uniform(
+    std::span<const T> u_batch,
+    std::span<T> du_batch,
+    size_t batch_width,
+    size_t start, size_t end) const
+{
+    assert(start >= 1 && "start must allow u[i-1] access");
+    assert(end <= u_batch.size() / batch_width - 1 && "end must allow u[i+1] access");
+    assert(spacing_.is_uniform() && "Use compute_first_derivative_batch_non_uniform");
+
+    const T half_dx_inv = spacing_.spacing_inv() * T(0.5);
+    const simd_t half_dx_inv_vec(half_dx_inv);
+    constexpr size_t simd_width = simd_t::size();
+
+    // Loop over grid points
+    for (size_t i = start; i < end; ++i) {
+        // Vectorized contract batches
+        size_t lane = 0;
+        for (; lane + simd_width <= batch_width; lane += simd_width) {
+            simd_t u_left, u_right;
+            u_left.copy_from(&u_batch[(i-1)*batch_width + lane],
+                           stdx::element_aligned);
+            u_right.copy_from(&u_batch[(i+1)*batch_width + lane],
+                            stdx::element_aligned);
+
+            const simd_t result = (u_right - u_left) * half_dx_inv_vec;
+            result.copy_to(&du_batch[i*batch_width + lane],
+                          stdx::element_aligned);
+        }
+
+        // Scalar tail
+        for (; lane < batch_width; ++lane) {
+            du_batch[i*batch_width + lane] =
+                (u_batch[(i+1)*batch_width + lane] -
+                 u_batch[(i-1)*batch_width + lane]) * half_dx_inv;
+        }
+    }
+}
+
 } // namespace mango::operators
