@@ -535,35 +535,6 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
-cc_test(
-    name = "contract_chain_benchmark",
-    srcs = ["contract_chain_benchmark.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:time_domain",
-        "//src/pde/memory:pde_workspace",
-        "//src/pde/operators:spatial_operator",
-        "//src/pde/operators:centered_difference_facade",
-        "//src/pde/core:boundary_conditions",
-        "//src/pde/operators:black_scholes_pde",
-        "@google_benchmark//:benchmark_main",
-    ],
-    copts = ["-std=c++23"],
-    tags = ["manual", "benchmark"],  # Exclude from regular test runs
-)
-
-cc_test(
-    name = "price_table_precompute_benchmark",
-    srcs = ["price_table_precompute_benchmark.cc"],
-    deps = [
-        "//src/option:price_table_4d_builder",
-        "//src/option:american_option",
-        "@google_benchmark//:benchmark_main",
-    ],
-    copts = ["-std=c++23", "-fopenmp"],
-    linkopts = ["-fopenmp"],
-    tags = ["manual", "benchmark"],  # Exclude from regular test runs
-)
 
 cc_test(
     name = "batch_transpose_test",

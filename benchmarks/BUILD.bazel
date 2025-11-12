@@ -141,3 +141,44 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "contract_chain_benchmark",
+    srcs = ["contract_chain_benchmark.cc"],
+    copts = [
+        "-std=c++23",
+        "-O3",
+        "-march=native",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:time_domain",
+        "//src/pde/memory:pde_workspace",
+        "//src/pde/operators:spatial_operator",
+        "//src/pde/operators:centered_difference_facade",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:black_scholes_pde",
+        "@google_benchmark//:benchmark_main",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "price_table_precompute_benchmark",
+    srcs = ["price_table_precompute_benchmark.cc"],
+    copts = [
+        "-std=c++23",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "//src/option:american_option",
+        "@google_benchmark//:benchmark_main",
+    ],
+    tags = ["benchmark", "manual"],
+)
