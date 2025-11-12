@@ -600,3 +600,15 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "openmp_scaling_test",
+    srcs = ["openmp_scaling_test.cc"],
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
