@@ -338,6 +338,34 @@ public:
         }
     }
 
+    // Horizontal SIMD batch kernels (cross-contract vectorization)
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_second_derivative_batch_uniform(
+        std::span<const T> u_batch,
+        std::span<T> d2u_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_first_derivative_batch_uniform(
+        std::span<const T> u_batch,
+        std::span<T> du_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
+    // Convenience wrapper (auto-dispatch uniform/non-uniform)
+    void compute_second_derivative_batch(
+        std::span<const T> u_batch,
+        std::span<T> d2u_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
+    void compute_first_derivative_batch(
+        std::span<const T> u_batch,
+        std::span<T> du_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
     size_t tile_size() const { return l1_tile_size_; }
 
 private:
