@@ -201,13 +201,27 @@ public:
         return obstacle_.has_value();
     }
 
-    /// Register snapshot collection at specific step index
+    /// Register snapshot collection at specific step index (single-contract mode)
     ///
     /// @param step_index Step number (0-based) to collect snapshot
     /// @param user_index User-provided index for matching
     /// @param collector Callback to receive snapshot (must outlive solver)
     void register_snapshot(size_t step_index, size_t user_index, SnapshotCollector* collector) {
-        snapshot_requests_.push_back({step_index, user_index, collector});
+        snapshot_requests_.push_back({step_index, user_index, collector, {}});
+        // Sort by step index for efficient lookup
+        std::sort(snapshot_requests_.begin(), snapshot_requests_.end(),
+                 [](const auto& a, const auto& b) { return a.step_index < b.step_index; });
+        next_snapshot_idx_ = 0;
+    }
+
+    /// Register per-lane snapshot collectors at specific step index (batch mode)
+    ///
+    /// @param step_index Step number (0-based) to collect snapshot
+    /// @param user_index User-provided index for matching
+    /// @param lane_collectors Vector of collectors (one per lane, must outlive solver)
+    void register_snapshot_batch(size_t step_index, size_t user_index,
+                                 std::vector<SnapshotCollector*> lane_collectors) {
+        snapshot_requests_.push_back({step_index, user_index, nullptr, std::move(lane_collectors)});
         // Sort by step index for efficient lookup
         std::sort(snapshot_requests_.begin(), snapshot_requests_.end(),
                  [](const auto& a, const auto& b) { return a.step_index < b.step_index; });
@@ -260,7 +274,8 @@ private:
     struct SnapshotRequest {
         size_t step_index;        // CHANGED: use step index not time
         size_t user_index;
-        SnapshotCollector* collector;
+        SnapshotCollector* collector;  // Single-contract mode
+        std::vector<SnapshotCollector*> lane_collectors;  // Batch mode (empty = single-contract)
     };
     std::vector<SnapshotRequest> snapshot_requests_;
     size_t next_snapshot_idx_ = 0;
@@ -269,9 +284,13 @@ private:
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
 
-    // Workspace for derivatives
+    // Workspace for derivatives (single-contract mode)
     std::vector<double> du_dx_;
     std::vector<double> d2u_dx2_;
+
+    // Per-lane derivative storage (batch mode)
+    std::vector<std::vector<double>> du_dx_lanes_;
+    std::vector<std::vector<double>> d2u_dx2_lanes_;
 
     PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {
@@ -285,6 +304,8 @@ private:
 
     /// Process snapshots at current step index
     void process_snapshots(size_t step_idx, double t_current) {
+        const bool is_batched = workspace_->has_batch();
+
         while (next_snapshot_idx_ < snapshot_requests_.size()) {
             const auto& req = snapshot_requests_[next_snapshot_idx_];
 
@@ -298,31 +319,84 @@ private:
                 continue;
             }
 
-            // Allocate derivative storage on first use
-            if (du_dx_.empty()) {
-                du_dx_.resize(n_);
-                d2u_dx2_.resize(n_);
+            if (is_batched && !req.lane_collectors.empty()) {
+                // Batch mode: unpack per-lane snapshots
+                const size_t n_lanes = workspace_->batch_width();
+
+                // Validate collector count matches batch width
+                if (req.lane_collectors.size() != n_lanes) {
+                    // TODO: Log error or throw exception
+                    ++next_snapshot_idx_;
+                    continue;
+                }
+
+                // Allocate per-lane derivative storage on first use
+                if (du_dx_lanes_.empty()) {
+                    du_dx_lanes_.resize(n_lanes);
+                    d2u_dx2_lanes_.resize(n_lanes);
+                    for (size_t lane = 0; lane < n_lanes; ++lane) {
+                        du_dx_lanes_[lane].resize(n_);
+                        d2u_dx2_lanes_[lane].resize(n_);
+                    }
+                }
+
+                // Process each lane's snapshot
+                for (size_t lane = 0; lane < n_lanes; ++lane) {
+                    // Get per-lane data from workspace
+                    auto u_lane = workspace_->u_lane(lane);
+                    auto lu_lane = workspace_->lu_lane(lane);
+
+                    // Compute derivatives for this lane using the stencil
+                    // NOTE: We need to compute derivatives from the per-lane solution
+                    // Since spatial_op_ operates on batched data, we'll use the
+                    // CenteredDifference stencil directly on per-lane data
+                    spatial_op_.compute_first_derivative(u_lane, std::span{du_dx_lanes_[lane]});
+                    spatial_op_.compute_second_derivative(u_lane, std::span{d2u_dx2_lanes_[lane]});
+
+                    // Build snapshot for this lane
+                    Snapshot snapshot{
+                        .time = t_current,
+                        .user_index = req.user_index,
+                        .spatial_grid = grid_,
+                        .dx = workspace_->dx(),
+                        .solution = u_lane,
+                        .spatial_operator = lu_lane,
+                        .first_derivative = std::span{du_dx_lanes_[lane]},
+                        .second_derivative = std::span{d2u_dx2_lanes_[lane]},
+                        .problem_params = nullptr
+                    };
+
+                    // Call per-lane collector
+                    req.lane_collectors[lane]->collect(snapshot);
+                }
+            } else {
+                // Single-contract mode: original behavior
+                // Allocate derivative storage on first use
+                if (du_dx_.empty()) {
+                    du_dx_.resize(n_);
+                    d2u_dx2_.resize(n_);
+                }
+
+                // Compute derivatives using PDE operator
+                spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_});
+                spatial_op_.compute_second_derivative(std::span{u_current_}, std::span{d2u_dx2_});
+
+                // Build snapshot
+                Snapshot snapshot{
+                    .time = t_current,
+                    .user_index = req.user_index,
+                    .spatial_grid = grid_,
+                    .dx = workspace_->dx(),
+                    .solution = std::span{u_current_},
+                    .spatial_operator = workspace_->lu(),
+                    .first_derivative = std::span{du_dx_},
+                    .second_derivative = std::span{d2u_dx2_},
+                    .problem_params = nullptr
+                };
+
+                // Call collector
+                req.collector->collect(snapshot);
             }
-
-            // Compute derivatives using PDE operator
-            spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_});
-            spatial_op_.compute_second_derivative(std::span{u_current_}, std::span{d2u_dx2_});
-
-            // Build snapshot
-            Snapshot snapshot{
-                .time = t_current,
-                .user_index = req.user_index,
-                .spatial_grid = grid_,
-                .dx = workspace_->dx(),
-                .solution = std::span{u_current_},
-                .spatial_operator = workspace_->lu(),
-                .first_derivative = std::span{du_dx_},
-                .second_derivative = std::span{d2u_dx2_},
-                .problem_params = nullptr
-            };
-
-            // Call collector
-            req.collector->collect(snapshot);
 
             ++next_snapshot_idx_;
         }

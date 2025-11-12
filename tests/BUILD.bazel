@@ -9,6 +9,22 @@ cc_test(
 )
 
 cc_test(
+    name = "snapshot_batch_test",
+    srcs = ["snapshot_batch_test.cc"],
+    deps = [
+        "//src/option:snapshot",
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:time_domain",
+        "//src/pde/memory:pde_workspace",
+        "//src/pde/operators:spatial_operator",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:black_scholes_pde",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
     name = "grid_test",
     srcs = ["grid_test.cc"],
     deps = [

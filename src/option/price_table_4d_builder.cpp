@@ -421,20 +421,56 @@ bool PriceTable4DBuilder::solve_batch(
 
     solver.initialize(initial_condition);
 
-    // TODO: Register snapshot collectors for batch mode
-    // This is a challenge - we need per-lane snapshot collection
-    // For now, just solve and extract final solution from each lane
+    // Create per-lane snapshot collectors
+    std::vector<PriceTableSnapshotCollector> lane_collectors;
+    lane_collectors.reserve(batch_width);
 
+    for (size_t i = 0; i < batch_width; ++i) {
+        PriceTableSnapshotCollectorConfig collector_config{
+            .moneyness = std::span{moneyness_},
+            .tau = std::span{maturity_},
+            .K_ref = K_ref_,
+            .option_type = option_type,
+            .payoff_params = nullptr
+        };
+        lane_collectors.emplace_back(collector_config);
+    }
+
+    // Register snapshots for all maturities
+    for (size_t j = 0; j < Nt; ++j) {
+        // Build vector of collector pointers for this maturity
+        std::vector<SnapshotCollector*> collector_ptrs;
+        collector_ptrs.reserve(batch_width);
+        for (size_t i = 0; i < batch_width; ++i) {
+            collector_ptrs.push_back(&lane_collectors[i]);
+        }
+
+        // Register batch snapshot at this step index
+        solver.register_snapshot_batch(step_indices[j], j, std::move(collector_ptrs));
+    }
+
+    // Solve PDE for all lanes
     auto result = solver.solve();
 
     if (!result.has_value()) {
         return false;
     }
 
-    // Extract solutions from each lane
-    // For now, we only get the final solution - snapshot collection is TBD
-    // This means we can't fill the full price table yet
-    // TODO: Implement batch snapshot collection
+    // Copy prices from each lane's collector to 4D array
+    for (size_t i = 0; i < batch_width; ++i) {
+        size_t contract_idx = batch_start + i;
+        size_t k = contract_idx / Nr;  // volatility index
+        size_t l = contract_idx % Nr;  // rate index
+
+        auto prices_2d = lane_collectors[i].prices();
+        for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+            for (size_t tau_idx = 0; tau_idx < Nt; ++tau_idx) {
+                size_t idx_2d = m_idx * Nt + tau_idx;
+                size_t idx_4d = ((m_idx * Nt + tau_idx) * volatility_.size() + k) * Nr + l;
+                prices_4d[idx_4d] = prices_2d[idx_2d];
+            }
+        }
+    }
 
     return true;
 }
