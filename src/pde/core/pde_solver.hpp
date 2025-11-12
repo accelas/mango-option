@@ -128,6 +128,15 @@ public:
         double t = time_.t_start();
         apply_obstacle(t, std::span{u_current_});
         apply_boundary_conditions(std::span{u_current_}, t);
+
+        // If batch mode, broadcast initial condition to all lanes
+        if (workspace_->has_batch()) {
+            const size_t n_lanes = workspace_->batch_width();
+            for (size_t lane = 0; lane < n_lanes; ++lane) {
+                auto u_lane = workspace_->u_lane(lane);
+                std::copy(u_current_.begin(), u_current_.end(), u_lane.begin());
+            }
+        }
     }
 
     /// Solve PDE from t_start to t_end
@@ -141,7 +150,19 @@ public:
             double t_old = t;
 
             // Store u^n for TR-BDF2
-            std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+            // In batch mode, copy to workspace per-lane buffers
+            // In single-contract mode, use the single u_old_ buffer
+            const bool is_batched = workspace_->has_batch();
+            if (is_batched) {
+                const size_t n_lanes = workspace_->batch_width();
+                for (size_t lane = 0; lane < n_lanes; ++lane) {
+                    auto u_lane = workspace_->u_lane(lane);
+                    auto u_old_lane = workspace_->u_old_lane(lane);
+                    std::copy(u_lane.begin(), u_lane.end(), u_old_lane.begin());
+                }
+            } else {
+                std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+            }
 
             // Stage 1: Trapezoidal rule to t_n + γ·dt
             double t_stage1 = t + config_.gamma * dt;
@@ -411,18 +432,55 @@ private:
     /// Solved via Newton-Raphson iteration
     expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt) {
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
+        const bool is_batched = workspace_->has_batch();
 
-        // Compute L(u^n)
-        apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_->lu());
+        if (is_batched) {
+            // Batch mode: compute RHS per-lane from workspace buffers
+            const size_t n_lanes = workspace_->batch_width();
 
-        // RHS = u^n + w1·L(u^n)
-        // Use FMA for SAXPY-style loop
-        for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(w1, workspace_->lu()[i], u_old_[i]);
+            // Pack u_old into batch_slice for batched operator
+            for (size_t lane = 0; lane < n_lanes; ++lane) {
+                auto u_old_lane = workspace_->u_old_lane(lane);
+                for (size_t i = 0; i < n_; ++i) {
+                    workspace_->batch_slice()[i * n_lanes + lane] = u_old_lane[i];
+                }
+            }
+
+            // Compute L(u^n) in batch (AoS → AoS)
+            apply_operator_with_blocking_batch(t_n, workspace_->batch_slice(),
+                                              workspace_->lu_batch(),
+                                              n_lanes);
+
+            // Scatter lu_batch → lu_lanes and compute RHS per lane
+            for (size_t lane = 0; lane < n_lanes; ++lane) {
+                auto u_old_lane = workspace_->u_old_lane(lane);
+                auto rhs_lane = workspace_->rhs_lane(lane);
+                auto u_lane = workspace_->u_lane(lane);
+
+                // Scatter Lu from AoS to SoA
+                for (size_t i = 0; i < n_; ++i) {
+                    const double lu_i = workspace_->lu_batch()[i * n_lanes + lane];
+                    // RHS = u^n + w1·L(u^n)
+                    rhs_lane[i] = std::fma(w1, lu_i, u_old_lane[i]);
+                }
+
+                // Initial guess: u* = u^n
+                std::copy(u_old_lane.begin(), u_old_lane.end(), u_lane.begin());
+            }
+        } else {
+            // Single-contract mode: use single buffers
+            // Compute L(u^n)
+            apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_->lu());
+
+            // RHS = u^n + w1·L(u^n)
+            // Use FMA for SAXPY-style loop
+            for (size_t i = 0; i < n_; ++i) {
+                rhs_[i] = std::fma(w1, workspace_->lu()[i], u_old_[i]);
+            }
+
+            // Initial guess: u* = u^n
+            std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
         }
-
-        // Initial guess: u* = u^n
-        std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
 
         // Solve implicit stage
         auto result = solve_implicit_stage(t_stage, w1,
@@ -462,15 +520,36 @@ private:
         const double alpha = 1.0 / denom;  // Coefficient for u^{n+γ}
         const double beta = -(one_minus_gamma * one_minus_gamma) / denom;  // Coefficient for u^n
         const double w2 = config_.stage2_weight(dt);  // (1-γ)·dt/(2-γ)
+        const bool is_batched = workspace_->has_batch();
 
-        // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
-        // Use FMA: alpha*u_current[i] + beta*u_old[i]
-        for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(alpha, u_current_[i], beta * u_old_[i]);
+        if (is_batched) {
+            // Batch mode: compute RHS per-lane
+            // Note: u_lane contains u^{n+γ} from Stage 1
+            const size_t n_lanes = workspace_->batch_width();
+            for (size_t lane = 0; lane < n_lanes; ++lane) {
+                auto u_lane = workspace_->u_lane(lane);          // u^{n+γ} from Stage 1
+                auto u_old_lane = workspace_->u_old_lane(lane);  // u^n stored earlier
+                auto rhs_lane = workspace_->rhs_lane(lane);
+
+                // RHS = alpha·u^{n+γ} + beta·u^n
+                for (size_t i = 0; i < n_; ++i) {
+                    rhs_lane[i] = std::fma(alpha, u_lane[i], beta * u_old_lane[i]);
+                }
+
+                // Initial guess: u^{n+1} = u^{n+γ} (already in u_lane)
+                // No copy needed
+            }
+        } else {
+            // Single-contract mode: use single buffers
+            // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
+            // Use FMA: alpha*u_current[i] + beta*u_old[i]
+            for (size_t i = 0; i < n_; ++i) {
+                rhs_[i] = std::fma(alpha, u_current_[i], beta * u_old_[i]);
+            }
+
+            // Initial guess: u^{n+1} = u* (already in u_current_)
+            // (No need to copy, u_current_ already has u^{n+γ})
         }
-
-        // Initial guess: u^{n+1} = u* (already in u_current_)
-        // (No need to copy, u_current_ already has u^{n+γ})
 
         // Solve implicit stage
         auto result = solve_implicit_stage(t_next, w2,

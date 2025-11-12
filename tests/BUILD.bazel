@@ -540,3 +540,19 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "pde_solver_batch_test",
+    srcs = ["pde_solver_batch_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:time_domain",
+        "//src/pde/memory:pde_workspace",
+        "//src/pde/operators:spatial_operator",
+        "//src/pde/operators:centered_difference_facade",
+        "//src/pde/operators:black_scholes_pde",
+        "//src/pde/core:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
