@@ -385,20 +385,19 @@ void SimdBackend<T>::compute_second_derivative_batch_uniform(
     size_t start, size_t end) const
 {
     assert(start >= 1 && "start must allow u[i-1] access");
-    assert(end <= u_batch.size() / batch_width - 1 && "end must allow u[i+1] access");
+    assert((end + 1) * batch_width <= u_batch.size() && "end must allow u[i+1] access");
     assert(spacing_.is_uniform() && "Use compute_second_derivative_batch_non_uniform");
 
     const T dx2_inv = spacing_.spacing_inv_sq();
     const simd_t dx2_inv_vec(dx2_inv);
     const simd_t minus_two(T(-2));
-    constexpr size_t simd_width = simd_t::size();
 
     // Loop over grid points (outer)
     for (size_t i = start; i < end; ++i) {
         // Loop over contract batches (inner - vectorized)
         size_t lane = 0;
-        for (; lane + simd_width <= batch_width; lane += simd_width) {
-            // Horizontal load: contracts [lane..lane+simd_width) at grid point i
+        for (; lane + simd_t::size() <= batch_width; lane += simd_t::size()) {
+            // Horizontal load: contracts [lane..lane+simd_t::size()) at grid point i
             simd_t u_left, u_center, u_right;
             u_left.copy_from(&u_batch[(i-1)*batch_width + lane],
                            stdx::element_aligned);
@@ -436,18 +435,17 @@ void SimdBackend<T>::compute_first_derivative_batch_uniform(
     size_t start, size_t end) const
 {
     assert(start >= 1 && "start must allow u[i-1] access");
-    assert(end <= u_batch.size() / batch_width - 1 && "end must allow u[i+1] access");
+    assert((end + 1) * batch_width <= u_batch.size() && "end must allow u[i+1] access");
     assert(spacing_.is_uniform() && "Use compute_first_derivative_batch_non_uniform");
 
     const T half_dx_inv = spacing_.spacing_inv() * T(0.5);
     const simd_t half_dx_inv_vec(half_dx_inv);
-    constexpr size_t simd_width = simd_t::size();
 
     // Loop over grid points
     for (size_t i = start; i < end; ++i) {
         // Vectorized contract batches
         size_t lane = 0;
-        for (; lane + simd_width <= batch_width; lane += simd_width) {
+        for (; lane + simd_t::size() <= batch_width; lane += simd_t::size()) {
             simd_t u_left, u_right;
             u_left.copy_from(&u_batch[(i-1)*batch_width + lane],
                            stdx::element_aligned);
