@@ -553,6 +553,19 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_precompute_benchmark",
+    srcs = ["price_table_precompute_benchmark.cc"],
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "//src/option:american_option",
+        "@google_benchmark//:benchmark_main",
+    ],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"],
+    tags = ["manual", "benchmark"],  # Exclude from regular test runs
+)
+
+cc_test(
     name = "batch_transpose_test",
     srcs = ["batch_transpose_test.cc"],
     deps = [
