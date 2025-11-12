@@ -103,6 +103,13 @@ public:
         }
     }
 
+    /// Apply operator to batch (AoS layout)
+    void apply_interior_batch(double t,
+                             std::span<const T> u_batch,
+                             std::span<T> lu_batch,
+                             size_t batch_width,
+                             size_t start, size_t end) const;
+
     /// Greeks computation (delegates to stencil)
     void compute_first_derivative(std::span<const T> u,
                                  std::span<T> du_dx) const {
