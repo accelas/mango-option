@@ -572,3 +572,14 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "batch_activation_verification",
+    srcs = ["batch_activation_verification.cc"],
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)

@@ -13,6 +13,7 @@
 #include "src/pde/operators/spatial_operator.hpp"
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -159,57 +160,91 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     auto workspace = std::make_shared<SliceSolverWorkspace>(
         grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
-    // Loop over (σ, r) pairs using refactored helper method
-    // NOTE: Batch mode is NOT YET ENABLED because snapshot collection needs
-    // per-lane unpacking support. For now, we use single-contract mode with
-    // improved structure that will support batch mode in future.
-    //
-    // TODO Task 2c: Implement per-lane snapshot collection to enable batch mode
+    // Batch solving with cross-contract vectorization
+    // Uses batch mode for full SIMD lanes, single-contract mode for tail
+    using simd_t = std::experimental::native_simd<double>;
+    constexpr size_t batch_width = simd_t::size();
+    const size_t n_contracts = Nv * Nr;
+
     size_t failed_count = 0;
-    const bool enable_parallel = (Nv * Nr > 4);
+    const bool enable_parallel = (n_contracts > 4);
 
     if (enable_parallel) {
 #pragma omp parallel
         {
-            // Thread-local workspace (single-contract mode for now)
+            // Thread-local workspace for batch solving
             auto thread_workspace = std::make_shared<SliceSolverWorkspace>(
                 grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
-#pragma omp for collapse(2) schedule(dynamic, 1)
-            for (size_t k = 0; k < Nv; ++k) {
-                for (size_t l = 0; l < Nr; ++l) {
-                    try {
-                        if (!solve_single_contract(k, l, T_max, dividend_yield,
-                                                  option_type, grid_config,
-                                                  thread_workspace, step_indices,
-                                                  Nm, Nt, prices_4d)) {
+            // Process contracts in batches of simd_width
+#pragma omp for schedule(dynamic, 1)
+            for (size_t batch_start = 0; batch_start < n_contracts; batch_start += batch_width) {
+                const size_t current_batch = std::min(batch_width, n_contracts - batch_start);
+
+                try {
+                    if (current_batch == batch_width) {
+                        // Full batch: use vectorized batch solver
+                        if (!solve_batch(batch_start, batch_width, Nv, Nr,
+                                       T_max, dividend_yield, option_type,
+                                       grid_config, thread_workspace, step_indices,
+                                       Nm, Nt, prices_4d)) {
 #pragma omp atomic
-                            ++failed_count;
+                            failed_count += batch_width;
                         }
-                    } catch (const std::exception&) {
+                    } else {
+                        // Tail: use single-contract solver
+                        for (size_t i = batch_start; i < n_contracts; ++i) {
+                            size_t k = i / Nr;  // volatility index
+                            size_t l = i % Nr;  // rate index
+
+                            if (!solve_single_contract(k, l, T_max, dividend_yield,
+                                                      option_type, grid_config,
+                                                      thread_workspace, step_indices,
+                                                      Nm, Nt, prices_4d)) {
 #pragma omp atomic
-                        ++failed_count;
+                                ++failed_count;
+                            }
+                        }
                     }
+                } catch (const std::exception&) {
+#pragma omp atomic
+                    failed_count += current_batch;
                 }
             }
         }
     } else {
-        // Serial path (single-contract mode)
+        // Serial path: process batches sequentially
         auto serial_workspace = std::make_shared<SliceSolverWorkspace>(
             grid_config.x_min, grid_config.x_max, grid_config.n_space);
 
-        for (size_t k = 0; k < Nv; ++k) {
-            for (size_t l = 0; l < Nr; ++l) {
-                try {
-                    if (!solve_single_contract(k, l, T_max, dividend_yield,
-                                              option_type, grid_config,
-                                              serial_workspace, step_indices,
-                                              Nm, Nt, prices_4d)) {
-                        ++failed_count;
+        for (size_t batch_start = 0; batch_start < n_contracts; batch_start += batch_width) {
+            const size_t current_batch = std::min(batch_width, n_contracts - batch_start);
+
+            try {
+                if (current_batch == batch_width) {
+                    // Full batch: use vectorized batch solver
+                    if (!solve_batch(batch_start, batch_width, Nv, Nr,
+                                   T_max, dividend_yield, option_type,
+                                   grid_config, serial_workspace, step_indices,
+                                   Nm, Nt, prices_4d)) {
+                        failed_count += batch_width;
                     }
-                } catch (const std::exception&) {
-                    ++failed_count;
+                } else {
+                    // Tail: use single-contract solver
+                    for (size_t i = batch_start; i < n_contracts; ++i) {
+                        size_t k = i / Nr;  // volatility index
+                        size_t l = i % Nr;  // rate index
+
+                        if (!solve_single_contract(k, l, T_max, dividend_yield,
+                                                  option_type, grid_config,
+                                                  serial_workspace, step_indices,
+                                                  Nm, Nt, prices_4d)) {
+                            ++failed_count;
+                        }
+                    }
                 }
+            } catch (const std::exception&) {
+                failed_count += current_batch;
             }
         }
     }
@@ -394,6 +429,12 @@ bool PriceTable4DBuilder::solve_batch(
     const double dt = T_max / grid_config.n_time;
     TimeDomain time_domain(0.0, T_max, dt);
 
+    // Create batch workspace (NOT the single-contract workspace from SliceSolverWorkspace)
+    auto batch_workspace = std::make_shared<PDEWorkspace>(
+        grid_config.n_space,
+        workspace->grid_span(),
+        batch_width);  // Enable batch mode
+
     // Create PDESolver with batch workspace
     PDESolver solver(
         workspace->grid_span(),
@@ -404,7 +445,7 @@ bool PriceTable4DBuilder::solve_batch(
         right_bc,
         spatial_op,
         obstacle_fn,
-        workspace->workspace().get()
+        batch_workspace.get()
     );
 
     // Initialize all lanes with the same initial condition (American option payoff)
