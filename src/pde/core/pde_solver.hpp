@@ -549,6 +549,19 @@ private:
         // Track max error across all lanes (for final return)
         double max_error = 0.0;
 
+        // Per-lane previous state for convergence checking
+        std::vector<std::vector<double>> u_old_per_lane;
+        if (is_batched) {
+            u_old_per_lane.resize(n_lanes);
+            for (size_t lane = 0; lane < n_lanes; ++lane) {
+                auto u_lane = workspace_->u_lane(lane);
+                u_old_per_lane[lane].assign(u_lane.begin(), u_lane.end());
+            }
+        } else {
+            // Single-contract: use existing u_old buffer
+            std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
+        }
+
         // Newton iteration
         for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
             // Batched or single-contract stencil
@@ -607,12 +620,21 @@ private:
                 apply_boundary_conditions(u_lane, t);
 
                 // Check convergence via step delta
-                double error_lane = compute_step_delta_error(u_lane, newton_ws_.u_old());
+                double error_lane = is_batched
+                    ? compute_step_delta_error(u_lane, u_old_per_lane[lane])
+                    : compute_step_delta_error(u_lane, newton_ws_.u_old());
                 max_error = std::max(max_error, error_lane);
                 all_converged &= (error_lane < root_config_.tolerance);
+            }
 
-                // Prepare for next iteration
-                std::copy(u_lane.begin(), u_lane.end(), newton_ws_.u_old().begin());
+            // Update old state for next Newton iteration
+            if (is_batched) {
+                for (size_t lane = 0; lane < n_lanes; ++lane) {
+                    auto u_lane = workspace_->u_lane(lane);
+                    u_old_per_lane[lane].assign(u_lane.begin(), u_lane.end());
+                }
+            } else {
+                std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
             }
 
             // Exit when ALL lanes converged
