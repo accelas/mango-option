@@ -148,6 +148,32 @@ private:
 
     expected<void, std::string> validate_grids() const;
 
+    /// Solve a single contract (used in tail path or serial mode)
+    bool solve_single_contract(
+        size_t k, size_t l,
+        double T_max,
+        double dividend_yield,
+        OptionType option_type,
+        const AmericanOptionGrid& grid_config,
+        std::shared_ptr<SliceSolverWorkspace> workspace,
+        const std::vector<size_t>& step_indices,
+        size_t Nm, size_t Nt,
+        std::vector<double>& prices_4d);
+
+    /// Solve a batch of contracts using cross-contract vectorization
+    bool solve_batch(
+        size_t batch_start,
+        size_t batch_width,
+        size_t Nv, size_t Nr,
+        double T_max,
+        double dividend_yield,
+        OptionType option_type,
+        const AmericanOptionGrid& grid_config,
+        std::shared_ptr<SliceSolverWorkspace> workspace,
+        const std::vector<size_t>& step_indices,
+        size_t Nm, size_t Nt,
+        std::vector<double>& prices_4d);
+
     std::vector<double> moneyness_;
     std::vector<double> maturity_;
     std::vector<double> volatility_;
