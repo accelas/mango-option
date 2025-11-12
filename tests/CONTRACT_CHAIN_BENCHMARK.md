@@ -13,6 +13,28 @@ The benchmark compares two solving strategies:
 1. **Single-contract mode**: Solve each contract individually (sequential)
 2. **Batch mode**: Solve multiple contracts simultaneously using SIMD vectorization
 
+## ⚠️ Build Mode Matters
+
+**WARNING: This benchmark MUST be run with optimized builds to see meaningful speedup results.**
+
+```bash
+# CORRECT: Use optimized build
+bazel run -c opt //tests:contract_chain_benchmark
+
+# WRONG: Debug build shows little/no speedup
+bazel run //tests:contract_chain_benchmark  # Don't do this!
+```
+
+**Why this matters:**
+- **Debug builds (-c dbg)**: No SIMD vectorization, no inlining, bounds checking enabled
+  - Batch mode speedup: ~1.1-1.3x (minimal, not representative)
+  - Single-contract performance: ~10x slower than optimized
+- **Optimized builds (-c opt)**: Full SIMD vectorization, aggressive inlining, loop unrolling
+  - Batch mode speedup: ~3-7x (actual production performance)
+  - This is what you want to measure!
+
+If your benchmark shows speedup less than 2x, check your build mode first!
+
 ## Expected Speedup
 
 Batch mode achieves speedup through cross-contract SIMD vectorization:
@@ -165,10 +187,56 @@ Batch mode (AoS): [u₀⁽⁰⁾, u₀⁽¹⁾, u₀⁽²⁾, u₀⁽³⁾,  ←
 
 This layout enables efficient SIMD operations on corresponding grid points across multiple contracts.
 
+## Limitations of Benchmark Implementation
+
+**This benchmark uses a simplified batch mode implementation with the following restrictions:**
+
+### Homogeneous Maturity Per Batch
+All contracts in a batch must share the **same maturity** (time to expiration). This simplification allows:
+- Single time-stepping loop for all contracts
+- Uniform convergence across the batch
+- Simplified time grid construction
+
+**Example:** A batch can contain contracts with maturities [1.0, 1.0, 1.0, 1.0] but NOT [0.5, 1.0, 1.5, 2.0].
+
+### Homogeneous Strike (Payoff) Per Batch
+All contracts in a batch use the **same strike price** (payoff structure). This simplification allows:
+- Uniform obstacle condition evaluation
+- Shared payoff computation
+- Single early exercise boundary per time step
+
+**Example:** A batch can contain contracts with strikes [100, 100, 100, 100] but NOT [80, 90, 100, 110].
+
+### Variable PDE Coefficients
+**What DOES vary within a batch:**
+- Volatility (σ): Different implied volatilities per contract
+- Interest rate (r): Different risk-free rates per contract
+- Dividend yield (q): Different dividend yields per contract
+
+This allows realistic batch processing scenarios like:
+- Pricing the same option across different vol surfaces
+- Pricing the same option across different rate curves
+- Parameter sensitivity analysis (vega, rho, dividend sensitivity)
+
+### Why These Limitations Exist
+**This is a benchmark simplification, NOT a fundamental limitation of batch mode:**
+
+The batch vectorization infrastructure itself can handle:
+- Different maturities (with more complex time-stepping logic)
+- Different strikes (with per-contract payoff evaluation)
+- Fully heterogeneous contract chains
+
+However, for this benchmark we prioritize:
+1. **Clear performance measurement**: Isolate SIMD vectorization gains
+2. **Implementation simplicity**: Avoid complexity that obscures the core algorithm
+3. **Realistic use cases**: Most production scenarios batch similar contracts
+
+**Future work:** Extend batch mode to support fully heterogeneous contract chains (different maturities and strikes).
+
 ## Future Work
 
 - Measure memory bandwidth utilization
 - Profile cache miss rates
 - Benchmark with different grid sizes
 - Test on ARM Neon (SIMD width = 2)
-- Add batch mode with homogeneous parameters (simpler, potentially faster)
+- Add support for heterogeneous maturities and strikes in batch mode
