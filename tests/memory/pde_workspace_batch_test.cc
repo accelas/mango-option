@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstring>
+#include <experimental/simd>
 
 TEST(PDEWorkspaceBatchTest, HasBatchQuery) {
     auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
@@ -14,10 +15,11 @@ TEST(PDEWorkspaceBatchTest, HasBatchQuery) {
     EXPECT_FALSE(single_contract.has_batch());
     EXPECT_EQ(single_contract.batch_width(), 0);
 
-    // Batch mode (batch_width = 4)
-    mango::PDEWorkspace batched(101, grid.span(), 4);
+    // Batch mode (batch_width = native SIMD width)
+    const size_t batch_width = std::experimental::native_simd<double>::size();
+    mango::PDEWorkspace batched(101, grid.span(), batch_width);
     EXPECT_TRUE(batched.has_batch());
-    EXPECT_EQ(batched.batch_width(), 4);
+    EXPECT_EQ(batched.batch_width(), batch_width);
 }
 
 TEST(PDEWorkspaceBatchTest, PackScatterRoundTrip) {
@@ -25,7 +27,7 @@ TEST(PDEWorkspaceBatchTest, PackScatterRoundTrip) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    constexpr size_t batch_width = 4;
+    const size_t batch_width = std::experimental::native_simd<double>::size();
     mango::PDEWorkspace workspace(101, grid.span(), batch_width);
 
     // Initialize per-lane SoA buffers with unique test pattern
