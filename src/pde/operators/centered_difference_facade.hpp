@@ -60,6 +60,26 @@ public:
         impl_->compute_second_derivative_tiled(u, d2u_dx2, start, end);
     }
 
+    void compute_second_derivative_batch(std::span<const T> u_batch,
+                                        std::span<T> d2u_batch,
+                                        size_t batch_width,
+                                        size_t start, size_t end) const {
+        assert(start >= 1 && "start must allow u[i-1] access");
+        assert((end + 1) * batch_width <= u_batch.size() && "end must allow u[i+1] access");
+        impl_->compute_second_derivative_batch(u_batch, d2u_batch,
+                                              batch_width, start, end);
+    }
+
+    void compute_first_derivative_batch(std::span<const T> u_batch,
+                                       std::span<T> du_batch,
+                                       size_t batch_width,
+                                       size_t start, size_t end) const {
+        assert(start >= 1 && "start must allow u[i-1] access");
+        assert((end + 1) * batch_width <= u_batch.size() && "end must allow u[i+1] access");
+        impl_->compute_first_derivative_batch(u_batch, du_batch,
+                                             batch_width, start, end);
+    }
+
 private:
     struct BackendInterface {
         virtual ~BackendInterface() = default;
@@ -72,6 +92,12 @@ private:
         virtual void compute_second_derivative_tiled(
             std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const = 0;
+        virtual void compute_second_derivative_batch(
+            std::span<const T> u_batch, std::span<T> d2u_batch,
+            size_t batch_width, size_t start, size_t end) const = 0;
+        virtual void compute_first_derivative_batch(
+            std::span<const T> u_batch, std::span<T> du_batch,
+            size_t batch_width, size_t start, size_t end) const = 0;
     };
 
     template<typename Backend>
@@ -97,6 +123,20 @@ private:
             std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const override {
             backend_.compute_second_derivative_tiled(u, d2u_dx2, start, end);
+        }
+
+        void compute_second_derivative_batch(
+            std::span<const T> u_batch, std::span<T> d2u_batch,
+            size_t batch_width, size_t start, size_t end) const override {
+            backend_.compute_second_derivative_batch(u_batch, d2u_batch,
+                                                    batch_width, start, end);
+        }
+
+        void compute_first_derivative_batch(
+            std::span<const T> u_batch, std::span<T> du_batch,
+            size_t batch_width, size_t start, size_t end) const override {
+            backend_.compute_first_derivative_batch(u_batch, du_batch,
+                                                   batch_width, start, end);
         }
     };
 

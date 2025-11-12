@@ -3,6 +3,7 @@
 #include "grid_spacing.hpp"
 #include "src/support/parallel.hpp"
 #include <span>
+#include <vector>
 #include <cmath>
 #include <cassert>
 
@@ -123,6 +124,59 @@ public:
     {
         // Scalar backend doesn't use tiling (simple forwarding)
         compute_second_derivative(u, d2u_dx2, start, end);
+    }
+
+    // Batch second derivative
+    void compute_second_derivative_batch(std::span<const T> u_batch,
+                                        std::span<T> d2u_batch,
+                                        size_t batch_width,
+                                        size_t start, size_t end) const
+    {
+        // Scalar backend uses compiler auto-vectorization, not explicit batch processing
+        // Fall back to single-contract loop
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            // Extract lane
+            thread_local std::vector<T> u_single, d2u_single;
+            u_single.resize(u_batch.size() / batch_width);
+            d2u_single.resize(u_batch.size() / batch_width);
+
+            const size_t n = u_batch.size() / batch_width;
+            for (size_t i = 0; i < n; ++i) {
+                u_single[i] = u_batch[i * batch_width + lane];
+            }
+
+            compute_second_derivative(std::span{u_single}, std::span{d2u_single}, start, end);
+
+            // Pack back
+            for (size_t i = start; i < end; ++i) {
+                d2u_batch[i * batch_width + lane] = d2u_single[i];
+            }
+        }
+    }
+
+    // Batch first derivative
+    void compute_first_derivative_batch(std::span<const T> u_batch,
+                                       std::span<T> du_batch,
+                                       size_t batch_width,
+                                       size_t start, size_t end) const
+    {
+        // Similar implementation for first derivative
+        for (size_t lane = 0; lane < batch_width; ++lane) {
+            thread_local std::vector<T> u_single, du_single;
+            u_single.resize(u_batch.size() / batch_width);
+            du_single.resize(u_batch.size() / batch_width);
+
+            const size_t n = u_batch.size() / batch_width;
+            for (size_t i = 0; i < n; ++i) {
+                u_single[i] = u_batch[i * batch_width + lane];
+            }
+
+            compute_first_derivative(std::span{u_single}, std::span{du_single}, start, end);
+
+            for (size_t i = start; i < end; ++i) {
+                du_batch[i * batch_width + lane] = du_single[i];
+            }
+        }
     }
 
 private:
