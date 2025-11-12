@@ -527,3 +527,16 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "spatial_operator_batch_test",
+    srcs = ["spatial_operator_batch_test.cc"],
+    deps = [
+        "//src/pde/operators:spatial_operator",
+        "//src/pde/operators:black_scholes_pde",
+        "//src/pde/operators:grid_spacing",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
