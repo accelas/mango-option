@@ -468,4 +468,37 @@ void SimdBackend<T>::compute_first_derivative_batch_uniform(
     }
 }
 
+// Convenience wrappers with auto-dispatch
+template<std::floating_point T>
+void SimdBackend<T>::compute_second_derivative_batch(
+    std::span<const T> u_batch,
+    std::span<T> d2u_batch,
+    size_t batch_width,
+    size_t start, size_t end) const
+{
+    if (spacing_.is_uniform()) {
+        compute_second_derivative_batch_uniform(u_batch, d2u_batch,
+                                               batch_width, start, end);
+    } else {
+        // TODO: implement non-uniform variant in next phase
+        throw std::runtime_error("Non-uniform batch not yet implemented");
+    }
+}
+
+template<std::floating_point T>
+void SimdBackend<T>::compute_first_derivative_batch(
+    std::span<const T> u_batch,
+    std::span<T> du_batch,
+    size_t batch_width,
+    size_t start, size_t end) const
+{
+    if (spacing_.is_uniform()) {
+        compute_first_derivative_batch_uniform(u_batch, du_batch,
+                                              batch_width, start, end);
+    } else {
+        // TODO: implement non-uniform variant in next phase
+        throw std::runtime_error("Non-uniform batch not yet implemented");
+    }
+}
+
 } // namespace mango::operators
