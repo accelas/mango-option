@@ -59,6 +59,10 @@ public:
         , l1_tile_size_(l1_tile_size)
     {}
 
+    // ========================================================================
+    // Single-Contract Methods: Second Derivatives
+    // ========================================================================
+
     /**
      * Vectorized second derivative kernel (uniform grid)
      *
@@ -103,63 +107,6 @@ public:
         // Scalar tail (zero-padded arrays allow safe i+1 access)
         for (; i < end; ++i) {
             d2u_dx2[i] = std::fma(u[i+1] + u[i-1], dx2_inv, T(-2) * u[i] * dx2_inv);
-        }
-    }
-
-    /**
-     * Tiled second derivative (cache-friendly)
-     *
-     * Operator decides tile size based on stencil width and cache target.
-     * Automatically dispatches to uniform or non-uniform implementation.
-     */
-    [[gnu::target_clones("default","avx2","avx512f")]]
-    void compute_second_derivative_tiled(
-        std::span<const T> u,
-        std::span<T> d2u_dx2,
-        size_t start,
-        size_t end) const
-    {
-        assert(start >= 1 && "start must allow u[i-1] access");
-        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
-
-        for (size_t tile_start = start; tile_start < end; tile_start += l1_tile_size_) {
-            const size_t tile_end = std::min(tile_start + l1_tile_size_, end);
-            if (spacing_.is_uniform()) {
-                compute_second_derivative_uniform(u, d2u_dx2, tile_start, tile_end);
-            } else {
-                compute_second_derivative_non_uniform(u, d2u_dx2, tile_start, tile_end);
-            }
-        }
-    }
-
-    /**
-     * First derivative (vectorized, uniform grid)
-     */
-    [[gnu::target_clones("default","avx2","avx512f")]]
-    void compute_first_derivative_uniform(
-        std::span<const T> u,
-        std::span<T> du_dx,
-        size_t start,
-        size_t end) const
-    {
-        assert(start >= 1 && "start must allow u[i-1] access");
-        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
-
-        const T half_dx_inv = spacing_.spacing_inv() * T(0.5);
-        const simd_t half_dx_inv_vec(half_dx_inv);
-
-        size_t i = start;
-        for (; i + simd_width <= end; i += simd_width) {
-            simd_t u_left, u_right;
-            u_left.copy_from(u.data() + i - 1, stdx::element_aligned);
-            u_right.copy_from(u.data() + i + 1, stdx::element_aligned);
-
-            const simd_t result = (u_right - u_left) * half_dx_inv_vec;
-            result.copy_to(du_dx.data() + i, stdx::element_aligned);
-        }
-
-        for (; i < end; ++i) {
-            du_dx[i] = (u[i+1] - u[i-1]) * half_dx_inv;
         }
     }
 
@@ -218,6 +165,93 @@ public:
             const T forward_diff = (u[i+1] - u[i]) * dxr_inv;
             const T backward_diff = (u[i] - u[i-1]) * dxl_inv;
             d2u_dx2[i] = (forward_diff - backward_diff) * dxc_inv;
+        }
+    }
+
+    /**
+     * Convenience wrapper for second derivative (automatic dispatch)
+     *
+     * Automatically dispatches to uniform or non-uniform implementation
+     * based on grid type. Both variants get ISA-specific code generation
+     * via [[gnu::target_clones]].
+     *
+     * Use this for tests, examples, or when grid type is runtime-determined.
+     * For performance-critical paths with known grid type at compile time,
+     * prefer explicit compute_second_derivative_uniform() or
+     * compute_second_derivative_non_uniform() to avoid branch overhead.
+     */
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_second_derivative(
+        std::span<const T> u,
+        std::span<T> d2u_dx2,
+        size_t start,
+        size_t end) const
+    {
+        if (spacing_.is_uniform()) {
+            compute_second_derivative_uniform(u, d2u_dx2, start, end);
+        } else {
+            compute_second_derivative_non_uniform(u, d2u_dx2, start, end);
+        }
+    }
+
+    /**
+     * Tiled second derivative (cache-friendly)
+     *
+     * Operator decides tile size based on stencil width and cache target.
+     * Automatically dispatches to uniform or non-uniform implementation.
+     */
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_second_derivative_tiled(
+        std::span<const T> u,
+        std::span<T> d2u_dx2,
+        size_t start,
+        size_t end) const
+    {
+        assert(start >= 1 && "start must allow u[i-1] access");
+        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
+
+        for (size_t tile_start = start; tile_start < end; tile_start += l1_tile_size_) {
+            const size_t tile_end = std::min(tile_start + l1_tile_size_, end);
+            if (spacing_.is_uniform()) {
+                compute_second_derivative_uniform(u, d2u_dx2, tile_start, tile_end);
+            } else {
+                compute_second_derivative_non_uniform(u, d2u_dx2, tile_start, tile_end);
+            }
+        }
+    }
+
+    // ========================================================================
+    // Single-Contract Methods: First Derivatives
+    // ========================================================================
+
+    /**
+     * First derivative (vectorized, uniform grid)
+     */
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_first_derivative_uniform(
+        std::span<const T> u,
+        std::span<T> du_dx,
+        size_t start,
+        size_t end) const
+    {
+        assert(start >= 1 && "start must allow u[i-1] access");
+        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
+
+        const T half_dx_inv = spacing_.spacing_inv() * T(0.5);
+        const simd_t half_dx_inv_vec(half_dx_inv);
+
+        size_t i = start;
+        for (; i + simd_width <= end; i += simd_width) {
+            simd_t u_left, u_right;
+            u_left.copy_from(u.data() + i - 1, stdx::element_aligned);
+            u_right.copy_from(u.data() + i + 1, stdx::element_aligned);
+
+            const simd_t result = (u_right - u_left) * half_dx_inv_vec;
+            result.copy_to(du_dx.data() + i, stdx::element_aligned);
+        }
+
+        for (; i < end; ++i) {
+            du_dx[i] = (u[i+1] - u[i-1]) * half_dx_inv;
         }
     }
 
@@ -287,32 +321,6 @@ public:
     }
 
     /**
-     * Convenience wrapper for second derivative (automatic dispatch)
-     *
-     * Automatically dispatches to uniform or non-uniform implementation
-     * based on grid type. Both variants get ISA-specific code generation
-     * via [[gnu::target_clones]].
-     *
-     * Use this for tests, examples, or when grid type is runtime-determined.
-     * For performance-critical paths with known grid type at compile time,
-     * prefer explicit compute_second_derivative_uniform() or
-     * compute_second_derivative_non_uniform() to avoid branch overhead.
-     */
-    [[gnu::target_clones("default","avx2","avx512f")]]
-    void compute_second_derivative(
-        std::span<const T> u,
-        std::span<T> d2u_dx2,
-        size_t start,
-        size_t end) const
-    {
-        if (spacing_.is_uniform()) {
-            compute_second_derivative_uniform(u, d2u_dx2, start, end);
-        } else {
-            compute_second_derivative_non_uniform(u, d2u_dx2, start, end);
-        }
-    }
-
-    /**
      * Convenience wrapper for first derivative (automatic dispatch)
      *
      * Automatically dispatches to uniform or non-uniform implementation
@@ -338,18 +346,14 @@ public:
         }
     }
 
-    // Horizontal SIMD batch kernels (cross-contract vectorization)
+    // ========================================================================
+    // Batch Methods: Second Derivatives (Horizontal SIMD)
+    // ========================================================================
+
     [[gnu::target_clones("default","avx2","avx512f")]]
     void compute_second_derivative_batch_uniform(
         std::span<const T> u_batch,
         std::span<T> d2u_batch,
-        size_t batch_width,
-        size_t start, size_t end) const;
-
-    [[gnu::target_clones("default","avx2","avx512f")]]
-    void compute_first_derivative_batch_uniform(
-        std::span<const T> u_batch,
-        std::span<T> du_batch,
         size_t batch_width,
         size_t start, size_t end) const;
 
@@ -360,17 +364,27 @@ public:
         size_t batch_width,
         size_t start, size_t end) const;
 
+    void compute_second_derivative_batch(
+        std::span<const T> u_batch,
+        std::span<T> d2u_batch,
+        size_t batch_width,
+        size_t start, size_t end) const;
+
+    // ========================================================================
+    // Batch Methods: First Derivatives (Horizontal SIMD)
+    // ========================================================================
+
     [[gnu::target_clones("default","avx2","avx512f")]]
-    void compute_first_derivative_batch_non_uniform(
+    void compute_first_derivative_batch_uniform(
         std::span<const T> u_batch,
         std::span<T> du_batch,
         size_t batch_width,
         size_t start, size_t end) const;
 
-    // Convenience wrapper (auto-dispatch uniform/non-uniform)
-    void compute_second_derivative_batch(
+    [[gnu::target_clones("default","avx2","avx512f")]]
+    void compute_first_derivative_batch_non_uniform(
         std::span<const T> u_batch,
-        std::span<T> d2u_batch,
+        std::span<T> du_batch,
         size_t batch_width,
         size_t start, size_t end) const;
 
