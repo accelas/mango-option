@@ -83,7 +83,7 @@ public:
     }
     std::span<const double> u_lane(size_t lane) const {
         assert(lane < batch_width_ && "lane out of range");
-        return {u_lane_buffers_[lane], n_};
+        return u_lanes_[lane];
     }
 
     std::span<double> lu_lane(size_t lane) {
