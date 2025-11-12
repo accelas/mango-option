@@ -373,4 +373,59 @@ private:
     size_t l1_tile_size_;
 };
 
+// ============================================================================
+// Batch Method Implementations (Horizontal SIMD)
+// ============================================================================
+
+template<std::floating_point T>
+void SimdBackend<T>::compute_second_derivative_batch_uniform(
+    std::span<const T> u_batch,
+    std::span<T> d2u_batch,
+    size_t batch_width,
+    size_t start, size_t end) const
+{
+    assert(start >= 1 && "start must allow u[i-1] access");
+    assert(end <= u_batch.size() / batch_width - 1 && "end must allow u[i+1] access");
+    assert(spacing_.is_uniform() && "Use compute_second_derivative_batch_non_uniform");
+
+    const T dx2_inv = spacing_.spacing_inv_sq();
+    const simd_t dx2_inv_vec(dx2_inv);
+    const simd_t minus_two(T(-2));
+    constexpr size_t simd_width = simd_t::size();
+
+    // Loop over grid points (outer)
+    for (size_t i = start; i < end; ++i) {
+        // Loop over contract batches (inner - vectorized)
+        size_t lane = 0;
+        for (; lane + simd_width <= batch_width; lane += simd_width) {
+            // Horizontal load: contracts [lane..lane+simd_width) at grid point i
+            simd_t u_left, u_center, u_right;
+            u_left.copy_from(&u_batch[(i-1)*batch_width + lane],
+                           stdx::element_aligned);
+            u_center.copy_from(&u_batch[i*batch_width + lane],
+                             stdx::element_aligned);
+            u_right.copy_from(&u_batch[(i+1)*batch_width + lane],
+                            stdx::element_aligned);
+
+            // Stencil computation (identical to single-contract)
+            const simd_t sum = u_left + u_right;
+            const simd_t result = stdx::fma(sum, dx2_inv_vec,
+                                           minus_two * u_center * dx2_inv_vec);
+
+            result.copy_to(&d2u_batch[i*batch_width + lane],
+                          stdx::element_aligned);
+        }
+
+        // Scalar tail for remaining contracts
+        for (; lane < batch_width; ++lane) {
+            size_t idx = i * batch_width + lane;
+            d2u_batch[idx] = std::fma(
+                u_batch[(i+1)*batch_width + lane] + u_batch[(i-1)*batch_width + lane],
+                dx2_inv,
+                T(-2) * u_batch[idx] * dx2_inv
+            );
+        }
+    }
+}
+
 } // namespace mango::operators
