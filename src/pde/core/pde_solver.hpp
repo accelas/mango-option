@@ -528,6 +528,15 @@ private:
                                            std::span<const double> rhs) {
         const double eps = root_config_.jacobian_fd_epsilon;
 
+        // Hoist batch detection ONCE per stage
+        const bool is_batched = workspace_->has_batch();
+        const size_t n_lanes = is_batched ? workspace_->batch_width() : 1;
+
+        // Pack SoA → AoS before Newton loop (if batched)
+        if (is_batched) {
+            workspace_->pack_to_batch_slice();
+        }
+
         // Apply BCs to initial guess
         apply_boundary_conditions(u, t);
 
@@ -539,8 +548,15 @@ private:
 
         // Newton iteration
         for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
-            // Evaluate L(u)
-            apply_operator_with_blocking(t, u, workspace_->lu());
+            // Batched or single-contract stencil
+            if (is_batched) {
+                apply_operator_with_blocking_batch(t, workspace_->batch_slice(),
+                                                  workspace_->lu_batch(),
+                                                  workspace_->batch_width());
+                workspace_->scatter_from_batch_slice();  // AoS → SoA
+            } else {
+                apply_operator_with_blocking(t, u, workspace_->lu());
+            }
 
             // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
             compute_residual(u, coeff_dt, workspace_->lu(), rhs,
