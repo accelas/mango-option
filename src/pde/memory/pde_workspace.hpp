@@ -34,9 +34,9 @@ public:
         , n_(n)
         , padded_n_(pad_to_simd(n))
         , grid_(grid)
-        , batch_width_(batch_width)  // NEW
-        , u_batch_(nullptr)           // NEW
-        , lu_batch_(nullptr)          // NEW
+        , batch_width_(batch_width)  // Batch mode: 0 = single-contract, >0 = batch
+        , u_batch_(nullptr)
+        , lu_batch_(nullptr)
     {
         assert(!grid.empty() && "grid must not be empty");
         assert(grid.size() == n && "grid size must match n");
@@ -94,6 +94,32 @@ public:
     std::span<const double> lu_lane(size_t lane) const {
         assert(lane < batch_width_ && "lane out of range");
         return lu_lanes_[lane];
+    }
+
+    // Per-lane RHS accessor (for TR-BDF2 time stepping)
+    // Returns view into lane's RHS vector (AoS layout: size n)
+    std::span<double> rhs_lane(size_t lane) {
+        assert(batch_width_ > 0 && "rhs_lane requires batch mode");
+        assert(lane < batch_width_ && "lane out of range");
+        return {rhs_lane_buffers_[lane], n_};
+    }
+    std::span<const double> rhs_lane(size_t lane) const {
+        assert(batch_width_ > 0 && "rhs_lane requires batch mode");
+        assert(lane < batch_width_ && "lane out of range");
+        return {rhs_lane_buffers_[lane], n_};
+    }
+
+    // Per-lane u_old accessor (for TR-BDF2 time stepping)
+    // Returns view into lane's u_old vector (AoS layout: size n)
+    std::span<double> u_old_lane(size_t lane) {
+        assert(batch_width_ > 0 && "u_old_lane requires batch mode");
+        assert(lane < batch_width_ && "lane out of range");
+        return {u_old_lane_buffers_[lane], n_};
+    }
+    std::span<const double> u_old_lane(size_t lane) const {
+        assert(batch_width_ > 0 && "u_old_lane requires batch mode");
+        assert(lane < batch_width_ && "lane out of range");
+        return {u_old_lane_buffers_[lane], n_};
     }
 
     // Padded accessors for SIMD kernels
@@ -250,15 +276,21 @@ private:
         const size_t lane_bytes = padded_n_ * sizeof(double);
         u_lane_buffers_.resize(batch_width_);
         lu_lane_buffers_.resize(batch_width_);
+        rhs_lane_buffers_.resize(batch_width_);
+        u_old_lane_buffers_.resize(batch_width_);
         u_lanes_.reserve(batch_width_);
         lu_lanes_.reserve(batch_width_);
 
         for (size_t lane = 0; lane < batch_width_; ++lane) {
             u_lane_buffers_[lane] = static_cast<double*>(resource_.allocate(lane_bytes));
             lu_lane_buffers_[lane] = static_cast<double*>(resource_.allocate(lane_bytes));
+            rhs_lane_buffers_[lane] = static_cast<double*>(resource_.allocate(lane_bytes));
+            u_old_lane_buffers_[lane] = static_cast<double*>(resource_.allocate(lane_bytes));
 
             std::fill(u_lane_buffers_[lane], u_lane_buffers_[lane] + padded_n_, 0.0);
             std::fill(lu_lane_buffers_[lane], lu_lane_buffers_[lane] + padded_n_, 0.0);
+            std::fill(rhs_lane_buffers_[lane], rhs_lane_buffers_[lane] + padded_n_, 0.0);
+            std::fill(u_old_lane_buffers_[lane], u_old_lane_buffers_[lane] + padded_n_, 0.0);
 
             u_lanes_.push_back(std::span<double>{u_lane_buffers_[lane], n_});
             lu_lanes_.push_back(std::span<const double>{lu_lane_buffers_[lane], n_});
@@ -320,6 +352,10 @@ private:
     std::vector<double*> lu_lane_buffers_;  // batch_width buffers of [n]
     std::vector<std::span<double>> u_lanes_;
     std::vector<std::span<const double>> lu_lanes_;
+
+    // Per-lane RHS and u_old buffers (for TR-BDF2 time stepping)
+    std::vector<double*> rhs_lane_buffers_;   // batch_width buffers of [n]
+    std::vector<double*> u_old_lane_buffers_; // batch_width buffers of [n]
 };
 
 } // namespace mango

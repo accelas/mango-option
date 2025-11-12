@@ -104,3 +104,87 @@ TEST(PDEWorkspaceTest, TileMetadata) {
     EXPECT_EQ(tile0.tile_start, 0);
     EXPECT_EQ(tile0.tile_size, 34);
 }
+
+TEST(PDEWorkspaceTest, BatchModePerLaneRHSAccessors) {
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
+
+    const size_t batch_width = 4;
+    mango::PDEWorkspace workspace(101, grid.span(), batch_width);
+
+    EXPECT_TRUE(workspace.has_batch());
+    EXPECT_EQ(workspace.batch_width(), batch_width);
+
+    // Test rhs_lane accessors
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        auto rhs = workspace.rhs_lane(lane);
+        EXPECT_EQ(rhs.size(), 101);
+
+        // Should be zero-initialized
+        for (size_t i = 0; i < rhs.size(); ++i) {
+            EXPECT_DOUBLE_EQ(rhs[i], 0.0);
+        }
+
+        // Write unique value to each lane
+        std::fill(rhs.begin(), rhs.end(), static_cast<double>(lane + 1.0));
+    }
+
+    // Verify lanes are independent
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        auto rhs = workspace.rhs_lane(lane);
+        EXPECT_DOUBLE_EQ(rhs[0], static_cast<double>(lane + 1.0));
+        EXPECT_DOUBLE_EQ(rhs[50], static_cast<double>(lane + 1.0));
+        EXPECT_DOUBLE_EQ(rhs[100], static_cast<double>(lane + 1.0));
+    }
+}
+
+TEST(PDEWorkspaceTest, BatchModePerLaneUOldAccessors) {
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
+
+    const size_t batch_width = 4;
+    mango::PDEWorkspace workspace(101, grid.span(), batch_width);
+
+    // Test u_old_lane accessors
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        auto u_old = workspace.u_old_lane(lane);
+        EXPECT_EQ(u_old.size(), 101);
+
+        // Should be zero-initialized
+        for (size_t i = 0; i < u_old.size(); ++i) {
+            EXPECT_DOUBLE_EQ(u_old[i], 0.0);
+        }
+
+        // Write unique value to each lane
+        std::fill(u_old.begin(), u_old.end(), static_cast<double>(lane + 10.0));
+    }
+
+    // Verify lanes are independent
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        auto u_old = workspace.u_old_lane(lane);
+        EXPECT_DOUBLE_EQ(u_old[0], static_cast<double>(lane + 10.0));
+        EXPECT_DOUBLE_EQ(u_old[50], static_cast<double>(lane + 10.0));
+        EXPECT_DOUBLE_EQ(u_old[100], static_cast<double>(lane + 10.0));
+    }
+}
+
+TEST(PDEWorkspaceTest, BatchModeMemoryAlignment) {
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
+
+    const size_t batch_width = 4;
+    mango::PDEWorkspace workspace(101, grid.span(), batch_width);
+
+    // Verify all per-lane buffers are properly aligned (64-byte alignment)
+    for (size_t lane = 0; lane < batch_width; ++lane) {
+        auto rhs = workspace.rhs_lane(lane);
+        auto u_old = workspace.u_old_lane(lane);
+
+        // Check alignment (should be 64-byte aligned via WorkspaceBase::allocate)
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(rhs.data()) % 64, 0);
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(u_old.data()) % 64, 0);
+    }
+}
