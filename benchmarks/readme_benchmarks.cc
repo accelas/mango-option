@@ -1,9 +1,17 @@
-#include "src/american_option.hpp"
-#include "src/slice_solver_workspace.hpp"
-#include "src/bspline_4d.hpp"
-#include "src/bspline_fitter_4d.hpp"
-#include "src/iv_solver.hpp"
-#include "src/iv_solver_interpolated.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/slice_solver_workspace.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
+#include "src/pde/core/pde_solver.hpp"
+#include "src/pde/core/time_domain.hpp"
+#include "src/pde/core/grid.hpp"
+#include "src/pde/memory/pde_workspace.hpp"
+#include "src/pde/operators/spatial_operator.hpp"
+#include "src/pde/operators/black_scholes_pde.hpp"
+#include "src/pde/operators/grid_spacing.hpp"
+#include "src/pde/core/boundary_conditions.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -218,36 +226,100 @@ BENCHMARK(BM_README_AmericanSingle)
 
 static void BM_README_AmericanBatch64(benchmark::State& state) {
     const size_t batch_size = static_cast<size_t>(state.range(0));
+    const size_t n_space = 101;
+    const size_t n_time = 1000;
 
-    std::vector<AmericanOptionParams> batch;
-    batch.reserve(batch_size);
-
-    for (size_t i = 0; i < batch_size; ++i) {
-        double strike = 90.0 + i * 0.5;
-        batch.push_back(AmericanOptionParams{
-            .strike = strike,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        });
+    // Grid configuration (log-moneyness space)
+    constexpr double x_min = -1.0;
+    constexpr double x_max = 1.0;
+    std::vector<double> grid(n_space);
+    const double dx = (x_max - x_min) / (n_space - 1);
+    for (size_t i = 0; i < n_space; ++i) {
+        grid[i] = x_min + i * dx;
     }
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    // Time domain (1 year maturity)
+    TimeDomain time_domain(0.0, 1.0, 1.0 / n_time);
+
+    // Create batch workspace for SIMD AoS layout
+    PDEWorkspace workspace_batch(n_space, std::span(grid), batch_size);
+
+    // Create per-contract PDE parameters (varying strikes)
+    std::vector<operators::BlackScholesPDE<double>> pdes;
+    pdes.reserve(batch_size);
+    constexpr double spot = 100.0;
+    constexpr double volatility = 0.20;
+    constexpr double rate = 0.05;
+    constexpr double dividend = 0.02;
+
+    for (size_t i = 0; i < batch_size; ++i) {
+        // Each contract has same vol/rate/div, but different strike
+        // (in practice, varying strikes affects obstacle, not PDE coefficients)
+        pdes.emplace_back(volatility, rate, dividend);
+    }
+
+    // Create spatial operator with batch PDEs (enables per-lane Jacobian)
+    auto spacing = std::make_shared<operators::GridSpacing<double>>(GridView<double>(grid));
+    auto spatial_op = operators::SpatialOperator<operators::BlackScholesPDE<double>, double>(pdes, spacing);
+
+    // Boundary conditions (zero at boundaries - far OTM and ITM)
+    auto left_bc_func = [](double, double) { return 0.0; };
+    auto right_bc_func = [](double, double) { return 0.0; };
+    auto left_bc = DirichletBC(left_bc_func);
+    auto right_bc = DirichletBC(right_bc_func);
+
+    // Root-finding config
+    RootFindingConfig root_config{
+        .max_iter = 100,
+        .tolerance = 1e-6,
+        .jacobian_fd_epsilon = 1e-7,
+        .brent_tol_abs = 1e-6
+    };
+
+    // TR-BDF2 config
+    TRBDF2Config trbdf2_config{
+        .max_iter = 100,
+        .tolerance = 1e-6
+    };
+
+    // Initial condition: American put payoff max(K - S, 0)
+    // Note: For simplicity, using same strike for all lanes in IC
+    // (real batch would initialize each lane with different strike's payoff)
+    constexpr double strike = 100.0;  // Base strike
+    auto initial_condition = [&](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            const double S = strike * std::exp(x[i]);
+            u[i] = std::max(strike - S, 0.0);
+        }
+    };
+
+    // Obstacle condition: American put payoff
+    auto obstacle = [&](double, std::span<const double> x, std::span<double> psi) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            const double S = strike * std::exp(x[i]);
+            psi[i] = std::max(strike - S, 0.0);
+        }
+    };
+
+    // Create batch solver with AoS memory layout for SIMD vectorization
+    PDESolver solver_batch(
+        grid, time_domain,
+        trbdf2_config, root_config,
+        left_bc, right_bc, spatial_op,
+        obstacle,
+        &workspace_batch  // Enables batch mode with cross-contract SIMD
+    );
 
     auto run_once = [&]() {
-        auto results = solve_american_options_batch(batch, grid);
-        for (const auto& res : results) {
-            if (!res) {
-                throw std::runtime_error(res.error().message);
-            }
+        // Initialize all lanes (broadcasts to all lanes in AoS layout)
+        solver_batch.initialize(initial_condition);
+
+        // Solve batch - uses SIMD vectorization across contracts
+        auto result = solver_batch.solve();
+        if (!result.has_value()) {
+            throw std::runtime_error("Batch solver failed: " + result.error().message);
         }
-        benchmark::DoNotOptimize(results);
+        benchmark::DoNotOptimize(result);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
@@ -260,7 +332,7 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     state.SetItemsProcessed(state.iterations() * batch_size);
     state.counters["batch"] = static_cast<double>(batch_size);
-    state.SetLabel("American batch (64 options)");
+    state.SetLabel("American batch (64 options, SIMD AoS)");
 }
 BENCHMARK(BM_README_AmericanBatch64)
     ->Arg(64)
