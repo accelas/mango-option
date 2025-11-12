@@ -61,6 +61,40 @@ public:
     std::span<double> psi_buffer() { return {psi_, n_}; }
     std::span<const double> psi_buffer() const { return {psi_, n_}; }
 
+    // Batch AoS accessors (for horizontal SIMD stencil)
+    std::span<double> batch_slice() {
+        return {u_batch_, n_ * batch_width_};
+    }
+    std::span<const double> batch_slice() const {
+        return {u_batch_, n_ * batch_width_};
+    }
+
+    std::span<double> lu_batch() {
+        return {lu_batch_, n_ * batch_width_};
+    }
+    std::span<const double> lu_batch() const {
+        return {lu_batch_, n_ * batch_width_};
+    }
+
+    // Per-lane SoA accessors (for Newton machinery)
+    std::span<double> u_lane(size_t lane) {
+        assert(lane < batch_width_ && "lane out of range");
+        return u_lanes_[lane];
+    }
+    std::span<const double> u_lane(size_t lane) const {
+        assert(lane < batch_width_ && "lane out of range");
+        return {u_lane_buffers_[lane], n_};
+    }
+
+    std::span<double> lu_lane(size_t lane) {
+        assert(lane < batch_width_ && "lane out of range");
+        return {lu_lane_buffers_[lane], n_};
+    }
+    std::span<const double> lu_lane(size_t lane) const {
+        assert(lane < batch_width_ && "lane out of range");
+        return lu_lanes_[lane];
+    }
+
     // Padded accessors for SIMD kernels
     //
     // CRITICAL: Padded spans do NOT include front guard cells!
