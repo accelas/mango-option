@@ -686,11 +686,6 @@ private:
         const bool is_batched = workspace_->has_batch();
         const size_t n_lanes = is_batched ? workspace_->batch_width() : 1;
 
-        // Pack SoA → AoS before Newton loop (if batched)
-        if (is_batched) {
-            workspace_->pack_to_batch_slice();
-        }
-
         // Apply BCs to initial guess
         apply_boundary_conditions(u, t);
 
@@ -721,6 +716,11 @@ private:
 
         // Newton iteration
         for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
+            // Refresh AoS buffer from updated SoA lane buffers (after iteration N-1)
+            if (is_batched) {
+                workspace_->pack_to_batch_slice();  // SoA → AoS
+            }
+
             // Batched or single-contract stencil
             if (is_batched) {
                 apply_operator_with_blocking_batch(t, workspace_->batch_slice(),
