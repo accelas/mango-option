@@ -5,6 +5,7 @@
 #include <cassert>
 #include <algorithm>
 #include <vector>
+#include <experimental/simd>
 
 namespace mango {
 
@@ -144,6 +145,45 @@ public:
     // Batch mode queries
     bool has_batch() const { return batch_width_ > 0; }
     size_t batch_width() const { return batch_width_; }
+
+    /**
+     * Pack per-lane SoA buffers into AoS batch slice
+     *
+     * Performs vectorized transpose from per-lane Structure-of-Arrays layout
+     * to Array-of-Structures batch slice. Uses std::experimental::simd for
+     * optimal performance with scalar tail handling.
+     *
+     * Memory layout transformation:
+     *   SoA: u_lane[0][i], u_lane[1][i], ..., u_lane[W-1][i]  (W separate arrays)
+     *   AoS: u_batch[i*W + 0], u_batch[i*W + 1], ..., u_batch[i*W + W-1]  (interleaved)
+     *
+     * PRECONDITION: batch_width_ > 0 (batch mode enabled)
+     */
+    void pack_to_batch_slice() {
+        assert(batch_width_ > 0 && "pack requires batch mode");
+
+        using simd_t = std::experimental::native_simd<double>;
+        constexpr size_t simd_width = simd_t::size();
+
+        for (size_t i = 0; i < n_; ++i) {
+            size_t lane = 0;
+
+            // Vectorized transpose
+            for (; lane + simd_width <= batch_width_; lane += simd_width) {
+                simd_t chunk;
+                for (size_t k = 0; k < simd_width; ++k) {
+                    chunk[k] = u_lane_buffers_[lane + k][i];
+                }
+                chunk.copy_to(&u_batch_[i * batch_width_ + lane],
+                             std::experimental::element_aligned);
+            }
+
+            // Scalar tail
+            for (; lane < batch_width_; ++lane) {
+                u_batch_[i * batch_width_ + lane] = u_lane_buffers_[lane][i];
+            }
+        }
+    }
 
 private:
     void allocate_and_initialize() {
