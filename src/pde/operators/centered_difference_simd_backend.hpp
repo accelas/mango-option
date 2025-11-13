@@ -107,32 +107,6 @@ public:
     }
 
     /**
-     * Tiled second derivative (cache-friendly)
-     *
-     * Operator decides tile size based on stencil width and cache target.
-     * Automatically dispatches to uniform or non-uniform implementation.
-     */
-    [[gnu::target_clones("default","avx2","avx512f")]]
-    void compute_second_derivative_tiled(
-        std::span<const T> u,
-        std::span<T> d2u_dx2,
-        size_t start,
-        size_t end) const
-    {
-        assert(start >= 1 && "start must allow u[i-1] access");
-        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
-
-        for (size_t tile_start = start; tile_start < end; tile_start += l1_tile_size_) {
-            const size_t tile_end = std::min(tile_start + l1_tile_size_, end);
-            if (spacing_.is_uniform()) {
-                compute_second_derivative_uniform(u, d2u_dx2, tile_start, tile_end);
-            } else {
-                compute_second_derivative_non_uniform(u, d2u_dx2, tile_start, tile_end);
-            }
-        }
-    }
-
-    /**
      * First derivative (vectorized, uniform grid)
      */
     [[gnu::target_clones("default","avx2","avx512f")]]

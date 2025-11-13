@@ -116,15 +116,6 @@ public:
         }
     }
 
-    // Tiled second derivative
-    void compute_second_derivative_tiled(
-        std::span<const T> u, std::span<T> d2u_dx2,
-        size_t start, size_t end) const
-    {
-        // Scalar backend doesn't use tiling (simple forwarding)
-        compute_second_derivative(u, d2u_dx2, start, end);
-    }
-
 private:
     const GridSpacing<T>& spacing_;
 };

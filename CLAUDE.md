@@ -313,10 +313,72 @@ Applied after each iteration to ensure constraints are satisfied. Order matters:
 
 If solver fails to converge:
 1. Reduce time step (dt)
-2. Increase max_iter in TRBDF2Config
+2. Increase max_iter using `solver.set_trbdf2_config()` (see Advanced Configuration below)
 3. Relax tolerance
 4. Check spatial operator implementation for errors
 5. Verify boundary conditions are consistent
+
+### American Option API Simplification
+
+The `AmericanOptionSolver` constructor has been simplified to hide internal solver configuration details. Most users should never need to modify TR-BDF2 or Newton solver parameters.
+
+**Basic Usage (most common):**
+```cpp
+#include "src/option/american_option.hpp"
+
+AmericanOptionParams params{
+    .strike = 100.0,
+    .spot = 100.0,
+    .maturity = 1.0,
+    .volatility = 0.20,
+    .rate = 0.05,
+    .continuous_dividend_yield = 0.02,
+    .option_type = OptionType::PUT
+};
+
+AmericanOptionGrid grid{
+    .n_space = 101,
+    .n_time = 1000,
+    .x_min = -3.0,
+    .x_max = 3.0
+};
+
+// Simple construction with defaults
+AmericanOptionSolver solver(params, grid);
+auto result = solver.solve();
+```
+
+**Advanced Configuration (rarely needed):**
+If you need to tune internal solver parameters for convergence or accuracy, use setter methods:
+```cpp
+AmericanOptionSolver solver(params, grid);
+
+// Tune TR-BDF2 time-stepping (for stiff problems)
+TRBDF2Config trbdf2_config{
+    .max_iter = 50,        // Increase iterations for convergence
+    .tolerance = 1e-8      // Higher accuracy
+};
+solver.set_trbdf2_config(trbdf2_config);
+
+// Tune Newton solver (for early exercise boundary)
+RootFindingConfig root_config{
+    .max_iter = 200,
+    .tolerance = 1e-8
+};
+solver.set_root_config(root_config);
+
+auto result = solver.solve();
+```
+
+**When to use advanced configuration:**
+- Solver fails to converge with default settings
+- Need higher accuracy than default 1e-6 tolerance
+- Debugging numerical issues
+- Research/benchmarking (comparing different solver configurations)
+
+**Default values (sensible for most applications):**
+- TR-BDF2: 20 iterations, 1e-6 tolerance, gamma = 2 - √2
+- Newton: 100 iterations, 1e-6 tolerance, FD epsilon = 1e-7
 
 ### Memory Management
 

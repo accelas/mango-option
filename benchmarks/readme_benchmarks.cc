@@ -1,9 +1,9 @@
-#include "src/american_option.hpp"
-#include "src/slice_solver_workspace.hpp"
-#include "src/bspline_4d.hpp"
-#include "src/bspline_fitter_4d.hpp"
-#include "src/iv_solver.hpp"
-#include "src/iv_solver_interpolated.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/slice_solver_workspace.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -177,16 +177,20 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = n_space;
-    grid.n_time = n_time;
+    constexpr double x_min = -3.0;
+    constexpr double x_max = 3.0;
 
-    auto workspace = std::make_shared<SliceSolverWorkspace>(
-        grid.x_min, grid.x_max, grid.n_space);
+    auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+    if (!workspace) {
+        throw std::runtime_error("Failed to create workspace: " + workspace.error());
+    }
 
     auto run_once = [&]() {
-        AmericanOptionSolver solver(params, grid, workspace);
-        auto result = solver.solve();
+        auto solver = AmericanOptionSolver::create(params, workspace.value());
+        if (!solver) {
+            throw std::runtime_error("Failed to create solver: " + solver.error());
+        }
+        auto result = solver.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -236,12 +240,13 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
         });
     }
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    constexpr double x_min = -3.0;
+    constexpr double x_max = 3.0;
+    constexpr size_t n_space = 101;
+    constexpr size_t n_time = 1000;
 
     auto run_once = [&]() {
-        auto results = solve_american_options_batch(batch, grid);
+        auto results = solve_american_options_batch(batch, x_min, x_max, n_space, n_time);
         for (const auto& res : results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);

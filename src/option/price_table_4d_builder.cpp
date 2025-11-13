@@ -6,9 +6,7 @@
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/option/price_table_snapshot_collector.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/slice_solver_workspace.hpp"
-#include "src/pde/core/trbdf2_config.hpp"
-#include "src/pde/core/root_finding.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -83,7 +81,22 @@ expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
 
 expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     OptionType option_type,
-    const AmericanOptionGrid& grid_config,
+    size_t n_space,
+    size_t n_time,
+    double dividend_yield)
+{
+    // Standard bounds: [-3.0, 3.0] log-moneyness
+    constexpr double x_min = -3.0;
+    constexpr double x_max = 3.0;
+    return precompute(option_type, x_min, x_max, n_space, n_time, dividend_yield);
+}
+
+expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
+    OptionType option_type,
+    double x_min,
+    double x_max,
+    size_t n_space,
+    size_t n_time,
     double dividend_yield)
 {
     const size_t Nm = moneyness_.size();
@@ -96,17 +109,18 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // uses natural cubic splines that extrapolate unpredictably outside knot domain.
     // If any requested ln(m) lies outside [x_min, x_max], the interpolation
     // will produce arbitrary extrapolation artifacts.
+
     const double x_min_requested = std::log(moneyness_.front());
     const double x_max_requested = std::log(moneyness_.back());
 
-    if (x_min_requested < grid_config.x_min || x_max_requested > grid_config.x_max) {
+    if (x_min_requested < x_min || x_max_requested > x_max) {
         return unexpected(
             "Requested moneyness range [" + std::to_string(moneyness_.front()) + ", " +
             std::to_string(moneyness_.back()) + "] in spot ratios "
             "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
             std::to_string(x_max_requested) + "], "
-            "which exceeds PDE grid bounds [" + std::to_string(grid_config.x_min) + ", " +
-            std::to_string(grid_config.x_max) + "]. "
+            "which exceeds PDE grid bounds [" + std::to_string(x_min) + ", " +
+            std::to_string(x_max) + "]. "
             "Either narrow the moneyness grid or expand the PDE x_min/x_max bounds. "
             "Example: for moneyness [0.7, 1.5], use x_min <= " +
             std::to_string(x_min_requested) + " and x_max >= " +
@@ -126,7 +140,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // instead of O(Nm × Nt × Nσ × Nr).
 
     const double T_max = maturity_.back();  // Maximum maturity
-    const double dt = T_max / grid_config.n_time;
+    const double dt = T_max / n_time;
 
     // Precompute step indices for each maturity
     // CRITICAL: PDESolver calls process_snapshots(step, t) where t = (step+1)*dt
@@ -141,18 +155,18 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
         // Clamp to valid range [0, n_time-1]
         if (step_rounded < 0) {
             step_indices[j] = 0;  // Minimum maturity (at time dt)
-        } else if (step_rounded >= static_cast<long long>(grid_config.n_time)) {
-            step_indices[j] = grid_config.n_time - 1;  // Maximum maturity (at time n_time*dt)
+        } else if (step_rounded >= static_cast<long long>(n_time)) {
+            step_indices[j] = n_time - 1;  // Maximum maturity (at time n_time*dt)
         } else {
             step_indices[j] = static_cast<size_t>(step_rounded);
         }
     }
 
-    // Create shared workspace (reused across all solvers)
-    // This eliminates redundant grid generation and GridSpacing allocation
-    // Use shared_ptr to ensure proper lifetime management
-    auto workspace = std::make_shared<SliceSolverWorkspace>(
-        grid_config.x_min, grid_config.x_max, grid_config.n_space);
+    // Validate workspace parameters before parallel work
+    auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+    if (!workspace_result) {
+        return unexpected("Invalid workspace parameters: " + workspace_result.error());
+    }
 
     // Loop over (σ, r) pairs only - this is the separable batch approach
     size_t failed_count = 0;
@@ -161,71 +175,80 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     if (enable_parallel) {
 #pragma omp parallel
         {
-            auto thread_workspace = std::make_shared<SliceSolverWorkspace>(
-                grid_config.x_min, grid_config.x_max, grid_config.n_space);
+            // Each thread creates its own workspace (parameters already validated)
+            auto thread_workspace_result = AmericanSolverWorkspace::create(
+                x_min, x_max, n_space, n_time);
 
+            // If per-thread workspace creation fails (e.g., OOM), count all as failures
+            if (!thread_workspace_result) {
 #pragma omp for collapse(2) schedule(dynamic, 1)
-            for (size_t k = 0; k < Nv; ++k) {
-                for (size_t l = 0; l < Nr; ++l) {
-                    try {
-                        AmericanOptionParams params{
-                            .strike = K_ref_,
-                            .spot = K_ref_,
-                            .maturity = T_max,
-                            .volatility = volatility_[k],
-                            .rate = rate_[l],
-                            .continuous_dividend_yield = dividend_yield,
-                            .option_type = option_type,
-                            .discrete_dividends = {}
-                        };
-
-                        PriceTableSnapshotCollectorConfig collector_config{
-                            .moneyness = std::span{moneyness_},
-                            .tau = std::span{maturity_},
-                            .K_ref = K_ref_,
-                            .option_type = option_type,
-                            .payoff_params = nullptr
-                        };
-                        PriceTableSnapshotCollector collector(collector_config);
-
-                        AmericanOptionSolver solver(
-                            params,
-                            grid_config,
-                            thread_workspace,
-                            TRBDF2Config{},
-                            RootFindingConfig{});
-
-                        for (size_t j = 0; j < Nt; ++j) {
-                            solver.register_snapshot(step_indices[j], j, &collector);
-                        }
-
-                        auto result = solver.solve();
-
-                        if (!result.has_value()) {
-#pragma omp atomic
-                            ++failed_count;
-                            continue;
-                        }
-
-                        auto prices_2d = collector.prices();
-                        for (size_t i = 0; i < Nm; ++i) {
-                            for (size_t j = 0; j < Nt; ++j) {
-                                size_t idx_2d = i * Nt + j;
-                                size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                                prices_4d[idx_4d] = prices_2d[idx_2d];
-                            }
-                        }
-
-                    } catch (const std::exception&) {
+                for (size_t k = 0; k < Nv; ++k) {
+                    for (size_t l = 0; l < Nr; ++l) {
 #pragma omp atomic
                         ++failed_count;
+                    }
+                }
+            } else {
+                auto thread_workspace = thread_workspace_result.value();
+
+#pragma omp for collapse(2) schedule(dynamic, 1)
+                for (size_t k = 0; k < Nv; ++k) {
+                    for (size_t l = 0; l < Nr; ++l) {
+                        try {
+                            AmericanOptionParams params{
+                                .strike = K_ref_,
+                                .spot = K_ref_,
+                                .maturity = T_max,
+                                .volatility = volatility_[k],
+                                .rate = rate_[l],
+                                .continuous_dividend_yield = dividend_yield,
+                                .option_type = option_type,
+                                .discrete_dividends = {}
+                            };
+
+                            PriceTableSnapshotCollectorConfig collector_config{
+                                .moneyness = std::span{moneyness_},
+                                .tau = std::span{maturity_},
+                                .K_ref = K_ref_,
+                                .option_type = option_type,
+                                .payoff_params = nullptr
+                            };
+                            PriceTableSnapshotCollector collector(collector_config);
+
+                            AmericanOptionSolver solver(params, thread_workspace);
+
+                            for (size_t j = 0; j < Nt; ++j) {
+                                solver.register_snapshot(step_indices[j], j, &collector);
+                            }
+
+                            auto result = solver.solve();
+
+                            if (!result.has_value()) {
+#pragma omp atomic
+                                ++failed_count;
+                                continue;
+                            }
+
+                            auto prices_2d = collector.prices();
+                            for (size_t i = 0; i < Nm; ++i) {
+                                for (size_t j = 0; j < Nt; ++j) {
+                                    size_t idx_2d = i * Nt + j;
+                                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                                    prices_4d[idx_4d] = prices_2d[idx_2d];
+                                }
+                            }
+
+                        } catch (const std::exception&) {
+#pragma omp atomic
+                            ++failed_count;
+                        }
                     }
                 }
             }
         }
     } else {
-        auto workspace = std::make_shared<SliceSolverWorkspace>(
-            grid_config.x_min, grid_config.x_max, grid_config.n_space);
+        // Sequential: reuse workspace across all solves (parameters already validated)
+        auto workspace = workspace_result.value();
 
         for (size_t k = 0; k < Nv; ++k) {
             for (size_t l = 0; l < Nr; ++l) {
@@ -250,12 +273,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
                     };
                     PriceTableSnapshotCollector collector(collector_config);
 
-                    AmericanOptionSolver solver(
-                        params,
-                        grid_config,
-                        workspace,
-                        TRBDF2Config{},
-                        RootFindingConfig{});
+                    AmericanOptionSolver solver(params, workspace);
 
                     for (size_t j = 0; j < Nt; ++j) {
                         solver.register_snapshot(step_indices[j], j, &collector);
