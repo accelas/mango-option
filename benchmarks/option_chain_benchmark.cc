@@ -1,20 +1,22 @@
 #include "src/option/option_chain_solver.hpp"
 #include "src/option/american_option.hpp"
+#include "src/support/parallel.hpp"
 #include <benchmark/benchmark.h>
 #include <vector>
 
 namespace mango {
 namespace {
 
-// Benchmark: Old batch API (no workspace reuse)
-static void BM_OldBatchAPI_10Strikes(benchmark::State& state) {
+// Benchmark: Naive parallel approach (no workspace reuse)
+// Inlines the old BatchAmericanOptionSolver::solve_batch for comparison
+static void BM_NaiveParallel_10Strikes(benchmark::State& state) {
     AmericanOptionGrid grid;
     grid.n_space = 101;
     grid.n_time = 1000;
     grid.x_min = -3.0;
     grid.x_max = 3.0;
 
-    // Create 10 separate option params (old API style)
+    // Create 10 separate option params (naive approach)
     std::vector<AmericanOptionParams> params;
     for (int i = 0; i < 10; ++i) {
         AmericanOptionParams p;
@@ -29,15 +31,23 @@ static void BM_OldBatchAPI_10Strikes(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        auto results = BatchAmericanOptionSolver::solve_batch(params, grid);
+        // Inline batch solver (no workspace reuse)
+        std::vector<expected<AmericanOptionResult, SolverError>> results(params.size());
+
+        MANGO_PRAGMA_PARALLEL_FOR
+        for (size_t i = 0; i < params.size(); ++i) {
+            AmericanOptionSolver solver(params[i], grid);
+            results[i] = solver.solve();
+        }
+
         benchmark::DoNotOptimize(results);
     }
 
     state.SetItemsProcessed(state.iterations() * 10);  // 10 options per iteration
 }
 
-// Benchmark: New chain API (with workspace reuse)
-static void BM_NewChainAPI_10Strikes(benchmark::State& state) {
+// Benchmark: Chain API with workspace reuse
+static void BM_ChainAPI_10Strikes(benchmark::State& state) {
     AmericanOptionGrid grid;
     grid.n_space = 101;
     grid.n_time = 1000;
@@ -96,8 +106,8 @@ static void BM_MultipleChains_Parallel(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * total_options);
 }
 
-BENCHMARK(BM_OldBatchAPI_10Strikes)->Unit(benchmark::kMillisecond);
-BENCHMARK(BM_NewChainAPI_10Strikes)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_NaiveParallel_10Strikes)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_ChainAPI_10Strikes)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_MultipleChains_Parallel)->Arg(1)->Arg(4)->Arg(8)->Arg(16)->Unit(benchmark::kMillisecond);
 
 }  // namespace
