@@ -4,6 +4,7 @@
 #include "src/interpolation/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/normalized_chain_solver.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -388,6 +389,53 @@ static void BM_README_PriceTableGreeks(benchmark::State& state) {
     state.SetLabel("Greeks (vega, gamma)");
 }
 BENCHMARK(BM_README_PriceTableGreeks)->MinTime(kMinBenchmarkTimeSec);
+
+// Benchmark: NormalizedChainSolver - solve once, price all strikes
+static void BM_README_NormalizedChain(benchmark::State& state) {
+    // Solve once for 5 strikes across 3 maturities
+    std::vector<double> tau_snapshots_vec{0.25, 0.5, 1.0};
+
+    NormalizedSolveRequest request{
+        .sigma = 0.20,
+        .rate = 0.05,
+        .dividend = 0.02,
+        .option_type = OptionType::PUT,
+        .x_min = -2.5,
+        .x_max = 2.5,
+        .n_space = 101,
+        .n_time = 1000,
+        .T_max = 1.0,
+        .tau_snapshots = std::span<const double>(tau_snapshots_vec)
+    };
+
+    std::vector<double> strikes = {90.0, 95.0, 100.0, 105.0, 110.0};
+    double spot = 100.0;
+
+    for (auto _ : state) {
+        // Create workspace
+        auto workspace_result = NormalizedWorkspace::create(request);
+        if (!workspace_result) continue;
+        auto workspace = std::move(workspace_result.value());
+        auto surface = workspace.surface_view();
+
+        // Solve PDE once
+        auto solve_result = NormalizedChainSolver::solve(request, workspace, surface);
+        if (!solve_result) continue;
+
+        // Price all 15 options (5 strikes × 3 maturities)
+        for (double K : strikes) {
+            for (double tau : tau_snapshots_vec) {
+                double x = std::log(spot / K);
+                double u = surface.interpolate(x, tau);
+                double price = K * u;
+                benchmark::DoNotOptimize(price);
+            }
+        }
+    }
+
+    state.SetLabel("American option chain (5 strikes × 3 maturities)");
+}
+BENCHMARK(BM_README_NormalizedChain)->MinTime(kMinBenchmarkTimeSec);
 
 class ReadmeSummaryReporter : public benchmark::ConsoleReporter {
 public:
