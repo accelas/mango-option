@@ -272,6 +272,7 @@ cc_test(
     srcs = ["american_option_solver_test.cc"],
     deps = [
         "//src/option:american_option",
+        "//src/option:price_table_snapshot_collector",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -461,4 +462,24 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
+)
+
+cc_test(
+    name = "normalized_chain_solver_test",
+    srcs = ["normalized_chain_solver_test.cc"],
+    deps = [
+        "//src/option:normalized_chain_solver",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "price_table_4d_integration_test",
+    srcs = ["price_table_4d_integration_test.cc"],
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
 )
