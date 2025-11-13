@@ -405,7 +405,19 @@ static void compare_normalized_chain_accuracy(
 
             // Compute errors
             double abs_error = std::abs(mango_price - ql_result.price);
-            double rel_error = abs_error / ql_result.price * 100.0;
+
+            // Relative error: only compute if QuantLib price is meaningful (> $0.01)
+            // For deep OTM options with near-zero prices, relative error is not meaningful
+            // and can explode to Inf/NaN. We use absolute error for those cases.
+            constexpr double MIN_PRICE_FOR_REL_ERROR = 0.01;
+            double rel_error = 0.0;
+            if (ql_result.price >= MIN_PRICE_FOR_REL_ERROR) {
+                rel_error = abs_error / ql_result.price * 100.0;
+            } else {
+                // For near-zero prices, use absolute error scaled to 1 cent
+                // This gives a percentage-like metric without division by near-zero
+                rel_error = abs_error / MIN_PRICE_FOR_REL_ERROR * 100.0;
+            }
 
             max_abs_error = std::max(max_abs_error, abs_error);
             max_rel_error = std::max(max_rel_error, rel_error);
@@ -425,12 +437,12 @@ static void compare_normalized_chain_accuracy(
 
     state.SetLabel(std::string(label) +
                   ": n=" + std::to_string(n_tests) +
-                  " max_rel=" + std::to_string(max_rel_error) + "%");
+                  " max_abs=$" + std::to_string(max_abs_error));
 
     state.counters["n_tests"] = n_tests;
-    state.counters["max_abs_err"] = max_abs_error;
+    state.counters["max_abs_err_$"] = max_abs_error;
     state.counters["max_rel_err_%"] = max_rel_error;
-    state.counters["avg_abs_err"] = avg_abs_error;
+    state.counters["avg_abs_err_$"] = avg_abs_error;
     state.counters["avg_rel_err_%"] = avg_rel_error;
 }
 
@@ -447,6 +459,11 @@ static void BM_NormalizedChain_ATM_5x3(benchmark::State& state) {
 BENCHMARK(BM_NormalizedChain_ATM_5x3)->Iterations(1);
 
 // Test 2: Wide strike range (7 strikes × 4 maturities = 28 options)
+// NOTE: Wide ranges include deep OTM options with low absolute prices.
+// For example, a put with K=80 when S=100 may have price < $0.10.
+// Relative error is computed carefully: for prices < $0.01, we scale
+// absolute error by 1¢ to avoid Inf/NaN from division by near-zero.
+// Absolute error remains the primary accuracy metric for these cases.
 static void BM_NormalizedChain_Wide_7x4(benchmark::State& state) {
     compare_normalized_chain_accuracy(
         state, "Normalized Chain Wide 7x4",
