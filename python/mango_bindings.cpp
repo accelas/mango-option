@@ -100,14 +100,6 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("option_type", &mango::AmericanOptionParams::option_type)
         .def_readwrite("discrete_dividends", &mango::AmericanOptionParams::discrete_dividends);
 
-    // AmericanOptionGrid structure
-    py::class_<mango::AmericanOptionGrid>(m, "AmericanOptionGrid")
-        .def(py::init<>())
-        .def_readwrite("n_space", &mango::AmericanOptionGrid::n_space)
-        .def_readwrite("n_time", &mango::AmericanOptionGrid::n_time)
-        .def_readwrite("x_min", &mango::AmericanOptionGrid::x_min)
-        .def_readwrite("x_max", &mango::AmericanOptionGrid::x_max);
-
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
         .def(py::init<>())
