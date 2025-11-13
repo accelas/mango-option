@@ -7,6 +7,7 @@
 #include "src/option/price_table_snapshot_collector.hpp"
 #include <cmath>
 #include <algorithm>
+#include <ranges>
 
 namespace mango {
 
@@ -154,18 +155,18 @@ expected<void, SolverError> NormalizedChainSolver::solve(
     auto solver = std::move(solver_result.value());
 
     // Setup snapshot collector
-    // Convert moneyness m = K/S to x = ln(S/K) = -ln(m)
-    std::vector<double> x_values;
-    x_values.reserve(workspace.x_grid_.size());
+    // PriceTableSnapshotCollector expects moneyness m = S/K_ref
+    // PDE grid is in x = ln(S/K) space, so m = exp(x)
+    std::vector<double> moneyness_values;
+    moneyness_values.reserve(workspace.x_grid_.size());
     for (double x : workspace.x_grid_) {
-        // x is already in log-moneyness, but we need to express as moneyness m
-        // x = -ln(m) → m = exp(-x)
-        double m = std::exp(-x);
-        x_values.push_back(m);
+        // x = ln(S/K_ref), so m = S/K_ref = exp(x)
+        double m = std::exp(x);
+        moneyness_values.push_back(m);
     }
 
     PriceTableSnapshotCollectorConfig collector_config{
-        .moneyness = std::span{x_values},
+        .moneyness = std::span{moneyness_values},
         .tau = std::span{workspace.tau_grid_},
         .K_ref = 1.0,  // Normalized
         .option_type = request.option_type,
@@ -241,8 +242,8 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     }
 
     // Check margins
-    // Moneyness convention: m = K/S, so x = ln(S/K) = -ln(m)
-    // x_min_data = -ln(m_max), x_max_data = -ln(m_min)
+    // Moneyness convention: m = S/K, so x = ln(S/K) = ln(m)
+    // x_min_data = ln(m_min), x_max_data = ln(m_max)
     if (moneyness_grid.empty()) {
         return unexpected("Moneyness grid is empty");
     }
@@ -252,11 +253,11 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     double m_max = *m_max_it;
 
     if (m_min <= 0.0 || m_max <= 0.0) {
-        return unexpected("Moneyness values must be positive (m = K/S > 0)");
+        return unexpected("Moneyness values must be positive (m = S/K > 0)");
     }
 
-    double x_min_data = -std::log(m_max);
-    double x_max_data = -std::log(m_min);
+    double x_min_data = std::log(m_min);
+    double x_max_data = std::log(m_max);
 
     double margin_left = x_min_data - request.x_min;
     double margin_right = request.x_max - x_max_data;

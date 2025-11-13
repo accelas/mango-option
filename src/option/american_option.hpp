@@ -15,6 +15,7 @@
 #include <memory>
 #include <stdexcept>
 #include <cmath>
+#include <functional>
 
 namespace mango {
 

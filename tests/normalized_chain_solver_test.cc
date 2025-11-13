@@ -6,6 +6,7 @@
 #include "src/option/normalized_chain_solver.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <iostream>
 
 using namespace mango;
 
@@ -155,13 +156,14 @@ TEST(NormalizedChainSolverTest, SolveAndInterpolate) {
     EXPECT_LT(u_atm_3m, u_atm_1y);  // Shorter maturity < longer maturity
 
     // Test different moneyness points (OTM and ITM)
-    double u_otm = surface.interpolate(-0.5, 1.0);  // S > K for put (OTM)
-    double u_itm_deep = surface.interpolate(0.5, 1.0);  // S < K for put (ITM)
+    // For puts: x = ln(S/K), so x < 0 means S < K (ITM), x > 0 means S > K (OTM)
+    double u_itm = surface.interpolate(-0.5, 1.0);   // x < 0 → S < K (ITM for put)
+    double u_otm = surface.interpolate(0.5, 1.0);    // x > 0 → S > K (OTM for put)
     // Both should have positive value
+    EXPECT_GT(u_itm, 0.0);
     EXPECT_GT(u_otm, 0.0);
-    EXPECT_GT(u_itm_deep, 0.0);
-    // Deep ITM should have higher value than ATM
-    EXPECT_GT(u_itm_deep, u_atm_1y);
+    // ITM put should have higher value than ATM
+    EXPECT_GT(u_itm, u_atm_1y);
 }
 
 TEST(NormalizedChainSolverTest, ScaleInvariance) {

@@ -229,10 +229,10 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
                         }
 
                         // Extract prices from surface
-                        // Moneyness convention: m = K/S
+                        // Moneyness convention: m = S/K_ref
                         for (size_t i = 0; i < Nm; ++i) {
-                            double x = -std::log(moneyness_[i]);  // x = -ln(m)
-                            double K = moneyness_[i] * spot;       // K = m * S
+                            double x = std::log(moneyness_[i]);  // x = ln(m) = ln(S/K_ref)
+                            double K = spot / moneyness_[i];      // K = K_ref / m
 
                             for (size_t j = 0; j < Nt; ++j) {
                                 double u = surface.interpolate(x, maturity_[j]);
