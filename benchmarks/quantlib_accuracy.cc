@@ -12,7 +12,8 @@
  * Requires: libquantlib-dev
  */
 
-#include "src/american_option.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/normalized_chain_solver.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
 #include <iomanip>
@@ -331,5 +332,165 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     state.counters["theta_rel_err_%"] = theta_rel;
 }
 BENCHMARK(BM_Greeks_Accuracy_ATM)->Iterations(1);
+
+// ============================================================================
+// Normalized Chain Solver Accuracy: Compare to QuantLib
+// ============================================================================
+
+static void compare_normalized_chain_accuracy(
+    benchmark::State& state,
+    const char* label,
+    double spot,
+    const std::vector<double>& strikes,
+    const std::vector<double>& maturities,
+    double volatility,
+    double rate,
+    double dividend_yield,
+    bool is_call)
+{
+    // Build normalized solver request
+    std::vector<double> moneyness;
+    for (double K : strikes) {
+        moneyness.push_back(spot / K);
+    }
+
+    NormalizedSolveRequest request{
+        .sigma = volatility,
+        .rate = rate,
+        .dividend = dividend_yield,
+        .option_type = is_call ? OptionType::CALL : OptionType::PUT,
+        .x_min = -3.0,
+        .x_max = 3.0,
+        .n_space = 201,  // High resolution for accuracy
+        .n_time = 2000,
+        .T_max = *std::max_element(maturities.begin(), maturities.end()),
+        .tau_snapshots = maturities
+    };
+
+    // Solve with normalized chain solver
+    auto workspace_result = NormalizedWorkspace::create(request);
+    if (!workspace_result) {
+        throw std::runtime_error("Failed to create workspace");
+    }
+    auto workspace = std::move(workspace_result.value());
+    auto surface = workspace.surface_view();
+
+    auto solve_result = NormalizedChainSolver::solve(request, workspace, surface);
+    if (!solve_result) {
+        throw std::runtime_error("Failed to solve normalized PDE");
+    }
+
+    // Compare prices for all (strike, maturity) combinations
+    double max_abs_error = 0.0;
+    double max_rel_error = 0.0;
+    double avg_abs_error = 0.0;
+    double avg_rel_error = 0.0;
+    size_t n_tests = 0;
+
+    for (size_t i = 0; i < strikes.size(); ++i) {
+        double K = strikes[i];
+        for (size_t j = 0; j < maturities.size(); ++j) {
+            double tau = maturities[j];
+
+            // Mango normalized price
+            double x = std::log(spot / K);
+            double u = surface.interpolate(x, tau);
+            double mango_price = K * u;
+
+            // QuantLib reference price
+            auto ql_result = price_american_option_quantlib(
+                spot, K, tau, volatility, rate, dividend_yield, is_call,
+                201, 2000);
+
+            // Compute errors
+            double abs_error = std::abs(mango_price - ql_result.price);
+            double rel_error = abs_error / ql_result.price * 100.0;
+
+            max_abs_error = std::max(max_abs_error, abs_error);
+            max_rel_error = std::max(max_rel_error, rel_error);
+            avg_abs_error += abs_error;
+            avg_rel_error += rel_error;
+            ++n_tests;
+        }
+    }
+
+    avg_abs_error /= n_tests;
+    avg_rel_error /= n_tests;
+
+    // Report results
+    for (auto _ : state) {
+        // Just iterate once to report
+    }
+
+    state.SetLabel(std::string(label) +
+                  ": n=" + std::to_string(n_tests) +
+                  " max_rel=" + std::to_string(max_rel_error) + "%");
+
+    state.counters["n_tests"] = n_tests;
+    state.counters["max_abs_err"] = max_abs_error;
+    state.counters["max_rel_err_%"] = max_rel_error;
+    state.counters["avg_abs_err"] = avg_abs_error;
+    state.counters["avg_rel_err_%"] = avg_rel_error;
+}
+
+// Test 1: ATM chain (5 strikes × 3 maturities = 15 options)
+static void BM_NormalizedChain_ATM_5x3(benchmark::State& state) {
+    compare_normalized_chain_accuracy(
+        state, "Normalized Chain ATM 5x3",
+        100.0,                                  // spot
+        {90.0, 95.0, 100.0, 105.0, 110.0},     // strikes
+        {0.25, 0.5, 1.0},                       // maturities
+        0.20, 0.05, 0.02,                       // σ, r, q
+        false);                                 // put
+}
+BENCHMARK(BM_NormalizedChain_ATM_5x3)->Iterations(1);
+
+// Test 2: Wide strike range (7 strikes × 4 maturities = 28 options)
+static void BM_NormalizedChain_Wide_7x4(benchmark::State& state) {
+    compare_normalized_chain_accuracy(
+        state, "Normalized Chain Wide 7x4",
+        100.0,                                              // spot
+        {80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0},    // strikes
+        {0.25, 0.5, 1.0, 2.0},                             // maturities
+        0.25, 0.05, 0.02,                                  // σ, r, q
+        false);                                            // put
+}
+BENCHMARK(BM_NormalizedChain_Wide_7x4)->Iterations(1);
+
+// Test 3: High volatility chain
+static void BM_NormalizedChain_HighVol_5x3(benchmark::State& state) {
+    compare_normalized_chain_accuracy(
+        state, "Normalized Chain High Vol 5x3",
+        100.0,                                  // spot
+        {85.0, 90.0, 100.0, 110.0, 115.0},     // strikes
+        {0.25, 0.5, 1.0},                       // maturities
+        0.50, 0.05, 0.02,                       // σ=50%, r, q
+        false);                                 // put
+}
+BENCHMARK(BM_NormalizedChain_HighVol_5x3)->Iterations(1);
+
+// Test 4: Long maturity chain
+static void BM_NormalizedChain_LongMat_5x4(benchmark::State& state) {
+    compare_normalized_chain_accuracy(
+        state, "Normalized Chain Long Mat 5x4",
+        100.0,                                  // spot
+        {85.0, 92.5, 100.0, 107.5, 115.0},     // strikes
+        {0.5, 1.0, 2.0, 3.0},                   // maturities (up to 3 years)
+        0.25, 0.05, 0.02,                       // σ, r, q
+        false);                                 // put
+}
+BENCHMARK(BM_NormalizedChain_LongMat_5x4)->Iterations(1);
+
+// Test 5: Call options
+static void BM_NormalizedChain_Call_5x3(benchmark::State& state) {
+    compare_normalized_chain_accuracy(
+        state, "Normalized Chain Call 5x3",
+        100.0,                                  // spot
+        {90.0, 95.0, 100.0, 105.0, 110.0},     // strikes
+        {0.25, 0.5, 1.0},                       // maturities
+        0.20, 0.05, 0.02,                       // σ, r, q
+        true);                                  // call
+}
+BENCHMARK(BM_NormalizedChain_Call_5x3)->Iterations(1);
 
 BENCHMARK_MAIN();
