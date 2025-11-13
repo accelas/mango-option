@@ -176,7 +176,6 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     if (use_normalized_solver) {
         // FAST PATH: Normalized solver
         const double T_max = maturity_.back();
-        const double spot = K_ref_;  // For price tables, spot = K_ref
 
 #pragma omp parallel
         {
@@ -229,15 +228,15 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
                         }
 
                         // Extract prices from surface
-                        // Moneyness convention: m = S/K_ref
+                        // Moneyness convention: m = S/K_ref, strike is always K_ref
+                        // Identity: V(S,K_ref,τ) = K_ref · u(ln(m), τ)
                         for (size_t i = 0; i < Nm; ++i) {
                             double x = std::log(moneyness_[i]);  // x = ln(m) = ln(S/K_ref)
-                            double K = spot / moneyness_[i];      // K = K_ref / m
 
                             for (size_t j = 0; j < Nt; ++j) {
                                 double u = surface.interpolate(x, maturity_[j]);
                                 size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                                prices_4d[idx_4d] = K * u;  // V = K·u
+                                prices_4d[idx_4d] = K_ref_ * u;  // V = K_ref·u (strike is constant)
                             }
                         }
                     }
