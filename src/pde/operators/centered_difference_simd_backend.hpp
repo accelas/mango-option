@@ -53,10 +53,8 @@ public:
     using simd_t = stdx::native_simd<T>;
     static constexpr size_t simd_width = simd_t::size();
 
-    explicit SimdBackend(const GridSpacing<T>& spacing,
-                        size_t l1_tile_size = 1024)
+    explicit SimdBackend(const GridSpacing<T>& spacing)
         : spacing_(spacing)
-        , l1_tile_size_(l1_tile_size)
     {}
 
     /**
@@ -312,11 +310,8 @@ public:
         }
     }
 
-    size_t tile_size() const { return l1_tile_size_; }
-
 private:
     const GridSpacing<T>& spacing_;
-    size_t l1_tile_size_;
 };
 
 } // namespace mango::operators

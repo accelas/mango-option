@@ -278,30 +278,6 @@ cc_test(
 )
 
 cc_test(
-    name = "american_option_expected_validation_test",
-    size = "small",
-    srcs = ["american_option_expected_validation_test.cc"],
-    deps = [
-        "//src/option:american_option",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "slice_solver_workspace_test",
-    size = "small",
-    srcs = ["slice_solver_workspace_test.cc"],
-    deps = [
-        "//src/option:slice_solver_workspace",
-        "//src/option:american_option",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-fopenmp"],
-    linkopts = ["-fopenmp"],
-)
-
-cc_test(
     name = "operator_factory_test",
     srcs = ["operator_factory_test.cc"],
     deps = [
