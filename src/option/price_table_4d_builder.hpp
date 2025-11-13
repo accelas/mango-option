@@ -17,8 +17,7 @@
  *   );
  *
  *   // Pre-compute prices (200 PDE solves, ~5 minutes on 16 cores)
- *   auto grid_config = AmericanOptionGrid{.n_space = 101, .n_time = 1000};
- *   builder.precompute(OptionType::PUT, grid_config);
+ *   builder.precompute(OptionType::PUT, 101, 1000);
  *
  *   // Get fast interpolator (~500ns per query)
  *   auto evaluator = builder.get_evaluator();
@@ -108,18 +107,49 @@ public:
         );
     }
 
-    /// Pre-compute all option prices on 4D grid
+    /// Pre-compute all option prices on 4D grid (standard bounds)
     ///
-    /// Runs PDE solver for each (σ, r) combination and assembles
-    /// prices into 4D array. Uses OpenMP for parallelization if available.
+    /// Runs PDE solver for each (σ, r) combination using standard
+    /// log-moneyness bounds [-3.0, 3.0]. For custom bounds, use the
+    /// overload that accepts x_min and x_max parameters.
     ///
     /// @param option_type Call or Put
-    /// @param grid_config PDE grid configuration
+    /// @param n_space Number of spatial grid points
+    /// @param n_time Number of time steps
     /// @param dividend_yield Continuous dividend yield (default: 0)
     /// @return Result with fitted B-spline evaluator
     expected<PriceTable4DResult, std::string> precompute(
         OptionType option_type,
-        const AmericanOptionGrid& grid_config,
+        size_t n_space,
+        size_t n_time,
+        double dividend_yield = 0.0);
+
+    /// Pre-compute all option prices on 4D grid (custom bounds)
+    ///
+    /// Runs PDE solver for each (σ, r) combination using custom
+    /// log-moneyness bounds. Use this when your moneyness grid
+    /// requires wider bounds than the standard [-3.0, 3.0] range.
+    ///
+    /// Example: For moneyness range [0.5, 2.0]:
+    /// ```cpp
+    /// double x_min = std::log(0.5);  // ≈ -0.693
+    /// double x_max = std::log(2.0);  // ≈ 0.693
+    /// builder.precompute(OptionType::PUT, x_min, x_max, 101, 1000);
+    /// ```
+    ///
+    /// @param option_type Call or Put
+    /// @param x_min Minimum log-moneyness (must be ≤ ln(moneyness.front()))
+    /// @param x_max Maximum log-moneyness (must be ≥ ln(moneyness.back()))
+    /// @param n_space Number of spatial grid points
+    /// @param n_time Number of time steps
+    /// @param dividend_yield Continuous dividend yield (default: 0)
+    /// @return Result with fitted B-spline evaluator
+    expected<PriceTable4DResult, std::string> precompute(
+        OptionType option_type,
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time,
         double dividend_yield = 0.0);
 
     /// Get grid dimensions

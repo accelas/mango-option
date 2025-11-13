@@ -21,11 +21,11 @@ TEST(AmericanOptionSolverTest, ConstructorValidation) {
         .option_type = OptionType::CALL
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     // Should construct successfully
     EXPECT_NO_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     });
 }
 
@@ -40,10 +40,10 @@ TEST(AmericanOptionSolverTest, InvalidStrike) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     }, std::invalid_argument);
 }
 
@@ -58,10 +58,10 @@ TEST(AmericanOptionSolverTest, InvalidSpot) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     }, std::invalid_argument);
 }
 
@@ -76,10 +76,10 @@ TEST(AmericanOptionSolverTest, InvalidMaturity) {
         .option_type = OptionType::CALL
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     }, std::invalid_argument);
 }
 
@@ -94,10 +94,10 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     }, std::invalid_argument);
 }
 
@@ -113,10 +113,10 @@ TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
         .option_type = OptionType::CALL
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_NO_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     });
 }
 
@@ -131,10 +131,10 @@ TEST(AmericanOptionSolverTest, InvalidDividendYield) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     }, std::invalid_argument);
 }
 
@@ -149,12 +149,10 @@ TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
         .option_type = OptionType::CALL
     };
 
-    AmericanOptionGrid grid{};
-    grid.n_space = 5;  // Too small
-
-    EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
-    }, std::invalid_argument);
+    // Test that workspace factory validates n_space >= 10
+    auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 5, 1000);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), "n_space must be >= 10");
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNTime) {
@@ -168,12 +166,10 @@ TEST(AmericanOptionSolverTest, InvalidGridNTime) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};
-    grid.n_time = 5;  // Too small
-
-    EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
-    }, std::invalid_argument);
+    // Test that workspace factory validates n_time >= 10
+    auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 5);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), "n_time must be >= 10");
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridBounds) {
@@ -187,13 +183,10 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
         .option_type = OptionType::CALL
     };
 
-    AmericanOptionGrid grid{};
-    grid.x_min = 3.0;
-    grid.x_max = -3.0;  // x_min >= x_max
-
-    EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
-    }, std::invalid_argument);
+    // Test that workspace factory validates x_min < x_max
+    auto result = AmericanSolverWorkspace::create(3.0, -3.0, 101, 1000);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), "x_min must be < x_max");
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividends) {
@@ -208,11 +201,11 @@ TEST(AmericanOptionSolverTest, DiscreteDividends) {
         .discrete_dividends = {{0.25, 1.0}, {0.75, 1.5}}  // Valid dividends
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     // Should accept valid discrete dividends
     EXPECT_NO_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     });
 }
 
@@ -229,10 +222,10 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
         .discrete_dividends = {{-0.1, 1.0}}  // Invalid: negative time
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params1, grid);
+        AmericanOptionSolver solver(params1, workspace);
     }, std::invalid_argument);
 
     // Should reject time beyond maturity
@@ -248,7 +241,7 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     };
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params2, grid);
+        AmericanOptionSolver solver(params2, workspace);
     }, std::invalid_argument);
 }
 
@@ -264,11 +257,11 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
         .discrete_dividends = {{0.5, -1.0}}  // Invalid: negative amount
     };
 
-    AmericanOptionGrid grid{};
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
     // Should reject negative amount
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, grid);
+        AmericanOptionSolver solver(params, workspace);
     }, std::invalid_argument);
 }
 
@@ -283,8 +276,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -300,7 +293,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
 
     // Solution should be available
     auto solution = solver.get_solution();
-    EXPECT_EQ(solution.size(), grid.n_space);
+    EXPECT_EQ(solution.size(), 101);  // Default n_space
 }
 
 TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
@@ -314,8 +307,8 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     // get_solution() should throw before solve()
     EXPECT_THROW({
@@ -334,8 +327,8 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
         .option_type = OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -360,8 +353,8 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
         .option_type = mango::OptionType::PUT
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -395,8 +388,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
         }
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -417,7 +410,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
 
     // Solution should be available
     auto solution = solver.get_solution();
-    EXPECT_EQ(solution.size(), grid.n_space);
+    EXPECT_EQ(solution.size(), 101);  // Default n_space
 }
 
 TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
@@ -437,8 +430,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
         }
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -474,7 +467,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
 
     // Solution should be available
     auto solution = solver.get_solution();
-    EXPECT_EQ(solution.size(), grid.n_space);
+    EXPECT_EQ(solution.size(), 101);  // Default n_space
 }
 
 TEST(AmericanOptionSolverTest, HybridDividendModel) {
@@ -493,8 +486,8 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
         }
     };
 
-    AmericanOptionGrid grid{};  // Use defaults
-    AmericanOptionSolver solver(params, grid);
+    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -517,7 +510,7 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
 
     // Solution should be available
     auto solution = solver.get_solution();
-    EXPECT_EQ(solution.size(), grid.n_space);
+    EXPECT_EQ(solution.size(), 101);  // Default n_space
 }
 
 }  // namespace

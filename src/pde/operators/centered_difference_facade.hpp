@@ -52,14 +52,6 @@ public:
         impl_->compute_first_derivative(u, du_dx, start, end);
     }
 
-    void compute_second_derivative_tiled(std::span<const T> u,
-                                         std::span<T> d2u_dx2,
-                                         size_t start, size_t end) const {
-        assert(start >= 1 && "start must allow u[i-1] access");
-        assert(end <= u.size() - 1 && "end must allow u[i+1] access");
-        impl_->compute_second_derivative_tiled(u, d2u_dx2, start, end);
-    }
-
 private:
     struct BackendInterface {
         virtual ~BackendInterface() = default;
@@ -68,9 +60,6 @@ private:
             size_t start, size_t end) const = 0;
         virtual void compute_first_derivative(
             std::span<const T> u, std::span<T> du_dx,
-            size_t start, size_t end) const = 0;
-        virtual void compute_second_derivative_tiled(
-            std::span<const T> u, std::span<T> d2u_dx2,
             size_t start, size_t end) const = 0;
     };
 
@@ -91,12 +80,6 @@ private:
             std::span<const T> u, std::span<T> du_dx,
             size_t start, size_t end) const override {
             backend_.compute_first_derivative(u, du_dx, start, end);
-        }
-
-        void compute_second_derivative_tiled(
-            std::span<const T> u, std::span<T> d2u_dx2,
-            size_t start, size_t end) const override {
-            backend_.compute_second_derivative_tiled(u, d2u_dx2, start, end);
         }
     };
 

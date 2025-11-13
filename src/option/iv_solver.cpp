@@ -1,8 +1,10 @@
 #include "src/option/iv_solver.hpp"
 #include "src/pde/core/root_finding.hpp"
 #include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <cmath>
 #include <algorithm>
+#include <memory>
 
 namespace mango {
 
@@ -144,16 +146,25 @@ double IVSolver::objective_function(double volatility) const {
     min_moneyness = std::min(min_moneyness, moneyness * 0.9);
     max_moneyness = std::max(max_moneyness, moneyness * 1.1);
 
-    // Create grid for PDE solver
-    AmericanOptionGrid grid_params;
-    grid_params.n_space = config_.grid_n_space;
-    grid_params.n_time = config_.grid_n_time;
-    grid_params.x_min = std::log(min_moneyness);  // Adaptive lower bound
-    grid_params.x_max = std::log(max_moneyness);  // Adaptive upper bound
+    // Create workspace for PDE solver
+    double x_min = std::log(min_moneyness);  // Adaptive lower bound
+    double x_max = std::log(max_moneyness);  // Adaptive upper bound
+    auto workspace_result = AmericanSolverWorkspace::create(
+        x_min, x_max, config_.grid_n_space, config_.grid_n_time);
+
+    if (!workspace_result) {
+        last_solver_error_ = SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = "Invalid workspace configuration: " + workspace_result.error(),
+            .iterations = 0
+        };
+        return std::numeric_limits<double>::quiet_NaN();
+    }
 
     // Create solver and solve
     try {
-        AmericanOptionSolver solver(option_params, grid_params);
+        auto workspace = workspace_result.value();
+        AmericanOptionSolver solver(option_params, workspace);
         auto price_result = solver.solve();
 
         if (!price_result) {

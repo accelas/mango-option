@@ -10,7 +10,7 @@
 #include "src/pde/core/spatial_operators.hpp"
 #include "src/support/expected.hpp"
 #include "src/support/parallel.hpp"
-#include "src/option/slice_solver_workspace.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -104,43 +104,6 @@ struct AmericanOptionParams {
     }
 };
 
-/**
- * Numerical grid parameters for PDE solver.
- */
-struct AmericanOptionGrid {
-    size_t n_space;    ///< Number of spatial grid points
-    size_t n_time;     ///< Number of time steps
-    double x_min;      ///< Minimum log-moneyness (default: -3.0)
-    double x_max;      ///< Maximum log-moneyness (default: +3.0)
-
-    /// Default constructor with sensible defaults
-    AmericanOptionGrid()
-        : n_space(101)
-        , n_time(1000)
-        , x_min(-3.0)
-        , x_max(3.0) {}
-
-    /// Validate grid parameters (exception-based)
-    void validate() const {
-        if (n_space < 10) throw std::invalid_argument("n_space must be >= 10");
-        if (n_time < 10) throw std::invalid_argument("n_time must be >= 10");
-        if (x_min >= x_max) throw std::invalid_argument("x_min must be < x_max");
-    }
-
-    /// Validate grid parameters (expected-based)
-    static expected<void, std::string> validate_expected(const AmericanOptionGrid& grid) {
-        if (grid.n_space < 10) {
-            return unexpected("n_space must be >= 10");
-        }
-        if (grid.n_time < 10) {
-            return unexpected("n_time must be >= 10");
-        }
-        if (grid.x_min >= grid.x_max) {
-            return unexpected("x_min must be < x_max");
-        }
-        return {};
-    }
-};
 
 /**
  * Solver result containing option value and Greeks.
@@ -157,9 +120,6 @@ struct AmericanOptionResult {
         : value(0.0), delta(0.0), gamma(0.0), theta(0.0), converged(false) {}
 };
 
-// Forward declaration
-class SliceSolverWorkspace;
-
 /**
  * American option pricing solver using finite difference method.
  *
@@ -170,20 +130,7 @@ class SliceSolverWorkspace;
 class AmericanOptionSolver {
 public:
     /**
-     * Constructor (standard mode - creates own grid).
-     *
-     * @param params Option pricing parameters (including discrete dividends)
-     * @param grid Numerical grid parameters
-     * @param trbdf2_config TR-BDF2 solver configuration
-     * @param root_config Root finding configuration for Newton solver
-     */
-    AmericanOptionSolver(const AmericanOptionParams& params,
-                        const AmericanOptionGrid& grid,
-                        const TRBDF2Config& trbdf2_config = {},
-                        const RootFindingConfig& root_config = {});
-
-    /**
-     * Constructor (workspace mode - reuses grid, spacing, and storage).
+     * Constructor with workspace.
      *
      * This constructor enables efficient batch solving by reusing
      * grid allocations across multiple solver instances. Use when
@@ -193,37 +140,13 @@ public:
      * to ensure proper lifetime management.
      *
      * @param params Option pricing parameters (including discrete dividends)
-     * @param grid Numerical grid parameters (must match workspace)
-     * @param workspace Shared workspace with pre-allocated grid (keeps workspace alive)
-     * @param trbdf2_config TR-BDF2 solver configuration
-     * @param root_config Root finding configuration for Newton solver
+     * @param workspace Shared workspace with grid configuration and pre-allocated storage
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
-                        const AmericanOptionGrid& grid,
-                        std::shared_ptr<SliceSolverWorkspace> workspace,
-                        const TRBDF2Config& trbdf2_config = {},
-                        const RootFindingConfig& root_config = {});
+                        std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
-     * Factory method with expected-based validation (standard mode).
-     *
-     * Creates an AmericanOptionSolver with validation returning expected<void, std::string>.
-     * This provides a non-throwing alternative to the constructor.
-     *
-     * @param params Option pricing parameters (including discrete dividends)
-     * @param grid Numerical grid parameters
-     * @param trbdf2_config TR-BDF2 solver configuration
-     * @param root_config Root finding configuration for Newton solver
-     * @return Expected containing solver on success, error message on failure
-     */
-    static expected<AmericanOptionSolver, std::string> create(
-        const AmericanOptionParams& params,
-        const AmericanOptionGrid& grid,
-        const TRBDF2Config& trbdf2_config = {},
-        const RootFindingConfig& root_config = {});
-
-    /**
-     * Factory method with expected-based validation (workspace mode).
+     * Factory method with expected-based validation.
      *
      * Creates an AmericanOptionSolver with validation returning expected<void, std::string>.
      * This provides a non-throwing alternative to the constructor.
@@ -232,18 +155,12 @@ public:
      * to ensure proper lifetime management.
      *
      * @param params Option pricing parameters (including discrete dividends)
-     * @param grid Numerical grid parameters (must match workspace)
-     * @param workspace Shared workspace with pre-allocated grid (keeps workspace alive)
-     * @param trbdf2_config TR-BDF2 solver configuration
-     * @param root_config Root finding configuration for Newton solver
+     * @param workspace Shared workspace with grid configuration and pre-allocated storage
      * @return Expected containing solver on success, error message on failure
      */
-    static expected<AmericanOptionSolver, std::string> create_with_workspace(
+    static expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
-        const AmericanOptionGrid& grid,
-        std::shared_ptr<SliceSolverWorkspace> workspace,
-        const TRBDF2Config& trbdf2_config = {},
-        const RootFindingConfig& root_config = {});
+        std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
      * Solve for option value and Greeks.
@@ -267,6 +184,30 @@ public:
     }
 
     /**
+     * Set TR-BDF2 solver configuration (advanced).
+     *
+     * Allows fine-tuning of the time-stepping scheme. Most users
+     * should use the default configuration.
+     *
+     * @param config TR-BDF2 solver configuration
+     */
+    void set_trbdf2_config(const TRBDF2Config& config) {
+        trbdf2_config_ = config;
+    }
+
+    /**
+     * Set root-finding configuration (advanced).
+     *
+     * Allows fine-tuning of the Newton solver for early exercise boundary.
+     * Most users should use the default configuration.
+     *
+     * @param config Root finding configuration
+     */
+    void set_root_config(const RootFindingConfig& config) {
+        root_config_ = config;
+    }
+
+    /**
      * Get the full solution surface (for debugging/analysis).
      *
      * @return Vector of option values across the spatial grid
@@ -276,13 +217,12 @@ public:
 private:
     // Parameters
     AmericanOptionParams params_;
-    AmericanOptionGrid grid_;
     TRBDF2Config trbdf2_config_;
     RootFindingConfig root_config_;
 
-    // Workspace (optional - nullptr means standalone mode)
+    // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
-    std::shared_ptr<SliceSolverWorkspace> workspace_;
+    std::shared_ptr<AmericanSolverWorkspace> workspace_;
 
     // Solution state
     std::vector<double> solution_;
@@ -312,9 +252,18 @@ private:
 /// Example usage:
 /// ```cpp
 /// std::vector<AmericanOptionParams> batch = { ... };
-/// AmericanOptionGrid grid{.n_space = 101, .n_time = 1000};
 ///
-/// auto results = solve_american_options_batch(batch, grid);
+/// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
+/// ```
+///
+/// Advanced usage with snapshots:
+/// ```cpp
+/// auto results = BatchAmericanOptionSolver::solve_batch_with_setup(
+///     params, -3.0, 3.0, 101, 1000,
+///     [&](size_t idx, AmericanOptionSolver& solver) {
+///         // Register snapshots for this solve
+///         solver.register_snapshot(step, user_idx, collector);
+///     });
 /// ```
 ///
 /// Performance:
@@ -322,22 +271,99 @@ private:
 /// - Parallel (32 cores): ~848 options/sec (11.8x speedup)
 class BatchAmericanOptionSolver {
 public:
+    /// Setup callback: called before each solve() to configure solver
+    /// @param index Index of current option in params vector
+    /// @param solver Reference to solver (can register snapshots, set configs, etc.)
+    using SetupCallback = std::function<void(size_t index, AmericanOptionSolver& solver)>;
     /// Solve a batch of American options in parallel
     ///
+    /// Each thread creates its own workspace to avoid data races.
+    /// The workspace parameters (grid configuration) are shared.
+    ///
     /// @param params Vector of option parameters
-    /// @param grid Shared grid configuration (same for all options)
+    /// @param x_min Minimum log-moneyness
+    /// @param x_max Maximum log-moneyness
+    /// @param n_space Number of spatial grid points
+    /// @param n_time Number of time steps
     /// @return Vector of results (same order as input)
     static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
         std::span<const AmericanOptionParams> params,
-        const AmericanOptionGrid& grid)
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time)
     {
         std::vector<expected<AmericanOptionResult, SolverError>> results(params.size());
 
-        MANGO_PRAGMA_PARALLEL_FOR
-        for (size_t i = 0; i < params.size(); ++i) {
-            AmericanOptionSolver solver(params[i], grid);
-            results[i] = solver.solve();
+        // Validate workspace parameters once before parallel loop
+        auto workspace_template = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace_template) {
+            // If workspace creation fails, return error for all options
+            SolverError error{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Invalid workspace parameters: " + workspace_template.error(),
+                .iterations = 0
+            };
+            for (size_t i = 0; i < params.size(); ++i) {
+                results[i] = unexpected(error);
+            }
+            return results;
         }
+
+        // Use parallel region + for to enable per-thread workspace reuse
+#ifdef _OPENMP
+#pragma omp parallel
+        {
+            // Each thread creates ONE workspace and reuses it for all its iterations
+            auto thread_workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+
+            // If per-thread workspace creation fails (e.g., OOM), write error to all thread's results
+            if (!thread_workspace_result) {
+                SolverError error{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .message = "Failed to create per-thread workspace: " + thread_workspace_result.error(),
+                    .iterations = 0
+                };
+#pragma omp for
+                for (size_t i = 0; i < params.size(); ++i) {
+                    results[i] = unexpected(error);
+                }
+            } else {
+                auto thread_workspace = thread_workspace_result.value();
+
+#pragma omp for
+                for (size_t i = 0; i < params.size(); ++i) {
+                    // Use factory method to avoid exceptions from constructor
+                    auto solver_result = AmericanOptionSolver::create(params[i], thread_workspace);
+                    if (!solver_result) {
+                        results[i] = unexpected(SolverError{
+                            .code = SolverErrorCode::InvalidConfiguration,
+                            .message = solver_result.error(),
+                            .iterations = 0
+                        });
+                    } else {
+                        results[i] = solver_result.value().solve();
+                    }
+                }
+            }
+        }
+#else
+        // Sequential: reuse validated workspace for all options
+        auto workspace = workspace_template.value();
+        for (size_t i = 0; i < params.size(); ++i) {
+            // Use factory method to avoid exceptions from constructor
+            auto solver_result = AmericanOptionSolver::create(params[i], workspace);
+            if (!solver_result) {
+                results[i] = unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .message = solver_result.error(),
+                    .iterations = 0
+                });
+            } else {
+                results[i] = solver_result.value().solve();
+            }
+        }
+#endif
 
         return results;
     }
@@ -345,26 +371,35 @@ public:
     /// Solve a batch of American options in parallel (vector overload)
     static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
         const std::vector<AmericanOptionParams>& params,
-        const AmericanOptionGrid& grid)
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time)
     {
-        return solve_batch(std::span{params}, grid);
+        return solve_batch(std::span{params}, x_min, x_max, n_space, n_time);
     }
 };
 
 /// Convenience function for batch solving
 inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
     std::span<const AmericanOptionParams> params,
-    const AmericanOptionGrid& grid)
+    double x_min,
+    double x_max,
+    size_t n_space,
+    size_t n_time)
 {
-    return BatchAmericanOptionSolver::solve_batch(params, grid);
+    return BatchAmericanOptionSolver::solve_batch(params, x_min, x_max, n_space, n_time);
 }
 
 /// Convenience function for batch solving (vector overload)
 inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
     const std::vector<AmericanOptionParams>& params,
-    const AmericanOptionGrid& grid)
+    double x_min,
+    double x_max,
+    size_t n_space,
+    size_t n_time)
 {
-    return BatchAmericanOptionSolver::solve_batch(params, grid);
+    return BatchAmericanOptionSolver::solve_batch(params, x_min, x_max, n_space, n_time);
 }
 
 }  // namespace mango

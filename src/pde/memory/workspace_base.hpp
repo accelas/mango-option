@@ -29,30 +29,6 @@ public:
         : resource_(initial_buffer_size)
     {}
 
-    /**
-     * Generate tile metadata for operator-level tiling
-     *
-     * Distributes n elements across num_tiles, with remainder spread
-     * across first tiles. All tiles SIMD-padded.
-     *
-     * @param n Total number of elements
-     * @param tile_idx Index of this tile [0, num_tiles)
-     * @param num_tiles Total number of tiles
-     * @return TileMetadata for this tile
-     */
-    static TileMetadata tile_info(size_t n, size_t tile_idx, size_t num_tiles) {
-        assert(num_tiles > 0 && "num_tiles must be positive");
-        assert(tile_idx < num_tiles && "tile_idx out of bounds");
-
-        const size_t base_tile_size = n / num_tiles;
-        const size_t remainder = n % num_tiles;
-        const size_t tile_size = base_tile_size + (tile_idx < remainder ? 1 : 0);
-        const size_t tile_start = tile_idx * base_tile_size + std::min(tile_idx, remainder);
-        const size_t padded_size = pad_to_simd(tile_size);
-
-        return {tile_start, tile_size, padded_size, 64};
-    }
-
     /// AVX-512: 8 doubles per vector
     static constexpr size_t SIMD_WIDTH = 8;
 

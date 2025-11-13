@@ -505,13 +505,11 @@ TEST_F(BSplineCollocation1DTest, FactoryNonUniformGrid) {
 // Test 28: Factory pattern - move semantics
 TEST_F(BSplineCollocation1DTest, FactoryMoveSemantics) {
     auto grid = uniform_grid(0.0, 1.0, 10);
-    auto original_ptr = grid.data();
 
     auto result = BSplineCollocation1D::create(std::move(grid));
 
     ASSERT_TRUE(result.has_value());
     // The grid should have been moved, not copied
-    // (We can't easily test the pointer change without exposing internals)
     EXPECT_EQ(grid.size(), 0);  // Moved-from vector should be empty
 }
 

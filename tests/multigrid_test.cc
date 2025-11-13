@@ -23,11 +23,11 @@ TEST(MultiGridBufferTest, TwoAxisCreation) {
     EXPECT_FALSE(mgrid.has_axis(mango::GridAxis::Volatility));
 
     // Verify axis sizes
-    EXPECT_EQ(mgrid.axis_size(mango::GridAxis::Moneyness), 10);
-    EXPECT_EQ(mgrid.axis_size(mango::GridAxis::Maturity), 20);
+    EXPECT_EQ(mgrid.axis_size(mango::GridAxis::Moneyness), 10u);
+    EXPECT_EQ(mgrid.axis_size(mango::GridAxis::Maturity), 20u);
 
     // Verify total grid points
-    EXPECT_EQ(mgrid.total_points(), 200);  // 10 × 20
+    EXPECT_EQ(mgrid.total_points(), 200u);  // 10 × 20
 }
 
 TEST(MultiGridBufferTest, AccessAxisData) {

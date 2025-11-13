@@ -56,9 +56,10 @@ TEST(BSplineFitter4DSeparableTest, FactoryCreation) {
     auto result = BSplineFitter4DSeparable::create(m, t, v, r);
     EXPECT_TRUE(result.has_value());
 
-    // Should be able to use the created fitter
-    auto& fitter = result.value();
-    EXPECT_TRUE(true);  // Basic sanity check that object was created
+    // Verify the object was created
+    if (result.has_value()) {
+        (void)result.value();  // Suppress unused variable warning
+    }
 }
 
 TEST(BSplineFitter4DSeparableTest, FactoryCreationWithSmallGrids) {

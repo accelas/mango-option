@@ -4,7 +4,7 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/slice_solver_workspace.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
@@ -116,49 +116,18 @@ private:
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
-    const AmericanOptionGrid& grid,
-    const TRBDF2Config& trbdf2_config,
-    const RootFindingConfig& root_config)
+    std::shared_ptr<AmericanSolverWorkspace> workspace)
     : params_(params)
-    , grid_(grid)
-    , trbdf2_config_(trbdf2_config)
-    , root_config_(root_config)
-    , workspace_(nullptr)
-{
-    // Validate parameters (includes discrete dividend validation)
-    params_.validate();
-    grid_.validate();
-}
-
-AmericanOptionSolver::AmericanOptionSolver(
-    const AmericanOptionParams& params,
-    const AmericanOptionGrid& grid,
-    std::shared_ptr<SliceSolverWorkspace> workspace,
-    const TRBDF2Config& trbdf2_config,
-    const RootFindingConfig& root_config)
-    : params_(params)
-    , grid_(grid)
-    , trbdf2_config_(trbdf2_config)
-    , root_config_(root_config)
+    , trbdf2_config_{}  // Default-initialized
+    , root_config_{}    // Default-initialized
     , workspace_(std::move(workspace))
 {
     // Validate parameters
     params_.validate();
-    grid_.validate();
 
     // Validate workspace is not null
     if (!workspace_) {
         throw std::invalid_argument("Workspace cannot be null");
-    }
-
-    // Validate grid matches workspace
-    if (grid_.x_min != workspace_->x_min() || grid_.x_max != workspace_->x_max() ||
-        grid_.n_space != workspace_->n_space()) {
-        throw std::invalid_argument(
-            "Grid parameters must match workspace "
-            "(x_min=" + std::to_string(workspace_->x_min()) +
-            ", x_max=" + std::to_string(workspace_->x_max()) +
-            ", n_space=" + std::to_string(workspace_->n_space()) + ")");
     }
 }
 
@@ -168,45 +137,12 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
-    const AmericanOptionGrid& grid,
-    const TRBDF2Config& trbdf2_config,
-    const RootFindingConfig& root_config) {
+    std::shared_ptr<AmericanSolverWorkspace> workspace) {
 
     // Validate parameters using expected-based validation
     auto params_result = AmericanOptionParams::validate_expected(params);
     if (!params_result.has_value()) {
         return unexpected(params_result.error());
-    }
-
-    auto grid_result = AmericanOptionGrid::validate_expected(grid);
-    if (!grid_result.has_value()) {
-        return unexpected(grid_result.error());
-    }
-
-    try {
-        // All validations passed, create solver
-        return AmericanOptionSolver(params, grid, trbdf2_config, root_config);
-    } catch (const std::exception& e) {
-        return unexpected(std::string("Failed to create solver: ") + e.what());
-    }
-}
-
-expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create_with_workspace(
-    const AmericanOptionParams& params,
-    const AmericanOptionGrid& grid,
-    std::shared_ptr<SliceSolverWorkspace> workspace,
-    const TRBDF2Config& trbdf2_config,
-    const RootFindingConfig& root_config) {
-
-    // Validate parameters using expected-based validation
-    auto params_result = AmericanOptionParams::validate_expected(params);
-    if (!params_result.has_value()) {
-        return unexpected(params_result.error());
-    }
-
-    auto grid_result = AmericanOptionGrid::validate_expected(grid);
-    if (!grid_result.has_value()) {
-        return unexpected(grid_result.error());
     }
 
     // Validate workspace
@@ -214,19 +150,9 @@ expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create_with_wo
         return unexpected("Workspace cannot be null");
     }
 
-    // Validate grid matches workspace
-    if (grid.x_min != workspace->x_min() || grid.x_max != workspace->x_max() ||
-        grid.n_space != workspace->n_space()) {
-        return unexpected(
-            "Grid parameters must match workspace "
-            "(x_min=" + std::to_string(workspace->x_min()) +
-            ", x_max=" + std::to_string(workspace->x_max()) +
-            ", n_space=" + std::to_string(workspace->n_space()) + ")");
-    }
-
     try {
         // All validations passed, create solver
-        return AmericanOptionSolver(params, grid, workspace, trbdf2_config, root_config);
+        return AmericanOptionSolver(params, workspace);
     } catch (const std::exception& e) {
         return unexpected(std::string("Failed to create solver: ") + e.what());
     }
@@ -237,33 +163,17 @@ expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create_with_wo
 // ============================================================================
 
 expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // 1. Acquire grid (reuse workspace grid if available)
-    std::optional<GridBuffer<double>> owned_grid_buffer;
-    std::span<const double> x_grid;
-    std::shared_ptr<operators::GridSpacing<double>> shared_spacing;
-    PDEWorkspace* external_workspace = nullptr;
-
-    if (workspace_) {
-        x_grid = workspace_->grid_span();
-        shared_spacing = workspace_->grid_spacing();
-        external_workspace = workspace_->workspace().get();
-    } else {
-        auto grid_result = GridSpec<>::uniform(grid_.x_min, grid_.x_max, grid_.n_space);
-        if (!grid_result.has_value()) {
-            return unexpected(SolverError{
-                .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Failed to create uniform grid: " + grid_result.error()
-            });
-        }
-        owned_grid_buffer.emplace(grid_result.value().generate());
-        x_grid = owned_grid_buffer->span();
-    }
+    // 1. Acquire grid from workspace
+    std::span<const double> x_grid = workspace_->grid_span();
+    std::shared_ptr<operators::GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
+    // Workspace now inherits from PDEWorkspace, so we can use it directly
+    PDEWorkspace* external_workspace = workspace_.get();
 
     // 2. Setup time domain
     // For option pricing: solve forward in PDE time (backward in calendar time)
     // t=0: terminal payoff at maturity
     // t=T: present value
-    TimeDomain time_domain(0.0, params_.maturity, params_.maturity / grid_.n_time);
+    TimeDomain time_domain(0.0, params_.maturity, params_.maturity / workspace_->n_time());
 
     // 3. Create Black-Scholes operator in log-moneyness coordinates
     auto make_operator = [&]() {
@@ -476,7 +386,9 @@ double AmericanOptionSolver::compute_delta() const {
     }
 
     const size_t n = solution_.size();
-    const double dx = (grid_.x_max - grid_.x_min) / (n - 1);
+    const double x_min = workspace_->x_min();
+    const double x_max = workspace_->x_max();
+    const double dx = (x_max - x_min) / (n - 1);
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
@@ -484,7 +396,7 @@ double AmericanOptionSolver::compute_delta() const {
     // Find the grid point closest to current_moneyness
     // Use the same approach as interpolate_solution
     size_t i = 0;
-    while (i < n-1 && grid_.x_min + (i+1)*dx < current_moneyness) {
+    while (i < n-1 && x_min + (i+1)*dx < current_moneyness) {
         i++;
     }
 
@@ -515,14 +427,16 @@ double AmericanOptionSolver::compute_gamma() const {
     }
 
     const size_t n = solution_.size();
-    const double dx = (grid_.x_max - grid_.x_min) / (n - 1);
+    const double x_min = workspace_->x_min();
+    const double x_max = workspace_->x_max();
+    const double dx = (x_max - x_min) / (n - 1);
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
 
     // Find the grid point closest to current_moneyness
     size_t i = 0;
-    while (i < n-1 && grid_.x_min + (i+1)*dx < current_moneyness) {
+    while (i < n-1 && x_min + (i+1)*dx < current_moneyness) {
         i++;
     }
 

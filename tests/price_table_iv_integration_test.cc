@@ -373,14 +373,13 @@ TEST(PriceTableIVIntegrationTest, MoneynessBoundsValidation) {
 
     auto builder = PriceTable4DBuilder::create(moneyness, maturity, volatility, rate, K_ref);
 
-    AmericanOptionGrid grid_config;
-    grid_config.n_space = 51;
-    grid_config.n_time = 100;
-    grid_config.x_min = -0.10;  // Covers ln(0.9) ≈ -0.105
-    grid_config.x_max = 0.10;   // Covers ln(1.1) ≈ 0.095
+    constexpr double x_min = -0.10;  // Covers ln(0.9) ≈ -0.105
+    constexpr double x_max = 0.10;   // Covers ln(1.1) ≈ 0.095
+    constexpr size_t n_space = 51;
+    constexpr size_t n_time = 100;
 
     // This should FAIL because ln(0.9) = -0.105 < -0.10
-    auto result = builder.precompute(OptionType::PUT, grid_config, 0.0);
+    auto result = builder.precompute(OptionType::PUT, x_min, x_max, n_space, n_time, 0.0);
     EXPECT_FALSE(result.has_value());
     EXPECT_THAT(result.error(), testing::HasSubstr("exceeds PDE grid bounds"));
 }

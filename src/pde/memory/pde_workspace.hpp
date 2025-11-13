@@ -80,16 +80,6 @@ public:
     std::span<const double> dx() const { return {dx_, n_ - 1}; }
     std::span<const double> dx_padded() const { return {dx_, pad_to_simd(n_ - 1)}; }
 
-    /// Tile metadata for this workspace
-    ///
-    /// NOTE: Currently unused in production code. Reserved for future multi-level
-    /// cache tiling optimizations (L1/L2/L3 blocking). The infrastructure exists
-    /// but benchmarking showed no benefit on modern CPUs with large caches.
-    /// See CLAUDE.md "Cache Blocking (Removed)" section for details.
-    TileMetadata tile_info(size_t tile_idx, size_t num_tiles) const {
-        return WorkspaceBase::tile_info(n_, tile_idx, num_tiles);
-    }
-
     /**
      * Reset and reinitialize
      * WARNING: Invalidates all previously returned spans!
