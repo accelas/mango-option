@@ -373,6 +373,99 @@ NewtonWorkspace implements hybrid allocation:
 
 Safe borrowing: u_stage and rhs are unused during Newton iteration.
 
+## Option Chain Batch Solver
+
+The library provides an optimized batch solver for option chains that exploits workspace reuse and cache locality.
+
+### What is an Option Chain?
+
+An **option chain** is a set of options sharing all parameters except strike:
+- Same underlying (SPY, AAPL, etc.)
+- Same expiration date
+- Same volatility, rate, dividend
+- **Different strikes** (typically 10-50)
+
+Example: SPY Dec-19-2025 Puts with strikes [400, 420, 440, 460, ...]
+
+### Why Use Option Chain Solver?
+
+**Performance benefits over naive batch solving:**
+- **10x less memory allocation**: One workspace per chain (~10 KB) vs per option (~10 KB each)
+- **Cache-friendly**: Sequential solving keeps workspace hot
+- **1.1-1.25x speedup**: From workspace reuse and cache warmth
+
+### Basic Usage
+
+```cpp
+#include "src/option/option_chain_solver.hpp"
+
+// Define chain: 5 put strikes, shared parameters
+mango::AmericanOptionChain chain{
+    .spot = 100.0,
+    .maturity = 1.0,
+    .volatility = 0.20,
+    .rate = 0.05,
+    .continuous_dividend_yield = 0.02,
+    .option_type = mango::OptionType::PUT,
+    .strikes = {90.0, 95.0, 100.0, 105.0, 110.0}
+};
+
+mango::AmericanOptionGrid grid{
+    .n_space = 101,
+    .n_time = 1000
+};
+
+// Solve entire chain with workspace reuse
+auto results = mango::OptionChainSolver::solve_chain(chain, grid);
+
+// Access results
+for (const auto& [strike, result] : results) {
+    if (result.has_value()) {
+        std::cout << "Strike " << strike << ": $" << result->value << "\n";
+    }
+}
+```
+
+### Multiple Chains (Parallel)
+
+```cpp
+// Create multiple chains (e.g., different expirations or underlyings)
+std::vector<mango::AmericanOptionChain> chains = {
+    { /* chain 1: Dec-2025 */ },
+    { /* chain 2: Jan-2026 */ },
+    { /* chain 3: Feb-2026 */ }
+};
+
+// Solve in parallel (chains parallelized, strikes sequential within chain)
+auto all_results = mango::OptionChainSolver::solve_chains(chains, grid);
+
+// all_results[i][j] = result for chains[i].strikes[j]
+```
+
+### When to Use
+
+✅ **Use OptionChainSolver when:**
+- Pricing multiple strikes with same expiration/parameters
+- Processing option chains from market data
+- Building IV surfaces (multiple chains across expirations)
+
+❌ **Use BatchAmericanOptionSolver when:**
+- Options have heterogeneous parameters (different T, σ, r)
+- No shared structure to exploit
+- Convenience wrapper for embarrassingly parallel work
+
+### Performance Characteristics
+
+**Single chain (10 strikes)**:
+- Old batch API: 10 × 10 KB = 100 KB allocated, cold cache
+- New chain API: 1 × 10 KB = 10 KB allocated, warm cache
+- Speedup: ~1.1-1.25x
+
+**Multiple chains (5 chains × 10 strikes = 50 options)**:
+- Parallelization: Across chains (not within)
+- Each thread: Sequential solve with workspace reuse
+- Scales well up to number of chains
+
 ## Implied Volatility Solver
 
 The library provides a complete implied volatility solver for American options using Brent's method with nested PDE evaluation.
