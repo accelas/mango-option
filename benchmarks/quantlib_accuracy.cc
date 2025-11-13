@@ -7,9 +7,10 @@
  * - Tests multiple scenarios (ATM, ITM, OTM, various maturities)
  * - Reports absolute and relative errors
  * - Tests convergence with increasing grid resolution
+ * - Tests normalized chain solver accuracy
  *
- * Run with: bazel run //benchmarks:quantlib_accuracy
- * Requires: libquantlib-dev
+ * Run with: bazel run //benchmarks:quantlib_accuracy --config=opt
+ * Requires: libquantlib0-dev
  */
 
 #include "src/option/american_option.hpp"
@@ -19,6 +20,7 @@
 #include <iomanip>
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 
 // QuantLib includes
 #include <ql/quantlib.hpp>
@@ -105,7 +107,7 @@ static void compare_scenario(
     double dividend_yield,
     bool is_call)
 {
-    // Mango-IV pricing
+    // Mango-IV pricing with workspace
     AmericanOptionParams mango_params{
         .strike = strike,
         .spot = spot,
@@ -117,11 +119,14 @@ static void compare_scenario(
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 201;  // High resolution for accuracy
-    grid.n_time = 2000;
+    // Create workspace (high resolution for accuracy)
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
+    if (!workspace_result) {
+        throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
+    }
+    auto workspace = std::move(workspace_result.value());
 
-    AmericanOptionSolver solver(mango_params, grid);
+    AmericanOptionSolver solver(mango_params, workspace);
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error(mango_result_expected.error().message);
@@ -241,11 +246,13 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = n_space;
-    grid.n_time = n_time;
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, n_space, n_time);
+    if (!workspace_result) {
+        throw std::runtime_error("Failed to create workspace");
+    }
+    auto workspace = std::move(workspace_result.value());
 
-    AmericanOptionSolver solver(params, grid);
+    AmericanOptionSolver solver(params, workspace);
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error(mango_result_expected.error().message);
@@ -279,8 +286,7 @@ BENCHMARK(BM_Convergence_GridResolution)
 // ============================================================================
 
 static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
-    // Mango-IV
-    AmericanOptionParams mango_params{
+    AmericanOptionParams params{
         .strike = 100.0,
         .spot = 100.0,
         .maturity = 1.0,
@@ -291,21 +297,21 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 201;
-    grid.n_time = 2000;
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
+    if (!workspace_result) {
+        throw std::runtime_error("Failed to create workspace");
+    }
+    auto workspace = std::move(workspace_result.value());
 
-    AmericanOptionSolver solver(mango_params, grid);
+    AmericanOptionSolver solver(params, workspace);
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error(mango_result_expected.error().message);
     }
     const AmericanOptionResult& mango_result = *mango_result_expected;
 
-    // QuantLib
     auto ql_result = price_american_option_quantlib(
-        100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false,
-        201, 2000);
+        100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false, 201, 2000);
 
     double delta_error = std::abs(mango_result.delta - ql_result.delta);
     double delta_rel = delta_error / std::abs(ql_result.delta) * 100.0;
@@ -349,11 +355,6 @@ static void compare_normalized_chain_accuracy(
     bool is_call)
 {
     // Build normalized solver request
-    std::vector<double> moneyness;
-    for (double K : strikes) {
-        moneyness.push_back(spot / K);
-    }
-
     NormalizedSolveRequest request{
         .sigma = volatility,
         .rate = rate,
