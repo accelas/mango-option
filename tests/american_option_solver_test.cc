@@ -4,8 +4,11 @@
  */
 
 #include "src/option/american_option.hpp"
+#include "src/option/price_table_snapshot_collector.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <mutex>
+#include <algorithm>
 
 namespace mango {
 namespace {
@@ -511,6 +514,129 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
     // Solution should be available
     auto solution = solver.get_solution();
     EXPECT_EQ(solution.size(), 101);  // Default n_space
+}
+
+TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
+    std::vector<AmericanOptionParams> batch(5);
+    for (size_t i = 0; i < 5; ++i) {
+        batch[i] = AmericanOptionParams{
+            .strike = 100.0,
+            .spot = 100.0,
+            .maturity = 1.0,
+            .volatility = 0.20 + 0.02 * i,
+            .rate = 0.05,
+            .continuous_dividend_yield = 0.02,
+            .option_type = OptionType::PUT,
+            .discrete_dividends = {}
+        };
+    }
+
+    // Track callback invocations
+    std::vector<size_t> callback_indices;
+    std::mutex callback_mutex;
+
+    auto results = BatchAmericanOptionSolver::solve_batch(
+        batch, -3.0, 3.0, 101, 1000,
+        [&](size_t idx, AmericanOptionSolver& solver) {
+            std::lock_guard<std::mutex> lock(callback_mutex);
+            callback_indices.push_back(idx);
+        });
+
+    // Verify all solves succeeded
+    ASSERT_EQ(results.size(), 5);
+    for (const auto& result : results) {
+        EXPECT_TRUE(result.has_value());
+    }
+
+    // Verify callback was invoked for each option
+    EXPECT_EQ(callback_indices.size(), 5);
+    std::sort(callback_indices.begin(), callback_indices.end());
+    for (size_t i = 0; i < 5; ++i) {
+        EXPECT_EQ(callback_indices[i], i);
+    }
+}
+
+TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
+    std::vector<AmericanOptionParams> batch(3);
+    for (size_t i = 0; i < 3; ++i) {
+        batch[i] = AmericanOptionParams{
+            .strike = 100.0,
+            .spot = 100.0,
+            .maturity = 1.0,
+            .volatility = 0.20,
+            .rate = 0.05,
+            .continuous_dividend_yield = 0.02,
+            .option_type = OptionType::PUT,
+            .discrete_dividends = {}
+        };
+    }
+
+    // Create collectors for each solve
+    std::vector<double> moneyness = {0.9, 1.0, 1.1};
+    std::vector<double> maturities = {0.5, 1.0};
+
+    std::vector<PriceTableSnapshotCollector> collectors;
+    for (size_t i = 0; i < 3; ++i) {
+        PriceTableSnapshotCollectorConfig config{
+            .moneyness = std::span{moneyness},
+            .tau = std::span{maturities},
+            .K_ref = 100.0,
+            .option_type = OptionType::PUT,
+            .payoff_params = nullptr
+        };
+        collectors.emplace_back(config);
+    }
+
+    // Register snapshots via callback
+    auto results = BatchAmericanOptionSolver::solve_batch(
+        batch, -3.0, 3.0, 101, 1000,
+        [&](size_t idx, AmericanOptionSolver& solver) {
+            solver.register_snapshot(499, 0, &collectors[idx]);  // τ=0.5
+            solver.register_snapshot(999, 1, &collectors[idx]);  // τ=1.0
+        });
+
+    // Verify all solves succeeded
+    ASSERT_EQ(results.size(), 3);
+    for (const auto& result : results) {
+        EXPECT_TRUE(result.has_value());
+    }
+
+    // Verify snapshots were collected
+    for (size_t i = 0; i < 3; ++i) {
+        auto prices = collectors[i].prices();
+        EXPECT_EQ(prices.size(), moneyness.size() * maturities.size());
+
+        // All prices should be positive
+        for (double price : prices) {
+            EXPECT_GT(price, 0.0);
+        }
+    }
+}
+
+TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
+    std::vector<AmericanOptionParams> batch(3);
+    for (size_t i = 0; i < 3; ++i) {
+        batch[i] = AmericanOptionParams{
+            .strike = 100.0,
+            .spot = 100.0,
+            .maturity = 1.0,
+            .volatility = 0.20,
+            .rate = 0.05,
+            .continuous_dividend_yield = 0.02,
+            .option_type = OptionType::PUT,
+            .discrete_dividends = {}
+        };
+    }
+
+    // Call without callback (backward compatible)
+    auto results = BatchAmericanOptionSolver::solve_batch(
+        batch, -3.0, 3.0, 101, 1000);
+
+    ASSERT_EQ(results.size(), 3);
+    for (const auto& result : results) {
+        EXPECT_TRUE(result.has_value());
+        EXPECT_GT(result.value().value, 0.0);
+    }
 }
 
 }  // namespace
