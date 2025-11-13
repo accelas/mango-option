@@ -278,30 +278,32 @@ public:
     /// Solve a batch of American options in parallel
     ///
     /// Each thread creates its own workspace to avoid data races.
-    /// The workspace parameters (grid configuration) are shared.
+    /// The workspace parameters (grid configuration) are validated once.
     ///
     /// @param params Vector of option parameters
     /// @param x_min Minimum log-moneyness
     /// @param x_max Maximum log-moneyness
     /// @param n_space Number of spatial grid points
     /// @param n_time Number of time steps
+    /// @param setup Optional callback invoked after solver creation, before solve()
     /// @return Vector of results (same order as input)
     static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
         std::span<const AmericanOptionParams> params,
         double x_min,
         double x_max,
         size_t n_space,
-        size_t n_time)
+        size_t n_time,
+        SetupCallback setup = nullptr)
     {
         std::vector<expected<AmericanOptionResult, SolverError>> results(params.size());
 
         // Validate workspace parameters once before parallel loop
-        auto workspace_template = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
-        if (!workspace_template) {
-            // If workspace creation fails, return error for all options
+        auto validation = AmericanSolverWorkspace::validate_params(x_min, x_max, n_space, n_time);
+        if (!validation) {
+            // If workspace validation fails, return error for all options
             SolverError error{
                 .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Invalid workspace parameters: " + workspace_template.error(),
+                .message = "Invalid workspace parameters: " + validation.error(),
                 .iterations = 0
             };
             for (size_t i = 0; i < params.size(); ++i) {
@@ -309,6 +311,28 @@ public:
             }
             return results;
         }
+
+        // Common solve logic
+        auto solve_one = [&](size_t i, std::shared_ptr<AmericanSolverWorkspace> workspace)
+            -> expected<AmericanOptionResult, SolverError>
+        {
+            // Use factory method to avoid exceptions from constructor
+            auto solver_result = AmericanOptionSolver::create(params[i], workspace);
+            if (!solver_result) {
+                return unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .message = solver_result.error(),
+                    .iterations = 0
+                });
+            }
+
+            // NEW: Invoke setup callback if provided
+            if (setup) {
+                setup(i, solver_result.value());
+            }
+
+            return solver_result.value().solve();
+        };
 
         // Use parallel region + for to enable per-thread workspace reuse
 #ifdef _OPENMP
@@ -333,35 +357,28 @@ public:
 
 #pragma omp for
                 for (size_t i = 0; i < params.size(); ++i) {
-                    // Use factory method to avoid exceptions from constructor
-                    auto solver_result = AmericanOptionSolver::create(params[i], thread_workspace);
-                    if (!solver_result) {
-                        results[i] = unexpected(SolverError{
-                            .code = SolverErrorCode::InvalidConfiguration,
-                            .message = solver_result.error(),
-                            .iterations = 0
-                        });
-                    } else {
-                        results[i] = solver_result.value().solve();
-                    }
+                    results[i] = solve_one(i, thread_workspace);
                 }
             }
         }
 #else
-        // Sequential: reuse validated workspace for all options
-        auto workspace = workspace_template.value();
-        for (size_t i = 0; i < params.size(); ++i) {
-            // Use factory method to avoid exceptions from constructor
-            auto solver_result = AmericanOptionSolver::create(params[i], workspace);
-            if (!solver_result) {
-                results[i] = unexpected(SolverError{
-                    .code = SolverErrorCode::InvalidConfiguration,
-                    .message = solver_result.error(),
-                    .iterations = 0
-                });
-            } else {
-                results[i] = solver_result.value().solve();
+        // Sequential: create workspace once and reuse for all options
+        auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace_result) {
+            SolverError error{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Failed to create workspace: " + workspace_result.error(),
+                .iterations = 0
+            };
+            for (size_t i = 0; i < params.size(); ++i) {
+                results[i] = unexpected(error);
             }
+            return results;
+        }
+
+        auto workspace = workspace_result.value();
+        for (size_t i = 0; i < params.size(); ++i) {
+            results[i] = solve_one(i, workspace);
         }
 #endif
 
@@ -374,9 +391,10 @@ public:
         double x_min,
         double x_max,
         size_t n_space,
-        size_t n_time)
+        size_t n_time,
+        SetupCallback setup = nullptr)
     {
-        return solve_batch(std::span{params}, x_min, x_max, n_space, n_time);
+        return solve_batch(std::span{params}, x_min, x_max, n_space, n_time, setup);
     }
 };
 
