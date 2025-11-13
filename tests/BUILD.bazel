@@ -486,3 +486,14 @@ cc_test(
     ],
     tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
 )
+
+cc_test(
+    name = "option_chain_solver_test",
+    size = "small",
+    srcs = ["option_chain_solver_test.cc"],
+    deps = [
+        "//src/option:option_chain_solver",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
