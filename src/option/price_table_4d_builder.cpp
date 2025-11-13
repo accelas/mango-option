@@ -167,43 +167,112 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // Start timer
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Key insight: For each (σ, r) pair, solve ONE PDE at max maturity
-    // and collect snapshots at all intermediate maturities.
-    // This gives us the full 2D (m, τ) surface with O(Nσ × Nr) solves
-    // instead of O(Nm × Nt × Nσ × Nr).
+    // Routing decision: normalized solver or batch API?
+    bool use_normalized_solver = should_use_normalized_solver(
+        x_min, x_max, n_space, {});  // No discrete dividends
 
-    const double T_max = maturity_.back();  // Maximum maturity
-    const double dt = T_max / n_time;
-
-    // Precompute step indices for each maturity
-    // CRITICAL: PDESolver calls process_snapshots(step, t) where t = (step+1)*dt
-    // So to capture a snapshot at maturity τ, we need step k such that (k+1)*dt ≈ τ
-    // Therefore: k = round(τ/dt) - 1
-    std::vector<size_t> step_indices(Nt);
-    for (size_t j = 0; j < Nt; ++j) {
-        // Compute step index: k = round(τ/dt) - 1
-        double step_exact = maturity_[j] / dt - 1.0;
-        long long step_rounded = std::llround(step_exact);
-
-        // Clamp to valid range [0, n_time-1]
-        if (step_rounded < 0) {
-            step_indices[j] = 0;  // Minimum maturity (at time dt)
-        } else if (step_rounded >= static_cast<long long>(n_time)) {
-            step_indices[j] = n_time - 1;  // Maximum maturity (at time n_time*dt)
-        } else {
-            step_indices[j] = static_cast<size_t>(step_rounded);
-        }
-    }
-
-    // Validate workspace parameters before parallel work
-    auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
-    if (!workspace_result) {
-        return unexpected("Invalid workspace parameters: " + workspace_result.error());
-    }
-
-    // Loop over (σ, r) pairs only - this is the separable batch approach
     size_t failed_count = 0;
-    const bool enable_parallel = (Nv * Nr > 4);
+
+    if (use_normalized_solver) {
+        // FAST PATH: Normalized solver
+        const double T_max = maturity_.back();
+        const double spot = K_ref_;  // For price tables, spot = K_ref
+
+#pragma omp parallel
+        {
+            // Create normalized request template (per-thread)
+            NormalizedSolveRequest base_request{
+                .sigma = 0.20,  // Placeholder, set in loop
+                .rate = 0.05,   // Placeholder, set in loop
+                .dividend = dividend_yield,
+                .option_type = option_type,
+                .x_min = x_min,
+                .x_max = x_max,
+                .n_space = n_space,
+                .n_time = n_time,
+                .T_max = T_max,
+                .tau_snapshots = std::span{maturity_}
+            };
+
+            // Create workspace once per thread (OUTSIDE work-sharing loop)
+            auto workspace_result = NormalizedWorkspace::create(base_request);
+
+            if (!workspace_result) {
+                // Workspace creation failed, mark all as errors
+#pragma omp for collapse(2)
+                for (size_t k = 0; k < Nv; ++k) {
+                    for (size_t l = 0; l < Nr; ++l) {
+#pragma omp atomic
+                        ++failed_count;
+                    }
+                }
+            } else {
+                auto workspace = std::move(workspace_result.value());
+                auto surface = workspace.surface_view();
+
+#pragma omp for collapse(2) schedule(dynamic, 1)
+                for (size_t k = 0; k < Nv; ++k) {
+                    for (size_t l = 0; l < Nr; ++l) {
+                        // Set (σ, r) for this solve
+                        NormalizedSolveRequest request = base_request;
+                        request.sigma = volatility_[k];
+                        request.rate = rate_[l];
+
+                        // Solve normalized PDE
+                        auto solve_result = NormalizedChainSolver::solve(
+                            request, workspace, surface);
+
+                        if (!solve_result) {
+#pragma omp atomic
+                            ++failed_count;
+                            continue;
+                        }
+
+                        // Extract prices from surface
+                        // Moneyness convention: m = K/S
+                        for (size_t i = 0; i < Nm; ++i) {
+                            double x = -std::log(moneyness_[i]);  // x = -ln(m)
+                            double K = moneyness_[i] * spot;       // K = m * S
+
+                            for (size_t j = 0; j < Nt; ++j) {
+                                double u = surface.interpolate(x, maturity_[j]);
+                                size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                                prices_4d[idx_4d] = K * u;  // V = K·u
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    } else {
+        // FALLBACK PATH: Batch API with snapshots
+        const double T_max = maturity_.back();
+        const double dt = T_max / n_time;
+
+        // Precompute step indices for each maturity
+        std::vector<size_t> step_indices(Nt);
+        for (size_t j = 0; j < Nt; ++j) {
+            double step_exact = maturity_[j] / dt - 1.0;
+            long long step_rounded = std::llround(step_exact);
+
+            if (step_rounded < 0) {
+                step_indices[j] = 0;
+            } else if (step_rounded >= static_cast<long long>(n_time)) {
+                step_indices[j] = n_time - 1;
+            } else {
+                step_indices[j] = static_cast<size_t>(step_rounded);
+            }
+        }
+
+        // Validate workspace parameters before parallel work
+        auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace_result) {
+            return unexpected("Invalid workspace parameters: " + workspace_result.error());
+        }
+
+        // Loop over (σ, r) pairs only - this is the separable batch approach
+        const bool enable_parallel = (Nv * Nr > 4);
 
     if (enable_parallel) {
 #pragma omp parallel
@@ -334,6 +403,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
             }
         }
     }
+    }  // End of else (FALLBACK PATH)
 
     if (failed_count > 0) {
         return unexpected("Failed to solve " + std::to_string(failed_count) +
