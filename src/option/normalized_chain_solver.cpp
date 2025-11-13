@@ -124,4 +124,76 @@ double NormalizedSurfaceView::interpolate(double x, double tau) const {
            fx * ft * v11;
 }
 
+expected<void, std::string> NormalizedChainSolver::check_eligibility(
+    const NormalizedSolveRequest& request,
+    std::span<const double> moneyness_grid)
+{
+    // Check grid spacing
+    double dx = (request.x_max - request.x_min) / (request.n_space - 1);
+    if (dx > EligibilityLimits::MAX_DX) {
+        return unexpected(
+            "Grid spacing " + std::to_string(dx) +
+            " exceeds limit " + std::to_string(EligibilityLimits::MAX_DX) +
+            " (Von Neumann stability requirement)");
+    }
+
+    // Check domain width
+    double width = request.x_max - request.x_min;
+    if (width > EligibilityLimits::MAX_WIDTH) {
+        return unexpected(
+            "Domain width " + std::to_string(width) +
+            " exceeds limit " + std::to_string(EligibilityLimits::MAX_WIDTH) +
+            " (convergence degrades beyond 5.8 log-units)");
+    }
+
+    // Check margins
+    // Moneyness convention: m = K/S, so x = ln(S/K) = -ln(m)
+    // x_min_data = -ln(m_max), x_max_data = -ln(m_min)
+    if (moneyness_grid.empty()) {
+        return unexpected("Moneyness grid is empty");
+    }
+
+    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_grid);
+    double m_min = *m_min_it;
+    double m_max = *m_max_it;
+
+    if (m_min <= 0.0 || m_max <= 0.0) {
+        return unexpected("Moneyness values must be positive (m = K/S > 0)");
+    }
+
+    double x_min_data = -std::log(m_max);
+    double x_max_data = -std::log(m_min);
+
+    double margin_left = x_min_data - request.x_min;
+    double margin_right = request.x_max - x_max_data;
+    double min_margin = EligibilityLimits::min_margin(dx);
+
+    if (margin_left < min_margin) {
+        return unexpected(
+            "Left margin " + std::to_string(margin_left) +
+            " < required " + std::to_string(min_margin) +
+            " (need ≥6 ghost cells to avoid boundary reflection)");
+    }
+
+    if (margin_right < min_margin) {
+        return unexpected(
+            "Right margin " + std::to_string(margin_right) +
+            " < required " + std::to_string(min_margin) +
+            " (need ≥6 ghost cells to avoid boundary reflection)");
+    }
+
+    // Check ratio (derived from width + margin constraints)
+    double ratio = m_max / m_min;
+    double max_ratio_limit = EligibilityLimits::max_ratio(dx);
+    if (ratio > max_ratio_limit) {
+        return unexpected(
+            "Moneyness ratio " + std::to_string(ratio) +
+            " exceeds limit " + std::to_string(max_ratio_limit) +
+            " (derived from width=" + std::to_string(EligibilityLimits::MAX_WIDTH) +
+            " and margin=" + std::to_string(min_margin) + ")");
+    }
+
+    return {};
+}
+
 }  // namespace mango
