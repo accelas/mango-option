@@ -151,5 +151,60 @@ TEST(AmericanOptionChainTest, NegativeDiscreteDividendAmountFails) {
     EXPECT_NE(result.error().find("dividend amount"), std::string::npos);
 }
 
+TEST(OptionChainSolverTest, SolvesSimpleChainSequentially) {
+    // Create chain: 5 put strikes around ATM
+    AmericanOptionChain chain{
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = 0.20,
+        .rate = 0.05,
+        .continuous_dividend_yield = 0.02,
+        .option_type = OptionType::PUT,
+        .strikes = {90.0, 95.0, 100.0, 105.0, 110.0},
+        .discrete_dividends = {}
+    };
+
+    AmericanOptionGrid grid;
+    grid.n_space = 101;
+    grid.n_time = 1000;
+    grid.x_min = -3.0;
+    grid.x_max = 3.0;
+
+    auto results = OptionChainSolver::solve_chain(chain, grid);
+
+    ASSERT_EQ(results.size(), 5);
+
+    // All should converge
+    for (const auto& [strike, result] : results) {
+        ASSERT_TRUE(result.has_value()) << "Strike " << strike << " failed to converge";
+        EXPECT_GT(result->value, 0.0) << "Strike " << strike << " has non-positive value";
+    }
+
+    // Put values should increase as strike increases (intrinsic value)
+    EXPECT_LT(results[0].result->value, results[4].result->value)
+        << "Deep OTM put should be cheaper than deep ITM put";
+}
+
+TEST(OptionChainSolverTest, HandlesInvalidChainGracefully) {
+    // Invalid chain: negative volatility
+    AmericanOptionChain chain{
+        .spot = 100.0,
+        .maturity = 1.0,
+        .volatility = -0.20,  // Invalid!
+        .rate = 0.05,
+        .continuous_dividend_yield = 0.02,
+        .option_type = OptionType::PUT,
+        .strikes = {100.0}
+    };
+
+    AmericanOptionGrid grid;
+
+    auto results = OptionChainSolver::solve_chain(chain, grid);
+
+    ASSERT_EQ(results.size(), 1);
+    EXPECT_FALSE(results[0].result.has_value());
+    EXPECT_EQ(results[0].result.error().code, SolverErrorCode::InvalidConfiguration);
+}
+
 }  // namespace
 }  // namespace mango
