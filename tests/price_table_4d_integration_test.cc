@@ -78,6 +78,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
     ASSERT_TRUE(result_fallback.has_value());
 
     // Compare prices at same query points
+    // Use relative error tolerance (1%) instead of absolute (catches scaling bugs)
     for (double m : {0.9, 1.0, 1.1}) {
         for (double tau : {0.5, 1.0}) {
             for (double sigma : {0.20, 0.25}) {
@@ -85,9 +86,13 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
                     double price_fast = result_fast->evaluator->eval(m, tau, sigma, r);
                     double price_fallback = result_fallback->evaluator->eval(m, tau, sigma, r);
 
-                    // Expect <2bp difference (relaxed due to interpolation and grid differences)
-                    EXPECT_NEAR(price_fast, price_fallback, 0.02)
-                        << "Mismatch at m=" << m << " tau=" << tau << " sigma=" << sigma << " r=" << r;
+                    // Use relative error: |fast - fallback| / |fallback| < 1%
+                    // This catches scaling bugs that absolute tolerance misses
+                    double rel_error = std::abs(price_fast - price_fallback) / std::abs(price_fallback);
+                    EXPECT_LT(rel_error, 0.01)
+                        << "Relative error " << (rel_error * 100) << "% exceeds 1% at "
+                        << "m=" << m << " tau=" << tau << " sigma=" << sigma << " r=" << r
+                        << " (fast=" << price_fast << ", fallback=" << price_fallback << ")";
                 }
             }
         }
