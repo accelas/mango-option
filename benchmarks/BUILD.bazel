@@ -63,6 +63,7 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:slice_solver_workspace",
+        "//src/option:option_chain_solver",
         "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "//src/interpolation:bspline_4d",

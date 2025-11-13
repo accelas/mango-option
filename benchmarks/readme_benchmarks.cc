@@ -1,9 +1,10 @@
-#include "src/american_option.hpp"
-#include "src/slice_solver_workspace.hpp"
-#include "src/bspline_4d.hpp"
-#include "src/bspline_fitter_4d.hpp"
-#include "src/iv_solver.hpp"
-#include "src/iv_solver_interpolated.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/slice_solver_workspace.hpp"
+#include "src/option/option_chain_solver.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -219,21 +220,18 @@ BENCHMARK(BM_README_AmericanSingle)
 static void BM_README_AmericanBatch64(benchmark::State& state) {
     const size_t batch_size = static_cast<size_t>(state.range(0));
 
-    std::vector<AmericanOptionParams> batch;
-    batch.reserve(batch_size);
+    // Create option chain with varying strikes
+    AmericanOptionChain chain;
+    chain.spot = 100.0;
+    chain.maturity = 1.0;
+    chain.volatility = 0.20;
+    chain.rate = 0.05;
+    chain.continuous_dividend_yield = 0.02;
+    chain.option_type = OptionType::PUT;
 
+    chain.strikes.reserve(batch_size);
     for (size_t i = 0; i < batch_size; ++i) {
-        double strike = 90.0 + i * 0.5;
-        batch.push_back(AmericanOptionParams{
-            .strike = strike,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        });
+        chain.strikes.push_back(90.0 + i * 0.5);
     }
 
     AmericanOptionGrid grid;
@@ -241,10 +239,10 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
     grid.n_time = 1000;
 
     auto run_once = [&]() {
-        auto results = solve_american_options_batch(batch, grid);
+        auto results = OptionChainSolver::solve_chain(chain, grid);
         for (const auto& res : results) {
-            if (!res) {
-                throw std::runtime_error(res.error().message);
+            if (!res.result) {
+                throw std::runtime_error(res.result.error().message);
             }
         }
         benchmark::DoNotOptimize(results);
