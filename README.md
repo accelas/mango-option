@@ -238,12 +238,14 @@ See `examples/` for complete working programs.
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| American option (single) | 4.1–20 ms | Depends on grid resolution (see benchmarks) |
-| American option (batch of 64) | ~1.5 ms wall | OpenMP parallelization |
-| American IV (FDM-based) | 31–48 ms | Brent’s method with full PDE solve per iteration |
-| **American IV (B-spline surface)** | **~1.05 µs** | **Measured via `bazel run //benchmarks:component_performance -- --benchmark_filter=BSpline`** |
-| Price table interpolation | ~0.5 µs | Single 4D cubic B-spline query |
-| Greeks (vega, gamma) | ~0.5 µs | Same spline evaluation as price |
+| American option (single, 101×1k) | ~4.5 ms | Standard grid resolution |
+| American option (single, 501×5k) | ~105 ms | High-resolution grid |
+| American option (batch of 64) | ~283 ms | Option chain solver with workspace reuse |
+| American IV (FDM, 101×1k) | ~137 ms | Brent's method with full PDE solve per iteration |
+| American IV (FDM, 201×2k) | ~269 ms | Higher resolution grid |
+| **American IV (B-spline surface)** | **~7.5 µs** | **Interpolation-based IV solver** |
+| Price table interpolation | ~8 ns | Single 4D cubic B-spline query |
+| Greeks (vega, gamma) | ~44 ns | Finite difference via table interpolation |
 
 ### Validation & Accuracy
 
