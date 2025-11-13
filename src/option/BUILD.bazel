@@ -131,3 +131,15 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "option_chain_solver",
+    hdrs = ["option_chain_solver.hpp"],
+    deps = [
+        ":american_option",
+        ":slice_solver_workspace",
+        "//src/support:expected",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
