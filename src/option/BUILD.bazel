@@ -148,6 +148,7 @@ cc_library(
 
 cc_library(
     name = "normalized_chain_solver",
+    srcs = ["normalized_chain_solver.cpp"],
     hdrs = ["normalized_chain_solver.hpp"],
     deps = [
         ":american_option",
