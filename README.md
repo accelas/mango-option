@@ -238,14 +238,14 @@ See `examples/` for complete working programs.
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| American option (single, 101×1k) | ~4.5 ms | Standard grid resolution |
+| American option (single, 101×1k) | ~4.4 ms | Standard grid resolution |
 | American option (single, 501×5k) | ~105 ms | High-resolution grid |
-| American option (batch of 64) | ~283 ms | Option chain solver with workspace reuse |
-| American IV (FDM, 101×1k) | ~137 ms | Brent's method with full PDE solve per iteration |
-| American IV (FDM, 201×2k) | ~269 ms | Higher resolution grid |
-| **American IV (B-spline surface)** | **~7.5 µs** | **Interpolation-based IV solver** |
-| Price table interpolation | ~8 ns | Single 4D cubic B-spline query |
-| Greeks (vega, gamma) | ~44 ns | Finite difference via table interpolation |
+| American option (batch of 64) | ~284 ms | Option chain solver with workspace reuse |
+| American IV (FDM, 101×1k) | ~42.6 ms | Brent's method with full PDE solve per iteration |
+| American IV (FDM, 201×2k) | ~162 ms | Higher resolution grid |
+| **American IV (B-spline surface)** | **~1.6 µs** | **Interpolation-based IV solver** |
+| Price table interpolation | ~258 ns | Single 4D cubic B-spline query |
+| Greeks (vega, gamma) | ~1.3 µs | Finite difference via table interpolation |
 
 ### Validation & Accuracy
 
