@@ -99,6 +99,92 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
     }
 }
 
+TEST(PriceTable4DIntegrationTest, FastPathVsFallbackRawPriceEquivalence) {
+    // REGRESSION TEST: Compare raw precomputed prices (not interpolated)
+    // This test ensures fast path and fallback produce identical numerical results
+    // at every grid point. If this test fails after code changes, it indicates
+    // a bug was introduced in the fast path that breaks scale invariance.
+
+    std::vector<double> moneyness = {0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15};
+    std::vector<double> maturity = {0.25, 0.5, 1.0, 1.5};
+    std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> rate = {0.02, 0.04, 0.06, 0.08};
+
+    const size_t Nm = moneyness.size();
+    const size_t Nt = maturity.size();
+    const size_t Nv = volatility.size();
+    const size_t Nr = rate.size();
+
+    // Fast path (narrow range → normalized solver)
+    auto builder_fast = PriceTable4DBuilder::create(
+        moneyness, maturity, volatility, rate, 100.0);
+    auto result_fast = builder_fast.precompute(
+        OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
+
+    // Fallback (wider grid → batch API)
+    auto builder_fallback = PriceTable4DBuilder::create(
+        moneyness, maturity, volatility, rate, 100.0);
+    auto result_fallback = builder_fallback.precompute(
+        OptionType::PUT, -3.5, 3.5, 121, 1000, 0.02);
+
+    ASSERT_TRUE(result_fast.has_value());
+    ASSERT_TRUE(result_fallback.has_value());
+
+    // Compare raw precomputed prices at EVERY grid point
+    // This is stricter than interpolation comparison
+    const auto& prices_fast = result_fast->prices_4d;
+    const auto& prices_fallback = result_fallback->prices_4d;
+
+    ASSERT_EQ(prices_fast.size(), prices_fallback.size());
+    ASSERT_EQ(prices_fast.size(), Nm * Nt * Nv * Nr);
+
+    size_t max_errors_to_show = 5;
+    size_t error_count = 0;
+
+    for (size_t i = 0; i < Nm; ++i) {
+        for (size_t j = 0; j < Nt; ++j) {
+            for (size_t k = 0; k < Nv; ++k) {
+                for (size_t l = 0; l < Nr; ++l) {
+                    size_t idx = ((i * Nt + j) * Nv + k) * Nr + l;
+
+                    double price_fast = prices_fast[idx];
+                    double price_fallback = prices_fallback[idx];
+
+                    // Relative error < 2.0% for raw prices
+                    // Looser than interpolated test due to:
+                    // 1. Different PDE grid resolutions (101 vs 121 points)
+                    // 2. Different PDE domain widths ([-3,3] vs [-3.5,3.5])
+                    // 3. Accumulated discretization errors (especially near grid edges)
+                    // This tolerance catches scaling bugs (10%+ errors) while allowing
+                    // reasonable numerical differences from different discretizations.
+                    double rel_error = std::abs(price_fast - price_fallback) /
+                                      std::abs(price_fallback);
+
+                    if (rel_error >= 0.02 && error_count < max_errors_to_show) {
+                        std::cerr << "Raw price mismatch at grid point ["
+                                  << i << "," << j << "," << k << "," << l << "]: "
+                                  << "m=" << moneyness[i] << " tau=" << maturity[j]
+                                  << " sigma=" << volatility[k] << " r=" << rate[l]
+                                  << " fast=" << price_fast
+                                  << " fallback=" << price_fallback
+                                  << " rel_error=" << (rel_error * 100) << "%\n";
+                        ++error_count;
+                    }
+
+                    EXPECT_LT(rel_error, 0.02)
+                        << "Relative error " << (rel_error * 100) << "% exceeds 2.0% at grid ["
+                        << i << "," << j << "," << k << "," << l << "]";
+                }
+            }
+        }
+    }
+
+    if (error_count > 0) {
+        std::cerr << "Total raw price mismatches: " << error_count << " out of "
+                  << (Nm * Nt * Nv * Nr) << " grid points\n";
+    }
+}
+
 TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
     // Benchmark fast path
     auto builder = PriceTable4DBuilder::create(
