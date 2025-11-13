@@ -112,6 +112,34 @@ public:
         const AmericanOptionGrid& grid,
         const TRBDF2Config& trbdf2_config = {},
         const RootFindingConfig& root_config = {});
+
+    /**
+     * Solve multiple option chains in parallel.
+     *
+     * Each chain is solved sequentially (workspace reuse), but chains
+     * are processed in parallel using OpenMP. This is the recommended
+     * mode for typical use cases.
+     *
+     * Parallelization strategy:
+     * - Parallelize ACROSS chains (not within)
+     * - Each thread gets one chain at a time
+     * - Sequential solve within chain keeps workspace hot
+     *
+     * Use when: Multiple chains (typical case).
+     *
+     * Performance: Same per-chain benefit as solve_chain(), scaled across cores.
+     *
+     * @param chains Vector of option chains
+     * @param grid PDE grid configuration (shared across all chains)
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration
+     * @return Results for each chain (same order as input)
+     */
+    static std::vector<std::vector<ChainStrikeResult>> solve_chains(
+        std::span<const AmericanOptionChain> chains,
+        const AmericanOptionGrid& grid,
+        const TRBDF2Config& trbdf2_config = {},
+        const RootFindingConfig& root_config = {});
 };
 
 }  // namespace mango

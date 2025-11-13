@@ -1,6 +1,7 @@
 #include "src/option/option_chain_solver.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/slice_solver_workspace.hpp"
+#include "src/support/parallel.hpp"
 
 namespace mango {
 
@@ -74,6 +75,24 @@ std::vector<ChainStrikeResult> OptionChainSolver::solve_chain(
     }
 
     return results;
+}
+
+std::vector<std::vector<ChainStrikeResult>> OptionChainSolver::solve_chains(
+    std::span<const AmericanOptionChain> chains,
+    const AmericanOptionGrid& grid,
+    const TRBDF2Config& trbdf2_config,
+    const RootFindingConfig& root_config)
+{
+    std::vector<std::vector<ChainStrikeResult>> all_results(chains.size());
+
+    // Parallelize ACROSS chains (not within)
+    // Each thread solves one chain sequentially with workspace reuse
+    MANGO_PRAGMA_PARALLEL_FOR
+    for (size_t i = 0; i < chains.size(); ++i) {
+        all_results[i] = solve_chain(chains[i], grid, trbdf2_config, root_config);
+    }
+
+    return all_results;
 }
 
 }  // namespace mango

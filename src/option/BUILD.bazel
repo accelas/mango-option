@@ -140,7 +140,12 @@ cc_library(
         ":american_option",
         ":slice_solver_workspace",
         "//src/support:expected",
+        "//src/support:parallel",
     ],
-    copts = ["-std=c++23"],
+    copts = [
+        "-std=c++23",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
