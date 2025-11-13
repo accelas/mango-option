@@ -240,7 +240,8 @@ See `examples/` for complete working programs.
 |-----------|------|-------|
 | American option (single, 101×1k) | ~4.4 ms | Standard grid resolution |
 | American option (single, 501×5k) | ~105 ms | High-resolution grid |
-| American option (batch of 64) | ~284 ms | Option chain solver with workspace reuse |
+| American option (batch of 64) | ~284 ms total | Option chain solver with workspace reuse |
+| American option (batch, per option) | ~4.4 ms | Amortized time per option in batch mode |
 | American IV (FDM, 101×1k) | ~42.6 ms | Brent's method with full PDE solve per iteration |
 | American IV (FDM, 201×2k) | ~162 ms | Higher resolution grid |
 | **American IV (B-spline surface)** | **~1.6 µs** | **Interpolation-based IV solver** |
