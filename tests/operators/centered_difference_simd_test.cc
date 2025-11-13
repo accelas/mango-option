@@ -38,7 +38,7 @@ TEST(CenteredDifferenceSIMDTest, TiledComputation) {
     auto grid = grid_result.value().generate();
 
     mango::operators::GridSpacing<double> spacing(grid.view());
-    mango::operators::SimdBackend<double> stencil(spacing, 32);  // L1 tile size
+    mango::operators::SimdBackend<double> stencil(spacing);
 
     // u(x) = sin(x), d2u/dx2 = -sin(x)
     std::vector<double> u(101);
@@ -48,7 +48,7 @@ TEST(CenteredDifferenceSIMDTest, TiledComputation) {
 
     std::vector<double> d2u_dx2(101, 0.0);
 
-    stencil.compute_second_derivative_tiled(u, d2u_dx2, 1, 100);
+    stencil.compute_second_derivative(u, d2u_dx2, 1, 100);
 
     // Verify against analytical derivative
     // Note: Finite differences have truncation error O(dx^2)

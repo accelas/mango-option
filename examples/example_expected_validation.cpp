@@ -25,10 +25,20 @@ int main() {
             .option_type = OptionType::PUT
         };
 
-        AmericanOptionGrid valid_grid{};
+        // Create workspace
+        constexpr double x_min = -3.0;
+        constexpr double x_max = 3.0;
+        constexpr size_t n_space = 101;
+        constexpr size_t n_time = 1000;
+
+        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace) {
+            std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
+            return 1;
+        }
 
         // Using factory method with expected-based validation
-        auto result = AmericanOptionSolver::create(valid_params, valid_grid);
+        auto result = AmericanOptionSolver::create(valid_params, workspace.value());
 
         if (result.has_value()) {
             std::cout << "   ✓ Validation passed! Solver created successfully.\n";
@@ -59,9 +69,18 @@ int main() {
             .option_type = OptionType::PUT
         };
 
-        AmericanOptionGrid valid_grid{};
+        constexpr double x_min = -3.0;
+        constexpr double x_max = 3.0;
+        constexpr size_t n_space = 101;
+        constexpr size_t n_time = 1000;
 
-        auto result = AmericanOptionSolver::create(invalid_params, valid_grid);
+        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace) {
+            std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
+            return 1;
+        }
+
+        auto result = AmericanOptionSolver::create(invalid_params, workspace.value());
 
         if (result.has_value()) {
             std::cout << "   ✓ Validation passed!\n";
@@ -84,15 +103,17 @@ int main() {
             .option_type = OptionType::CALL
         };
 
-        AmericanOptionGrid invalid_grid{};
-        invalid_grid.n_space = 5;  // Too small!
+        constexpr double x_min = -3.0;
+        constexpr double x_max = 3.0;
+        constexpr size_t n_space = 5;  // Too small!
+        constexpr size_t n_time = 1000;
 
-        auto result = AmericanOptionSolver::create(valid_params, invalid_grid);
+        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
 
-        if (result.has_value()) {
-            std::cout << "   ✓ Validation passed!\n";
+        if (workspace.has_value()) {
+            std::cout << "   ✓ Workspace created (unexpected)!\n";
         } else {
-            std::cout << "   ✗ Validation failed: " << result.error() << "\n";
+            std::cout << "   ✗ Workspace creation failed: " << workspace.error() << "\n";
         }
         std::cout << "\n";
     }
@@ -110,9 +131,18 @@ int main() {
             .option_type = OptionType::PUT
         };
 
-        AmericanOptionGrid valid_grid{};
+        constexpr double x_min = -3.0;
+        constexpr double x_max = 3.0;
+        constexpr size_t n_space = 101;
+        constexpr size_t n_time = 1000;
 
-        auto result = AmericanOptionSolver::create(invalid_params, valid_grid);
+        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace) {
+            std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
+            return 1;
+        }
+
+        auto result = AmericanOptionSolver::create(invalid_params, workspace.value());
 
         if (result.has_value()) {
             std::cout << "   ✓ Validation passed!\n";
@@ -123,14 +153,23 @@ int main() {
         std::cout << "\n";
     }
 
-    // Example 5: Using workspace mode with validation
+    // Example 5: Using shared workspace for multiple solves
     {
-        std::cout << "5. Workspace mode with validation:\n";
+        std::cout << "5. Using shared workspace for multiple solves:\n";
 
-        // Create workspace
-        auto workspace = std::make_shared<SliceSolverWorkspace>(-3.0, 3.0, 101);
+        // Create workspace once
+        constexpr double x_min = -3.0;
+        constexpr double x_max = 3.0;
+        constexpr size_t n_space = 101;
+        constexpr size_t n_time = 1000;
 
-        AmericanOptionParams valid_params{
+        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace) {
+            std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
+            return 1;
+        }
+
+        AmericanOptionParams params1{
             .strike = 100.0,
             .spot = 100.0,
             .maturity = 0.5,
@@ -140,22 +179,19 @@ int main() {
             .option_type = OptionType::CALL
         };
 
-        AmericanOptionGrid grid_for_workspace{};  // Must match workspace dimensions
-        grid_for_workspace.n_space = 101;  // Must match workspace
+        auto result1 = AmericanOptionSolver::create(params1, workspace.value());
 
-        auto result = AmericanOptionSolver::create_with_workspace(valid_params, grid_for_workspace, workspace);
-
-        if (result.has_value()) {
-            std::cout << "   ✓ Validation passed! Workspace solver created.\n";
+        if (result1.has_value()) {
+            std::cout << "   ✓ First solver created with shared workspace.\n";
         } else {
-            std::cout << "   ✗ Validation failed: " << result.error() << "\n";
+            std::cout << "   ✗ Validation failed: " << result1.error() << "\n";
         }
         std::cout << "\n";
     }
 
-    // Example 6: Backward compatibility (existing constructor still works)
+    // Example 6: Error propagation in solve()
     {
-        std::cout << "6. Backward compatibility (existing constructor):\n";
+        std::cout << "6. Error propagation in solve():\n";
         AmericanOptionParams valid_params{
             .strike = 100.0,
             .spot = 100.0,
@@ -166,30 +202,41 @@ int main() {
             .option_type = OptionType::PUT
         };
 
-        AmericanOptionGrid valid_grid{};
+        constexpr double x_min = -3.0;
+        constexpr double x_max = 3.0;
+        constexpr size_t n_space = 101;
+        constexpr size_t n_time = 1000;
 
-        try {
-            // This is the existing constructor - still works as before
-            AmericanOptionSolver solver(valid_params, valid_grid);
-            std::cout << "   ✓ Existing constructor works with valid parameters.\n";
+        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace) {
+            std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
+            return 1;
+        }
 
-            auto solution = solver.solve();
-            if (solution.has_value()) {
-                std::cout << "   ✓ Option solved successfully.\n";
-            }
-        } catch (const std::exception& e) {
-            std::cout << "   ✗ Constructor failed: " << e.what() << "\n";
+        auto solver_result = AmericanOptionSolver::create(valid_params, workspace.value());
+        if (!solver_result) {
+            std::cout << "   ✗ Solver creation failed: " << solver_result.error() << "\n\n";
+            return 1;
+        }
+
+        auto solution = solver_result.value().solve();
+        if (solution.has_value()) {
+            std::cout << "   ✓ Option solved successfully.\n";
+            std::cout << "   ✓ Option value: $" << std::fixed << std::setprecision(4)
+                     << solution.value().value << "\n";
+        } else {
+            std::cout << "   ✗ Solve failed: " << solution.error().message << "\n";
         }
         std::cout << "\n";
     }
 
     std::cout << "=== Summary ===\n";
-    std::cout << "The new expected-based validation provides:\n";
+    std::cout << "The expected-based validation provides:\n";
     std::cout << "• Non-throwing validation with clear error messages\n";
     std::cout << "• Factory methods that return expected<T, E> for better error handling\n";
-    std::cout << "• Full backward compatibility with existing constructors\n";
-    std::cout << "• Consistent validation logic between exception and expected paths\n";
-    std::cout << "• Support for both standard and workspace modes\n\n";
+    std::cout << "• Workspace creation validates grid parameters (n_space, n_time)\n";
+    std::cout << "• Solver creation validates option parameters (strike, spot, etc.)\n";
+    std::cout << "• Shared workspace support for efficient batch solving\n\n";
 
     return 0;
 }

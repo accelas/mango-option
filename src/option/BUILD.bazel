@@ -6,6 +6,20 @@ cc_library(
 )
 
 cc_library(
+    name = "american_solver_workspace",
+    hdrs = ["american_solver_workspace.hpp"],
+    deps = [
+        "//src/pde/memory:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/operators:grid_spacing",
+        "//src/support:expected",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+# Deprecated: Use american_solver_workspace instead
+cc_library(
     name = "slice_solver_workspace",
     hdrs = ["slice_solver_workspace.hpp"],
     deps = [
@@ -25,7 +39,7 @@ cc_library(
         "//src/support:parallel",
         "//src/pde/core:pde_solver",
         "//src/pde/core:spatial_operators",
-        ":slice_solver_workspace",
+        ":american_solver_workspace",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:black_scholes_pde",
         "//src/support:expected",

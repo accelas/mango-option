@@ -92,15 +92,3 @@ TEST(PDEWorkspaceTest, ResetInvalidatesSpans) {
     EXPECT_DOUBLE_EQ(u_after[0], 0.0);  // Freshly allocated
 }
 
-TEST(PDEWorkspaceTest, TileMetadata) {
-    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 100);
-    ASSERT_TRUE(grid_result.has_value());
-    auto grid = grid_result.value().generate();
-
-    mango::PDEWorkspace workspace(100, grid.span());
-
-    // 100 elements into 3 tiles: 34, 33, 33
-    auto tile0 = workspace.tile_info(0, 3);
-    EXPECT_EQ(tile0.tile_start, 0);
-    EXPECT_EQ(tile0.tile_size, 34);
-}
