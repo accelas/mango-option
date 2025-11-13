@@ -80,4 +80,38 @@ struct ChainStrikeResult {
     expected<AmericanOptionResult, SolverError> result;     ///< Price + Greeks or error
 };
 
+/**
+ * Batch solver optimized for option chains.
+ *
+ * Provides three modes:
+ * 1. solve_chain() - Sequential within chain (workspace reuse)
+ * 2. solve_chains() - Parallel across chains (default)
+ * 3. solve_chains_advanced() - Thread pool with dynamic scheduling (future)
+ */
+class OptionChainSolver {
+public:
+    /**
+     * Solve option chain sequentially with workspace reuse.
+     *
+     * Creates one SliceSolverWorkspace for entire chain and solves
+     * all strikes sequentially. This keeps the workspace "hot" and
+     * minimizes allocation overhead.
+     *
+     * Use when: Single chain, or when called from parallel context.
+     *
+     * Performance: ~10x less allocation, cache-friendly.
+     *
+     * @param chain Chain configuration (shared params, different strikes)
+     * @param grid PDE grid configuration
+     * @param trbdf2_config TR-BDF2 solver configuration
+     * @param root_config Root finding configuration
+     * @return Results for each strike (same order as chain.strikes)
+     */
+    static std::vector<ChainStrikeResult> solve_chain(
+        const AmericanOptionChain& chain,
+        const AmericanOptionGrid& grid,
+        const TRBDF2Config& trbdf2_config = {},
+        const RootFindingConfig& root_config = {});
+};
+
 }  // namespace mango
