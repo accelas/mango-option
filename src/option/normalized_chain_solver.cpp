@@ -4,6 +4,7 @@
  */
 
 #include "src/option/normalized_chain_solver.hpp"
+#include "src/option/price_table_snapshot_collector.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -122,6 +123,99 @@ double NormalizedSurfaceView::interpolate(double x, double tau) const {
            (1.0 - fx) * ft * v01 +
            fx * (1.0 - ft) * v10 +
            fx * ft * v11;
+}
+
+expected<void, SolverError> NormalizedChainSolver::solve(
+    const NormalizedSolveRequest& request,
+    NormalizedWorkspace& workspace,
+    NormalizedSurfaceView& surface_view)
+{
+    // Create solver parameters (K=1, S=1 → x = ln(S/K) = 0 is ATM)
+    AmericanOptionParams params{
+        .strike = 1.0,  // Normalized strike
+        .spot = 1.0,    // Normalized spot (ATM at x=0)
+        .maturity = request.T_max,
+        .volatility = request.sigma,
+        .rate = request.rate,
+        .continuous_dividend_yield = request.dividend,
+        .option_type = request.option_type,
+        .discrete_dividends = {}  // Normalized solver requires no discrete dividends
+    };
+
+    // Create solver with workspace
+    auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_);
+    if (!solver_result) {
+        return unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = "Failed to create solver: " + solver_result.error(),
+            .iterations = 0
+        });
+    }
+    auto solver = std::move(solver_result.value());
+
+    // Setup snapshot collector
+    // Convert moneyness m = K/S to x = ln(S/K) = -ln(m)
+    std::vector<double> x_values;
+    x_values.reserve(workspace.x_grid_.size());
+    for (double x : workspace.x_grid_) {
+        // x is already in log-moneyness, but we need to express as moneyness m
+        // x = -ln(m) → m = exp(-x)
+        double m = std::exp(-x);
+        x_values.push_back(m);
+    }
+
+    PriceTableSnapshotCollectorConfig collector_config{
+        .moneyness = std::span{x_values},
+        .tau = std::span{workspace.tau_grid_},
+        .K_ref = 1.0,  // Normalized
+        .option_type = request.option_type,
+        .payoff_params = nullptr
+    };
+    PriceTableSnapshotCollector collector(collector_config);
+
+    // Register snapshots at requested maturities
+    double dt = request.T_max / request.n_time;
+    for (size_t j = 0; j < workspace.tau_grid_.size(); ++j) {
+        // Compute step index: k = round(τ/dt) - 1
+        double step_exact = workspace.tau_grid_[j] / dt - 1.0;
+        long long step_rounded = std::llround(step_exact);
+
+        // Clamp to valid range
+        if (step_rounded < 0) {
+            step_rounded = 0;
+        } else if (step_rounded >= static_cast<long long>(request.n_time)) {
+            step_rounded = static_cast<long long>(request.n_time) - 1;
+        }
+
+        solver.register_snapshot(static_cast<size_t>(step_rounded), j, &collector);
+    }
+
+    // Solve PDE
+    auto solve_result = solver.solve();
+    if (!solve_result) {
+        return unexpected(solve_result.error());
+    }
+
+    // Extract values from collector
+    auto prices_2d = collector.prices();  // Shape: Nx × Ntau
+    size_t Nx = workspace.x_grid_.size();
+    size_t Ntau = workspace.tau_grid_.size();
+
+    if (prices_2d.size() != Nx * Ntau) {
+        return unexpected(SolverError{
+            .code = SolverErrorCode::InvalidState,
+            .message = "Snapshot collector returned wrong size",
+            .iterations = 0
+        });
+    }
+
+    // Copy to workspace values (already normalized u = V/K, and K=1)
+    std::copy(prices_2d.begin(), prices_2d.end(), workspace.values_.begin());
+
+    // Update surface view to reference workspace values
+    surface_view = workspace.surface_view();
+
+    return {};
 }
 
 expected<void, std::string> NormalizedChainSolver::check_eligibility(

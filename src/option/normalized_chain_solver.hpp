@@ -102,6 +102,8 @@ public:
 private:
     NormalizedWorkspace() = default;
 
+    friend class NormalizedChainSolver;
+
     std::shared_ptr<AmericanSolverWorkspace> pde_workspace_;
     std::vector<double> x_grid_;
     std::vector<double> tau_grid_;
