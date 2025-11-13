@@ -265,144 +265,69 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
             }
         }
 
-        // Validate workspace parameters before parallel work
-        auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
-        if (!workspace_result) {
-            return unexpected("Invalid workspace parameters: " + workspace_result.error());
-        }
-
-        // Loop over (σ, r) pairs only - this is the separable batch approach
-        const bool enable_parallel = (Nv * Nr > 4);
-
-    if (enable_parallel) {
-#pragma omp parallel
-        {
-            // Each thread creates its own workspace (parameters already validated)
-            auto thread_workspace_result = AmericanSolverWorkspace::create(
-                x_min, x_max, n_space, n_time);
-
-            // If per-thread workspace creation fails (e.g., OOM), count all as failures
-            if (!thread_workspace_result) {
-#pragma omp for collapse(2) schedule(dynamic, 1)
-                for (size_t k = 0; k < Nv; ++k) {
-                    for (size_t l = 0; l < Nr; ++l) {
-#pragma omp atomic
-                        ++failed_count;
-                    }
-                }
-            } else {
-                auto thread_workspace = thread_workspace_result.value();
-
-#pragma omp for collapse(2) schedule(dynamic, 1)
-                for (size_t k = 0; k < Nv; ++k) {
-                    for (size_t l = 0; l < Nr; ++l) {
-                        try {
-                            AmericanOptionParams params{
-                                .strike = K_ref_,
-                                .spot = K_ref_,
-                                .maturity = T_max,
-                                .volatility = volatility_[k],
-                                .rate = rate_[l],
-                                .continuous_dividend_yield = dividend_yield,
-                                .option_type = option_type,
-                                .discrete_dividends = {}
-                            };
-
-                            PriceTableSnapshotCollectorConfig collector_config{
-                                .moneyness = std::span{moneyness_},
-                                .tau = std::span{maturity_},
-                                .K_ref = K_ref_,
-                                .option_type = option_type,
-                                .payoff_params = nullptr
-                            };
-                            PriceTableSnapshotCollector collector(collector_config);
-
-                            AmericanOptionSolver solver(params, thread_workspace);
-
-                            for (size_t j = 0; j < Nt; ++j) {
-                                solver.register_snapshot(step_indices[j], j, &collector);
-                            }
-
-                            auto result = solver.solve();
-
-                            if (!result.has_value()) {
-#pragma omp atomic
-                                ++failed_count;
-                                continue;
-                            }
-
-                            auto prices_2d = collector.prices();
-                            for (size_t i = 0; i < Nm; ++i) {
-                                for (size_t j = 0; j < Nt; ++j) {
-                                    size_t idx_2d = i * Nt + j;
-                                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                                    prices_4d[idx_4d] = prices_2d[idx_2d];
-                                }
-                            }
-
-                        } catch (const std::exception&) {
-#pragma omp atomic
-                            ++failed_count;
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        // Sequential: reuse workspace across all solves (parameters already validated)
-        auto workspace = workspace_result.value();
+        // Build batch parameters (all (σ,r) combinations)
+        std::vector<AmericanOptionParams> batch_params;
+        batch_params.reserve(Nv * Nr);
 
         for (size_t k = 0; k < Nv; ++k) {
             for (size_t l = 0; l < Nr; ++l) {
-                try {
-                    AmericanOptionParams params{
-                        .strike = K_ref_,
-                        .spot = K_ref_,
-                        .maturity = T_max,
-                        .volatility = volatility_[k],
-                        .rate = rate_[l],
-                        .continuous_dividend_yield = dividend_yield,
-                        .option_type = option_type,
-                        .discrete_dividends = {}
-                    };
+                batch_params.push_back({
+                    .strike = K_ref_,
+                    .spot = K_ref_,
+                    .maturity = T_max,
+                    .volatility = volatility_[k],
+                    .rate = rate_[l],
+                    .continuous_dividend_yield = dividend_yield,
+                    .option_type = option_type,
+                    .discrete_dividends = {}
+                });
+            }
+        }
 
-                    PriceTableSnapshotCollectorConfig collector_config{
-                        .moneyness = std::span{moneyness_},
-                        .tau = std::span{maturity_},
-                        .K_ref = K_ref_,
-                        .option_type = option_type,
-                        .payoff_params = nullptr
-                    };
-                    PriceTableSnapshotCollector collector(collector_config);
+        // Create collectors for each batch item
+        std::vector<PriceTableSnapshotCollector> collectors;
+        collectors.reserve(Nv * Nr);
 
-                    AmericanOptionSolver solver(params, workspace);
+        for (size_t idx = 0; idx < Nv * Nr; ++idx) {
+            PriceTableSnapshotCollectorConfig collector_config{
+                .moneyness = std::span{moneyness_},
+                .tau = std::span{maturity_},
+                .K_ref = K_ref_,
+                .option_type = option_type,
+                .payoff_params = nullptr
+            };
+            collectors.emplace_back(collector_config);
+        }
 
-                    for (size_t j = 0; j < Nt; ++j) {
-                        solver.register_snapshot(step_indices[j], j, &collector);
-                    }
+        // Solve batch with snapshot registration via callback
+        auto results = BatchAmericanOptionSolver::solve_batch(
+            batch_params, x_min, x_max, n_space, n_time,
+            [&](size_t idx, AmericanOptionSolver& solver) {
+                // Register snapshots for all maturities
+                for (size_t j = 0; j < Nt; ++j) {
+                    solver.register_snapshot(step_indices[j], j, &collectors[idx]);
+                }
+            });
 
-                    auto result = solver.solve();
+        // Extract prices from collectors
+        for (size_t idx = 0; idx < Nv * Nr; ++idx) {
+            size_t k = idx / Nr;
+            size_t l = idx % Nr;
 
-                    if (!result.has_value()) {
-                        ++failed_count;
-                        continue;
-                    }
+            if (!results[idx].has_value()) {
+                ++failed_count;
+                continue;
+            }
 
-                    auto prices_2d = collector.prices();
-                    for (size_t i = 0; i < Nm; ++i) {
-                        for (size_t j = 0; j < Nt; ++j) {
-                            size_t idx_2d = i * Nt + j;
-                            size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                            prices_4d[idx_4d] = prices_2d[idx_2d];
-                        }
-                    }
-
-                } catch (const std::exception&) {
-                    ++failed_count;
+            auto prices_2d = collectors[idx].prices();
+            for (size_t i = 0; i < Nm; ++i) {
+                for (size_t j = 0; j < Nt; ++j) {
+                    size_t idx_2d = i * Nt + j;
+                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                    prices_4d[idx_4d] = prices_2d[idx_2d];
                 }
             }
         }
-    }
     }  // End of else (FALLBACK PATH)
 
     if (failed_count > 0) {
