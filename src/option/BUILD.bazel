@@ -78,6 +78,7 @@ cc_library(
     deps = [
         ":american_option",
         ":slice_solver_workspace",
+        ":normalized_chain_solver",
         "//src/interpolation:bspline_4d",
         "//src/interpolation:bspline_fitter_4d",
         ":price_table_snapshot_collector",

@@ -7,6 +7,7 @@
 #include "src/option/price_table_snapshot_collector.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/option/normalized_chain_solver.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -77,6 +78,38 @@ expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
     }
 
     return {};
+}
+
+bool PriceTable4DBuilder::should_use_normalized_solver(
+    double x_min,
+    double x_max,
+    size_t n_space,
+    const std::vector<std::pair<double, double>>& discrete_dividends) const
+{
+    // Check 1: No discrete dividends (normalized solver requirement)
+    if (!discrete_dividends.empty()) {
+        return false;
+    }
+
+    // Check 2: Build test request and check eligibility
+    // Use first volatility/rate for eligibility check (grid params are same for all)
+    NormalizedSolveRequest test_request{
+        .sigma = volatility_.front(),
+        .rate = rate_.front(),
+        .dividend = 0.0,  // Will be set per-solve
+        .option_type = OptionType::PUT,  // Doesn't affect eligibility
+        .x_min = x_min,
+        .x_max = x_max,
+        .n_space = n_space,
+        .n_time = 1000,  // Typical value
+        .T_max = maturity_.back(),
+        .tau_snapshots = std::span{maturity_}
+    };
+
+    auto eligibility = NormalizedChainSolver::check_eligibility(
+        test_request, std::span{moneyness_});
+
+    return eligibility.has_value();
 }
 
 expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
