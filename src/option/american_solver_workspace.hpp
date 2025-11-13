@@ -135,6 +135,43 @@ public:
     }
 
     /**
+     * Validate workspace parameters without allocation.
+     *
+     * Enables fail-fast in batch operations before parallel region.
+     *
+     * @param x_min Minimum log-moneyness
+     * @param x_max Maximum log-moneyness
+     * @param n_space Number of spatial grid points
+     * @param n_time Number of time steps
+     * @return Success or error message
+     */
+    static expected<void, std::string> validate_params(
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time)
+    {
+        if (x_min >= x_max) {
+            return unexpected("x_min must be < x_max");
+        }
+        if (n_space < 3) {
+            return unexpected("n_space must be >= 3");
+        }
+        if (n_time < 1) {
+            return unexpected("n_time must be >= 1");
+        }
+
+        double dx = (x_max - x_min) / (n_space - 1);
+        if (dx >= 0.5) {
+            return unexpected(
+                "Grid too coarse: dx = " + std::to_string(dx) +
+                " >= 0.5 (Von Neumann stability violated)");
+        }
+
+        return {};
+    }
+
+    /**
      * Factory method with expected-based validation.
      *
      * Creates a shared_ptr to the workspace, ensuring proper lifetime management

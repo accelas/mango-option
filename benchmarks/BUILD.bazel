@@ -65,6 +65,7 @@ cc_binary(
         "//src/option:slice_solver_workspace",
         "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
+        "//src/option:normalized_chain_solver",
         "//src/interpolation:bspline_4d",
         "//src/interpolation:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
@@ -119,6 +120,7 @@ cc_binary(
     linkstatic = True,  # Static link our library code
     deps = [
         "//src/option:american_option",
+        "//src/option:normalized_chain_solver",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],

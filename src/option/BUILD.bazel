@@ -78,6 +78,7 @@ cc_library(
     deps = [
         ":american_option",
         ":slice_solver_workspace",
+        ":normalized_chain_solver",
         "//src/interpolation:bspline_4d",
         "//src/interpolation:bspline_fitter_4d",
         ":price_table_snapshot_collector",
@@ -143,5 +144,19 @@ cc_library(
         "-O3",
         "-march=native",
     ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "normalized_chain_solver",
+    srcs = ["normalized_chain_solver.cpp"],
+    hdrs = ["normalized_chain_solver.hpp"],
+    deps = [
+        ":american_option",
+        ":american_solver_workspace",
+        ":price_table_snapshot_collector",
+        "//src/support:expected",
+    ],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
