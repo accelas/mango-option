@@ -1,0 +1,166 @@
+#pragma once
+
+#include "src/support/expected.hpp"
+#include "src/interpolation/bspline_utils.hpp"
+#include <vector>
+#include <span>
+#include <string>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+
+namespace mango {
+
+/// Workspace holding all data for PriceTableSurface in single contiguous allocation
+///
+/// Enables zero-copy mmap loading from Arrow IPC files. All numeric data is
+/// 64-byte aligned for AVX-512 SIMD operations.
+///
+/// Memory layout (all contiguous):
+///   [moneyness grid][maturity grid][volatility grid][rate grid]
+///   [knots_m][knots_tau][knots_sigma][knots_r]
+///   [coefficients]
+///   [metadata: K_ref, dividend_yield]
+///
+/// Example:
+///   auto ws = PriceTableWorkspace::create(m, tau, sigma, r, coeffs, K_ref, q);
+///   BSpline4D spline(ws.value());
+class PriceTableWorkspace {
+public:
+    /// Factory method with validation
+    ///
+    /// @param m_grid Moneyness grid (sorted ascending, >= 4 points)
+    /// @param tau_grid Maturity grid (years, sorted ascending, >= 4 points)
+    /// @param sigma_grid Volatility grid (sorted ascending, >= 4 points)
+    /// @param r_grid Rate grid (sorted ascending, >= 4 points)
+    /// @param coefficients B-spline coefficients (size = n_m * n_tau * n_sigma * n_r)
+    /// @param K_ref Reference strike price
+    /// @param dividend_yield Continuous dividend yield
+    /// @return Expected workspace or error message
+    static expected<PriceTableWorkspace, std::string> create(
+        const std::vector<double>& m_grid,
+        const std::vector<double>& tau_grid,
+        const std::vector<double>& sigma_grid,
+        const std::vector<double>& r_grid,
+        const std::vector<double>& coefficients,
+        double K_ref,
+        double dividend_yield);
+
+    /// Grid accessors (zero-copy spans into arena)
+    std::span<const double> moneyness() const { return moneyness_; }
+    std::span<const double> maturity() const { return maturity_; }
+    std::span<const double> volatility() const { return volatility_; }
+    std::span<const double> rate() const { return rate_; }
+
+    /// Knot vector accessors (precomputed clamped cubic knots)
+    std::span<const double> knots_moneyness() const { return knots_m_; }
+    std::span<const double> knots_maturity() const { return knots_tau_; }
+    std::span<const double> knots_volatility() const { return knots_sigma_; }
+    std::span<const double> knots_rate() const { return knots_r_; }
+
+    /// Coefficient accessor (4D tensor in row-major layout)
+    std::span<const double> coefficients() const { return coefficients_; }
+
+    /// Metadata accessors
+    double K_ref() const { return K_ref_; }
+    double dividend_yield() const { return dividend_yield_; }
+
+    /// Grid dimensions
+    std::tuple<size_t, size_t, size_t, size_t> dimensions() const {
+        return {moneyness_.size(), maturity_.size(),
+                volatility_.size(), rate_.size()};
+    }
+
+    /// Save workspace to Apache Arrow IPC file
+    ///
+    /// @param filepath Output file path
+    /// @param ticker Underlying symbol (e.g., "SPY")
+    /// @param option_type 0=PUT, 1=CALL
+    /// @return Expected void or error message
+    expected<void, std::string> save(const std::string& filepath,
+                                     const std::string& ticker,
+                                     uint8_t option_type) const;
+
+    /// Load error codes
+    enum class LoadError {
+        NOT_ARROW_FILE,              // Missing "ARROW1" magic
+        UNSUPPORTED_VERSION,         // format_version != 1
+        INSUFFICIENT_GRID_POINTS,    // n < 4 for any axis
+        SIZE_MISMATCH,               // Array length doesn't match metadata
+        COEFFICIENT_SIZE_MISMATCH,   // coeffs.size() != n_m×n_tau×n_sigma×n_r
+        GRID_NOT_SORTED,             // Monotonicity violation
+        MMAP_FAILED,                 // OS mmap error
+        INVALID_ALIGNMENT,           // Buffer not 64-byte aligned
+        FILE_NOT_FOUND,              // File doesn't exist
+        SCHEMA_MISMATCH,             // Missing required fields
+        ARROW_READ_ERROR,            // Arrow library error
+        CORRUPTED_COEFFICIENTS,      // CRC64 checksum mismatch for coefficients
+        CORRUPTED_GRIDS,             // CRC64 checksum mismatch for grids
+        CORRUPTED_KNOTS,             // Knot values don't match recomputed knots
+    };
+
+    /// Load workspace from Apache Arrow IPC file with zero-copy mmap
+    ///
+    /// @param filepath Input file path
+    /// @return Expected workspace or error code
+    static expected<PriceTableWorkspace, LoadError> load(const std::string& filepath);
+
+    /// Move-only semantics (no copies of large arena)
+    PriceTableWorkspace(const PriceTableWorkspace&) = delete;
+    PriceTableWorkspace& operator=(const PriceTableWorkspace&) = delete;
+    PriceTableWorkspace(PriceTableWorkspace&&) noexcept = default;
+    PriceTableWorkspace& operator=(PriceTableWorkspace&&) noexcept = default;
+
+private:
+    PriceTableWorkspace() = default;
+
+    /// Allocate aligned arena and set up spans
+    static expected<PriceTableWorkspace, std::string> allocate_and_initialize(
+        const std::vector<double>& m_grid,
+        const std::vector<double>& tau_grid,
+        const std::vector<double>& sigma_grid,
+        const std::vector<double>& r_grid,
+        const std::vector<double>& coefficients,
+        double K_ref,
+        double dividend_yield);
+
+    /// Friend function for zero-copy loading from raw buffers
+    friend expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
+        const double* m_data, size_t n_m,
+        const double* tau_data, size_t n_tau,
+        const double* sigma_data, size_t n_sigma,
+        const double* r_data, size_t n_r,
+        const double* coeff_data, size_t n_coeffs,
+        double K_ref,
+        double dividend_yield);
+
+    /// Validate grids before allocation
+    static expected<void, std::string> validate_inputs(
+        const std::vector<double>& m_grid,
+        const std::vector<double>& tau_grid,
+        const std::vector<double>& sigma_grid,
+        const std::vector<double>& r_grid,
+        const std::vector<double>& coefficients);
+
+    // Single contiguous allocation (64-byte aligned)
+    std::vector<double> arena_;
+
+    // Views into arena (no ownership)
+    std::span<const double> moneyness_;
+    std::span<const double> maturity_;
+    std::span<const double> volatility_;
+    std::span<const double> rate_;
+
+    std::span<const double> knots_m_;
+    std::span<const double> knots_tau_;
+    std::span<const double> knots_sigma_;
+    std::span<const double> knots_r_;
+
+    std::span<const double> coefficients_;
+
+    // Scalar metadata
+    double K_ref_ = 0.0;
+    double dividend_yield_ = 0.0;
+};
+
+}  // namespace mango

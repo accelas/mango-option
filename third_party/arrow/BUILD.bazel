@@ -1,0 +1,12 @@
+"""System Arrow library."""
+
+cc_library(
+    name = "arrow",
+    hdrs = [],
+    includes = ["/usr/include"],
+    linkopts = [
+        "-larrow",
+        "-larrow_bundled_dependencies",
+    ],
+    visibility = ["//visibility:public"],
+)

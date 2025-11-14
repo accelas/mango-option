@@ -1,0 +1,29 @@
+[requires]
+arrow/14.0.1
+
+[generators]
+BazelDeps
+BazelToolchain
+
+[options]
+# Minimal Arrow build: IPC-only (no Parquet, Flight, S3, etc.)
+arrow/*:shared=False
+arrow/*:parquet=False
+arrow/*:with_flight_rpc=False
+arrow/*:with_flight_sql=False
+arrow/*:with_gandiva=False
+arrow/*:with_s3=False
+arrow/*:with_gcs=False
+arrow/*:with_orc=False
+arrow/*:with_json=False
+arrow/*:with_csv=False
+arrow/*:with_thrift=False
+arrow/*:with_re2=False
+arrow/*:with_utf8proc=False
+arrow/*:with_boost=True
+# Disable heavy compression codecs (keep only zlib if needed)
+arrow/*:with_brotli=False
+arrow/*:with_bz2=False
+arrow/*:with_lz4=False
+arrow/*:with_snappy=False
+arrow/*:with_zstd=False

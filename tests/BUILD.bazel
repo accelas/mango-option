@@ -490,3 +490,23 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "crc64_test",
+    srcs = ["crc64_test.cc"],
+    deps = [
+        "//src/option:crc64",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "price_table_workspace_test",
+    srcs = ["price_table_workspace_test.cc"],
+    deps = [
+        "//src/option:price_table_workspace",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)

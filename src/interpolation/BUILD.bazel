@@ -43,7 +43,10 @@ cc_library(
 cc_library(
     name = "bspline_4d",
     hdrs = ["bspline_4d.hpp"],
-    deps = [":bspline_utils"],
+    deps = [
+        ":bspline_utils",
+        "//src/option:price_table_workspace",
+    ],
     copts = [
         "-std=c++23",
         "-Wall",

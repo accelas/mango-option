@@ -62,6 +62,7 @@
 #pragma once
 
 #include "src/interpolation/bspline_utils.hpp"
+#include "src/option/price_table_workspace.hpp"
 #include <vector>
 #include <algorithm>
 #include <cassert>
@@ -136,8 +137,35 @@ inline double clamp_query(double x, double xmin, double xmax) {
 /// to avoid naive sequential fallback overhead.
 class BSpline4D {
 public:
-    /// Construct 4D B-spline from grids and coefficients
+    /// Construct from PriceTableWorkspace (zero-copy, recommended)
     ///
+    /// @param workspace Workspace containing grids, knots, and coefficients
+    explicit BSpline4D(const PriceTableWorkspace& workspace)
+        : m_(workspace.moneyness().begin(), workspace.moneyness().end()),
+          t_(workspace.maturity().begin(), workspace.maturity().end()),
+          v_(workspace.volatility().begin(), workspace.volatility().end()),
+          r_(workspace.rate().begin(), workspace.rate().end()),
+          tm_(workspace.knots_moneyness().begin(), workspace.knots_moneyness().end()),
+          tt_(workspace.knots_maturity().begin(), workspace.knots_maturity().end()),
+          tv_(workspace.knots_volatility().begin(), workspace.knots_volatility().end()),
+          tr_(workspace.knots_rate().begin(), workspace.knots_rate().end()),
+          c_(workspace.coefficients().begin(), workspace.coefficients().end()),
+          Nm_(static_cast<int>(workspace.moneyness().size())),
+          Nt_(static_cast<int>(workspace.maturity().size())),
+          Nv_(static_cast<int>(workspace.volatility().size())),
+          Nr_(static_cast<int>(workspace.rate().size()))
+    {
+        assert(Nm_ >= 4 && "Moneyness grid must have ≥4 points");
+        assert(Nt_ >= 4 && "Maturity grid must have ≥4 points");
+        assert(Nv_ >= 4 && "Volatility grid must have ≥4 points");
+        assert(Nr_ >= 4 && "Rate grid must have ≥4 points");
+        assert(c_.size() == static_cast<std::size_t>(Nm_) * Nt_ * Nv_ * Nr_ &&
+               "Coefficient size must match grid dimensions");
+    }
+
+    /// Construct from vectors (legacy API, copies data)
+    ///
+    /// @deprecated Use PriceTableWorkspace constructor for better performance
     /// @param m Moneyness grid (sorted, ≥4 points)
     /// @param t Maturity grid (sorted, ≥4 points)
     /// @param v Volatility grid (sorted, ≥4 points)
