@@ -10,12 +10,13 @@
  * Run with: bazel run //benchmarks:component_performance
  */
 
-#include "src/american_option.hpp"
-#include "src/slice_solver_workspace.hpp"
-#include "src/bspline_4d.hpp"
-#include "src/bspline_fitter_4d.hpp"
-#include "src/iv_solver.hpp"
-#include "src/iv_solver_interpolated.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/slice_solver_workspace.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/price_table_4d_builder.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -88,7 +89,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             }
         }
 
-        BSplineFitter4D fitter(
+        auto fitter = BSplineFitter4D::create(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
@@ -325,13 +326,22 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    IVSolverInterpolated solver(
-        *surf.evaluator,
-        surf.K_ref,
-        {surf.m_grid.front(), surf.m_grid.back()},
-        {surf.tau_grid.front(), surf.tau_grid.back()},
-        {surf.sigma_grid.front(), surf.sigma_grid.back()},
-        {surf.rate_grid.front(), surf.rate_grid.back()});
+    // Wrap fixture in PriceTableSurface for clean API
+    PriceTableGrid grid{
+        .moneyness = surf.m_grid,
+        .maturity = surf.tau_grid,
+        .volatility = surf.sigma_grid,
+        .rate = surf.rate_grid,
+        .K_ref = surf.K_ref
+    };
+
+    PriceTableSurface surface(
+        std::make_shared<BSpline4D>(*surf.evaluator),  // Share ownership
+        std::move(grid),
+        0.0  // dividend yield
+    );
+
+    IVSolverInterpolated solver(surface);
 
     constexpr double spot = 103.5;
     constexpr double strike = 100.0;
@@ -350,7 +360,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     for (auto _ : state) {
         auto result = solver.solve(query);
         if (!result.converged) {
-            throw std::runtime_error(result.error_message.value_or("Fast IV solver failed"));
+            throw std::runtime_error(result.failure_reason.value_or("Fast IV solver failed"));
         }
         benchmark::DoNotOptimize(result.implied_vol);
     }

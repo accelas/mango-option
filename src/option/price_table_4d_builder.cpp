@@ -125,6 +125,26 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
 }
 
 expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
+    const PriceTableConfig& config)
+{
+    if (config.x_bounds) {
+        return precompute(
+            config.option_type,
+            config.x_bounds->first,
+            config.x_bounds->second,
+            config.n_space,
+            config.n_time,
+            config.dividend_yield);
+    }
+
+    return precompute(
+        config.option_type,
+        config.n_space,
+        config.n_time,
+        config.dividend_yield);
+}
+
+expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     OptionType option_type,
     double x_min,
     double x_max,
@@ -350,8 +370,16 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     }
 
     // Create evaluator
-    auto evaluator = std::make_unique<BSpline4D>(
+    auto evaluator = std::make_shared<BSpline4D>(
         moneyness_, maturity_, volatility_, rate_, fit_result.coefficients);
+
+    PriceTableGrid grid_snapshot{
+        .moneyness = moneyness_,
+        .maturity = maturity_,
+        .volatility = volatility_,
+        .rate = rate_,
+        .K_ref = K_ref_
+    };
 
     // Populate fitting statistics from result
     BSplineFittingStats fitting_stats{
@@ -381,6 +409,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     };
 
     return PriceTable4DResult{
+        .surface = PriceTableSurface(evaluator, std::move(grid_snapshot), dividend_yield),
         .evaluator = std::move(evaluator),
         .prices_4d = std::move(prices_4d),
         .n_pde_solves = Nv * Nr,  // Now correct: O(Nσ × Nr) not O(Nm × Nt × Nσ × Nr)

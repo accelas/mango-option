@@ -46,10 +46,13 @@
 #include "src/option/american_option.hpp"  // For OptionType enum
 #include "src/option/iv_types.hpp"
 #include <cmath>
+#include <memory>
 #include <optional>
 #include <string>
 
 namespace mango {
+
+class PriceTableSurface;
 
 /// Query parameters for IV calculation
 struct IVQuery {
@@ -95,7 +98,8 @@ public:
         std::pair<double, double> sigma_range,
         std::pair<double, double> r_range,
         const IVSolverConfig& config = {})
-        : price_surface_(price_surface)
+        : owned_surface_()
+        , price_surface_(price_surface)
         , K_ref_(K_ref)
         , m_range_(m_range)
         , tau_range_(tau_range)
@@ -108,6 +112,11 @@ public:
         }
     }
 
+    /// Convenience constructor that derives metadata directly from PriceTableSurface
+    IVSolverInterpolated(
+        const PriceTableSurface& surface,
+        const IVSolverConfig& config = {});
+
     /// Solve for implied volatility
     ///
     /// @param query Market data and option parameters
@@ -115,6 +124,7 @@ public:
     IVResult solve(const IVQuery& query) const;
 
 private:
+    std::shared_ptr<BSpline4D> owned_surface_;
     const BSpline4D& price_surface_;
     double K_ref_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;

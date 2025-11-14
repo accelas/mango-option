@@ -61,11 +61,12 @@ const auto& price_table = result.value();
 ### Step 3: Create IV Solver
 
 ```cpp
-// Define grid bounds for interpolation
-auto m_range = std::make_pair(moneyness.front(), moneyness.back());
-auto tau_range = std::make_pair(maturities.front(), maturities.back());
-auto vol_range = std::make_pair(volatilities.front(), volatilities.back());
-auto rate_range = std::make_pair(rates.front(), rates.back());
+// Define grid bounds for interpolation (from surface metadata)
+const PriceTableSurface& surface = price_table.surface;
+auto m_range = surface.moneyness_range();
+auto tau_range = surface.maturity_range();
+auto vol_range = surface.volatility_range();
+auto rate_range = surface.rate_range();
 
 // Configure solver
 IVSolverConfig config;
@@ -73,12 +74,7 @@ config.max_iterations = 50;
 config.tolerance = 1e-6;
 
 // Create solver (lightweight, no heavy computation)
-IVSolverInterpolated iv_solver(
-    *price_table.evaluator,  // Dereference unique_ptr
-    K_ref,
-    m_range, tau_range, vol_range, rate_range,
-    config
-);
+IVSolverInterpolated iv_solver(surface, config);
 ```
 
 **Key Point**: IV solver creation is cheap. The expensive work was done in Step 2.
@@ -114,14 +110,14 @@ for (const auto& option : market_data) {
 
 1. **Builder pattern is intuitive**: `create()` → `precompute()` → use result
 2. **Structured config**: `IVSolverConfig` makes parameters discoverable
-3. **Clear ownership**: `unique_ptr` makes lifetime management explicit
+3. **Clear ownership**: `PriceTableSurface` wraps the evaluator and its metadata
 4. **Range-based validation**: Grid bounds prevent out-of-range queries
 5. **Result types**: `IVResult` provides rich diagnostics (convergence, iterations, error)
 
 ### Potential Pain Points
 
 1. **Grid definition is verbose**: Requires 4 separate vectors + bounds extraction
-2. **unique_ptr dereferencing**: Easy to forget the `*` in `*price_table.evaluator`
+2. **Legacy pointer plumbing**: Older call sites still dereference `.evaluator` directly
 3. **Strike reference concept**: `K_ref` requires understanding of normalized solving
 4. **Moneyness grid**: Users must compute `m = S/K` from strikes (not obvious)
 

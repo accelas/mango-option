@@ -39,6 +39,8 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <optional>
+#include <utility>
 
 namespace mango {
 
@@ -63,13 +65,79 @@ struct BSplineFittingStats {
     size_t failed_slices_total = 0;    ///< Total failed fits
 };
 
+/// Aggregated description of the 4D grid used for precomputation
+struct PriceTableGrid {
+    std::vector<double> moneyness;
+    std::vector<double> maturity;
+    std::vector<double> volatility;
+    std::vector<double> rate;
+    double K_ref = 0.0;
+};
+
+/// Configuration for PDE solves performed by the builder
+struct PriceTableConfig {
+    OptionType option_type = OptionType::PUT;
+    size_t n_space = 101;
+    size_t n_time = 1000;
+    double dividend_yield = 0.0;
+    std::optional<std::pair<double, double>> x_bounds;
+};
+
+/// Thin value object exposing a user-friendly interface to the price surface
+class PriceTableSurface {
+public:
+    PriceTableSurface() = default;
+
+    PriceTableSurface(
+        std::shared_ptr<BSpline4D> evaluator,
+        PriceTableGrid grid,
+        double dividend_yield)
+        : evaluator_(std::move(evaluator))
+        , grid_(std::move(grid))
+        , dividend_yield_(dividend_yield)
+    {}
+
+    bool valid() const { return static_cast<bool>(evaluator_); }
+
+    double eval(double m, double tau, double sigma, double rate) const {
+        if (!valid()) {
+            throw std::runtime_error("PriceTableSurface not initialized");
+        }
+        return evaluator_->eval(m, tau, sigma, rate);
+    }
+
+    const PriceTableGrid& grid() const { return grid_; }
+    double K_ref() const { return grid_.K_ref; }
+    double dividend_yield() const { return dividend_yield_; }
+
+    std::pair<double, double> moneyness_range() const { return axis_range(grid_.moneyness); }
+    std::pair<double, double> maturity_range() const { return axis_range(grid_.maturity); }
+    std::pair<double, double> volatility_range() const { return axis_range(grid_.volatility); }
+    std::pair<double, double> rate_range() const { return axis_range(grid_.rate); }
+
+    std::shared_ptr<BSpline4D> evaluator() const { return evaluator_; }
+
+private:
+    static std::pair<double, double> axis_range(const std::vector<double>& axis) {
+        if (axis.empty()) {
+            return {0.0, 0.0};
+        }
+        return {axis.front(), axis.back()};
+    }
+
+    std::shared_ptr<BSpline4D> evaluator_;
+    PriceTableGrid grid_;
+    double dividend_yield_ = 0.0;
+};
+
 /// Result of 4D price table building
 struct PriceTable4DResult {
-    std::unique_ptr<BSpline4D> evaluator;  ///< Fast B-spline evaluator
-    std::vector<double> prices_4d;              ///< Raw 4D price array
-    size_t n_pde_solves;                        ///< Number of PDE solves performed
-    double precompute_time_seconds;             ///< Wall-clock time for pre-computation
-    BSplineFittingStats fitting_stats;          ///< B-spline fitting diagnostics
+    PriceTableSurface surface;                ///< Friendly interface to evaluator
+    std::shared_ptr<BSpline4D> evaluator;     ///< Fast B-spline evaluator
+    std::vector<double> prices_4d;            ///< Raw 4D price array
+    size_t n_pde_solves;                      ///< Number of PDE solves performed
+    double precompute_time_seconds;           ///< Wall-clock time for pre-computation
+    BSplineFittingStats fitting_stats;        ///< B-spline fitting diagnostics
 };
 
 /// 4D Price Table Builder
@@ -107,6 +175,69 @@ public:
         );
     }
 
+    /// Convenience overload that accepts the grid description directly
+    static PriceTable4DBuilder create(PriceTableGrid grid) {
+        return create(
+            std::move(grid.moneyness),
+            std::move(grid.maturity),
+            std::move(grid.volatility),
+            std::move(grid.rate),
+            grid.K_ref
+        );
+    }
+
+    /// Create builder from strike prices (auto-computes moneyness)
+    ///
+    /// This convenience method allows users to work with raw strike prices
+    /// instead of pre-computing moneyness ratios. Automatically selects the
+    /// ATM strike as the reference strike (K_ref).
+    ///
+    /// @param spot Current underlying price
+    /// @param strikes Strike prices (should be sorted)
+    /// @param maturities Time to expiration (years)
+    /// @param volatilities Volatility grid
+    /// @param rates Rate grid
+    /// @return Builder ready for precomputation
+    ///
+    /// Usage example:
+    /// ```cpp
+    /// auto builder = PriceTable4DBuilder::from_strikes(
+    ///     450.0,  // spot price
+    ///     {400, 425, 450, 475, 500},  // strikes
+    ///     {0.1, 0.25, 0.5, 1.0},      // maturities
+    ///     {0.15, 0.20, 0.25, 0.30},   // volatilities
+    ///     {0.03, 0.04, 0.05}          // rates
+    /// );
+    /// ```
+    static PriceTable4DBuilder from_strikes(
+        double spot,
+        std::vector<double> strikes,
+        std::vector<double> maturities,
+        std::vector<double> volatilities,
+        std::vector<double> rates)
+    {
+        // Auto-compute moneyness: m = spot / strike
+        std::vector<double> moneyness;
+        moneyness.reserve(strikes.size());
+        for (double K : strikes) {
+            moneyness.push_back(spot / K);
+        }
+
+        // Use ATM strike as reference
+        auto atm_it = std::lower_bound(strikes.begin(), strikes.end(), spot);
+        double K_ref = (atm_it != strikes.end()) ? *atm_it : strikes[strikes.size()/2];
+
+        PriceTableGrid grid{
+            .moneyness = std::move(moneyness),
+            .maturity = std::move(maturities),
+            .volatility = std::move(volatilities),
+            .rate = std::move(rates),
+            .K_ref = K_ref
+        };
+
+        return create(std::move(grid));
+    }
+
     /// Pre-compute all option prices on 4D grid (standard bounds)
     ///
     /// Runs PDE solver for each (σ, r) combination using standard
@@ -123,6 +254,10 @@ public:
         size_t n_space,
         size_t n_time,
         double dividend_yield = 0.0);
+
+    /// Pre-compute all option prices using a single configuration struct
+    expected<PriceTable4DResult, std::string> precompute(
+        const PriceTableConfig& config);
 
     /// Pre-compute all option prices on 4D grid (custom bounds)
     ///
