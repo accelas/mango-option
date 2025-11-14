@@ -212,14 +212,16 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     }();
 
     // Create IV solver
-    IVSolverInterpolated iv_solver(
-        *evaluator,
+    auto iv_solver_result = IVSolverInterpolated::create(
+        std::move(evaluator),
         K_ref,
         std::make_pair(moneyness.front(), moneyness.back()),
         std::make_pair(maturity.front(), maturity.back()),
         std::make_pair(volatility.front(), volatility.back()),
         std::make_pair(rate.front(), rate.back())
     );
+    ASSERT_TRUE(iv_solver_result.has_value()) << iv_solver_result.error();
+    const auto& iv_solver = iv_solver_result.value();
 
     // Test: Recover known volatility from market price
     double test_spot = 100.0;
@@ -230,13 +232,17 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     double market_price = bs_price(test_spot, test_strike, test_maturity,
                                    known_sigma, test_rate, OptionType::PUT);
 
-    IVQuery query{
-        .market_price = market_price,
+    OptionSpec spec{
         .spot = test_spot,
         .strike = test_strike,
         .maturity = test_maturity,
         .rate = test_rate,
-        .option_type = OptionType::PUT
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
+    };
+    IVQuery query{
+        .option = spec,
+        .market_price = market_price
     };
 
     auto result = iv_solver.solve(query);
@@ -340,14 +346,16 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
         return std::make_unique<BSpline4D>(workspace.value());
     }();
 
-    IVSolverInterpolated iv_solver(
-        *evaluator,
+    auto iv_solver_result = IVSolverInterpolated::create(
+        std::move(evaluator),
         K_ref,
         std::make_pair(moneyness.front(), moneyness.back()),
         std::make_pair(maturity.front(), maturity.back()),
         std::make_pair(volatility.front(), volatility.back()),
         std::make_pair(rate.front(), rate.back())
     );
+    ASSERT_TRUE(iv_solver_result.has_value()) << iv_solver_result.error();
+    const auto& iv_solver = iv_solver_result.value();
 
     // Test recovery
     double test_spot = 100.0;
@@ -358,13 +366,17 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
     double market_price = bs_price(test_spot, test_strike, test_maturity,
                                    known_sigma, test_rate, OptionType::CALL);
 
-    IVQuery query{
-        .market_price = market_price,
+    OptionSpec spec{
         .spot = test_spot,
         .strike = test_strike,
         .maturity = test_maturity,
         .rate = test_rate,
-        .option_type = OptionType::CALL
+        .dividend_yield = 0.0,
+        .type = OptionType::CALL
+    };
+    IVQuery query{
+        .option = spec,
+        .market_price = market_price
     };
 
     auto result = iv_solver.solve(query);
@@ -484,14 +496,16 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
         return std::make_unique<BSpline4D>(workspace.value());
     }();
 
-    IVSolverInterpolated iv_solver(
-        *evaluator,
+    auto iv_solver_result = IVSolverInterpolated::create(
+        std::move(evaluator),
         K_ref,
         std::make_pair(moneyness.front(), moneyness.back()),
         std::make_pair(maturity.front(), maturity.back()),
         std::make_pair(volatility.front(), volatility.back()),
         std::make_pair(rate.front(), rate.back())
     );
+    ASSERT_TRUE(iv_solver_result.has_value()) << iv_solver_result.error();
+    const auto& iv_solver = iv_solver_result.value();
 
     // Test with strike = K_ref (should work)
     double spot = 105.0;
@@ -499,13 +513,17 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     const double base_price_kref = evaluator->eval(spot / K_ref, 1.0, known_sigma, known_r);
     double market_price = base_price_kref * (strike / K_ref);
 
-    IVQuery query1{
-        .market_price = market_price,
+    OptionSpec spec1{
         .spot = spot,
         .strike = strike,  // = K_ref
         .maturity = 1.0,
         .rate = known_r,
-        .option_type = OptionType::PUT
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
+    };
+    IVQuery query1{
+        .option = spec1,
+        .market_price = market_price
     };
 
     auto result1 = iv_solver.solve(query1);
@@ -517,13 +535,17 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     double strike2 = 90.0;
     double market_price2 = base_price_kref * (strike2 / K_ref);
 
-    IVQuery query2{
-        .market_price = market_price2,
+    OptionSpec spec2{
         .spot = spot,
         .strike = strike2,  // != K_ref
         .maturity = 1.0,
         .rate = known_r,
-        .option_type = OptionType::PUT
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
+    };
+    IVQuery query2{
+        .option = spec2,
+        .market_price = market_price2
     };
 
     auto result2 = iv_solver.solve(query2);
@@ -612,13 +634,18 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
             scenario.rate,
             OptionType::CALL);
 
-        IVQuery query{
-            .market_price = market_price,
+        OptionSpec spec{
             .spot = spot,
             .strike = K_ref,
             .maturity = scenario.tau,
             .rate = scenario.rate,
-            .option_type = OptionType::CALL};
+            .dividend_yield = 0.0,
+            .type = OptionType::CALL
+        };
+        IVQuery query{
+            .option = spec,
+            .market_price = market_price
+        };
 
         auto result = iv_solver.solve(query);
         ASSERT_TRUE(result.converged)
@@ -684,26 +711,28 @@ TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
     }();
 
     // Create IV solver
-    IVSolverInterpolated iv_solver(
-        *evaluator,
+    auto iv_solver_result = IVSolverInterpolated::create(
+        std::move(evaluator),
         K_ref,
         std::make_pair(moneyness.front(), moneyness.back()),
         std::make_pair(maturity.front(), maturity.back()),
         std::make_pair(volatility.front(), volatility.back()),
         std::make_pair(rate.front(), rate.back())
     );
+    ASSERT_TRUE(iv_solver_result.has_value()) << iv_solver_result.error();
+    const auto& iv_solver = iv_solver_result.value();
 
     // Test multiple scenarios
     std::vector<IVQuery> test_queries = {
         // ATM
-        {.market_price = bs_price(100.0, 100.0, 0.5, 0.20, 0.05, OptionType::PUT),
-         .spot = 100.0, .strike = K_ref, .maturity = 0.5, .rate = 0.05, .option_type = OptionType::PUT},
+        {.option = OptionSpec{.spot = 100.0, .strike = K_ref, .maturity = 0.5, .rate = 0.05, .dividend_yield = 0.0, .type = OptionType::PUT},
+         .market_price = bs_price(100.0, 100.0, 0.5, 0.20, 0.05, OptionType::PUT)},
         // ITM
-        {.market_price = bs_price(90.0, 100.0, 1.0, 0.25, 0.05, OptionType::PUT),
-         .spot = 90.0, .strike = K_ref, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT},
+        {.option = OptionSpec{.spot = 90.0, .strike = K_ref, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.0, .type = OptionType::PUT},
+         .market_price = bs_price(90.0, 100.0, 1.0, 0.25, 0.05, OptionType::PUT)},
         // OTM
-        {.market_price = bs_price(110.0, 100.0, 0.25, 0.15, 0.025, OptionType::PUT),
-         .spot = 110.0, .strike = K_ref, .maturity = 0.25, .rate = 0.025, .option_type = OptionType::PUT},
+        {.option = OptionSpec{.spot = 110.0, .strike = K_ref, .maturity = 0.25, .rate = 0.025, .dividend_yield = 0.0, .type = OptionType::PUT},
+         .market_price = bs_price(110.0, 100.0, 0.25, 0.15, 0.025, OptionType::PUT)},
     };
 
     for (const auto& query : test_queries) {
@@ -711,9 +740,9 @@ TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
 
         // Should converge successfully
         ASSERT_TRUE(result.converged)
-            << "Failed for spot=" << query.spot
-            << " maturity=" << query.maturity
-            << " rate=" << query.rate
+            << "Failed for spot=" << query.option.spot
+            << " maturity=" << query.option.maturity
+            << " rate=" << query.option.rate
             << (result.failure_reason.has_value() ? ": " + *result.failure_reason : "");
 
         // Results should be numerically stable and within reasonable bounds
