@@ -11,6 +11,7 @@
  */
 
 #include "src/interpolation/bspline_4d.hpp"
+#include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <random>
@@ -629,4 +630,65 @@ TEST(BSpline4DTest, AllZeroCoefficients) {
     EXPECT_NEAR(val1, 0.0, kTolerance);
     EXPECT_NEAR(val2, 0.0, kTolerance);
     EXPECT_NEAR(val3, 0.0, kTolerance);
+}
+
+// ============================================================================
+// Workspace-Based Construction Tests
+// ============================================================================
+
+TEST(BSpline4D, ConstructsFromWorkspace) {
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(4 * 4 * 4 * 4, 5.0);
+
+    auto ws = mango::PriceTableWorkspace::create(m, tau, sigma, r, coeffs, 100.0, 0.02).value();
+
+    mango::BSpline4D spline(ws);
+
+    // Verify dimensions match
+    auto [nm, nt, nv, nr] = spline.dimensions();
+    EXPECT_EQ(nm, 4);
+    EXPECT_EQ(nt, 4);
+    EXPECT_EQ(nv, 4);
+    EXPECT_EQ(nr, 4);
+
+    // Verify evaluation works
+    double result = spline.eval(0.95, 0.5, 0.20, 0.03);
+    EXPECT_NEAR(result, 5.0, 0.1);  // Should be close to constant coefficient
+}
+
+TEST(BSpline4D, WorkspaceAndVectorConstructorsGiveSameResults) {
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(4 * 4 * 4 * 4);
+
+    // Fill with test pattern
+    for (size_t i = 0; i < coeffs.size(); ++i) {
+        coeffs[i] = static_cast<double>(i);
+    }
+
+    // Construct from workspace
+    auto ws = mango::PriceTableWorkspace::create(m, tau, sigma, r, coeffs, 100.0, 0.02).value();
+    mango::BSpline4D spline_ws(ws);
+
+    // Construct from vectors (old API)
+    mango::BSpline4D spline_vec(m, tau, sigma, r, coeffs);
+
+    // Compare evaluations at multiple points
+    std::vector<std::tuple<double, double, double, double>> test_points = {
+        {0.85, 0.2, 0.18, 0.025},
+        {0.95, 0.75, 0.22, 0.035},
+        {1.05, 1.5, 0.28, 0.045}
+    };
+
+    for (const auto& [mq, tq, vq, rq] : test_points) {
+        double result_ws = spline_ws.eval(mq, tq, vq, rq);
+        double result_vec = spline_vec.eval(mq, tq, vq, rq);
+        EXPECT_DOUBLE_EQ(result_ws, result_vec)
+            << "Results differ at (" << mq << ", " << tq << ", " << vq << ", " << rq << ")";
+    }
 }

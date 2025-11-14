@@ -12,3 +12,17 @@ python.toolchain(
     ignore_root_user_error = True,
 )
 use_repo(python, "python_3_11")
+
+# Apache Arrow C++ (required for price table persistence)
+# NOTE: Using system-installed Arrow packages in CI (libarrow-dev)
+# For local development, run: ./tools/enable_arrow.sh
+# See CONAN_SETUP.md for details
+# conan_extension = use_extension("//conan_deps:conan_deps_module_extension.bzl", "conan_extension")
+# use_repo(
+#     conan_extension,
+#     "arrow",
+#     "boost",
+#     "bzip2",
+#     "libbacktrace",
+#     "zlib",
+# )

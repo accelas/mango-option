@@ -161,3 +161,25 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "crc64",
+    srcs = ["crc64.cpp"],
+    hdrs = ["crc64.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_workspace",
+    srcs = ["price_table_workspace.cpp"],
+    hdrs = ["price_table_workspace.hpp"],
+    deps = [
+        "//src/support:expected",
+        "//src/interpolation:bspline_utils",
+        ":crc64",
+        "//third_party/arrow",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

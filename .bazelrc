@@ -5,3 +5,6 @@
 build --color=yes
 test --color=yes
 test --test_output=errors
+
+# Arrow persistence feature (enabled by default)
+build --define=enable_arrow=true
