@@ -29,7 +29,6 @@ jobs:
       - name: Setup Conan
         uses: conan-io/setup-conan@v1
         with:
-          version: 2.x
           use_venv: true
 
       - name: Setup Conan profile
