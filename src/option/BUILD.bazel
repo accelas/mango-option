@@ -123,6 +123,9 @@ cc_library(
         ":american_option",
         ":iv_types",
         ":price_table_4d_builder",
+        ":option_spec",
+        ":iv_solver_base",
+        "//src/support:parallel",
     ],
     copts = [
         "-std=c++23",
@@ -130,7 +133,60 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
+        "-fopenmp",
     ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "option_spec",
+    srcs = ["option_spec.cpp"],
+    hdrs = ["option_spec.hpp"],
+    deps = [
+        ":american_option",  # For OptionType enum
+        "//src/support:expected",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_solver_base",
+    hdrs = ["iv_solver_base.hpp"],
+    deps = [
+        ":option_spec",
+        ":iv_types",
+        "//src/support:expected",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "iv_solver_fdm",
+    srcs = ["iv_solver_fdm.cpp"],
+    hdrs = ["iv_solver_fdm.hpp"],
+    deps = [
+        ":iv_solver_base",
+        ":option_spec",
+        ":iv_types",
+        "//src/pde/core:root_finding",
+        ":american_option",
+        ":american_solver_workspace",
+        "//src/support:parallel",
+        "//common:ivcalc_trace_hdr",
+        "//src/support:expected",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-fopenmp",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
 
