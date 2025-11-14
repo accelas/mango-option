@@ -4,6 +4,7 @@
  */
 
 #include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <iostream>
@@ -209,4 +210,25 @@ TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
     // Should maintain ~848 options/sec on 32 cores (or scale with cores)
     // Relaxed threshold for CI environments
     EXPECT_LT(duration_sec, 60.0);  // Complete within 1 minute
+}
+
+TEST(PriceTableSurface, ConstructsFromWorkspace) {
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(4 * 4 * 4 * 4, 10.0);
+
+    auto ws = mango::PriceTableWorkspace::create(m, tau, sigma, r, coeffs, 100.0, 0.015);
+    ASSERT_TRUE(ws.has_value());
+
+    mango::PriceTableSurface surface(std::make_shared<mango::PriceTableWorkspace>(std::move(ws.value())));
+
+    EXPECT_TRUE(surface.valid());
+    EXPECT_DOUBLE_EQ(surface.K_ref(), 100.0);
+    EXPECT_DOUBLE_EQ(surface.dividend_yield(), 0.015);
+
+    auto [m_min, m_max] = surface.moneyness_range();
+    EXPECT_DOUBLE_EQ(m_min, 0.8);
+    EXPECT_DOUBLE_EQ(m_max, 1.1);
 }
