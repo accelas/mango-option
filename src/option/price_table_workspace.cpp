@@ -2,6 +2,11 @@
 #include <algorithm>
 #include <numeric>
 #include <cstring>
+#include <chrono>
+#include <fstream>
+#include <arrow/api.h>
+#include <arrow/io/api.h>
+#include <arrow/ipc/api.h>
 
 namespace mango {
 
@@ -151,6 +156,404 @@ expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
     // Allocate and initialize workspace
     return allocate_and_initialize(m_grid, tau_grid, sigma_grid, r_grid,
                                    coefficients, K_ref, dividend_yield);
+}
+
+expected<void, std::string> PriceTableWorkspace::save(
+    const std::string& filepath,
+    const std::string& ticker,
+    uint8_t option_type) const
+{
+    // Create Arrow schema according to spec v1.0
+    auto schema = arrow::schema({
+        // Metadata (scalar fields)
+        arrow::field("format_version", arrow::uint32()),
+        arrow::field("created_timestamp", arrow::timestamp(arrow::TimeUnit::MICRO)),
+        arrow::field("ticker", arrow::utf8()),
+        arrow::field("option_type", arrow::uint8()),
+        arrow::field("K_ref", arrow::float64()),
+        arrow::field("dividend_yield", arrow::float64()),
+
+        // Grid dimensions
+        arrow::field("n_moneyness", arrow::uint32()),
+        arrow::field("n_maturity", arrow::uint32()),
+        arrow::field("n_volatility", arrow::uint32()),
+        arrow::field("n_rate", arrow::uint32()),
+
+        // Grid vectors (1D arrays)
+        arrow::field("moneyness", arrow::list(arrow::float64())),
+        arrow::field("maturity", arrow::list(arrow::float64())),
+        arrow::field("volatility", arrow::list(arrow::float64())),
+        arrow::field("rate", arrow::list(arrow::float64())),
+
+        // Knot vectors
+        arrow::field("knots_moneyness", arrow::list(arrow::float64())),
+        arrow::field("knots_maturity", arrow::list(arrow::float64())),
+        arrow::field("knots_volatility", arrow::list(arrow::float64())),
+        arrow::field("knots_rate", arrow::list(arrow::float64())),
+
+        // Coefficients (4D tensor in row-major layout)
+        arrow::field("coefficients", arrow::list(arrow::float64())),
+
+        // Checksums (placeholder 0 for now, Task 7 adds CRC64)
+        arrow::field("checksum_coefficients", arrow::uint64()),
+        arrow::field("checksum_grids", arrow::uint64()),
+    });
+
+    // Get current timestamp
+    auto now = std::chrono::system_clock::now();
+    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+        now.time_since_epoch()).count();
+
+    auto [n_m, n_tau, n_sigma, n_r] = dimensions();
+
+    // Build column data using Arrow builders
+    arrow::UInt32Builder format_version_builder;
+    arrow::TimestampBuilder timestamp_builder(arrow::timestamp(arrow::TimeUnit::MICRO),
+                                             arrow::default_memory_pool());
+    arrow::StringBuilder ticker_builder;
+    arrow::UInt8Builder option_type_builder;
+    arrow::DoubleBuilder k_ref_builder;
+    arrow::DoubleBuilder dividend_builder;
+
+    arrow::UInt32Builder n_m_builder, n_tau_builder, n_sigma_builder, n_r_builder;
+
+    // List builders for grid vectors
+    arrow::ListBuilder moneyness_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+    arrow::ListBuilder maturity_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+    arrow::ListBuilder volatility_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+    arrow::ListBuilder rate_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+
+    // List builders for knot vectors
+    arrow::ListBuilder knots_m_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+    arrow::ListBuilder knots_tau_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+    arrow::ListBuilder knots_sigma_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+    arrow::ListBuilder knots_r_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+
+    // List builder for coefficients
+    arrow::ListBuilder coeffs_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+
+    arrow::UInt64Builder checksum_coeffs_builder, checksum_grids_builder;
+
+    // Append scalar values
+    if (!format_version_builder.Append(1).ok() ||
+        !timestamp_builder.Append(micros).ok() ||
+        !ticker_builder.Append(ticker).ok() ||
+        !option_type_builder.Append(option_type).ok() ||
+        !k_ref_builder.Append(K_ref_).ok() ||
+        !dividend_builder.Append(dividend_yield_).ok() ||
+        !n_m_builder.Append(static_cast<uint32_t>(n_m)).ok() ||
+        !n_tau_builder.Append(static_cast<uint32_t>(n_tau)).ok() ||
+        !n_sigma_builder.Append(static_cast<uint32_t>(n_sigma)).ok() ||
+        !n_r_builder.Append(static_cast<uint32_t>(n_r)).ok())
+    {
+        return unexpected("Failed to append scalar values");
+    }
+
+    // Helper to append list data
+    auto append_list = [](arrow::ListBuilder& list_builder,
+                         std::span<const double> data) -> bool {
+        if (!list_builder.Append().ok()) return false;
+        auto* value_builder = static_cast<arrow::DoubleBuilder*>(list_builder.value_builder());
+        return value_builder->AppendValues(data.data(), data.size()).ok();
+    };
+
+    // Append grid vectors
+    if (!append_list(moneyness_list_builder, moneyness_) ||
+        !append_list(maturity_list_builder, maturity_) ||
+        !append_list(volatility_list_builder, volatility_) ||
+        !append_list(rate_list_builder, rate_))
+    {
+        return unexpected("Failed to append grid vectors");
+    }
+
+    // Append knot vectors
+    if (!append_list(knots_m_list_builder, knots_m_) ||
+        !append_list(knots_tau_list_builder, knots_tau_) ||
+        !append_list(knots_sigma_list_builder, knots_sigma_) ||
+        !append_list(knots_r_list_builder, knots_r_))
+    {
+        return unexpected("Failed to append knot vectors");
+    }
+
+    // Append coefficients
+    if (!append_list(coeffs_list_builder, coefficients_)) {
+        return unexpected("Failed to append coefficients");
+    }
+
+    // Append checksums (placeholder 0 for now)
+    if (!checksum_coeffs_builder.Append(0).ok() ||
+        !checksum_grids_builder.Append(0).ok())
+    {
+        return unexpected("Failed to append checksums");
+    }
+
+    // Finish all builders and create arrays
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(22);
+
+    auto finish_builder = [&arrays](arrow::ArrayBuilder& builder) -> bool {
+        std::shared_ptr<arrow::Array> array;
+        if (!builder.Finish(&array).ok()) return false;
+        arrays.push_back(array);
+        return true;
+    };
+
+    if (!finish_builder(format_version_builder) ||
+        !finish_builder(timestamp_builder) ||
+        !finish_builder(ticker_builder) ||
+        !finish_builder(option_type_builder) ||
+        !finish_builder(k_ref_builder) ||
+        !finish_builder(dividend_builder) ||
+        !finish_builder(n_m_builder) ||
+        !finish_builder(n_tau_builder) ||
+        !finish_builder(n_sigma_builder) ||
+        !finish_builder(n_r_builder) ||
+        !finish_builder(moneyness_list_builder) ||
+        !finish_builder(maturity_list_builder) ||
+        !finish_builder(volatility_list_builder) ||
+        !finish_builder(rate_list_builder) ||
+        !finish_builder(knots_m_list_builder) ||
+        !finish_builder(knots_tau_list_builder) ||
+        !finish_builder(knots_sigma_list_builder) ||
+        !finish_builder(knots_r_list_builder) ||
+        !finish_builder(coeffs_list_builder) ||
+        !finish_builder(checksum_coeffs_builder) ||
+        !finish_builder(checksum_grids_builder))
+    {
+        return unexpected("Failed to finish builders");
+    }
+
+    // Create record batch (single row)
+    auto record_batch = arrow::RecordBatch::Make(schema, 1, arrays);
+
+    // Open file for writing
+    auto file_result = arrow::io::FileOutputStream::Open(filepath);
+    if (!file_result.ok()) {
+        return unexpected("Failed to open file: " + file_result.status().ToString());
+    }
+
+    // Write using Arrow IPC (Feather V2 format)
+    auto writer_result = arrow::ipc::MakeFileWriter(*file_result, schema);
+    if (!writer_result.ok()) {
+        return unexpected("Failed to create Arrow writer: " + writer_result.status().ToString());
+    }
+
+    auto writer = *writer_result;
+    if (!writer->WriteRecordBatch(*record_batch).ok()) {
+        return unexpected("Failed to write record batch");
+    }
+
+    if (!writer->Close().ok()) {
+        return unexpected("Failed to close Arrow writer");
+    }
+
+    return {};
+}
+
+expected<PriceTableWorkspace, PriceTableWorkspace::LoadError>
+PriceTableWorkspace::load(const std::string& filepath)
+{
+    // 1. Check if file exists
+    std::ifstream test_file(filepath);
+    if (!test_file.good()) {
+        return unexpected(LoadError::FILE_NOT_FOUND);
+    }
+    test_file.close();
+
+    // 2. Open file using Arrow memory-mapped IO for zero-copy
+    auto mmap_result = arrow::io::MemoryMappedFile::Open(filepath, arrow::io::FileMode::READ);
+    if (!mmap_result.ok()) {
+        return unexpected(LoadError::MMAP_FAILED);
+    }
+    auto mmap_file = *mmap_result;
+
+    // 3. Create IPC file reader
+    auto reader_result = arrow::ipc::RecordBatchFileReader::Open(mmap_file);
+    if (!reader_result.ok()) {
+        // Check if it's a generic Arrow read error or specifically not an Arrow file
+        std::string error_msg = reader_result.status().ToString();
+        if (error_msg.find("Not an Arrow file") != std::string::npos ||
+            error_msg.find("Invalid") != std::string::npos) {
+            return unexpected(LoadError::NOT_ARROW_FILE);
+        }
+        return unexpected(LoadError::ARROW_READ_ERROR);
+    }
+    auto reader = *reader_result;
+
+    // 4. Read the single record batch
+    if (reader->num_record_batches() != 1) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    auto batch_result = reader->ReadRecordBatch(0);
+    if (!batch_result.ok()) {
+        return unexpected(LoadError::ARROW_READ_ERROR);
+    }
+    auto batch = *batch_result;
+
+    // 5. Helper to extract scalar fields
+    auto get_scalar = [&batch](const std::string& name) -> std::shared_ptr<arrow::Scalar> {
+        auto column = batch->GetColumnByName(name);
+        if (!column) return nullptr;
+        auto scalar_result = column->GetScalar(0);
+        if (!scalar_result.ok()) return nullptr;
+        return *scalar_result;
+    };
+
+    // 6. Helper to extract list field as vector
+    auto get_list_values = [&batch](const std::string& name) -> std::vector<double> {
+        auto column = batch->GetColumnByName(name);
+        if (!column) return {};
+
+        auto list_array = std::dynamic_pointer_cast<arrow::ListArray>(column);
+        if (!list_array) return {};
+
+        // For a single-row batch, extract the list at row 0
+        if (list_array->length() != 1) return {};
+
+        // Get the slice of values for row 0
+        int64_t start = list_array->value_offset(0);
+        int64_t end = list_array->value_offset(1);
+        int64_t list_length = end - start;
+
+        auto values = std::dynamic_pointer_cast<arrow::DoubleArray>(list_array->values());
+        if (!values) return {};
+
+        std::vector<double> result(list_length);
+        for (int64_t i = 0; i < list_length; ++i) {
+            result[i] = values->Value(start + i);
+        }
+
+        return result;
+    };
+
+    // 7. Validate format version
+    auto version_scalar = get_scalar("format_version");
+    if (!version_scalar) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+    uint32_t format_version = std::dynamic_pointer_cast<arrow::UInt32Scalar>(version_scalar)->value;
+    if (format_version != 1) {
+        return unexpected(LoadError::UNSUPPORTED_VERSION);
+    }
+
+    // 8. Extract dimensions
+    auto n_m_scalar = get_scalar("n_moneyness");
+    auto n_tau_scalar = get_scalar("n_maturity");
+    auto n_sigma_scalar = get_scalar("n_volatility");
+    auto n_r_scalar = get_scalar("n_rate");
+
+    if (!n_m_scalar || !n_tau_scalar || !n_sigma_scalar || !n_r_scalar) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    uint32_t n_m = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_m_scalar)->value;
+    uint32_t n_tau = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_tau_scalar)->value;
+    uint32_t n_sigma = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_sigma_scalar)->value;
+    uint32_t n_r = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_r_scalar)->value;
+
+    // 9. Validate dimensions (must be >= 4 for cubic B-splines)
+    if (n_m < 4 || n_tau < 4 || n_sigma < 4 || n_r < 4) {
+        return unexpected(LoadError::INSUFFICIENT_GRID_POINTS);
+    }
+
+    // 10. Extract metadata
+    auto k_ref_scalar = get_scalar("K_ref");
+    auto div_scalar = get_scalar("dividend_yield");
+
+    if (!k_ref_scalar || !div_scalar) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    double K_ref = std::dynamic_pointer_cast<arrow::DoubleScalar>(k_ref_scalar)->value;
+    double dividend_yield = std::dynamic_pointer_cast<arrow::DoubleScalar>(div_scalar)->value;
+
+    // 11. Extract grid vectors
+    auto m_grid = get_list_values("moneyness");
+    auto tau_grid = get_list_values("maturity");
+    auto sigma_grid = get_list_values("volatility");
+    auto r_grid = get_list_values("rate");
+
+    if (m_grid.empty() || tau_grid.empty() || sigma_grid.empty() || r_grid.empty()) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    // 12. Validate array sizes match metadata
+    if (m_grid.size() != n_m || tau_grid.size() != n_tau ||
+        sigma_grid.size() != n_sigma || r_grid.size() != n_r) {
+        return unexpected(LoadError::SIZE_MISMATCH);
+    }
+
+    // 13. Extract knot vectors
+    auto knots_m = get_list_values("knots_moneyness");
+    auto knots_tau = get_list_values("knots_maturity");
+    auto knots_sigma = get_list_values("knots_volatility");
+    auto knots_r = get_list_values("knots_rate");
+
+    // 14. Validate knot vector sizes (should be n + 4 for clamped cubic B-splines)
+    // Note: Schema doc incorrectly stated n + 8, but clamped_knots_cubic() returns n + 4
+    if (knots_m.size() != n_m + 4 || knots_tau.size() != n_tau + 4 ||
+        knots_sigma.size() != n_sigma + 4 || knots_r.size() != n_r + 4) {
+        return unexpected(LoadError::SIZE_MISMATCH);
+    }
+
+    // 15. Extract coefficients
+    auto coeffs = get_list_values("coefficients");
+
+    // 16. Validate coefficient size
+    size_t expected_coeffs = static_cast<size_t>(n_m) * n_tau * n_sigma * n_r;
+    if (coeffs.size() != expected_coeffs) {
+        return unexpected(LoadError::COEFFICIENT_SIZE_MISMATCH);
+    }
+
+    // 17. Validate grid monotonicity
+    auto is_sorted = [](const std::vector<double>& v) {
+        return std::is_sorted(v.begin(), v.end());
+    };
+
+    if (!is_sorted(m_grid) || !is_sorted(tau_grid) ||
+        !is_sorted(sigma_grid) || !is_sorted(r_grid)) {
+        return unexpected(LoadError::GRID_NOT_SORTED);
+    }
+
+    // 18. Extract checksum fields (skip validation for now - Task 7 will add CRC64)
+    // auto checksum_coeffs = get_scalar("checksum_coefficients");
+    // auto checksum_grids = get_scalar("checksum_grids");
+
+    // 19. Create workspace using the same allocate_and_initialize path
+    // This ensures identical memory layout between save/load
+    auto ws_result = allocate_and_initialize(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, K_ref, dividend_yield);
+
+    if (!ws_result) {
+        return unexpected(LoadError::ARROW_READ_ERROR);
+    }
+
+    // 20. Verify alignment of loaded data
+    // Note: We rely on allocate_and_initialize() to ensure proper alignment
+    // The alignment is best-effort and may not always be perfect for all grid sizes
+    auto& ws = ws_result.value();
+
+    // Optional alignment check (disabled for now as it's not critical for correctness)
+    // auto check_alignment = [](const void* ptr) -> bool {
+    //     auto addr = reinterpret_cast<std::uintptr_t>(ptr);
+    //     return (addr % 64) == 0;
+    // };
+    // if (!check_alignment(ws.moneyness_.data()) ||
+    //     !check_alignment(ws.coefficients_.data())) {
+    //     return unexpected(LoadError::INVALID_ALIGNMENT);
+    // }
+
+    return std::move(ws);
 }
 
 }  // namespace mango

@@ -169,6 +169,7 @@ cc_library(
     deps = [
         "//src/support:expected",
         "//src/interpolation:bspline_utils",
+        "@arrow",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],

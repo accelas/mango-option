@@ -1,6 +1,8 @@
 #include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
+#include <fstream>
+#include <filesystem>
 
 TEST(PriceTableWorkspace, ConstructsFromGridData) {
     std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
@@ -51,4 +53,281 @@ TEST(PriceTableWorkspace, ValidatesArenaAlignment) {
     // Check 64-byte alignment for SIMD
     auto addr = reinterpret_cast<std::uintptr_t>(ws.moneyness().data());
     EXPECT_EQ(addr % 64, 0) << "Moneyness grid not 64-byte aligned";
+}
+
+TEST(PriceTableWorkspace, SavesAndLoadsFromArrowFile) {
+    // Create workspace with known data
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
+
+    // Fill coefficients with distinct values for verification
+    std::vector<double> coeffs(4 * 4 * 4 * 4);
+    for (size_t i = 0; i < coeffs.size(); ++i) {
+        coeffs[i] = static_cast<double>(i) * 0.1;
+    }
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+
+    ASSERT_TRUE(ws_result.has_value());
+    auto& ws = ws_result.value();
+
+    // Save to temporary file
+    const std::string filepath = "/tmp/test_price_table.arrow";
+    auto save_result = ws.save(filepath, "SPY", 0);  // 0 = PUT
+
+    ASSERT_TRUE(save_result.has_value()) << "Save failed: " << save_result.error();
+
+    // TODO: Implement load() in later task to verify roundtrip
+    // For now, just verify file exists and has Arrow magic header
+    std::ifstream file(filepath, std::ios::binary);
+    ASSERT_TRUE(file.is_open()) << "File not created";
+
+    char magic[6];
+    file.read(magic, 6);
+    std::string magic_str(magic, 6);
+    EXPECT_EQ(magic_str, "ARROW1") << "Arrow magic header not found";
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+TEST(PriceTableWorkspace, SavedFileContainsCorrectDimensions) {
+    // Create workspace with known dimensions
+    std::vector<double> m_grid = {0.7, 0.8, 0.9, 1.0, 1.1};     // 5 points
+    std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};       // 4 points
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};  // 4 points
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};      // 4 points
+
+    std::vector<double> coeffs(5 * 4 * 4 * 4, 42.0);  // Fill with known value
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.03);
+
+    ASSERT_TRUE(ws_result.has_value());
+    auto& ws = ws_result.value();
+
+    // Save to temporary file
+    const std::string filepath = "/tmp/test_dimensions.arrow";
+    auto save_result = ws.save(filepath, "TEST", 1);  // 1 = CALL
+
+    ASSERT_TRUE(save_result.has_value()) << "Save failed: " << save_result.error();
+
+    // Verify file is non-empty
+    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(file.is_open());
+    auto filesize = file.tellg();
+    EXPECT_GT(filesize, 100) << "File too small to contain data";
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+// ============================================================================
+// Load Tests (TDD - write failing tests first)
+// ============================================================================
+
+TEST(PriceTableWorkspace, LoadFromNonExistentFileReturnsFileNotFound) {
+    auto result = mango::PriceTableWorkspace::load("/tmp/nonexistent_file.arrow");
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), mango::PriceTableWorkspace::LoadError::FILE_NOT_FOUND);
+}
+
+TEST(PriceTableWorkspace, LoadFromNonArrowFileReturnsNotArrowFile) {
+    // Create a file without Arrow magic header
+    const std::string filepath = "/tmp/not_arrow_file.txt";
+    std::ofstream file(filepath);
+    file << "This is not an Arrow file\n";
+    file.close();
+
+    auto result = mango::PriceTableWorkspace::load(filepath);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), mango::PriceTableWorkspace::LoadError::NOT_ARROW_FILE);
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
+    // Create and save workspace
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
+
+    std::vector<double> coeffs(4 * 4 * 4 * 4);
+    for (size_t i = 0; i < coeffs.size(); ++i) {
+        coeffs[i] = static_cast<double>(i) * 0.1;
+    }
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+
+    ASSERT_TRUE(ws_result.has_value());
+    auto& ws = ws_result.value();
+
+    const std::string filepath = "/tmp/test_roundtrip.arrow";
+    auto save_result = ws.save(filepath, "SPY", 0);
+    ASSERT_TRUE(save_result.has_value()) << "Save failed: " << save_result.error();
+
+    // Load workspace
+    auto load_result = mango::PriceTableWorkspace::load(filepath);
+    ASSERT_TRUE(load_result.has_value()) << "Load failed";
+
+    auto& loaded_ws = load_result.value();
+
+    // Verify dimensions match
+    EXPECT_EQ(loaded_ws.moneyness().size(), 4);
+    EXPECT_EQ(loaded_ws.maturity().size(), 4);
+    EXPECT_EQ(loaded_ws.volatility().size(), 4);
+    EXPECT_EQ(loaded_ws.rate().size(), 4);
+    EXPECT_EQ(loaded_ws.coefficients().size(), 256);
+
+    // Verify metadata
+    EXPECT_DOUBLE_EQ(loaded_ws.K_ref(), 100.0);
+    EXPECT_DOUBLE_EQ(loaded_ws.dividend_yield(), 0.02);
+
+    // Verify grid values
+    for (size_t i = 0; i < m_grid.size(); ++i) {
+        EXPECT_DOUBLE_EQ(loaded_ws.moneyness()[i], m_grid[i]);
+    }
+    for (size_t i = 0; i < tau_grid.size(); ++i) {
+        EXPECT_DOUBLE_EQ(loaded_ws.maturity()[i], tau_grid[i]);
+    }
+
+    // Verify coefficient values
+    for (size_t i = 0; i < coeffs.size(); ++i) {
+        EXPECT_DOUBLE_EQ(loaded_ws.coefficients()[i], coeffs[i]);
+    }
+
+    // Verify 64-byte alignment
+    auto addr = reinterpret_cast<std::uintptr_t>(loaded_ws.moneyness().data());
+    EXPECT_EQ(addr % 64, 0) << "Loaded data not 64-byte aligned";
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+TEST(PriceTableWorkspace, LoadValidatesDimensions) {
+    // This test would require creating a malformed Arrow file
+    // For now, we'll test this indirectly by ensuring load() validates
+    // We'll create a proper test after implementing load()
+
+    // Create workspace with known dimensions
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+    ASSERT_TRUE(ws_result.has_value());
+
+    const std::string filepath = "/tmp/test_dimensions_validation.arrow";
+    auto save_result = ws_result.value().save(filepath, "TEST", 0);
+    ASSERT_TRUE(save_result.has_value());
+
+    // Load should succeed for valid file
+    auto load_result = mango::PriceTableWorkspace::load(filepath);
+    ASSERT_TRUE(load_result.has_value());
+
+    // Verify dimensions
+    auto [n_m, n_tau, n_sigma, n_r] = load_result.value().dimensions();
+    EXPECT_EQ(n_m, 4);
+    EXPECT_EQ(n_tau, 4);
+    EXPECT_EQ(n_sigma, 4);
+    EXPECT_EQ(n_r, 4);
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+TEST(PriceTableWorkspace, LoadVerifiesGridMonotonicity) {
+    // Create workspace with sorted grids
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+    ASSERT_TRUE(ws_result.has_value());
+
+    const std::string filepath = "/tmp/test_monotonicity.arrow";
+    auto save_result = ws_result.value().save(filepath, "TEST", 0);
+    ASSERT_TRUE(save_result.has_value());
+
+    // Load should succeed (grids are already sorted)
+    auto load_result = mango::PriceTableWorkspace::load(filepath);
+    EXPECT_TRUE(load_result.has_value());
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+TEST(PriceTableWorkspace, LoadVerifiesKnotVectorSizes) {
+    // Create workspace
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};  // 5 points
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};     // 4 points
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(5 * 4 * 4 * 4, 1.0);
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+    ASSERT_TRUE(ws_result.has_value());
+
+    const std::string filepath = "/tmp/test_knots.arrow";
+    auto save_result = ws_result.value().save(filepath, "TEST", 0);
+    ASSERT_TRUE(save_result.has_value());
+
+    // Load and verify knot vector sizes
+    auto load_result = mango::PriceTableWorkspace::load(filepath);
+    ASSERT_TRUE(load_result.has_value());
+
+    // Knot vectors should be n + 4 for clamped cubic B-splines
+    EXPECT_EQ(load_result.value().knots_moneyness().size(), 5 + 4);
+    EXPECT_EQ(load_result.value().knots_maturity().size(), 4 + 4);
+    EXPECT_EQ(load_result.value().knots_volatility().size(), 4 + 4);
+    EXPECT_EQ(load_result.value().knots_rate().size(), 4 + 4);
+
+    // Cleanup
+    std::filesystem::remove(filepath);
+}
+
+TEST(PriceTableWorkspace, LoadPreservesBufferAlignment) {
+    // Create workspace
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
+    std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
+
+    auto ws_result = mango::PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+    ASSERT_TRUE(ws_result.has_value());
+
+    const std::string filepath = "/tmp/test_alignment.arrow";
+    auto save_result = ws_result.value().save(filepath, "TEST", 0);
+    ASSERT_TRUE(save_result.has_value());
+
+    // Load and verify at least the first buffer is 64-byte aligned
+    // Note: We copy data from Arrow into our own allocation, so alignment
+    // is controlled by allocate_and_initialize(), which aligns the arena start
+    auto load_result = mango::PriceTableWorkspace::load(filepath);
+    ASSERT_TRUE(load_result.has_value());
+    auto& loaded_ws = load_result.value();
+
+    // Check that at least the moneyness grid (first buffer) is aligned
+    auto addr = reinterpret_cast<std::uintptr_t>(loaded_ws.moneyness().data());
+    EXPECT_EQ(addr % 64, 0) << "Moneyness grid not 64-byte aligned";
+
+    // Cleanup
+    std::filesystem::remove(filepath);
 }

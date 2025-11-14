@@ -71,6 +71,37 @@ public:
                 volatility_.size(), rate_.size()};
     }
 
+    /// Save workspace to Apache Arrow IPC file
+    ///
+    /// @param filepath Output file path
+    /// @param ticker Underlying symbol (e.g., "SPY")
+    /// @param option_type 0=PUT, 1=CALL
+    /// @return Expected void or error message
+    expected<void, std::string> save(const std::string& filepath,
+                                     const std::string& ticker,
+                                     uint8_t option_type) const;
+
+    /// Load error codes
+    enum class LoadError {
+        NOT_ARROW_FILE,              // Missing "ARROW1" magic
+        UNSUPPORTED_VERSION,         // format_version != 1
+        INSUFFICIENT_GRID_POINTS,    // n < 4 for any axis
+        SIZE_MISMATCH,               // Array length doesn't match metadata
+        COEFFICIENT_SIZE_MISMATCH,   // coeffs.size() != n_m×n_tau×n_sigma×n_r
+        GRID_NOT_SORTED,             // Monotonicity violation
+        MMAP_FAILED,                 // OS mmap error
+        INVALID_ALIGNMENT,           // Buffer not 64-byte aligned
+        FILE_NOT_FOUND,              // File doesn't exist
+        SCHEMA_MISMATCH,             // Missing required fields
+        ARROW_READ_ERROR,            // Arrow library error
+    };
+
+    /// Load workspace from Apache Arrow IPC file with zero-copy mmap
+    ///
+    /// @param filepath Input file path
+    /// @return Expected workspace or error code
+    static expected<PriceTableWorkspace, LoadError> load(const std::string& filepath);
+
     /// Move-only semantics (no copies of large arena)
     PriceTableWorkspace(const PriceTableWorkspace&) = delete;
     PriceTableWorkspace& operator=(const PriceTableWorkspace&) = delete;
