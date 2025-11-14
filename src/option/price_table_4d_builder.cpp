@@ -369,17 +369,20 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
         return unexpected("B-spline fitting failed: " + fit_result.error_message);
     }
 
-    // Create evaluator
-    auto evaluator = std::make_shared<BSpline4D>(
-        moneyness_, maturity_, volatility_, rate_, fit_result.coefficients);
+    // Create workspace with all data
+    auto workspace_result = PriceTableWorkspace::allocate_and_initialize(
+        moneyness_, maturity_, volatility_, rate_,
+        fit_result.coefficients,
+        K_ref_, dividend_yield);
 
-    PriceTableGrid grid_snapshot{
-        .moneyness = moneyness_,
-        .maturity = maturity_,
-        .volatility = volatility_,
-        .rate = rate_,
-        .K_ref = K_ref_
-    };
+    if (!workspace_result.has_value()) {
+        return unexpected("Workspace allocation failed: " + workspace_result.error());
+    }
+
+    auto workspace = std::make_shared<PriceTableWorkspace>(std::move(workspace_result.value()));
+
+    // Create evaluator for backward compatibility (though workspace-based surface is preferred)
+    auto evaluator = std::make_shared<BSpline4D>(*workspace);
 
     // Populate fitting statistics from result
     BSplineFittingStats fitting_stats{
@@ -409,7 +412,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     };
 
     return PriceTable4DResult{
-        .surface = PriceTableSurface(evaluator, std::move(grid_snapshot), dividend_yield),
+        .surface = PriceTableSurface(workspace),
         .evaluator = std::move(evaluator),
         .prices_4d = std::move(prices_4d),
         .n_pde_solves = Nv * Nr,  // Now correct: O(Nσ × Nr) not O(Nm × Nt × Nσ × Nr)
