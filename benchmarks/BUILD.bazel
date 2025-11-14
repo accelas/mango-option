@@ -195,21 +195,3 @@ cc_binary(
     tags = ["benchmark", "manual"],
 )
 
-cc_binary(
-    name = "bspline_banded_solver_benchmark",
-    srcs = ["bspline_banded_solver_benchmark.cc"],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-        "-ftree-vectorize",
-    ],
-    linkstatic = True,
-    deps = [
-        "//src/interpolation:bspline_fitter_4d",
-        "@google_benchmark//:benchmark",
-    ],
-    tags = ["benchmark", "manual"],
-)
