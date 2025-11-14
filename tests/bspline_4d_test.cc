@@ -167,7 +167,7 @@ TEST(BSpline4DTest, InvalidConstruction) {
     // Should fail validation for < 4 points
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     EXPECT_FALSE(workspace.has_value());
-    EXPECT_THAT(workspace.error(), testing::HasSubstr("moneyness"));
+    EXPECT_THAT(workspace.error(), testing::HasSubstr("Moneyness"));
 }
 
 TEST(BSpline4DTest, ConstantFunction) {
