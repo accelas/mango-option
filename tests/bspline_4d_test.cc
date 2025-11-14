@@ -238,7 +238,9 @@ TEST(BSpline4DTest, SeparableFunction) {
         }
     }
 
-    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, coeffs);
+    auto workspace = PriceTableWorkspace::create(m_grid, t_grid, v_grid, r_grid, coeffs, 100.0, 0.0);
+    ASSERT_TRUE(workspace.has_value());
+    BSpline4D spline(workspace.value());
 
     // Test approximation at grid points (not exact without proper fitting)
     // Relaxed tolerance since we're using function values as coefficients
