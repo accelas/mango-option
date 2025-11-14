@@ -5,72 +5,56 @@
 
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
+#include "src/support/parallel.hpp"
 #include <algorithm>
 #include <cmath>
 
 namespace mango {
 
-namespace {
-
-const BSpline4D& require_surface(const std::shared_ptr<BSpline4D>& surface) {
-    if (!surface) {
-        throw std::invalid_argument("PriceTableSurface not initialized");
+expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
+    std::shared_ptr<const BSpline4D> spline,
+    double K_ref,
+    std::pair<double, double> m_range,
+    std::pair<double, double> tau_range,
+    std::pair<double, double> sigma_range,
+    std::pair<double, double> r_range,
+    const IVSolverInterpolatedConfig& config)
+{
+    if (!spline) {
+        return unexpected(std::string("BSpline4D pointer is null"));
     }
-    return *surface;
+    if (K_ref <= 0.0) {
+        return unexpected(std::string("K_ref must be positive"));
+    }
+
+    return IVSolverInterpolated(
+        std::move(spline), K_ref, m_range, tau_range, sigma_range, r_range, config);
 }
 
-}  // namespace
-
-IVSolverInterpolated::IVSolverInterpolated(
+expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
     const PriceTableSurface& surface,
-    const IVSolverConfig& config)
-    : owned_surface_(std::make_shared<BSpline4D>(*surface.workspace()))
-    , price_surface_(require_surface(owned_surface_))
-    , K_ref_(surface.K_ref())
-    , m_range_(surface.moneyness_range())
-    , tau_range_(surface.maturity_range())
-    , sigma_range_(surface.volatility_range())
-    , r_range_(surface.rate_range())
-    , config_(config)
+    const IVSolverInterpolatedConfig& config)
 {
-    if (K_ref_ <= 0.0) {
-        throw std::invalid_argument("K_ref must be positive");
+    if (!surface.valid()) {
+        return unexpected(std::string("PriceTableSurface is not initialized (workspace is null)"));
     }
+
+    auto spline = std::make_shared<BSpline4D>(*surface.workspace());
+    return create(
+        std::move(spline),
+        surface.K_ref(),
+        surface.moneyness_range(),
+        surface.maturity_range(),
+        surface.volatility_range(),
+        surface.rate_range(),
+        config);
 }
 
 std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& query) const {
-    if (query.market_price <= 0.0) {
-        return "Market price must be positive";
-    }
-    if (query.spot <= 0.0) {
-        return "Spot price must be positive";
-    }
-    if (query.strike <= 0.0) {
-        return "Strike must be positive";
-    }
-    if (query.maturity <= 0.0) {
-        return "Maturity must be positive";
-    }
-
-    // Check for arbitrage violations (option-type specific)
-    double intrinsic;
-    double upper_bound;
-
-    if (query.option_type == OptionType::CALL) {
-        intrinsic = std::max(query.spot - query.strike, 0.0);  // Call intrinsic
-        upper_bound = query.spot;  // Call price cannot exceed spot
-    } else {  // PUT
-        intrinsic = std::max(query.strike - query.spot, 0.0);  // Put intrinsic
-        upper_bound = query.strike;  // Put price cannot exceed strike
-    }
-
-    if (query.market_price < intrinsic) {
-        return "Market price below intrinsic value (arbitrage)";
-    }
-    if (query.market_price > upper_bound) {
-        const char* opt_type = (query.option_type == OptionType::CALL) ? "Call" : "Put";
-        const char* bound_type = (query.option_type == OptionType::CALL) ? "spot" : "strike";
-        return std::string(opt_type) + " price above " + bound_type + " (arbitrage)";
+    // Use common validation for option spec, market price, and arbitrage checks
+    auto validation = validate_iv_query(query);
+    if (!validation) {
+        return validation.error();
     }
 
     return std::nullopt;
@@ -79,10 +63,10 @@ std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& q
 std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& query) const {
     // Compute intrinsic value based on option type
     double intrinsic;
-    if (query.option_type == OptionType::CALL) {
-        intrinsic = std::max(query.spot - query.strike, 0.0);
+    if (query.option.type == OptionType::CALL) {
+        intrinsic = std::max(query.option.spot - query.option.strike, 0.0);
     } else {  // PUT
-        intrinsic = std::max(query.strike - query.spot, 0.0);
+        intrinsic = std::max(query.option.strike - query.option.spot, 0.0);
     }
 
     // Analyze time value to set adaptive bounds
@@ -91,13 +75,10 @@ std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& q
 
     double sigma_upper;
     if (time_value_pct > 0.5) {
-        // High time value suggests high volatility
         sigma_upper = 3.0;  // 300%
     } else if (time_value_pct > 0.2) {
-        // Moderate time value
         sigma_upper = 2.0;  // 200%
     } else {
-        // Low time value (deep ITM)
         sigma_upper = 1.5;  // 150%
     }
 
@@ -112,7 +93,7 @@ std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& q
     return {sigma_min, sigma_max};
 }
 
-IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
+IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
     // Validate input
     auto error = validate_query(query);
     if (error.has_value()) {
@@ -126,15 +107,13 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
         };
     }
 
-    // CRITICAL: Compute moneyness using K_ref, not query.strike!
-    // The price surface was built for strike = K_ref, so moneyness m = S/K_ref.
-    // We'll scale the result to match query.strike in eval_price().
-    const double moneyness = query.spot / K_ref_;
+    // CRITICAL: Compute moneyness using K_ref, not query.option.strike!
+    const double moneyness = query.option.spot / K_ref_;
 
     // Get adaptive bounds
     auto [sigma_min, sigma_max] = adaptive_bounds(query);
 
-    // Check if query is within surface bounds (before we start iterating)
+    // Check if query is within surface bounds
     if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
         return IVResult{
             .converged = false,
@@ -142,10 +121,6 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
             .implied_vol = 0.0,
             .final_error = 0.0,
             .failure_reason = "Query parameters out of surface bounds. "
-                              "Moneyness: [" + std::to_string(m_range_.first) + ", " + std::to_string(m_range_.second) + "], "
-                              "Maturity: [" + std::to_string(tau_range_.first) + ", " + std::to_string(tau_range_.second) + "], "
-                              "Volatility: [" + std::to_string(sigma_range_.first) + ", " + std::to_string(sigma_range_.second) + "], "
-                              "Rate: [" + std::to_string(r_range_.first) + ", " + std::to_string(r_range_.second) + "]. "
                               "Use PDE-based IV solver for out-of-grid queries.",
             .vega = std::nullopt
         };
@@ -175,13 +150,13 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
         }
 
         // Evaluate price at current volatility (with strike scaling)
-        const double price = eval_price(moneyness, query.maturity, sigma, query.rate, query.strike);
+        const double price = eval_price(moneyness, query.option.maturity, sigma, query.option.rate, query.option.strike);
 
         // Compute error
         error_abs = std::abs(price - query.market_price);
 
         // Compute vega (∂Price/∂σ) with strike scaling
-        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+        const double vega = compute_vega(moneyness, query.option.maturity, sigma, query.option.rate, query.option.strike);
         last_vega = vega;
 
         // Check convergence
@@ -208,8 +183,6 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
             };
         }
 
-        last_vega = vega;
-
         // Newton step: σ_{n+1} = σ_n - f(σ_n)/f'(σ_n)
         const double f = price - query.market_price;
         const double sigma_new = sigma - f / vega;
@@ -219,7 +192,6 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
 
         // Check if bounds are hit (may indicate convergence issues)
         if (sigma_new < sigma_min || sigma_new > sigma_max) {
-            // Try to refine bounds
             if (iter > 10) {
                 return IVResult{
                     .converged = false,
@@ -244,4 +216,13 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
     };
 }
 
-}  // namespace mango
+void IVSolverInterpolated::solve_batch_impl(std::span<const IVQuery> queries,
+                                             std::span<IVResult> results) const noexcept {
+    // Trivially parallel: B-spline is immutable and thread-safe
+    MANGO_PRAGMA_PARALLEL_FOR
+    for (size_t i = 0; i < queries.size(); ++i) {
+        results[i] = solve_impl(queries[i]);
+    }
+}
+
+} // namespace mango
