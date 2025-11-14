@@ -222,8 +222,8 @@ TEST_F(BSpline4DEndToEndPerformanceTest, PerformanceRegression) {
     std::cout << "    Max: " << max << " µs\n";
 
     // Performance regression check: should complete in reasonable time
-    // Based on observed performance: ~270ms for 24K points with banded solver
-    // Allow 2× margin for CI/slower machines
-    EXPECT_LT(mean, 540000.0)  // <540ms (2× observed time)
+    // Based on observed performance: ~270ms local, ~630ms CI for 24K points with banded solver
+    // Allow 3.5× margin for CI variability (CI is ~2.3× slower than local dev)
+    EXPECT_LT(mean, 950000.0)  // <950ms (3.5× local observed time)
         << "4D B-spline fitting too slow (performance regression)";
 }
