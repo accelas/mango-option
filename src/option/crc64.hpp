@@ -2,14 +2,16 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <mutex>
 
 namespace mango {
 
-/// CRC64-ECMA implementation for data integrity checking
-/// Uses polynomial 0x42F0E1EBA9EA3693 (standardized by ECMA)
+/// CRC64-ECMA-182 implementation for data integrity checking
+/// Uses polynomial 0x42F0E1EBA9EA3693 (ECMA-182 standard)
+/// Initial value: 0x0, Final XOR: 0x0
 class CRC64 {
 public:
-    /// Compute CRC64-ECMA checksum for double array
+    /// Compute CRC64-ECMA-182 checksum for double array
     ///
     /// @param data Pointer to double array
     /// @param count Number of doubles in array
@@ -17,14 +19,14 @@ public:
     static uint64_t compute(const double* data, size_t count);
 
 private:
-    /// CRC64-ECMA polynomial (reversed)
+    /// CRC64-ECMA-182 polynomial (reversed for LSB-first processing)
     static constexpr uint64_t POLY = 0xC96C5795D7870F42ULL;
 
     /// Lookup table for fast CRC64 computation (initialized on first use)
     static uint64_t table_[256];
-    static bool table_initialized_;
+    static std::once_flag init_flag_;
 
-    /// Initialize lookup table (called automatically on first use)
+    /// Initialize lookup table (called automatically on first use, thread-safe)
     static void init_table();
 };
 

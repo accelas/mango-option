@@ -5,6 +5,7 @@
 #include <cstring>
 #include <chrono>
 #include <fstream>
+#include <optional>
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
@@ -132,6 +133,88 @@ expected<PriceTableWorkspace, std::string> PriceTableWorkspace::allocate_and_ini
 
     std::memcpy(ptr, coefficients.data(), coefficients.size() * sizeof(double));
     ws.coefficients_ = std::span<const double>(ptr, coefficients.size());
+
+    ws.K_ref_ = K_ref;
+    ws.dividend_yield_ = dividend_yield;
+
+    return ws;
+}
+
+// Helper for zero-copy loading from raw buffers (friend of PriceTableWorkspace)
+expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
+    const double* m_data, size_t n_m,
+    const double* tau_data, size_t n_tau,
+    const double* sigma_data, size_t n_sigma,
+    const double* r_data, size_t n_r,
+    const double* coeff_data, size_t n_coeffs,
+    double K_ref,
+    double dividend_yield)
+{
+    PriceTableWorkspace ws;
+
+    // Compute knot vectors (clamped cubic B-spline)
+    // We need to create temporary vectors for clamped_knots_cubic
+    std::vector<double> m_grid(m_data, m_data + n_m);
+    std::vector<double> tau_grid(tau_data, tau_data + n_tau);
+    std::vector<double> sigma_grid(sigma_data, sigma_data + n_sigma);
+    std::vector<double> r_grid(r_data, r_data + n_r);
+
+    auto knots_m = clamped_knots_cubic(m_grid);
+    auto knots_tau = clamped_knots_cubic(tau_grid);
+    auto knots_sigma = clamped_knots_cubic(sigma_grid);
+    auto knots_r = clamped_knots_cubic(r_grid);
+
+    // Calculate total arena size
+    size_t total_size = n_m + n_tau + n_sigma + n_r +
+                       knots_m.size() + knots_tau.size() +
+                       knots_sigma.size() + knots_r.size() +
+                       n_coeffs;
+
+    // Allocate with 64-byte alignment for AVX-512
+    ws.arena_.resize(total_size + 8);  // +8 for alignment padding
+
+    // Find 64-byte aligned start within arena
+    auto arena_ptr = reinterpret_cast<std::uintptr_t>(ws.arena_.data());
+    auto aligned_offset = (64 - (arena_ptr % 64)) % 64;
+    double* aligned_start = ws.arena_.data() + aligned_offset / sizeof(double);
+
+    // Copy data into arena (single copy from Arrow buffers)
+    double* ptr = aligned_start;
+
+    std::memcpy(ptr, m_data, n_m * sizeof(double));
+    ws.moneyness_ = std::span<const double>(ptr, n_m);
+    ptr += n_m;
+
+    std::memcpy(ptr, tau_data, n_tau * sizeof(double));
+    ws.maturity_ = std::span<const double>(ptr, n_tau);
+    ptr += n_tau;
+
+    std::memcpy(ptr, sigma_data, n_sigma * sizeof(double));
+    ws.volatility_ = std::span<const double>(ptr, n_sigma);
+    ptr += n_sigma;
+
+    std::memcpy(ptr, r_data, n_r * sizeof(double));
+    ws.rate_ = std::span<const double>(ptr, n_r);
+    ptr += n_r;
+
+    std::memcpy(ptr, knots_m.data(), knots_m.size() * sizeof(double));
+    ws.knots_m_ = std::span<const double>(ptr, knots_m.size());
+    ptr += knots_m.size();
+
+    std::memcpy(ptr, knots_tau.data(), knots_tau.size() * sizeof(double));
+    ws.knots_tau_ = std::span<const double>(ptr, knots_tau.size());
+    ptr += knots_tau.size();
+
+    std::memcpy(ptr, knots_sigma.data(), knots_sigma.size() * sizeof(double));
+    ws.knots_sigma_ = std::span<const double>(ptr, knots_sigma.size());
+    ptr += knots_sigma.size();
+
+    std::memcpy(ptr, knots_r.data(), knots_r.size() * sizeof(double));
+    ws.knots_r_ = std::span<const double>(ptr, knots_r.size());
+    ptr += knots_r.size();
+
+    std::memcpy(ptr, coeff_data, n_coeffs * sizeof(double));
+    ws.coefficients_ = std::span<const double>(ptr, n_coeffs);
 
     ws.K_ref_ = K_ref;
     ws.dividend_yield_ = dividend_yield;
@@ -496,7 +579,30 @@ PriceTableWorkspace::load(const std::string& filepath)
         return *scalar_result;
     };
 
-    // 6. Helper to extract list field as vector
+    // 6a. Helper to get raw Arrow buffer pointer (zero-copy)
+    struct BufferView {
+        const double* data;
+        size_t size;
+    };
+
+    auto get_arrow_buffer = [&batch](const std::string& name) -> std::optional<BufferView> {
+        auto column = batch->GetColumnByName(name);
+        if (!column) return std::nullopt;
+
+        auto list_array = std::dynamic_pointer_cast<arrow::ListArray>(column);
+        if (!list_array || list_array->length() != 1) return std::nullopt;
+
+        int64_t start = list_array->value_offset(0);
+        int64_t end = list_array->value_offset(1);
+        int64_t list_length = end - start;
+
+        auto values = std::dynamic_pointer_cast<arrow::DoubleArray>(list_array->values());
+        if (!values) return std::nullopt;
+
+        return BufferView{values->raw_values() + start, static_cast<size_t>(list_length)};
+    };
+
+    // 6b. Fallback helper for cases where we still need vectors (CRC computation)
     auto get_list_values = [&batch](const std::string& name) -> std::vector<double> {
         auto column = batch->GetColumnByName(name);
         if (!column) return {};
@@ -584,19 +690,19 @@ PriceTableWorkspace::load(const std::string& filepath)
     double K_ref = k_ref_double->value;
     double dividend_yield = div_double->value;
 
-    // 11. Extract grid vectors
-    auto m_grid = get_list_values("moneyness");
-    auto tau_grid = get_list_values("maturity");
-    auto sigma_grid = get_list_values("volatility");
-    auto r_grid = get_list_values("rate");
+    // 11. Extract grid buffer views (zero-copy)
+    auto m_view = get_arrow_buffer("moneyness");
+    auto tau_view = get_arrow_buffer("maturity");
+    auto sigma_view = get_arrow_buffer("volatility");
+    auto r_view = get_arrow_buffer("rate");
 
-    if (m_grid.empty() || tau_grid.empty() || sigma_grid.empty() || r_grid.empty()) {
+    if (!m_view || !tau_view || !sigma_view || !r_view) {
         return unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     // 12. Validate array sizes match metadata
-    if (m_grid.size() != n_m || tau_grid.size() != n_tau ||
-        sigma_grid.size() != n_sigma || r_grid.size() != n_r) {
+    if (m_view->size != n_m || tau_view->size != n_tau ||
+        sigma_view->size != n_sigma || r_view->size != n_r) {
         return unexpected(LoadError::SIZE_MISMATCH);
     }
 
@@ -613,16 +719,45 @@ PriceTableWorkspace::load(const std::string& filepath)
         return unexpected(LoadError::SIZE_MISMATCH);
     }
 
-    // 15. Extract coefficients
-    auto coeffs = get_list_values("coefficients");
+    // 14b. Validate knot values match recomputed knots from grids
+    // Recompute knots from loaded grids (need temporary vectors)
+    std::vector<double> m_grid(m_view->data, m_view->data + m_view->size);
+    std::vector<double> tau_grid(tau_view->data, tau_view->data + tau_view->size);
+    std::vector<double> sigma_grid(sigma_view->data, sigma_view->data + sigma_view->size);
+    std::vector<double> r_grid(r_view->data, r_view->data + r_view->size);
+
+    auto knots_m_computed = clamped_knots_cubic(m_grid);
+    auto knots_tau_computed = clamped_knots_cubic(tau_grid);
+    auto knots_sigma_computed = clamped_knots_cubic(sigma_grid);
+    auto knots_r_computed = clamped_knots_cubic(r_grid);
+
+    // Compare with tolerance for floating-point errors
+    auto knots_match = [](const std::vector<double>& a, const std::vector<double>& b) {
+        if (a.size() != b.size()) return false;
+        return std::equal(a.begin(), a.end(), b.begin(),
+                         [](double x, double y) { return std::abs(x - y) < 1e-14; });
+    };
+
+    if (!knots_match(knots_m, knots_m_computed) ||
+        !knots_match(knots_tau, knots_tau_computed) ||
+        !knots_match(knots_sigma, knots_sigma_computed) ||
+        !knots_match(knots_r, knots_r_computed)) {
+        return unexpected(LoadError::CORRUPTED_KNOTS);
+    }
+
+    // 15. Extract coefficients buffer view (zero-copy)
+    auto coeffs_view = get_arrow_buffer("coefficients");
+    if (!coeffs_view) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
 
     // 16. Validate coefficient size
     size_t expected_coeffs = static_cast<size_t>(n_m) * n_tau * n_sigma * n_r;
-    if (coeffs.size() != expected_coeffs) {
+    if (coeffs_view->size != expected_coeffs) {
         return unexpected(LoadError::COEFFICIENT_SIZE_MISMATCH);
     }
 
-    // 17. Validate grid monotonicity
+    // 17. Validate grid monotonicity (using grids already created for knot validation)
     auto is_sorted = [](const std::vector<double>& v) {
         return std::is_sorted(v.begin(), v.end());
     };
@@ -650,10 +785,10 @@ PriceTableWorkspace::load(const std::string& filepath)
     uint64_t stored_checksum_coeffs = checksum_coeffs_uint64->value;
     uint64_t stored_checksum_grids = checksum_grids_uint64->value;
 
-    // Compute checksums for loaded data
-    uint64_t computed_checksum_coeffs = CRC64::compute(coeffs.data(), coeffs.size());
+    // Compute checksums directly from Arrow buffers (zero-copy)
+    uint64_t computed_checksum_coeffs = CRC64::compute(coeffs_view->data, coeffs_view->size);
 
-    // Concatenate grids for checksum computation
+    // For grids, we need to concatenate for CRC (one unavoidable copy)
     std::vector<double> all_grids;
     all_grids.reserve(m_grid.size() + tau_grid.size() +
                      sigma_grid.size() + r_grid.size());
@@ -672,10 +807,14 @@ PriceTableWorkspace::load(const std::string& filepath)
         return unexpected(LoadError::CORRUPTED_GRIDS);
     }
 
-    // 19. Create workspace using the same allocate_and_initialize path
-    // This ensures identical memory layout between save/load
-    auto ws_result = allocate_and_initialize(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, K_ref, dividend_yield);
+    // 19. Create workspace using zero-copy path (single memcpy from Arrow buffers into arena)
+    auto ws_result = allocate_and_initialize_from_buffers(
+        m_view->data, m_view->size,
+        tau_view->data, tau_view->size,
+        sigma_view->data, sigma_view->size,
+        r_view->data, r_view->size,
+        coeffs_view->data, coeffs_view->size,
+        K_ref, dividend_yield);
 
     if (!ws_result) {
         return unexpected(LoadError::ARROW_READ_ERROR);

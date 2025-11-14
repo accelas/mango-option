@@ -76,10 +76,11 @@ PriceTableSchema = pa.schema([
     # ========================================================================
     # KNOT VECTORS (Precomputed, clamped cubic B-spline)
     # ========================================================================
-    pa.field("knots_moneyness", pa.list_(pa.float64())),   # Size: n_m + 8
-    pa.field("knots_maturity", pa.list_(pa.float64())),    # Size: n_tau + 8
-    pa.field("knots_volatility", pa.list_(pa.float64())),  # Size: n_sigma + 8
-    pa.field("knots_rate", pa.list_(pa.float64())),        # Size: n_r + 8
+    # Note: Clamped cubic B-splines have n+4 knots (4 clamped at each end)
+    pa.field("knots_moneyness", pa.list_(pa.float64())),   # Size: n_m + 4
+    pa.field("knots_maturity", pa.list_(pa.float64())),    # Size: n_tau + 4
+    pa.field("knots_volatility", pa.list_(pa.float64())),  # Size: n_sigma + 4
+    pa.field("knots_rate", pa.list_(pa.float64())),        # Size: n_r + 4
 
     # ========================================================================
     # B-SPLINE COEFFICIENTS (4D tensor, row-major layout)

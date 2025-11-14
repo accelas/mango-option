@@ -96,6 +96,7 @@ public:
         ARROW_READ_ERROR,            // Arrow library error
         CORRUPTED_COEFFICIENTS,      // CRC64 checksum mismatch for coefficients
         CORRUPTED_GRIDS,             // CRC64 checksum mismatch for grids
+        CORRUPTED_KNOTS,             // Knot values don't match recomputed knots
     };
 
     /// Load workspace from Apache Arrow IPC file with zero-copy mmap
@@ -120,6 +121,16 @@ private:
         const std::vector<double>& sigma_grid,
         const std::vector<double>& r_grid,
         const std::vector<double>& coefficients,
+        double K_ref,
+        double dividend_yield);
+
+    /// Friend function for zero-copy loading from raw buffers
+    friend expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
+        const double* m_data, size_t n_m,
+        const double* tau_data, size_t n_tau,
+        const double* sigma_data, size_t n_sigma,
+        const double* r_data, size_t n_r,
+        const double* coeff_data, size_t n_coeffs,
         double K_ref,
         double dividend_yield);
 
