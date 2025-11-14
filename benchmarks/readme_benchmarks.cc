@@ -5,6 +5,7 @@
 #include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/normalized_chain_solver.hpp"
+#include "src/option/price_table_4d_builder.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -115,13 +116,22 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    IVSolverInterpolated solver(
-        *surf.evaluator,
-        surf.K_ref,
-        {surf.m_grid.front(), surf.m_grid.back()},
-        {surf.tau_grid.front(), surf.tau_grid.back()},
-        {surf.sigma_grid.front(), surf.sigma_grid.back()},
-        {surf.rate_grid.front(), surf.rate_grid.back()});
+    // Wrap fixture in PriceTableSurface for clean API
+    PriceTableGrid grid{
+        .moneyness = surf.m_grid,
+        .maturity = surf.tau_grid,
+        .volatility = surf.sigma_grid,
+        .rate = surf.rate_grid,
+        .K_ref = surf.K_ref
+    };
+
+    PriceTableSurface surface(
+        std::make_shared<BSpline4D>(*surf.evaluator),  // Share ownership
+        std::move(grid),
+        0.0  // dividend yield
+    );
+
+    IVSolverInterpolated solver(surface);
 
     constexpr double spot = 103.5;
     constexpr double strike = 100.0;

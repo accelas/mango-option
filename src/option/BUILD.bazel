@@ -136,6 +136,7 @@ cc_library(
         "//src/interpolation:bspline_4d",
         ":american_option",
         ":iv_types",
+        ":price_table_4d_builder",
     ],
     copts = [
         "-std=c++23",
