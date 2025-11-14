@@ -51,39 +51,10 @@ expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
 }
 
 std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& query) const {
-    // Validate option spec
-    auto spec_validation = validate_option_spec(query.option);
-    if (!spec_validation) {
-        return spec_validation.error();
-    }
-
-    // Validate market price
-    if (!std::isfinite(query.market_price)) {
-        return "Market price must be finite";
-    }
-    if (query.market_price <= 0.0) {
-        return "Market price must be positive";
-    }
-
-    // Check for arbitrage violations
-    double intrinsic;
-    double upper_bound;
-
-    if (query.option.type == OptionType::CALL) {
-        intrinsic = std::max(query.option.spot - query.option.strike, 0.0);
-        upper_bound = query.option.spot;
-    } else {  // PUT
-        intrinsic = std::max(query.option.strike - query.option.spot, 0.0);
-        upper_bound = query.option.strike;
-    }
-
-    if (query.market_price < intrinsic) {
-        return "Market price below intrinsic value (arbitrage)";
-    }
-    if (query.market_price > upper_bound) {
-        const char* opt_type = (query.option.type == OptionType::CALL) ? "Call" : "Put";
-        const char* bound_type = (query.option.type == OptionType::CALL) ? "spot" : "strike";
-        return std::string(opt_type) + " price above " + bound_type + " (arbitrage)";
+    // Use common validation for option spec, market price, and arbitrage checks
+    auto validation = validate_iv_query(query);
+    if (!validation) {
+        return validation.error();
     }
 
     return std::nullopt;

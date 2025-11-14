@@ -16,23 +16,15 @@ IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
 }
 
 expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) const {
-    // Validate option spec
-    auto spec_validation = validate_option_spec(query.option);
-    if (!spec_validation) {
-        return spec_validation;
+    // Use common validation for option spec, market price, and arbitrage checks
+    auto common_validation = validate_iv_query(query);
+    if (!common_validation) {
+        // Trace validation error
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 3, 0.0, 0.0);
+        return common_validation;
     }
 
-    // Validate market price
-    if (!std::isfinite(query.market_price)) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 3, query.market_price, 0.0);
-        return unexpected(std::string("Market price must be finite"));
-    }
-    if (query.market_price <= 0.0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 4, query.market_price, 0.0);
-        return unexpected(std::string("Market price must be positive"));
-    }
-
-    // Validate grid parameters
+    // FDM-specific validation: grid parameters
     if (config_.grid_n_space == 0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
         return unexpected(std::string("Grid n_space must be positive"));
@@ -46,29 +38,6 @@ expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) co
     if (config_.grid_s_max <= 0.0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 8, config_.grid_s_max, 0.0);
         return unexpected(std::string("Grid s_max must be positive"));
-    }
-
-    // Check arbitrage bounds
-    double intrinsic_value;
-    if (query.option.type == OptionType::CALL) {
-        intrinsic_value = std::max(query.option.spot - query.option.strike, 0.0);
-        if (query.market_price > query.option.spot) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 5, query.market_price, query.option.spot);
-            return unexpected(std::string("Call price exceeds spot price (arbitrage)"));
-        }
-    } else {
-        intrinsic_value = std::max(query.option.strike - query.option.spot, 0.0);
-        if (query.market_price > query.option.strike) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 5, query.market_price, query.option.strike);
-            return unexpected(std::string("Put price exceeds strike (arbitrage)"));
-        }
-    }
-
-    // Market price should be at least intrinsic value (with small tolerance)
-    const double tolerance = 1e-6;
-    if (query.market_price < intrinsic_value - tolerance) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 5, query.market_price, intrinsic_value);
-        return unexpected(std::string("Market price below intrinsic value (arbitrage)"));
     }
 
     return {};

@@ -57,4 +57,17 @@ struct IVQuery {
     double market_price;    ///< Observed market price to match
 };
 
+/**
+ * @brief Validate IV query (option spec + market price)
+ *
+ * Performs comprehensive validation:
+ * - Option spec validation (via validate_option_spec)
+ * - Market price: finite, positive
+ * - Arbitrage checks: price <= upper bound, price >= intrinsic value
+ *
+ * @param query IV query to validate
+ * @return void on success, error message on failure
+ */
+expected<void, std::string> validate_iv_query(const IVQuery& query);
+
 } // namespace mango
