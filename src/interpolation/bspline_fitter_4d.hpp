@@ -609,6 +609,16 @@ public:
         }
     }
 
+    /// Control banded solver usage for all axes
+    ///
+    /// @param use_banded If true, use efficient O(n) banded LU solver. If false, use dense solver.
+    void set_use_banded_solver(bool use_banded) {
+        solver_axis0_->set_use_banded_solver(use_banded);
+        solver_axis1_->set_use_banded_solver(use_banded);
+        solver_axis2_->set_use_banded_solver(use_banded);
+        solver_axis3_->set_use_banded_solver(use_banded);
+    }
+
     /// Fit B-spline coefficients via separable collocation
     ///
     /// @param values Function values at grid points (row-major: i*N1*N2*N3 + j*N2*N3 + k*N3 + l)
@@ -958,8 +968,9 @@ public:
     /// @param values Function values at grid points (size N0 × N1 × N2 × N3)
     ///               Row-major layout: index = ((i*N1 + j)*N2 + k)*N3 + l
     /// @param tolerance Maximum residual per axis (default 1e-6)
+    /// @param use_banded_solver If true, use efficient O(n) banded solver (default: true)
     /// @return Fit result with coefficients and diagnostics
-    BSplineFitResult4D fit(const std::vector<double>& values, double tolerance = 1e-6) {
+    BSplineFitResult4D fit(const std::vector<double>& values, double tolerance = 1e-6, bool use_banded_solver = true) {
         // Create separable fitter using factory pattern
         auto fitter_result = BSplineFitter4DSeparable::create(axis0_grid_, axis1_grid_,
                                                               axis2_grid_, axis3_grid_);
@@ -972,6 +983,9 @@ public:
             };
         }
         auto& fitter = fitter_result.value();
+
+        // Configure solver mode
+        fitter.set_use_banded_solver(use_banded_solver);
 
         // Perform separable fitting
         auto sep_result = fitter.fit(values, tolerance);

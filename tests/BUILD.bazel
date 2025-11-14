@@ -475,6 +475,30 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_end_to_end_performance_test",
+    srcs = ["price_table_end_to_end_performance_test.cc"],
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    size = "large",
+    timeout = "moderate",
+)
+
+cc_test(
+    name = "bspline_4d_end_to_end_performance_test",
+    srcs = ["bspline_4d_end_to_end_performance_test.cc"],
+    deps = [
+        "//src/interpolation:bspline_fitter_4d",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    size = "large",
+    timeout = "moderate",
+)
+
+cc_test(
     name = "bspline_vega_analytic_test",
     srcs = ["bspline_vega_analytic_test.cc"],
     copts = [
