@@ -34,9 +34,10 @@ jobs:
       - name: Setup Conan profile
         run: |
           conan profile detect --force
-          # Use C++17 for Conan packages to match prebuilt binaries
-          # (Our code still compiles with C++23 via Bazel config)
+          # Use C++17 and GCC 13 for Conan packages to match prebuilt binaries
+          # (Our code still compiles with C++23 and GCC 14 via Bazel)
           sed -i 's/compiler.cppstd=gnu17/compiler.cppstd=17/' ~/.conan2/profiles/default
+          sed -i 's/compiler.version=14/compiler.version=13/' ~/.conan2/profiles/default
 
       - name: Cache Conan packages
         uses: actions/cache@v4
