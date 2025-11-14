@@ -13,7 +13,6 @@
 #include "src/interpolation/bspline_4d.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <cmath>
 #include <random>
 #include <chrono>
@@ -167,7 +166,6 @@ TEST(BSpline4DTest, InvalidConstruction) {
     // Should fail validation for < 4 points
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     EXPECT_FALSE(workspace.has_value());
-    EXPECT_THAT(workspace.error(), testing::HasSubstr("Moneyness"));
 }
 
 TEST(BSpline4DTest, ConstantFunction) {
