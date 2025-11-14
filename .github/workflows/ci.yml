@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y git wget ca-certificates build-essential python3 python3-pip python-is-python3 systemtap-sdt-dev libquantlib0-dev cmake
+          apt-get install -y git wget ca-certificates build-essential python3 python3-pip python3-venv python-is-python3 systemtap-sdt-dev libquantlib0-dev cmake
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,6 +30,7 @@ jobs:
         uses: conan-io/setup-conan@v1
         with:
           version: 2.x
+          use_venv: true
 
       - name: Setup Conan profile
         run: |
