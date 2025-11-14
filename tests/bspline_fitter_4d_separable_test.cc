@@ -137,10 +137,10 @@ TEST(BSplineFitter4DSeparableTest, ConstantFunction) {
     EXPECT_EQ(result.coefficients.size(), values.size());
 
     // Check diagnostic information
-    EXPECT_GE(result.failed_slices_m, 0UL);
-    EXPECT_GE(result.failed_slices_tau, 0UL);
-    EXPECT_GE(result.failed_slices_sigma, 0UL);
-    EXPECT_GE(result.failed_slices_r, 0UL);
+    EXPECT_GE(result.failed_slices_axis0, 0UL);
+    EXPECT_GE(result.failed_slices_axis1, 0UL);
+    EXPECT_GE(result.failed_slices_axis2, 0UL);
+    EXPECT_GE(result.failed_slices_axis3, 0UL);
 }
 
 TEST(BSplineFitter4DSeparableTest, SeparableFunction) {

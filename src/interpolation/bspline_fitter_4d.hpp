@@ -4,25 +4,25 @@
  *
  * Uses tensor-product structure to fit B-spline coefficients efficiently.
  * Instead of a massive O(n⁴) dense system, we solve sequential 1D systems
- * along each axis: m → τ → σ → r.
+ * along each axis: axis0 → axis1 → axis2 → axis3.
  *
  * Algorithm:
- *   1. Fit along m-axis for all (τ,σ,r) slices
- *   2. Fit along τ-axis for all (m,σ,r) slices
- *   3. Fit along σ-axis for all (m,τ,r) slices
- *   4. Fit along r-axis for all (m,τ,σ) slices
+ *   1. Fit along axis0 for all (axis1, axis2, axis3) slices
+ *   2. Fit along axis1 for all (axis0, axis2, axis3) slices
+ *   3. Fit along axis2 for all (axis0, axis1, axis3) slices
+ *   4. Fit along axis3 for all (axis0, axis1, axis2) slices
  *
  * Each step uses 1D cubic B-spline collocation (bspline_collocation_1d.hpp).
  *
- * Performance: O(Nm³ + Nt³ + Nσ³ + Nr³)
+ * Performance: O(N0³ + N1³ + N2³ + N3³)
  *   For 50×30×20×10: ~5ms fitting time
  *
  * Accuracy: Residuals <1e-6 at all grid points (validated per-axis)
  *
  * Usage:
- *   auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+ *   auto fitter_result = BSplineFitter4D::create(axis0_grid, axis1_grid, axis2_grid, axis3_grid);
  *   if (fitter_result.has_value()) {
- *       auto result = fitter_result.value().fit(prices_4d);
+ *       auto result = fitter_result.value().fit(values_4d);
  *       if (result.success) {
  *           // Use result.coefficients with BSpline4D
  *       }
@@ -45,26 +45,26 @@ namespace mango {
 
 /// Result of 4D B-spline fitting
 struct BSplineFitResult4D {
-    std::vector<double> coefficients;  ///< Fitted coefficients (Nm × Nt × Nv × Nr)
+    std::vector<double> coefficients;  ///< Fitted coefficients (N0 × N1 × N2 × N3)
     bool success;                       ///< Fit succeeded
     std::string error_message;          ///< Error description if failed
     double max_residual;                ///< Maximum absolute residual at grid points
 
     // Detailed per-axis statistics (populated if success)
-    double max_residual_m = 0.0;       ///< Max residual along moneyness axis
-    double max_residual_tau = 0.0;     ///< Max residual along maturity axis
-    double max_residual_sigma = 0.0;   ///< Max residual along volatility axis
-    double max_residual_r = 0.0;       ///< Max residual along rate axis
+    double max_residual_axis0 = 0.0;   ///< Max residual along axis0
+    double max_residual_axis1 = 0.0;   ///< Max residual along axis1
+    double max_residual_axis2 = 0.0;   ///< Max residual along axis2
+    double max_residual_axis3 = 0.0;   ///< Max residual along axis3
 
-    double condition_m = 0.0;          ///< Condition number estimate (moneyness)
-    double condition_tau = 0.0;        ///< Condition number estimate (maturity)
-    double condition_sigma = 0.0;      ///< Condition number estimate (volatility)
-    double condition_r = 0.0;          ///< Condition number estimate (rate)
+    double condition_axis0 = 0.0;      ///< Condition number estimate (axis0)
+    double condition_axis1 = 0.0;      ///< Condition number estimate (axis1)
+    double condition_axis2 = 0.0;      ///< Condition number estimate (axis2)
+    double condition_axis3 = 0.0;      ///< Condition number estimate (axis3)
 
-    size_t failed_slices_m = 0;        ///< Failed fits along moneyness
-    size_t failed_slices_tau = 0;      ///< Failed fits along maturity
-    size_t failed_slices_sigma = 0;    ///< Failed fits along volatility
-    size_t failed_slices_r = 0;        ///< Failed fits along rate
+    size_t failed_slices_axis0 = 0;    ///< Failed fits along axis0
+    size_t failed_slices_axis1 = 0;    ///< Failed fits along axis1
+    size_t failed_slices_axis2 = 0;    ///< Failed fits along axis2
+    size_t failed_slices_axis3 = 0;    ///< Failed fits along axis3
 };
 
 /// Separable 4D B-spline coefficient fitter
@@ -72,57 +72,29 @@ struct BSplineFitResult4D {
 /// Uses tensor-product structure to avoid dense O(n⁴) solve.
 /// Performs sequential 1D fits along each dimension.
 ///
-/// Memory: O(n·m·p·q) for temporary storage
-/// Time: O(n·m·p·q) for all 1D fits
+/// Memory: O(N0·N1·N2·N3) for temporary storage
+/// Time: O(N0·N1·N2·N3) for all 1D fits
 class BSplineFitter4D {
 public:
     /// Factory method to create BSplineFitter4D with validation
     ///
-    /// @param m_grid Moneyness grid (sorted, ≥4 points)
-    /// @param t_grid Maturity grid (sorted, ≥4 points)
-    /// @param v_grid Volatility grid (sorted, ≥4 points)
-    /// @param r_grid Rate grid (sorted, ≥4 points)
+    /// @param axis0_grid Grid for axis 0 (sorted, ≥4 points)
+    /// @param axis1_grid Grid for axis 1 (sorted, ≥4 points)
+    /// @param axis2_grid Grid for axis 2 (sorted, ≥4 points)
+    /// @param axis3_grid Grid for axis 3 (sorted, ≥4 points)
     /// @return expected<BSplineFitter4D, std::string> - success or error message
+    ///
+    /// @note Validation is delegated to BSplineFitter4DSeparable and BSplineCollocation1D.
+    ///       Grids are checked during solver construction, eliminating redundant checks.
     static expected<BSplineFitter4D, std::string> create(
-        std::vector<double> m_grid,
-        std::vector<double> t_grid,
-        std::vector<double> v_grid,
-        std::vector<double> r_grid) {
+        std::vector<double> axis0_grid,
+        std::vector<double> axis1_grid,
+        std::vector<double> axis2_grid,
+        std::vector<double> axis3_grid) {
 
-        // Validate grid sizes
-        if (m_grid.size() < 4) {
-            return unexpected(std::string("Moneyness grid must have ≥4 points for cubic B-splines"));
-        }
-        if (t_grid.size() < 4) {
-            return unexpected(std::string("Maturity grid must have ≥4 points for cubic B-splines"));
-        }
-        if (v_grid.size() < 4) {
-            return unexpected(std::string("Volatility grid must have ≥4 points for cubic B-splines"));
-        }
-        if (r_grid.size() < 4) {
-            return unexpected(std::string("Rate grid must have ≥4 points for cubic B-splines"));
-        }
-
-        // Verify grids are sorted
-        auto is_sorted = [](const std::vector<double>& v) {
-            return std::is_sorted(v.begin(), v.end());
-        };
-
-        if (!is_sorted(m_grid)) {
-            return unexpected(std::string("Moneyness grid must be sorted in ascending order"));
-        }
-        if (!is_sorted(t_grid)) {
-            return unexpected(std::string("Maturity grid must be sorted in ascending order"));
-        }
-        if (!is_sorted(v_grid)) {
-            return unexpected(std::string("Volatility grid must be sorted in ascending order"));
-        }
-        if (!is_sorted(r_grid)) {
-            return unexpected(std::string("Rate grid must be sorted in ascending order"));
-        }
-
-        // All validations passed, create the fitter
-        return BSplineFitter4D(std::move(m_grid), std::move(t_grid), std::move(v_grid), std::move(r_grid));
+        // All validations delegated to separable fitter
+        return BSplineFitter4D(std::move(axis0_grid), std::move(axis1_grid),
+                               std::move(axis2_grid), std::move(axis3_grid));
     }
 
     /// Fit B-spline coefficients via separable collocation
@@ -130,13 +102,14 @@ public:
     /// Uses tensor-product structure: sequential 1D fitting along each axis.
     /// Produces numerically accurate coefficients with residuals <1e-6.
     ///
-    /// @param values Function values at grid points (size Nm × Nt × Nv × Nr)
-    ///               Row-major layout: index = ((i*Nt + j)*Nv + k)*Nr + l
+    /// @param values Function values at grid points (size N0 × N1 × N2 × N3)
+    ///               Row-major layout: index = ((i*N1 + j)*N2 + k)*N3 + l
     /// @param tolerance Maximum residual per axis (default 1e-6)
     /// @return Fit result with coefficients and diagnostics
     BSplineFitResult4D fit(const std::vector<double>& values, double tolerance = 1e-6) {
         // Create separable fitter using factory pattern
-        auto fitter_result = BSplineFitter4DSeparable::create(m_grid_, t_grid_, v_grid_, r_grid_);
+        auto fitter_result = BSplineFitter4DSeparable::create(axis0_grid_, axis1_grid_,
+                                                              axis2_grid_, axis3_grid_);
         if (!fitter_result.has_value()) {
             return {
                 .coefficients = std::vector<double>(),
@@ -161,10 +134,10 @@ public:
 
         // Aggregate maximum residual across all axes
         double max_residual = std::max({
-            sep_result.max_residual_m,
-            sep_result.max_residual_tau,
-            sep_result.max_residual_sigma,
-            sep_result.max_residual_r
+            sep_result.max_residual_axis0,
+            sep_result.max_residual_axis1,
+            sep_result.max_residual_axis2,
+            sep_result.max_residual_axis3
         });
 
         // Return with full statistics
@@ -173,18 +146,18 @@ public:
             .success = true,
             .error_message = "",
             .max_residual = max_residual,
-            .max_residual_m = sep_result.max_residual_m,
-            .max_residual_tau = sep_result.max_residual_tau,
-            .max_residual_sigma = sep_result.max_residual_sigma,
-            .max_residual_r = sep_result.max_residual_r,
-            .condition_m = sep_result.condition_m,
-            .condition_tau = sep_result.condition_tau,
-            .condition_sigma = sep_result.condition_sigma,
-            .condition_r = sep_result.condition_r,
-            .failed_slices_m = sep_result.failed_slices_m,
-            .failed_slices_tau = sep_result.failed_slices_tau,
-            .failed_slices_sigma = sep_result.failed_slices_sigma,
-            .failed_slices_r = sep_result.failed_slices_r
+            .max_residual_axis0 = sep_result.max_residual_axis0,
+            .max_residual_axis1 = sep_result.max_residual_axis1,
+            .max_residual_axis2 = sep_result.max_residual_axis2,
+            .max_residual_axis3 = sep_result.max_residual_axis3,
+            .condition_axis0 = sep_result.condition_axis0,
+            .condition_axis1 = sep_result.condition_axis1,
+            .condition_axis2 = sep_result.condition_axis2,
+            .condition_axis3 = sep_result.condition_axis3,
+            .failed_slices_axis0 = sep_result.failed_slices_axis0,
+            .failed_slices_axis1 = sep_result.failed_slices_axis1,
+            .failed_slices_axis2 = sep_result.failed_slices_axis2,
+            .failed_slices_axis3 = sep_result.failed_slices_axis3
         };
     }
 
@@ -195,53 +168,53 @@ public:
 
     /// Get grid dimensions
     [[nodiscard]] std::tuple<size_t, size_t, size_t, size_t> dimensions() const noexcept {
-        return {Nm_, Nt_, Nv_, Nr_};
+        return {N0_, N1_, N2_, N3_};
     }
 
 private:
     /// Private constructor - use factory method create() instead
     ///
-    /// @param m_grid Moneyness grid (already validated by factory)
-    /// @param t_grid Maturity grid (already validated by factory)
-    /// @param v_grid Volatility grid (already validated by factory)
-    /// @param r_grid Rate grid (already validated by factory)
-    BSplineFitter4D(std::vector<double> m_grid,
-                    std::vector<double> t_grid,
-                    std::vector<double> v_grid,
-                    std::vector<double> r_grid)
-        : m_grid_(std::move(m_grid)),
-          t_grid_(std::move(t_grid)),
-          v_grid_(std::move(v_grid)),
-          r_grid_(std::move(r_grid)),
-          Nm_(m_grid_.size()),
-          Nt_(t_grid_.size()),
-          Nv_(v_grid_.size()),
-          Nr_(r_grid_.size())
+    /// @param axis0_grid Grid for axis 0 (validation delegated to separable fitter)
+    /// @param axis1_grid Grid for axis 1 (validation delegated to separable fitter)
+    /// @param axis2_grid Grid for axis 2 (validation delegated to separable fitter)
+    /// @param axis3_grid Grid for axis 3 (validation delegated to separable fitter)
+    BSplineFitter4D(std::vector<double> axis0_grid,
+                    std::vector<double> axis1_grid,
+                    std::vector<double> axis2_grid,
+                    std::vector<double> axis3_grid)
+        : axis0_grid_(std::move(axis0_grid)),
+          axis1_grid_(std::move(axis1_grid)),
+          axis2_grid_(std::move(axis2_grid)),
+          axis3_grid_(std::move(axis3_grid)),
+          N0_(axis0_grid_.size()),
+          N1_(axis1_grid_.size()),
+          N2_(axis2_grid_.size()),
+          N3_(axis3_grid_.size())
     {
-        // Pre-compute knot vectors (no validation needed - done by factory)
-        tm_ = clamped_knots_cubic(m_grid_);
-        tt_ = clamped_knots_cubic(t_grid_);
-        tv_ = clamped_knots_cubic(v_grid_);
-        tr_ = clamped_knots_cubic(r_grid_);
+        // Pre-compute knot vectors (no validation needed - delegated to separable fitter)
+        t0_ = clamped_knots_cubic(axis0_grid_);
+        t1_ = clamped_knots_cubic(axis1_grid_);
+        t2_ = clamped_knots_cubic(axis2_grid_);
+        t3_ = clamped_knots_cubic(axis3_grid_);
     }
 
     // Friend declaration for factory method to access private constructor
     friend expected<BSplineFitter4D, std::string> create(
         std::vector<double>, std::vector<double>, std::vector<double>, std::vector<double>);
-    std::vector<double> m_grid_;  ///< Moneyness grid
-    std::vector<double> t_grid_;  ///< Maturity grid
-    std::vector<double> v_grid_;  ///< Volatility grid
-    std::vector<double> r_grid_;  ///< Rate grid
+    std::vector<double> axis0_grid_;  ///< Grid for axis 0
+    std::vector<double> axis1_grid_;  ///< Grid for axis 1
+    std::vector<double> axis2_grid_;  ///< Grid for axis 2
+    std::vector<double> axis3_grid_;  ///< Grid for axis 3
 
-    std::vector<double> tm_;  ///< Moneyness knot vector
-    std::vector<double> tt_;  ///< Maturity knot vector
-    std::vector<double> tv_;  ///< Volatility knot vector
-    std::vector<double> tr_;  ///< Rate knot vector
+    std::vector<double> t0_;  ///< Knot vector for axis 0
+    std::vector<double> t1_;  ///< Knot vector for axis 1
+    std::vector<double> t2_;  ///< Knot vector for axis 2
+    std::vector<double> t3_;  ///< Knot vector for axis 3
 
-    size_t Nm_;  ///< Number of moneyness points
-    size_t Nt_;  ///< Number of maturity points
-    size_t Nv_;  ///< Number of volatility points
-    size_t Nr_;  ///< Number of rate points
+    size_t N0_;  ///< Number of points on axis 0
+    size_t N1_;  ///< Number of points on axis 1
+    size_t N2_;  ///< Number of points on axis 2
+    size_t N3_;  ///< Number of points on axis 3
 };
 
 }  // namespace mango
