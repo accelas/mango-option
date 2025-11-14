@@ -168,6 +168,9 @@ expected<void, std::string> PriceTableWorkspace::save(
         // Metadata (scalar fields)
         arrow::field("format_version", arrow::uint32()),
         arrow::field("created_timestamp", arrow::timestamp(arrow::TimeUnit::MICRO)),
+        arrow::field("mango_version", arrow::utf8()),  // Placeholder: "dev" for now
+
+        // Option parameters
         arrow::field("ticker", arrow::utf8()),
         arrow::field("option_type", arrow::uint8()),
         arrow::field("K_ref", arrow::float64()),
@@ -194,6 +197,23 @@ expected<void, std::string> PriceTableWorkspace::save(
         // Coefficients (4D tensor in row-major layout)
         arrow::field("coefficients", arrow::list(arrow::float64())),
 
+        // Optional: raw prices (not yet implemented, save as null)
+        arrow::field("prices_raw", arrow::list(arrow::float64()), /*nullable=*/true),
+
+        // Fitting statistics (placeholders: 0.0 until fitting is implemented)
+        arrow::field("max_residual_moneyness", arrow::float64()),
+        arrow::field("max_residual_maturity", arrow::float64()),
+        arrow::field("max_residual_volatility", arrow::float64()),
+        arrow::field("max_residual_rate", arrow::float64()),
+        arrow::field("max_residual_overall", arrow::float64()),
+        arrow::field("condition_number_max", arrow::float64()),
+
+        // Build metadata (placeholders: 0 until build tracking is implemented)
+        arrow::field("n_pde_solves", arrow::uint32()),
+        arrow::field("precompute_time_seconds", arrow::float64()),
+        arrow::field("pde_n_space", arrow::uint32()),
+        arrow::field("pde_n_time", arrow::uint32()),
+
         // Checksums (placeholder 0 for now, Task 7 adds CRC64)
         arrow::field("checksum_coefficients", arrow::uint64()),
         arrow::field("checksum_grids", arrow::uint64()),
@@ -210,6 +230,7 @@ expected<void, std::string> PriceTableWorkspace::save(
     arrow::UInt32Builder format_version_builder;
     arrow::TimestampBuilder timestamp_builder(arrow::timestamp(arrow::TimeUnit::MICRO),
                                              arrow::default_memory_pool());
+    arrow::StringBuilder mango_version_builder;
     arrow::StringBuilder ticker_builder;
     arrow::UInt8Builder option_type_builder;
     arrow::DoubleBuilder k_ref_builder;
@@ -241,11 +262,24 @@ expected<void, std::string> PriceTableWorkspace::save(
     arrow::ListBuilder coeffs_list_builder(arrow::default_memory_pool(),
         std::make_shared<arrow::DoubleBuilder>());
 
+    // List builder for prices_raw (nullable)
+    arrow::ListBuilder prices_raw_list_builder(arrow::default_memory_pool(),
+        std::make_shared<arrow::DoubleBuilder>());
+
+    // Builders for fitting statistics
+    arrow::DoubleBuilder max_res_m_builder, max_res_tau_builder, max_res_sigma_builder;
+    arrow::DoubleBuilder max_res_r_builder, max_res_overall_builder, cond_num_builder;
+
+    // Builders for build metadata
+    arrow::UInt32Builder n_pde_solves_builder, pde_n_space_builder, pde_n_time_builder;
+    arrow::DoubleBuilder precompute_time_builder;
+
     arrow::UInt64Builder checksum_coeffs_builder, checksum_grids_builder;
 
     // Append scalar values
     if (!format_version_builder.Append(1).ok() ||
         !timestamp_builder.Append(micros).ok() ||
+        !mango_version_builder.Append("dev").ok() ||  // Placeholder: "dev"
         !ticker_builder.Append(ticker).ok() ||
         !option_type_builder.Append(option_type).ok() ||
         !k_ref_builder.Append(K_ref_).ok() ||
@@ -289,6 +323,31 @@ expected<void, std::string> PriceTableWorkspace::save(
         return unexpected("Failed to append coefficients");
     }
 
+    // Append prices_raw as null (not yet implemented)
+    if (!prices_raw_list_builder.AppendNull().ok()) {
+        return unexpected("Failed to append prices_raw (null)");
+    }
+
+    // Append fitting statistics (placeholders: 0.0)
+    if (!max_res_m_builder.Append(0.0).ok() ||
+        !max_res_tau_builder.Append(0.0).ok() ||
+        !max_res_sigma_builder.Append(0.0).ok() ||
+        !max_res_r_builder.Append(0.0).ok() ||
+        !max_res_overall_builder.Append(0.0).ok() ||
+        !cond_num_builder.Append(0.0).ok())
+    {
+        return unexpected("Failed to append fitting statistics");
+    }
+
+    // Append build metadata (placeholders: 0)
+    if (!n_pde_solves_builder.Append(0).ok() ||
+        !precompute_time_builder.Append(0.0).ok() ||
+        !pde_n_space_builder.Append(0).ok() ||
+        !pde_n_time_builder.Append(0).ok())
+    {
+        return unexpected("Failed to append build metadata");
+    }
+
     // Append checksums (placeholder 0 for now)
     if (!checksum_coeffs_builder.Append(0).ok() ||
         !checksum_grids_builder.Append(0).ok())
@@ -298,7 +357,7 @@ expected<void, std::string> PriceTableWorkspace::save(
 
     // Finish all builders and create arrays
     std::vector<std::shared_ptr<arrow::Array>> arrays;
-    arrays.reserve(22);
+    arrays.reserve(33);  // Updated to match 33 fields in schema v1.0
 
     auto finish_builder = [&arrays](arrow::ArrayBuilder& builder) -> bool {
         std::shared_ptr<arrow::Array> array;
@@ -309,6 +368,7 @@ expected<void, std::string> PriceTableWorkspace::save(
 
     if (!finish_builder(format_version_builder) ||
         !finish_builder(timestamp_builder) ||
+        !finish_builder(mango_version_builder) ||
         !finish_builder(ticker_builder) ||
         !finish_builder(option_type_builder) ||
         !finish_builder(k_ref_builder) ||
@@ -326,6 +386,17 @@ expected<void, std::string> PriceTableWorkspace::save(
         !finish_builder(knots_sigma_list_builder) ||
         !finish_builder(knots_r_list_builder) ||
         !finish_builder(coeffs_list_builder) ||
+        !finish_builder(prices_raw_list_builder) ||
+        !finish_builder(max_res_m_builder) ||
+        !finish_builder(max_res_tau_builder) ||
+        !finish_builder(max_res_sigma_builder) ||
+        !finish_builder(max_res_r_builder) ||
+        !finish_builder(max_res_overall_builder) ||
+        !finish_builder(cond_num_builder) ||
+        !finish_builder(n_pde_solves_builder) ||
+        !finish_builder(precompute_time_builder) ||
+        !finish_builder(pde_n_space_builder) ||
+        !finish_builder(pde_n_time_builder) ||
         !finish_builder(checksum_coeffs_builder) ||
         !finish_builder(checksum_grids_builder))
     {
@@ -441,7 +512,11 @@ PriceTableWorkspace::load(const std::string& filepath)
     if (!version_scalar) {
         return unexpected(LoadError::SCHEMA_MISMATCH);
     }
-    uint32_t format_version = std::dynamic_pointer_cast<arrow::UInt32Scalar>(version_scalar)->value;
+    auto version_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(version_scalar);
+    if (!version_uint32) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+    uint32_t format_version = version_uint32->value;
     if (format_version != 1) {
         return unexpected(LoadError::UNSUPPORTED_VERSION);
     }
@@ -456,10 +531,19 @@ PriceTableWorkspace::load(const std::string& filepath)
         return unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
-    uint32_t n_m = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_m_scalar)->value;
-    uint32_t n_tau = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_tau_scalar)->value;
-    uint32_t n_sigma = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_sigma_scalar)->value;
-    uint32_t n_r = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_r_scalar)->value;
+    auto n_m_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_m_scalar);
+    auto n_tau_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_tau_scalar);
+    auto n_sigma_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_sigma_scalar);
+    auto n_r_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_r_scalar);
+
+    if (!n_m_uint32 || !n_tau_uint32 || !n_sigma_uint32 || !n_r_uint32) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    uint32_t n_m = n_m_uint32->value;
+    uint32_t n_tau = n_tau_uint32->value;
+    uint32_t n_sigma = n_sigma_uint32->value;
+    uint32_t n_r = n_r_uint32->value;
 
     // 9. Validate dimensions (must be >= 4 for cubic B-splines)
     if (n_m < 4 || n_tau < 4 || n_sigma < 4 || n_r < 4) {
@@ -474,8 +558,15 @@ PriceTableWorkspace::load(const std::string& filepath)
         return unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
-    double K_ref = std::dynamic_pointer_cast<arrow::DoubleScalar>(k_ref_scalar)->value;
-    double dividend_yield = std::dynamic_pointer_cast<arrow::DoubleScalar>(div_scalar)->value;
+    auto k_ref_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(k_ref_scalar);
+    auto div_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(div_scalar);
+
+    if (!k_ref_double || !div_double) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    double K_ref = k_ref_double->value;
+    double dividend_yield = div_double->value;
 
     // 11. Extract grid vectors
     auto m_grid = get_list_values("moneyness");
