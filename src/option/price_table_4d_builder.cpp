@@ -386,29 +386,29 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
 
     // Populate fitting statistics from result
     BSplineFittingStats fitting_stats{
-        .max_residual_m = fit_result.max_residual_m,
-        .max_residual_tau = fit_result.max_residual_tau,
-        .max_residual_sigma = fit_result.max_residual_sigma,
-        .max_residual_r = fit_result.max_residual_r,
+        .max_residual_axis0 = fit_result.max_residual_axis0,
+        .max_residual_axis1 = fit_result.max_residual_axis1,
+        .max_residual_axis2 = fit_result.max_residual_axis2,
+        .max_residual_axis3 = fit_result.max_residual_axis3,
         .max_residual_overall = fit_result.max_residual,
-        .condition_m = fit_result.condition_m,
-        .condition_tau = fit_result.condition_tau,
-        .condition_sigma = fit_result.condition_sigma,
-        .condition_r = fit_result.condition_r,
+        .condition_axis0 = fit_result.condition_axis0,
+        .condition_axis1 = fit_result.condition_axis1,
+        .condition_axis2 = fit_result.condition_axis2,
+        .condition_axis3 = fit_result.condition_axis3,
         .condition_max = std::max({
-            fit_result.condition_m,
-            fit_result.condition_tau,
-            fit_result.condition_sigma,
-            fit_result.condition_r
+            fit_result.condition_axis0,
+            fit_result.condition_axis1,
+            fit_result.condition_axis2,
+            fit_result.condition_axis3
         }),
-        .failed_slices_m = fit_result.failed_slices_m,
-        .failed_slices_tau = fit_result.failed_slices_tau,
-        .failed_slices_sigma = fit_result.failed_slices_sigma,
-        .failed_slices_r = fit_result.failed_slices_r,
-        .failed_slices_total = fit_result.failed_slices_m +
-                               fit_result.failed_slices_tau +
-                               fit_result.failed_slices_sigma +
-                               fit_result.failed_slices_r
+        .failed_slices_axis0 = fit_result.failed_slices_axis0,
+        .failed_slices_axis1 = fit_result.failed_slices_axis1,
+        .failed_slices_axis2 = fit_result.failed_slices_axis2,
+        .failed_slices_axis3 = fit_result.failed_slices_axis3,
+        .failed_slices_total = fit_result.failed_slices_axis0 +
+                               fit_result.failed_slices_axis1 +
+                               fit_result.failed_slices_axis2 +
+                               fit_result.failed_slices_axis3
     };
 
     return PriceTable4DResult{

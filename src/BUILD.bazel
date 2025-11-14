@@ -6,7 +6,7 @@
 #
 # - Interpolation utilities: //src/interpolation:BUILD.bazel
 #   (cubic_spline_solver, snapshot_interpolator, bspline_4d, bspline_basis_1d,
-#    bspline_collocation_1d, bspline_fitter_4d, bspline_fitter_4d_separable, bspline_utils)
+#    bspline_fitter_4d, bspline_utils)
 #
 # - Pricing models: //src/option:BUILD.bazel
 #   (snapshot, american_option, american_solver_workspace, price_table_4d_builder,

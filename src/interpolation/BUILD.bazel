@@ -24,23 +24,6 @@ cc_library(
 )
 
 cc_library(
-    name = "bspline_collocation_1d",
-    hdrs = ["bspline_collocation_1d.hpp"],
-    deps = [
-        ":bspline_utils",
-        "//src/pde/core:thomas_solver",
-        "//src/support:expected",
-    ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "bspline_4d",
     hdrs = ["bspline_4d.hpp"],
     deps = [
@@ -58,27 +41,13 @@ cc_library(
 )
 
 cc_library(
-    name = "bspline_fitter_4d_separable",
-    hdrs = ["bspline_fitter_4d_separable.hpp"],
-    deps = [
-        ":bspline_collocation_1d",
-        "//src/support:expected",
-    ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "bspline_fitter_4d",
     hdrs = ["bspline_fitter_4d.hpp"],
     deps = [
         ":bspline_4d",
-        ":bspline_fitter_4d_separable",
+        ":bspline_utils",
+        "//src/pde/core:thomas_solver",
+        "//src/support:expected",
     ],
     copts = [
         "-std=c++23",

@@ -49,23 +49,23 @@ namespace mango {
 
 /// Statistics from B-spline fitting process
 struct BSplineFittingStats {
-    double max_residual_m = 0.0;       ///< Max residual along moneyness axis
-    double max_residual_tau = 0.0;     ///< Max residual along maturity axis
-    double max_residual_sigma = 0.0;   ///< Max residual along volatility axis
-    double max_residual_r = 0.0;       ///< Max residual along rate axis
-    double max_residual_overall = 0.0; ///< Max residual across all axes
+    double max_residual_axis0 = 0.0;       ///< Max residual along axis 0
+    double max_residual_axis1 = 0.0;       ///< Max residual along axis 1
+    double max_residual_axis2 = 0.0;       ///< Max residual along axis 2
+    double max_residual_axis3 = 0.0;       ///< Max residual along axis 3
+    double max_residual_overall = 0.0;     ///< Max residual across all axes
 
-    double condition_m = 0.0;          ///< Condition number estimate (moneyness)
-    double condition_tau = 0.0;        ///< Condition number estimate (maturity)
-    double condition_sigma = 0.0;      ///< Condition number estimate (volatility)
-    double condition_r = 0.0;          ///< Condition number estimate (rate)
-    double condition_max = 0.0;        ///< Maximum condition number
+    double condition_axis0 = 0.0;          ///< Condition number estimate (axis 0)
+    double condition_axis1 = 0.0;          ///< Condition number estimate (axis 1)
+    double condition_axis2 = 0.0;          ///< Condition number estimate (axis 2)
+    double condition_axis3 = 0.0;          ///< Condition number estimate (axis 3)
+    double condition_max = 0.0;            ///< Maximum condition number
 
-    size_t failed_slices_m = 0;        ///< Failed fits along moneyness
-    size_t failed_slices_tau = 0;      ///< Failed fits along maturity
-    size_t failed_slices_sigma = 0;    ///< Failed fits along volatility
-    size_t failed_slices_r = 0;        ///< Failed fits along rate
-    size_t failed_slices_total = 0;    ///< Total failed fits
+    size_t failed_slices_axis0 = 0;        ///< Failed fits along axis 0
+    size_t failed_slices_axis1 = 0;        ///< Failed fits along axis 1
+    size_t failed_slices_axis2 = 0;        ///< Failed fits along axis 2
+    size_t failed_slices_axis3 = 0;        ///< Failed fits along axis 3
+    size_t failed_slices_total = 0;        ///< Total failed fits
 };
 
 /// Configuration for PDE solves performed by the builder
