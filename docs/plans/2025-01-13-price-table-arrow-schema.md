@@ -144,10 +144,10 @@ PriceTableSchema = pa.schema([
 │   │   Buffer 4: rate [n_r doubles]                        │ │
 │   ├───────────────────────────────────────────────────────┤ │
 │   │ Knot Vectors (1D arrays, 64-byte aligned)             │ │
-│   │   Buffer 5: knots_m [n_m+8 doubles]                   │ │
-│   │   Buffer 6: knots_tau [n_tau+8 doubles]               │ │
-│   │   Buffer 7: knots_sigma [n_sigma+8 doubles]           │ │
-│   │   Buffer 8: knots_r [n_r+8 doubles]                   │ │
+│   │   Buffer 5: knots_m [n_m+4 doubles]                   │ │
+│   │   Buffer 6: knots_tau [n_tau+4 doubles]               │ │
+│   │   Buffer 7: knots_sigma [n_sigma+4 doubles]           │ │
+│   │   Buffer 8: knots_r [n_r+4 doubles]                   │ │
 │   ├───────────────────────────────────────────────────────┤ │
 │   │ Coefficients (1D array, 64-byte aligned)              │ │
 │   │   Buffer 9: coeffs [n_m×n_tau×n_sigma×n_r doubles]    │ │
