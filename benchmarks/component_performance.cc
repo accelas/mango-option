@@ -17,6 +17,7 @@
 #include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -104,12 +105,21 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
         }
 
-        fixture_ptr->evaluator = std::make_unique<BSpline4D>(
+        // Create workspace for BSpline4D
+        auto workspace_result = PriceTableWorkspace::create(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
             fixture_ptr->rate_grid,
-            fit_result.coefficients);
+            fit_result.coefficients,
+            fixture_ptr->K_ref,
+            0.0);  // dividend_yield = 0
+
+        if (!workspace_result.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
+        }
+
+        fixture_ptr->evaluator = std::make_unique<BSpline4D>(workspace_result.value());
 
         return fixture_ptr.release();
     }();

@@ -36,13 +36,13 @@
  * docs/analytic-vega-analysis.md.
  *
  * Usage:
- *   std::vector<double> m_grid = {...};     // moneyness
- *   std::vector<double> tau_grid = {...};   // maturity
- *   std::vector<double> sigma_grid = {...}; // volatility
- *   std::vector<double> r_grid = {...};     // rate
- *   std::vector<double> coeffs = {...};     // from fitting
+ *   // Create workspace with grids and coefficients
+ *   auto workspace = PriceTableWorkspace::create(
+ *       m_grid, tau_grid, sigma_grid, r_grid,
+ *       coeffs, K_ref, dividend_yield).value();
  *
- *   BSpline4D spline(m_grid, tau_grid, sigma_grid, r_grid, coeffs);
+ *   // Create evaluator from workspace
+ *   BSpline4D spline(workspace);
  *
  *   // Price evaluation:
  *   double price = spline.eval(1.05, 0.25, 0.20, 0.05);
@@ -163,40 +163,6 @@ public:
                "Coefficient size must match grid dimensions");
     }
 
-    /// Construct from vectors (legacy API, copies data)
-    ///
-    /// @deprecated Use PriceTableWorkspace constructor for better performance
-    /// @param m Moneyness grid (sorted, ≥4 points)
-    /// @param t Maturity grid (sorted, ≥4 points)
-    /// @param v Volatility grid (sorted, ≥4 points)
-    /// @param r Rate grid (sorted, ≥4 points)
-    /// @param coeff Coefficients (size must be Nm × Nt × Nv × Nr)
-    BSpline4D(std::vector<double> m,
-              std::vector<double> t,
-              std::vector<double> v,
-              std::vector<double> r,
-              std::vector<double> coeff)
-        : m_(std::move(m)),
-          t_(std::move(t)),
-          v_(std::move(v)),
-          r_(std::move(r)),
-          tm_(clamped_knots_cubic(m_)),
-          tt_(clamped_knots_cubic(t_)),
-          tv_(clamped_knots_cubic(v_)),
-          tr_(clamped_knots_cubic(r_)),
-          c_(std::move(coeff)),
-          Nm_(static_cast<int>(m_.size())),
-          Nt_(static_cast<int>(t_.size())),
-          Nv_(static_cast<int>(v_.size())),
-          Nr_(static_cast<int>(r_.size()))
-    {
-        assert(Nm_ >= 4 && "Moneyness grid must have ≥4 points");
-        assert(Nt_ >= 4 && "Maturity grid must have ≥4 points");
-        assert(Nv_ >= 4 && "Volatility grid must have ≥4 points");
-        assert(Nr_ >= 4 && "Rate grid must have ≥4 points");
-        assert(c_.size() == static_cast<std::size_t>(Nm_) * Nt_ * Nv_ * Nr_ &&
-               "Coefficient size must match grid dimensions");
-    }
 
     /// Evaluate B-spline at query point
     ///

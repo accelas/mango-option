@@ -12,6 +12,7 @@
 
 #include "src/interpolation/bspline_fitter_4d.hpp"
 #include "src/interpolation/bspline_4d.hpp"
+#include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <random>
@@ -263,8 +264,13 @@ TEST(BSplineFitter4DTest, ConstantFunction) {
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
     EXPECT_EQ(result.coefficients.size(), values.size());
 
+    // Create workspace for evaluator
+    auto workspace_result = PriceTableWorkspace::create(
+        m_grid, t_grid, v_grid, r_grid, result.coefficients, 100.0, 0.0);
+    ASSERT_TRUE(workspace_result.has_value());
+
     // Create evaluator and test at random points
-    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
+    BSpline4D spline(workspace_result.value());
 
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> m_dist(0.8, 1.2);
@@ -322,8 +328,13 @@ TEST(BSplineFitter4DTest, SeparableFunction) {
 
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
+    // Create workspace for evaluator
+    auto workspace_result = PriceTableWorkspace::create(
+        m_grid, t_grid, v_grid, r_grid, result.coefficients, 100.0, 0.0);
+    ASSERT_TRUE(workspace_result.has_value());
+
     // Create evaluator
-    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
+    BSpline4D spline(workspace_result.value());
 
     // Test at grid points (should be well-approximated)
     int count_good = 0;
@@ -449,8 +460,13 @@ TEST(BSplineFitter4DTest, SmoothFunction) {
 
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
+    // Create workspace for evaluator
+    auto workspace_result = PriceTableWorkspace::create(
+        m_grid, t_grid, v_grid, r_grid, result.coefficients, 100.0, 0.0);
+    ASSERT_TRUE(workspace_result.has_value());
+
     // Create evaluator
-    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
+    BSpline4D spline(workspace_result.value());
 
     // Test smoothness: evaluate at many off-grid points
     std::mt19937 rng(456);
@@ -538,8 +554,13 @@ TEST(BSplineFitter4DTest, EndToEndWorkflow) {
     ASSERT_TRUE(fit_result.success);
     std::cout << "Fit max residual: " << fit_result.max_residual << "\n";
 
-    // Step 4: Create evaluator
-    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, fit_result.coefficients);
+    // Step 4: Create workspace for evaluator
+    auto workspace_result = PriceTableWorkspace::create(
+        m_grid, t_grid, v_grid, r_grid, fit_result.coefficients, 100.0, 0.0);
+    ASSERT_TRUE(workspace_result.has_value());
+
+    // Create evaluator
+    BSpline4D spline(workspace_result.value());
 
     // Step 5: Query at arbitrary points
     struct Query {
