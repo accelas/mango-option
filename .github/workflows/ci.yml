@@ -92,22 +92,11 @@ jobs:
       - name: Build all targets
         run: bazel build --config=arrow //... --build_tag_filters=-benchmark
 
-      - name: Run fast test suite
+      - name: Run test suite
         run: |
-          # ============================================================
-          # Slow Test Exclusion
-          # ============================================================
-          # Tests marked with tags containing "slow" are excluded from the fast CI job:
-          #   - implied_volatility_test (~300s, uses FDM pricing)
-          #   - adaptive_accuracy_test (known failures, issue #61)
-          #   - price_table_slow_test (precomputes 1200 grid points)
-          #
-          # To run slow tests locally:
-          #   bazel test //tests:slow_tests
-          # ============================================================
-
-          # Run all tests except those tagged as manual or slow
-          bazel test //tests/... --test_output=errors --test_tag_filters=-manual,-slow
+          # Run all tests except those tagged as manual
+          # (manual tests are benchmarks and diagnostic tools)
+          bazel test //tests/... --test_output=errors --test_tag_filters=-manual
 
       - name: Display test results
         if: always()
