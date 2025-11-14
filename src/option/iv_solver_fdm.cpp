@@ -23,6 +23,10 @@ expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) co
     }
 
     // Validate market price
+    if (!std::isfinite(query.market_price)) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 3, query.market_price, 0.0);
+        return unexpected(std::string("Market price must be finite"));
+    }
     if (query.market_price <= 0.0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 4, query.market_price, 0.0);
         return unexpected(std::string("Market price must be positive"));
@@ -236,12 +240,17 @@ IVResult IVSolverFDM::solve_impl(const IVQuery& query) {
 
 void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
                                     std::span<IVResult> results) {
-    // Use OpenMP with thread-local solvers for thread safety
-    MANGO_PRAGMA_PARALLEL_FOR
-    for (size_t i = 0; i < queries.size(); ++i) {
-        // Each thread creates its own solver instance
+    // Use OpenMP with one solver per thread for efficiency
+    #pragma omp parallel
+    {
+        // Each thread creates its own solver instance once
         IVSolverFDM thread_local_solver(config_);
-        results[i] = thread_local_solver.solve_impl(queries[i]);
+
+        // Distribute iterations across threads
+        #pragma omp for
+        for (size_t i = 0; i < queries.size(); ++i) {
+            results[i] = thread_local_solver.solve_impl(queries[i]);
+        }
     }
 }
 

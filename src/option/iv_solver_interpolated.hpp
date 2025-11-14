@@ -62,7 +62,6 @@ class PriceTableSurface;
 struct IVSolverInterpolatedConfig {
     int max_iterations = 50;      ///< Maximum Newton iterations
     double tolerance = 1e-6;       ///< Price convergence tolerance
-    double vega_epsilon = 1e-4;    ///< Finite difference step for vega
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
 };

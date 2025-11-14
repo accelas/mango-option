@@ -35,6 +35,10 @@ expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
     const PriceTableSurface& surface,
     const IVSolverInterpolatedConfig& config)
 {
+    if (!surface.valid()) {
+        return unexpected(std::string("PriceTableSurface is not initialized (workspace is null)"));
+    }
+
     auto spline = std::make_shared<BSpline4D>(*surface.workspace());
     return create(
         std::move(spline),
@@ -54,6 +58,9 @@ std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& q
     }
 
     // Validate market price
+    if (!std::isfinite(query.market_price)) {
+        return "Market price must be finite";
+    }
     if (query.market_price <= 0.0) {
         return "Market price must be positive";
     }
