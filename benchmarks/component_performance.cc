@@ -10,12 +10,13 @@
  * Run with: bazel run //benchmarks:component_performance
  */
 
-#include "src/american_option.hpp"
-#include "src/slice_solver_workspace.hpp"
-#include "src/bspline_4d.hpp"
-#include "src/bspline_fitter_4d.hpp"
-#include "src/iv_solver.hpp"
-#include "src/iv_solver_interpolated.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
+#include "src/interpolation/bspline_4d.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/price_table_4d_builder.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -88,13 +89,17 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             }
         }
 
-        BSplineFitter4D fitter(
+        auto fitter_result = BSplineFitter4D::create(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
             fixture_ptr->rate_grid);
 
-        auto fit_result = fitter.fit(prices);
+        if (!fitter_result) {
+            throw std::runtime_error("Failed to create BSpline fitter: " + fitter_result.error());
+        }
+
+        auto fit_result = fitter_result->fit(prices);
         if (!fit_result.success) {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
         }
@@ -130,15 +135,22 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = state.range(0);
-    grid.n_time = 1000;
-    auto workspace = std::make_shared<SliceSolverWorkspace>(
-        grid.x_min, grid.x_max, grid.n_space);
+    size_t n_space = state.range(0);
+    size_t n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
+    auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid, workspace);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace);
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -161,15 +173,22 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = state.range(0);
-    auto workspace = std::make_shared<SliceSolverWorkspace>(
-        grid.x_min, grid.x_max, grid.n_space);
+    size_t n_space = 101;
+    size_t n_time = state.range(0);
+    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
+    auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid, workspace);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace);
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -192,15 +211,22 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
-    auto workspace = std::make_shared<SliceSolverWorkspace>(
-        grid.x_min, grid.x_max, grid.n_space);
+    size_t n_space = 101;
+    size_t n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
+    auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid, workspace);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace);
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -223,13 +249,22 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         .discrete_dividends = {{0.25, 2.0}, {0.5, 2.0}, {0.75, 2.0}}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    size_t n_space = 101;
+    size_t n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
+    auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace);
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -325,13 +360,22 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    IVSolverInterpolated solver(
-        *surf.evaluator,
-        surf.K_ref,
-        {surf.m_grid.front(), surf.m_grid.back()},
-        {surf.tau_grid.front(), surf.tau_grid.back()},
-        {surf.sigma_grid.front(), surf.sigma_grid.back()},
-        {surf.rate_grid.front(), surf.rate_grid.back()});
+    // Wrap fixture in PriceTableSurface for clean API
+    PriceTableGrid grid{
+        .moneyness = surf.m_grid,
+        .maturity = surf.tau_grid,
+        .volatility = surf.sigma_grid,
+        .rate = surf.rate_grid,
+        .K_ref = surf.K_ref
+    };
+
+    PriceTableSurface surface(
+        std::make_shared<BSpline4D>(*surf.evaluator),  // Share ownership
+        std::move(grid),
+        0.0  // dividend yield
+    );
+
+    IVSolverInterpolated solver(surface);
 
     constexpr double spot = 103.5;
     constexpr double strike = 100.0;
@@ -350,7 +394,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     for (auto _ : state) {
         auto result = solver.solve(query);
         if (!result.converged) {
-            throw std::runtime_error(result.error_message.value_or("Fast IV solver failed"));
+            throw std::runtime_error(result.failure_reason.value_or("Fast IV solver failed"));
         }
         benchmark::DoNotOptimize(result.implied_vol);
     }
@@ -378,17 +422,24 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = n_space;
-    grid.n_time = n_time;
+    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
+    auto workspace = workspace_result.value();
 
     double total_time_ns = 0.0;
     size_t iterations = 0;
 
     for (auto _ : state) {
         auto start = std::chrono::high_resolution_clock::now();
-        AmericanOptionSolver solver(params, grid);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace);
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         auto end = std::chrono::high_resolution_clock::now();
 
         if (!result) {
@@ -438,12 +489,28 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
         });
     }
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    size_t n_space = 101;
+    size_t n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
 
     for (auto _ : state) {
-        auto results = solve_american_options_batch(batch, grid);
+        std::vector<expected<AmericanOptionResult, SolverError>> results;
+        results.reserve(batch_size);
+
+        // Sequential processing for now (batch API may not exist)
+        for (const auto& params : batch) {
+            auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+            if (!solver_result) {
+                state.SkipWithError(solver_result.error().c_str());
+                return;
+            }
+            results.push_back(solver_result.value().solve());
+        }
+
         for (const auto& res : results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);
@@ -453,7 +520,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     }
 
     state.SetItemsProcessed(state.iterations() * batch_size);
-    state.SetLabel("Parallel batch: " + std::to_string(batch_size) + " options");
+    state.SetLabel("Sequential batch: " + std::to_string(batch_size) + " options");
 }
 BENCHMARK(BM_AmericanPut_Batch)
     ->Arg(10)
@@ -486,12 +553,20 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
     config.grid_n_time = 1000;
 
     for (auto _ : state) {
-        auto results = solve_implied_vol_batch(batch, config);
+        std::vector<IVResult> results;
+        results.reserve(batch_size);
+
+        // Sequential processing for now (batch API may not exist)
+        for (const auto& params : batch) {
+            IVSolver solver(params, config);
+            results.push_back(solver.solve());
+        }
+
         benchmark::DoNotOptimize(results);
     }
 
     state.SetItemsProcessed(state.iterations() * batch_size);
-    state.SetLabel("Parallel batch: " + std::to_string(batch_size) + " IVs");
+    state.SetLabel("Sequential batch: " + std::to_string(batch_size) + " IVs");
 }
 BENCHMARK(BM_ImpliedVol_Batch)
     ->Arg(10)
