@@ -148,7 +148,7 @@ TEST(BSpline4DTest, Construction) {
     std::vector<double> coeffs(10 * 8 * 6 * 5, 1.0);
 
     EXPECT_NO_THROW({
-        BSpline4D_FMA spline(m, t, v, r, coeffs);
+        BSpline4D spline(m, t, v, r, coeffs);
     });
 }
 
@@ -162,7 +162,7 @@ TEST(BSpline4DTest, InvalidConstruction) {
 
     // Should fail assertion for < 4 points
     EXPECT_DEATH({
-        BSpline4D_FMA spline(m, t, v, r, coeffs);
+        BSpline4D spline(m, t, v, r, coeffs);
     }, "Moneyness grid must have");
 }
 
@@ -176,7 +176,7 @@ TEST(BSpline4DTest, ConstantFunction) {
     const double constant_value = 5.0;
     std::vector<double> coeffs(8 * 6 * 5 * 4, constant_value);
 
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Test at various points
     std::mt19937 rng(42);
@@ -232,7 +232,7 @@ TEST(BSpline4DTest, SeparableFunction) {
         }
     }
 
-    BSpline4D_FMA spline(m_grid, t_grid, v_grid, r_grid, coeffs);
+    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, coeffs);
 
     // Test approximation at grid points (not exact without proper fitting)
     // Relaxed tolerance since we're using function values as coefficients
@@ -292,7 +292,7 @@ TEST(BSpline4DTest, BoundaryHandling) {
     auto r = linspace(0.0, 0.1, 4);
 
     std::vector<double> coeffs(8 * 6 * 5 * 4, 1.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Test at boundaries (should not crash)
     EXPECT_NO_THROW({
@@ -329,7 +329,7 @@ TEST(BSpline4DTest, PerformanceSingleEval) {
         c = dist(rng);
     }
 
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Warm-up
     for (int i = 0; i < 100; ++i) {
@@ -382,7 +382,7 @@ TEST(BSpline4DTest, PerformanceSmallGrid) {
     auto r = linspace(0.0, 0.10, 5);
 
     std::vector<double> coeffs(10 * 8 * 6 * 5, 1.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     constexpr int n_queries = 100000;
 
@@ -421,7 +421,7 @@ TEST(BSpline4DTest, Accessors) {
     auto r = linspace(0.0, 0.1, 5);
 
     std::vector<double> coeffs(10 * 8 * 6 * 5, 1.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     auto [Nm, Nt, Nv, Nr] = spline.dimensions();
     EXPECT_EQ(Nm, 10);
@@ -451,7 +451,7 @@ TEST(BSpline4DTest, ExactBoundaryEvaluation) {
 
     // Create known constant coefficients
     std::vector<double> coeffs(8 * 6 * 5 * 4, 42.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Test all 16 corners
     double val1 = spline.eval(m.front(), t.front(), v.front(), r.front());
@@ -498,7 +498,7 @@ TEST(BSpline4DTest, ClampingBehaviorOutsideBounds) {
     auto r = linspace(0.0, 0.1, 4);
 
     std::vector<double> coeffs(8 * 6 * 5 * 4, 10.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Query slightly past each axis boundary
     double val_m_below = spline.eval(m.front() - 0.1, t.front(), v.front(), r.front());
@@ -538,7 +538,7 @@ TEST(BSpline4DTest, ExtremeBoundsClampingRegression) {
     auto r = linspace(0.0, 0.1, 4);
 
     std::vector<double> coeffs(8 * 6 * 5 * 4, 7.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Query WAY outside bounds (100× the grid range)
     double val_extreme1 = spline.eval(-100.0, t.front(), v.front(), r.front());
@@ -574,7 +574,7 @@ TEST(BSpline4DTest, NaNPropagation) {
     // Index = 0*120 + 5*20 + 0*4 + 0 = 100
     coeffs[100] = std::numeric_limits<double>::quiet_NaN();
 
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Query near the NaN coefficient region:
     // Coefficient at (m[0]=0.8, t[5]=2.0, v[0]=0.1, r[0]=0.0)
@@ -602,7 +602,7 @@ TEST(BSpline4DTest, InfCoefficientHandling) {
     std::vector<double> coeffs(8 * 6 * 5 * 4, 1.0);
     coeffs[50] = std::numeric_limits<double>::infinity();
 
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Should not crash, but may return Inf
     EXPECT_NO_THROW({
@@ -619,7 +619,7 @@ TEST(BSpline4DTest, AllZeroCoefficients) {
     auto r = linspace(0.0, 0.1, 4);
 
     std::vector<double> coeffs(8 * 6 * 5 * 4, 0.0);
-    BSpline4D_FMA spline(m, t, v, r, coeffs);
+    BSpline4D spline(m, t, v, r, coeffs);
 
     // Should return zero everywhere
     double val1 = spline.eval(1.0, 0.5, 0.3, 0.05);

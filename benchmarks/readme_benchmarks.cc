@@ -47,7 +47,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::unique_ptr<BSpline4D_FMA> evaluator;
+    std::unique_ptr<BSpline4D> evaluator;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -99,7 +99,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
         }
 
-        fixture_ptr->evaluator = std::make_unique<BSpline4D_FMA>(
+        fixture_ptr->evaluator = std::make_unique<BSpline4D>(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,

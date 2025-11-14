@@ -24,7 +24,7 @@
  *   if (fitter_result.has_value()) {
  *       auto result = fitter_result.value().fit(prices_4d);
  *       if (result.success) {
- *           // Use result.coefficients with BSpline4D_FMA
+ *           // Use result.coefficients with BSpline4D
  *       }
  *   } else {
  *       // Handle creation error: fitter_result.error()
