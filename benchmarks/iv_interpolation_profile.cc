@@ -233,4 +233,64 @@ static void BM_BSpline_VegaDualSIMD(benchmark::State& state) {
 }
 BENCHMARK(BM_BSpline_VegaDualSIMD);
 
+// ============================================================================
+// Batch Processing: 4 queries sequentially (scalar baseline)
+// ============================================================================
+
+static void BM_BSpline_VegaBatch4_Sequential(benchmark::State& state) {
+    const auto& surf = GetSurface();
+
+    constexpr double epsilon = 1e-4;
+
+    // 4 different queries
+    constexpr double m[4] = {0.95, 1.00, 1.05, 1.10};
+    constexpr double tau[4] = {0.25, 0.50, 1.00, 2.00};
+    constexpr double sigma[4] = {0.15, 0.20, 0.25, 0.30};
+    constexpr double r[4] = {0.02, 0.03, 0.05, 0.08};
+
+    for (auto _ : state) {
+        double prices[4], vegas[4];
+
+        // Process each query sequentially using scalar triple
+        for (int i = 0; i < 4; ++i) {
+            surf.evaluator->eval_price_and_vega_triple(
+                m[i], tau[i], sigma[i], r[i], epsilon, prices[i], vegas[i]);
+        }
+
+        benchmark::DoNotOptimize(vegas);
+    }
+
+    state.SetLabel("Batch-4 sequential scalar (baseline)");
+}
+BENCHMARK(BM_BSpline_VegaBatch4_Sequential);
+
+// ============================================================================
+// Batch Processing: 4 queries using batch SIMD
+// ============================================================================
+
+static void BM_BSpline_VegaBatch4_SIMD(benchmark::State& state) {
+    const auto& surf = GetSurface();
+
+    constexpr double epsilon = 1e-4;
+
+    // 4 different queries (same as sequential)
+    alignas(32) constexpr double m[4] = {0.95, 1.00, 1.05, 1.10};
+    alignas(32) constexpr double tau[4] = {0.25, 0.50, 1.00, 2.00};
+    alignas(32) constexpr double sigma[4] = {0.15, 0.20, 0.25, 0.30};
+    alignas(32) constexpr double r[4] = {0.02, 0.03, 0.05, 0.08};
+
+    for (auto _ : state) {
+        alignas(32) double prices[4], vegas[4];
+
+        // Process all 4 queries in batch
+        surf.evaluator->eval_price_and_vega_batch_simd(
+            m, tau, sigma, r, epsilon, 4, prices, vegas);
+
+        benchmark::DoNotOptimize(vegas);
+    }
+
+    state.SetLabel("Batch-4 SIMD (horizontal)");
+}
+BENCHMARK(BM_BSpline_VegaBatch4_SIMD);
+
 BENCHMARK_MAIN();
