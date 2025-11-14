@@ -21,10 +21,14 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          # Add Apache Arrow repository and install Arrow
-          apt-get install -y git wget ca-certificates build-essential systemtap-sdt-dev libquantlib0-dev \
-            apache-arrow-apt-source
+          apt-get install -y git wget ca-certificates build-essential systemtap-sdt-dev libquantlib0-dev
+
+          # Add Apache Arrow repository
+          wget https://apache.jfrog.io/artifactory/arrow/debian/apache-arrow-apt-source-latest-trixie.deb
+          apt-get install -y ./apache-arrow-apt-source-latest-trixie.deb
           apt-get update
+
+          # Install Arrow
           apt-get install -y libarrow-dev
 
       - name: Checkout code
