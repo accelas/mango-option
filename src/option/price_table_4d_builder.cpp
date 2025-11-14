@@ -350,7 +350,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     }
 
     // Create evaluator
-    auto evaluator = std::make_unique<BSpline4D_FMA>(
+    auto evaluator = std::make_unique<BSpline4D>(
         moneyness_, maturity_, volatility_, rate_, fit_result.coefficients);
 
     // Populate fitting statistics from result

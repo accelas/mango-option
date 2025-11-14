@@ -30,7 +30,7 @@ double analytic_bs_price(double S, double K, double tau, double sigma, double r)
 }
 
 // Fit B-spline to analytic surface
-std::unique_ptr<BSpline4D_FMA> fit_test_surface() {
+std::unique_ptr<BSpline4D> fit_test_surface() {
     const double K_ref = 100.0;
 
     std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
@@ -68,7 +68,7 @@ std::unique_ptr<BSpline4D_FMA> fit_test_surface() {
     auto fit_result = fitter_result.value().fit(prices);
     EXPECT_TRUE(fit_result.success);
 
-    return std::make_unique<BSpline4D_FMA>(
+    return std::make_unique<BSpline4D>(
         m_grid, tau_grid, sigma_grid, rate_grid, fit_result.coefficients);
 }
 
@@ -93,8 +93,11 @@ TEST(BSplineVegaAnalytic, AnalyticMatchesFiniteDifference) {
         double price_analytic, vega_analytic;
         spline->eval_price_and_vega_analytic(m, tau, sigma, r, price_analytic, vega_analytic);
 
-        double price_fd, vega_fd;
-        spline->eval_price_and_vega_triple(m, tau, sigma, r, epsilon, price_fd, vega_fd);
+        // Finite difference reference (3 separate evaluations)
+        double price_down = spline->eval(m, tau, sigma - epsilon, r);
+        double price_fd = spline->eval(m, tau, sigma, r);
+        double price_up = spline->eval(m, tau, sigma + epsilon, r);
+        double vega_fd = (price_up - price_down) / (2.0 * epsilon);
 
         // Prices should be identical (both evaluate at σ)
         EXPECT_NEAR(price_analytic, price_fd, 1e-12)

@@ -148,24 +148,24 @@ IVResult IVSolverInterpolated::solve(const IVQuery& query) const {
         // Evaluate price at current volatility (with strike scaling)
         const double price = eval_price(moneyness, query.maturity, sigma, query.rate, query.strike);
 
-    // Compute error
-    error_abs = std::abs(price - query.market_price);
+        // Compute error
+        error_abs = std::abs(price - query.market_price);
 
-    // Compute vega (∂Price/∂σ) with strike scaling
-    const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
-    last_vega = vega;
+        // Compute vega (∂Price/∂σ) with strike scaling
+        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+        last_vega = vega;
 
-    // Check convergence
-    if (error_abs < config_.tolerance) {
-        return IVResult{
-            .converged = true,
-            .iterations = iter + 1,
-            .implied_vol = sigma,
-            .final_error = error_abs,
-            .failure_reason = std::nullopt,
-            .vega = last_vega
-        };
-    }
+        // Check convergence
+        if (error_abs < config_.tolerance) {
+            return IVResult{
+                .converged = true,
+                .iterations = iter + 1,
+                .implied_vol = sigma,
+                .final_error = error_abs,
+                .failure_reason = std::nullopt,
+                .vega = last_vega
+            };
+        }
 
         // Check for numerical issues
         if (std::abs(vega) < 1e-10) {

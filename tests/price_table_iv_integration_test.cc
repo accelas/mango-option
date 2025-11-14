@@ -202,7 +202,7 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     ASSERT_TRUE(fit_result.success) << fit_result.error_message;
 
     // Create evaluator
-    auto evaluator = std::make_unique<BSpline4D_FMA>(
+    auto evaluator = std::make_unique<BSpline4D>(
         moneyness, maturity, volatility, rate, fit_result.coefficients);
 
     // Create IV solver
@@ -325,7 +325,7 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
 
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D_FMA>(
+    auto evaluator = std::make_unique<BSpline4D>(
         moneyness, maturity, volatility, rate, fit_result.coefficients);
 
     IVSolverInterpolated iv_solver(
@@ -463,7 +463,7 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D_FMA>(
+    auto evaluator = std::make_unique<BSpline4D>(
         moneyness, maturity, volatility, rate, fit_result.coefficients);
 
     IVSolverInterpolated iv_solver(
@@ -549,7 +549,7 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
     auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D_FMA>(
+    auto evaluator = std::make_unique<BSpline4D>(
         moneyness, maturity, volatility, rate, fit_result.coefficients);
 
     IVSolverInterpolated iv_solver(
@@ -650,7 +650,7 @@ TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
     auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D_FMA>(
+    auto evaluator = std::make_unique<BSpline4D>(
         moneyness, maturity, volatility, rate, fit_result.coefficients);
 
     // Create IV solver

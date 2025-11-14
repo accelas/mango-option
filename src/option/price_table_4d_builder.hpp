@@ -65,7 +65,7 @@ struct BSplineFittingStats {
 
 /// Result of 4D price table building
 struct PriceTable4DResult {
-    std::unique_ptr<BSpline4D_FMA> evaluator;  ///< Fast B-spline evaluator
+    std::unique_ptr<BSpline4D> evaluator;  ///< Fast B-spline evaluator
     std::vector<double> prices_4d;              ///< Raw 4D price array
     size_t n_pde_solves;                        ///< Number of PDE solves performed
     double precompute_time_seconds;             ///< Wall-clock time for pre-computation
