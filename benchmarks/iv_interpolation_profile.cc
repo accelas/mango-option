@@ -188,6 +188,28 @@ static void BM_BSpline_VegaTriple(benchmark::State& state) {
 BENCHMARK(BM_BSpline_VegaTriple);
 
 // ============================================================================
+// Vega via Analytic B-spline Derivative (single evaluation)
+// ============================================================================
+
+static void BM_BSpline_VegaAnalytic(benchmark::State& state) {
+    const auto& surf = GetSurface();
+
+    constexpr double m = 1.03;
+    constexpr double tau = 0.5;
+    constexpr double sigma = 0.22;
+    constexpr double r = 0.05;
+
+    for (auto _ : state) {
+        double price, vega;
+        surf.evaluator->eval_price_and_vega_analytic(m, tau, sigma, r, price, vega);
+        benchmark::DoNotOptimize(vega);
+    }
+
+    state.SetLabel("Vega analytic (B'_k derivative)");
+}
+BENCHMARK(BM_BSpline_VegaAnalytic);
+
+// ============================================================================
 // Vega via SIMD Triple Evaluation (single pass)
 // ============================================================================
 

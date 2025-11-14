@@ -343,6 +343,94 @@ public:
         vega = (price_up - price_down) / (2.0 * epsilon);
     }
 
+    /// Evaluate price and vega using analytic B-spline derivative
+    ///
+    /// Computes V(σ) and vega = ∂V/∂σ exactly using B-spline derivative formula.
+    /// Single evaluation vs 3 for finite difference - expected ~45% faster than scalar triple.
+    ///
+    /// Uses Cox-de Boor derivative formula: B'_{i,p}(x) = p/(t[i+p]-t[i])*B_{i,p-1}(x) - ...
+    /// For cubic B-splines, derivatives are expressed in terms of quadratic basis functions.
+    ///
+    /// @param mq Moneyness query point
+    /// @param tq Maturity query point
+    /// @param vq Volatility query point (σ)
+    /// @param rq Rate query point
+    /// @param[out] price Output: V(σ)
+    /// @param[out] vega Output: exact ∂V/∂σ
+    void eval_price_and_vega_analytic(
+        double mq, double tq, double vq, double rq,
+        double& price, double& vega) const
+    {
+        // Clamp queries to domain
+        mq = clamp_query(mq, m_.front(), m_.back());
+        tq = clamp_query(tq, t_.front(), t_.back());
+        vq = clamp_query(vq, v_.front(), v_.back());
+        rq = clamp_query(rq, r_.front(), r_.back());
+
+        // Find knot spans
+        const int im = find_span_cubic(tm_, mq);
+        const int jt = find_span_cubic(tt_, tq);
+        const int kv = find_span_cubic(tv_, vq);
+        const int lr = find_span_cubic(tr_, rq);
+
+        // Evaluate basis for m, tau, rate
+        double wm[4], wt[4], wr[4];
+        cubic_basis_nonuniform(tm_, im, mq, wm);
+        cubic_basis_nonuniform(tt_, jt, tq, wt);
+        cubic_basis_nonuniform(tr_, lr, rq, wr);
+
+        // Evaluate basis AND derivative for volatility
+        double wv[4], dwv[4];
+        cubic_basis_nonuniform(tv_, kv, vq, wv);
+        cubic_basis_derivative_nonuniform(tv_, kv, vq, dwv);
+
+        // Accumulate price and vega simultaneously
+        price = 0.0;
+        vega = 0.0;
+
+        // 4D tensor product (256 iterations total)
+        for (int a = 0; a < 4; ++a) {
+            int im_idx = im - a;
+            if (static_cast<unsigned>(im_idx) >= static_cast<unsigned>(Nm_)) continue;
+
+            for (int b = 0; b < 4; ++b) {
+                int jt_idx = jt - b;
+                if (static_cast<unsigned>(jt_idx) >= static_cast<unsigned>(Nt_)) continue;
+
+                const double wm_wt = wm[a] * wt[b];
+
+                for (int c = 0; c < 4; ++c) {
+                    int kv_idx = kv - c;
+                    if (static_cast<unsigned>(kv_idx) >= static_cast<unsigned>(Nv_)) continue;
+
+                    // Weights for price and vega
+                    const double w_price = wm_wt * wv[c];
+                    const double w_vega = wm_wt * dwv[c];
+
+                    // Compute base index for coefficient array
+                    const std::size_t base =
+                        (((std::size_t)im_idx * Nt_ + jt_idx) * Nv_ + kv_idx) * Nr_;
+
+                    // Compute valid range for rate dimension
+                    const int d_min = std::max(0, lr - (Nr_ - 1));
+                    const int d_max = std::min(3, lr);
+
+                    const double* coeff_block = c_.data() + base;
+
+                    for (int d = d_min; d <= d_max; ++d) {
+                        const int lr_idx = lr - d;
+                        const double coeff = coeff_block[lr_idx];
+                        const double w_r = wr[d];
+
+                        // Two independent FMA chains (exploits ILP)
+                        price = std::fma(coeff, w_price * w_r, price);
+                        vega = std::fma(coeff, w_vega * w_r, vega);
+                    }
+                }
+            }
+        }
+    }
+
     /// Evaluate price and vega using SIMD (3-lane)
     ///
     /// @deprecated PERFORMANCE REGRESSION - use eval_price_and_vega_triple() instead

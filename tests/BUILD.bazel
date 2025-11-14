@@ -490,3 +490,20 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "bspline_vega_analytic_test",
+    srcs = ["bspline_vega_analytic_test.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+    ],
+    deps = [
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
