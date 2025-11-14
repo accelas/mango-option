@@ -21,10 +21,39 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y git wget ca-certificates build-essential python3 systemtap-sdt-dev libquantlib0-dev
+          apt-get install -y git wget ca-certificates build-essential python3 python3-pip python3-venv systemtap-sdt-dev libquantlib0-dev
 
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install Conan
+        run: |
+          python3 -m pip install --break-system-packages conan
+          conan --version
+
+      - name: Setup Conan profile
+        run: |
+          conan profile detect --force
+          # Configure for C++23
+          sed -i 's/compiler.cppstd=gnu17/compiler.cppstd=gnu23/' ~/.conan2/profiles/default
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2/p
+          key: conan-packages-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}
+          restore-keys: |
+            conan-packages-${{ runner.os }}-
+
+      - name: Install Arrow via Conan
+        run: |
+          conan install . --output-folder=conan_deps --build=missing
+
+      - name: Enable Arrow in MODULE.bazel
+        run: |
+          sed -i 's/^# \(conan_extension = use_extension\)/\1/' MODULE.bazel
+          sed -i 's/^# \(use_repo\)/\1/' MODULE.bazel
+          sed -i 's/^#     \("/    "/' MODULE.bazel
 
       - name: Cache Bazelisk binary
         id: cache-bazelisk
@@ -61,7 +90,7 @@ jobs:
             debian-trixie-bazel-build-
 
       - name: Build all targets
-        run: bazel build //... --build_tag_filters=-benchmark
+        run: bazel build --config=arrow //... --build_tag_filters=-benchmark
 
       - name: Run fast test suite
         run: |

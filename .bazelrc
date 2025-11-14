@@ -6,11 +6,5 @@ build --color=yes
 test --color=yes
 test --test_output=errors
 
-# Arrow persistence feature (optional, requires Conan build)
-# To enable: bazel build --config=arrow //...
-build:arrow --action_env=ENABLE_ARROW=1
-build:arrow --define=enable_arrow=true
-
-# CI configuration (disables Arrow to avoid long build times)
-build:ci --action_env=ENABLE_ARROW=0
-build:ci --define=enable_arrow=false
+# Arrow persistence feature (enabled by default)
+build --define=enable_arrow=true

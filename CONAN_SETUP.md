@@ -1,8 +1,8 @@
-# Conan Setup for Apache Arrow (Optional)
+# Conan Setup for Apache Arrow
 
-This project uses [Conan](https://conan.io/) to manage the Apache Arrow C++ dependency.
+This project uses [Conan](https://conan.io/) to manage the Apache Arrow C++ dependency for price table persistence features.
 
-**Note**: Arrow support is **optional** and disabled by default. The project builds without Arrow, but you'll need it to use price table persistence features (save/load via Arrow IPC format).
+**Note**: Arrow is required to build the project. Use the automated setup script for quickest installation.
 
 ## Prerequisites
 
@@ -18,7 +18,28 @@ source venv/bin/activate
 pip install conan
 ```
 
-## Initial Setup
+## Quick Start (Automated)
+
+Run the helper script to install and enable Arrow:
+
+```bash
+./tools/enable_arrow.sh
+```
+
+This script will:
+1. Install Conan (if needed)
+2. Run `conan install` (~15-30 minutes first time)
+3. Enable the Conan extension in MODULE.bazel automatically
+
+To disable later:
+
+```bash
+./tools/disable_arrow.sh
+```
+
+## Manual Setup (Alternative)
+
+If you prefer manual control:
 
 1. **Create Conan profile** (first time only):
 
@@ -33,11 +54,9 @@ conan install . --output-folder=conan_deps --build=missing
 ```
 
 This will:
-- Download Arrow 14.0.1 and its dependencies (Boost, zlib, etc.)
-- Build them from source for your platform
+- Download Arrow 14.0.1 and its dependencies
+- Build them from source for your platform (~15-30 min)
 - Generate Bazel integration files in `conan_deps/`
-
-**Note**: The first build will take 15-30 minutes as it compiles Boost and Arrow from source.
 
 3. **Enable Conan dependencies in MODULE.bazel**:
 
@@ -55,7 +74,6 @@ use_repo(
 )
 ```
 
-**Note**: This is a one-time edit. Once uncommented, the dependencies will be available.
 
 ## Bazel Integration
 
@@ -129,28 +147,23 @@ If not, edit `~/.conan2/profiles/default` and set `compiler.cppstd=gnu23`.
 
 ## CI/CD Integration
 
-Arrow is **disabled by default in CI** to avoid long build times. The CI configuration is defined in `.bazelrc`:
+Arrow is enabled in CI with aggressive caching to avoid slow builds.
 
-```bash
-# CI builds without Arrow (fast, no Conan required)
-bazel build --config=ci //...
-bazel test --config=ci //...
+**GitHub Actions caching strategy:**
+
+```yaml
+- name: Cache Conan packages
+  uses: actions/cache@v4
+  with:
+    path: ~/.conan2/p
+    key: conan-packages-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}
+    restore-keys: |
+      conan-packages-${{ runner.os }}-
 ```
 
-If you need Arrow in CI (not recommended due to 15-30 min build time):
+**First CI run**: ~20-30 minutes (builds Arrow from source)
+**Subsequent runs**: ~2-5 minutes (cache hit, no rebuild)
 
-```bash
-# Install Conan
-pipx install conan
+The cache key includes `conanfile.txt` hash, so changing Arrow options will trigger a rebuild.
 
-# Configure profile
-conan profile detect
-
-# Install dependencies
-conan install . --output-folder=conan_deps --build=missing
-
-# Build with Arrow
-bazel build --config=arrow //...
-```
-
-**Recommendation**: Keep Arrow disabled in CI and only build it locally or in dedicated release pipelines.
+See `.github/workflows/ci.yml` for the complete CI configuration.

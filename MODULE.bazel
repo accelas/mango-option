@@ -13,18 +13,15 @@ python.toolchain(
 )
 use_repo(python, "python_3_11")
 
-# Apache Arrow C++ (optional, requires Conan build)
-# To enable Arrow support, uncomment the following lines after running:
-#   conan install . --output-folder=conan_deps --build=missing
-#
-# See CONAN_SETUP.md for complete installation instructions
-#
-# conan_extension = use_extension("//conan_deps:conan_deps_module_extension.bzl", "conan_extension")
-# use_repo(
-#     conan_extension,
-#     "arrow",
-#     "boost",
-#     "bzip2",
-#     "libbacktrace",
-#     "zlib",
-# )
+# Apache Arrow C++ (required for price table persistence)
+# Install dependencies: ./tools/enable_arrow.sh
+# See CONAN_SETUP.md for details
+conan_extension = use_extension("//conan_deps:conan_deps_module_extension.bzl", "conan_extension")
+use_repo(
+    conan_extension,
+    "arrow",
+    "boost",
+    "bzip2",
+    "libbacktrace",
+    "zlib",
+)
