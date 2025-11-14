@@ -69,7 +69,7 @@ jobs:
             debian-trixie-bazel-build-
 
       - name: Build all targets
-        run: bazel build --config=arrow //... --build_tag_filters=-benchmark
+        run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Run test suite
         run: |
