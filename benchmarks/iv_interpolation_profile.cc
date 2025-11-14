@@ -210,4 +210,27 @@ static void BM_BSpline_VegaSIMD(benchmark::State& state) {
 }
 BENCHMARK(BM_BSpline_VegaSIMD);
 
+// ============================================================================
+// Vega via Dual-Accumulator SIMD (breaks dependency chain)
+// ============================================================================
+
+static void BM_BSpline_VegaDualSIMD(benchmark::State& state) {
+    const auto& surf = GetSurface();
+
+    constexpr double m = 1.03;
+    constexpr double tau = 0.5;
+    constexpr double sigma = 0.22;
+    constexpr double r = 0.05;
+    constexpr double epsilon = 1e-4;
+
+    for (auto _ : state) {
+        double price, vega;
+        surf.evaluator->eval_price_and_vega_triple_dual_simd(m, tau, sigma, r, epsilon, price, vega);
+        benchmark::DoNotOptimize(vega);
+    }
+
+    state.SetLabel("Vega dual-SIMD (2 accumulators)");
+}
+BENCHMARK(BM_BSpline_VegaDualSIMD);
+
 BENCHMARK_MAIN();
