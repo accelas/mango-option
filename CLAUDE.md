@@ -16,27 +16,31 @@ This project uses Bazel with Bzlmod for dependency management.
 # Build everything
 bazel build //...
 
-# Build specific targets
-bazel build //src:pde_solver
-bazel build //examples:example_heat_equation
+# Build specific targets (modern C++ implementation)
+bazel build //src/option:american_option
+bazel build //src/pde/core:pde_solver
+bazel build //examples:example_newton_solver
+
+# Build benchmarks
+bazel build //benchmarks:market_iv_e2e_benchmark
+bazel build //benchmarks:component_performance
 
 # Run all tests
 bazel test //...
 
 # Run specific test suites
 bazel test //tests:pde_solver_test
-bazel test //tests:cubic_spline_test
-bazel test //tests:stability_test
+bazel test //tests:american_option_solver_test
+bazel test //tests:iv_solver_test
+bazel test //tests:bspline_4d_test
+bazel test //tests:price_table_workspace_test
 
 # Run tests with verbose output
-bazel test //tests:pde_solver_test --test_output=all
+bazel test //tests:iv_solver_test --test_output=all
 
-# Run example
-bazel run //examples:example_heat_equation
-
-# Run QuantLib comparison benchmark (requires libquantlib0-dev)
-bazel build //tests:quantlib_benchmark
-./bazel-bin/tests/quantlib_benchmark
+# Run benchmarks
+bazel run //benchmarks:market_iv_e2e_benchmark
+bazel run //benchmarks:component_performance
 
 # Clean build artifacts
 bazel clean
@@ -46,21 +50,48 @@ bazel clean
 
 ```
 mango-iv/
-├── MODULE.bazel           # Bazel module with GoogleTest and Benchmark dependencies
+├── MODULE.bazel           # Bazel module with dependencies (GoogleTest, Benchmark, Apache Arrow via Conan)
+├── conanfile.txt          # Conan package manager config for Apache Arrow (persistence)
 ├── src/
-│   ├── BUILD.bazel        # Build configuration for library
-│   ├── pde_solver.h       # Public API header
-│   └── pde_solver.c       # TR-BDF2 solver implementation
+│   ├── BUILD.bazel        # Top-level build configuration
+│   ├── pde/               # PDE solver components
+│   │   ├── core/          # Core solver (PDESolver, Newton, root-finding, grids)
+│   │   ├── memory/        # Memory management (workspaces, allocators)
+│   │   └── operators/     # Spatial operators (centered difference, Black-Scholes)
+│   ├── option/            # Option pricing and IV solving
+│   │   ├── american_option.{hpp,cpp}      # American option solver
+│   │   ├── iv_solver_base.hpp             # Base class for IV solvers (C++23 deducing this)
+│   │   ├── iv_solver_fdm.{hpp,cpp}        # FDM-based IV solver
+│   │   ├── iv_solver_interpolated.{hpp,cpp} # B-spline IV solver
+│   │   ├── option_spec.{hpp,cpp}          # Unified option specification API
+│   │   ├── price_table_4d_builder.{hpp,cpp} # Price table builder with structured types
+│   │   └── price_table_workspace.{hpp,cpp}  # Arrow IPC persistence with CRC64 checksums
+│   ├── interpolation/     # B-spline interpolation
+│   │   ├── bspline_4d.hpp           # 4D B-spline evaluator
+│   │   ├── bspline_fitter_4d.hpp    # 4D B-spline fitting (consolidated)
+│   │   └── cubic_spline_solver.hpp  # 1D cubic spline solver
+│   └── support/           # Support utilities
+│       ├── expected.hpp   # Expected/error handling (tl::expected)
+│       ├── error_types.hpp # Error type definitions
+│       └── cpu/           # CPU feature detection
+├── benchmarks/
+│   ├── BUILD.bazel
+│   ├── component_performance.cc      # Component benchmarks
+│   └── market_iv_e2e_benchmark.cc    # End-to-end IV benchmark
 ├── examples/
 │   ├── BUILD.bazel
-│   └── example_heat_equation.c  # Demonstrates heat equation with callbacks
+│   └── example_newton_solver.cc      # Demonstrates Newton solver
+├── legacy/                # Legacy C implementation (archived)
+│   ├── src/               # Original C23 implementation
+│   ├── examples/          # C examples
+│   └── tests/             # C tests
 └── tests/
     ├── BUILD.bazel
-    ├── pde_solver_test.cc        # Core PDE solver tests
-    ├── cubic_spline_test.cc      # Interpolation tests
-    ├── stability_test.cc          # Numerical stability tests
-    ├── quantlib_benchmark.cc      # Performance comparison with QuantLib
-    └── BENCHMARK.md               # Benchmark documentation
+    ├── pde_solver_test.cc          # Core PDE solver tests
+    ├── american_option_solver_test.cc # American option tests
+    ├── iv_solver_test.cc           # Unified IV solver tests
+    ├── bspline_4d_test.cc          # B-spline interpolation tests
+    └── price_table_workspace_test.cc # Arrow IPC persistence tests
 ```
 
 ## Core Architecture
@@ -394,7 +425,7 @@ The library provides a unified configuration and result interface for all root-f
 ### Configuration
 
 ```cpp
-#include "src/cpp/root_finding.hpp"
+#include "src/pde/core/root_finding.hpp"
 
 mango::RootFindingConfig config{
     .max_iter = 100,
@@ -437,33 +468,67 @@ Safe borrowing: u_stage and rhs are unused during Newton iteration.
 
 ## Implied Volatility Solver
 
-The library provides a complete implied volatility solver for American options using Brent's method with nested PDE evaluation.
+The library provides **two** implied volatility solvers with a unified API:
+
+1. **IVSolverFDM**: Ground truth solver using Brent's method + nested PDE (~143ms/query)
+2. **IVSolverInterpolated**: Fast solver using B-spline price tables (~30µs/query, 4800x speedup)
+
+Both solvers implement a unified interface via C++23 `deducing this` for zero-overhead static polymorphism, supporting single queries and OpenMP-parallelized batch processing.
 
 ### Overview
 
-**Algorithm:** Nested Brent's method + American option PDE solver
-**Performance:** ~143ms per IV calculation (43% faster than 250ms target)
+**Unified API:** Both solvers accept `OptionSpec` + `market_price` via `IVQuery` struct
+**Performance:** FDM ~143ms, Interpolation ~30µs (4800x speedup)
+**Batch Support:** OpenMP-parallelized `solve_batch()` on both solvers
+**Thread Safety:** Guaranteed via thread-local solvers (FDM) or lock-free reads (interpolation)
 **Status:** Production-ready
 
-The IV solver finds the volatility parameter that makes the American option's theoretical price (from PDE solver) match the observed market price.
+### Unified API - Basic Usage
 
-### Basic Usage
+Both solvers share the same `IVQuery` input format:
 
 ```cpp
-#include "src/cpp/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"  // or iv_solver_interpolated.hpp
+#include "src/option/option_spec.hpp"
 
-// Setup option parameters
-mango::IVParams params{
-    .spot_price = 100.0,
+// Define option contract specification
+mango::OptionSpec spec{
+    .spot = 100.0,
     .strike = 100.0,
-    .time_to_maturity = 1.0,
-    .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = false  // American put
+    .maturity = 1.0,
+    .rate = 0.05,
+    .dividend_yield = 0.02,
+    .type = mango::OptionType::PUT
 };
 
-// Configure solver (optional - uses defaults if not specified)
-mango::IVConfig config{
+// Query: option + market price
+mango::IVQuery query{.option = spec, .market_price = 10.45};
+
+// Solve using FDM (ground truth)
+mango::IVSolverFDM fdm_solver(mango::IVSolverFDMConfig{});
+mango::IVResult result = fdm_solver.solve(query);
+
+if (result.converged) {
+    std::cout << "Implied Volatility: " << result.implied_vol << "\n";
+    std::cout << "Iterations: " << result.iterations << "\n";
+} else {
+    std::cerr << "Failed: " << *result.failure_reason << "\n";
+}
+```
+
+### FDM Solver (IVSolverFDM)
+
+Ground truth solver using Brent's method with nested American option PDE evaluation.
+
+**When to use:**
+- High-accuracy IV calculation (ground truth)
+- Validating interpolation-based results
+- One-off calculations where speed is not critical
+- Building pre-computed price tables
+
+**Configuration:**
+```cpp
+mango::IVSolverFDMConfig config{
     .root_config = mango::RootFindingConfig{
         .max_iter = 100,
         .tolerance = 1e-6
@@ -473,43 +538,91 @@ mango::IVConfig config{
     .grid_s_max = 200.0
 };
 
-// Solve for implied volatility
-mango::IVSolver solver(params, config);
-mango::IVResult result = solver.solve();
+mango::IVSolverFDM solver(config);
+```
 
-if (result.converged) {
-    std::cout << "Implied Volatility: " << result.implied_vol << "\n";
-    std::cout << "Iterations: " << result.iterations << "\n";
-    std::cout << "Final Error: " << result.final_error << "\n";
-} else {
-    std::cerr << "Failed to converge: " << *result.failure_reason << "\n";
+**Performance:**
+- Single query: ~143ms
+- Batch (32 cores): ~107 IVs/sec (15.3x speedup via OpenMP)
+
+### Interpolation Solver (IVSolverInterpolated)
+
+Fast solver using pre-computed 4D B-spline price tables.
+
+**When to use:**
+- Real-time market making (thousands of IV queries)
+- Live risk calculations
+- Intraday volatility surface updates
+- Applications requiring sub-millisecond latency
+
+**Setup:**
+```cpp
+#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/price_table_4d_builder.hpp"
+
+// 1. Build price table (one-time, offline)
+auto builder = mango::PriceTable4DBuilder::create({m, tau, sigma, r}, K_ref);
+auto build_result = builder->precompute(config);
+
+// 2. Create IV solver from table
+auto iv_solver = mango::IVSolverInterpolated::create(build_result->surface);
+
+// 3. Query IV (fast!)
+mango::IVResult result = iv_solver->solve(query);  // ~30µs
+```
+
+**Performance:**
+- Single query: ~30µs (4800x faster than FDM)
+- Batch: Trivially parallelizable (lock-free reads)
+- Memory: ~2.4 MB for 50×30×20×10 grid
+
+### Batch Processing (Both Solvers)
+
+Both solvers support OpenMP-parallelized batch processing via `solve_batch()`:
+
+```cpp
+// Prepare batch queries
+std::vector<mango::IVQuery> queries = load_market_data();
+std::vector<mango::IVResult> results(queries.size());
+
+// FDM batch (uses thread-local solvers for safety)
+mango::IVSolverFDM fdm_solver(config);
+auto status = fdm_solver.solve_batch(queries, results);
+
+// Interpolation batch (lock-free reads, trivially thread-safe)
+auto interp_solver = mango::IVSolverInterpolated::create(surface);
+status = interp_solver->solve_batch(queries, results);
+
+// Process results
+for (const auto& result : results) {
+    if (result.converged) {
+        std::cout << "σ = " << result.implied_vol << "\n";
+    }
 }
 ```
 
-### Configuration Options
+### Input Validation
 
-**Root-Finding Configuration:**
-```cpp
-mango::RootFindingConfig root_config{
-    .max_iter = 100,           // Maximum Brent iterations
-    .tolerance = 1e-6,         // Price convergence tolerance
-    .brent_tol_abs = 1e-6      // Brent absolute tolerance
-};
-```
+Both solvers use centralized validation via `validate_iv_query()` in `option_spec.cpp`:
 
-**Grid Configuration:**
-```cpp
-mango::IVConfig config{
-    .root_config = root_config,
-    .grid_n_space = 101,       // Spatial grid points
-    .grid_n_time = 1000,       // Time steps
-    .grid_s_max = 200.0        // Maximum spot price
-};
-```
+**Validation checks:**
+- **Option spec validation:**
+  - Spot price > 0 and finite
+  - Strike price > 0 and finite
+  - Time to maturity > 0 and finite
+  - Rate and dividend yield are finite
+- **Market price validation:**
+  - Market price > 0 and finite
+- **Arbitrage checks:**
+  - Call price ≤ spot price (no arbitrage)
+  - Put price ≤ strike price (no arbitrage)
+  - Market price ≥ intrinsic value (no arbitrage)
 
-### Adaptive Volatility Bounds
+All validation errors return descriptive error messages via `expected<void, std::string>`.
 
-The solver uses intelligent bounds based on intrinsic value analysis:
+### Adaptive Volatility Bounds (FDM Solver)
+
+The FDM solver uses intelligent bounds based on intrinsic value analysis:
 
 | Moneyness | Time Value | Upper Bound | Rationale |
 |-----------|-----------|-------------|-----------|
@@ -520,35 +633,27 @@ The solver uses intelligent bounds based on intrinsic value analysis:
 
 This adaptive approach reduces Brent iterations compared to arbitrary bounds.
 
-### Input Validation
-
-The solver validates all inputs and catches arbitrage violations:
-
-**Validation checks:**
-- Spot price > 0
-- Strike price > 0
-- Time to maturity > 0
-- Market price > 0
-- Call price ≤ spot price (no arbitrage)
-- Put price ≤ strike price (no arbitrage)
-- Market price ≥ intrinsic value (no arbitrage)
-
 ### Performance Characteristics
 
-**Typical performance (100 space points, 1000 time steps):**
+**FDM Solver:**
 
 | Scenario | Iterations | Time | Notes |
 |----------|-----------|------|-------|
-| ATM put | 10-12 | ~132ms | Most common case |
-| ITM put | 12-15 | ~158ms | Higher time value |
-| OTM put | 10-12 | ~139ms | Lower price sensitivity |
+| Single query | 10-15 | ~143ms | Ground truth accuracy |
+| Batch (32 cores) | - | ~107 IVs/sec | 15.3x speedup via OpenMP |
 
-**Average:** ~143ms per IV calculation (43% faster than 250ms target)
+**Interpolation Solver:**
 
-**Speedup opportunities:**
-- For production use requiring many queries, consider interpolation-based IV (~7.5µs)
-- FDM-based IV provides ground truth for validation
-- See `docs/plans/2025-10-31-interpolation-iv-next-steps.md` for future work
+| Scenario | Time | Notes |
+|----------|------|-------|
+| Single query | ~30µs | 4800x faster than FDM |
+| Batch | ~30µs per query | Trivially parallelizable (lock-free) |
+| Table build | 15-20 min | One-time offline cost for 300K grid points |
+
+**Speedup strategy:**
+- Use **FDM** for ground truth validation and building price tables
+- Use **Interpolation** for production queries requiring sub-millisecond latency
+- Interpolation provides ~4800x speedup with minimal accuracy loss (<0.1% typical error)
 
 ### USDT Tracing
 
@@ -580,53 +685,50 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
 
 ### Error Handling
 
+Both solvers return `IVResult` with convergence status and optional error messages:
+
 ```cpp
-IVResult result = solver.solve();
+IVResult result = solver.solve(query);
 
 if (!result.converged) {
     // Check failure reason
     if (result.failure_reason.has_value()) {
         std::cerr << "Error: " << *result.failure_reason << "\n";
-    }
 
-    // Check if it was a convergence issue vs validation error
-    if (result.iterations >= config.root_config.max_iter) {
-        std::cerr << "Reached max iterations without converging\n";
+        // Common failures:
+        // - "Market price is not finite"
+        // - "Market price 105.0 exceeds upper bound 100.0 (no arbitrage)"
+        // - "Market price 5.0 < intrinsic value 10.0 (no arbitrage)"
+        // - "Failed to converge after 100 iterations"
     }
 }
 ```
 
-### Example: Batch Processing
-
+**Batch error handling:**
 ```cpp
-// Process multiple options
-std::vector<IVParams> option_params = load_market_data();
-std::vector<IVResult> results;
+auto status = solver.solve_batch(queries, results);
 
-for (const auto& params : option_params) {
-    mango::IVSolver solver(params, config);
-    results.push_back(solver.solve());
+if (!status) {
+    std::cerr << "Batch error: " << status.error() << "\n";
+    // Common: "Size mismatch: 100 queries but 50 result slots"
 }
 
-// Report statistics
-size_t converged = 0;
-double total_time = 0.0;
-
-for (const auto& result : results) {
-    if (result.converged) {
-        converged++;
+// Check individual results
+for (size_t i = 0; i < results.size(); ++i) {
+    if (!results[i].converged) {
+        std::cerr << "Query " << i << " failed: "
+                  << *results[i].failure_reason << "\n";
     }
 }
-
-std::cout << "Converged: " << converged << "/" << results.size() << "\n";
 ```
 
 ### Related Documentation
 
-- **Design Document:** `docs/plans/2025-10-31-american-iv-implementation-design.md`
-- **Implementation Summary:** `docs/plans/IV_IMPLEMENTATION_SUMMARY.md`
-- **Future Work:** `docs/plans/2025-10-31-interpolation-iv-next-steps.md`
-- **Test Suite:** `tests/iv_solver_test.cc`
+- **Unified IV API:** `src/option/iv_solver_base.hpp` - Base class with deducing this
+- **FDM Solver:** `src/option/iv_solver_fdm.{hpp,cpp}` - Brent + nested PDE
+- **Interpolation Solver:** `src/option/iv_solver_interpolated.{hpp,cpp}` - B-spline IV
+- **Option Spec:** `src/option/option_spec.{hpp,cpp}` - Unified input validation
+- **Test Suite:** `tests/iv_solver_test.cc` - Comprehensive tests for both solvers
 
 ## USDT Tracing System
 
@@ -828,174 +930,231 @@ double u_at_x = pde_solver_interpolate(solver, 0.123);
 
 ## Price Table Pre-computation Workflow
 
-The price table module provides fast option pricing through pre-computed lookup tables. This is ideal for applications requiring thousands of pricing queries where computation time dominates.
+The price table module provides fast option pricing through pre-computed 4D B-spline lookup tables with **Apache Arrow IPC persistence** for zero-copy memory-mapped loading.
 
-### Typical Workflow
+**Key Features:**
+- **Arrow IPC Persistence:** Save/load tables in ~150-300µs using Apache Arrow Feather V2 format
+- **Zero-Copy mmap:** Memory-mapped loading avoids deserialization overhead
+- **CRC64 Checksums:** Data integrity validation (ECMA polynomial 0x42F0E1EBA9EA3693)
+- **Structured API:** Ergonomic types (PriceTableGrid, PriceTableConfig, PriceTableSurface)
+- **OpenMP Parallelization:** Fast batch precomputation across multiple cores
+- **Sub-microsecond Queries:** ~500ns price interpolation, Greeks included
 
-**1. Create the price table structure:**
-```c
-// Define grid dimensions (example: 4D table for American puts)
-double *moneyness = malloc(n_m * sizeof(double));
-double *maturity = malloc(n_tau * sizeof(double));
-double *volatility = malloc(n_sigma * sizeof(double));
-double *rate = malloc(n_r * sizeof(double));
+### Modern C++ API (Recommended)
 
-// Generate grids (log-spaced for moneyness, linear for others)
-generate_log_spaced(moneyness, n_m, 0.7, 1.3);
-generate_linear(maturity, n_tau, 0.027, 2.0);
-generate_linear(volatility, n_sigma, 0.10, 0.80);
-generate_linear(rate, n_r, 0.0, 0.10);
+**1. Build price table with structured types:**
+```cpp
+#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_workspace.hpp"
 
-// Create table (takes ownership of grid arrays)
-OptionPriceTable *table = price_table_create(
-    moneyness, n_m, maturity, n_tau, volatility, n_sigma,
-    rate, n_r, NULL, 0,  // No dividend dimension
-    OPTION_PUT, EXERCISE_AMERICAN);
-
-price_table_set_underlying(table, "SPX");
-```
-
-**2. Pre-compute all prices:**
-```c
-// Configure FDM solver grid
-AmericanOptionGrid grid = {
-    .n_space = 101,
-    .n_time = 1000,
-    .S_max = 200.0
+// Define grid using structured type
+mango::PriceTableGrid grid{
+    .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},     // std::vector<double>
+    .maturity_grid = {0.027, 0.25, 0.5, 1.0, 2.0},
+    .volatility_grid = {0.10, 0.20, 0.30, 0.40},
+    .rate_grid = {0.0, 0.02, 0.05},
+    .K_ref = 100.0  // Reference strike for moneyness calculation
 };
 
-// Optionally tune batch size (default: 100)
-setenv("MANGO_PRECOMPUTE_BATCH_SIZE", "200", 1);
+// Or use convenience factory from strikes
+auto builder = mango::PriceTable4DBuilder::from_strikes(
+    100.0,  // spot
+    {80, 90, 100, 110, 120},  // strikes (auto-converts to moneyness)
+    {0.027, 0.25, 0.5, 1.0, 2.0},  // maturities
+    {0.10, 0.20, 0.30, 0.40},      // volatilities
+    {0.0, 0.02, 0.05}              // rates
+);
 
-// Compute all prices (uses OpenMP parallelization)
-int status = price_table_precompute(table, &grid);
-if (status != 0) {
-    fprintf(stderr, "Pre-computation failed\n");
+// Alternative: create from grid struct
+auto builder_alt = mango::PriceTable4DBuilder::create(grid);
+```
+
+**2. Pre-compute prices using structured config:**
+```cpp
+// Configure precomputation
+mango::PriceTableConfig config{
+    .option_type = mango::OptionType::PUT,
+    .n_pde_space = 101,
+    .n_pde_time = 1000,
+    .dividend_yield = 0.02
+};
+
+// Precompute table (uses OpenMP parallelization)
+auto result = builder->precompute(config);
+
+if (!result) {
+    std::cerr << "Precomputation failed: " << result.error() << "\n";
     return 1;
 }
+
+// Access surface for queries
+const auto& surface = result->surface;
 ```
 
-**3. Save table for fast loading later:**
-```c
-price_table_save(table, "spx_american_put.bin");
-price_table_destroy(table);
+**3. Save table using Arrow IPC (Feather V2 format):**
+```cpp
+// Save to disk with CRC64 checksums
+auto workspace = std::move(result->workspace);  // Transfer ownership
+auto save_status = workspace->save("spx_put_table.arrow");
 
-// Later: fast load (milliseconds instead of minutes)
-table = price_table_load("spx_american_put.bin");
+if (!save_status) {
+    std::cerr << "Save failed: " << save_status.error() << "\n";
+    return 1;
+}
+
+// File format: Apache Arrow IPC with:
+// - Schema v1.0: 33 fields (grids, coefficients, metadata)
+// - CRC64 checksums for data integrity
+// - Zero-copy mmap ready
 ```
 
-**4. Query prices, vegas, and gammas (sub-microsecond):**
-```c
-// Single price query
-double price = price_table_interpolate_4d(table, 1.05, 0.25, 0.20, 0.05);
+**4. Load table with zero-copy mmap (fast!):**
+```cpp
+// Load from disk (~150-300µs, no deserialization overhead)
+auto workspace = mango::PriceTableWorkspace::load("spx_put_table.arrow");
 
-// Single vega query (∂V/∂σ)
-double vega = price_table_interpolate_vega_4d(table, 1.05, 0.25, 0.20, 0.05);
+if (!workspace) {
+    std::cerr << "Load failed: " << workspace.error() << "\n";
+    // Possible errors: FILE_NOT_FOUND, SCHEMA_MISMATCH, CORRUPTED_*, etc.
+    return 1;
+}
 
-// Single gamma query (∂²V/∂S²)
-double gamma = price_table_interpolate_gamma_4d(table, 1.05, 0.25, 0.20, 0.05);
+// Create surface from loaded workspace
+auto surface = mango::PriceTableSurface(std::move(*workspace));
+```
 
-// Multiple queries (typical usage)
-for (size_t i = 0; i < n_queries; i++) {
-    double p = price_table_interpolate_4d(table, m[i], tau[i], sigma[i], r[i]);
-    double v = price_table_interpolate_vega_4d(table, m[i], tau[i], sigma[i], r[i]);
-    double g = price_table_interpolate_gamma_4d(table, m[i], tau[i], sigma[i], r[i]);
-    // Process price, vega, and gamma...
+**5. Query prices and Greeks (sub-microsecond):**
+```cpp
+// Single queries (~500ns each)
+double price = surface.interpolate(1.05, 0.25, 0.20, 0.05);  // moneyness, tau, sigma, r
+double vega = surface.interpolate_vega(1.05, 0.25, 0.20, 0.05);   // ∂V/∂σ
+double gamma = surface.interpolate_gamma(1.05, 0.25, 0.20, 0.05);  // ∂²V/∂S²
+
+// Batch queries (typical production usage)
+for (const auto& query : market_data) {
+    double m = query.spot / query.strike;  // Compute moneyness
+    double p = surface.interpolate(m, query.maturity, query.vol, query.rate);
+    double v = surface.interpolate_vega(m, query.maturity, query.vol, query.rate);
+    double g = surface.interpolate_gamma(m, query.maturity, query.vol, query.rate);
+
+    // Use for risk calculations, market making, etc.
+    process_greeks(p, v, g);
 }
 ```
 
-**5. Cleanup:**
-```c
-price_table_destroy(table);
+### Arrow IPC Persistence Details
+
+**Save/Load Error Codes:**
+
+The workspace implements comprehensive validation during load:
+
+```cpp
+enum class LoadError {
+    FILE_NOT_FOUND,          // Arrow file doesn't exist
+    ARROW_ERROR,             // Arrow library error
+    SCHEMA_MISMATCH,         // Wrong schema version or fields
+    INVALID_DIMENSIONS,      // Grid dimensions invalid (zero, negative)
+    SIZE_MISMATCH,           // Array sizes don't match dimensions
+    NON_MONOTONIC,           // Grids not strictly increasing
+    ALIGNMENT_ERROR,         // Coefficient arrays not 64-byte aligned
+    CORRUPTED_COEFFICIENTS,  // CRC64 checksum mismatch
+    CORRUPTED_GRIDS          // CRC64 checksum mismatch
+};
 ```
 
-### Vega Interpolation
+**Schema v1.0 Fields (33 total):**
 
-The price table automatically computes vega (∂V/∂σ) during precomputation using centered finite differences:
+| Category | Fields | Description |
+|----------|--------|-------------|
+| Metadata | mango_version, schema_version, timestamp | Version tracking |
+| Grid Dimensions | n_m, n_tau, n_sigma, n_r, K_ref | 4D grid sizes + reference |
+| Grid Arrays | moneyness, maturity, volatility, rate | Axis values (double[]) |
+| B-spline Knots | knots_m, knots_tau, knots_sigma, knots_r | B-spline knot vectors |
+| Coefficients | coefficients, vega_coeffs, gamma_coeffs | 4D tensor data (64-byte aligned) |
+| Raw Prices | prices_raw (nullable) | Optional pre-fit price grid |
+| Fitting Stats | max_residual_*, condition_number_max | B-spline fitting diagnostics |
+| Build Info | n_pde_solves, precompute_time_seconds, pde_n_space, pde_n_time | Build metadata |
+| Checksums | crc64_coefficients, crc64_grids | CRC64 data integrity |
 
-```c
-// Vega is computed automatically during precomputation
-price_table_precompute(table, &grid);  // Computes both prices and vegas
+**Memory Layout:**
 
-// Query vega at any point (4D table)
-double vega = price_table_interpolate_vega_4d(table,
-    1.05,   // moneyness
-    0.5,    // maturity
-    0.20,   // volatility
-    0.05);  // rate
+```cpp
+// PriceTableWorkspace uses single contiguous allocation (64-byte aligned)
+// Example 50×30×20×10 grid:
+size_t total_size =
+    + 4 * sizeof(size_t)              // Dimensions (n_m, n_tau, n_sigma, n_r)
+    + sizeof(double)                   // K_ref
+    + (50 + 30 + 20 + 10) * sizeof(double)  // Grid arrays
+    + (54 + 34 + 24 + 14) * sizeof(double)  // Knot vectors (n+4 each)
+    + (50*30*20*10) * 3 * sizeof(double);   // Coefficients (price, vega, gamma)
 
-// For 5D tables with dividend
-double vega_5d = price_table_interpolate_vega_5d(table,
-    1.05, 0.5, 0.20, 0.05, 0.02);  // with dividend
+// Total: ~2.4 MB for this grid
+// All allocations from single arena for cache locality + mmap efficiency
 ```
 
-**Key Points:**
-- Vega computed during precomputation (centered finite differences)
-- Same interpolation strategy as prices (cubic or multilinear)
-- ~8ns per query (same speed as price interpolation)
-- More accurate than computing vega at query time
+### Greeks Computation
+
+All Greeks are computed during precomputation using centered finite differences:
+
+**Vega (∂V/∂σ):**
+- Computed via centered FD on volatility axis
 - Enables Newton-based IV inversion
-- Binary save/load preserves vega data
+- ~500ns query time (same as price)
 
-### Gamma Interpolation
-
-The price table automatically computes gamma (∂²V/∂S²) during precomputation using centered finite differences on the moneyness axis:
-
-```c
-// Gamma is computed automatically during precomputation
-price_table_precompute(table, &grid);  // Computes prices, vegas, and gammas
-
-// Query gamma at any point (4D table)
-double gamma = price_table_interpolate_gamma_4d(table,
-    1.05,   // moneyness
-    0.5,    // maturity
-    0.20,   // volatility
-    0.05);  // rate
-
-// For 5D tables with dividend
-double gamma_5d = price_table_interpolate_gamma_5d(table,
-    1.05, 0.5, 0.20, 0.05, 0.02);  // with dividend
-```
-
-**Key Points:**
-- Gamma computed during precomputation (centered finite differences on moneyness)
+**Gamma (∂²V/∂S²):**
+- Computed via centered FD on moneyness axis
 - Properly scaled from ∂²V/∂m² to ∂²V/∂S² using chain rule (γ = ∂²V/∂m² / K_ref²)
-- Same interpolation strategy as prices (cubic or multilinear)
-- ~8ns per query (same speed as price interpolation)
-- More accurate than computing gamma at query time (avoids numerical errors)
-- Essential for delta-hedging strategies and convexity analysis
-- Binary save/load preserves gamma data
+- Essential for delta-hedging and convexity analysis
 - Accuracy depends on grid spacing (finer grids → better second derivatives)
 
-**Note on Accuracy:**
-Second derivatives are inherently more sensitive to grid spacing than first derivatives. For high-accuracy gamma values, use finer moneyness grids (e.g., 50+ points). Typical relative errors: ~5-10% on moderate grids (20 points), <1% on fine grids (50+ points).
+**Accuracy Guidelines:**
+- **Vega (first derivative):** <0.1% error typical with 20+ volatility points
+- **Gamma (second derivative):** ~5-10% error with 20 moneyness points, <1% with 50+ points
+- Use finer grids for high-accuracy second derivatives
+
+All Greeks preserved during Arrow IPC save/load (coefficients + checksums).
 
 ### Performance Characteristics
 
-**Pre-computation (one-time cost):**
+**Pre-computation (one-time offline cost):**
 - 300K grid points (50×30×20×10): ~15-20 minutes on 16 cores
-- Throughput: ~300 options/second with parallelization
+- Throughput: ~300 options/second with OpenMP parallelization
 - Memory overhead: ~10 KB per batch (configurable)
-- Uses OpenMP for parallel batch processing
+- Output: ~2.4 MB Arrow IPC file (with all Greeks + metadata)
 
-**Query performance (amortized benefit):**
-- 4D interpolation: ~500 nanoseconds (multilinear)
-- 5D interpolation: ~2 microseconds (multilinear)
-- Greeks computation: ~5-10 microseconds (requires multiple interpolations)
-- Speedup vs FDM: ~40,000x for single query
+**Persistence (Arrow IPC):**
+- **Save:** ~1-2ms (includes CRC64 checksum computation)
+- **Load:** ~150-300µs (zero-copy mmap, validation only)
+- **Verification:** CRC64 checksums validate data integrity on load
+- **Format:** Apache Arrow Feather V2 (IPC file format)
+
+**Query performance (production):**
+- **Price:** ~500 nanoseconds (B-spline evaluation)
+- **Vega:** ~500 nanoseconds (pre-computed coefficients)
+- **Gamma:** ~500 nanoseconds (pre-computed coefficients)
+- **Speedup vs FDM:** ~286,000x (143ms FDM vs 500ns interpolation)
 
 **Memory usage:**
-- 4D table (50×30×20×10): ~2.4 MB
-- 5D table adds dividend dimension (proportional scaling)
-- Binary format includes grids, prices, and metadata
+- 4D table (50×30×20×10): ~2.4 MB resident (mmap shared across processes)
+- Single contiguous allocation (64-byte aligned for AVX-512)
+- Cache-friendly sequential access pattern
 
-### Environment Variables
+### Conan Dependency Setup
 
-- **MANGO_PRECOMPUTE_BATCH_SIZE**: Batch size for pre-computation (default: 100)
-  - Range: 1-100000
-  - Larger batches: better throughput, more memory
-  - Smaller batches: more frequent progress updates, less memory
-  - Recommended: 100-500 for most use cases
+Apache Arrow is required for price table persistence:
+
+```bash
+# Install Conan 2.x (one-time)
+pip install conan
+
+# Install Arrow and dependencies (~15-30 min first time)
+conan install . --output-folder=conan_deps --build=missing
+
+# Build with Arrow support
+bazel build --config=arrow //...
+```
+
+Arrow dependencies are cached in `~/.conan2/p` for fast subsequent builds.
 
 ### USDT Tracing
 
@@ -1007,7 +1166,7 @@ sudo bpftrace -e 'usdt::mango:algo_progress /arg0 == 4/ {
 }' -c './my_precompute_program'
 ```
 
-See `examples/example_precompute_table.c` for a complete working example.
+See `benchmarks/market_iv_e2e_benchmark.cc` for complete working examples.
 
 ## Numerical Considerations
 
