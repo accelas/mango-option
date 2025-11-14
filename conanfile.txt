@@ -1,0 +1,13 @@
+[requires]
+arrow/14.0.1
+
+[generators]
+BazelDeps
+BazelToolchain
+
+[options]
+# Minimal Arrow build with only IPC support
+arrow/*:shared=False
+arrow/*:parquet=False
+arrow/*:with_thrift=False
+arrow/*:with_boost=True

@@ -23,3 +23,6 @@ accuracy_test_table.bin
 .cache/
 .bazel_cache/
 .actrc
+
+# Conan artifacts
+conan_deps/
