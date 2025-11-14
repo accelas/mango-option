@@ -483,3 +483,20 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "bspline_vega_triple_test",
+    srcs = ["bspline_vega_triple_test.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-march=native",
+    ],
+    deps = [
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
