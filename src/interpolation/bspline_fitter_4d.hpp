@@ -40,8 +40,77 @@
 #include <string>
 #include <stdexcept>
 #include <memory>
+#include <span>
+#include <cassert>
 
 namespace mango {
+
+// ============================================================================
+// Banded Matrix Storage
+// ============================================================================
+
+/// Compact storage for 4-diagonal banded matrix from cubic B-spline collocation
+///
+/// Matrix structure for cubic B-spline (degree 3):
+///   - Each basis function has compact support → at most 4 non-zero entries per row
+///   - Banded structure: entries in columns [j-3, j-2, j-1, j]
+///
+/// Storage layout (row-major):
+///   band_values_[i*4 + k] = A[i, col_start[i] + k] for k ∈ [0,3]
+///
+/// Memory: O(4n) vs O(n²) for dense
+class BandedMatrixStorage {
+public:
+    /// Construct banded storage for n×n matrix with bandwidth 4
+    explicit BandedMatrixStorage(size_t n)
+        : n_(n)
+        , band_values_(4 * n, 0.0)
+        , col_start_(n, 0)
+    {}
+
+    /// Get reference to band entry A[row, col]
+    /// Assumes col ∈ [col_start[row], col_start[row] + 3]
+    double& operator()(size_t row, size_t col) {
+        assert(row < n_);
+        assert(col >= col_start_[row] && col < col_start_[row] + 4);
+        size_t k = col - col_start_[row];
+        return band_values_[row * 4 + k];
+    }
+
+    /// Get const reference to band entry
+    double operator()(size_t row, size_t col) const {
+        assert(row < n_);
+        assert(col >= col_start_[row] && col < col_start_[row] + 4);
+        size_t k = col - col_start_[row];
+        return band_values_[row * 4 + k];
+    }
+
+    /// Get starting column index for row
+    size_t col_start(size_t row) const {
+        assert(row < n_);
+        return col_start_[row];
+    }
+
+    /// Set starting column index for row
+    void set_col_start(size_t row, size_t col) {
+        assert(row < n_);
+        col_start_[row] = col;
+    }
+
+    /// Get number of rows (and columns)
+    size_t size() const { return n_; }
+
+    /// Get raw band values (for debugging/testing)
+    std::span<const double> band_values() const { return band_values_; }
+
+    /// Get raw column starts (for debugging/testing)
+    std::span<const size_t> col_starts() const { return col_start_; }
+
+private:
+    size_t n_;                          ///< Matrix dimension
+    std::vector<double> band_values_;   ///< Banded storage (4n entries)
+    std::vector<size_t> col_start_;     ///< Starting column for each row
+};
 
 // ============================================================================
 // 1D B-spline Collocation Solver

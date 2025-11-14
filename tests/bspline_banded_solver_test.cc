@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/interpolation/bspline_utils.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
 #include <vector>
 #include <cmath>
 
@@ -55,6 +55,32 @@ TEST_F(BandedSolverTest, DenseSolverBaseline) {
     for (size_t i = 1; i < knots_.size(); ++i) {
         EXPECT_GE(knots_[i], knots_[i-1]) << "Knots not monotonic at index " << i;
     }
+}
+
+TEST_F(BandedSolverTest, BandedStorageStructure) {
+    // Test that banded matrix is stored compactly (4 diagonals × n entries)
+    // instead of dense n×n storage
+
+    mango::BandedMatrixStorage mat(n_);
+
+    // Verify compact storage: 4n entries, not n²
+    EXPECT_EQ(mat.band_values().size(), 4 * n_);
+    EXPECT_EQ(mat.col_starts().size(), n_);
+
+    // Test accessor for simple 3×3 case
+    mango::BandedMatrixStorage small(3);
+    small.set_col_start(0, 0);
+    small.set_col_start(1, 0);
+    small.set_col_start(2, 0);
+
+    // Set diagonal entries
+    small(0, 0) = 1.0;
+    small(1, 1) = 2.0;
+    small(2, 2) = 3.0;
+
+    EXPECT_DOUBLE_EQ(small(0, 0), 1.0);
+    EXPECT_DOUBLE_EQ(small(1, 1), 2.0);
+    EXPECT_DOUBLE_EQ(small(2, 2), 3.0);
 }
 
 } // namespace

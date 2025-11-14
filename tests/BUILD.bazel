@@ -515,7 +515,7 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
-        "//src/interpolation:bspline_utils",
+        "//src/interpolation:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
