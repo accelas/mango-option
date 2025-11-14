@@ -256,12 +256,6 @@ public:
         }
     }
 
-    /// Enable or disable banded solver (for testing)
-    ///
-    /// @param use_banded If true, use efficient O(n) banded LU solver. If false, use dense solver.
-    void set_use_banded_solver(bool use_banded) {
-        use_banded_solver_ = use_banded;
-    }
 
     /// Fit B-spline coefficients via collocation
     ///
@@ -323,7 +317,6 @@ private:
     explicit BSplineCollocation1D(std::vector<double> grid)
         : grid_(std::move(grid))
         , n_(grid_.size())
-        , use_banded_solver_(true)  // Default: use efficient banded solver
     {
         // Build knot vector (clamped cubic)
         knots_ = clamped_knots_cubic(grid_);
@@ -336,7 +329,6 @@ private:
     std::vector<double> grid_;              ///< Data grid points
     std::vector<double> knots_;             ///< Knot vector (clamped)
     size_t n_;                              ///< Number of grid points
-    bool use_banded_solver_;                ///< If true, use banded LU solver; if false, use dense solver
 
     // Banded storage: each row has exactly 4 non-zero entries (cubic B-spline support)
     std::vector<double> band_values_;       ///< Banded matrix values (n×4, row-major)
@@ -370,17 +362,8 @@ private:
         }
     }
 
-    /// Solve banded linear system (dispatcher)
+    /// Solve banded linear system using O(n) banded LU solver
     bool solve_banded_system(const std::vector<double>& rhs, std::vector<double>& solution) const {
-        if (use_banded_solver_) {
-            return solve_banded_system_efficient(rhs, solution);
-        } else {
-            return solve_banded_system_dense(rhs, solution);
-        }
-    }
-
-    /// Solve using efficient O(n) banded LU solver
-    bool solve_banded_system_efficient(const std::vector<double>& rhs, std::vector<double>& solution) const {
         // Build BandedMatrixStorage from compact storage
         BandedMatrixStorage A(n_);
 
@@ -404,79 +387,6 @@ private:
         return true;  // banded_lu_solve doesn't report failures (assumes well-conditioned)
     }
 
-    /// Solve using dense O(n³) solver (for regression testing)
-    bool solve_banded_system_dense(const std::vector<double>& rhs, std::vector<double>& solution) const {
-        solution = rhs;
-
-        // Expand compact n×4 banded storage to full n×n for working copy
-        std::vector<double> A(n_ * n_, 0.0);
-
-        // Copy from compact storage to full matrix
-        for (size_t i = 0; i < n_; ++i) {
-            int j_start = band_col_start_[i];
-            int j_end = std::min(j_start + 4, static_cast<int>(n_));
-
-            for (int j = j_start; j < j_end; ++j) {
-                int band_idx = j - j_start;
-                A[i * n_ + j] = band_values_[i * 4 + band_idx];
-            }
-        }
-
-        const double pivot_tol = 1e-14;
-
-        // Gaussian elimination with partial pivoting
-        for (size_t col = 0; col < n_; ++col) {
-            // Find pivot
-            size_t pivot_row = col;
-            double pivot_val = std::abs(A[col * n_ + col]);
-
-            for (size_t row = col + 1; row < n_; ++row) {
-                double val = std::abs(A[row * n_ + col]);
-                if (val > pivot_val) {
-                    pivot_val = val;
-                    pivot_row = row;
-                }
-            }
-
-            // Check for singular matrix
-            if (pivot_val < pivot_tol) {
-                return false;
-            }
-
-            // Swap rows if needed
-            if (pivot_row != col) {
-                for (size_t j = 0; j < n_; ++j) {
-                    std::swap(A[col * n_ + j], A[pivot_row * n_ + j]);
-                }
-                std::swap(solution[col], solution[pivot_row]);
-            }
-
-            // Eliminate column
-            double diag = A[col * n_ + col];
-            for (size_t row = col + 1; row < n_; ++row) {
-                double mult = A[row * n_ + col] / diag;
-
-                for (size_t j = col; j < n_; ++j) {
-                    A[row * n_ + j] -= mult * A[col * n_ + j];
-                }
-
-                solution[row] -= mult * solution[col];
-            }
-        }
-
-        // Back substitution
-        for (int i = static_cast<int>(n_) - 1; i >= 0; --i) {
-            double sum = solution[i];
-
-            for (size_t j = i + 1; j < n_; ++j) {
-                sum -= A[i * n_ + j] * solution[j];
-            }
-
-            solution[i] = sum / A[i * n_ + i];
-        }
-
-        return true;
-    }
 
     /// Compute max residual ||B*c - f||_∞ using banded storage
     double compute_residual(const std::vector<double>& coeffs,
@@ -609,15 +519,6 @@ public:
         }
     }
 
-    /// Control banded solver usage for all axes
-    ///
-    /// @param use_banded If true, use efficient O(n) banded LU solver. If false, use dense solver.
-    void set_use_banded_solver(bool use_banded) {
-        solver_axis0_->set_use_banded_solver(use_banded);
-        solver_axis1_->set_use_banded_solver(use_banded);
-        solver_axis2_->set_use_banded_solver(use_banded);
-        solver_axis3_->set_use_banded_solver(use_banded);
-    }
 
     /// Fit B-spline coefficients via separable collocation
     ///
@@ -968,9 +869,8 @@ public:
     /// @param values Function values at grid points (size N0 × N1 × N2 × N3)
     ///               Row-major layout: index = ((i*N1 + j)*N2 + k)*N3 + l
     /// @param tolerance Maximum residual per axis (default 1e-6)
-    /// @param use_banded_solver If true, use efficient O(n) banded solver (default: true)
     /// @return Fit result with coefficients and diagnostics
-    BSplineFitResult4D fit(const std::vector<double>& values, double tolerance = 1e-6, bool use_banded_solver = true) {
+    BSplineFitResult4D fit(const std::vector<double>& values, double tolerance = 1e-6) {
         // Create separable fitter using factory pattern
         auto fitter_result = BSplineFitter4DSeparable::create(axis0_grid_, axis1_grid_,
                                                               axis2_grid_, axis3_grid_);
@@ -983,9 +883,6 @@ public:
             };
         }
         auto& fitter = fitter_result.value();
-
-        // Configure solver mode
-        fitter.set_use_banded_solver(use_banded_solver);
 
         // Perform separable fitting
         auto sep_result = fitter.fit(values, tolerance);

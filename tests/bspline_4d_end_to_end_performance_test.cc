@@ -86,7 +86,7 @@ protected:
     }
 };
 
-TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridBandedSolver) {
+TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridAccuracyAndPerformance) {
     // Realistic production grid: 50×30×20×10 = 300K points
     auto moneyness = create_moneyness_grid(50);
     auto maturity = create_maturity_grid(30);
@@ -95,7 +95,7 @@ TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridBandedSolver) {
 
     auto values = generate_test_values(moneyness, maturity, volatility, rate);
 
-    std::cout << "\nRealistic grid (banded solver):\n";
+    std::cout << "\nRealistic grid accuracy and performance test:\n";
     std::cout << "  Dimensions: "
               << moneyness.size() << "×"
               << maturity.size() << "×"
@@ -103,7 +103,7 @@ TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridBandedSolver) {
               << rate.size() << " = "
               << values.size() << " points\n";
 
-    // Create fitter with banded solver (default)
+    // Create fitter
     auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
     ASSERT_TRUE(fitter_result.has_value()) << "Fitter creation failed: " << fitter_result.error();
 
@@ -119,19 +119,26 @@ TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridBandedSolver) {
 
     // Verify fitting quality
     EXPECT_LT(fit_result.max_residual, 1e-5);
+
+    // Verify reasonable performance (should complete in reasonable time)
+    // Based on observed performance: ~6000ms for 300K points with banded solver
+    // Allow 3× margin for CI/slower machines
+    EXPECT_LT(duration_us, 18000000.0)  // <18 seconds
+        << "4D B-spline fitting too slow (performance regression)";
 }
 
-TEST_F(BSpline4DEndToEndPerformanceTest, BandedVsDenseSpeedupAnalysis) {
-    // Test multiple grid sizes to understand speedup characteristics
+TEST_F(BSpline4DEndToEndPerformanceTest, MultipleGridSizesAccuracy) {
+    // Test multiple grid sizes to verify accuracy and reasonable performance
     struct GridConfig {
         std::string name;
         size_t n_m, n_tau, n_sigma, n_r;
+        double max_time_ms;  // Maximum expected time (generous margin for CI)
     };
 
     std::vector<GridConfig> configs = {
-        {"Small (7×4×4×4)", 7, 4, 4, 4},
-        {"Medium (20×15×10×8)", 20, 15, 10, 8},
-        {"Large (50×30×20×10)", 50, 30, 20, 10}
+        {"Small (7×4×4×4)", 7, 4, 4, 4, 10.0},
+        {"Medium (20×15×10×8)", 20, 15, 10, 8, 1000.0},      // ~270ms observed, allow 3× margin
+        {"Large (50×30×20×10)", 50, 30, 20, 10, 18000.0}     // ~6000ms observed, allow 3× margin
     };
 
     for (const auto& config : configs) {
@@ -144,48 +151,31 @@ TEST_F(BSpline4DEndToEndPerformanceTest, BandedVsDenseSpeedupAnalysis) {
 
         std::cout << "\n" << config.name << " (" << values.size() << " points):\n";
 
-        double banded_time_us = 0.0;
-        double dense_time_us = 0.0;
+        // Create fitter and fit
+        auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+        ASSERT_TRUE(fitter_result.has_value());
 
-        // Test 1: Banded solver
-        {
-            auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
-            ASSERT_TRUE(fitter_result.has_value());
+        auto start = std::chrono::high_resolution_clock::now();
+        auto fit_result = fitter_result.value().fit(values, 1e-6);
+        auto end = std::chrono::high_resolution_clock::now();
 
-            auto start = std::chrono::high_resolution_clock::now();
-            auto fit_result = fitter_result.value().fit(values, 1e-6, true);
-            auto end = std::chrono::high_resolution_clock::now();
+        ASSERT_TRUE(fit_result.success) << "Fit failed for " << config.name;
 
-            ASSERT_TRUE(fit_result.success);
-            banded_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            std::cout << "  Banded:  " << (banded_time_us / 1000.0) << " ms\n";
-        }
+        auto duration_ms = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
+        std::cout << "  Fitting time: " << duration_ms << " ms\n";
+        std::cout << "  Max residual: " << fit_result.max_residual << "\n";
 
-        // Test 2: Dense solver
-        {
-            auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
-            ASSERT_TRUE(fitter_result.has_value());
+        // Verify accuracy
+        EXPECT_LT(fit_result.max_residual, 1e-5)
+            << "Residual too large for " << config.name;
 
-            auto start = std::chrono::high_resolution_clock::now();
-            auto fit_result = fitter_result.value().fit(values, 1e-6, false);
-            auto end = std::chrono::high_resolution_clock::now();
-
-            ASSERT_TRUE(fit_result.success);
-            dense_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            std::cout << "  Dense:   " << (dense_time_us / 1000.0) << " ms\n";
-        }
-
-        double speedup = dense_time_us / banded_time_us;
-        std::cout << "  Speedup: " << speedup << "×\n";
-
-        // For large grids, expect significant speedup
-        if (values.size() >= 10000) {
-            EXPECT_GT(speedup, 1.0) << "Banded solver should be faster for large grids";
-        }
+        // Verify reasonable performance
+        EXPECT_LT(duration_ms, config.max_time_ms)
+            << config.name << " took too long (performance regression)";
     }
 
-    std::cout << "\nNOTE: Micro-benchmark shows 42× speedup for 1D solver.\n";
-    std::cout << "      End-to-end 4D speedup depends on grid size and overhead.\n";
+    std::cout << "\nNOTE: Banded solver provides ~42× speedup over dense solver in micro-benchmarks.\n";
+    std::cout << "      End-to-end performance depends on grid size and problem complexity.\n";
 }
 
 // Benchmark-style test for performance regression tracking

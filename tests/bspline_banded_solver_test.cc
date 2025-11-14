@@ -166,18 +166,15 @@ TEST_F(BandedSolverTest, BandedLUSolveLarger) {
 // Task 5: Integration Tests
 // ============================================================================
 
-TEST_F(BandedSolverTest, CollocationUseBandedSolver) {
-    // Test that BSplineCollocation1D can use banded solver
-    // and produces valid results
+TEST_F(BandedSolverTest, CollocationAccuracy) {
+    // Test that BSplineCollocation1D produces accurate results
+    // for a quadratic function (should fit perfectly with cubic B-splines)
 
     // Create collocation solver
     auto solver_result = mango::BSplineCollocation1D::create(x_);
     ASSERT_TRUE(solver_result.has_value()) << "Failed to create solver: " << solver_result.error();
 
     auto& solver = solver_result.value();
-
-    // Enable banded solver mode (this will fail until we implement it)
-    solver.set_use_banded_solver(true);
 
     // Fit quadratic function
     auto fit_result = solver.fit(y_, 1e-9);
@@ -187,8 +184,9 @@ TEST_F(BandedSolverTest, CollocationUseBandedSolver) {
     EXPECT_EQ(fit_result.coefficients.size(), n_);
 }
 
-TEST_F(BandedSolverTest, BandedVsDenseIdenticalResults) {
-    // Verify banded solver produces identical results to dense solver
+TEST_F(BandedSolverTest, BandedSolverAccuracyQuadratic) {
+    // Verify banded solver produces highly accurate results
+    // For a quadratic function y=x², cubic B-splines should fit perfectly
 
     // Create solver
     auto solver_result = mango::BSplineCollocation1D::create(x_);
@@ -196,27 +194,21 @@ TEST_F(BandedSolverTest, BandedVsDenseIdenticalResults) {
 
     auto& solver = solver_result.value();
 
-    // Solve with dense solver (current default)
-    solver.set_use_banded_solver(false);
-    auto dense_result = solver.fit(y_, 1e-9);
-    ASSERT_TRUE(dense_result.success) << "Dense solver failed: " << dense_result.error_message;
+    // Fit quadratic function y = x²
+    auto fit_result = solver.fit(y_, 1e-9);
+    ASSERT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
 
-    // Solve with banded solver
-    solver.set_use_banded_solver(true);
-    auto banded_result = solver.fit(y_, 1e-9);
-    ASSERT_TRUE(banded_result.success) << "Banded solver failed: " << banded_result.error_message;
+    // For a quadratic function fit with cubic B-splines, residuals should be extremely small
+    // (machine precision level, not just 1e-6)
+    EXPECT_LT(fit_result.max_residual, 1e-10)
+        << "Residual too large for quadratic function fit with cubic B-splines";
 
-    // Compare coefficients (should match to floating-point precision)
-    ASSERT_EQ(dense_result.coefficients.size(), banded_result.coefficients.size());
+    // Verify we got coefficients
+    ASSERT_EQ(fit_result.coefficients.size(), n_);
 
-    for (size_t i = 0; i < dense_result.coefficients.size(); ++i) {
-        EXPECT_NEAR(dense_result.coefficients[i], banded_result.coefficients[i], 1e-14)
-            << "Coefficients differ at index " << i;
-    }
-
-    // Compare residuals
-    EXPECT_NEAR(dense_result.max_residual, banded_result.max_residual, 1e-14)
-        << "Residuals differ between solvers";
+    // Verify condition number is reasonable (well-conditioned)
+    EXPECT_LT(fit_result.condition_estimate, 1e6)
+        << "System is poorly conditioned";
 }
 
 } // namespace
