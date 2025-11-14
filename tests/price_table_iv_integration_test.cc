@@ -496,6 +496,10 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
         return std::make_unique<BSpline4D>(workspace.value());
     }();
 
+    // First compute base price before moving evaluator
+    double spot = 105.0;
+    const double base_price_kref = evaluator->eval(spot / K_ref, 1.0, known_sigma, known_r);
+
     auto iv_solver_result = IVSolverInterpolated::create(
         std::move(evaluator),
         K_ref,
@@ -508,9 +512,7 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     const auto& iv_solver = iv_solver_result.value();
 
     // Test with strike = K_ref (should work)
-    double spot = 105.0;
     double strike = K_ref;
-    const double base_price_kref = evaluator->eval(spot / K_ref, 1.0, known_sigma, known_r);
     double market_price = base_price_kref * (strike / K_ref);
 
     OptionSpec spec1{
