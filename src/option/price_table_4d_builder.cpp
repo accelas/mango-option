@@ -370,13 +370,13 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     }
 
     // Create workspace with all data
-    auto workspace_result = PriceTableWorkspace::allocate_and_initialize(
+    auto workspace_result = PriceTableWorkspace::create(
         moneyness_, maturity_, volatility_, rate_,
         fit_result.coefficients,
         K_ref_, dividend_yield);
 
     if (!workspace_result.has_value()) {
-        return unexpected("Workspace allocation failed: " + workspace_result.error());
+        return unexpected("Workspace creation failed: " + workspace_result.error());
     }
 
     auto workspace = std::make_shared<PriceTableWorkspace>(std::move(workspace_result.value()));
