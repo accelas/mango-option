@@ -84,15 +84,24 @@ public:
     /// @param axis3_grid Grid for axis 3 (sorted, ≥4 points)
     /// @return expected<BSplineFitter4D, std::string> - success or error message
     ///
-    /// @note Validation is delegated to BSplineFitter4DSeparable and BSplineCollocation1D.
-    ///       Grids are checked during solver construction, eliminating redundant checks.
+    /// @note Validation is delegated to BSplineCollocation1D via BSplineFitter4DSeparable.
+    ///       We validate at creation time by attempting to create a separable fitter.
     static expected<BSplineFitter4D, std::string> create(
         std::vector<double> axis0_grid,
         std::vector<double> axis1_grid,
         std::vector<double> axis2_grid,
         std::vector<double> axis3_grid) {
 
-        // All validations delegated to separable fitter
+        // Validate grids by attempting to create separable fitter
+        // This delegates validation to BSplineCollocation1D for each axis
+        auto validation_result = BSplineFitter4DSeparable::create(
+            axis0_grid, axis1_grid, axis2_grid, axis3_grid);
+
+        if (!validation_result.has_value()) {
+            return unexpected(validation_result.error());
+        }
+
+        // Grids are valid, create the fitter
         return BSplineFitter4D(std::move(axis0_grid), std::move(axis1_grid),
                                std::move(axis2_grid), std::move(axis3_grid));
     }
