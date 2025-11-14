@@ -256,6 +256,13 @@ public:
         }
     }
 
+    /// Enable or disable banded solver (for testing)
+    ///
+    /// @param use_banded If true, use efficient O(n) banded LU solver. If false, use dense solver.
+    void set_use_banded_solver(bool use_banded) {
+        use_banded_solver_ = use_banded;
+    }
+
     /// Fit B-spline coefficients via collocation
     ///
     /// Solves B*c = f where B is the collocation matrix
@@ -316,6 +323,7 @@ private:
     explicit BSplineCollocation1D(std::vector<double> grid)
         : grid_(std::move(grid))
         , n_(grid_.size())
+        , use_banded_solver_(true)  // Default: use efficient banded solver
     {
         // Build knot vector (clamped cubic)
         knots_ = clamped_knots_cubic(grid_);
@@ -328,6 +336,7 @@ private:
     std::vector<double> grid_;              ///< Data grid points
     std::vector<double> knots_;             ///< Knot vector (clamped)
     size_t n_;                              ///< Number of grid points
+    bool use_banded_solver_;                ///< If true, use banded LU solver; if false, use dense solver
 
     // Banded storage: each row has exactly 4 non-zero entries (cubic B-spline support)
     std::vector<double> band_values_;       ///< Banded matrix values (n×4, row-major)
@@ -361,8 +370,42 @@ private:
         }
     }
 
-    /// Solve banded linear system using Gaussian elimination with partial pivoting
+    /// Solve banded linear system (dispatcher)
     bool solve_banded_system(const std::vector<double>& rhs, std::vector<double>& solution) const {
+        if (use_banded_solver_) {
+            return solve_banded_system_efficient(rhs, solution);
+        } else {
+            return solve_banded_system_dense(rhs, solution);
+        }
+    }
+
+    /// Solve using efficient O(n) banded LU solver
+    bool solve_banded_system_efficient(const std::vector<double>& rhs, std::vector<double>& solution) const {
+        // Build BandedMatrixStorage from compact storage
+        BandedMatrixStorage A(n_);
+
+        for (size_t i = 0; i < n_; ++i) {
+            int col_start = band_col_start_[i];
+            A.set_col_start(i, static_cast<size_t>(col_start));
+
+            // Copy band values
+            for (int k = 0; k < 4; ++k) {
+                int col = col_start + k;
+                if (col >= 0 && col < static_cast<int>(n_)) {
+                    A(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
+                }
+            }
+        }
+
+        // Solve using banded LU
+        solution.resize(n_);
+        banded_lu_solve(A, rhs, solution);
+
+        return true;  // banded_lu_solve doesn't report failures (assumes well-conditioned)
+    }
+
+    /// Solve using dense O(n³) solver (for regression testing)
+    bool solve_banded_system_dense(const std::vector<double>& rhs, std::vector<double>& solution) const {
         solution = rhs;
 
         // Expand compact n×4 banded storage to full n×n for working copy

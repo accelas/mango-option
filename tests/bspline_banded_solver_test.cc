@@ -162,5 +162,62 @@ TEST_F(BandedSolverTest, BandedLUSolveLarger) {
     EXPECT_LT(max_residual, 1e-10) << "Residual too large for n=10 system";
 }
 
+// ============================================================================
+// Task 5: Integration Tests
+// ============================================================================
+
+TEST_F(BandedSolverTest, CollocationUseBandedSolver) {
+    // Test that BSplineCollocation1D can use banded solver
+    // and produces valid results
+
+    // Create collocation solver
+    auto solver_result = mango::BSplineCollocation1D::create(x_);
+    ASSERT_TRUE(solver_result.has_value()) << "Failed to create solver: " << solver_result.error();
+
+    auto& solver = solver_result.value();
+
+    // Enable banded solver mode (this will fail until we implement it)
+    solver.set_use_banded_solver(true);
+
+    // Fit quadratic function
+    auto fit_result = solver.fit(y_, 1e-9);
+
+    EXPECT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
+    EXPECT_LT(fit_result.max_residual, 1e-6) << "Residual too large";
+    EXPECT_EQ(fit_result.coefficients.size(), n_);
+}
+
+TEST_F(BandedSolverTest, BandedVsDenseIdenticalResults) {
+    // Verify banded solver produces identical results to dense solver
+
+    // Create solver
+    auto solver_result = mango::BSplineCollocation1D::create(x_);
+    ASSERT_TRUE(solver_result.has_value()) << "Failed to create solver: " << solver_result.error();
+
+    auto& solver = solver_result.value();
+
+    // Solve with dense solver (current default)
+    solver.set_use_banded_solver(false);
+    auto dense_result = solver.fit(y_, 1e-9);
+    ASSERT_TRUE(dense_result.success) << "Dense solver failed: " << dense_result.error_message;
+
+    // Solve with banded solver
+    solver.set_use_banded_solver(true);
+    auto banded_result = solver.fit(y_, 1e-9);
+    ASSERT_TRUE(banded_result.success) << "Banded solver failed: " << banded_result.error_message;
+
+    // Compare coefficients (should match to floating-point precision)
+    ASSERT_EQ(dense_result.coefficients.size(), banded_result.coefficients.size());
+
+    for (size_t i = 0; i < dense_result.coefficients.size(); ++i) {
+        EXPECT_NEAR(dense_result.coefficients[i], banded_result.coefficients[i], 1e-14)
+            << "Coefficients differ at index " << i;
+    }
+
+    // Compare residuals
+    EXPECT_NEAR(dense_result.max_residual, banded_result.max_residual, 1e-14)
+        << "Residuals differ between solvers";
+}
+
 } // namespace
 } // namespace mango
