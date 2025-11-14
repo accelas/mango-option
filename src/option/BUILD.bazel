@@ -178,7 +178,7 @@ cc_library(
         "//src/support:expected",
         "//src/interpolation:bspline_utils",
         ":crc64",
-        "@arrow",
+        "//third_party/arrow",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
