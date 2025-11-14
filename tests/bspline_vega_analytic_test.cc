@@ -5,6 +5,7 @@
 
 #include "src/interpolation/bspline_4d.hpp"
 #include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -68,8 +69,14 @@ std::unique_ptr<BSpline4D> fit_test_surface() {
     auto fit_result = fitter_result.value().fit(prices);
     EXPECT_TRUE(fit_result.success);
 
-    return std::make_unique<BSpline4D>(
-        m_grid, tau_grid, sigma_grid, rate_grid, fit_result.coefficients);
+    // Create workspace for BSpline4D
+    auto workspace_result = PriceTableWorkspace::create(
+        m_grid, tau_grid, sigma_grid, rate_grid,
+        fit_result.coefficients,
+        K_ref, 0.0);  // dividend_yield = 0
+    EXPECT_TRUE(workspace_result.has_value());
+
+    return std::make_unique<BSpline4D>(workspace_result.value());
 }
 
 } // namespace

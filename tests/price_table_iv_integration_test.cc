@@ -202,8 +202,14 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     ASSERT_TRUE(fit_result.success) << fit_result.error_message;
 
     // Create evaluator
-    auto evaluator = std::make_unique<BSpline4D>(
-        moneyness, maturity, volatility, rate, fit_result.coefficients);
+    auto evaluator = [&]() {
+        auto workspace = PriceTableWorkspace::create(
+            moneyness, maturity, volatility, rate, fit_result.coefficients, K_ref, 0.0);
+        if (!workspace.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + workspace.error());
+        }
+        return std::make_unique<BSpline4D>(workspace.value());
+    }();
 
     // Create IV solver
     IVSolverInterpolated iv_solver(
@@ -325,8 +331,14 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
 
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D>(
-        moneyness, maturity, volatility, rate, fit_result.coefficients);
+    auto evaluator = [&]() {
+        auto workspace = PriceTableWorkspace::create(
+            moneyness, maturity, volatility, rate, fit_result.coefficients, K_ref, 0.0);
+        if (!workspace.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + workspace.error());
+        }
+        return std::make_unique<BSpline4D>(workspace.value());
+    }();
 
     IVSolverInterpolated iv_solver(
         *evaluator,
@@ -463,8 +475,14 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D>(
-        moneyness, maturity, volatility, rate, fit_result.coefficients);
+    auto evaluator = [&]() {
+        auto workspace = PriceTableWorkspace::create(
+            moneyness, maturity, volatility, rate, fit_result.coefficients, K_ref, 0.0);
+        if (!workspace.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + workspace.error());
+        }
+        return std::make_unique<BSpline4D>(workspace.value());
+    }();
 
     IVSolverInterpolated iv_solver(
         *evaluator,
@@ -549,8 +567,14 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
     auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D>(
-        moneyness, maturity, volatility, rate, fit_result.coefficients);
+    auto evaluator = [&]() {
+        auto workspace = PriceTableWorkspace::create(
+            moneyness, maturity, volatility, rate, fit_result.coefficients, K_ref, 0.0);
+        if (!workspace.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + workspace.error());
+        }
+        return std::make_unique<BSpline4D>(workspace.value());
+    }();
 
     IVSolverInterpolated iv_solver(
         *evaluator,
@@ -650,8 +674,14 @@ TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
     auto fit_result = fitter_result.value().fit(prices_4d);
     ASSERT_TRUE(fit_result.success);
 
-    auto evaluator = std::make_unique<BSpline4D>(
-        moneyness, maturity, volatility, rate, fit_result.coefficients);
+    auto evaluator = [&]() {
+        auto workspace = PriceTableWorkspace::create(
+            moneyness, maturity, volatility, rate, fit_result.coefficients, K_ref, 0.0);
+        if (!workspace.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + workspace.error());
+        }
+        return std::make_unique<BSpline4D>(workspace.value());
+    }();
 
     // Create IV solver
     IVSolverInterpolated iv_solver(
