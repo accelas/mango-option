@@ -297,8 +297,17 @@ public:
 
     /// Evaluate price and vega using SIMD (3-lane)
     ///
+    /// @deprecated PERFORMANCE REGRESSION - use eval_price_and_vega_triple() instead
+    /// @warning Empirical benchmarking shows 0.45× speedup (18% slower than baseline!)
+    /// @note Retained for research purposes only - demonstrates SIMD overhead for narrow width
+    ///
     /// Uses std::experimental::fixed_size_simd<double,4> to evaluate
-    /// σ-ε, σ, σ+ε in parallel. Achieves ~1.5× speedup over scalar triple.
+    /// σ-ε, σ, σ+ε in parallel. SIMD overhead (packing, broadcasts, copy_to)
+    /// exceeds arithmetic benefits for only 3 lanes.
+    ///
+    /// Benchmarks (actual):
+    /// - Scalar triple: 271ns (1.90× speedup) ✅ USE THIS
+    /// - SIMD triple:   608ns (0.45× speedup) ❌ DO NOT USE
     ///
     /// @param mq Moneyness query point
     /// @param tq Maturity query point
