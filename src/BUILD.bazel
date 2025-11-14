@@ -9,7 +9,7 @@
 #    bspline_collocation_1d, bspline_fitter_4d, bspline_fitter_4d_separable, bspline_utils)
 #
 # - Pricing models: //src/option:BUILD.bazel
-#   (snapshot, american_option, slice_solver_workspace, price_table_4d_builder,
+#   (snapshot, american_option, american_solver_workspace, price_table_4d_builder,
 #    price_table_snapshot_collector, iv_solver, iv_solver_interpolated, iv_types)
 #
 # - Utilities: //src/support:BUILD.bazel

@@ -1,5 +1,4 @@
 #include "src/option/american_option.hpp"
-#include "src/option/slice_solver_workspace.hpp"
 #include "src/interpolation/bspline_4d.hpp"
 #include "src/interpolation/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver.hpp"
