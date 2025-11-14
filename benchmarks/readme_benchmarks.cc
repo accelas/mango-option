@@ -115,14 +115,19 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Use direct constructor with BSpline4D evaluator
-    IVSolverInterpolated solver(
-        *surf.evaluator,
+    // Create solver using factory method
+    auto solver_result = IVSolverInterpolated::create(
+        surf.evaluator,
         surf.K_ref,
         {surf.m_grid.front(), surf.m_grid.back()},
         {surf.tau_grid.front(), surf.tau_grid.back()},
         {surf.sigma_grid.front(), surf.sigma_grid.back()},
         {surf.rate_grid.front(), surf.rate_grid.back()});
+
+    if (!solver_result) {
+        throw std::runtime_error("Failed to create IV solver: " + solver_result.error());
+    }
+    const auto& solver = solver_result.value();
 
     constexpr double spot = 103.5;
     constexpr double strike = 100.0;
@@ -130,13 +135,18 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     constexpr double rate = 0.05;
     constexpr double sigma_true = 0.20;
 
-    IVQuery query{
-        .market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT),
+    OptionSpec spec{
         .spot = spot,
         .strike = strike,
         .maturity = maturity,
         .rate = rate,
-        .option_type = OptionType::PUT};
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
+    };
+    IVQuery query{
+        .option = spec,
+        .market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)
+    };
 
     auto run_once = [&]() {
         auto result = solver.solve(query);

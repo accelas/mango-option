@@ -27,14 +27,15 @@
  * // Step 2: Build price table (one-time precomputation)
  * PriceTableConfig builder_cfg;
  * builder_cfg.dividend_yield = dividend;
- * auto builder = PriceTable4DBuilder::create(grid);
  * auto result = builder.precompute(builder_cfg);
  *
- * // Step 3: Create IV solver directly from surface metadata
- * IVSolverInterpolated iv_solver(result.surface);
+ * // Step 3: Create IV solver from surface
+ * auto solver_result = IVSolverInterpolated::create(result.value().surface);
+ * const auto& iv_solver = solver_result.value();
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
- * IVQuery query{spot, strike, maturity, rate, market_price, OptionType::PUT};
+ * OptionSpec spec{spot, strike, maturity, rate, dividend, OptionType::PUT};
+ * IVQuery query{spec, market_price};
  * auto iv_result = iv_solver.solve(query);
  * ```
  *
@@ -249,11 +250,16 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     }
 
     // API STEP 3: Create IV solver
-    IVSolverConfig solver_config;
+    IVSolverInterpolatedConfig solver_config;
     solver_config.max_iterations = 50;
     solver_config.tolerance = 1e-6;
 
-    IVSolverInterpolated iv_solver(surface, solver_config);
+    auto iv_solver_result = IVSolverInterpolated::create(surface, solver_config);
+    if (!iv_solver_result) {
+        state.SkipWithError(iv_solver_result.error().c_str());
+        return;
+    }
+    const auto& iv_solver = iv_solver_result.value();
 
     // Benchmark: Compute IV for all observations
     size_t converged = 0;
@@ -265,14 +271,15 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
 
         for (const auto& obs : observations) {
             // API STEP 4: Solve for IV
-            IVQuery query{
-                .market_price = obs.market_price,
+            OptionSpec spec{
                 .spot = obs.spot,
                 .strike = obs.strike,
                 .maturity = obs.maturity,
                 .rate = obs.rate,
-                .option_type = obs.type
+                .dividend_yield = grid.dividend,
+                .type = obs.type
             };
+            IVQuery query{.option = spec, .market_price = obs.market_price};
 
             auto result = iv_solver.solve(query);
 

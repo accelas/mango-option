@@ -14,7 +14,7 @@
 #include "src/option/american_solver_workspace.hpp"
 #include "src/interpolation/bspline_4d.hpp"
 #include "src/interpolation/bspline_fitter_4d.hpp"
-#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/option/price_table_workspace.hpp"
@@ -290,24 +290,26 @@ BENCHMARK(BM_AmericanCall_WithDividends);
 // ============================================================================
 
 static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
-    IVParams params{
-        .spot_price = 100.0,
+    OptionSpec spec{
+        .spot = 100.0,
         .strike = 100.0,
-        .time_to_maturity = 1.0,
-        .risk_free_rate = 0.05,
-        .market_price = 6.0,  // Approximate for σ=0.20
-        .is_call = false
+        .maturity = 1.0,
+        .rate = 0.05,
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
     };
+    IVQuery query{.option = spec, .market_price = 6.0};
 
-    IVConfig config;
+    IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     config.grid_n_space = 101;
     config.grid_n_time = 1000;
 
+    IVSolverFDM solver(config);
+
     for (auto _ : state) {
-        IVSolver solver(params, config);
-        auto result = solver.solve();
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -316,24 +318,26 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
 BENCHMARK(BM_ImpliedVol_ATM_Put);
 
 static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
-    IVParams params{
-        .spot_price = 110.0,
+    OptionSpec spec{
+        .spot = 110.0,
         .strike = 100.0,
-        .time_to_maturity = 0.25,
-        .risk_free_rate = 0.05,
-        .market_price = 0.80,  // OTM put
-        .is_call = false
+        .maturity = 0.25,
+        .rate = 0.05,
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
     };
+    IVQuery query{.option = spec, .market_price = 0.80};
 
-    IVConfig config;
+    IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     config.grid_n_space = 101;
     config.grid_n_time = 1000;
 
+    IVSolverFDM solver(config);
+
     for (auto _ : state) {
-        IVSolver solver(params, config);
-        auto result = solver.solve();
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -342,24 +346,26 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
 BENCHMARK(BM_ImpliedVol_OTM_Put);
 
 static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
-    IVParams params{
-        .spot_price = 90.0,
+    OptionSpec spec{
+        .spot = 90.0,
         .strike = 100.0,
-        .time_to_maturity = 2.0,
-        .risk_free_rate = 0.05,
-        .market_price = 15.0,  // ITM put
-        .is_call = false
+        .maturity = 2.0,
+        .rate = 0.05,
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
     };
+    IVQuery query{.option = spec, .market_price = 15.0};
 
-    IVConfig config;
+    IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     config.grid_n_space = 101;
     config.grid_n_time = 1000;
 
+    IVSolverFDM solver(config);
+
     for (auto _ : state) {
-        IVSolver solver(params, config);
-        auto result = solver.solve();
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -370,14 +376,19 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Use direct constructor with BSpline4D evaluator
-    IVSolverInterpolated solver(
-        *surf.evaluator,
+    // Create solver using factory method
+    auto solver_result = IVSolverInterpolated::create(
+        surf.evaluator,
         surf.K_ref,
         {surf.m_grid.front(), surf.m_grid.back()},
         {surf.tau_grid.front(), surf.tau_grid.back()},
         {surf.sigma_grid.front(), surf.sigma_grid.back()},
         {surf.rate_grid.front(), surf.rate_grid.back()});
+
+    if (!solver_result) {
+        throw std::runtime_error("Failed to create IV solver: " + solver_result.error());
+    }
+    const auto& solver = solver_result.value();
 
     constexpr double spot = 103.5;
     constexpr double strike = 100.0;
@@ -385,13 +396,18 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     constexpr double rate = 0.05;
     constexpr double sigma_true = 0.20;
 
-    IVQuery query{
-        .market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT),
+    OptionSpec spec{
         .spot = spot,
         .strike = strike,
         .maturity = maturity,
         .rate = rate,
-        .option_type = OptionType::PUT};
+        .dividend_yield = 0.0,
+        .type = OptionType::PUT
+    };
+    IVQuery query{
+        .option = spec,
+        .market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)
+    };
 
     for (auto _ : state) {
         auto result = solver.solve(query);

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 #include <cmath>
 
 using namespace mango;
@@ -7,17 +7,19 @@ using namespace mango;
 class IVSolverTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Default parameters for testing
-        params = IVParams{
-            .spot_price = 100.0,
+        // Default option specification
+        spec = OptionSpec{
+            .spot = 100.0,
             .strike = 100.0,
-            .time_to_maturity = 1.0,
-            .risk_free_rate = 0.05,
-            .market_price = 10.45,
-            .is_call = false  // American put
+            .maturity = 1.0,
+            .rate = 0.05,
+            .dividend_yield = 0.0,
+            .type = OptionType::PUT
         };
 
-        config = IVConfig{
+        query = IVQuery{.option = spec, .market_price = 10.45};
+
+        config = IVSolverFDMConfig{
             .root_config = RootFindingConfig{
                 .max_iter = 100,
                 .tolerance = 1e-6,
@@ -29,14 +31,15 @@ protected:
         };
     }
 
-    IVParams params;
-    IVConfig config;
+    OptionSpec spec;
+    IVQuery query;
+    IVSolverFDMConfig config;
 };
 
-// Test 1: Construction should succeed (TDD - this should fail initially)
+// Test 1: Construction should succeed
 TEST_F(IVSolverTest, ConstructionSucceeds) {
-    // Create solver - should compile but not implement solve() yet
-    IVSolver solver(params, config);
+    // Create solver
+    IVSolverFDM solver(config);
 
     // Construction itself should succeed
     SUCCEED();
@@ -44,9 +47,9 @@ TEST_F(IVSolverTest, ConstructionSucceeds) {
 
 // Test 2: Basic ATM put IV calculation (should converge now)
 TEST_F(IVSolverTest, ATMPutIVCalculation) {
-    IVSolver solver(params, config);
+    IVSolverFDM solver(config);
 
-    IVResult result = solver.solve();
+    IVResult result = solver.solve(query);
 
     // Should converge with real implementation
     EXPECT_TRUE(result.converged);
@@ -57,10 +60,10 @@ TEST_F(IVSolverTest, ATMPutIVCalculation) {
 
 // Test 3: Invalid parameters should be caught
 TEST_F(IVSolverTest, InvalidSpotPrice) {
-    params.spot_price = -100.0;  // Invalid
+    query.option.spot = -100.0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());
@@ -68,10 +71,10 @@ TEST_F(IVSolverTest, InvalidSpotPrice) {
 
 // Test 4: Invalid strike price
 TEST_F(IVSolverTest, InvalidStrike) {
-    params.strike = 0.0;  // Invalid
+    query.option.strike = 0.0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());
@@ -79,10 +82,10 @@ TEST_F(IVSolverTest, InvalidStrike) {
 
 // Test 5: Invalid time to maturity
 TEST_F(IVSolverTest, InvalidTimeToMaturity) {
-    params.time_to_maturity = -1.0;  // Invalid
+    query.option.maturity = -1.0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());
@@ -90,10 +93,10 @@ TEST_F(IVSolverTest, InvalidTimeToMaturity) {
 
 // Test 6: Invalid market price
 TEST_F(IVSolverTest, InvalidMarketPrice) {
-    params.market_price = -5.0;  // Invalid
+    query.market_price = -5.0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());
@@ -101,11 +104,11 @@ TEST_F(IVSolverTest, InvalidMarketPrice) {
 
 // Test 7: ITM put IV calculation
 TEST_F(IVSolverTest, ITMPutIVCalculation) {
-    params.strike = 110.0;  // In the money
-    params.market_price = 15.0;
+    query.option.strike = 110.0;  // In the money
+    query.market_price = 15.0;
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
@@ -114,11 +117,11 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
 
 // Test 8: OTM put IV calculation
 TEST_F(IVSolverTest, OTMPutIVCalculation) {
-    params.strike = 90.0;  // Out of the money
-    params.market_price = 2.5;
+    query.option.strike = 90.0;  // Out of the money
+    query.market_price = 2.5;
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_TRUE(result.converged);
     EXPECT_GT(result.implied_vol, 0.0);
@@ -127,12 +130,12 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
 
 // Test 9: Deep ITM put (tests adaptive grid bounds)
 TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
-    params.spot_price = 50.0;  // Deep in the money (S/K = 0.5)
-    params.strike = 100.0;
-    params.market_price = 51.0;  // Intrinsic value is 50
+    query.option.spot = 50.0;  // Deep in the money (S/K = 0.5)
+    query.option.strike = 100.0;
+    query.market_price = 51.0;  // Intrinsic value is 50
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     // Should converge with adaptive grid
     EXPECT_TRUE(result.converged) << "Deep ITM should converge with adaptive grid";
@@ -142,12 +145,12 @@ TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
 
 // Test 10: Deep OTM put (tests adaptive grid bounds)
 TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
-    params.spot_price = 200.0;  // Deep out of the money (S/K = 2.0)
-    params.strike = 100.0;
-    params.market_price = 1.0;
+    query.option.spot = 200.0;  // Deep out of the money (S/K = 2.0)
+    query.option.strike = 100.0;
+    query.market_price = 1.0;
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     // Should converge with adaptive grid
     EXPECT_TRUE(result.converged) << "Deep OTM should converge with adaptive grid";
@@ -157,11 +160,11 @@ TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
 
 // Test 11: Call option IV calculation
 TEST_F(IVSolverTest, ATMCallIVCalculation) {
-    params.is_call = true;
-    params.market_price = 10.0;  // ATM call price
+    query.option.type = OptionType::CALL;
+    query.market_price = 10.0;  // ATM call price
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_TRUE(result.converged) << "ATM call should converge";
     EXPECT_GT(result.implied_vol, 0.15);
@@ -172,8 +175,8 @@ TEST_F(IVSolverTest, ATMCallIVCalculation) {
 TEST_F(IVSolverTest, InvalidGridNSpace) {
     config.grid_n_space = 0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());
@@ -184,8 +187,8 @@ TEST_F(IVSolverTest, InvalidGridNSpace) {
 TEST_F(IVSolverTest, InvalidGridNTime) {
     config.grid_n_time = 0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());
@@ -196,8 +199,8 @@ TEST_F(IVSolverTest, InvalidGridNTime) {
 TEST_F(IVSolverTest, InvalidGridSMax) {
     config.grid_s_max = -100.0;  // Invalid
 
-    IVSolver solver(params, config);
-    IVResult result = solver.solve();
+    IVSolverFDM solver(config);
+    IVResult result = solver.solve(query);
 
     EXPECT_FALSE(result.converged);
     EXPECT_TRUE(result.failure_reason.has_value());

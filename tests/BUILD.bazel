@@ -210,7 +210,7 @@ cc_test(
     name = "iv_solver_test",
     srcs = ["iv_solver_test.cc"],
     deps = [
-        "//src/option:iv_solver",
+        "//src/option:iv_solver_fdm",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
