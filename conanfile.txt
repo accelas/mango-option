@@ -27,8 +27,3 @@ arrow/*:with_bz2=False
 arrow/*:with_lz4=False
 arrow/*:with_snappy=False
 arrow/*:with_zstd=False
-
-[conf]
-# Use system libraries to speed up CI builds
-tools.system.package_manager:mode=install
-tools.system.package_manager:sudo=False
