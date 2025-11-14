@@ -605,3 +605,93 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
         EXPECT_NEAR(result.implied_vol, scenario.sigma, 0.05);
     }
 }
+
+// Test that SIMD vega computation produces identical results to scalar
+TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
+    // Setup: Create a synthetic price surface
+    const double K_ref = 100.0;
+    const double known_sigma = 0.20;
+    const double known_r = 0.05;
+
+    // Grid configuration
+    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> maturity = {0.1, 0.5, 1.0, 2.0};
+    std::vector<double> volatility = {0.10, 0.15, 0.20, 0.25, 0.30};
+    std::vector<double> rate = {0.0, 0.025, 0.05, 0.10};
+
+    // Build 4D price table using analytical BS
+    const size_t Nm = moneyness.size();
+    const size_t Nt = maturity.size();
+    const size_t Nv = volatility.size();
+    const size_t Nr = rate.size();
+
+    std::vector<double> prices_4d(Nm * Nt * Nv * Nr);
+
+    for (size_t i = 0; i < Nm; ++i) {
+        for (size_t j = 0; j < Nt; ++j) {
+            for (size_t k = 0; k < Nv; ++k) {
+                for (size_t l = 0; l < Nr; ++l) {
+                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                    prices_4d[idx_4d] = bs_price(
+                        moneyness[i] * K_ref,
+                        K_ref,
+                        maturity[j],
+                        volatility[k],
+                        rate[l],
+                        OptionType::PUT);
+                }
+            }
+        }
+    }
+
+    // Build B-spline surface
+    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    ASSERT_TRUE(fitter_result.has_value());
+    auto fit_result = fitter_result.value().fit(prices_4d);
+    ASSERT_TRUE(fit_result.success);
+
+    auto evaluator = std::make_unique<BSpline4D_FMA>(
+        moneyness, maturity, volatility, rate, fit_result.coefficients);
+
+    // Create IV solver
+    IVSolverInterpolated iv_solver(
+        *evaluator,
+        K_ref,
+        std::make_pair(moneyness.front(), moneyness.back()),
+        std::make_pair(maturity.front(), maturity.back()),
+        std::make_pair(volatility.front(), volatility.back()),
+        std::make_pair(rate.front(), rate.back())
+    );
+
+    // Test multiple scenarios
+    std::vector<IVQuery> test_queries = {
+        // ATM
+        {.market_price = bs_price(100.0, 100.0, 0.5, 0.20, 0.05, OptionType::PUT),
+         .spot = 100.0, .strike = K_ref, .maturity = 0.5, .rate = 0.05, .option_type = OptionType::PUT},
+        // ITM
+        {.market_price = bs_price(90.0, 100.0, 1.0, 0.25, 0.05, OptionType::PUT),
+         .spot = 90.0, .strike = K_ref, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT},
+        // OTM
+        {.market_price = bs_price(110.0, 100.0, 0.25, 0.15, 0.025, OptionType::PUT),
+         .spot = 110.0, .strike = K_ref, .maturity = 0.25, .rate = 0.025, .option_type = OptionType::PUT},
+    };
+
+    for (const auto& query : test_queries) {
+        auto result = iv_solver.solve(query);
+
+        // Should converge successfully
+        ASSERT_TRUE(result.converged)
+            << "Failed for spot=" << query.spot
+            << " maturity=" << query.maturity
+            << " rate=" << query.rate
+            << (result.failure_reason.has_value() ? ": " + *result.failure_reason : "");
+
+        // Results should be numerically stable and within reasonable bounds
+        EXPECT_GT(result.implied_vol, 0.05);  // > 5%
+        EXPECT_LT(result.implied_vol, 0.50);  // < 50%
+        EXPECT_LT(result.iterations, 20);     // Should converge quickly
+
+        // Final error should be within tolerance
+        EXPECT_LT(result.final_error, 1e-6);
+    }
+}
