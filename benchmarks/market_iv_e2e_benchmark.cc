@@ -17,19 +17,22 @@
  * **Workflow Example:**
  * ```cpp
  * // Step 1: Define option surface grid (from market data)
- * std::vector<double> moneyness = {0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2};
- * std::vector<double> maturities = {0.1, 0.25, 0.5, 1.0, 2.0};
- * std::vector<double> volatilities = {0.15, 0.20, 0.25, 0.30, 0.40};
- * std::vector<double> rates = {0.02, 0.03, 0.04, 0.05};
+ * PriceTableGrid grid{
+ *     .moneyness = {0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2},
+ *     .maturity = {0.1, 0.25, 0.5, 1.0, 2.0},
+ *     .volatility = {0.15, 0.20, 0.25, 0.30, 0.40},
+ *     .rate = {0.02, 0.03, 0.04, 0.05},
+ *     .K_ref = 100.0
+ * };
  *
  * // Step 2: Build price table (one-time precomputation)
- * auto builder = PriceTable4DBuilder::create(
- *     moneyness, maturities, volatilities, rates, K_ref);
- * auto result = builder.precompute(OptionType::PUT, 51, 500, dividend);
+ * PriceTableConfig builder_cfg;
+ * builder_cfg.dividend_yield = dividend;
+ * auto builder = PriceTable4DBuilder::create(grid);
+ * auto result = builder.precompute(builder_cfg);
  *
- * // Step 3: Create IV solver
- * IVSolverInterpolated iv_solver(
- *     result.evaluator, K_ref, m_range, tau_range, vol_range, rate_range);
+ * // Step 3: Create IV solver directly from surface metadata
+ * IVSolverInterpolated iv_solver(result.surface);
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
  * IVQuery query{spot, strike, maturity, rate, market_price, OptionType::PUT};
@@ -157,6 +160,29 @@ std::vector<MarketObservation> generate_market_observations(
     return observations;
 }
 
+PriceTableGrid make_price_table_grid(const MarketGrid& grid) {
+    PriceTableGrid price_grid;
+    price_grid.moneyness = grid.moneyness;
+    price_grid.maturity = grid.maturities;
+    price_grid.volatility = grid.volatilities;
+    price_grid.rate = grid.rates;
+    price_grid.K_ref = grid.K_ref;
+    return price_grid;
+}
+
+PriceTableConfig make_price_table_config(
+    const MarketGrid& grid,
+    size_t n_space = 51,
+    size_t n_time = 500)
+{
+    PriceTableConfig config;
+    config.option_type = OptionType::PUT;
+    config.n_space = n_space;
+    config.n_time = n_time;
+    config.dividend_yield = grid.dividend;
+    return config;
+}
+
 } // namespace
 
 // ============================================================================
@@ -166,23 +192,14 @@ std::vector<MarketObservation> generate_market_observations(
 static void BM_API_BuildPriceTable(benchmark::State& state) {
     MarketGrid grid = generate_market_grid();
 
+    PriceTableConfig config = make_price_table_config(grid, 51, 500);
+
     for (auto _ : state) {
         // API STEP 1: Create builder with market grids
-        auto builder = PriceTable4DBuilder::create(
-            grid.moneyness,
-            grid.maturities,
-            grid.volatilities,
-            grid.rates,
-            grid.K_ref
-        );
+        auto builder = PriceTable4DBuilder::create(make_price_table_grid(grid));
 
         // API STEP 2: Precompute all prices (one PDE solve per σ,r pair)
-        auto result = builder.precompute(
-            OptionType::PUT,
-            51,              // n_space: coarse grid for benchmark
-            500,             // n_time: sufficient accuracy
-            grid.dividend
-        );
+        auto result = builder.precompute(config);
 
         if (!result) {
             state.SkipWithError(result.error().c_str());
@@ -211,16 +228,8 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     MarketGrid grid = generate_market_grid();
 
     // Build price table once (setup, not timed)
-    auto builder = PriceTable4DBuilder::create(
-        grid.moneyness,
-        grid.maturities,
-        grid.volatilities,
-        grid.rates,
-        grid.K_ref
-    );
-
-    auto price_table_result = builder.precompute(
-        OptionType::PUT, 51, 500, grid.dividend);
+    auto builder = PriceTable4DBuilder::create(make_price_table_grid(grid));
+    auto price_table_result = builder.precompute(make_price_table_config(grid, 51, 500));
 
     if (!price_table_result) {
         state.SkipWithError(price_table_result.error().c_str());
@@ -228,6 +237,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     }
 
     const auto& price_table = price_table_result.value();
+    const PriceTableSurface& surface = price_table.surface;
 
     // Generate market observations
     auto observations = generate_market_observations(grid, 100);
@@ -235,29 +245,15 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     // Fill in "market prices" using our price table (simulates real market data)
     for (auto& obs : observations) {
         double m = obs.spot / obs.strike;
-        obs.market_price = price_table.evaluator->eval(
-            m, obs.maturity, obs.true_vol, obs.rate);
+        obs.market_price = surface.eval(m, obs.maturity, obs.true_vol, obs.rate);
     }
 
     // API STEP 3: Create IV solver
-    auto m_range = std::make_pair(grid.moneyness.front(), grid.moneyness.back());
-    auto tau_range = std::make_pair(grid.maturities.front(), grid.maturities.back());
-    auto vol_range = std::make_pair(grid.volatilities.front(), grid.volatilities.back());
-    auto rate_range = std::make_pair(grid.rates.front(), grid.rates.back());
+    IVSolverConfig solver_config;
+    solver_config.max_iterations = 50;
+    solver_config.tolerance = 1e-6;
 
-    IVSolverConfig config;
-    config.max_iterations = 50;
-    config.tolerance = 1e-6;
-
-    IVSolverInterpolated iv_solver(
-        *price_table.evaluator,
-        grid.K_ref,
-        m_range,
-        tau_range,
-        vol_range,
-        rate_range,
-        config
-    );
+    IVSolverInterpolated iv_solver(surface, solver_config);
 
     // Benchmark: Compute IV for all observations
     size_t converged = 0;
@@ -313,29 +309,20 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         // FULL WORKFLOW: Build table → Solve IVs
 
         // Step 1-2: Build price table
-        auto builder = PriceTable4DBuilder::create(
-            grid.moneyness, grid.maturities, grid.volatilities,
-            grid.rates, grid.K_ref);
-
-        auto price_table = builder.precompute(
-            OptionType::PUT, 51, 500, grid.dividend).value();
+        auto builder = PriceTable4DBuilder::create(make_price_table_grid(grid));
+        auto price_table = builder
+            .precompute(make_price_table_config(grid, 51, 500))
+            .value();
+        const PriceTableSurface& surface = price_table.surface;
 
         // Fill market prices
         for (auto& obs : observations) {
             double m = obs.spot / obs.strike;
-            obs.market_price = price_table.evaluator->eval(
-                m, obs.maturity, obs.true_vol, obs.rate);
+            obs.market_price = surface.eval(m, obs.maturity, obs.true_vol, obs.rate);
         }
 
         // Step 3-4: Compute IVs
-        auto m_range = std::make_pair(grid.moneyness.front(), grid.moneyness.back());
-        auto tau_range = std::make_pair(grid.maturities.front(), grid.maturities.back());
-        auto vol_range = std::make_pair(grid.volatilities.front(), grid.volatilities.back());
-        auto rate_range = std::make_pair(grid.rates.front(), grid.rates.back());
-
-        IVSolverInterpolated iv_solver(
-            *price_table.evaluator, grid.K_ref,
-            m_range, tau_range, vol_range, rate_range);
+        IVSolverInterpolated iv_solver(surface);
 
         size_t converged = 0;
         for (const auto& obs : observations) {

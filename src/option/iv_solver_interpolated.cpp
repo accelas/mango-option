@@ -4,10 +4,39 @@
  */
 
 #include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/price_table_4d_builder.hpp"
 #include <algorithm>
 #include <cmath>
 
 namespace mango {
+
+namespace {
+
+const BSpline4D& require_surface(const std::shared_ptr<BSpline4D>& surface) {
+    if (!surface) {
+        throw std::invalid_argument("PriceTableSurface not initialized");
+    }
+    return *surface;
+}
+
+}  // namespace
+
+IVSolverInterpolated::IVSolverInterpolated(
+    const PriceTableSurface& surface,
+    const IVSolverConfig& config)
+    : owned_surface_(surface.evaluator())
+    , price_surface_(require_surface(owned_surface_))
+    , K_ref_(surface.K_ref())
+    , m_range_(surface.moneyness_range())
+    , tau_range_(surface.maturity_range())
+    , sigma_range_(surface.volatility_range())
+    , r_range_(surface.rate_range())
+    , config_(config)
+{
+    if (K_ref_ <= 0.0) {
+        throw std::invalid_argument("K_ref must be positive");
+    }
+}
 
 std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& query) const {
     if (query.market_price <= 0.0) {

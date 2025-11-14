@@ -23,16 +23,14 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,  # Static link our library code
     deps = [
         "//src/option:american_option",
-        "//src/option:slice_solver_workspace",
+        "//src/option:american_solver_workspace",
         "//src/option:iv_solver",
         "//src/interpolation:bspline_4d",
         "//src/interpolation:bspline_fitter_4d",
