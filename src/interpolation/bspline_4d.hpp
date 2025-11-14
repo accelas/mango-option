@@ -234,14 +234,18 @@ public:
         cubic_basis_nonuniform(tt_, jt, tq, wt);
         cubic_basis_nonuniform(tr_, lr, rq, wr);
 
-        // Find sigma span (same for all 3 values if epsilon is small)
+        // Clamp shifted sigma values to prevent extrapolation outside grid
+        const double v_down = clamp_query(vq - epsilon, v_.front(), v_.back());
+        const double v_up = clamp_query(vq + epsilon, v_.front(), v_.back());
+
+        // Find sigma span (may differ for shifted values at boundaries)
         const int kv = find_span_cubic(tv_, vq);
 
-        // Evaluate basis for 3 sigma values
+        // Evaluate basis for 3 sigma values (with clamped shifts)
         double wv_down[4], wv_base[4], wv_up[4];
-        cubic_basis_nonuniform(tv_, kv, vq - epsilon, wv_down);
+        cubic_basis_nonuniform(tv_, kv, v_down, wv_down);
         cubic_basis_nonuniform(tv_, kv, vq, wv_base);
-        cubic_basis_nonuniform(tv_, kv, vq + epsilon, wv_up);
+        cubic_basis_nonuniform(tv_, kv, v_up, wv_up);
 
         // Accumulate 3 results in parallel
         double price_down = 0.0;
@@ -343,11 +347,15 @@ public:
         cubic_basis_nonuniform(tt_, jt, tq, wt);
         cubic_basis_nonuniform(tr_, lr, rq, wr);
 
-        // Evaluate 3 sigma basis functions
+        // Clamp shifted sigma values to prevent extrapolation outside grid
+        const double v_down = clamp_query(vq - epsilon, v_.front(), v_.back());
+        const double v_up = clamp_query(vq + epsilon, v_.front(), v_.back());
+
+        // Evaluate 3 sigma basis functions (with clamped shifts)
         double wv_down[4], wv_base[4], wv_up[4];
-        cubic_basis_nonuniform(tv_, kv, vq - epsilon, wv_down);
+        cubic_basis_nonuniform(tv_, kv, v_down, wv_down);
         cubic_basis_nonuniform(tv_, kv, vq, wv_base);
-        cubic_basis_nonuniform(tv_, kv, vq + epsilon, wv_up);
+        cubic_basis_nonuniform(tv_, kv, v_up, wv_up);
 
         // SIMD accumulator for 3 results + padding
         simd_t accum(0.0);
