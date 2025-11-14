@@ -197,16 +197,6 @@ public:
         );
     }
 
-    /// Convenience overload that accepts the grid description directly
-    static PriceTable4DBuilder create(PriceTableGrid grid) {
-        return create(
-            std::move(grid.moneyness),
-            std::move(grid.maturity),
-            std::move(grid.volatility),
-            std::move(grid.rate),
-            grid.K_ref
-        );
-    }
 
     /// Create builder from strike prices (auto-computes moneyness)
     ///
@@ -264,15 +254,13 @@ public:
         auto atm_it = std::lower_bound(strikes.begin(), strikes.end(), spot);
         double K_ref = (atm_it != strikes.end()) ? *atm_it : strikes[strikes.size()/2];
 
-        PriceTableGrid grid{
-            .moneyness = std::move(moneyness),
-            .maturity = std::move(maturities),
-            .volatility = std::move(volatilities),
-            .rate = std::move(rates),
-            .K_ref = K_ref
-        };
-
-        return create(std::move(grid));
+        return create(
+            std::move(moneyness),
+            std::move(maturities),
+            std::move(volatilities),
+            std::move(rates),
+            K_ref
+        );
     }
 
     /// Create builder from market option chain data
