@@ -319,7 +319,7 @@ cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
-        "//src/interpolation:bspline_collocation_1d",
+        "//src/interpolation:bspline_fitter_4d",
         "//src/interpolation:bspline_4d",
         "@googletest//:gtest_main",
     ],
@@ -351,7 +351,7 @@ cc_test(
     name = "bspline_fitter_4d_separable_test",
     srcs = ["bspline_fitter_4d_separable_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d_separable",
+        "//src/interpolation:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],

@@ -9,7 +9,7 @@
  * - Integration with evaluation
  */
 
-#include "src/interpolation/bspline_fitter_4d_separable.hpp"
+#include "src/interpolation/bspline_fitter_4d.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -137,10 +137,10 @@ TEST(BSplineFitter4DSeparableTest, ConstantFunction) {
     EXPECT_EQ(result.coefficients.size(), values.size());
 
     // Check diagnostic information
-    EXPECT_GE(result.failed_slices_m, 0UL);
-    EXPECT_GE(result.failed_slices_tau, 0UL);
-    EXPECT_GE(result.failed_slices_sigma, 0UL);
-    EXPECT_GE(result.failed_slices_r, 0UL);
+    EXPECT_GE(result.failed_slices_axis0, 0UL);
+    EXPECT_GE(result.failed_slices_axis1, 0UL);
+    EXPECT_GE(result.failed_slices_axis2, 0UL);
+    EXPECT_GE(result.failed_slices_axis3, 0UL);
 }
 
 TEST(BSplineFitter4DSeparableTest, SeparableFunction) {

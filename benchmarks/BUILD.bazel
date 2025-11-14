@@ -136,8 +136,7 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src/interpolation:bspline_fitter_4d_separable",
-        "//src/interpolation:bspline_collocation_1d",
+        "//src/interpolation:bspline_fitter_4d",
     ],
     tags = ["benchmark", "manual"],
 )

@@ -285,10 +285,10 @@ expected<void, std::string> PriceTableWorkspace::save(
         arrow::field("prices_raw", arrow::list(arrow::float64()), /*nullable=*/true),
 
         // Fitting statistics (placeholders: 0.0 until fitting is implemented)
-        arrow::field("max_residual_moneyness", arrow::float64()),
-        arrow::field("max_residual_maturity", arrow::float64()),
+        arrow::field("max_residual_axis0oneyness", arrow::float64()),
+        arrow::field("max_residual_axis0aturity", arrow::float64()),
         arrow::field("max_residual_volatility", arrow::float64()),
-        arrow::field("max_residual_rate", arrow::float64()),
+        arrow::field("max_residual_axis3ate", arrow::float64()),
         arrow::field("max_residual_overall", arrow::float64()),
         arrow::field("condition_number_max", arrow::float64()),
 
