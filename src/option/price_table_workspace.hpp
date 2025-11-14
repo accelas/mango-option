@@ -94,6 +94,8 @@ public:
         FILE_NOT_FOUND,              // File doesn't exist
         SCHEMA_MISMATCH,             // Missing required fields
         ARROW_READ_ERROR,            // Arrow library error
+        CORRUPTED_COEFFICIENTS,      // CRC64 checksum mismatch for coefficients
+        CORRUPTED_GRIDS,             // CRC64 checksum mismatch for grids
     };
 
     /// Load workspace from Apache Arrow IPC file with zero-copy mmap

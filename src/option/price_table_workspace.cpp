@@ -1,4 +1,5 @@
 #include "src/option/price_table_workspace.hpp"
+#include "src/option/crc64.hpp"
 #include <algorithm>
 #include <numeric>
 #include <cstring>
@@ -348,9 +349,24 @@ expected<void, std::string> PriceTableWorkspace::save(
         return unexpected("Failed to append build metadata");
     }
 
-    // Append checksums (placeholder 0 for now)
-    if (!checksum_coeffs_builder.Append(0).ok() ||
-        !checksum_grids_builder.Append(0).ok())
+    // Compute CRC64 checksums for data integrity
+    // 1. Checksum for coefficients array
+    uint64_t checksum_coefficients = CRC64::compute(coefficients_.data(), coefficients_.size());
+
+    // 2. Checksum for all grid vectors (concatenated)
+    // Allocate temporary buffer for concatenated grids
+    std::vector<double> all_grids;
+    all_grids.reserve(moneyness_.size() + maturity_.size() +
+                     volatility_.size() + rate_.size());
+    all_grids.insert(all_grids.end(), moneyness_.begin(), moneyness_.end());
+    all_grids.insert(all_grids.end(), maturity_.begin(), maturity_.end());
+    all_grids.insert(all_grids.end(), volatility_.begin(), volatility_.end());
+    all_grids.insert(all_grids.end(), rate_.begin(), rate_.end());
+    uint64_t checksum_grids = CRC64::compute(all_grids.data(), all_grids.size());
+
+    // Append checksums (real CRC64 values)
+    if (!checksum_coeffs_builder.Append(checksum_coefficients).ok() ||
+        !checksum_grids_builder.Append(checksum_grids).ok())
     {
         return unexpected("Failed to append checksums");
     }
@@ -616,9 +632,45 @@ PriceTableWorkspace::load(const std::string& filepath)
         return unexpected(LoadError::GRID_NOT_SORTED);
     }
 
-    // 18. Extract checksum fields (skip validation for now - Task 7 will add CRC64)
-    // auto checksum_coeffs = get_scalar("checksum_coefficients");
-    // auto checksum_grids = get_scalar("checksum_grids");
+    // 18. Extract and validate CRC64 checksums
+    auto checksum_coeffs_scalar = get_scalar("checksum_coefficients");
+    auto checksum_grids_scalar = get_scalar("checksum_grids");
+
+    if (!checksum_coeffs_scalar || !checksum_grids_scalar) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    auto checksum_coeffs_uint64 = std::dynamic_pointer_cast<arrow::UInt64Scalar>(checksum_coeffs_scalar);
+    auto checksum_grids_uint64 = std::dynamic_pointer_cast<arrow::UInt64Scalar>(checksum_grids_scalar);
+
+    if (!checksum_coeffs_uint64 || !checksum_grids_uint64) {
+        return unexpected(LoadError::SCHEMA_MISMATCH);
+    }
+
+    uint64_t stored_checksum_coeffs = checksum_coeffs_uint64->value;
+    uint64_t stored_checksum_grids = checksum_grids_uint64->value;
+
+    // Compute checksums for loaded data
+    uint64_t computed_checksum_coeffs = CRC64::compute(coeffs.data(), coeffs.size());
+
+    // Concatenate grids for checksum computation
+    std::vector<double> all_grids;
+    all_grids.reserve(m_grid.size() + tau_grid.size() +
+                     sigma_grid.size() + r_grid.size());
+    all_grids.insert(all_grids.end(), m_grid.begin(), m_grid.end());
+    all_grids.insert(all_grids.end(), tau_grid.begin(), tau_grid.end());
+    all_grids.insert(all_grids.end(), sigma_grid.begin(), sigma_grid.end());
+    all_grids.insert(all_grids.end(), r_grid.begin(), r_grid.end());
+    uint64_t computed_checksum_grids = CRC64::compute(all_grids.data(), all_grids.size());
+
+    // Validate checksums
+    if (computed_checksum_coeffs != stored_checksum_coeffs) {
+        return unexpected(LoadError::CORRUPTED_COEFFICIENTS);
+    }
+
+    if (computed_checksum_grids != stored_checksum_grids) {
+        return unexpected(LoadError::CORRUPTED_GRIDS);
+    }
 
     // 19. Create workspace using the same allocate_and_initialize path
     // This ensures identical memory layout between save/load
