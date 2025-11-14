@@ -68,15 +68,6 @@ struct BSplineFittingStats {
     size_t failed_slices_total = 0;    ///< Total failed fits
 };
 
-/// Aggregated description of the 4D grid used for precomputation
-struct PriceTableGrid {
-    std::vector<double> moneyness;
-    std::vector<double> maturity;
-    std::vector<double> volatility;
-    std::vector<double> rate;
-    double K_ref = 0.0;
-};
-
 /// Configuration for PDE solves performed by the builder
 struct PriceTableConfig {
     OptionType option_type = OptionType::PUT;
@@ -106,7 +97,7 @@ class PriceTableSurface {
 public:
     PriceTableSurface() = default;
 
-    /// Construct from workspace (recommended, zero-copy ready)
+    /// Construct from workspace (zero-copy ready, supports save/load)
     ///
     /// @param workspace Shared workspace containing all data
     explicit PriceTableSurface(std::shared_ptr<PriceTableWorkspace> workspace)
@@ -114,94 +105,51 @@ public:
         , evaluator_(workspace_ ? std::make_unique<BSpline4D>(*workspace_) : nullptr)
     {}
 
-    /// Construct from evaluator and grid (legacy API)
-    ///
-    /// @deprecated Use workspace-based constructor for mmap support
-    PriceTableSurface(
-        std::shared_ptr<BSpline4D> evaluator,
-        PriceTableGrid grid,
-        double dividend_yield)
-        : legacy_evaluator_(std::move(evaluator))
-        , legacy_grid_(std::move(grid))
-        , legacy_dividend_yield_(dividend_yield)
-    {}
-
     bool valid() const {
-        return workspace_ != nullptr || legacy_evaluator_ != nullptr;
+        return workspace_ != nullptr;
     }
 
     double eval(double m, double tau, double sigma, double rate) const {
         if (!valid()) {
             throw std::runtime_error("PriceTableSurface not initialized");
         }
-        if (evaluator_) {
-            return evaluator_->eval(m, tau, sigma, rate);
-        }
-        return legacy_evaluator_->eval(m, tau, sigma, rate);
+        return evaluator_->eval(m, tau, sigma, rate);
     }
 
     double K_ref() const {
-        if (workspace_) return workspace_->K_ref();
-        return legacy_grid_.K_ref;
+        return workspace_->K_ref();
     }
 
     double dividend_yield() const {
-        if (workspace_) return workspace_->dividend_yield();
-        return legacy_dividend_yield_;
+        return workspace_->dividend_yield();
     }
 
     std::pair<double, double> moneyness_range() const {
-        if (workspace_) {
-            auto span = workspace_->moneyness();
-            return {span.front(), span.back()};
-        }
-        return axis_range(legacy_grid_.moneyness);
+        auto span = workspace_->moneyness();
+        return {span.front(), span.back()};
     }
 
     std::pair<double, double> maturity_range() const {
-        if (workspace_) {
-            auto span = workspace_->maturity();
-            return {span.front(), span.back()};
-        }
-        return axis_range(legacy_grid_.maturity);
+        auto span = workspace_->maturity();
+        return {span.front(), span.back()};
     }
 
     std::pair<double, double> volatility_range() const {
-        if (workspace_) {
-            auto span = workspace_->volatility();
-            return {span.front(), span.back()};
-        }
-        return axis_range(legacy_grid_.volatility);
+        auto span = workspace_->volatility();
+        return {span.front(), span.back()};
     }
 
     std::pair<double, double> rate_range() const {
-        if (workspace_) {
-            auto span = workspace_->rate();
-            return {span.front(), span.back()};
-        }
-        return axis_range(legacy_grid_.rate);
+        auto span = workspace_->rate();
+        return {span.front(), span.back()};
     }
 
-    /// Access workspace (nullptr if legacy construction)
+    /// Access workspace
     std::shared_ptr<PriceTableWorkspace> workspace() const { return workspace_; }
 
-    /// Access evaluator (legacy API)
-    std::shared_ptr<BSpline4D> evaluator() const { return legacy_evaluator_; }
-
 private:
-    static std::pair<double, double> axis_range(const std::vector<double>& axis) {
-        if (axis.empty()) return {0.0, 0.0};
-        return {axis.front(), axis.back()};
-    }
-
-    // Workspace-based (preferred)
     std::shared_ptr<PriceTableWorkspace> workspace_;
     std::unique_ptr<BSpline4D> evaluator_;
-
-    // Legacy support
-    std::shared_ptr<BSpline4D> legacy_evaluator_;
-    PriceTableGrid legacy_grid_;
-    double legacy_dividend_yield_ = 0.0;
 };
 
 /// Result of 4D price table building
@@ -249,16 +197,6 @@ public:
         );
     }
 
-    /// Convenience overload that accepts the grid description directly
-    static PriceTable4DBuilder create(PriceTableGrid grid) {
-        return create(
-            std::move(grid.moneyness),
-            std::move(grid.maturity),
-            std::move(grid.volatility),
-            std::move(grid.rate),
-            grid.K_ref
-        );
-    }
 
     /// Create builder from strike prices (auto-computes moneyness)
     ///
@@ -316,15 +254,13 @@ public:
         auto atm_it = std::lower_bound(strikes.begin(), strikes.end(), spot);
         double K_ref = (atm_it != strikes.end()) ? *atm_it : strikes[strikes.size()/2];
 
-        PriceTableGrid grid{
-            .moneyness = std::move(moneyness),
-            .maturity = std::move(maturities),
-            .volatility = std::move(volatilities),
-            .rate = std::move(rates),
-            .K_ref = K_ref
-        };
-
-        return create(std::move(grid));
+        return create(
+            std::move(moneyness),
+            std::move(maturities),
+            std::move(volatilities),
+            std::move(rates),
+            K_ref
+        );
     }
 
     /// Create builder from market option chain data
