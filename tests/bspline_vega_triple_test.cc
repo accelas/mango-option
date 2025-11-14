@@ -87,4 +87,24 @@ TEST_F(BSplineVegaTest, EvalPriceAndVegaTriple_MatchesScalar) {
     EXPECT_NEAR(vega_triple, vega_scalar, 1e-10);  // Slightly looser for derivative
 }
 
+TEST_F(BSplineVegaTest, EvalPriceAndVegaTripleSIMD_MatchesScalar) {
+    constexpr double m = 1.05;
+    constexpr double tau = 0.75;
+    constexpr double sigma = 0.20;
+    constexpr double r = 0.04;
+    constexpr double epsilon = 1e-4;
+
+    // Scalar reference
+    double price_scalar, vega_scalar;
+    spline->eval_price_and_vega_triple(m, tau, sigma, r, epsilon, price_scalar, vega_scalar);
+
+    // SIMD version (to be implemented)
+    double price_simd, vega_simd;
+    spline->eval_price_and_vega_triple_simd(m, tau, sigma, r, epsilon, price_simd, vega_simd);
+
+    // Should match scalar within FP rounding tolerance
+    EXPECT_NEAR(price_simd, price_scalar, 1e-14);
+    EXPECT_NEAR(vega_simd, vega_scalar, 1e-14);
+}
+
 } // namespace
