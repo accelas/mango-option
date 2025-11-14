@@ -14,8 +14,10 @@ python.toolchain(
 use_repo(python, "python_3_11")
 
 # Apache Arrow C++ (optional, requires Conan build)
-# Uncomment the following lines to enable Arrow IPC persistence features
-# See CONAN_SETUP.md for installation instructions
+# To enable Arrow support, uncomment the following lines after running:
+#   conan install . --output-folder=conan_deps --build=missing
+#
+# See CONAN_SETUP.md for complete installation instructions
 #
 # conan_extension = use_extension("//conan_deps:conan_deps_module_extension.bzl", "conan_extension")
 # use_repo(

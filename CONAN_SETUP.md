@@ -39,9 +39,9 @@ This will:
 
 **Note**: The first build will take 15-30 minutes as it compiles Boost and Arrow from source.
 
-3. **Enable Conan integration in MODULE.bazel**:
+3. **Enable Conan dependencies in MODULE.bazel**:
 
-Uncomment the Conan extension lines in `MODULE.bazel`:
+Uncomment the Conan extension block in `MODULE.bazel` (lines 22-30):
 
 ```python
 conan_extension = use_extension("//conan_deps:conan_deps_module_extension.bzl", "conan_extension")
@@ -54,6 +54,8 @@ use_repo(
     "zlib",
 )
 ```
+
+**Note**: This is a one-time edit. Once uncommented, the dependencies will be available.
 
 ## Bazel Integration
 
