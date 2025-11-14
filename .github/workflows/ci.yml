@@ -21,9 +21,11 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          # Install Apache Arrow from system packages (Debian provides prebuilt binaries)
+          # Add Apache Arrow repository and install Arrow
           apt-get install -y git wget ca-certificates build-essential systemtap-sdt-dev libquantlib0-dev \
-            libarrow-dev libparquet-dev
+            apache-arrow-apt-source
+          apt-get update
+          apt-get install -y libarrow-dev
 
       - name: Checkout code
         uses: actions/checkout@v4
