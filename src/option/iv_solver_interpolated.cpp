@@ -24,7 +24,7 @@ const BSpline4D& require_surface(const std::shared_ptr<BSpline4D>& surface) {
 IVSolverInterpolated::IVSolverInterpolated(
     const PriceTableSurface& surface,
     const IVSolverConfig& config)
-    : owned_surface_(surface.evaluator())
+    : owned_surface_(std::make_shared<BSpline4D>(*surface.workspace()))
     , price_surface_(require_surface(owned_surface_))
     , K_ref_(surface.K_ref())
     , m_range_(surface.moneyness_range())

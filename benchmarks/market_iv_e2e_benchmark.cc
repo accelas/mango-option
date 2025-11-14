@@ -17,13 +17,12 @@
  * **Workflow Example:**
  * ```cpp
  * // Step 1: Define option surface grid (from market data)
- * PriceTableGrid grid{
- *     .moneyness = {0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2},
- *     .maturity = {0.1, 0.25, 0.5, 1.0, 2.0},
- *     .volatility = {0.15, 0.20, 0.25, 0.30, 0.40},
- *     .rate = {0.02, 0.03, 0.04, 0.05},
- *     .K_ref = 100.0
- * };
+ * auto builder = PriceTable4DBuilder::create(
+ *     {0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2},  // moneyness
+ *     {0.1, 0.25, 0.5, 1.0, 2.0},              // maturity
+ *     {0.15, 0.20, 0.25, 0.30, 0.40},          // volatility
+ *     {0.02, 0.03, 0.04, 0.05},                // rate
+ *     100.0);                                   // K_ref
  *
  * // Step 2: Build price table (one-time precomputation)
  * PriceTableConfig builder_cfg;
@@ -160,15 +159,6 @@ std::vector<MarketObservation> generate_market_observations(
     return observations;
 }
 
-PriceTableGrid make_price_table_grid(const MarketGrid& grid) {
-    PriceTableGrid price_grid;
-    price_grid.moneyness = grid.moneyness;
-    price_grid.maturity = grid.maturities;
-    price_grid.volatility = grid.volatilities;
-    price_grid.rate = grid.rates;
-    price_grid.K_ref = grid.K_ref;
-    return price_grid;
-}
 
 PriceTableConfig make_price_table_config(
     const MarketGrid& grid,
@@ -196,7 +186,12 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
 
     for (auto _ : state) {
         // API STEP 1: Create builder with market grids
-        auto builder = PriceTable4DBuilder::create(make_price_table_grid(grid));
+        auto builder = PriceTable4DBuilder::create(
+            grid.moneyness,
+            grid.maturities,
+            grid.volatilities,
+            grid.rates,
+            grid.K_ref);
 
         // API STEP 2: Precompute all prices (one PDE solve per σ,r pair)
         auto result = builder.precompute(config);
@@ -228,7 +223,12 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     MarketGrid grid = generate_market_grid();
 
     // Build price table once (setup, not timed)
-    auto builder = PriceTable4DBuilder::create(make_price_table_grid(grid));
+    auto builder = PriceTable4DBuilder::create(
+        grid.moneyness,
+        grid.maturities,
+        grid.volatilities,
+        grid.rates,
+        grid.K_ref);
     auto price_table_result = builder.precompute(make_price_table_config(grid, 51, 500));
 
     if (!price_table_result) {
@@ -309,7 +309,12 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         // FULL WORKFLOW: Build table → Solve IVs
 
         // Step 1-2: Build price table
-        auto builder = PriceTable4DBuilder::create(make_price_table_grid(grid));
+        auto builder = PriceTable4DBuilder::create(
+            grid.moneyness,
+            grid.maturities,
+            grid.volatilities,
+            grid.rates,
+            grid.K_ref);
         auto price_table = builder
             .precompute(make_price_table_config(grid, 51, 500))
             .value();
