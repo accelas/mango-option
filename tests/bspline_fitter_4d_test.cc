@@ -5,7 +5,7 @@
  * Validates:
  * - Constant function fitting
  * - Separable function fitting
- * - Integration with BSpline4D_FMA evaluator
+ * - Integration with BSpline4D evaluator
  * - Grid dimension validation
  * - Residual quality
  */
@@ -264,7 +264,7 @@ TEST(BSplineFitter4DTest, ConstantFunction) {
     EXPECT_EQ(result.coefficients.size(), values.size());
 
     // Create evaluator and test at random points
-    BSpline4D_FMA spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
+    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
 
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> m_dist(0.8, 1.2);
@@ -323,7 +323,7 @@ TEST(BSplineFitter4DTest, SeparableFunction) {
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
     // Create evaluator
-    BSpline4D_FMA spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
+    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
 
     // Test at grid points (should be well-approximated)
     int count_good = 0;
@@ -450,7 +450,7 @@ TEST(BSplineFitter4DTest, SmoothFunction) {
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
     // Create evaluator
-    BSpline4D_FMA spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
+    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, result.coefficients);
 
     // Test smoothness: evaluate at many off-grid points
     std::mt19937 rng(456);
@@ -539,7 +539,7 @@ TEST(BSplineFitter4DTest, EndToEndWorkflow) {
     std::cout << "Fit max residual: " << fit_result.max_residual << "\n";
 
     // Step 4: Create evaluator
-    BSpline4D_FMA spline(m_grid, t_grid, v_grid, r_grid, fit_result.coefficients);
+    BSpline4D spline(m_grid, t_grid, v_grid, r_grid, fit_result.coefficients);
 
     // Step 5: Query at arbitrary points
     struct Query {

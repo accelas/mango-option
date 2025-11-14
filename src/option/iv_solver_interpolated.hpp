@@ -8,7 +8,7 @@
  *
  * Usage:
  *   // After building price table
- *   BSpline4D_FMA price_surface = ...;  // from PriceTable4DBuilder
+ *   BSpline4D price_surface = ...;  // from PriceTable4DBuilder
  *
  *   // Create IV solver
  *   IVSolverInterpolated iv_solver(price_surface, K_ref);
@@ -88,7 +88,7 @@ public:
     /// @param r_range Rate bounds (min, max)
     /// @param config Solver configuration
     IVSolverInterpolated(
-        const BSpline4D_FMA& price_surface,
+        const BSpline4D& price_surface,
         double K_ref,
         std::pair<double, double> m_range,
         std::pair<double, double> tau_range,
@@ -115,7 +115,7 @@ public:
     IVResult solve(const IVQuery& query) const;
 
 private:
-    const BSpline4D_FMA& price_surface_;
+    const BSpline4D& price_surface_;
     double K_ref_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
     IVSolverConfig config_;
@@ -137,16 +137,14 @@ private:
         return price_Kref * scale_factor;
     }
 
-    /// Compute vega using scalar triple evaluation
+    /// Compute vega using analytic B-spline derivative
     double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const {
-        const double eps = config_.vega_epsilon;
-
-        // Use scalar triple evaluation (1.90× speedup vs finite difference)
-        // Evaluates (σ-ε, σ, σ+ε) in single pass with shared coefficient loads
-        // Note: Benchmarks showed SIMD version is slower due to overhead
+        // Use analytic derivative via Cox-de Boor formula
+        // Exact derivative with no epsilon parameter (mathematically superior to FD)
+        // Same performance as scalar triple FD (~275ns)
         double price_unused, vega_Kref;
-        price_surface_.eval_price_and_vega_triple(
-            moneyness, maturity, vol, rate, eps,
+        price_surface_.eval_price_and_vega_analytic(
+            moneyness, maturity, vol, rate,
             price_unused, vega_Kref);
 
         // Scale vega by strike ratio: ∂(V_ref * K/K_ref)/∂σ = (K/K_ref) * ∂V_ref/∂σ

@@ -15,28 +15,15 @@
  *
  * Performance Summary (Intel Xeon, 256 FMAs per evaluation):
  * - Single price eval: ~135ns
- * - Vega via FD (3 evals): 515ns (baseline)
- * - Vega via scalar triple: 272ns (1.89× speedup) ⭐ RECOMMENDED
- * - Vega via analytic derivative: 275ns (1.87× speedup, exact) ⭐ RECOMMENDED
+ * - Vega (analytic derivative): ~275ns (1.87× faster than 3-eval FD baseline)
  *
- * Vega Computation Methods:
- * 1. **Scalar triple FD** (`eval_price_and_vega_triple()`):
- *    - Evaluates (σ-ε, σ, σ+ε) simultaneously with 3 independent accumulators
- *    - Exploits CPU's 3-4 parallel FMA units via instruction-level parallelism (ILP)
- *    - 272ns per query (1.89× faster than baseline)
- *
- * 2. **Analytic derivative** (`eval_price_and_vega_analytic()`):
- *    - Uses Cox-de Boor derivative formula: B'_{i,3} = 3/(t[i+3]-t[i]) B_{i,2} - ...
- *    - Exact derivative (no finite difference truncation error)
- *    - No epsilon parameter tuning required
- *    - Better boundary accuracy (no σ±ε clamping bias)
- *    - 275ns per query (same performance as scalar FD, mathematically superior)
- *
- * Why Analytic ≈ Scalar FD Performance:
- * - Analytic uses 2 accumulators vs FD's 3, reducing ILP slightly
- * - Basis recursion is <5% of total work (256-FMA tensor loop dominates)
- * - Both hit latency-bound ceiling (~275ns = 73% of theoretical 160ns minimum)
- * - See docs/analytic-vega-analysis.md for detailed expert analysis
+ * Vega Computation:
+ * **Analytic derivative** (`eval_price_and_vega_analytic()`):
+ * - Uses Cox-de Boor derivative formula: B'_{i,3} = 3/(t[i+3]-t[i]) B_{i,2} - ...
+ * - Exact derivative (no finite difference truncation error)
+ * - No epsilon parameter tuning required
+ * - Better boundary accuracy than finite difference (no σ±ε clamping bias)
+ * - ~275ns per query (latency-bound ceiling, 73% of theoretical 160ns minimum)
  *
  * Design Rationale - Why Scalar Beats SIMD:
  * Vertical SIMD experiments (removed as of PR #157) showed 2.3× performance
@@ -55,13 +42,13 @@
  *   std::vector<double> r_grid = {...};     // rate
  *   std::vector<double> coeffs = {...};     // from fitting
  *
- *   BSpline4D_FMA spline(m_grid, tau_grid, sigma_grid, r_grid, coeffs);
+ *   BSpline4D spline(m_grid, tau_grid, sigma_grid, r_grid, coeffs);
  *
- *   // Scalar triple FD (fast, tunable epsilon):
- *   double price, vega;
- *   spline.eval_price_and_vega_triple(1.05, 0.25, 0.20, 0.05, 1e-4, price, vega);
+ *   // Price evaluation:
+ *   double price = spline.eval(1.05, 0.25, 0.20, 0.05);
  *
- *   // Analytic derivative (exact, no epsilon):
+ *   // Price + vega (analytic derivative, exact):
+ *   double vega;
  *   spline.eval_price_and_vega_analytic(1.05, 0.25, 0.20, 0.05, price, vega);
  *
  * Note: This class handles evaluation only. Coefficient fitting requires
@@ -102,18 +89,52 @@ inline double clamp_query(double x, double xmin, double xmax) {
     return x;
 }
 
-/// 4D Tensor-Product B-Spline with FMA Optimization
+/// 4D Tensor-Product B-Spline Evaluator
 ///
 /// Evaluates 4D B-spline surfaces using tensor-product structure:
 ///   f(m, τ, σ, r) = Σ Σ Σ Σ c[i,j,k,l] · B_i(m) · B_j(τ) · B_k(σ) · B_l(r)
 ///
 /// where B_i are cubic B-spline basis functions.
 ///
-/// Performance: ~100-200ns per evaluation with FMA instructions
+/// Performance: ~135ns per price evaluation, ~275ns for price + vega
 ///
 /// Memory layout: coefficients stored in row-major order (r varies fastest)
 ///   index = ((i * Nt + j) * Nv + k) * Nr + l
-class BSpline4D_FMA {
+///
+/// Historical Note - SIMD Optimization Attempts:
+/// Multiple SIMD vectorization strategies were attempted and empirically
+/// benchmarked (2025-01, commits 331e2ab-435ef0c, removed in PR #157):
+///
+/// 1. **Vertical SIMD (single-query parallelism)**: Evaluated (σ-ε, σ, σ+ε)
+///    in parallel using std::experimental::simd. Result: 2.3× SLOWER (618ns
+///    vs 272ns scalar). Root cause: Reduced instruction-level parallelism
+///    (3 independent scalar accumulators → 1 SIMD dependency chain) and
+///    broadcast overhead (56 scalar→SIMD packs in hot path).
+///
+/// 2. **Dual-accumulator SIMD**: Attempted to restore ILP with 2 independent
+///    SIMD chains. Result: 1.73× SLOWER (471ns vs 272ns). Still lost to
+///    scalar due to packing/broadcast overhead dominating modest ILP gains.
+///
+/// 3. **Scalar triple FD**: Evaluated 3 finite differences with 3 independent
+///    scalar accumulators, exploiting CPU's parallel FMA units. Result: 1.89×
+///    FASTER (272ns vs 515ns baseline). REMOVED as mathematically inferior to
+///    analytic derivative despite identical performance.
+///
+/// 4. **Analytic Cox-de Boor derivative**: Exact vega via B-spline derivative
+///    formula. Result: 1.87× FASTER (275ns vs 515ns), IDENTICAL to scalar FD.
+///    KEPT as production method (exact derivative, no epsilon parameter).
+///
+/// Analysis (Codex AI expert review, docs/analytic-vega-analysis.md):
+/// - Tensor loop (256 FMAs) dominates both scalar and SIMD variants
+/// - Basis recursion is <5% of total work
+/// - Both hit latency-bound ceiling (~275ns = 73% of theoretical 160ns)
+/// - Vertical SIMD's broadcast overhead exceeds any instruction savings
+///
+/// Conclusion: Scalar design is near-optimal for single-query evaluation.
+/// Future batch processing may benefit from horizontal SIMD (multiple
+/// independent queries in parallel), but requires careful implementation
+/// to avoid naive sequential fallback overhead.
+class BSpline4D {
 public:
     /// Construct 4D B-spline from grids and coefficients
     ///
@@ -122,11 +143,11 @@ public:
     /// @param v Volatility grid (sorted, ≥4 points)
     /// @param r Rate grid (sorted, ≥4 points)
     /// @param coeff Coefficients (size must be Nm × Nt × Nv × Nr)
-    BSpline4D_FMA(std::vector<double> m,
-                  std::vector<double> t,
-                  std::vector<double> v,
-                  std::vector<double> r,
-                  std::vector<double> coeff)
+    BSpline4D(std::vector<double> m,
+              std::vector<double> t,
+              std::vector<double> v,
+              std::vector<double> r,
+              std::vector<double> coeff)
         : m_(std::move(m)),
           t_(std::move(t)),
           v_(std::move(v)),
@@ -240,105 +261,6 @@ public:
 
     /// Get rate grid
     [[nodiscard]] const std::vector<double>& rate_grid() const noexcept { return r_; }
-
-    /// Evaluate price and vega in single pass (scalar version)
-    ///
-    /// Computes V(σ) and vega = ∂V/∂σ via centered finite difference.
-    /// Single-pass implementation shares coefficient loads.
-    ///
-    /// @param mq Moneyness query point
-    /// @param tq Maturity query point
-    /// @param vq Volatility query point (σ)
-    /// @param rq Rate query point
-    /// @param epsilon Finite difference step for vega
-    /// @param[out] price Output: V(σ)
-    /// @param[out] vega Output: ∂V/∂σ ≈ (V(σ+ε) - V(σ-ε))/(2ε)
-    void eval_price_and_vega_triple(
-        double mq, double tq, double vq, double rq,
-        double epsilon,
-        double& price, double& vega) const
-    {
-        // Clamp queries to domain
-        mq = clamp_query(mq, m_.front(), m_.back());
-        tq = clamp_query(tq, t_.front(), t_.back());
-        vq = clamp_query(vq, v_.front(), v_.back());
-        rq = clamp_query(rq, r_.front(), r_.back());
-
-        // Find knot spans (shared across 3 sigma values)
-        const int im = find_span_cubic(tm_, mq);
-        const int jt = find_span_cubic(tt_, tq);
-        const int lr = find_span_cubic(tr_, rq);
-
-        // Evaluate basis for m, tau, rate (shared across 3 sigma values)
-        double wm[4], wt[4], wr[4];
-        cubic_basis_nonuniform(tm_, im, mq, wm);
-        cubic_basis_nonuniform(tt_, jt, tq, wt);
-        cubic_basis_nonuniform(tr_, lr, rq, wr);
-
-        // Clamp shifted sigma values to prevent extrapolation outside grid
-        const double v_down = clamp_query(vq - epsilon, v_.front(), v_.back());
-        const double v_up = clamp_query(vq + epsilon, v_.front(), v_.back());
-
-        // Find sigma span (may differ for shifted values at boundaries)
-        const int kv = find_span_cubic(tv_, vq);
-
-        // Evaluate basis for 3 sigma values (with clamped shifts)
-        double wv_down[4], wv_base[4], wv_up[4];
-        cubic_basis_nonuniform(tv_, kv, v_down, wv_down);
-        cubic_basis_nonuniform(tv_, kv, vq, wv_base);
-        cubic_basis_nonuniform(tv_, kv, v_up, wv_up);
-
-        // Accumulate 3 results in parallel
-        double price_down = 0.0;
-        double price_base = 0.0;
-        double price_up = 0.0;
-
-        // 4D tensor product (256 iterations total)
-        for (int a = 0; a < 4; ++a) {
-            int im_idx = im - a;
-            if (static_cast<unsigned>(im_idx) >= static_cast<unsigned>(Nm_)) continue;
-
-            for (int b = 0; b < 4; ++b) {
-                int jt_idx = jt - b;
-                if (static_cast<unsigned>(jt_idx) >= static_cast<unsigned>(Nt_)) continue;
-
-                const double wm_wt = wm[a] * wt[b];
-
-                for (int c = 0; c < 4; ++c) {
-                    int kv_idx = kv - c;
-                    if (static_cast<unsigned>(kv_idx) >= static_cast<unsigned>(Nv_)) continue;
-
-                    // Pack 3 sigma weights
-                    const double w_down = wm_wt * wv_down[c];
-                    const double w_base = wm_wt * wv_base[c];
-                    const double w_up = wm_wt * wv_up[c];
-
-                    // Compute base index for coefficient array
-                    const std::size_t base =
-                        (((std::size_t)im_idx * Nt_ + jt_idx) * Nv_ + kv_idx) * Nr_;
-
-                    // Compute valid range for rate dimension
-                    const int d_min = std::max(0, lr - (Nr_ - 1));
-                    const int d_max = std::min(3, lr);
-
-                    const double* coeff_block = c_.data() + base;
-
-                    for (int d = d_min; d <= d_max; ++d) {
-                        const int lr_idx = lr - d;
-                        const double coeff = coeff_block[lr_idx];
-                        const double w_r = wr[d];
-
-                        price_down = std::fma(coeff, w_down * w_r, price_down);
-                        price_base = std::fma(coeff, w_base * w_r, price_base);
-                        price_up = std::fma(coeff, w_up * w_r, price_up);
-                    }
-                }
-            }
-        }
-
-        price = price_base;
-        vega = (price_up - price_down) / (2.0 * epsilon);
-    }
 
     /// Evaluate price and vega using analytic B-spline derivative
     ///

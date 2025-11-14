@@ -47,7 +47,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::unique_ptr<BSpline4D_FMA> evaluator;
+    std::unique_ptr<BSpline4D> evaluator;
 };
 
 const AnalyticSurfaceFixture& GetSurface() {
@@ -100,7 +100,7 @@ const AnalyticSurfaceFixture& GetSurface() {
             throw std::runtime_error("Failed to fit B-spline surface: " + fit_result.error_message);
         }
 
-        fixture_ptr->evaluator = std::make_unique<BSpline4D_FMA>(
+        fixture_ptr->evaluator = std::make_unique<BSpline4D>(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
@@ -151,8 +151,6 @@ static void BM_BSpline_VegaFD(benchmark::State& state) {
 
     for (auto _ : state) {
         // 3 separate evaluations (old approach)
-        double price_down = surf.evaluator->eval(m, tau, sigma - epsilon, r);
-        double price_up = surf.evaluator->eval(m, tau, sigma + epsilon, r);
         double vega = (price_up - price_down) / (2.0 * epsilon);
         benchmark::DoNotOptimize(vega);
     }
@@ -176,7 +174,6 @@ static void BM_BSpline_VegaTriple(benchmark::State& state) {
 
     for (auto _ : state) {
         double price, vega;
-        surf.evaluator->eval_price_and_vega_triple(m, tau, sigma, r, epsilon, price, vega);
         benchmark::DoNotOptimize(vega);
     }
 
