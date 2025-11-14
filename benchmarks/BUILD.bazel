@@ -60,7 +60,6 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/option:american_option",
-        "//src/option:slice_solver_workspace",
         "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "//src/option:normalized_chain_solver",
