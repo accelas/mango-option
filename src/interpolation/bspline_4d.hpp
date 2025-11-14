@@ -199,6 +199,101 @@ public:
     /// Get rate grid
     [[nodiscard]] const std::vector<double>& rate_grid() const noexcept { return r_; }
 
+    /// Evaluate price and vega in single pass (scalar version)
+    ///
+    /// Computes V(σ) and vega = ∂V/∂σ via centered finite difference.
+    /// Single-pass implementation shares coefficient loads.
+    ///
+    /// @param mq Moneyness query point
+    /// @param tq Maturity query point
+    /// @param vq Volatility query point (σ)
+    /// @param rq Rate query point
+    /// @param epsilon Finite difference step for vega
+    /// @param[out] price Output: V(σ)
+    /// @param[out] vega Output: ∂V/∂σ ≈ (V(σ+ε) - V(σ-ε))/(2ε)
+    void eval_price_and_vega_triple(
+        double mq, double tq, double vq, double rq,
+        double epsilon,
+        double& price, double& vega) const
+    {
+        // Clamp queries to domain
+        mq = clamp_query(mq, m_.front(), m_.back());
+        tq = clamp_query(tq, t_.front(), t_.back());
+        vq = clamp_query(vq, v_.front(), v_.back());
+        rq = clamp_query(rq, r_.front(), r_.back());
+
+        // Find knot spans (shared across 3 sigma values)
+        const int im = find_span_cubic(tm_, mq);
+        const int jt = find_span_cubic(tt_, tq);
+        const int lr = find_span_cubic(tr_, rq);
+
+        // Evaluate basis for m, tau, rate (shared across 3 sigma values)
+        double wm[4], wt[4], wr[4];
+        cubic_basis_nonuniform(tm_, im, mq, wm);
+        cubic_basis_nonuniform(tt_, jt, tq, wt);
+        cubic_basis_nonuniform(tr_, lr, rq, wr);
+
+        // Find sigma span (same for all 3 values if epsilon is small)
+        const int kv = find_span_cubic(tv_, vq);
+
+        // Evaluate basis for 3 sigma values
+        double wv_down[4], wv_base[4], wv_up[4];
+        cubic_basis_nonuniform(tv_, kv, vq - epsilon, wv_down);
+        cubic_basis_nonuniform(tv_, kv, vq, wv_base);
+        cubic_basis_nonuniform(tv_, kv, vq + epsilon, wv_up);
+
+        // Accumulate 3 results in parallel
+        double price_down = 0.0;
+        double price_base = 0.0;
+        double price_up = 0.0;
+
+        // 4D tensor product (256 iterations total)
+        for (int a = 0; a < 4; ++a) {
+            int im_idx = im - a;
+            if (static_cast<unsigned>(im_idx) >= static_cast<unsigned>(Nm_)) continue;
+
+            for (int b = 0; b < 4; ++b) {
+                int jt_idx = jt - b;
+                if (static_cast<unsigned>(jt_idx) >= static_cast<unsigned>(Nt_)) continue;
+
+                const double wm_wt = wm[a] * wt[b];
+
+                for (int c = 0; c < 4; ++c) {
+                    int kv_idx = kv - c;
+                    if (static_cast<unsigned>(kv_idx) >= static_cast<unsigned>(Nv_)) continue;
+
+                    // Pack 3 sigma weights
+                    const double w_down = wm_wt * wv_down[c];
+                    const double w_base = wm_wt * wv_base[c];
+                    const double w_up = wm_wt * wv_up[c];
+
+                    // Compute base index for coefficient array
+                    const std::size_t base =
+                        (((std::size_t)im_idx * Nt_ + jt_idx) * Nv_ + kv_idx) * Nr_;
+
+                    // Compute valid range for rate dimension
+                    const int d_min = std::max(0, lr - (Nr_ - 1));
+                    const int d_max = std::min(3, lr);
+
+                    const double* coeff_block = c_.data() + base;
+
+                    for (int d = d_min; d <= d_max; ++d) {
+                        const int lr_idx = lr - d;
+                        const double coeff = coeff_block[lr_idx];
+                        const double w_r = wr[d];
+
+                        price_down = std::fma(coeff, w_down * w_r, price_down);
+                        price_base = std::fma(coeff, w_base * w_r, price_base);
+                        price_up = std::fma(coeff, w_up * w_r, price_up);
+                    }
+                }
+            }
+        }
+
+        price = price_base;
+        vega = (price_up - price_down) / (2.0 * epsilon);
+    }
+
 private:
     std::vector<double> m_;   ///< Moneyness grid
     std::vector<double> t_;   ///< Maturity grid

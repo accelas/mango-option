@@ -22,11 +22,11 @@ double analytic_bs(double S, double K, double tau, double sigma, double r) {
 class BSplineVegaTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Small test grids
-        m_grid = {0.9, 1.0, 1.1};
-        tau_grid = {0.5, 1.0};
-        sigma_grid = {0.15, 0.20, 0.25};
-        rate_grid = {0.03, 0.05};
+        // Small test grids (minimum 4 points for cubic B-splines)
+        m_grid = {0.85, 0.9, 1.0, 1.1};
+        tau_grid = {0.25, 0.5, 0.75, 1.0};
+        sigma_grid = {0.15, 0.20, 0.25, 0.30};
+        rate_grid = {0.02, 0.03, 0.04, 0.05};
 
         // Generate prices
         K_ref = 100.0;
