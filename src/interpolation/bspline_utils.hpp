@@ -172,4 +172,83 @@ inline void cubic_basis_nonuniform(const std::vector<double>& t, int i, double x
     }
 }
 
+/// Evaluate cubic basis function derivatives using Cox-de Boor recursion
+///
+/// Computes the derivatives of the 4 nonzero cubic basis functions at x.
+/// Uses the derivative formula: B'_{i,p}(x) = p/(t[i+p]-t[i])*B_{i,p-1}(x) - p/(t[i+p+1]-t[i+1])*B_{i+1,p-1}(x)
+///
+/// For cubic (p=3), derivatives are expressed in terms of quadratic basis functions.
+///
+/// @param t Knot vector
+/// @param i Knot span index
+/// @param x Evaluation point
+/// @param dN Output: 4 basis function derivatives dN[0..3]
+///           dN[0] corresponds to d/dx B_i(x), dN[1] to d/dx B_{i-1}(x), etc.
+inline void cubic_basis_derivative_nonuniform(const std::vector<double>& t, int i, double x, double dN[4]) {
+    const int n = static_cast<int>(t.size());
+
+    // We need quadratic basis functions (degree 2) to compute cubic derivatives
+    // Build up from degree 0 → 1 → 2 using Cox-de Boor recursion
+
+    // Degree 0: piecewise constants
+    double N0[4] = {0, 0, 0, 0};
+    for (int k = 0; k < 4; ++k) {
+        int idx = i - k;
+        if (idx >= 0 && idx + 1 < n) {
+            N0[k] = (t[idx] <= x && x < t[idx + 1]) ? 1.0 : 0.0;
+        }
+    }
+
+    // Degree 1: linear
+    double N1[4] = {0, 0, 0, 0};
+    for (int k = 0; k < 4; ++k) {
+        int idx = i - k;
+        if (idx >= 0 && idx + 2 < n) {
+            double leftDen  = t[idx + 1] - t[idx];
+            double rightDen = t[idx + 2] - t[idx + 1];
+
+            double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N0[k] : 0.0;
+            double right = (rightDen > 0.0 && k > 0) ? (t[idx + 2] - x) / rightDen * N0[k - 1] : 0.0;
+
+            N1[k] = left + right;
+        }
+    }
+
+    // Degree 2: quadratic (needed for cubic derivatives)
+    double N2[4] = {0, 0, 0, 0};
+    for (int k = 0; k < 4; ++k) {
+        int idx = i - k;
+        if (idx >= 0 && idx + 3 < n) {
+            double leftDen  = t[idx + 2] - t[idx];
+            double rightDen = t[idx + 3] - t[idx + 1];
+
+            double left  = (leftDen > 0.0) ? (x - t[idx]) / leftDen * N1[k] : 0.0;
+            double right = (rightDen > 0.0 && k > 0) ? (t[idx + 3] - x) / rightDen * N1[k - 1] : 0.0;
+
+            N2[k] = left + right;
+        }
+    }
+
+    // Apply derivative formula for cubic (p=3):
+    // B'_{i,3}(x) = 3/(t[i+3]-t[i]) * B_{i,2}(x) - 3/(t[i+4]-t[i+1]) * B_{i+1,2}(x)
+    constexpr double p = 3.0;
+    for (int k = 0; k < 4; ++k) {
+        int idx = i - k;
+        if (idx >= 0 && idx + 4 < n) {
+            double leftDen  = t[idx + 3] - t[idx];
+            double rightDen = t[idx + 4] - t[idx + 1];
+
+            // First term: p/(t[i+p]-t[i]) * B_{i,p-1}(x)
+            double left = (leftDen > 0.0) ? (p / leftDen) * N2[k] : 0.0;
+
+            // Second term: -p/(t[i+p+1]-t[i+1]) * B_{i+1,p-1}(x)
+            double right = (rightDen > 0.0 && k > 0) ? (p / rightDen) * N2[k - 1] : 0.0;
+
+            dN[k] = left - right;
+        } else {
+            dN[k] = 0.0;
+        }
+    }
+}
+
 }  // namespace mango

@@ -143,3 +143,29 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "iv_interpolation_profile",
+    srcs = ["iv_interpolation_profile.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
