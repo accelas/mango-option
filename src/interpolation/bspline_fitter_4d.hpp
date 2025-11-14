@@ -113,6 +113,85 @@ private:
 };
 
 // ============================================================================
+// Banded LU Solver
+// ============================================================================
+
+/// Solve banded system Ax = b using LU decomposition
+///
+/// For 4-diagonal banded matrix from cubic B-spline collocation.
+/// Time complexity: O(n) for fixed bandwidth
+/// Space complexity: O(n) (in-place decomposition)
+///
+/// @param A Banded matrix (modified in-place during decomposition)
+/// @param b Right-hand side vector
+/// @param x Solution vector (output)
+inline void banded_lu_solve(
+    BandedMatrixStorage& A,
+    std::span<const double> b,
+    std::span<double> x)
+{
+    const size_t n = A.size();
+    assert(b.size() == n);
+    assert(x.size() == n);
+
+    // Working storage for intermediate results
+    std::vector<double> y(n);  // For forward substitution
+
+    // Phase 1: LU decomposition (in-place, Doolittle algorithm)
+    // For banded matrix with bandwidth k=4, this is O(n) not O(n³)
+    for (size_t i = 0; i < n; ++i) {
+        size_t col_start = A.col_start(i);
+        size_t col_end = std::min(col_start + 4, n);
+
+        // Eliminate entries below diagonal in column i
+        for (size_t k = i + 1; k < std::min(i + 4, n); ++k) {
+            size_t k_col_start = A.col_start(k);
+
+            // Check if A(k, i) is in the band
+            if (i >= k_col_start && i < k_col_start + 4) {
+                double factor = A(k, i) / A(i, i);
+
+                // Update row k (only within band)
+                for (size_t j = i; j < col_end; ++j) {
+                    if (j >= k_col_start && j < k_col_start + 4) {
+                        A(k, j) -= factor * A(i, j);
+                    }
+                }
+
+                // Store multiplier in lower triangle (for forward substitution)
+                A(k, i) = factor;
+            }
+        }
+    }
+
+    // Phase 2: Forward substitution (Ly = b)
+    for (size_t i = 0; i < n; ++i) {
+        y[i] = b[i];
+
+        size_t col_start = A.col_start(i);
+        for (size_t j = col_start; j < i; ++j) {
+            if (j >= col_start && j < col_start + 4) {
+                y[i] -= A(i, j) * y[j];
+            }
+        }
+    }
+
+    // Phase 3: Back substitution (Ux = y)
+    for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
+        x[i] = y[i];
+
+        size_t col_start = A.col_start(i);
+        size_t col_end = std::min(col_start + 4, n);
+
+        for (size_t j = static_cast<size_t>(i) + 1; j < col_end; ++j) {
+            x[i] -= A(i, j) * x[j];
+        }
+
+        x[i] /= A(i, i);
+    }
+}
+
+// ============================================================================
 // 1D B-spline Collocation Solver
 // ============================================================================
 
