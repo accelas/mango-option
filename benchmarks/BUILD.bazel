@@ -169,3 +169,31 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "market_iv_e2e_benchmark",
+    srcs = ["market_iv_e2e_benchmark.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/option:price_table_4d_builder",
+        "//src/option:iv_solver_interpolated",
+        "//src/interpolation:bspline_4d",
+        "//src/interpolation:bspline_fitter_4d",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
