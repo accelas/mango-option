@@ -89,13 +89,17 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             }
         }
 
-        auto fitter = BSplineFitter4D::create(
+        auto fitter_result = BSplineFitter4D::create(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
             fixture_ptr->rate_grid);
 
-        auto fit_result = fitter.fit(prices);
+        if (!fitter_result) {
+            throw std::runtime_error("Failed to create BSpline fitter: " + fitter_result.error());
+        }
+
+        auto fit_result = fitter_result->fit(prices);
         if (!fit_result.success) {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
         }

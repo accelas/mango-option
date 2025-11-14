@@ -233,12 +233,27 @@ public:
         std::vector<double> volatilities,
         std::vector<double> rates)
     {
+        // Validate inputs
+        if (strikes.empty()) {
+            throw std::invalid_argument("Strike array cannot be empty");
+        }
+        if (spot <= 0.0) {
+            throw std::invalid_argument("Spot price must be positive");
+        }
+
         // Auto-compute moneyness: m = spot / strike
+        // Note: strikes are sorted ascending, so moneyness will be descending
         std::vector<double> moneyness;
         moneyness.reserve(strikes.size());
         for (double K : strikes) {
+            if (K <= 0.0) {
+                throw std::invalid_argument("All strikes must be positive");
+            }
             moneyness.push_back(spot / K);
         }
+
+        // Reverse to get ascending moneyness (required by PriceTable4DBuilder)
+        std::reverse(moneyness.begin(), moneyness.end());
 
         // Use ATM strike as reference
         auto atm_it = std::lower_bound(strikes.begin(), strikes.end(), spot);
