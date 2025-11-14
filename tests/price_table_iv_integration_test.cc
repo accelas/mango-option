@@ -598,13 +598,15 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
         return std::make_unique<BSpline4D>(workspace.value());
     }();
 
-    IVSolverInterpolated iv_solver(
-        *evaluator,
+    auto iv_solver_result = IVSolverInterpolated::create(
+        std::move(evaluator),
         K_ref,
         std::make_pair(moneyness.front(), moneyness.back()),
         std::make_pair(maturity.front(), maturity.back()),
         std::make_pair(volatility.front(), volatility.back()),
         std::make_pair(rate.front(), rate.back()));
+    ASSERT_TRUE(iv_solver_result.has_value()) << iv_solver_result.error();
+    const auto& iv_solver = iv_solver_result.value();
 
     const std::array<double, 2> m_range = {moneyness.front(), moneyness.back()};
     const std::array<double, 2> tau_range = {maturity.front(), maturity.back()};
@@ -661,8 +663,6 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
 TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
     // Setup: Create a synthetic price surface
     const double K_ref = 100.0;
-    const double known_sigma = 0.20;
-    const double known_r = 0.05;
 
     // Grid configuration
     std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1, 1.2};
