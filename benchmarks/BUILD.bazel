@@ -194,4 +194,3 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
-
