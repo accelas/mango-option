@@ -39,6 +39,8 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <algorithm>
+#include <string>
 #include <optional>
 #include <utility>
 
@@ -81,6 +83,21 @@ struct PriceTableConfig {
     size_t n_time = 1000;
     double dividend_yield = 0.0;
     std::optional<std::pair<double, double>> x_bounds;
+};
+
+/// Market option chain data (from exchanges)
+///
+/// Represents raw option chain data as typically received from market data
+/// feeds or exchanges. Can contain duplicate strikes/maturities (e.g., multiple
+/// options with same parameters but different bid/ask spreads).
+struct OptionChain {
+    std::string ticker;                  ///< Underlying ticker symbol
+    double spot = 0.0;                   ///< Current underlying price
+    std::vector<double> strikes;         ///< Strike prices (may have duplicates)
+    std::vector<double> maturities;      ///< Times to expiration in years (may have duplicates)
+    std::vector<double> implied_vols;    ///< Market implied volatilities (for grid)
+    std::vector<double> rates;           ///< Risk-free rates (may have duplicates)
+    double dividend_yield = 0.0;         ///< Continuous dividend yield
 };
 
 /// Thin value object exposing a user-friendly interface to the price surface
@@ -236,6 +253,53 @@ public:
         };
 
         return create(std::move(grid));
+    }
+
+    /// Create builder from market option chain data
+    ///
+    /// Convenience method that extracts unique strikes, maturities, volatilities,
+    /// and rates from raw market chain data (which may contain duplicates), sorts
+    /// them, and builds a price table grid.
+    ///
+    /// @param chain Market option chain data from exchange
+    /// @return Builder ready for precomputation
+    ///
+    /// Usage example:
+    /// ```cpp
+    /// OptionChain spy_chain{
+    ///     .ticker = "SPY",
+    ///     .spot = 450.0,
+    ///     .strikes = {400, 425, 425, 450, 475, 500},  // duplicates OK
+    ///     .maturities = {0.1, 0.25, 0.25, 0.5, 1.0},  // duplicates OK
+    ///     .implied_vols = {0.15, 0.20, 0.25, 0.30},
+    ///     .rates = {0.03, 0.04, 0.05},
+    ///     .dividend_yield = 0.015
+    /// };
+    /// auto builder = PriceTable4DBuilder::from_chain(spy_chain);
+    /// ```
+    static PriceTable4DBuilder from_chain(const OptionChain& chain)
+    {
+        // Helper to extract unique sorted values
+        auto unique_sorted = [](std::vector<double> vec) {
+            std::sort(vec.begin(), vec.end());
+            auto last = std::unique(vec.begin(), vec.end());
+            vec.erase(last, vec.end());
+            return vec;
+        };
+
+        // Extract unique sorted values from potentially duplicated chain data
+        auto strikes = unique_sorted(chain.strikes);
+        auto maturities = unique_sorted(chain.maturities);
+        auto vols = unique_sorted(chain.implied_vols);
+        auto rates = unique_sorted(chain.rates);
+
+        return from_strikes(
+            chain.spot,
+            std::move(strikes),
+            std::move(maturities),
+            std::move(vols),
+            std::move(rates)
+        );
     }
 
     /// Pre-compute all option prices on 4D grid (standard bounds)
