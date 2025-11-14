@@ -21,8 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y git wget ca-certificates build-essential python3 python3-pip python3-venv python-is-python3 systemtap-sdt-dev libquantlib0-dev cmake \
-            libboost-dev libboost-system-dev libboost-filesystem-dev zlib1g-dev libbz2-dev
+          apt-get install -y git wget ca-certificates build-essential python3 python3-pip python3-venv python-is-python3 systemtap-sdt-dev libquantlib0-dev cmake
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,9 +47,7 @@ jobs:
 
       - name: Install Arrow via Conan
         run: |
-          conan install . --output-folder=conan_deps --build=missing \
-            -c tools.system.package_manager:mode=install \
-            -c tools.system.package_manager:sudo=False
+          conan install . --output-folder=conan_deps --build=missing
 
       - name: Cache Bazelisk binary
         id: cache-bazelisk
