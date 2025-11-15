@@ -4,20 +4,14 @@
  */
 
 #include "src/option/price_table_4d_builder.hpp"
-#include "src/option/price_table_snapshot_collector.hpp"
-#include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
-#include "src/option/normalized_chain_solver.hpp"
+#include "src/option/price_table_solver_factory.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
 #include <stdexcept>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <ranges>
 
 namespace mango {
 
@@ -78,38 +72,6 @@ std::expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
     }
 
     return {};
-}
-
-bool PriceTable4DBuilder::should_use_normalized_solver(
-    double x_min,
-    double x_max,
-    size_t n_space,
-    const std::vector<std::pair<double, double>>& discrete_dividends) const
-{
-    // Check 1: No discrete dividends (normalized solver requirement)
-    if (!discrete_dividends.empty()) {
-        return false;
-    }
-
-    // Check 2: Build test request and check eligibility
-    // Use first volatility/rate for eligibility check (grid params are same for all)
-    NormalizedSolveRequest test_request{
-        .sigma = volatility_.front(),
-        .rate = rate_.front(),
-        .dividend = 0.0,  // Will be set per-solve
-        .option_type = OptionType::PUT,  // Doesn't affect eligibility
-        .x_min = x_min,
-        .x_max = x_max,
-        .n_space = n_space,
-        .n_time = 1000,  // Typical value
-        .T_max = maturity_.back(),
-        .tau_snapshots = std::span{maturity_}
-    };
-
-    auto eligibility = NormalizedChainSolver::check_eligibility(
-        test_request, std::span{moneyness_});
-
-    return eligibility.has_value();
 }
 
 std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
@@ -187,171 +149,34 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // Start timer
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Routing decision: normalized solver or batch API?
-    bool use_normalized_solver = should_use_normalized_solver(
-        x_min, x_max, n_space, {});  // No discrete dividends
+    // Create unified PDE grid configuration
+    OptionSolverGrid config{
+        .option_type = option_type,
+        .x_min = x_min,
+        .x_max = x_max,
+        .n_space = n_space,
+        .n_time = n_time,
+        .dividend_yield = dividend_yield
+    };
 
-    size_t failed_count = 0;
+    // Create appropriate solver using factory (validates, checks eligibility, routes)
+    auto solver_result = PriceTableSolverFactory::create(config, std::span{moneyness_});
+    if (!solver_result.has_value()) {
+        return std::unexpected(solver_result.error());
+    }
+    auto solver = std::move(solver_result.value());
 
-    if (use_normalized_solver) {
-        // FAST PATH: Normalized solver
-        const double T_max = maturity_.back();
+    // Solve using the selected strategy
+    auto solve_result = solver->solve(
+        prices_4d,
+        std::span{moneyness_},
+        std::span{maturity_},
+        std::span{volatility_},
+        std::span{rate_},
+        K_ref_);
 
-#pragma omp parallel
-        {
-            // Create normalized request template (per-thread)
-            NormalizedSolveRequest base_request{
-                .sigma = 0.20,  // Placeholder, set in loop
-                .rate = 0.05,   // Placeholder, set in loop
-                .dividend = dividend_yield,
-                .option_type = option_type,
-                .x_min = x_min,
-                .x_max = x_max,
-                .n_space = n_space,
-                .n_time = n_time,
-                .T_max = T_max,
-                .tau_snapshots = std::span{maturity_}
-            };
-
-            // Create workspace once per thread (OUTSIDE work-sharing loop)
-            auto workspace_result = NormalizedWorkspace::create(base_request);
-
-            if (!workspace_result) {
-                // Workspace creation failed, mark all as errors
-#pragma omp for collapse(2)
-                for (size_t k = 0; k < Nv; ++k) {
-                    for (size_t l = 0; l < Nr; ++l) {
-#pragma omp atomic
-                        ++failed_count;
-                    }
-                }
-            } else {
-                auto workspace = std::move(workspace_result.value());
-                auto surface = workspace.surface_view();
-
-#pragma omp for collapse(2) schedule(dynamic, 1)
-                for (size_t k = 0; k < Nv; ++k) {
-                    for (size_t l = 0; l < Nr; ++l) {
-                        // Set (σ, r) for this solve
-                        NormalizedSolveRequest request = base_request;
-                        request.sigma = volatility_[k];
-                        request.rate = rate_[l];
-
-                        // Solve normalized PDE
-                        auto solve_result = NormalizedChainSolver::solve(
-                            request, workspace, surface);
-
-                        if (!solve_result) {
-#pragma omp atomic
-                            ++failed_count;
-                            continue;
-                        }
-
-                        // Extract prices from surface
-                        // Moneyness convention: m = S/K_ref, strike is always K_ref
-                        // Identity: V(S,K_ref,τ) = K_ref · u(ln(m), τ)
-                        for (size_t i = 0; i < Nm; ++i) {
-                            double x = std::log(moneyness_[i]);  // x = ln(m) = ln(S/K_ref)
-
-                            for (size_t j = 0; j < Nt; ++j) {
-                                double u = surface.interpolate(x, maturity_[j]);
-                                size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                                prices_4d[idx_4d] = K_ref_ * u;  // V = K_ref·u (strike is constant)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-    } else {
-        // FALLBACK PATH: Batch API with snapshots
-        const double T_max = maturity_.back();
-        const double dt = T_max / n_time;
-
-        // Precompute step indices for each maturity
-        std::vector<size_t> step_indices(Nt);
-        for (size_t j = 0; j < Nt; ++j) {
-            double step_exact = maturity_[j] / dt - 1.0;
-            long long step_rounded = std::llround(step_exact);
-
-            if (step_rounded < 0) {
-                step_indices[j] = 0;
-            } else if (step_rounded >= static_cast<long long>(n_time)) {
-                step_indices[j] = n_time - 1;
-            } else {
-                step_indices[j] = static_cast<size_t>(step_rounded);
-            }
-        }
-
-        // Build batch parameters (all (σ,r) combinations)
-        std::vector<AmericanOptionParams> batch_params;
-        batch_params.reserve(Nv * Nr);
-
-        for (size_t k = 0; k < Nv; ++k) {
-            for (size_t l = 0; l < Nr; ++l) {
-                batch_params.push_back({
-                    .strike = K_ref_,
-                    .spot = K_ref_,
-                    .maturity = T_max,
-                    .volatility = volatility_[k],
-                    .rate = rate_[l],
-                    .continuous_dividend_yield = dividend_yield,
-                    .option_type = option_type,
-                    .discrete_dividends = {}
-                });
-            }
-        }
-
-        // Create collectors for each batch item
-        std::vector<PriceTableSnapshotCollector> collectors;
-        collectors.reserve(Nv * Nr);
-
-        for (size_t idx = 0; idx < Nv * Nr; ++idx) {
-            PriceTableSnapshotCollectorConfig collector_config{
-                .moneyness = std::span{moneyness_},
-                .tau = std::span{maturity_},
-                .K_ref = K_ref_,
-                .option_type = option_type,
-                .payoff_params = nullptr
-            };
-            collectors.emplace_back(collector_config);
-        }
-
-        // Solve batch with snapshot registration via callback
-        auto results = BatchAmericanOptionSolver::solve_batch(
-            batch_params, x_min, x_max, n_space, n_time,
-            [&](size_t idx, AmericanOptionSolver& solver) {
-                // Register snapshots for all maturities
-                for (size_t j = 0; j < Nt; ++j) {
-                    solver.register_snapshot(step_indices[j], j, &collectors[idx]);
-                }
-            });
-
-        // Extract prices from collectors
-        for (size_t idx = 0; idx < Nv * Nr; ++idx) {
-            size_t k = idx / Nr;
-            size_t l = idx % Nr;
-
-            if (!results[idx].has_value()) {
-                ++failed_count;
-                continue;
-            }
-
-            auto prices_2d = collectors[idx].prices();
-            for (size_t i = 0; i < Nm; ++i) {
-                for (size_t j = 0; j < Nt; ++j) {
-                    size_t idx_2d = i * Nt + j;
-                    size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                    prices_4d[idx_4d] = prices_2d[idx_2d];
-                }
-            }
-        }
-    }  // End of else (FALLBACK PATH)
-
-    if (failed_count > 0) {
-        return std::unexpected("Failed to solve " + std::to_string(failed_count) +
-                         " out of " + std::to_string(Nv * Nr) + " PDEs");
+    if (!solve_result) {
+        return std::unexpected(solve_result.error());
     }
 
     // End timer

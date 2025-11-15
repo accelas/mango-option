@@ -10,6 +10,7 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/operators/operator_factory.hpp"
+#include "src/support/parallel.hpp"
 // BlackScholesPDE now defined in american_option.hpp
 #include <algorithm>
 #include <span>
@@ -35,7 +36,7 @@ class AmericanPutObstacle {
 public:
     void operator()(double, std::span<const double> x,
                     std::span<double> psi) const {
-        #pragma omp simd
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < x.size(); ++i) {
             psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
         }
@@ -52,7 +53,7 @@ class AmericanCallObstacle {
 public:
     void operator()(double, std::span<const double> x,
                     std::span<double> psi) const {
-        #pragma omp simd
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < x.size(); ++i) {
             psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
         }
@@ -138,23 +139,20 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
     std::shared_ptr<AmericanSolverWorkspace> workspace) {
 
-    // Validate parameters using expected-based validation
-    auto params_result = AmericanOptionParams::validate_expected(params);
-    if (!params_result.has_value()) {
-        return std::unexpected(params_result.error());
-    }
-
-    // Validate workspace
+    // Validate workspace first
     if (!workspace) {
         return std::unexpected("Workspace cannot be null");
     }
 
-    try {
-        // All validations passed, create solver
-        return AmericanOptionSolver(params, workspace);
-    } catch (const std::exception& e) {
-        return std::unexpected(std::string("Failed to create solver: ") + e.what());
-    }
+    // Chain validation and construction using monadic operations
+    return AmericanOptionParams::validate_expected(params)
+        .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
+            try {
+                return AmericanOptionSolver(params, workspace);
+            } catch (const std::exception& e) {
+                return std::unexpected(std::string("Failed to create solver: ") + e.what());
+            }
+        });
 }
 
 // ============================================================================
@@ -268,22 +266,27 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         });
 
         // 8. Solve the PDE
-        auto solve_status = solver.solve();
-        if (!solve_status) {
-            return std::unexpected(solve_status.error());
-        }
-        result.converged = true;
+        return solver.solve()
+            .transform([&]() {
+                result.converged = true;
 
-        // 9. Extract solution
-        auto solution_view = solver.solution();
-        solution_.assign(solution_view.begin(), solution_view.end());
-        solved_ = true;
+                // 9. Extract solution
+                auto solution_view = solver.solution();
+                solution_.assign(solution_view.begin(), solution_view.end());
+                solved_ = true;
 
-        // 10. Interpolate to current spot price and denormalize
-        double current_moneyness = std::log(params_.spot / params_.strike);
-        double normalized_value = interpolate_solution(current_moneyness, x_grid);
+                // 10. Interpolate to current spot price and denormalize
+                double current_moneyness = std::log(params_.spot / params_.strike);
+                double normalized_value = interpolate_solution(current_moneyness, x_grid);
+                result.value = normalized_value * params_.strike;  // Denormalize
 
-        result.value = normalized_value * params_.strike;  // Denormalize
+                // 11. Compute Greeks
+                result.delta = compute_delta();
+                result.gamma = compute_gamma();
+                result.theta = compute_theta();
+
+                return result;
+            });
 
     } else {  // CALL
         // Create PDESolver with obstacle
@@ -328,29 +331,28 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         });
 
         // 8. Solve the PDE
-        auto solve_status = solver.solve();
-        if (!solve_status) {
-            return std::unexpected(solve_status.error());
-        }
-        result.converged = true;
+        return solver.solve()
+            .transform([&]() {
+                result.converged = true;
 
-        // 9. Extract solution
-        auto solution_view = solver.solution();
-        solution_.assign(solution_view.begin(), solution_view.end());
-        solved_ = true;
+                // 9. Extract solution
+                auto solution_view = solver.solution();
+                solution_.assign(solution_view.begin(), solution_view.end());
+                solved_ = true;
 
-        // 10. Interpolate to current spot price and denormalize
-        double current_moneyness = std::log(params_.spot / params_.strike);
-        double normalized_value = interpolate_solution(current_moneyness, x_grid);
-        result.value = normalized_value * params_.strike;  // Denormalize
+                // 10. Interpolate to current spot price and denormalize
+                double current_moneyness = std::log(params_.spot / params_.strike);
+                double normalized_value = interpolate_solution(current_moneyness, x_grid);
+                result.value = normalized_value * params_.strike;  // Denormalize
+
+                // 11. Compute Greeks
+                result.delta = compute_delta();
+                result.gamma = compute_gamma();
+                result.theta = compute_theta();
+
+                return result;
+            });
     }
-
-    // 11. Compute Greeks (stub implementation for now - Task 9)
-    result.delta = compute_delta();
-    result.gamma = compute_gamma();
-    result.theta = compute_theta();
-
-    return result;
 }
 
 double AmericanOptionSolver::interpolate_solution(double x_target,

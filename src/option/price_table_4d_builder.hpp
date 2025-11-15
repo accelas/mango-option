@@ -386,13 +386,6 @@ private:
 
     std::expected<void, std::string> validate_grids() const;
 
-    /// Check if we should use normalized solver (fast path)
-    bool should_use_normalized_solver(
-        double x_min,
-        double x_max,
-        size_t n_space,
-        const std::vector<std::pair<double, double>>& discrete_dividends) const;
-
     std::vector<double> moneyness_;
     std::vector<double> maturity_;
     std::vector<double> volatility_;

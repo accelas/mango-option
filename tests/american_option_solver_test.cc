@@ -535,7 +535,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     std::vector<size_t> callback_indices;
     std::mutex callback_mutex;
 
-    auto results = BatchAmericanOptionSolver::solve_batch(
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(
         batch, -3.0, 3.0, 101, 1000,
         [&](size_t idx, AmericanOptionSolver& solver) {
             std::lock_guard<std::mutex> lock(callback_mutex);
@@ -543,8 +543,9 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
         });
 
     // Verify all solves succeeded
-    ASSERT_EQ(results.size(), 5);
-    for (const auto& result : results) {
+    ASSERT_EQ(batch_result.results.size(), 5);
+    EXPECT_EQ(batch_result.failed_count, 0);
+    for (const auto& result : batch_result.results) {
         EXPECT_TRUE(result.has_value());
     }
 
@@ -588,7 +589,7 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
     }
 
     // Register snapshots via callback
-    auto results = BatchAmericanOptionSolver::solve_batch(
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(
         batch, -3.0, 3.0, 101, 1000,
         [&](size_t idx, AmericanOptionSolver& solver) {
             solver.register_snapshot(499, 0, &collectors[idx]);  // τ=0.5
@@ -596,8 +597,9 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
         });
 
     // Verify all solves succeeded
-    ASSERT_EQ(results.size(), 3);
-    for (const auto& result : results) {
+    ASSERT_EQ(batch_result.results.size(), 3);
+    EXPECT_EQ(batch_result.failed_count, 0);
+    for (const auto& result : batch_result.results) {
         EXPECT_TRUE(result.has_value());
     }
 
@@ -629,11 +631,12 @@ TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
     }
 
     // Call without callback (backward compatible)
-    auto results = BatchAmericanOptionSolver::solve_batch(
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(
         batch, -3.0, 3.0, 101, 1000);
 
-    ASSERT_EQ(results.size(), 3);
-    for (const auto& result : results) {
+    ASSERT_EQ(batch_result.results.size(), 3);
+    EXPECT_EQ(batch_result.failed_count, 0);
+    for (const auto& result : batch_result.results) {
         EXPECT_TRUE(result.has_value());
         EXPECT_GT(result.value().value, 0.0);
     }
