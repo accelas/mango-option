@@ -518,7 +518,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        std::vector<expected<AmericanOptionResult, SolverError>> results;
+        std::vector<std::expected<AmericanOptionResult, SolverError>> results;
         results.reserve(batch_size);
 
         // Sequential processing for now (batch API may not exist)

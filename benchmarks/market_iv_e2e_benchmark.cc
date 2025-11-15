@@ -343,8 +343,10 @@ static void BM_API_EndToEnd(benchmark::State& state) {
 
         size_t converged = 0;
         for (const auto& obs : observations) {
-            IVQuery query{obs.market_price, obs.spot, obs.strike,
-                         obs.maturity, obs.rate, obs.type};
+            IVQuery query{
+                .option = {obs.spot, obs.strike, obs.maturity, obs.rate, 0.0, obs.type},
+                .market_price = obs.market_price
+            };
             if (iv_solver.solve(query).converged) {
                 converged++;
             }

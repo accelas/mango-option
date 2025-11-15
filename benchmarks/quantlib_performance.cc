@@ -12,7 +12,8 @@
  * Requires: libquantlib-dev (apt-get install libquantlib-dev)
  */
 
-#include "src/american_option.hpp"
+#include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <stdexcept>
 
@@ -89,13 +90,19 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -140,13 +147,19 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -191,13 +204,19 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = 101;
-    grid.n_time = 1000;
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -247,13 +266,19 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         .discrete_dividends = {}
     };
 
-    AmericanOptionGrid grid;
-    grid.n_space = n_space;
-    grid.n_time = n_time;
+    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, n_space, n_time);
+    if (!workspace_result) {
+        state.SkipWithError(workspace_result.error().c_str());
+        return;
+    }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, grid);
-        auto result = solver.solve();
+        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+        if (!solver_result) {
+            state.SkipWithError(solver_result.error().c_str());
+            return;
+        }
+        auto result = solver_result.value().solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
