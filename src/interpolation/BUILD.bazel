@@ -55,5 +55,10 @@ cc_library(
         "-O3",
         "-march=native",
     ],
+    linkopts = [
+        "-llapacke",
+        "-llapack",
+        "-lblas",
+    ],
     visibility = ["//visibility:public"],
 )

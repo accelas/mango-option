@@ -13,7 +13,8 @@ RUN apt-get update && \
         build-essential \
         python3 \
         systemtap-sdt-dev \
-        libquantlib0-dev && \
+        libquantlib0-dev \
+        liblapacke-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 

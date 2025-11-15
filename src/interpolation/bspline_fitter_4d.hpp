@@ -35,6 +35,7 @@
 #include "src/interpolation/bspline_utils.hpp"
 #include "src/pde/core/thomas_solver.hpp"
 #include "src/support/expected.hpp"
+#include <lapacke.h>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -44,6 +45,7 @@
 #include <memory>
 #include <span>
 #include <cassert>
+#include <limits>
 
 namespace mango {
 
@@ -112,6 +114,24 @@ private:
     size_t n_;                          ///< Matrix dimension
     std::vector<double> band_values_;   ///< Banded storage (4n entries)
     std::vector<size_t> col_start_;     ///< Starting column for each row
+
+    // LAPACK factorization storage
+    mutable std::vector<double> lapack_band_storage_;  ///< Storage in LAPACK band layout
+    mutable std::vector<lapack_int> pivot_indices_;    ///< Pivot indices from dgbtrf
+    mutable lapack_int kl_ = 0;                        ///< Number of sub-diagonals
+    mutable lapack_int ku_ = 0;                        ///< Number of super-diagonals
+    mutable lapack_int ldab_ = 0;                      ///< Leading dimension for band storage
+    mutable bool factored_ = false;                    ///< True if LAPACK factorization computed
+
+    friend expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A);
+    friend expected<void, std::string> banded_lu_substitution(
+        const BandedMatrixStorage& LU,
+        std::span<const double> b,
+        std::span<double> x);
+    friend void banded_lu_solve(
+        BandedMatrixStorage& A,
+        std::span<const double> b,
+        std::span<double> x);
 };
 
 // ============================================================================
@@ -129,61 +149,76 @@ private:
 /// @param A Banded matrix (modified in-place to store LU factors)
 /// @return expected<void, string> - success or error message
 inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
-    const size_t n = A.size();
-
-    // Compute matrix 1-norm for pivot threshold
-    // ||A||_1 = max column sum
-    double matrix_norm = 0.0;
-    for (size_t j = 0; j < n; ++j) {
-        double col_sum = 0.0;
-        for (size_t i = 0; i < n; ++i) {
-            size_t col_start = A.col_start(i);
-            if (j >= col_start && j < col_start + 4) {
-                col_sum += std::abs(A(i, j));
-            }
-        }
-        matrix_norm = std::max(matrix_norm, col_sum);
+    const lapack_int n = static_cast<lapack_int>(A.size());
+    if (n == 0) {
+        return unexpected(std::string("Matrix dimension must be > 0"));
     }
 
-    // Pivot threshold: relative to matrix norm
-    const double PIVOT_THRESHOLD = 1e-14 * matrix_norm;
-
-    // Phase 1: LU decomposition (in-place, Doolittle algorithm)
-    // For banded matrix with bandwidth k=4, this is O(n) not O(n³)
-    for (size_t i = 0; i < n; ++i) {
-        // Check for zero/tiny pivot
-        if (std::abs(A(i, i)) < PIVOT_THRESHOLD) {
-            return unexpected(
-                std::string("Matrix is singular or ill-conditioned at row ") +
-                std::to_string(i) + ": pivot = " + std::to_string(A(i, i)) +
-                ", threshold = " + std::to_string(PIVOT_THRESHOLD)
-            );
-        }
-
-        size_t col_start = A.col_start(i);
-        size_t col_end = std::min(col_start + 4, n);
-
-        // Eliminate entries below diagonal in column i
-        for (size_t k = i + 1; k < std::min(i + 4, n); ++k) {
-            size_t k_col_start = A.col_start(k);
-
-            // Check if A(k, i) is in the band
-            if (i >= k_col_start && i < k_col_start + 4) {
-                double factor = A(k, i) / A(i, i);
-
-                // Update row k (only within band)
-                for (size_t j = i; j < col_end; ++j) {
-                    if (j >= k_col_start && j < k_col_start + 4) {
-                        A(k, j) -= factor * A(i, j);
-                    }
-                }
-
-                // Store multiplier in lower triangle (for forward substitution)
-                A(k, i) = factor;
+    // Determine bandwidths by inspecting row column ranges
+    lapack_int kl = 0;
+    lapack_int ku = 0;
+    for (lapack_int i = 0; i < n; ++i) {
+        size_t col_start = A.col_start_[static_cast<size_t>(i)];
+        for (size_t k = 0; k < 4; ++k) {
+            size_t col = col_start + k;
+            if (col >= A.size()) {
+                continue;
             }
+            lapack_int col_idx = static_cast<lapack_int>(col);
+            kl = std::max(kl, i - col_idx);
+            ku = std::max(ku, col_idx - i);
         }
     }
 
+    // LAPACK band storage has leading dimension ldab = 2*kl + ku + 1
+    lapack_int ldab = 2 * kl + ku + 1;
+    A.lapack_band_storage_.assign(static_cast<size_t>(ldab) * static_cast<size_t>(n), 0.0);
+
+    // Populate LAPACK band storage (column-major)
+    for (lapack_int i = 0; i < n; ++i) {
+        size_t col_start = A.col_start_[static_cast<size_t>(i)];
+        for (size_t k = 0; k < 4; ++k) {
+            size_t col = col_start + k;
+            if (col >= A.size()) {
+                continue;
+            }
+            double value = A.band_values_[static_cast<size_t>(i) * 4 + k];
+            lapack_int col_idx = static_cast<lapack_int>(col);
+            lapack_int row_idx = kl + ku + i - col_idx;
+            if (row_idx < 0 || row_idx >= ldab) {
+                continue;
+            }
+            size_t storage_index = static_cast<size_t>(row_idx + col_idx * ldab);
+            A.lapack_band_storage_[storage_index] = value;
+        }
+    }
+
+    A.pivot_indices_.resize(static_cast<size_t>(n));
+    lapack_int info = LAPACKE_dgbtrf(
+        LAPACK_COL_MAJOR,
+        n,
+        n,
+        kl,
+        ku,
+        A.lapack_band_storage_.data(),
+        ldab,
+        A.pivot_indices_.data());
+
+    if (info < 0) {
+        return unexpected(
+            std::string("LAPACKE_dgbtrf: invalid argument at position ") +
+            std::to_string(-info));
+    }
+    if (info > 0) {
+        return unexpected(
+            std::string("Banded matrix is singular; zero pivot encountered at row ") +
+            std::to_string(info));
+    }
+
+    A.kl_ = kl;
+    A.ku_ = ku;
+    A.ldab_ = ldab;
+    A.factored_ = true;
     return {};
 }
 
@@ -198,43 +233,47 @@ inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
 /// @param LU Pre-factored banded matrix (from banded_lu_factorize)
 /// @param b Right-hand side vector
 /// @param x Solution vector (output)
-inline void banded_lu_substitution(
+inline expected<void, std::string> banded_lu_substitution(
     const BandedMatrixStorage& LU,
     std::span<const double> b,
     std::span<double> x)
 {
-    const size_t n = LU.size();
-    assert(b.size() == n);
-    assert(x.size() == n);
-
-    // Working storage for intermediate results
-    std::vector<double> y(n);
-
-    // Phase 1: Forward substitution (Ly = b)
-    for (size_t i = 0; i < n; ++i) {
-        y[i] = b[i];
-
-        size_t col_start = LU.col_start(i);
-        for (size_t j = col_start; j < i; ++j) {
-            if (j >= col_start && j < col_start + 4) {
-                y[i] -= LU(i, j) * y[j];
-            }
-        }
+    const lapack_int n = static_cast<lapack_int>(LU.size());
+    if (!LU.factored_) {
+        return unexpected(std::string("Banded matrix has not been factorized"));
+    }
+    if (b.size() != static_cast<size_t>(n) || x.size() != static_cast<size_t>(n)) {
+        return unexpected(std::string("Dimension mismatch in banded_lu_substitution"));
     }
 
-    // Phase 2: Back substitution (Ux = y)
-    for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
-        x[i] = y[i];
+    std::vector<double> rhs(b.begin(), b.end());
+    lapack_int nrhs = 1;
+    lapack_int info = LAPACKE_dgbtrs(
+        LAPACK_COL_MAJOR,
+        'N',
+        n,
+        LU.kl_,
+        LU.ku_,
+        nrhs,
+        LU.lapack_band_storage_.data(),
+        LU.ldab_,
+        LU.pivot_indices_.data(),
+        rhs.data(),
+        n);
 
-        size_t col_start = LU.col_start(i);
-        size_t col_end = std::min(col_start + 4, n);
-
-        for (size_t j = static_cast<size_t>(i) + 1; j < col_end; ++j) {
-            x[i] -= LU(i, j) * x[j];
-        }
-
-        x[i] /= LU(i, i);
+    if (info < 0) {
+        return unexpected(
+            std::string("LAPACKE_dgbtrs: invalid argument at position ") +
+            std::to_string(-info));
     }
+    if (info > 0) {
+        return unexpected(
+            std::string("LAPACKE_dgbtrs failed; zero pivot encountered at row ") +
+            std::to_string(info));
+    }
+
+    std::copy(rhs.begin(), rhs.end(), x.begin());
+    return {};
 }
 
 /// Solve banded system Ax = b using LU decomposition (legacy interface)
@@ -259,7 +298,10 @@ inline void banded_lu_solve(
     }
 
     // Solve using factored matrix
-    banded_lu_substitution(A, b, x);
+    auto solve_result = banded_lu_substitution(A, b, x);
+    if (!solve_result) {
+        std::fill(x.begin(), x.end(), std::numeric_limits<double>::quiet_NaN());
+    }
 }
 
 // ============================================================================
@@ -481,7 +523,10 @@ private:
 
         // Solve using cached LU factors (fast!)
         solution.resize(n_);
-        banded_lu_substitution(*lu_factors_, rhs, solution);
+        auto sub_result = banded_lu_substitution(*lu_factors_, rhs, solution);
+        if (!sub_result) {
+            return sub_result;
+        }
 
         return {};
     }
