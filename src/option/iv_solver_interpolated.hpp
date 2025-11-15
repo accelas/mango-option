@@ -142,7 +142,7 @@ private:
     /// The price surface stores prices for reference strike K_ref.
     /// For options with different strikes, we scale: V(K) = V(K_ref) * (K/K_ref)
     ///
-    /// @param moneyness m = S/K_ref (not S/K!)
+    /// @param moneyness m = S/K
     /// @param maturity Time to maturity
     /// @param vol Volatility
     /// @param rate Risk-free rate
@@ -167,8 +167,7 @@ private:
 
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {
-        // CRITICAL: Use K_ref for moneyness, not query.strike!
-        const double m = query.spot / K_ref_;
+        const double m = query.spot / query.strike;
 
         return m >= m_range_.first && m <= m_range_.second &&
                query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&
