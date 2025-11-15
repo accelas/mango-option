@@ -550,6 +550,41 @@ private:
         }
     }
 
+    /// Ensure matrix is factored (builds and factorizes if not already done)
+    ///
+    /// Extracts common factorization logic to avoid duplication.
+    /// @return expected<void, string> - success or error message
+    expected<void, std::string> ensure_factored() const {
+        if (is_factored_) {
+            return {};  // Already factored
+        }
+
+        // Build BandedMatrixStorage from compact storage
+        lu_factors_ = BandedMatrixStorage(n_);
+
+        for (size_t i = 0; i < n_; ++i) {
+            int col_start = band_col_start_[i];
+            lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
+
+            // Copy band values with bounds checking
+            for (int k = 0; k < 4; ++k) {
+                int col = col_start + k;
+                if (col >= 0 && col < static_cast<int>(n_)) {
+                    (*lu_factors_)(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
+                }
+            }
+        }
+
+        // Factorize once
+        auto factorize_result = banded_lu_factorize(*lu_factors_);
+        if (!factorize_result) {
+            return factorize_result;  // Propagate error
+        }
+
+        is_factored_ = true;
+        return {};
+    }
+
     /// Solve banded linear system using cached LU factorization
     ///
     /// On first call, factorizes the matrix and caches LU factors.
@@ -562,30 +597,10 @@ private:
         const std::vector<double>& rhs,
         std::vector<double>& solution) const
     {
-        if (!is_factored_) {
-            // Build BandedMatrixStorage from compact storage
-            lu_factors_ = BandedMatrixStorage(n_);
-
-            for (size_t i = 0; i < n_; ++i) {
-                int col_start = band_col_start_[i];
-                lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
-
-                // Copy band values
-                for (int k = 0; k < 4; ++k) {
-                    int col = col_start + k;
-                    if (col >= 0 && col < static_cast<int>(n_)) {
-                        (*lu_factors_)(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
-                    }
-                }
-            }
-
-            // Factorize once
-            auto factorize_result = banded_lu_factorize(*lu_factors_);
-            if (!factorize_result) {
-                return factorize_result;  // Propagate error
-            }
-
-            is_factored_ = true;
+        // Ensure matrix is factored (no-op if already done)
+        auto factorize_result = ensure_factored();
+        if (!factorize_result) {
+            return factorize_result;
         }
 
         // Solve using cached LU factors (fast!)
@@ -603,25 +618,10 @@ private:
         const std::vector<double>& rhs,
         std::span<double> solution) const
     {
-        if (!is_factored_) {
-            // First solve: build and factorize matrix
-            lu_factors_ = BandedMatrixStorage(n_);
-
-            // Populate matrix from banded storage
-            for (size_t i = 0; i < n_; ++i) {
-                int col_start = band_col_start_[i];
-                lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
-
-                for (size_t k = 0; k < 4 && (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k) {
-                    (*lu_factors_)(i, col_start + k) = band_values_[i * 4 + k];
-                }
-            }
-
-            auto factorize_result = banded_lu_factorize(*lu_factors_);
-            if (!factorize_result) {
-                return factorize_result;
-            }
-            is_factored_ = true;
+        // Ensure matrix is factored (no-op if already done)
+        auto factorize_result = ensure_factored();
+        if (!factorize_result) {
+            return factorize_result;
         }
 
         // Solve using cached factors, output to provided buffer
@@ -662,15 +662,15 @@ private:
         double max_residual = 0.0;
 
         for (size_t i = 0; i < n_; ++i) {
-            double residual = 0.0;
+            double Bc_i = 0.0;
             int col_start = band_col_start_[i];
 
             for (size_t k = 0; k < 4 && (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k) {
-                residual += band_values_[i * 4 + k] * coeffs[col_start + k];
+                Bc_i = std::fma(band_values_[i * 4 + k], coeffs[col_start + k], Bc_i);
             }
 
-            residual -= values[i];
-            max_residual = std::max(max_residual, std::abs(residual));
+            double residual = std::abs(Bc_i - values[i]);
+            max_residual = std::max(max_residual, residual);
         }
 
         return max_residual;
