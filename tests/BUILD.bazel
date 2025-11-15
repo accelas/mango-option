@@ -577,3 +577,27 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     size = "small",
 )
+
+cc_test(
+    name = "cox_de_boor_profile_test",
+    srcs = ["cox_de_boor_profile_test.cc"],
+    deps = [
+        "//src/interpolation:bspline_fitter_4d",
+        "//src/interpolation:bspline_utils",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    size = "small",
+)
+
+cc_test(
+    name = "bspline_runtime_breakdown_test",
+    srcs = ["bspline_runtime_breakdown_test.cc"],
+    deps = [
+        "//src/interpolation:bspline_fitter_4d",
+        "//src/interpolation:bspline_utils",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    size = "small",
+)
