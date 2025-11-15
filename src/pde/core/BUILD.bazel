@@ -54,25 +54,6 @@ cc_library(
 )
 
 cc_library(
-    name = "spatial_operators",
-    hdrs = ["spatial_operators.hpp"],
-    deps = [
-        "//src/support:parallel",
-    ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        "-O3",
-        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
-        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
-        "-ftree-vectorize",   # Enable auto-vectorization
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "time_domain",
     hdrs = ["time_domain.hpp"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],

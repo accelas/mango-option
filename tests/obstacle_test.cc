@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/spatial_operators.hpp"
+#include "src/pde/operators/laplacian_pde.hpp"
+#include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
@@ -19,7 +20,9 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     TimeDomain time(0.0, 1.0, 0.01);
 
     // Zero spatial operator (no PDE evolution) - isolates obstacle enforcement
-    LaplacianOperator spatial_op(0.0);
+    auto pde = operators::LaplacianPDE<double>(0.0);
+    auto grid_view = GridView<double>(grid.span());
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), grid_view);
 
     // BCs compatible with obstacle (both = 0.5)
     DirichletBC left_bc{[](double t, double x) { return 0.5; }};
@@ -67,7 +70,9 @@ TEST(ObstacleTest, TimeVaryingObstacle) {
     TimeDomain time(0.0, 1.0, 0.01);
 
     // Zero spatial operator
-    LaplacianOperator spatial_op(0.0);
+    auto pde = operators::LaplacianPDE<double>(0.0);
+    auto grid_view = GridView<double>(grid.span());
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), grid_view);
 
     DirichletBC left_bc{[](double t, double x) { return 1.0; }};
     DirichletBC right_bc{[](double t, double x) { return 1.0; }};
@@ -106,7 +111,9 @@ TEST(ObstacleTest, NoObstacleOptional) {
     TimeDomain time(0.0, 0.1, 0.01);
 
     // Zero spatial operator
-    LaplacianOperator spatial_op(0.0);
+    auto pde = operators::LaplacianPDE<double>(0.0);
+    auto grid_view = GridView<double>(grid.span());
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), grid_view);
 
     DirichletBC left_bc{[](double t, double x) { return 0.0; }};
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};

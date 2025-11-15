@@ -7,7 +7,6 @@
 #define MANGO_AMERICAN_OPTION_HPP
 
 #include "src/pde/core/pde_solver.hpp"
-#include "src/pde/core/spatial_operators.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"

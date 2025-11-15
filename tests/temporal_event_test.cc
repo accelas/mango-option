@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/spatial_operators.hpp"
+#include "src/pde/operators/laplacian_pde.hpp"
+#include "src/pde/operators/spatial_operator.hpp"
+#include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
@@ -19,8 +21,10 @@ TEST(TemporalEventTest, EventAppliedAfterStep) {
 
     TimeDomain time(0.0, 1.0, 0.1);
 
-    // Zero spatial operator (no PDE evolution) - use LaplacianOperator with D=0
-    LaplacianOperator spatial_op(0.0);
+    // Zero spatial operator (no PDE evolution) - use LaplacianPDE with D=0
+    auto pde = operators::LaplacianPDE<double>(0.0);
+    auto grid_view = GridView<double>(grid.span());
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), grid_view);
 
     DirichletBC left_bc{[](double t, double x) { return 0.0; }};
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};

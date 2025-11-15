@@ -4,7 +4,8 @@ cc_binary(
     deps = [
         "//src/pde/core:pde_solver",
         "//src/pde/core:boundary_conditions",
-        "//src/pde/core:spatial_operators",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/operators:operator_factory",
         "//src/pde/core:root_finding",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",
