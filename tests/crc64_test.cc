@@ -80,17 +80,10 @@ TEST(CRC64, ECMA182Standard) {
 
     // Test with known byte pattern: ASCII string "123456789"
     // CRC64-ECMA-182 of "123456789" is 0x62EC59E3F1A4F00A
-    const char test_str[] = "123456789";
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(test_str);
-
-    // We need to call the internal compute function on raw bytes
-    // Since CRC64::compute takes double*, we'll create a wrapper test
-    // For now, verify that the implementation differs from CRC64/WE
+    // Note: Currently we only test with double* API, not raw bytes
 
     // CRC64/WE (init=0xFFFF..., final=0xFFFF...) produces different results
     // than CRC64-ECMA-182 (init=0x0, final=0x0)
-    std::vector<double> test_data = {1.0, 2.0, 3.0, 4.0};
-    uint64_t checksum = mango::CRC64::compute(test_data.data(), test_data.size());
 
     // Verify we're NOT using CRC64/WE (which would give all 0xFFs for empty)
     EXPECT_NE(empty_checksum, 0xFFFFFFFFFFFFFFFFULL)
