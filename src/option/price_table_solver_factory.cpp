@@ -251,12 +251,14 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     std::span<const double> rate,
     double K_ref)
 {
-    const size_t Nm = moneyness.size();
     const size_t Nt = maturity.size();
     const size_t Nv = volatility.size();
     const size_t Nr = rate.size();
     const double T_max = maturity.back();
     const double dt = T_max / config_.n_time;
+
+    // Zero out entire output array upfront (failed solves leave zeros)
+    std::ranges::fill(prices_4d, 0.0);
 
     // Precompute step indices for each maturity
     std::vector<size_t> step_indices(Nt);
@@ -316,16 +318,9 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
             }
         });
 
-    size_t failed_count = 0;
-    for (size_t idx = 0; idx < Nv * Nr; ++idx) {
-        if (!results[idx].has_value()) {
-            ++failed_count;
-            const size_t base_offset = idx;
-            for (size_t ij = 0; ij < Nm * Nt; ++ij) {
-                prices_4d[base_offset + ij * slice_stride] = 0.0;
-            }
-        }
-    }
+    // Count failures in one pass (no per-failure loop needed, array pre-zeroed)
+    const size_t failed_count = std::ranges::count_if(results,
+        [](const auto& result) { return !result.has_value(); });
 
     if (failed_count > 0) {
         return std::unexpected("Failed to solve " + std::to_string(failed_count) +
