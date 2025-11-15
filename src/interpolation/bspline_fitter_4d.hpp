@@ -934,32 +934,59 @@ private:
 
     /// Fit along axis0 for all (j,k,l) slices
     bool fit_axis0(std::vector<double>& coeffs, double tolerance,
-                   BSplineFit4DSeparableResult& result) {
-        std::vector<double> slice(N0_);
+                   BSplineFit4DSeparableResult& result,
+                   BSplineFitter4DWorkspace* workspace = nullptr) {
+
+        // Use workspace buffer if provided, else allocate
+        std::vector<double> fallback_slice;
+        std::vector<double> fallback_coeffs;
+        std::span<double> slice_buffer;
+        std::span<double> coeffs_buffer;
+
+        if (workspace) {
+            slice_buffer = workspace->get_slice_buffer(N0_);
+            coeffs_buffer = workspace->get_coeffs_buffer(N0_);
+        } else {
+            fallback_slice.resize(N0_);
+            fallback_coeffs.resize(N0_);
+            slice_buffer = std::span{fallback_slice};
+            coeffs_buffer = std::span{fallback_coeffs};
+        }
+
         std::vector<double> max_residuals;
         std::vector<double> conditions;
 
         for (size_t j = 0; j < N1_; ++j) {
             for (size_t k = 0; k < N2_; ++k) {
                 for (size_t l = 0; l < N3_; ++l) {
-                    // Extract 1D slice along axis0: coeffs[:,j,k,l]
+                    // Extract 1D slice along axis0: coeffs[:,j,k,l] into buffer
                     for (size_t i = 0; i < N0_; ++i) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        slice[i] = coeffs[idx];
+                        slice_buffer[i] = coeffs[idx];
                     }
 
-                    // Fit 1D B-spline
-                    auto fit_result = solver_axis0_->fit(slice, tolerance);
+                    // Fit using workspace buffers (zero allocation!)
+                    BSplineCollocation1DResult fit_result;
+                    if (workspace) {
+                        fit_result = solver_axis0_->fit_with_buffer(
+                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            coeffs_buffer,
+                            tolerance);
+                    } else {
+                        fit_result = solver_axis0_->fit(
+                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            tolerance);
+                    }
 
                     if (!fit_result.success) {
                         ++result.failed_slices_axis0;
                         return false;
                     }
 
-                    // Write coefficients back
+                    // Write coefficients back from buffer
                     for (size_t i = 0; i < N0_; ++i) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        coeffs[idx] = fit_result.coefficients[i];
+                        coeffs[idx] = workspace ? coeffs_buffer[i] : fit_result.coefficients[i];
                     }
 
                     max_residuals.push_back(fit_result.max_residual);
