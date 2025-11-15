@@ -267,13 +267,13 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
     constexpr size_t n_time = 1000;
 
     auto run_once = [&]() {
-        auto results = solve_american_options_batch(batch, x_min, x_max, n_space, n_time);
-        for (const auto& res : results) {
+        auto batch_result = solve_american_options_batch(batch, x_min, x_max, n_space, n_time);
+        for (const auto& res : batch_result.results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);
             }
         }
-        benchmark::DoNotOptimize(results);
+        benchmark::DoNotOptimize(batch_result);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
