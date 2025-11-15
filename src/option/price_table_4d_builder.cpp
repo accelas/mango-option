@@ -13,10 +13,6 @@
 #include <stdexcept>
 #include <ranges>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 namespace mango {
 
 std::expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
