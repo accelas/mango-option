@@ -1,7 +1,6 @@
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/spatial_operators.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/root_finding.hpp"
 #include "src/option/snapshot.hpp"
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"
@@ -40,7 +39,6 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     mango::TRBDF2Config trbdf2;
 
     // Root-finding config
-    mango::RootFindingConfig root_config;
 
     // Boundary conditions: u(0,t) = 0, u(1,t) = 0
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -57,7 +55,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     };
 
     // Create solver
-    mango::PDESolver solver(grid.span(), time, trbdf2, root_config, left_bc, right_bc, heat_op);
+    mango::PDESolver solver(grid.span(), time, trbdf2, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -94,9 +92,8 @@ TEST(PDESolverTest, NewtonConvergence) {
     // TR-BDF2 config
     mango::TRBDF2Config config;
 
-    // Root-finding config
-    mango::RootFindingConfig root_config;
-    root_config.max_iter = 20;  // Newton should converge well within this
+    // TR-BDF2 config (includes Newton parameters)
+    config.max_iter = 20;  // Newton should converge well within this
 
     // Boundary conditions: u(0,t) = 0, u(1,t) = 0
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -113,7 +110,7 @@ TEST(PDESolverTest, NewtonConvergence) {
     };
 
     // Create solver
-    mango::PDESolver solver(grid.span(), time, config, root_config, left_bc, right_bc, heat_op);
+    mango::PDESolver solver(grid.span(), time, config, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -139,7 +136,6 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
 
     mango::TimeDomain time{0.0, 0.1, 0.01};
     mango::TRBDF2Config trbdf2_config;
-    mango::RootFindingConfig root_config{.max_iter = 20, .tolerance = 1e-6};
 
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -147,7 +143,7 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
     const double D = 1.0;
     mango::LaplacianOperator spatial_op(D);
 
-    mango::PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+    mango::PDESolver solver(grid.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
 
     // Initial condition: u(x, 0) = sin(πx)
@@ -175,8 +171,7 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, n).value().generate();
 
     mango::TimeDomain time{0.0, 1.0, 0.5};  // Large dt
-    mango::TRBDF2Config trbdf2_config;
-    mango::RootFindingConfig root_config{.max_iter = 2, .tolerance = 1e-12};  // Hard to converge
+    mango::TRBDF2Config trbdf2_config{.max_iter = 2, .tolerance = 1e-12};  // Hard to converge
 
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -184,7 +179,7 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
     const double D = 1.0;
     mango::LaplacianOperator spatial_op(D);
 
-    mango::PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+    mango::PDESolver solver(grid.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
 
     const double pi = std::numbers::pi;
@@ -205,12 +200,11 @@ TEST(PDESolverTest, SnapshotRegistration) {
     mango::LaplacianOperator op(0.1);
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 11).value().generate();
     mango::TimeDomain time(0.0, 1.0, 0.1);  // 10 steps
-    mango::RootFindingConfig root_config;
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
     mango::PDESolver solver(grid.span(), time, mango::TRBDF2Config{},
-                           root_config, left_bc, right_bc, op);
+                           left_bc, right_bc, op);
 
     // Register snapshots at step indices 2, 5, 9
     MockCollector collector;
@@ -227,12 +221,11 @@ TEST(PDESolverTest, SnapshotCollection) {
     mango::LaplacianOperator op(0.1);
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 21).value().generate();
     mango::TimeDomain time(0.0, 1.0, 0.25);  // 4 steps: 0.25, 0.5, 0.75, 1.0
-    mango::RootFindingConfig root_config;
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
     mango::PDESolver solver(grid.span(), time, mango::TRBDF2Config{},
-                           root_config, left_bc, right_bc, op);
+                           left_bc, right_bc, op);
 
     // Initial condition: Gaussian
     auto ic = [](std::span<const double> x, std::span<double> u) {
@@ -288,7 +281,6 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     mango::TRBDF2Config trbdf2;
 
     // Root-finding config
-    mango::RootFindingConfig root_config;
 
     // Boundary conditions: u(0,t) = 0, u(1,t) = 0
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -302,7 +294,7 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     };
 
     // Create solver with new operator
-    mango::PDESolver solver(grid.span(), time, trbdf2, root_config,
+    mango::PDESolver solver(grid.span(), time, trbdf2,
                            left_bc, right_bc, spatial_op);
 
     // Initialize with IC

@@ -119,7 +119,6 @@ AmericanOptionSolver::AmericanOptionSolver(
     std::shared_ptr<AmericanSolverWorkspace> workspace)
     : params_(params)
     , trbdf2_config_{}  // Default-initialized
-    , root_config_{}    // Default-initialized
     , workspace_(std::move(workspace))
 {
     // Validate parameters
@@ -228,7 +227,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     if (params_.option_type == OptionType::PUT) {
         // Create PDESolver with obstacle
-        PDESolver solver(x_grid, time_domain, trbdf2_config_, root_config_,
+        PDESolver solver(x_grid, time_domain, trbdf2_config_,
                         left_bc, right_bc, bs_op,
                         [](double t, auto x, auto psi) {
                             AmericanPutObstacle obstacle;
@@ -289,7 +288,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     } else {  // CALL
         // Create PDESolver with obstacle
         // Note: left_bc and right_bc already defined above with time-dependent discounting
-        PDESolver solver(x_grid, time_domain, trbdf2_config_, root_config_,
+        PDESolver solver(x_grid, time_domain, trbdf2_config_,
                         left_bc, right_bc, bs_op,
                         [](double t, auto x, auto psi) {
                             AmericanCallObstacle obstacle;

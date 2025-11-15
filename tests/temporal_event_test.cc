@@ -5,7 +5,6 @@
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
-#include "src/pde/core/root_finding.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -27,9 +26,8 @@ TEST(TemporalEventTest, EventAppliedAfterStep) {
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};
 
     TRBDF2Config trbdf2_config{};
-    RootFindingConfig root_config{};
 
-    PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op);
 
     // Initial condition: u = 1 everywhere

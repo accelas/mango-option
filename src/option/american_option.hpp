@@ -187,25 +187,13 @@ public:
     /**
      * Set TR-BDF2 solver configuration (advanced).
      *
-     * Allows fine-tuning of the time-stepping scheme. Most users
-     * should use the default configuration.
+     * Allows fine-tuning of the time-stepping scheme and Newton solver.
+     * Most users should use the default configuration.
      *
-     * @param config TR-BDF2 solver configuration
+     * @param config TR-BDF2 solver configuration (includes Newton parameters)
      */
     void set_trbdf2_config(const TRBDF2Config& config) {
         trbdf2_config_ = config;
-    }
-
-    /**
-     * Set root-finding configuration (advanced).
-     *
-     * Allows fine-tuning of the Newton solver for early exercise boundary.
-     * Most users should use the default configuration.
-     *
-     * @param config Root finding configuration
-     */
-    void set_root_config(const RootFindingConfig& config) {
-        root_config_ = config;
     }
 
     /**
@@ -219,7 +207,6 @@ private:
     // Parameters
     AmericanOptionParams params_;
     TRBDF2Config trbdf2_config_;
-    RootFindingConfig root_config_;
 
     // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
