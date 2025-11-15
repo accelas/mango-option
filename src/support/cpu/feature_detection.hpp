@@ -100,10 +100,9 @@ inline CPUFeatures detect_cpu_features() {
         features.has_avx2 = (ebx & bit_AVX2) != 0;
 
         // Emit diagnostic if FMA is missing (AVX2 CPUs typically have it)
+        // (No-op in production builds - use USDT tracing if needed)
         if (features.has_avx2 && !features.has_fma) {
-            #ifndef NDEBUG
-            std::cerr << "Warning: AVX2 detected but FMA not available\n";
-            #endif
+            // Debug diagnostic would go here
         }
     }
 

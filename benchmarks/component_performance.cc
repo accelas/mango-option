@@ -18,6 +18,8 @@
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/option/price_table_workspace.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -55,7 +57,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::unique_ptr<BSpline4D> evaluator;
+    std::shared_ptr<const BSpline4D> evaluator;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -119,7 +121,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
         }
 
-        fixture_ptr->evaluator = std::make_unique<BSpline4D>(workspace_result.value());
+        fixture_ptr->evaluator = std::make_shared<BSpline4D>(workspace_result.value());
 
         return fixture_ptr.release();
     }();
