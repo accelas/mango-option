@@ -7,17 +7,15 @@ using namespace mango;
 class IVSolverTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Default option specification
-        spec = OptionSpec{
-            .spot = 100.0,
-            .strike = 100.0,
-            .maturity = 1.0,
-            .rate = 0.05,
-            .dividend_yield = 0.0,
-            .type = OptionType::PUT
+        query = IVQuery{
+            100.0,  // spot
+            100.0,  // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.0,    // dividend_yield
+            OptionType::PUT,
+            10.45   // market_price
         };
-
-        query = IVQuery{.option = spec, .market_price = 10.45};
 
         config = IVSolverFDMConfig{
             .root_config = RootFindingConfig{
@@ -31,7 +29,6 @@ protected:
         };
     }
 
-    OptionSpec spec;
     IVQuery query;
     IVSolverFDMConfig config;
 };
@@ -60,7 +57,7 @@ TEST_F(IVSolverTest, ATMPutIVCalculation) {
 
 // Test 3: Invalid parameters should be caught
 TEST_F(IVSolverTest, InvalidSpotPrice) {
-    query.option.spot = -100.0;  // Invalid
+    query.spot = -100.0;  // Invalid
 
     IVSolverFDM solver(config);
     IVResult result = solver.solve(query);
@@ -71,7 +68,7 @@ TEST_F(IVSolverTest, InvalidSpotPrice) {
 
 // Test 4: Invalid strike price
 TEST_F(IVSolverTest, InvalidStrike) {
-    query.option.strike = 0.0;  // Invalid
+    query.strike = 0.0;  // Invalid
 
     IVSolverFDM solver(config);
     IVResult result = solver.solve(query);
@@ -82,7 +79,7 @@ TEST_F(IVSolverTest, InvalidStrike) {
 
 // Test 5: Invalid time to maturity
 TEST_F(IVSolverTest, InvalidTimeToMaturity) {
-    query.option.maturity = -1.0;  // Invalid
+    query.maturity = -1.0;  // Invalid
 
     IVSolverFDM solver(config);
     IVResult result = solver.solve(query);
@@ -104,7 +101,7 @@ TEST_F(IVSolverTest, InvalidMarketPrice) {
 
 // Test 7: ITM put IV calculation
 TEST_F(IVSolverTest, ITMPutIVCalculation) {
-    query.option.strike = 110.0;  // In the money
+    query.strike = 110.0;  // In the money
     query.market_price = 15.0;
 
     IVSolverFDM solver(config);
@@ -117,7 +114,7 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
 
 // Test 8: OTM put IV calculation
 TEST_F(IVSolverTest, OTMPutIVCalculation) {
-    query.option.strike = 90.0;  // Out of the money
+    query.strike = 90.0;  // Out of the money
     query.market_price = 2.5;
 
     IVSolverFDM solver(config);
@@ -130,8 +127,8 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
 
 // Test 9: Deep ITM put (tests adaptive grid bounds)
 TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
-    query.option.spot = 50.0;  // Deep in the money (S/K = 0.5)
-    query.option.strike = 100.0;
+    query.spot = 50.0;  // Deep in the money (S/K = 0.5)
+    query.strike = 100.0;
     query.market_price = 51.0;  // Intrinsic value is 50
 
     IVSolverFDM solver(config);
@@ -145,8 +142,8 @@ TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
 
 // Test 10: Deep OTM put (tests adaptive grid bounds)
 TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
-    query.option.spot = 200.0;  // Deep out of the money (S/K = 2.0)
-    query.option.strike = 100.0;
+    query.spot = 200.0;  // Deep out of the money (S/K = 2.0)
+    query.strike = 100.0;
     query.market_price = 1.0;
 
     IVSolverFDM solver(config);
@@ -160,7 +157,7 @@ TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
 
 // Test 11: Call option IV calculation
 TEST_F(IVSolverTest, ATMCallIVCalculation) {
-    query.option.type = OptionType::CALL;
+    query.type = OptionType::CALL;
     query.market_price = 10.0;  // ATM call price
 
     IVSolverFDM solver(config);

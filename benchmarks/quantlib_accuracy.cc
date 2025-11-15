@@ -108,16 +108,15 @@ static void compare_scenario(
     bool is_call)
 {
     // Mango-IV pricing with workspace
-    AmericanOptionParams mango_params{
-        .strike = strike,
-        .spot = spot,
-        .maturity = maturity,
-        .volatility = volatility,
-        .rate = rate,
-        .continuous_dividend_yield = dividend_yield,
-        .option_type = is_call ? OptionType::CALL : OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams mango_params(
+        spot,
+        strike,
+        maturity,
+        rate,
+        dividend_yield,
+        is_call ? OptionType::CALL : OptionType::PUT,
+        volatility
+    );
 
     // Create workspace (high resolution for accuracy)
     auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
@@ -235,16 +234,15 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     }
 
     // Mango-IV pricing at given resolution
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
 
     auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, n_space, n_time);
     if (!workspace_result) {
@@ -286,16 +284,15 @@ BENCHMARK(BM_Convergence_GridResolution)
 // ============================================================================
 
 static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
 
     auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
     if (!workspace_result) {
@@ -584,16 +581,16 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
         {0.25, 1.0}  // $1 dividend at 0.25 years
     };
 
-    AmericanOptionParams params{
-        .strike = strike,
-        .spot = spot,
-        .maturity = maturity,
-        .volatility = volatility,
-        .rate = rate,
-        .continuous_dividend_yield = div_yield,
-        .option_type = OptionType::CALL,
-        .discrete_dividends = dividends
-    };
+    AmericanOptionParams params(
+        spot,
+        strike,
+        maturity,
+        rate,
+        div_yield,
+        OptionType::CALL,
+        volatility,
+        dividends
+    );
 
     // Create workspace (high resolution)
     auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
@@ -648,16 +645,16 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         // Note: dividend at maturity (1.0y) excluded (no impact)
     };
 
-    AmericanOptionParams params{
-        .strike = strike,
-        .spot = spot,
-        .maturity = maturity,
-        .volatility = volatility,
-        .rate = rate,
-        .continuous_dividend_yield = div_yield,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = dividends
-    };
+    AmericanOptionParams params(
+        spot,
+        strike,
+        maturity,
+        rate,
+        div_yield,
+        OptionType::PUT,
+        volatility,
+        dividends
+    );
 
     auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
     if (!workspace_result) {

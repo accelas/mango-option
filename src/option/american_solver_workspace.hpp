@@ -40,7 +40,8 @@ namespace mango {
  * auto workspace = workspace_result.value();
  *
  * for (auto [sigma, rate] : parameter_grid) {
- *     AmericanOptionParams params{...};
+ *     AmericanOptionParams params(
+ *         spot, strike, maturity, rate, dividend_yield, option_type, sigma);
  *     auto solver_result = AmericanOptionSolver::create(params, workspace);
  *     if (solver_result) {
  *         auto result = solver_result.value().solve();

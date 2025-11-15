@@ -132,16 +132,15 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     NormalizedSurfaceView& surface_view)
 {
     // Create solver parameters (K=1, S=1 → x = ln(S/K) = 0 is ATM)
-    AmericanOptionParams params{
-        .strike = 1.0,  // Normalized strike
-        .spot = 1.0,    // Normalized spot (ATM at x=0)
-        .maturity = request.T_max,
-        .volatility = request.sigma,
-        .rate = request.rate,
-        .continuous_dividend_yield = request.dividend,
-        .option_type = request.option_type,
-        .discrete_dividends = {}  // Normalized solver requires no discrete dividends
-    };
+    AmericanOptionParams params;
+    params.spot = 1.0;    // Normalized spot (ATM at x=0)
+    params.strike = 1.0;  // Normalized strike
+    params.maturity = request.T_max;
+    params.rate = request.rate;
+    params.dividend_yield = request.dividend;
+    params.type = request.option_type;
+    params.volatility = request.sigma;
+    params.discrete_dividends = {};  // Normalized solver requires no discrete dividends
 
     // Create solver with workspace
     auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_);
