@@ -579,42 +579,6 @@ cc_test(
 )
 
 cc_test(
-    name = "cox_de_boor_profile_test",
-    srcs = ["cox_de_boor_profile_test.cc"],
-    deps = [
-        "//src/interpolation:bspline_fitter_4d",
-        "//src/interpolation:bspline_utils",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-    size = "small",
-)
-
-cc_test(
-    name = "bspline_runtime_breakdown_test",
-    srcs = ["bspline_runtime_breakdown_test.cc"],
-    deps = [
-        "//src/interpolation:bspline_fitter_4d",
-        "//src/interpolation:bspline_utils",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-    size = "small",
-)
-
-cc_test(
-    name = "bspline_instrumented_profile_test",
-    srcs = ["bspline_instrumented_profile_test.cc"],
-    deps = [
-        "//src/interpolation:bspline_fitter_4d",
-        "//src/interpolation:bspline_utils",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-    size = "small",
-)
-
-cc_test(
     name = "bspline_condition_number_stress_test",
     srcs = ["bspline_condition_number_stress_test.cc"],
     deps = [
