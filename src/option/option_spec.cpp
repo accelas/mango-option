@@ -1,5 +1,4 @@
 #include "src/option/option_spec.hpp"
-#include "src/option/american_option.hpp"
 #include <cmath>
 #include <algorithm>
 

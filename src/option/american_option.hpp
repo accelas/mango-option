@@ -11,6 +11,7 @@
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/option/option_spec.hpp"  // For OptionType enum
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -77,14 +78,6 @@ private:
     T half_sigma_sq_;    // σ²/2
     T drift_;            // r - d - σ²/2
     T discount_rate_;    // r
-};
-
-/**
- * Option type enumeration.
- */
-enum class OptionType {
-    CALL,
-    PUT
 };
 
 /**

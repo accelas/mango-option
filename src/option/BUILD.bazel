@@ -26,6 +26,7 @@ cc_library(
         "//src/support:parallel",
         "//src/pde/core:pde_solver",
         ":american_solver_workspace",
+        ":option_spec",
         "//src/pde/operators:operator_factory",
         "//src/support:error_types",
     ],
@@ -142,7 +143,6 @@ cc_library(
     srcs = ["option_spec.cpp"],
     hdrs = ["option_spec.hpp"],
     deps = [
-        ":american_option",  # For OptionType enum
         "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
