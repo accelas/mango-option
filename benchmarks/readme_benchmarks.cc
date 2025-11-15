@@ -144,17 +144,14 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     constexpr double rate = 0.05;
     constexpr double sigma_true = 0.20;
 
-    OptionSpec spec{
-        .spot = spot,
-        .strike = strike,
-        .maturity = maturity,
-        .rate = rate,
-        .dividend_yield = 0.0,
-        .type = OptionType::PUT
-    };
     IVQuery query{
-        .option = spec,
-        .market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)
+        spot,
+        strike,
+        maturity,
+        rate,
+        0.0,  // dividend_yield
+        OptionType::PUT,
+        analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)
     };
 
     auto run_once = [&]() {
@@ -295,15 +292,13 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     const size_t n_time = static_cast<size_t>(state.range(1));
 
     IVQuery query{
-        .option = OptionSpec{
-            .spot = 100.0,
-            .strike = 100.0,
-            .maturity = 1.0,
-            .rate = 0.05,
-            .dividend_yield = 0.0,
-            .type = OptionType::PUT
-        },
-        .market_price = 6.08
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        6.08    // market_price
     };
 
     IVConfig config;
