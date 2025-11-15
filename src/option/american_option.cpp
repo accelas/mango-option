@@ -10,7 +10,7 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/operators/operator_factory.hpp"
-#include "src/pde/operators/black_scholes_pde.hpp"
+// BlackScholesPDE now defined in american_option.hpp
 #include <algorithm>
 #include <span>
 #include <cmath>
@@ -176,7 +176,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     // 3. Create Black-Scholes operator in log-moneyness coordinates
     auto make_operator = [&]() {
-        auto pde = operators::BlackScholesPDE<double>(
+        auto pde = BlackScholesPDE<double>(
             params_.volatility,
             params_.rate,
             params_.continuous_dividend_yield);

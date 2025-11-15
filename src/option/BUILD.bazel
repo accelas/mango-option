@@ -25,10 +25,8 @@ cc_library(
     deps = [
         "//src/support:parallel",
         "//src/pde/core:pde_solver",
-        
         ":american_solver_workspace",
         "//src/pde/operators:operator_factory",
-        "//src/pde/operators:black_scholes_pde",
         "//src/support:error_types",
     ],
     copts = [
