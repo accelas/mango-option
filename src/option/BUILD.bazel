@@ -80,26 +80,14 @@ cc_library(
 )
 
 cc_library(
-    name = "iv_solver",
-    srcs = ["iv_solver.cpp"],
-    hdrs = ["iv_solver.hpp"],
+    name = "batch_iv_solver",
+    hdrs = ["batch_iv_solver.hpp"],
     deps = [
-        "//src/support:parallel",
-        "//src/math:root_finding",
-        ":american_option",
+        ":iv_solver_fdm",
         ":iv_types",
-        "//common:ivcalc_trace_hdr",
-        "//src/support:error_types",
+        ":option_spec",
     ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-fopenmp",  # Enable OpenMP for batch API parallelization
-        "-DHAVE_SYSTEMTAP_SDT",
-    ],
-    linkopts = ["-fopenmp"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 

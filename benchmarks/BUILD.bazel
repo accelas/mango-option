@@ -31,7 +31,6 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:american_solver_workspace",
-        "//src/option:iv_solver",
         "//src/option:iv_solver_fdm",
         "//src/option:option_spec",
         "//src/bspline:bspline_4d",
@@ -62,7 +61,7 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/option:american_option",
-        "//src/option:iv_solver",
+        "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
         "//src/option:normalized_chain_solver",
         "//src/bspline:bspline_4d",

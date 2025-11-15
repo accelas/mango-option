@@ -18,8 +18,6 @@
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/option/price_table_workspace.hpp"
-#include "src/option/iv_solver.hpp"
-#include "src/option/iv_solver_fdm.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>
@@ -531,20 +529,20 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
         });
     }
 
-    IVConfig config;
+    IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     config.grid_n_space = 101;
     config.grid_n_time = 1000;
 
+    IVSolverFDM solver(config);
     for (auto _ : state) {
         std::vector<IVResult> results;
         results.reserve(batch_size);
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            IVSolver solver(params, config);
-            results.push_back(solver.solve());
+            results.push_back(solver.solve(params));
         }
 
         benchmark::DoNotOptimize(results);
