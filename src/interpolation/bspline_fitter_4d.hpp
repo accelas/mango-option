@@ -639,6 +639,35 @@ struct BSplineFit4DSeparableResult {
     size_t failed_slices_axis3;         ///< Number of failed 1D fits along axis3
 };
 
+/// Workspace for B-spline 4D fitting to reduce allocations
+///
+/// Pre-allocates reusable buffers for intermediate results.
+/// Buffers are sized for the largest axis and reused across all slices.
+struct BSplineFitter4DWorkspace {
+    std::vector<double> slice_buffer;     ///< Reusable buffer for slice extraction
+    std::vector<double> coeffs_buffer;    ///< Reusable buffer for fitted coefficients
+
+    /// Create workspace sized for maximum axis dimension
+    ///
+    /// @param max_n Largest dimension across all 4 axes
+    explicit BSplineFitter4DWorkspace(size_t max_n)
+        : slice_buffer(max_n)
+        , coeffs_buffer(max_n)
+    {}
+
+    /// Get slice buffer as span (subspan for smaller axes)
+    std::span<double> get_slice_buffer(size_t n) {
+        assert(n <= slice_buffer.size());
+        return std::span{slice_buffer.data(), n};
+    }
+
+    /// Get coefficients buffer as span
+    std::span<double> get_coeffs_buffer(size_t n) {
+        assert(n <= coeffs_buffer.size());
+        return std::span{coeffs_buffer.data(), n};
+    }
+};
+
 /// Separable 4D B-spline fitter
 ///
 /// Exploits tensor-product structure to avoid solving a massive dense system.
