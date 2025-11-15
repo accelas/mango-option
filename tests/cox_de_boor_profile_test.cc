@@ -62,73 +62,61 @@ TEST_F(CoxDeBoorProfileTest, MeasureCoxDeBoorOverhead) {
     std::cout << "\n=== Cox-de Boor Profiling ===\n";
     std::cout << "Evaluations: " << NUM_EVALUATIONS << "\n\n";
 
-    // Test 1: SIMD version
-    {
-        double total_simd_us = 0.0;
-        alignas(32) double N[4];
+    // Test SIMD and scalar in same loop to avoid cache effects
+    double total_simd_us = 0.0;
+    double total_scalar_us = 0.0;
 
-        for (int run = 0; run < 5; ++run) {
-            auto start = std::chrono::high_resolution_clock::now();
+    alignas(32) double N_simd[4];
+    double N_scalar[4];
 
-            for (int i = 0; i < NUM_EVALUATIONS; ++i) {
-                double x = 0.5 + (i % 100) * 0.001;  // Vary evaluation point
-                cubic_basis_nonuniform_simd(knots, 5, x, N);
-            }
-
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            total_simd_us += duration;
+    for (int run = 0; run < 5; ++run) {
+        // SIMD timing
+        auto start_simd = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < NUM_EVALUATIONS; ++i) {
+            double x = 0.5 + (i % 100) * 0.001;
+            cubic_basis_nonuniform_simd(knots, 5, x, N_simd);
         }
+        auto end_simd = std::chrono::high_resolution_clock::now();
+        total_simd_us += std::chrono::duration_cast<std::chrono::microseconds>(
+            end_simd - start_simd).count();
 
-        double avg_simd_us = total_simd_us / 5.0;
-        double per_eval_ns = (avg_simd_us * 1000.0) / NUM_EVALUATIONS;
-
-        std::cout << "SIMD Cox-de Boor:\n";
-        std::cout << "  Total time (5 runs): " << avg_simd_us << " µs\n";
-        std::cout << "  Per evaluation: " << per_eval_ns << " ns\n\n";
+        // Scalar timing
+        auto start_scalar = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < NUM_EVALUATIONS; ++i) {
+            double x = 0.5 + (i % 100) * 0.001;
+            cubic_basis_nonuniform(knots, 5, x, N_scalar);
+        }
+        auto end_scalar = std::chrono::high_resolution_clock::now();
+        total_scalar_us += std::chrono::duration_cast<std::chrono::microseconds>(
+            end_scalar - start_scalar).count();
     }
 
-    // Test 2: Scalar version
-    {
-        double total_scalar_us = 0.0;
-        double N[4];
+    double avg_simd_us = total_simd_us / 5.0;
+    double avg_scalar_us = total_scalar_us / 5.0;
 
-        for (int run = 0; run < 5; ++run) {
-            auto start = std::chrono::high_resolution_clock::now();
+    double simd_per_eval_ns = (avg_simd_us * 1000.0) / NUM_EVALUATIONS;
+    double scalar_per_eval_ns = (avg_scalar_us * 1000.0) / NUM_EVALUATIONS;
+    double speedup = avg_scalar_us / avg_simd_us;
 
-            for (int i = 0; i < NUM_EVALUATIONS; ++i) {
-                double x = 0.5 + (i % 100) * 0.001;
-                cubic_basis_nonuniform(knots, 5, x, N);
-            }
+    std::cout << "SIMD Cox-de Boor:\n";
+    std::cout << "  Total time (5 runs): " << avg_simd_us << " µs\n";
+    std::cout << "  Per evaluation: " << simd_per_eval_ns << " ns\n\n";
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            total_scalar_us += duration;
-        }
+    std::cout << "Scalar Cox-de Boor:\n";
+    std::cout << "  Total time (5 runs): " << avg_scalar_us << " µs\n";
+    std::cout << "  Per evaluation: " << scalar_per_eval_ns << " ns\n\n";
 
-        double avg_scalar_us = total_scalar_us / 5.0;
-        double per_eval_ns = (avg_scalar_us * 1000.0) / NUM_EVALUATIONS;
+    std::cout << "SIMD Speedup: " << speedup << "×\n\n";
 
-        std::cout << "Scalar Cox-de Boor:\n";
-        std::cout << "  Total time (5 runs): " << avg_scalar_us << " µs\n";
-        std::cout << "  Per evaluation: " << per_eval_ns << " ns\n\n";
+    // Machine-checkable assertions
+    EXPECT_GT(speedup, 2.0) << "SIMD should be at least 2× faster than scalar";
+    EXPECT_LT(simd_per_eval_ns, 100.0) << "SIMD should be < 100ns per evaluation";
 
-        // Calculate actual speedup
-        double total_simd_us = 0.0;
-        alignas(32) double N_simd[4];
-        for (int run = 0; run < 5; ++run) {
-            auto start = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < NUM_EVALUATIONS; ++i) {
-                double x = 0.5 + (i % 100) * 0.001;
-                cubic_basis_nonuniform_simd(knots, 5, x, N_simd);
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            total_simd_us += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-        }
-        double avg_simd_us_rerun = total_simd_us / 5.0;
-
-        double speedup = avg_scalar_us / avg_simd_us_rerun;
-        std::cout << "SIMD Speedup: " << speedup << "×\n\n";
+    // Verify SIMD and scalar produce same results
+    cubic_basis_nonuniform_simd(knots, 5, 0.5, N_simd);
+    cubic_basis_nonuniform(knots, 5, 0.5, N_scalar);
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_NEAR(N_simd[i], N_scalar[i], 1e-14);
     }
 }
 

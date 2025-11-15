@@ -601,3 +601,15 @@ cc_test(
     copts = ["-std=c++23"],
     size = "small",
 )
+
+cc_test(
+    name = "bspline_instrumented_profile_test",
+    srcs = ["bspline_instrumented_profile_test.cc"],
+    deps = [
+        "//src/interpolation:bspline_fitter_4d",
+        "//src/interpolation:bspline_utils",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    size = "small",
+)
