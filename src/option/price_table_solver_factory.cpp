@@ -217,7 +217,7 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
 
     // Solve batch with snapshot registration
     auto results = BatchAmericanOptionSolver::solve_batch(
-        batch_params, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
+        std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
         [&](size_t idx, AmericanOptionSolver& solver) {
             for (size_t j = 0; j < Nt; ++j) {
                 solver.register_snapshot(step_indices[j], j, &collectors[idx]);
