@@ -10,7 +10,7 @@ Fixed two critical issues identified during code review of the B-spline banded s
 
 1. **Condition Number Bottleneck (Performance Bug):** The `estimate_condition_number()` function was calling `solve_banded_system()` n times, performing n separate LU factorizations instead of reusing a single factorization.
 
-2. **No Zero-Pivot Detection (Correctness Bug):** The `banded_lu_solve()` function performed division by diagonal pivots without checking for zero or near-zero values, leading to silent NaN/Inf corruption.
+2. **No Zero-Pivot Detection (Correctness Bug):** The original custom `banded_lu_solve()` divided by diagonal pivots without checking for zero or near-zero values, leading to silent NaN/Inf corruption. (See “Update” below for the LAPACKE replacement.)
 
 ## Impact
 
@@ -35,26 +35,23 @@ Fixed two critical issues identified during code review of the B-spline banded s
 - Measured timing: 25 us for n=50 (includes factorization + 50 substitutions)
 
 **Correctness:**
-- Pivot threshold check: |pivot| ≥ 1e-14 × ||A||₁
+- Pivot threshold check: |pivot| ≥ 1e-14 × ||A||₁ (original stop-gap)
 - Clear error messages for singular/ill-conditioned matrices
 - Proper error propagation via `expected<void, string>`
 - Grid validation catches duplicate points at construction time
+- **Update (LAPACKE, 2025‑01‑16):** We now delegate factorization/solve to LAPACK’s banded routines (`dgbtrf`/`dgbtrs`), which provide full partial pivoting. The earlier ad‑hoc threshold logic is superseded by LAPACKE’s pivot handling, while the higher-level `expected` plumbing remains unchanged.
 
 ## Implementation Details
 
 ### New Functions
 
 **1. `banded_lu_factorize(BandedMatrixStorage& A) -> expected<void, string>`**
-- In-place LU factorization with pivot detection
-- Computes matrix 1-norm for relative threshold
-- Returns error if pivot < 1e-14 × ||A||₁
-- O(n) complexity for 4-diagonal band
+- Original implementation: custom in-place LU with heuristic pivot check
+- **Current implementation:** calls `LAPACKE_dgbtrf` with automatic partial pivoting; stores LAPACK band buffer + pivot indices inside `BandedMatrixStorage`
 
 **2. `banded_lu_substitution(const BandedMatrixStorage& LU, b, x)`**
-- Forward/back substitution using pre-factored matrix
-- Does NOT modify LU factors (const reference)
-- O(n) complexity
-- ~10× faster than re-factorizing
+- Original implementation: manual forward/back substitution
+- **Current implementation:** wraps `LAPACKE_dgbtrs`, reusing cached LU factors and pivot indices
 
 **3. Updated `banded_lu_solve(BandedMatrixStorage& A, b, x)` (legacy)****
 - Now calls `banded_lu_factorize()` + `banded_lu_substitution()`

@@ -38,23 +38,12 @@ class BandedMatrixStorage {
 
 **Memory savings**: 4n doubles vs n² doubles (25× reduction for n=100)
 
-### 2. Banded LU Decomposition
+### 2. Banded LU Decomposition (now via LAPACKE)
 
-Implemented in-place Doolittle LU decomposition exploiting banded structure:
+- Initial implementation used a handwritten Doolittle LU tailored to the four-diagonal structure.
+- **Update (2025‑01‑16):** We now call LAPACK’s banded routines (`dgbtrf`/`dgbtrs`) through LAPACKE. `BandedMatrixStorage` maintains the LAPACK band buffer plus pivot indices so we get partial pivoting, better numerical robustness, and leverage the optimized Fortran kernels.
 
-```cpp
-void banded_lu_solve(
-    BandedMatrixStorage& A,  // Modified in-place
-    std::span<const double> b,
-    std::span<double> x)
-{
-    // Phase 1: LU decomposition (O(n) for fixed bandwidth)
-    // Phase 2: Forward substitution (Ly = b)
-    // Phase 3: Back substitution (Ux = y)
-}
-```
-
-**Complexity**: O(n) time for fixed bandwidth k=4 (vs O(n³) for dense)
+**Complexity**: O(n) time for fixed bandwidth k=4 (vs O(n³) for dense), with LAPACKE providing the factor/solve kernels.
 
 ### 3. Integration into Collocation Solver
 
@@ -102,7 +91,8 @@ For small grids (< 500 points), overhead dominates and speedup is minimal. For p
 
 ### Files Modified
 
-- `src/interpolation/bspline_fitter_4d.hpp`: Added `BandedMatrixStorage`, `banded_lu_solve()`, modified `BSplineCollocation1D`
+- `src/interpolation/bspline_fitter_4d.hpp`: Added `BandedMatrixStorage`, LAPACKE-backed banded solver, modified `BSplineCollocation1D`
+- `src/interpolation/BUILD.bazel`: Link against `lapacke`, `lapack`, `blas`
 
 ### Files Added
 
@@ -119,9 +109,13 @@ For small grids (< 500 points), overhead dominates and speedup is minimal. For p
 ### Numerical Validation
 
 All tests verify:
-- **Accuracy**: Banded solver produces identical results to dense solver (1e-14 tolerance)
+- **Accuracy**: LAPACKE-based solver produces identical results to dense solver (1e-14 tolerance)
 - **Fitting residuals**: < 1e-9 on all axes (same as dense solver)
 - **Condition number**: Stable across all grid sizes
+
+### Dependency Update
+
+- CI and the developer Docker image now install `liblapacke-dev` so Bazel targets linking `bspline_fitter_4d` resolve LAPACK/BLAS symbols automatically.
 
 ## Testing Methodology
 
