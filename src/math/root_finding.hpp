@@ -53,14 +53,26 @@ struct RootFindingResult {
     std::optional<double> root;
 };
 
-/// Concept for Brent objective functions
+/// Concept for objective functions (scalar functions f: R -> R)
 ///
-/// Brent's method works with any callable that takes a double and returns a double.
+/// Works with any callable that takes a double and returns a double.
 /// This includes lambdas, function objects, function pointers, and std::function.
 template<typename F>
-concept BrentObjective = requires(F f, double x) {
+concept ObjectiveFunction = requires(F f, double x) {
     { f(x) } -> std::convertible_to<double>;
 };
+
+/// Concept for derivative functions (scalar functions df: R -> R)
+///
+/// Same signature as ObjectiveFunction but semantically represents a derivative.
+template<typename DF>
+concept DerivativeFunction = requires(DF df, double x) {
+    { df(x) } -> std::convertible_to<double>;
+};
+
+/// Backward compatibility alias
+template<typename F>
+concept BrentObjective = ObjectiveFunction<F>;
 
 /// Find root using Brent's method
 ///
@@ -256,6 +268,242 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
         .failure_reason = "Max iterations reached",
         .root = b
     };
+}
+
+/// Find root using bounded Newton-Raphson method
+///
+/// Iteratively refines an initial guess using Newton's method with bounds enforcement.
+/// Uses the update rule: x_{n+1} = x_n - f(x_n)/f'(x_n), clamped to [x_min, x_max].
+///
+/// **Properties:**
+/// - Quadratic convergence when close to root (if derivative is accurate)
+/// - Requires derivative information (analytic or finite-difference)
+/// - Bounds prevent divergence and ensure stability
+/// - Detects flat regions (small derivative) and bounds hits
+///
+/// **Use cases:**
+/// - Implied volatility with B-spline price surface (fast derivative via chain rule)
+/// - Any bounded optimization where derivative is cheap to compute
+/// - Problems where initial guess is good but needs refinement
+///
+/// **Advantages over Brent:**
+/// - Faster convergence (quadratic vs superlinear) near root
+/// - Better when derivative is cheap (e.g., automatic differentiation)
+/// - No bracketing required, just initial guess and bounds
+///
+/// **Disadvantages:**
+/// - Requires derivative (Brent doesn't)
+/// - Can fail if derivative is zero or very small
+/// - Less robust globally (Brent guarantees convergence if bracketed)
+///
+/// @tparam F Objective function type satisfying ObjectiveFunction concept
+/// @tparam DF Derivative function type satisfying DerivativeFunction concept
+/// @param f Function to find root of (finds x where f(x) = 0)
+/// @param df Derivative of f (df/dx)
+/// @param x0 Initial guess
+/// @param x_min Lower bound (x will stay >= x_min)
+/// @param x_max Upper bound (x will stay <= x_max)
+/// @param config Root-finding configuration (uses max_iter, tolerance)
+/// @return Result with root (if converged), final derivative, and convergence status
+///
+/// **Example:**
+/// ```cpp
+/// auto f = [](double x) { return x*x - 2.0; };  // Find sqrt(2)
+/// auto df = [](double x) { return 2.0*x; };     // Derivative
+/// auto result = newton_find_root(f, df, 1.0, 0.0, 10.0, config);
+/// // result.root.value() ≈ 1.414213...
+/// ```
+template<ObjectiveFunction F, DerivativeFunction DF>
+RootFindingResult newton_find_root(F&& f, DF&& df,
+                                   double x0,
+                                   double x_min, double x_max,
+                                   const RootFindingConfig& config) {
+    // Validate bounds
+    if (x_min >= x_max) {
+        return RootFindingResult{
+            .converged = false,
+            .iterations = 0,
+            .final_error = std::numeric_limits<double>::quiet_NaN(),
+            .failure_reason = "Invalid bounds: x_min must be < x_max",
+            .root = std::nullopt
+        };
+    }
+
+    // Clamp initial guess to bounds
+    double x = std::clamp(x0, x_min, x_max);
+
+    for (size_t iter = 0; iter < config.max_iter; ++iter) {
+        // Evaluate function and derivative at current point
+        const double fx = f(x);
+        const double dfx = df(x);
+
+        // Check for non-finite values
+        if (!std::isfinite(fx) || !std::isfinite(dfx)) {
+            return RootFindingResult{
+                .converged = false,
+                .iterations = iter + 1,
+                .final_error = std::numeric_limits<double>::quiet_NaN(),
+                .failure_reason = "Function or derivative returned non-finite value",
+                .root = x
+            };
+        }
+
+        // Compute absolute error
+        const double error_abs = std::abs(fx);
+
+        // Check convergence
+        if (error_abs < config.tolerance) {
+            return RootFindingResult{
+                .converged = true,
+                .iterations = iter + 1,
+                .final_error = error_abs,
+                .failure_reason = std::nullopt,
+                .root = x
+            };
+        }
+
+        // Check for numerical issues (flat derivative)
+        if (std::abs(dfx) < 1e-10) {
+            return RootFindingResult{
+                .converged = false,
+                .iterations = iter + 1,
+                .final_error = error_abs,
+                .failure_reason = "Derivative too small (flat region)",
+                .root = x
+            };
+        }
+
+        // Newton step: x_{n+1} = x_n - f(x_n)/f'(x_n)
+        const double x_new = x - fx / dfx;
+
+        // Enforce bounds
+        const double x_clamped = std::clamp(x_new, x_min, x_max);
+
+        // Check if bounds are hit repeatedly (may indicate convergence issues)
+        if (x_new < x_min || x_new > x_max) {
+            if (iter > 10) {
+                return RootFindingResult{
+                    .converged = false,
+                    .iterations = iter + 1,
+                    .final_error = error_abs,
+                    .failure_reason = "Hit bounds without convergence",
+                    .root = x_clamped
+                };
+            }
+        }
+
+        x = x_clamped;
+    }
+
+    // Max iterations reached
+    const double fx_final = f(x);
+    return RootFindingResult{
+        .converged = false,
+        .iterations = config.max_iter,
+        .final_error = std::abs(fx_final),
+        .failure_reason = "Maximum iterations reached without convergence",
+        .root = x
+    };
+}
+
+/// Generic root-finding API that dispatches to appropriate method based on available information
+///
+/// This provides a unified interface for root-finding that automatically selects:
+/// - Newton-Raphson if derivative is provided (quadratic convergence)
+/// - Brent's method if only objective function is provided (robust, derivative-free)
+///
+/// **Design Pattern: Concept-based Overloading**
+/// Uses C++20 concepts to select the optimal algorithm at compile-time based on
+/// what information the caller provides.
+///
+/// **Usage Examples:**
+///
+/// **1. Derivative-free (uses Brent automatically):**
+/// ```cpp
+/// auto f = [](double x) { return x*x - 2.0; };
+/// auto result = find_root(f, 0.0, 2.0, config);  // Calls brent_find_root
+/// ```
+///
+/// **2. With derivative (uses Newton automatically):**
+/// ```cpp
+/// auto f = [](double x) { return x*x - 2.0; };
+/// auto df = [](double x) { return 2.0*x; };
+/// auto result = find_root(f, df, 1.0, 0.0, 2.0, config);  // Calls newton_find_root
+/// ```
+///
+/// **3. Bracketed Brent (explicit):**
+/// ```cpp
+/// auto result = find_root_bracketed(f, 0.0, 2.0, config);  // Forces Brent
+/// ```
+///
+/// **4. Bounded Newton (explicit):**
+/// ```cpp
+/// auto result = find_root_bounded(f, df, 1.0, 0.0, 2.0, config);  // Forces Newton
+/// ```
+
+/// Find root using Brent's method (bracketed, derivative-free)
+///
+/// **Signature:** find_root(f, a, b, config)
+/// - Requires: f(a) and f(b) have opposite signs
+/// - Uses: Brent's method (robust, superlinear convergence)
+/// - Best for: Unknown derivative, wide bracket
+///
+/// @tparam F Function type satisfying ObjectiveFunction concept
+/// @param f Objective function to find root of
+/// @param a Left bracket
+/// @param b Right bracket
+/// @param config Root-finding configuration
+/// @return RootFindingResult with root and convergence status
+template<ObjectiveFunction F>
+RootFindingResult find_root(F&& f, double a, double b,
+                            const RootFindingConfig& config) {
+    return brent_find_root(std::forward<F>(f), a, b, config);
+}
+
+/// Find root using Newton-Raphson (bounded, with derivative)
+///
+/// **Signature:** find_root(f, df, x0, x_min, x_max, config)
+/// - Requires: Derivative df available
+/// - Uses: Newton-Raphson (quadratic convergence near root)
+/// - Best for: Good initial guess, cheap derivative
+///
+/// @tparam F Objective function type satisfying ObjectiveFunction concept
+/// @tparam DF Derivative function type satisfying DerivativeFunction concept
+/// @param f Objective function to find root of
+/// @param df Derivative of objective function
+/// @param x0 Initial guess
+/// @param x_min Lower bound
+/// @param x_max Upper bound
+/// @param config Root-finding configuration
+/// @return RootFindingResult with root and convergence status
+template<ObjectiveFunction F, DerivativeFunction DF>
+RootFindingResult find_root(F&& f, DF&& df, double x0,
+                            double x_min, double x_max,
+                            const RootFindingConfig& config) {
+    return newton_find_root(std::forward<F>(f), std::forward<DF>(df),
+                           x0, x_min, x_max, config);
+}
+
+/// Explicit Brent's method call (for clarity when both overloads could apply)
+///
+/// Same as find_root(f, a, b, config) but name makes intention explicit.
+/// Use when you want to be clear that Brent is being used.
+template<ObjectiveFunction F>
+RootFindingResult find_root_bracketed(F&& f, double a, double b,
+                                      const RootFindingConfig& config) {
+    return brent_find_root(std::forward<F>(f), a, b, config);
+}
+
+/// Explicit Newton-Raphson call (for clarity when both overloads could apply)
+///
+/// Same as find_root(f, df, x0, x_min, x_max, config) but name makes intention explicit.
+/// Use when you want to be clear that Newton is being used.
+template<ObjectiveFunction F, DerivativeFunction DF>
+RootFindingResult find_root_bounded(F&& f, DF&& df, double x0,
+                                    double x_min, double x_max,
+                                    const RootFindingConfig& config) {
+    return newton_find_root(std::forward<F>(f), std::forward<DF>(df),
+                           x0, x_min, x_max, config);
 }
 
 }  // namespace mango
