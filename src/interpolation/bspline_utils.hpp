@@ -309,11 +309,9 @@ inline simd4d cubic_basis_degree0_simd(
     auto in_interval = (t_left_vec <= x_vec) && (x_vec < t_right_vec);
 
     // Return 1.0 if in interval, 0.0 otherwise
-    // Use element-wise selection: mask ? true_val : false_val
-    simd4d result;
-    for (size_t lane = 0; lane < 4; ++lane) {
-        result[lane] = in_interval[lane] ? 1.0 : 0.0;
-    }
+    // Use vectorized blend: select true_val for mask, else false_val
+    simd4d result(0.0);
+    stdx::where(in_interval, result) = simd4d(1.0);
     return result;
 }
 
@@ -401,26 +399,22 @@ inline void cubic_basis_nonuniform_simd(
         auto left_valid = denom_left_vec != simd4d(0.0);
         auto right_valid = denom_right_vec != simd4d(0.0);
 
-        // Compute next degree basis functions
-        // N[k] = left_term[k] + right_term[k]
-        // where right_term[k] uses N_curr[k-1] (shifted by 1 lane)
-        simd4d N_next;
-        for (size_t lane = 0; lane < 4; ++lane) {
-            double left = left_valid[lane] ?
-                (left_num[lane] / denom_left_vec[lane]) * N_curr[lane] : 0.0;
+        // Compute left term: (x - t[idx]) / (t[idx+p] - t[idx]) * N_curr[k]
+        simd4d left_term(0.0);
+        stdx::where(left_valid, left_term) = (left_num / denom_left_vec) * N_curr;
 
-            // Right term uses N_curr[k-1], which is lane-1
-            // For lane 0, there is no k-1, so right term is 0
-            double right = 0.0;
-            if (lane > 0 && right_valid[lane]) {
-                right = (right_num[lane] / denom_right_vec[lane]) * N_curr[lane - 1];
-            }
+        // Shift N_curr by one lane for right term: N_curr[k-1]
+        // Lane 0 gets 0.0 (no k-1), lanes 1-3 get N_curr[0-2]
+        std::array<double, 4> shifted{0.0, N_curr[0], N_curr[1], N_curr[2]};
+        simd4d N_curr_shifted;
+        N_curr_shifted.copy_from(shifted.data(), stdx::element_aligned);
 
-            N_next[lane] = left + right;
-        }
+        // Compute right term: (t[idx+p+1] - x) / (t[idx+p+1] - t[idx+1]) * N_curr[k-1]
+        simd4d right_term(0.0);
+        stdx::where(right_valid, right_term) = (right_num / denom_right_vec) * N_curr_shifted;
 
-        // Update for next iteration
-        N_curr = N_next;
+        // Combine left and right terms
+        N_curr = left_term + right_term;
     }
 
     // Store result
