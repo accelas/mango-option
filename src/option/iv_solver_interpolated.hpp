@@ -47,7 +47,8 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_types.hpp"
 #include "src/interpolation/bspline_4d.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -79,7 +80,7 @@ public:
     /// @param surface Pre-computed price table surface
     /// @param config Solver configuration
     /// @return IV solver or error message
-    static expected<IVSolverInterpolated, std::string> create(
+    static std::expected<IVSolverInterpolated, std::string> create(
         std::shared_ptr<const BSpline4D> spline,
         double K_ref,
         std::pair<double, double> m_range,
@@ -89,7 +90,7 @@ public:
         const IVSolverInterpolatedConfig& config = {});
 
     /// Convenience factory that derives metadata from PriceTableSurface
-    static expected<IVSolverInterpolated, std::string> create(
+    static std::expected<IVSolverInterpolated, std::string> create(
         const PriceTableSurface& surface,
         const IVSolverInterpolatedConfig& config = {});
 

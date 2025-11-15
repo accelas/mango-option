@@ -3,9 +3,27 @@
 #include <string>
 #include <vector>
 #include <optional>
-#include "src/support/expected.hpp"
+#include <variant>
+#include <expected>
 
 namespace mango {
+
+/// High-level solver error categories surfaced through expected results
+enum class SolverErrorCode {
+    Stage1ConvergenceFailure,
+    Stage2ConvergenceFailure,
+    LinearSolveFailure,
+    InvalidConfiguration,
+    InvalidState,
+    Unknown
+};
+
+/// Detailed solver error passed through expected failure path
+struct SolverError {
+    SolverErrorCode code{SolverErrorCode::Unknown};
+    std::string message;
+    size_t iterations{0};
+};
 
 /// Error codes for parameter validation failures
 enum class ValidationErrorCode {

@@ -9,7 +9,8 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_types.hpp"
 #include "src/pde/core/root_finding.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <span>
 #include <optional>
 
@@ -122,7 +123,7 @@ private:
 
     /// Validate input parameters
     /// @return expected success or validation error message
-    expected<void, std::string> validate_query(const IVQuery& query) const;
+    std::expected<void, std::string> validate_query(const IVQuery& query) const;
 
     /// Estimate upper bound for volatility search using intrinsic value approximation
     /// @return Upper bound estimate (typically 2.0-3.0 for reasonable markets)

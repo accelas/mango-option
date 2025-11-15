@@ -2,7 +2,7 @@ cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
     deps = [
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",
@@ -122,7 +122,7 @@ cc_library(
         ":root_finding",
         "//src/option:snapshot",
         ":jacobian_view",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],

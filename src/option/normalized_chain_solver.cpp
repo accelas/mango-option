@@ -11,47 +11,47 @@
 
 namespace mango {
 
-expected<void, std::string> NormalizedSolveRequest::validate() const {
+std::expected<void, std::string> NormalizedSolveRequest::validate() const {
     if (sigma <= 0.0) {
-        return unexpected("Volatility must be positive");
+        return std::unexpected("Volatility must be positive");
     }
     // Note: rate can be negative (EUR, JPY markets)
     if (dividend < 0.0) {
-        return unexpected("Dividend yield must be non-negative");
+        return std::unexpected("Dividend yield must be non-negative");
     }
     if (x_min >= x_max) {
-        return unexpected("x_min must be < x_max");
+        return std::unexpected("x_min must be < x_max");
     }
     if (n_space < 3) {
-        return unexpected("n_space must be ≥ 3");
+        return std::unexpected("n_space must be ≥ 3");
     }
     if (n_time < 1) {
-        return unexpected("n_time must be ≥ 1");
+        return std::unexpected("n_time must be ≥ 1");
     }
     if (T_max <= 0.0) {
-        return unexpected("T_max must be positive");
+        return std::unexpected("T_max must be positive");
     }
     if (tau_snapshots.empty()) {
-        return unexpected("tau_snapshots must be non-empty");
+        return std::unexpected("tau_snapshots must be non-empty");
     }
 
     // Validate snapshot times
     for (double tau : tau_snapshots) {
         if (tau <= 0.0 || tau > T_max) {
-            return unexpected("Snapshot times must be in (0, T_max]");
+            return std::unexpected("Snapshot times must be in (0, T_max]");
         }
     }
 
     return {};
 }
 
-expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
+std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
     const NormalizedSolveRequest& request)
 {
     // Validate request
     auto validation = request.validate();
     if (!validation) {
-        return unexpected(validation.error());
+        return std::unexpected(validation.error());
     }
 
     NormalizedWorkspace workspace;
@@ -60,7 +60,7 @@ expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
     auto pde_workspace = AmericanSolverWorkspace::create(
         request.x_min, request.x_max, request.n_space, request.n_time);
     if (!pde_workspace) {
-        return unexpected("Failed to create PDE workspace: " + pde_workspace.error());
+        return std::unexpected("Failed to create PDE workspace: " + pde_workspace.error());
     }
     workspace.pde_workspace_ = std::move(pde_workspace.value());
 
@@ -126,7 +126,7 @@ double NormalizedSurfaceView::interpolate(double x, double tau) const {
            fx * ft * v11;
 }
 
-expected<void, SolverError> NormalizedChainSolver::solve(
+std::expected<void, SolverError> NormalizedChainSolver::solve(
     const NormalizedSolveRequest& request,
     NormalizedWorkspace& workspace,
     NormalizedSurfaceView& surface_view)
@@ -146,7 +146,7 @@ expected<void, SolverError> NormalizedChainSolver::solve(
     // Create solver with workspace
     auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_);
     if (!solver_result) {
-        return unexpected(SolverError{
+        return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
             .message = "Failed to create solver: " + solver_result.error(),
             .iterations = 0
@@ -194,7 +194,7 @@ expected<void, SolverError> NormalizedChainSolver::solve(
     // Solve PDE
     auto solve_result = solver.solve();
     if (!solve_result) {
-        return unexpected(solve_result.error());
+        return std::unexpected(solve_result.error());
     }
 
     // Extract values from collector
@@ -203,7 +203,7 @@ expected<void, SolverError> NormalizedChainSolver::solve(
     size_t Ntau = workspace.tau_grid_.size();
 
     if (prices_2d.size() != Nx * Ntau) {
-        return unexpected(SolverError{
+        return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidState,
             .message = "Snapshot collector returned wrong size",
             .iterations = 0
@@ -219,14 +219,14 @@ expected<void, SolverError> NormalizedChainSolver::solve(
     return {};
 }
 
-expected<void, std::string> NormalizedChainSolver::check_eligibility(
+std::expected<void, std::string> NormalizedChainSolver::check_eligibility(
     const NormalizedSolveRequest& request,
     std::span<const double> moneyness_grid)
 {
     // Check grid spacing
     double dx = (request.x_max - request.x_min) / (request.n_space - 1);
     if (dx > EligibilityLimits::MAX_DX) {
-        return unexpected(
+        return std::unexpected(
             "Grid spacing " + std::to_string(dx) +
             " exceeds limit " + std::to_string(EligibilityLimits::MAX_DX) +
             " (Von Neumann stability requirement)");
@@ -235,7 +235,7 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     // Check domain width
     double width = request.x_max - request.x_min;
     if (width > EligibilityLimits::MAX_WIDTH) {
-        return unexpected(
+        return std::unexpected(
             "Domain width " + std::to_string(width) +
             " exceeds limit " + std::to_string(EligibilityLimits::MAX_WIDTH) +
             " (convergence degrades beyond 5.8 log-units)");
@@ -245,7 +245,7 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     // Moneyness convention: m = S/K, so x = ln(S/K) = ln(m)
     // x_min_data = ln(m_min), x_max_data = ln(m_max)
     if (moneyness_grid.empty()) {
-        return unexpected("Moneyness grid is empty");
+        return std::unexpected("Moneyness grid is empty");
     }
 
     auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_grid);
@@ -253,7 +253,7 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     double m_max = *m_max_it;
 
     if (m_min <= 0.0 || m_max <= 0.0) {
-        return unexpected("Moneyness values must be positive (m = S/K > 0)");
+        return std::unexpected("Moneyness values must be positive (m = S/K > 0)");
     }
 
     double x_min_data = std::log(m_min);
@@ -264,14 +264,14 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     double min_margin = EligibilityLimits::min_margin(dx);
 
     if (margin_left < min_margin) {
-        return unexpected(
+        return std::unexpected(
             "Left margin " + std::to_string(margin_left) +
             " < required " + std::to_string(min_margin) +
             " (need ≥6 ghost cells to avoid boundary reflection)");
     }
 
     if (margin_right < min_margin) {
-        return unexpected(
+        return std::unexpected(
             "Right margin " + std::to_string(margin_right) +
             " < required " + std::to_string(min_margin) +
             " (need ≥6 ghost cells to avoid boundary reflection)");
@@ -281,7 +281,7 @@ expected<void, std::string> NormalizedChainSolver::check_eligibility(
     double ratio = m_max / m_min;
     double max_ratio_limit = EligibilityLimits::max_ratio(dx);
     if (ratio > max_ratio_limit) {
-        return unexpected(
+        return std::unexpected(
             "Moneyness ratio " + std::to_string(ratio) +
             " exceeds limit " + std::to_string(max_ratio_limit) +
             " (derived from width=" + std::to_string(EligibilityLimits::MAX_WIDTH) +

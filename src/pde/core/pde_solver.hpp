@@ -11,7 +11,8 @@
 #include "src/pde/core/newton_workspace.hpp"
 #include "src/option/snapshot.hpp"
 #include "src/pde/core/jacobian_view.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <memory>
 #include <span>
 #include <vector>
@@ -126,7 +127,7 @@ public:
     /// Solve PDE from t_start to t_end
     ///
     /// @return expected success or solver error diagnostic
-    expected<void, SolverError> solve() {
+    std::expected<void, SolverError> solve() {
         double t = time_.t_start();
         const double dt = time_.dt();
 
@@ -140,14 +141,14 @@ public:
             double t_stage1 = t + config_.gamma * dt;
             auto stage1_ok = solve_stage1(t, t_stage1, dt);
             if (!stage1_ok) {
-                return unexpected(stage1_ok.error());
+                return std::unexpected(stage1_ok.error());
             }
 
             // Stage 2: BDF2 from t_n to t_n+1
             double t_next = t + dt;
             auto stage2_ok = solve_stage2(t_stage1, t_next, dt);
             if (!stage2_ok) {
-                return unexpected(stage2_ok.error());
+                return std::unexpected(stage2_ok.error());
             }
 
             // Update time
@@ -401,7 +402,7 @@ private:
     /// u^{n+γ} = u^n + (γ·dt/2) · [L(u^n) + L(u^{n+γ})]
     ///
     /// Solved via Newton-Raphson iteration
-    expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt) {
+    std::expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt) {
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
@@ -432,7 +433,7 @@ private:
                 error.code = SolverErrorCode::LinearSolveFailure;
             }
 
-            return unexpected(error);
+            return std::unexpected(error);
         }
 
         return {};
@@ -444,7 +445,7 @@ private:
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via Newton-Raphson iteration
-    expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
+    std::expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
         const double two_minus_gamma = 2.0 - gamma;
@@ -480,7 +481,7 @@ private:
                 error.code = SolverErrorCode::LinearSolveFailure;
             }
 
-            return unexpected(error);
+            return std::unexpected(error);
         }
 
         return {};

@@ -2,7 +2,8 @@
 
 #include "src/pde/core/root_finding.hpp"
 #include "common/ivcalc_trace.h"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include "src/option/iv_types.hpp"
 #include <optional>
@@ -125,7 +126,7 @@ private:
 
     /// Validate input parameters
     /// @return expected success or validation error message
-    expected<void, std::string> validate_params() const;
+    std::expected<void, std::string> validate_params() const;
 
     /// Estimate upper bound for volatility search using intrinsic value approximation
     /// @return Upper bound estimate (typically 2.0-3.0 for reasonable markets)

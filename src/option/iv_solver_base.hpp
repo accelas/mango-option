@@ -7,7 +7,8 @@
 
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_types.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <span>
 #include <format>
 #include <utility>
@@ -52,13 +53,13 @@ public:
      * @return void on success, error message on size mismatch
      */
     template <typename Self>
-    expected<void, std::string> solve_batch(this Self&& self,
+    std::expected<void, std::string> solve_batch(this Self&& self,
                                              std::span<const IVQuery> queries,
                                              std::span<IVResult> results)
     {
         // Runtime validation
         if (queries.size() != results.size()) {
-            return unexpected(std::format(
+            return std::unexpected(std::format(
                 "Size mismatch: {} queries but {} result slots",
                 queries.size(), results.size()));
         }

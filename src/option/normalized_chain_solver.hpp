@@ -8,7 +8,8 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <span>
 #include <memory>
 #include <vector>
@@ -42,7 +43,7 @@ struct NormalizedSolveRequest {
     std::span<const double> tau_snapshots;  ///< Maturities to collect
 
     /// Validate request parameters
-    expected<void, std::string> validate() const;
+    std::expected<void, std::string> validate() const;
 };
 
 /**
@@ -85,7 +86,7 @@ private:
 class NormalizedWorkspace {
 public:
     /// Create workspace for given request parameters
-    static expected<NormalizedWorkspace, std::string> create(
+    static std::expected<NormalizedWorkspace, std::string> create(
         const NormalizedSolveRequest& request);
 
     /// Get view of solution surface (after solve completes)
@@ -157,7 +158,7 @@ public:
      * @param surface_view Output view (references workspace.values_)
      * @return Success or solver error
      */
-    static expected<void, SolverError> solve(
+    static std::expected<void, SolverError> solve(
         const NormalizedSolveRequest& request,
         NormalizedWorkspace& workspace,
         NormalizedSurfaceView& surface_view);
@@ -174,7 +175,7 @@ public:
      * @param moneyness_grid Moneyness values m = K/S from price table
      * @return Success or reason for ineligibility
      */
-    static expected<void, std::string> check_eligibility(
+    static std::expected<void, std::string> check_eligibility(
         const NormalizedSolveRequest& request,
         std::span<const double> moneyness_grid);
 };

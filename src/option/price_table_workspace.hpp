@@ -1,6 +1,7 @@
 #pragma once
 
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include "src/interpolation/bspline_utils.hpp"
 #include <vector>
 #include <span>
@@ -37,7 +38,7 @@ public:
     /// @param K_ref Reference strike price
     /// @param dividend_yield Continuous dividend yield
     /// @return Expected workspace or error message
-    static expected<PriceTableWorkspace, std::string> create(
+    static std::expected<PriceTableWorkspace, std::string> create(
         const std::vector<double>& m_grid,
         const std::vector<double>& tau_grid,
         const std::vector<double>& sigma_grid,
@@ -77,7 +78,7 @@ public:
     /// @param ticker Underlying symbol (e.g., "SPY")
     /// @param option_type 0=PUT, 1=CALL
     /// @return Expected void or error message
-    expected<void, std::string> save(const std::string& filepath,
+    std::expected<void, std::string> save(const std::string& filepath,
                                      const std::string& ticker,
                                      uint8_t option_type) const;
 
@@ -103,7 +104,7 @@ public:
     ///
     /// @param filepath Input file path
     /// @return Expected workspace or error code
-    static expected<PriceTableWorkspace, LoadError> load(const std::string& filepath);
+    static std::expected<PriceTableWorkspace, LoadError> load(const std::string& filepath);
 
     /// Move-only semantics (no copies of large arena)
     PriceTableWorkspace(const PriceTableWorkspace&) = delete;
@@ -115,7 +116,7 @@ private:
     PriceTableWorkspace() = default;
 
     /// Allocate aligned arena and set up spans
-    static expected<PriceTableWorkspace, std::string> allocate_and_initialize(
+    static std::expected<PriceTableWorkspace, std::string> allocate_and_initialize(
         const std::vector<double>& m_grid,
         const std::vector<double>& tau_grid,
         const std::vector<double>& sigma_grid,
@@ -125,7 +126,7 @@ private:
         double dividend_yield);
 
     /// Friend function for zero-copy loading from raw buffers
-    friend expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
+    friend std::expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
         const double* m_data, size_t n_m,
         const double* tau_data, size_t n_tau,
         const double* sigma_data, size_t n_sigma,
@@ -135,7 +136,7 @@ private:
         double dividend_yield);
 
     /// Validate grids before allocation
-    static expected<void, std::string> validate_inputs(
+    static std::expected<void, std::string> validate_inputs(
         const std::vector<double>& m_grid,
         const std::vector<double>& tau_grid,
         const std::vector<double>& sigma_grid,

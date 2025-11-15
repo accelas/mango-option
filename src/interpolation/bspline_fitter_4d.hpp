@@ -33,7 +33,8 @@
 #pragma once
 
 #include "src/interpolation/bspline_utils.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <lapacke.h>
 #include <vector>
 #include <cmath>
@@ -122,8 +123,8 @@ private:
     mutable lapack_int ldab_ = 0;                      ///< Leading dimension for band storage
     mutable bool factored_ = false;                    ///< True if LAPACK factorization computed
 
-    friend expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A);
-    friend expected<void, std::string> banded_lu_substitution(
+    friend std::expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A);
+    friend std::expected<void, std::string> banded_lu_substitution(
         const BandedMatrixStorage& LU,
         std::span<const double> b,
         std::span<double> x);
@@ -143,11 +144,11 @@ private:
 /// Space complexity: O(1) (in-place)
 ///
 /// @param A Banded matrix (modified in-place to store LU factors)
-/// @return expected<void, string> - success or error message
-inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
+/// @return std::expected<void, string> - success or error message
+inline std::expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
     const lapack_int n = static_cast<lapack_int>(A.size());
     if (n == 0) {
-        return unexpected(std::string("Matrix dimension must be > 0"));
+        return std::unexpected(std::string("Matrix dimension must be > 0"));
     }
 
     // Determine bandwidths by inspecting row column ranges
@@ -201,12 +202,12 @@ inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
         A.pivot_indices_.data());
 
     if (info < 0) {
-        return unexpected(
+        return std::unexpected(
             std::string("LAPACKE_dgbtrf: invalid argument at position ") +
             std::to_string(-info));
     }
     if (info > 0) {
-        return unexpected(
+        return std::unexpected(
             std::string("Banded matrix is singular; zero pivot encountered at row ") +
             std::to_string(info));
     }
@@ -230,17 +231,17 @@ inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
 /// @param LU Pre-factored banded matrix (from banded_lu_factorize)
 /// @param b Right-hand side vector
 /// @param x Solution vector (output, also used as workspace)
-inline expected<void, std::string> banded_lu_substitution(
+inline std::expected<void, std::string> banded_lu_substitution(
     const BandedMatrixStorage& LU,
     std::span<const double> b,
     std::span<double> x)
 {
     const lapack_int n = static_cast<lapack_int>(LU.size());
     if (!LU.factored_) {
-        return unexpected(std::string("Banded matrix has not been factorized"));
+        return std::unexpected(std::string("Banded matrix has not been factorized"));
     }
     if (b.size() != static_cast<size_t>(n) || x.size() != static_cast<size_t>(n)) {
-        return unexpected(std::string("Dimension mismatch in banded_lu_substitution"));
+        return std::unexpected(std::string("Dimension mismatch in banded_lu_substitution"));
     }
 
     // Copy b into x, then solve in-place (LAPACKE_dgbtrs modifies RHS)
@@ -261,12 +262,12 @@ inline expected<void, std::string> banded_lu_substitution(
         n);
 
     if (info < 0) {
-        return unexpected(
+        return std::unexpected(
             std::string("LAPACKE_dgbtrs: invalid argument at position ") +
             std::to_string(-info));
     }
     if (info > 0) {
-        return unexpected(
+        return std::unexpected(
             std::string("LAPACKE_dgbtrs failed; zero pivot encountered at row ") +
             std::to_string(info));
     }
@@ -300,18 +301,18 @@ public:
     /// Factory method to create BSplineCollocation1D instance
     ///
     /// @param grid Data grid points (sorted, ≥4 points)
-    /// @return expected<BSplineCollocation1D, std::string> containing either the solver or error message
-    static expected<BSplineCollocation1D, std::string> create(std::vector<double> grid) {
+    /// @return std::expected<BSplineCollocation1D, std::string> containing either the solver or error message
+    static std::expected<BSplineCollocation1D, std::string> create(std::vector<double> grid) {
         try {
             // Validate grid size
             if (grid.size() < 4) {
-                return unexpected(std::string("Grid must have ≥4 points for cubic B-splines, got ") +
+                return std::unexpected(std::string("Grid must have ≥4 points for cubic B-splines, got ") +
                                std::to_string(grid.size()) + " points");
             }
 
             // Validate grid is sorted
             if (!std::is_sorted(grid.begin(), grid.end())) {
-                return unexpected(std::string("Grid must be sorted in ascending order"));
+                return std::unexpected(std::string("Grid must be sorted in ascending order"));
             }
 
             // Check for duplicate or near-duplicate points
@@ -319,7 +320,7 @@ public:
             for (size_t i = 1; i < grid.size(); ++i) {
                 double spacing = grid[i] - grid[i-1];
                 if (spacing < MIN_SPACING) {
-                    return unexpected(
+                    return std::unexpected(
                         std::string("Grid points too close together (spacing < 1e-14). ") +
                         "Found grid[" + std::to_string(i-1) + "] = " + std::to_string(grid[i-1]) +
                         " and grid[" + std::to_string(i) + "] = " + std::to_string(grid[i]) +
@@ -330,13 +331,13 @@ public:
 
             // Check for zero-width grid
             if (grid.back() - grid.front() < MIN_SPACING) {
-                return unexpected(std::string("Grid has zero width (all points nearly identical)"));
+                return std::unexpected(std::string("Grid has zero width (all points nearly identical)"));
             }
 
             // All validations passed - create the solver
             return BSplineCollocation1D(std::move(grid));
         } catch (const std::exception& e) {
-            return unexpected(std::string("BSplineCollocation1D creation failed: ") + e.what());
+            return std::unexpected(std::string("BSplineCollocation1D creation failed: ") + e.what());
         }
     }
 
@@ -524,8 +525,8 @@ private:
     /// Ensure matrix is factored (builds and factorizes if not already done)
     ///
     /// Extracts common factorization logic to avoid duplication.
-    /// @return expected<void, string> - success or error message
-    expected<void, std::string> ensure_factored() const {
+    /// @return std::expected<void, string> - success or error message
+    std::expected<void, std::string> ensure_factored() const {
         if (is_factored_) {
             return {};  // Already factored
         }
@@ -563,8 +564,8 @@ private:
     ///
     /// @param rhs Right-hand side vector
     /// @param solution Solution vector (output)
-    /// @return expected<void, string> - success or error message
-    expected<void, std::string> solve_banded_system(
+    /// @return std::expected<void, string> - success or error message
+    std::expected<void, std::string> solve_banded_system(
         const std::vector<double>& rhs,
         std::vector<double>& solution) const
     {
@@ -585,7 +586,7 @@ private:
     }
 
     /// Solve banded system directly into caller's buffer
-    expected<void, std::string> solve_banded_system_to_buffer(
+    std::expected<void, std::string> solve_banded_system_to_buffer(
         std::span<const double> rhs,
         std::span<double> solution) const
     {
@@ -791,7 +792,7 @@ public:
     ///
     /// @note Validation is delegated to BSplineCollocation1D for each axis.
     ///       Grids are checked during 1D solver construction.
-    static expected<BSplineFitter4DSeparable, std::string> create(
+    static std::expected<BSplineFitter4DSeparable, std::string> create(
         std::vector<double> axis0_grid,
         std::vector<double> axis1_grid,
         std::vector<double> axis2_grid,
@@ -801,7 +802,7 @@ public:
             return BSplineFitter4DSeparable(std::move(axis0_grid), std::move(axis1_grid),
                                            std::move(axis2_grid), std::move(axis3_grid));
         } catch (const std::exception& e) {
-            return unexpected(std::string(e.what()));
+            return std::unexpected(std::string(e.what()));
         }
     }
 
@@ -1235,11 +1236,11 @@ public:
     /// @param axis1_grid Grid for axis 1 (sorted, ≥4 points)
     /// @param axis2_grid Grid for axis 2 (sorted, ≥4 points)
     /// @param axis3_grid Grid for axis 3 (sorted, ≥4 points)
-    /// @return expected<BSplineFitter4D, std::string> - success or error message
+    /// @return std::expected<BSplineFitter4D, std::string> - success or error message
     ///
     /// @note Validation is delegated to BSplineCollocation1D via BSplineFitter4DSeparable.
     ///       We validate at creation time by attempting to create a separable fitter.
-    static expected<BSplineFitter4D, std::string> create(
+    static std::expected<BSplineFitter4D, std::string> create(
         std::vector<double> axis0_grid,
         std::vector<double> axis1_grid,
         std::vector<double> axis2_grid,
@@ -1251,7 +1252,7 @@ public:
             axis0_grid, axis1_grid, axis2_grid, axis3_grid);
 
         if (!validation_result.has_value()) {
-            return unexpected(validation_result.error());
+            return std::unexpected(validation_result.error());
         }
 
         // Grids are valid, create the fitter
@@ -1356,7 +1357,7 @@ private:
     }
 
     // Friend declaration for factory method to access private constructor
-    friend expected<BSplineFitter4D, std::string> create(
+    friend std::expected<BSplineFitter4D, std::string> create(
         std::vector<double>, std::vector<double>, std::vector<double>, std::vector<double>);
 
     std::vector<double> axis0_grid_;  ///< Grid for axis 0

@@ -21,21 +21,21 @@
 
 namespace mango {
 
-expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
+std::expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
     if (moneyness_.size() < 4) {
-        return unexpected("Moneyness grid must have ≥4 points for cubic B-splines");
+        return std::unexpected("Moneyness grid must have ≥4 points for cubic B-splines");
     }
     if (maturity_.size() < 4) {
-        return unexpected("Maturity grid must have ≥4 points for cubic B-splines");
+        return std::unexpected("Maturity grid must have ≥4 points for cubic B-splines");
     }
     if (volatility_.size() < 4) {
-        return unexpected("Volatility grid must have ≥4 points for cubic B-splines");
+        return std::unexpected("Volatility grid must have ≥4 points for cubic B-splines");
     }
     if (rate_.size() < 4) {
-        return unexpected("Rate grid must have ≥4 points for cubic B-splines");
+        return std::unexpected("Rate grid must have ≥4 points for cubic B-splines");
     }
     if (K_ref_ <= 0.0) {
-        return unexpected("Reference strike K_ref must be positive");
+        return std::unexpected("Reference strike K_ref must be positive");
     }
 
     // Verify sorted
@@ -44,24 +44,24 @@ expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
     };
 
     if (!is_sorted(moneyness_)) {
-        return unexpected("Moneyness grid must be sorted");
+        return std::unexpected("Moneyness grid must be sorted");
     }
     if (!is_sorted(maturity_)) {
-        return unexpected("Maturity grid must be sorted");
+        return std::unexpected("Maturity grid must be sorted");
     }
     if (!is_sorted(volatility_)) {
-        return unexpected("Volatility grid must be sorted");
+        return std::unexpected("Volatility grid must be sorted");
     }
     if (!is_sorted(rate_)) {
-        return unexpected("Rate grid must be sorted");
+        return std::unexpected("Rate grid must be sorted");
     }
 
     // Verify positive
     if (maturity_.front() <= 0.0) {
-        return unexpected("Maturity must be positive");
+        return std::unexpected("Maturity must be positive");
     }
     if (volatility_.front() <= 0.0) {
-        return unexpected("Volatility must be positive");
+        return std::unexpected("Volatility must be positive");
     }
 
     // Verify moneyness values are positive
@@ -69,7 +69,7 @@ expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
     // Moneyness grid should represent S/K_ref ratios, not raw spots
     for (size_t i = 0; i < moneyness_.size(); ++i) {
         if (moneyness_[i] <= 0.0) {
-            return unexpected(
+            return std::unexpected(
                 "Moneyness values must be positive (m = S/K_ref > 0). "
                 "Found m[" + std::to_string(i) + "] = " + std::to_string(moneyness_[i]) + ". "
                 "Note: moneyness represents spot ratios S/K_ref, not log-moneyness x = ln(S/K_ref)."
@@ -112,7 +112,7 @@ bool PriceTable4DBuilder::should_use_normalized_solver(
     return eligibility.has_value();
 }
 
-expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
+std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     OptionType option_type,
     size_t n_space,
     size_t n_time,
@@ -124,7 +124,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     return precompute(option_type, x_min, x_max, n_space, n_time, dividend_yield);
 }
 
-expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
+std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     const PriceTableConfig& config)
 {
     if (config.x_bounds) {
@@ -144,7 +144,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
         config.dividend_yield);
 }
 
-expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
+std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     OptionType option_type,
     double x_min,
     double x_max,
@@ -167,7 +167,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     const double x_max_requested = std::log(moneyness_.back());
 
     if (x_min_requested < x_min || x_max_requested > x_max) {
-        return unexpected(
+        return std::unexpected(
             "Requested moneyness range [" + std::to_string(moneyness_.front()) + ", " +
             std::to_string(moneyness_.back()) + "] in spot ratios "
             "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
@@ -350,7 +350,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     }  // End of else (FALLBACK PATH)
 
     if (failed_count > 0) {
-        return unexpected("Failed to solve " + std::to_string(failed_count) +
+        return std::unexpected("Failed to solve " + std::to_string(failed_count) +
                          " out of " + std::to_string(Nv * Nr) + " PDEs");
     }
 
@@ -361,12 +361,12 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // Fit B-spline coefficients using factory pattern
     auto fitter_result = BSplineFitter4D::create(moneyness_, maturity_, volatility_, rate_);
     if (!fitter_result.has_value()) {
-        return unexpected("B-spline fitter creation failed: " + fitter_result.error());
+        return std::unexpected("B-spline fitter creation failed: " + fitter_result.error());
     }
     auto fit_result = fitter_result.value().fit(prices_4d);
 
     if (!fit_result.success) {
-        return unexpected("B-spline fitting failed: " + fit_result.error_message);
+        return std::unexpected("B-spline fitting failed: " + fit_result.error_message);
     }
 
     // Create workspace with all data
@@ -376,7 +376,7 @@ expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
         K_ref_, dividend_yield);
 
     if (!workspace_result.has_value()) {
-        return unexpected("Workspace creation failed: " + workspace_result.error());
+        return std::unexpected("Workspace creation failed: " + workspace_result.error());
     }
 
     auto workspace = std::make_shared<PriceTableWorkspace>(std::move(workspace_result.value()));

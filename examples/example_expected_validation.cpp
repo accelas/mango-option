@@ -233,7 +233,7 @@ int main() {
     std::cout << "=== Summary ===\n";
     std::cout << "The expected-based validation provides:\n";
     std::cout << "• Non-throwing validation with clear error messages\n";
-    std::cout << "• Factory methods that return expected<T, E> for better error handling\n";
+    std::cout << "• Factory methods that return std::expected<T, E> for better error handling\n";
     std::cout << "• Workspace creation validates grid parameters (n_space, n_time)\n";
     std::cout << "• Solver creation validates option parameters (strike, spot, etc.)\n";
     std::cout << "• Shared workspace support for efficient batch solving\n\n";

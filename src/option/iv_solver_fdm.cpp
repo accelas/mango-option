@@ -15,7 +15,7 @@ IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
     // Constructor - just stores configuration
 }
 
-expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) const {
+std::expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) const {
     // Use common validation for option spec, market price, and arbitrage checks
     auto common_validation = validate_iv_query(query);
     if (!common_validation) {
@@ -27,17 +27,17 @@ expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) co
     // FDM-specific validation: grid parameters
     if (config_.grid_n_space == 0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
-        return unexpected(std::string("Grid n_space must be positive"));
+        return std::unexpected(std::string("Grid n_space must be positive"));
     }
 
     if (config_.grid_n_time == 0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
-        return unexpected(std::string("Grid n_time must be positive"));
+        return std::unexpected(std::string("Grid n_time must be positive"));
     }
 
     if (config_.grid_s_max <= 0.0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 8, config_.grid_s_max, 0.0);
-        return unexpected(std::string("Grid s_max must be positive"));
+        return std::unexpected(std::string("Grid s_max must be positive"));
     }
 
     return {};
