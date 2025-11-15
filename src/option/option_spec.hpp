@@ -79,12 +79,12 @@ struct IVQuery {
 std::expected<void, std::string> validate_iv_query(const IVQuery& query);
 
 /**
- * @brief PDE grid configuration for option pricing
+ * @brief Option solver grid configuration
  *
  * Specifies the computational grid and option parameters for
- * solving the PDE using finite difference methods.
+ * solving the option pricing PDE using finite difference methods.
  */
-struct PDEGridConfig {
+struct OptionSolverGrid {
     OptionType option_type;    ///< Call or Put
     double x_min;              ///< Minimum log-moneyness
     double x_max;              ///< Maximum log-moneyness

@@ -396,12 +396,12 @@ private:
     /// Solve using normalized chain solver (fast path)
     std::expected<void, std::string> solve_with_normalized_solver(
         std::vector<double>& prices_4d,
-        const PDEGridConfig& config);
+        const OptionSolverGrid& config);
 
     /// Solve using batch API with snapshots (fallback path)
     std::expected<void, std::string> solve_with_batch_api(
         std::vector<double>& prices_4d,
-        const PDEGridConfig& config);
+        const OptionSolverGrid& config);
 
     std::vector<double> moneyness_;
     std::vector<double> maturity_;

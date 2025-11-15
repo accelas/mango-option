@@ -147,7 +147,7 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
 
 std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solver(
     std::vector<double>& prices_4d,
-    const PDEGridConfig& config)
+    const OptionSolverGrid& config)
 {
     const size_t Nm = moneyness_.size();
     const size_t Nt = maturity_.size();
@@ -233,7 +233,7 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
 
 std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
     std::vector<double>& prices_4d,
-    const PDEGridConfig& config)
+    const OptionSolverGrid& config)
 {
     const size_t Nm = moneyness_.size();
     const size_t Nt = maturity_.size();
@@ -373,7 +373,7 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     auto start_time = std::chrono::high_resolution_clock::now();
 
     // Create unified PDE grid configuration
-    PDEGridConfig config{
+    OptionSolverGrid config{
         .option_type = option_type,
         .x_min = x_min,
         .x_max = x_max,
