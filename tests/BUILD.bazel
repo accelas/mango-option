@@ -2,7 +2,7 @@ cc_test(
     name = "snapshot_test",
     srcs = ["snapshot_test.cc"],
     deps = [
-        "//src/option:snapshot",
+        "//src/pde/core:snapshot",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -66,7 +66,7 @@ cc_test(
         
         "//src/pde/core:boundary_conditions",
         "//src/pde/core:root_finding",
-        "//src/option:snapshot",
+        "//src/pde/core:snapshot",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/memory:pde_workspace",
@@ -114,7 +114,7 @@ cc_test(
     srcs = ["price_table_snapshot_collector_test.cc"],
     deps = [
         "//src/option:price_table_snapshot_collector",
-        "//src/option:snapshot",
+        "//src/pde/core:snapshot",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -125,7 +125,7 @@ cc_test(
     srcs = ["price_table_snapshot_collector_expected_test.cc"],
     deps = [
         "//src/option:price_table_snapshot_collector",
-        "//src/option:snapshot",
+        "//src/pde/core:snapshot",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -136,7 +136,7 @@ cc_test(
     srcs = ["minimal_expected_test.cc"],
     deps = [
         "//src/option:price_table_snapshot_collector",
-        "//src/option:snapshot",
+        "//src/pde/core:snapshot",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],

@@ -8,7 +8,7 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
 #include "src/pde/core/thomas_solver.hpp"
-#include "src/option/snapshot.hpp"
+#include "src/pde/core/snapshot.hpp"
 #include "src/pde/core/jacobian_view.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
