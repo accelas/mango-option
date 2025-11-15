@@ -551,18 +551,21 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
     size_t batch_size = state.range(0);
 
     // Generate batch of market prices
-    std::vector<IVParams> batch;
+    std::vector<IVQuery> batch;
     batch.reserve(batch_size);
 
     for (size_t i = 0; i < batch_size; ++i) {
         double market_price = 5.0 + i * 0.1;  // Different prices
-        batch.push_back(IVParams{
-            .spot_price = 100.0,
-            .strike = 100.0,
-            .time_to_maturity = 1.0,
-            .risk_free_rate = 0.05,
-            .market_price = market_price,
-            .is_call = false
+        batch.push_back(IVQuery{
+            .option = OptionSpec{
+                .spot = 100.0,
+                .strike = 100.0,
+                .maturity = 1.0,
+                .rate = 0.05,
+                .dividend_yield = 0.0,
+                .type = OptionType::PUT
+            },
+            .market_price = market_price
         });
     }
 

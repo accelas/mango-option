@@ -296,13 +296,16 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     const size_t n_space = static_cast<size_t>(state.range(0));
     const size_t n_time = static_cast<size_t>(state.range(1));
 
-    IVParams params{
-        .spot_price = 100.0,
-        .strike = 100.0,
-        .time_to_maturity = 1.0,
-        .risk_free_rate = 0.05,
-        .market_price = 6.08,
-        .is_call = false
+    IVQuery query{
+        .option = OptionSpec{
+            .spot = 100.0,
+            .strike = 100.0,
+            .maturity = 1.0,
+            .rate = 0.05,
+            .dividend_yield = 0.0,
+            .type = OptionType::PUT
+        },
+        .market_price = 6.08
     };
 
     IVConfig config;
@@ -312,7 +315,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     config.grid_n_time = n_time;
 
     auto run_once = [&]() {
-        IVSolver solver(params, config);
+        IVSolver solver(query, config);
         auto result = solver.solve();
         if (!result.converged) {
             throw std::runtime_error(

@@ -6,36 +6,13 @@
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include "src/option/iv_types.hpp"
+#include "src/option/option_spec.hpp"  // For IVQuery
 #include <optional>
 #include <string>
 #include <vector>
 #include <span>
 
 namespace mango {
-
-/// Parameters for implied volatility calculation
-///
-/// Describes the option contract and market conditions for which
-/// we want to find the implied volatility.
-struct IVParams {
-    /// Current stock price (S)
-    double spot_price;
-
-    /// Strike price (K)
-    double strike;
-
-    /// Time to expiration in years (T)
-    double time_to_maturity;
-
-    /// Risk-free interest rate (r)
-    double risk_free_rate;
-
-    /// Observed market price of the option
-    double market_price;
-
-    /// Option type: true for call, false for put
-    bool is_call;
-};
 
 /// Configuration for implied volatility solver
 ///
@@ -67,20 +44,23 @@ struct IVConfig {
 ///
 /// **Usage:**
 /// ```cpp
-/// IVParams params{
-///     .spot_price = 100.0,
-///     .strike = 100.0,
-///     .time_to_maturity = 1.0,
-///     .risk_free_rate = 0.05,
-///     .market_price = 10.45,
-///     .is_call = false
+/// IVQuery query{
+///     .option = OptionSpec{
+///         .spot = 100.0,
+///         .strike = 100.0,
+///         .maturity = 1.0,
+///         .rate = 0.05,
+///         .dividend_yield = 0.0,
+///         .type = OptionType::PUT
+///     },
+///     .market_price = 10.45
 /// };
 ///
 /// IVConfig config{
 ///     .root_config = RootFindingConfig{.max_iter = 100, .tolerance = 1e-6}
 /// };
 ///
-/// IVSolver solver(params, config);
+/// IVSolver solver(query, config);
 /// IVResult result = solver.solve();
 ///
 /// if (result.converged) {
@@ -104,9 +84,9 @@ class IVSolver {
 public:
     /// Construct solver with problem parameters and configuration
     ///
-    /// @param params Option parameters and market price
+    /// @param query IV query (option specification and market price)
     /// @param config Solver configuration (root-finding and grid settings)
-    explicit IVSolver(const IVParams& params, const IVConfig& config);
+    explicit IVSolver(const IVQuery& query, const IVConfig& config);
 
     /// Solve for implied volatility
     ///
@@ -120,13 +100,9 @@ public:
     IVResult solve();
 
 private:
-    IVParams params_;
+    IVQuery query_;
     IVConfig config_;
     mutable std::optional<SolverError> last_solver_error_;
-
-    /// Validate input parameters
-    /// @return expected success or validation error message
-    std::expected<void, std::string> validate_params() const;
 
     /// Estimate upper bound for volatility search using intrinsic value approximation
     /// @return Upper bound estimate (typically 2.0-3.0 for reasonable markets)
@@ -149,7 +125,7 @@ private:
 ///
 /// Example usage:
 /// ```cpp
-/// std::vector<IVParams> batch = { ... };
+/// std::vector<IVQuery> batch = { ... };
 /// IVConfig config;  // Shared configuration
 ///
 /// auto results = solve_implied_vol_batch(batch, config);
@@ -168,18 +144,18 @@ class BatchIVSolver {
 public:
     /// Solve implied volatility for a batch of options in parallel
     ///
-    /// @param params Vector of IV parameters (spot, strike, maturity, price)
+    /// @param queries Vector of IV queries (option specs and market prices)
     /// @param config Shared configuration (grid size, tolerances)
     /// @return Vector of IV results (same order as input)
     static std::vector<IVResult> solve_batch(
-        std::span<const IVParams> params,
+        std::span<const IVQuery> queries,
         const IVConfig& config)
     {
-        std::vector<IVResult> results(params.size());
+        std::vector<IVResult> results(queries.size());
 
         MANGO_PRAGMA_PARALLEL_FOR
-        for (size_t i = 0; i < params.size(); ++i) {
-            IVSolver solver(params[i], config);
+        for (size_t i = 0; i < queries.size(); ++i) {
+            IVSolver solver(queries[i], config);
             results[i] = solver.solve();
         }
 
@@ -188,27 +164,27 @@ public:
 
     /// Solve implied volatility for a batch of options (vector overload)
     static std::vector<IVResult> solve_batch(
-        const std::vector<IVParams>& params,
+        const std::vector<IVQuery>& queries,
         const IVConfig& config)
     {
-        return solve_batch(std::span{params}, config);
+        return solve_batch(std::span{queries}, config);
     }
 };
 
 /// Convenience function for batch IV solving
 inline std::vector<IVResult> solve_implied_vol_batch(
-    std::span<const IVParams> params,
+    std::span<const IVQuery> queries,
     const IVConfig& config)
 {
-    return BatchIVSolver::solve_batch(params, config);
+    return BatchIVSolver::solve_batch(queries, config);
 }
 
 /// Convenience function for batch IV solving (vector overload)
 inline std::vector<IVResult> solve_implied_vol_batch(
-    const std::vector<IVParams>& params,
+    const std::vector<IVQuery>& queries,
     const IVConfig& config)
 {
-    return BatchIVSolver::solve_batch(params, config);
+    return BatchIVSolver::solve_batch(queries, config);
 }
 
 }  // namespace mango
