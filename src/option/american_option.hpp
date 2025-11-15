@@ -175,6 +175,17 @@ struct AmericanOptionResult {
 };
 
 /**
+ * Batch solver result containing individual results and aggregate statistics.
+ */
+struct BatchAmericanOptionResult {
+    std::vector<std::expected<AmericanOptionResult, SolverError>> results;
+    size_t failed_count;  ///< Number of failed solves
+
+    /// Check if all solves succeeded
+    bool all_succeeded() const { return failed_count == 0; }
+};
+
+/**
  * American option pricing solver using finite difference method.
  *
  * Solves the Black-Scholes PDE with obstacle constraints in log-moneyness
@@ -327,8 +338,8 @@ public:
     /// @param n_space Number of spatial grid points
     /// @param n_time Number of time steps
     /// @param setup Optional callback invoked after solver creation, before solve()
-    /// @return Vector of results (same order as input)
-    static std::vector<std::expected<AmericanOptionResult, SolverError>> solve_batch(
+    /// @return Batch result with individual results and failure count
+    static BatchAmericanOptionResult solve_batch(
         std::span<const AmericanOptionParams> params,
         double x_min,
         double x_max,
@@ -337,6 +348,7 @@ public:
         SetupCallback setup = nullptr)
     {
         std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
+        size_t failed_count = 0;
 
         // Validate workspace parameters once before parallel loop
         auto validation = AmericanSolverWorkspace::validate_params(x_min, x_max, n_space, n_time);
@@ -350,7 +362,10 @@ public:
             for (size_t i = 0; i < params.size(); ++i) {
                 results[i] = std::unexpected(error);
             }
-            return results;
+            return BatchAmericanOptionResult{
+                .results = std::move(results),
+                .failed_count = params.size()
+            };
         }
 
         // Common solve logic
@@ -392,6 +407,8 @@ public:
 #pragma omp for
                 for (size_t i = 0; i < params.size(); ++i) {
                     results[i] = std::unexpected(error);
+#pragma omp atomic
+                    ++failed_count;
                 }
             } else {
                 auto thread_workspace = thread_workspace_result.value();
@@ -399,6 +416,10 @@ public:
 #pragma omp for
                 for (size_t i = 0; i < params.size(); ++i) {
                     results[i] = solve_one(i, thread_workspace);
+                    if (!results[i].has_value()) {
+#pragma omp atomic
+                        ++failed_count;
+                    }
                 }
             }
         }
@@ -413,21 +434,31 @@ public:
             };
             for (size_t i = 0; i < params.size(); ++i) {
                 results[i] = std::unexpected(error);
+                ++failed_count;
             }
-            return results;
+            return BatchAmericanOptionResult{
+                .results = std::move(results),
+                .failed_count = failed_count
+            };
         }
 
         auto workspace = workspace_result.value();
         for (size_t i = 0; i < params.size(); ++i) {
             results[i] = solve_one(i, workspace);
+            if (!results[i].has_value()) {
+                ++failed_count;
+            }
         }
 #endif
 
-        return results;
+        return BatchAmericanOptionResult{
+            .results = std::move(results),
+            .failed_count = failed_count
+        };
     }
 
     /// Solve a batch of American options in parallel (vector overload)
-    static std::vector<std::expected<AmericanOptionResult, SolverError>> solve_batch(
+    static BatchAmericanOptionResult solve_batch(
         const std::vector<AmericanOptionParams>& params,
         double x_min,
         double x_max,
@@ -440,7 +471,7 @@ public:
 };
 
 /// Convenience function for batch solving
-inline std::vector<std::expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
+inline BatchAmericanOptionResult solve_american_options_batch(
     std::span<const AmericanOptionParams> params,
     double x_min,
     double x_max,
@@ -451,7 +482,7 @@ inline std::vector<std::expected<AmericanOptionResult, SolverError>> solve_ameri
 }
 
 /// Convenience function for batch solving (vector overload)
-inline std::vector<std::expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
+inline BatchAmericanOptionResult solve_american_options_batch(
     const std::vector<AmericanOptionParams>& params,
     double x_min,
     double x_max,

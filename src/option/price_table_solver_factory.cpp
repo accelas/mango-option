@@ -310,7 +310,7 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     }
 
     // Solve batch with snapshot registration
-    auto results = BatchAmericanOptionSolver::solve_batch(
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(
         std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
         [&](size_t idx, AmericanOptionSolver& solver) {
             for (size_t j = 0; j < Nt; ++j) {
@@ -318,12 +318,9 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
             }
         });
 
-    // Count failures in one pass (no per-failure loop needed, array pre-zeroed)
-    const size_t failed_count = std::ranges::count_if(results,
-        [](const auto& result) { return !result.has_value(); });
-
-    if (failed_count > 0) {
-        return std::unexpected("Failed to solve " + std::to_string(failed_count) +
+    // Check failure count (tracked internally by solve_batch)
+    if (batch_result.failed_count > 0) {
+        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
                          " out of " + std::to_string(Nv * Nr) + " PDEs");
     }
 
