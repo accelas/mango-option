@@ -25,7 +25,7 @@ public:
     /**
      * @brief Solve for prices on 4D grid
      *
-     * @param prices_4d Output array (Nm × Nt × Nv × Nr)
+     * @param prices_4d Output array (Nm × Nt × Nv × Nr), must be pre-sized
      * @param moneyness Moneyness grid
      * @param maturity Maturity grid
      * @param volatility Volatility grid
@@ -34,7 +34,7 @@ public:
      * @return void on success, error message on failure
      */
     virtual std::expected<void, std::string> solve(
-        std::vector<double>& prices_4d,
+        std::span<double> prices_4d,
         std::span<const double> moneyness,
         std::span<const double> maturity,
         std::span<const double> volatility,

@@ -115,7 +115,7 @@ public:
         : config_(config) {}
 
     std::expected<void, std::string> solve(
-        std::vector<double>& prices_4d,
+        std::span<double> prices_4d,
         std::span<const double> moneyness,
         std::span<const double> maturity,
         std::span<const double> volatility,
@@ -131,7 +131,7 @@ private:
 };
 
 std::expected<void, std::string> NormalizedPriceTableSolver::solve(
-    std::vector<double>& prices_4d,
+    std::span<double> prices_4d,
     std::span<const double> moneyness,
     std::span<const double> maturity,
     std::span<const double> volatility,
@@ -228,7 +228,7 @@ public:
         : config_(config) {}
 
     std::expected<void, std::string> solve(
-        std::vector<double>& prices_4d,
+        std::span<double> prices_4d,
         std::span<const double> moneyness,
         std::span<const double> maturity,
         std::span<const double> volatility,
@@ -244,7 +244,7 @@ private:
 };
 
 std::expected<void, std::string> BatchPriceTableSolver::solve(
-    std::vector<double>& prices_4d,
+    std::span<double> prices_4d,
     std::span<const double> moneyness,
     std::span<const double> maturity,
     std::span<const double> volatility,
