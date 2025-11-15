@@ -204,6 +204,29 @@ cc_test(
 )
 
 cc_test(
+    name = "american_option_test",
+    size = "small",
+    srcs = ["american_option_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "real_option_data_test",
+    srcs = ["real_option_data_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//third_party/arrow",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    data = ["//data:real_option_chain.arrow"],
+)
+
+cc_test(
     name = "thomas_cubic_spline_test",
     srcs = ["thomas_cubic_spline_test.cc"],
     deps = [

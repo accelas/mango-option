@@ -474,10 +474,6 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
         return std::make_unique<BSpline4D>(workspace.value());
     }();
 
-    // First compute base price before moving evaluator
-    double spot = 105.0;
-    const double base_price_kref = evaluator->eval(spot / K_ref, 1.0, known_sigma, known_r);
-
     auto iv_solver_result = IVSolverInterpolated::create(
         std::move(evaluator),
         K_ref,
@@ -490,26 +486,25 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     const auto& iv_solver = iv_solver_result.value();
 
     // Test with strike = K_ref (should work)
+    double spot = 105.0;
     double strike = K_ref;
-    double market_price = base_price_kref * (strike / K_ref);
+    double market_price = bs_price(spot, strike, 1.0, known_sigma, known_r, OptionType::PUT);
 
     IVQuery query1{spot, strike, 1.0, known_r, 0.0, OptionType::PUT, market_price};
 
     auto result1 = iv_solver.solve(query1);
     EXPECT_TRUE(result1.converged);
+    EXPECT_NEAR(result1.implied_vol, known_sigma, 0.02);
 
     // Test with strike != K_ref (should also work with correct scaling)
-    // Note: The solver now uses m = spot / K_ref for surface lookup
-    // and scales price by (strike / K_ref)
     double strike2 = 90.0;
-    double market_price2 = base_price_kref * (strike2 / K_ref);
+    double market_price2 = bs_price(spot, strike2, 1.0, known_sigma, known_r, OptionType::PUT);
 
     IVQuery query2{spot, strike2, 1.0, known_r, 0.0, OptionType::PUT, market_price2};
 
     auto result2 = iv_solver.solve(query2);
-    // This should work because we compute moneyness as spot/K_ref
-    // and scale the price appropriately
     EXPECT_TRUE(result2.converged) << (result2.failure_reason.has_value() ? *result2.failure_reason : "");
+    EXPECT_NEAR(result2.implied_vol, known_sigma, 0.02);
 }
 
 TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {

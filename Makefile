@@ -46,9 +46,8 @@ EXAMPLE_SOURCES := $(wildcard $(EXAMPLE_DIR)/*.cc)
 EXAMPLE_BINS := $(patsubst $(EXAMPLE_DIR)/%.cc,$(BIN_DIR)/%,$(EXAMPLE_SOURCES))
 
 # Test sources (only built if GoogleTest is available)
-# Exclude american_option_test.cc - it's a legacy C test
 # Exclude snapshot_optimization_benchmark.cc - it's a manual/slow benchmark
-TEST_SOURCES := $(filter-out $(TEST_DIR)/american_option_test.cc $(TEST_DIR)/snapshot_optimization_benchmark.cc,$(wildcard $(TEST_DIR)/*.cc))
+TEST_SOURCES := $(filter-out $(TEST_DIR)/snapshot_optimization_benchmark.cc,$(wildcard $(TEST_DIR)/*.cc))
 TEST_BINS := $(patsubst $(TEST_DIR)/%.cc,$(BIN_DIR)/test_%,$(TEST_SOURCES))
 
 # Phony targets

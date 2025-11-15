@@ -8,6 +8,7 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
 
 namespace py = pybind11;
 
@@ -90,12 +91,6 @@ PYBIND11_MODULE(mango_iv, m) {
 
     // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 
-    // OptionType enum
-    py::enum_<mango::OptionType>(m, "OptionType")
-        .value("CALL", mango::OptionType::CALL)
-        .value("PUT", mango::OptionType::PUT)
-        .export_values();
-
     // AmericanOptionParams structure
     py::class_<mango::AmericanOptionParams>(m, "AmericanOptionParams")
         .def(py::init<>())
@@ -116,4 +111,52 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("gamma", &mango::AmericanOptionResult::gamma)
         .def_readwrite("theta", &mango::AmericanOptionResult::theta)
         .def_readwrite("converged", &mango::AmericanOptionResult::converged);
+
+    m.def(
+        "american_option_price",
+        [](const mango::AmericanOptionParams& params,
+           double x_min,
+           double x_max,
+           size_t n_space,
+           size_t n_time) {
+            auto workspace_result =
+                mango::AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+            if (!workspace_result) {
+                throw py::value_error(
+                    "Failed to create workspace: " + workspace_result.error());
+            }
+
+            auto solver_result = mango::AmericanOptionSolver::create(
+                params, workspace_result.value());
+            if (!solver_result) {
+                throw py::value_error(
+                    "Failed to create solver: " + solver_result.error());
+            }
+
+            auto solve_result = solver_result.value().solve();
+            if (!solve_result) {
+                auto error = solve_result.error();
+                throw py::value_error(
+                    "American option solve failed: " + error.message);
+            }
+
+            return solve_result.value();
+        },
+        py::arg("params"),
+        py::arg("x_min") = -3.0,
+        py::arg("x_max") = 3.0,
+        py::arg("n_space") = 201,
+        py::arg("n_time") = 2000,
+        R"pbdoc(
+            Price an American option using the PDE solver.
+
+            Args:
+                params: AmericanOptionParams with contract information.
+                x_min/x_max: Log-moneyness domain bounds.
+                n_space: Number of spatial grid points.
+                n_time: Number of time steps.
+
+            Returns:
+                AmericanOptionResult with value and Greeks.
+        )pbdoc");
 }
