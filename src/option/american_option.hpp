@@ -391,8 +391,8 @@ public:
         };
 
         // Use parallel region + for to enable per-thread workspace reuse
-#ifdef _OPENMP
-#pragma omp parallel
+        // Note: MANGO_PRAGMA_* macros expand to nothing in sequential mode
+        MANGO_PRAGMA_PARALLEL
         {
             // Each thread creates ONE workspace and reuses it for all its iterations
             auto thread_workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
@@ -404,52 +404,25 @@ public:
                     .message = "Failed to create per-thread workspace: " + thread_workspace_result.error(),
                     .iterations = 0
                 };
-#pragma omp for
+                MANGO_PRAGMA_FOR
                 for (size_t i = 0; i < params.size(); ++i) {
                     results[i] = std::unexpected(error);
-#pragma omp atomic
+                    MANGO_PRAGMA_ATOMIC
                     ++failed_count;
                 }
             } else {
                 auto thread_workspace = thread_workspace_result.value();
 
-#pragma omp for
+                MANGO_PRAGMA_FOR
                 for (size_t i = 0; i < params.size(); ++i) {
                     results[i] = solve_one(i, thread_workspace);
                     if (!results[i].has_value()) {
-#pragma omp atomic
+                        MANGO_PRAGMA_ATOMIC
                         ++failed_count;
                     }
                 }
             }
         }
-#else
-        // Sequential: create workspace once and reuse for all options
-        auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
-        if (!workspace_result) {
-            SolverError error{
-                .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Failed to create workspace: " + workspace_result.error(),
-                .iterations = 0
-            };
-            for (size_t i = 0; i < params.size(); ++i) {
-                results[i] = std::unexpected(error);
-                ++failed_count;
-            }
-            return BatchAmericanOptionResult{
-                .results = std::move(results),
-                .failed_count = failed_count
-            };
-        }
-
-        auto workspace = workspace_result.value();
-        for (size_t i = 0; i < params.size(); ++i) {
-            results[i] = solve_one(i, workspace);
-            if (!results[i].has_value()) {
-                ++failed_count;
-            }
-        }
-#endif
 
         return BatchAmericanOptionResult{
             .results = std::move(results),
