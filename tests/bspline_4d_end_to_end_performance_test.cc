@@ -14,9 +14,11 @@
 
 #include "src/interpolation/bspline_fitter_4d.hpp"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <chrono>
-#include <iostream>
 #include <cmath>
+#include <iostream>
+#include <numeric>
 #include <vector>
 
 using namespace mango;
@@ -226,4 +228,44 @@ TEST_F(BSpline4DEndToEndPerformanceTest, PerformanceRegression) {
     // Allow 3.5× margin for CI variability (CI is ~2.3× slower than local dev)
     EXPECT_LT(mean, 950000.0)  // <950ms (3.5× local observed time)
         << "4D B-spline fitting too slow (performance regression)";
+}
+
+// SIMD optimization performance benchmark (Phase 2)
+TEST_F(BSpline4DEndToEndPerformanceTest, SIMDSpeedupRegression) {
+    // Medium grid: 20×15×10×8 = 24K points
+    auto moneyness = create_moneyness_grid(20);
+    auto maturity = create_maturity_grid(15);
+    auto volatility = create_volatility_grid(10);
+    auto rate = create_rate_grid(8);
+
+    auto values = generate_test_values(moneyness, maturity, volatility, rate);
+
+    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    ASSERT_TRUE(fitter_result.has_value());
+
+    // Run 5 times for stable measurement
+    std::vector<double> times_us;
+    for (int run = 0; run < 5; ++run) {
+        auto start = std::chrono::high_resolution_clock::now();
+        auto fit_result = fitter_result.value().fit(values, 1e-6);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        ASSERT_TRUE(fit_result.success);
+        times_us.push_back(
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+    }
+
+    double mean = std::accumulate(times_us.begin(), times_us.end(), 0.0) / times_us.size();
+
+    std::cout << "\nSIMD Performance (24K grid, 5 runs):\n";
+    std::cout << "  Mean: " << mean << " µs (" << (mean / 1000.0) << " ms)\n";
+    std::cout << "  Min: " << *std::min_element(times_us.begin(), times_us.end()) << " µs\n";
+    std::cout << "  Max: " << *std::max_element(times_us.begin(), times_us.end()) << " µs\n";
+
+    // Performance regression check
+    // Baseline (Phase 0+1): 86.7ms
+    // Target (Phase 0+1+2): ~76ms (1.14× speedup)
+    // Allow 3× margin for CI variability
+    EXPECT_LT(mean, 230000.0)  // <230ms (3× target)
+        << "SIMD optimization performance regression";
 }

@@ -103,8 +103,12 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
     A(1, 0) = -1.0; A(1, 1) = 2.0; A(1, 2) = -1.0;
     A(2, 1) = -1.0; A(2, 2) = 2.0;
 
-    // Solve
-    mango::banded_lu_solve(A, b, x);
+    // Solve using modern interface
+    auto factor_result = mango::banded_lu_factorize(A);
+    ASSERT_TRUE(factor_result.has_value()) << "Factorization failed: " << factor_result.error();
+
+    auto solve_result = mango::banded_lu_substitution(A, b, x);
+    ASSERT_TRUE(solve_result.has_value()) << "Substitution failed: " << solve_result.error();
 
     EXPECT_NEAR(x[0], 1.0, 1e-10);
     EXPECT_NEAR(x[1], 1.0, 1e-10);
@@ -141,8 +145,12 @@ TEST_F(BandedSolverTest, BandedLUSolveLarger) {
         }
     }
 
-    // Solve
-    mango::banded_lu_solve(A, b, x);
+    // Solve using modern interface
+    auto factor_result = mango::banded_lu_factorize(A);
+    ASSERT_TRUE(factor_result.has_value()) << "Factorization failed: " << factor_result.error();
+
+    auto solve_result = mango::banded_lu_substitution(A, b, x);
+    ASSERT_TRUE(solve_result.has_value()) << "Substitution failed: " << solve_result.error();
 
     // Verify residual ||Ax - b|| is small
     std::vector<double> residual(n, 0.0);
