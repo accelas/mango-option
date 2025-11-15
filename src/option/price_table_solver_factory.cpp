@@ -181,9 +181,11 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         }
     }
 
-    // Build batch parameters (all (σ,r) combinations)
+    // Build batch parameters and collectors (all (σ,r) combinations)
     std::vector<AmericanOptionParams> batch_params;
+    std::vector<PriceTableSnapshotCollector> collectors;
     batch_params.reserve(Nv * Nr);
+    collectors.reserve(Nv * Nr);
 
     namespace views = std::views;
     for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
@@ -198,13 +200,7 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
             .option_type = config_.option_type,
             .discrete_dividends = {}
         });
-    }
 
-    // Create collectors for each batch item
-    std::vector<PriceTableSnapshotCollector> collectors;
-    collectors.reserve(Nv * Nr);
-
-    for (size_t idx = 0; idx < Nv * Nr; ++idx) {
         PriceTableSnapshotCollectorConfig collector_config{
             .moneyness = moneyness,
             .tau = maturity,
