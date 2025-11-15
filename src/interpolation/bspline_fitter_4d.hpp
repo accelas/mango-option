@@ -533,9 +533,9 @@ private:
             // Find knot span
             int span = find_span_cubic(knots_, x);
 
-            // Evaluate 4 non-zero basis functions at x
-            double basis[4];
-            cubic_basis_nonuniform(knots_, span, x, basis);
+            // Evaluate 4 non-zero basis functions at x (SIMD-accelerated)
+            alignas(32) double basis[4];
+            cubic_basis_nonuniform_simd(knots_, span, x, basis);
 
             // Store in banded format
             band_col_start_[i] = std::max(0, span - 3);
