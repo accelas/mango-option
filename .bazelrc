@@ -6,5 +6,8 @@ build --color=yes
 test --color=yes
 test --test_output=errors
 
+# Treat warnings as errors
+build --copt=-Werror
+
 # Arrow persistence feature (enabled by default)
 build --define=enable_arrow=true
