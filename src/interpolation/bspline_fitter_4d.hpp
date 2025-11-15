@@ -837,6 +837,10 @@ public:
                     "Value array size mismatch", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         }
 
+        // Create workspace sized for largest axis (eliminates ~15K allocations)
+        size_t max_n = std::max({N0_, N1_, N2_, N3_});
+        BSplineFitter4DWorkspace workspace(max_n);
+
         // Work in-place: copy values to coefficients array
         std::vector<double> coeffs = values;
 
@@ -852,7 +856,7 @@ public:
         // Strides: axis3=1, axis2=N3, axis1=N2*N3, axis0=N1*N2*N3
 
         // Step 1: axis3 (stride=1, contiguous access)
-        if (!fit_axis3(coeffs, tolerance, result)) {
+        if (!fit_axis3(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis3: " +
                                    std::to_string(result.failed_slices_axis3) + " slices failed";
@@ -860,7 +864,7 @@ public:
         }
 
         // Step 2: axis2 (stride=N3, small jumps)
-        if (!fit_axis2(coeffs, tolerance, result)) {
+        if (!fit_axis2(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis2: " +
                                    std::to_string(result.failed_slices_axis2) + " slices failed";
@@ -868,7 +872,7 @@ public:
         }
 
         // Step 3: axis1 (stride=N2*N3, medium jumps)
-        if (!fit_axis1(coeffs, tolerance, result)) {
+        if (!fit_axis1(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis1: " +
                                    std::to_string(result.failed_slices_axis1) + " slices failed";
@@ -876,7 +880,7 @@ public:
         }
 
         // Step 4: axis0 (stride=N1*N2*N3, large jumps - done last)
-        if (!fit_axis0(coeffs, tolerance, result)) {
+        if (!fit_axis0(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis0: " +
                                    std::to_string(result.failed_slices_axis0) + " slices failed";
