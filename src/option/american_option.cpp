@@ -10,6 +10,7 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/operators/operator_factory.hpp"
+#include "src/support/parallel.hpp"
 // BlackScholesPDE now defined in american_option.hpp
 #include <algorithm>
 #include <span>
@@ -35,7 +36,7 @@ class AmericanPutObstacle {
 public:
     void operator()(double, std::span<const double> x,
                     std::span<double> psi) const {
-        #pragma omp simd
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < x.size(); ++i) {
             psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
         }
@@ -52,7 +53,7 @@ class AmericanCallObstacle {
 public:
     void operator()(double, std::span<const double> x,
                     std::span<double> psi) const {
-        #pragma omp simd
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < x.size(); ++i) {
             psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
         }

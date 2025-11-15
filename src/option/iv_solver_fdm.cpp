@@ -210,13 +210,13 @@ IVResult IVSolverFDM::solve_impl(const IVQuery& query) {
 void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
                                     std::span<IVResult> results) {
     // Use OpenMP with one solver per thread for efficiency
-    #pragma omp parallel
+    MANGO_PRAGMA_PARALLEL
     {
         // Each thread creates its own solver instance once
         IVSolverFDM thread_local_solver(config_);
 
         // Distribute iterations across threads
-        #pragma omp for
+        MANGO_PRAGMA_FOR
         for (size_t i = 0; i < queries.size(); ++i) {
             results[i] = thread_local_solver.solve_impl(queries[i]);
         }
