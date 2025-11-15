@@ -44,7 +44,6 @@ cc_library(
     name = "bspline_fitter_4d",
     hdrs = ["bspline_fitter_4d.hpp"],
     deps = [
-        ":bspline_4d",
         ":bspline_utils",
         "//src/pde/core:thomas_solver",
         "//src/support:expected",
@@ -55,6 +54,11 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
+    ],
+    linkopts = [
+        "-llapacke",
+        "-llapack",
+        "-lblas",
     ],
     visibility = ["//visibility:public"],
 )
