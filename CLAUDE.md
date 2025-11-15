@@ -110,34 +110,6 @@ This scheme provides:
 - Second-order accuracy
 - Good damping properties for high-frequency errors
 
-### Cache Blocking (Removed)
-
-**Note:** Cache blocking was previously attempted but has been removed because the implementation was ineffective.
-
-**Why it was removed:**
-- The blocked path still passed full array spans to the stencil operators
-- Stencil accesses `u[i-1]`, `u[i]`, `u[i+1]` which can span multiple cache blocks
-- Added loop/branch overhead without any cache locality benefit
-- On large grids, this resulted in slower performance than single-pass evaluation
-
-**What would be needed for true cache blocking:**
-- Materialize block-local buffers with halo zones
-- Copy block data from global arrays into cache-friendly buffers
-- Run stencil on local buffers
-- Copy results back to global arrays
-- This adds complexity and copy overhead that may not pay off on modern CPUs with large L2/L3 caches
-
-**Current implementation:**
-- All grid sizes use single-pass evaluation (direct call to `spatial_op_.apply()`)
-- All cache blocking infrastructure has been removed (parameter, methods, tests)
-- `TRBDF2Config` no longer has a `cache_blocking_threshold` field
-
-**For developers:**
-If cache blocking becomes important in the future, it will need to be re-implemented from scratch with:
-1. Profiling to confirm memory bandwidth is the bottleneck (not computation or convergence)
-2. True blocking with local buffers and halo zones (not just index ranges)
-3. Careful benchmarking to ensure speedup justifies added complexity
-
 ### Implicit Solver
 
 Uses fixed-point iteration with under-relaxation (ω = 0.7) to solve implicit systems. Convergence criteria use relative error with default tolerance of 1e-6.
@@ -1092,6 +1064,7 @@ All tests verify:
 
 See `tests/bspline_banded_solver_test.cc` and `tests/bspline_4d_end_to_end_performance_test.cc` for details.
 
+<<<<<<< HEAD
 ### Workspace Optimization (Phase 1)
 
 After banded solver optimization (Phase 0), the next bottleneck was memory allocation overhead. The workspace optimization reduces allocations from 15,000 to 4 per fit operation.
@@ -1267,6 +1240,8 @@ auto result = fitter->fit(values);  // SIMD Cox-de Boor used automatically
 
 See `docs/plans/COX_DE_BOOR_SIMD_SUMMARY.md` for complete implementation details, design decisions, and performance analysis.
 
+=======
+>>>>>>> b9d76b9 (Clean up obsolete files and documentation)
 ## Numerical Considerations
 
 - Spatial discretization determines maximum stable dt for explicit methods
