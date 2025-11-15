@@ -2,8 +2,18 @@
 
 #include <cmath>
 #include <cstddef>
+#include <optional>
+#include <string>
 
 namespace mango {
+
+/// Result from Newton-Raphson iteration for implicit PDE stages
+struct NewtonResult {
+    bool converged;                              ///< Convergence status
+    size_t iterations;                           ///< Number of iterations performed
+    double final_error;                          ///< Final error measure
+    std::optional<std::string> failure_reason;   ///< Optional failure diagnostic
+};
 
 /// TR-BDF2 time-stepping configuration
 ///

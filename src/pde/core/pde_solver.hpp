@@ -9,7 +9,6 @@
 #include "src/pde/core/trbdf2_config.hpp"
 #include "src/pde/core/thomas_solver.hpp"
 #include "src/pde/core/newton_workspace.hpp"
-#include "src/pde/core/root_finding.hpp"
 #include "src/option/snapshot.hpp"
 #include "src/pde/core/jacobian_view.hpp"
 #include "src/support/expected.hpp"
@@ -496,10 +495,10 @@ private:
     //   u = rhs + coeff_dt·L(u)
     // which arises from implicit time-stepping in PDEs.
     //
-    // For general root-finding needs, see root_finding.hpp for the abstraction
-    // layer (RootFindingConfig, RootFindingResult). A truly general Newton
-    // solver would use function pointers/callables rather than template
-    // parameters for boundary conditions and spatial operators.
+    // For general root-finding needs (e.g., Brent's method for scalar equations),
+    // see root_finding.hpp. A truly general Newton solver would use function
+    // pointers/callables rather than template parameters for boundary conditions
+    // and spatial operators.
     //
     // These methods were previously in a separate NewtonSolver class but were
     // merged into PDESolver to make the design honest about their specific
@@ -516,9 +515,9 @@ private:
     /// @param u Solution vector (input: initial guess, output: converged solution)
     /// @param rhs Right-hand side from previous stage
     /// @return Result with convergence status
-    RootFindingResult solve_implicit_stage(double t, double coeff_dt,
-                                           std::span<double> u,
-                                           std::span<const double> rhs) {
+    NewtonResult solve_implicit_stage(double t, double coeff_dt,
+                                      std::span<double> u,
+                                      std::span<const double> rhs) {
         const double eps = config_.jacobian_fd_epsilon;
 
         // Apply BCs to initial guess
@@ -560,7 +559,7 @@ private:
 
             if (!result.ok()) {
                 return {false, iter, std::numeric_limits<double>::infinity(),
-                       "Singular Jacobian", std::nullopt};
+                       "Singular Jacobian"};
             }
 
             // Update: u ← u + δu
@@ -578,7 +577,7 @@ private:
             double error = compute_step_delta_error(u, newton_ws_.u_old());
 
             if (error < config_.tolerance) {
-                return {true, iter + 1, error, std::nullopt, std::nullopt};
+                return {true, iter + 1, error, std::nullopt};
             }
 
             // Prepare for next iteration
@@ -587,7 +586,7 @@ private:
 
         return {false, config_.max_iter,
                compute_step_delta_error(u, newton_ws_.u_old()),
-               "Max iterations reached", std::nullopt};
+               "Max iterations reached"};
     }
 
     void compute_residual(std::span<const double> u, double coeff_dt,
