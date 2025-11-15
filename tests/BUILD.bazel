@@ -555,3 +555,15 @@ cc_test(
     copts = ["-std=c++23"],
     size = "small",
 )
+
+cc_test(
+    name = "bspline_condition_number_stress_test",
+    srcs = ["bspline_condition_number_stress_test.cc"],
+    deps = [
+        "//src/interpolation:bspline_fitter_4d",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+    size = "medium",
+    timeout = "moderate",
+)

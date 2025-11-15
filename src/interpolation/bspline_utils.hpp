@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <array>
+#include <experimental/simd>
 
 namespace mango {
 
