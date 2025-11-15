@@ -29,18 +29,6 @@ cc_test(
 )
 
 cc_test(
-    name = "multigrid_test",
-    srcs = ["multigrid_test.cc"],
-    deps = [
-        "//src/pde/core:multigrid",
-        "//src/pde/core:grid",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-)
-
-cc_test(
     name = "boundary_conditions_test",
     srcs = ["boundary_conditions_test.cc"],
     deps = [
@@ -106,20 +94,6 @@ cc_test(
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/memory:pde_workspace",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
-)
-
-cc_test(
-    name = "integration_5d_price_table_test",
-    srcs = ["integration_5d_price_table_test.cc"],
-    deps = [
-        "//src/pde/core:multigrid",
-        "//src/pde/memory:pde_workspace",
-        "//src/pde/core:spatial_operators",
-        "//src/pde/core:grid",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

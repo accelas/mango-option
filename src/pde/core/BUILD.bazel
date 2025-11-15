@@ -14,17 +14,6 @@ cc_library(
 )
 
 cc_library(
-    name = "multigrid",
-    hdrs = ["multigrid.hpp"],
-    deps = [
-        ":grid",
-        "//src/support:expected",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "boundary_conditions",
     hdrs = ["boundary_conditions.hpp"],
     copts = [

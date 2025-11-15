@@ -1,7 +1,7 @@
 # All library targets have been reorganized into subdirectories:
 #
 # - Core PDE solver components: //src/pde/core:BUILD.bazel
-#   (grid, multigrid, boundary_conditions, jacobian_view, root_finding, brent,
+#   (grid, boundary_conditions, jacobian_view, root_finding, brent,
 #    newton_workspace, spatial_operators, time_domain, trbdf2_config, thomas_solver, pde_solver)
 #
 # - Interpolation utilities: //src/interpolation:BUILD.bazel
