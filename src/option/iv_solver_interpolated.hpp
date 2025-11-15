@@ -46,7 +46,7 @@
 #include "src/option/iv_solver_base.hpp"
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_types.hpp"
-#include "src/interpolation/bspline_4d.hpp"
+#include "src/bspline/bspline_4d.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <cmath>

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
 #include <vector>
 #include <cmath>
 

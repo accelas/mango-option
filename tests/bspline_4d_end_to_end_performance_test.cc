@@ -12,7 +12,7 @@
  * - Expected speedup: Based on micro-benchmark results (42× for 1D solver)
  */
 
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <chrono>

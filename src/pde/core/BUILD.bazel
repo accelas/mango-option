@@ -45,22 +45,6 @@ cc_library(
 )
 
 cc_library(
-    name = "root_finding",
-    hdrs = ["root_finding.hpp"],
-    deps = [
-        "//common:ivcalc_trace_hdr",
-    ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-DHAVE_SYSTEMTAP_SDT",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "time_domain",
     hdrs = ["time_domain.hpp"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -70,13 +54,6 @@ cc_library(
 cc_library(
     name = "trbdf2_config",
     hdrs = ["trbdf2_config.hpp"],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "thomas_solver",
-    hdrs = ["thomas_solver.hpp"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
@@ -92,8 +69,8 @@ cc_library(
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",
-        ":thomas_solver",
-        ":root_finding",
+        "//src/math:thomas_solver",
+        "//src/math:root_finding",
         "//src/pde/core:snapshot",
         ":jacobian_view",
         "//src/support:error_types",

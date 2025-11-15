@@ -1,0 +1,30 @@
+cc_library(
+    name = "root_finding",
+    hdrs = ["root_finding.hpp"],
+    deps = [
+        "//common:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "thomas_solver",
+    hdrs = ["thomas_solver.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "cubic_spline_solver",
+    hdrs = ["cubic_spline_solver.hpp"],
+    deps = [":thomas_solver"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

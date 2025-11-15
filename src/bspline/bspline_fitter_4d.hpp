@@ -32,7 +32,7 @@
 
 #pragma once
 
-#include "src/interpolation/bspline_utils.hpp"
+#include "src/bspline/bspline_utils.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <lapacke.h>

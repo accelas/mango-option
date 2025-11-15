@@ -2,7 +2,7 @@
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"
 #include "src/pde/operators/operator_factory.hpp"
-#include "src/pde/core/root_finding.hpp"
+#include "src/math/root_finding.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include <iostream>

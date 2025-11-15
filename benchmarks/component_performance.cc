@@ -12,8 +12,8 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
-#include "src/interpolation/bspline_4d.hpp"
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"

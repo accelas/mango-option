@@ -42,7 +42,7 @@ cc_test(
     name = "root_finding_test",
     srcs = ["root_finding_test.cc"],
     deps = [
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -52,7 +52,7 @@ cc_test(
     name = "brent_cpp_test",
     srcs = ["brent_cpp_test.cc"],
     deps = [
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -65,7 +65,7 @@ cc_test(
         "//src/pde/core:pde_solver",
         
         "//src/pde/core:boundary_conditions",
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
         "//src/pde/core:snapshot",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:laplacian_pde",
@@ -102,7 +102,7 @@ cc_test(
     name = "tridiagonal_solver_test",
     srcs = ["tridiagonal_solver_test.cc"],
     deps = [
-        "//src/pde/core:thomas_solver",
+        "//src/math:thomas_solver",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -207,9 +207,9 @@ cc_test(
     name = "thomas_cubic_spline_test",
     srcs = ["thomas_cubic_spline_test.cc"],
     deps = [
-        "//src/pde/core:thomas_solver",
-        "//src/interpolation:cubic_spline_solver",
-        "//src/interpolation:snapshot_interpolator",
+        "//src/math:thomas_solver",
+        "//src/math:cubic_spline_solver",
+        "//src/option:price_table_snapshot_collector",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -219,8 +219,8 @@ cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
-        "//src/interpolation:bspline_4d",
+        "//src/bspline:bspline_fitter_4d",
+        "//src/bspline:bspline_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -230,7 +230,7 @@ cc_test(
     name = "bspline_4d_test",
     srcs = ["bspline_4d_test.cc"],
     deps = [
-        "//src/interpolation:bspline_4d",
+        "//src/bspline:bspline_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
@@ -240,8 +240,8 @@ cc_test(
     name = "bspline_fitter_4d_test",
     srcs = ["bspline_fitter_4d_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
-        "//src/interpolation:bspline_4d",
+        "//src/bspline:bspline_fitter_4d",
+        "//src/bspline:bspline_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
@@ -251,7 +251,7 @@ cc_test(
     name = "bspline_fitter_4d_separable_test",
     srcs = ["bspline_fitter_4d_separable_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
@@ -265,8 +265,8 @@ cc_test(
         "//src/option:price_table_snapshot_collector",
         "//src/option:iv_solver_interpolated",
         "//src/option:american_option",
-        "//src/interpolation:bspline_fitter_4d",
-        "//src/interpolation:bspline_4d",
+        "//src/bspline:bspline_fitter_4d",
+        "//src/bspline:bspline_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -390,7 +390,7 @@ cc_test(
     name = "bspline_4d_end_to_end_performance_test",
     srcs = ["bspline_4d_end_to_end_performance_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -408,8 +408,8 @@ cc_test(
         "-march=native",
     ],
     deps = [
-        "//src/interpolation:bspline_4d",
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_4d",
+        "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -439,7 +439,7 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -449,7 +449,7 @@ cc_test(
     name = "bspline_workspace_test",
     srcs = ["bspline_workspace_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -460,7 +460,7 @@ cc_test(
     name = "bspline_condition_number_stress_test",
     srcs = ["bspline_condition_number_stress_test.cc"],
     deps = [
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
