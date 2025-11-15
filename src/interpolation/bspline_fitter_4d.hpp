@@ -226,13 +226,14 @@ inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
 ///
 /// Uses forward and back substitution with pre-computed LU factors.
 /// MUCH faster than re-factorizing for condition number estimation.
+/// Operates in-place on x (copies b into x, then LAPACKE_dgbtrs modifies x).
 ///
 /// Time complexity: O(n)
-/// Space complexity: O(n) for temporary vector
+/// Space complexity: O(1) (zero heap allocations - operates in-place)
 ///
 /// @param LU Pre-factored banded matrix (from banded_lu_factorize)
 /// @param b Right-hand side vector
-/// @param x Solution vector (output)
+/// @param x Solution vector (output, also used as workspace)
 inline expected<void, std::string> banded_lu_substitution(
     const BandedMatrixStorage& LU,
     std::span<const double> b,
@@ -246,7 +247,9 @@ inline expected<void, std::string> banded_lu_substitution(
         return unexpected(std::string("Dimension mismatch in banded_lu_substitution"));
     }
 
-    std::vector<double> rhs(b.begin(), b.end());
+    // Copy b into x, then solve in-place (LAPACKE_dgbtrs modifies RHS)
+    std::copy(b.begin(), b.end(), x.begin());
+
     lapack_int nrhs = 1;
     lapack_int info = LAPACKE_dgbtrs(
         LAPACK_COL_MAJOR,
@@ -258,7 +261,7 @@ inline expected<void, std::string> banded_lu_substitution(
         LU.lapack_band_storage_.data(),
         LU.ldab_,
         LU.pivot_indices_.data(),
-        rhs.data(),
+        x.data(),  // Solve in-place on x (was rhs.data())
         n);
 
     if (info < 0) {
@@ -272,7 +275,7 @@ inline expected<void, std::string> banded_lu_substitution(
             std::to_string(info));
     }
 
-    std::copy(rhs.begin(), rhs.end(), x.begin());
+    // x now contains the solution (no copy needed)
     return {};
 }
 
@@ -429,6 +432,73 @@ public:
         return {coeffs, true, "", max_residual, cond_est};
     }
 
+    /// Fit with external coefficient buffer (zero-allocation variant)
+    ///
+    /// @param values Function values at grid points
+    /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
+    /// @param tolerance Max allowed residual
+    /// @return Fit result WITHOUT coefficients vector (uses coeffs_out)
+    BSplineCollocation1DResult fit_with_buffer(
+        std::span<const double> values,
+        std::span<double> coeffs_out,
+        double tolerance = 1e-9)
+    {
+        if (values.size() != n_) {
+            return {std::vector<double>(), false,
+                    "Value array size mismatch", 0.0, 0.0};
+        }
+
+        if (coeffs_out.size() != n_) {
+            return {std::vector<double>(), false,
+                    "Coefficients buffer size mismatch", 0.0, 0.0};
+        }
+
+        // Validate input values for NaN/Inf
+        for (size_t i = 0; i < n_; ++i) {
+            if (std::isnan(values[i])) {
+                return {std::vector<double>(), false,
+                        "Input values contain NaN at index " + std::to_string(i), 0.0, 0.0};
+            }
+            if (std::isinf(values[i])) {
+                return {std::vector<double>(), false,
+                        "Input values contain infinite value at index " + std::to_string(i), 0.0, 0.0};
+            }
+        }
+
+        // Clear cached LU factors (new fit)
+        is_factored_ = false;
+        lu_factors_.reset();
+
+        // Build collocation matrix
+        build_collocation_matrix();
+
+        // Solve banded system into provided buffer
+        auto solve_result = solve_banded_system_to_buffer(values, coeffs_out);
+
+        if (!solve_result) {
+            return {std::vector<double>(), false,
+                    "Failed to solve collocation system: " + solve_result.error(),
+                    0.0, 0.0};
+        }
+
+        // Compute residuals
+        double max_residual = compute_residual_from_span(coeffs_out, values);
+
+        // Check residual tolerance
+        if (max_residual > tolerance) {
+            return {std::vector<double>(), false,
+                    "Residual " + std::to_string(max_residual) +
+                    " exceeds tolerance " + std::to_string(tolerance),
+                    max_residual, 0.0};
+        }
+
+        // Estimate condition number
+        double cond_est = estimate_condition_number();
+
+        // Return result without copying coefficients (already in caller's buffer)
+        return {std::vector<double>(), true, "", max_residual, cond_est};
+    }
+
 private:
     /// Constructor (private - use factory method)
     explicit BSplineCollocation1D(std::vector<double> grid)
@@ -483,6 +553,41 @@ private:
         }
     }
 
+    /// Ensure matrix is factored (builds and factorizes if not already done)
+    ///
+    /// Extracts common factorization logic to avoid duplication.
+    /// @return expected<void, string> - success or error message
+    expected<void, std::string> ensure_factored() const {
+        if (is_factored_) {
+            return {};  // Already factored
+        }
+
+        // Build BandedMatrixStorage from compact storage
+        lu_factors_ = BandedMatrixStorage(n_);
+
+        for (size_t i = 0; i < n_; ++i) {
+            int col_start = band_col_start_[i];
+            lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
+
+            // Copy band values with bounds checking
+            for (int k = 0; k < 4; ++k) {
+                int col = col_start + k;
+                if (col >= 0 && col < static_cast<int>(n_)) {
+                    (*lu_factors_)(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
+                }
+            }
+        }
+
+        // Factorize once
+        auto factorize_result = banded_lu_factorize(*lu_factors_);
+        if (!factorize_result) {
+            return factorize_result;  // Propagate error
+        }
+
+        is_factored_ = true;
+        return {};
+    }
+
     /// Solve banded linear system using cached LU factorization
     ///
     /// On first call, factorizes the matrix and caches LU factors.
@@ -495,30 +600,10 @@ private:
         const std::vector<double>& rhs,
         std::vector<double>& solution) const
     {
-        if (!is_factored_) {
-            // Build BandedMatrixStorage from compact storage
-            lu_factors_ = BandedMatrixStorage(n_);
-
-            for (size_t i = 0; i < n_; ++i) {
-                int col_start = band_col_start_[i];
-                lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
-
-                // Copy band values
-                for (int k = 0; k < 4; ++k) {
-                    int col = col_start + k;
-                    if (col >= 0 && col < static_cast<int>(n_)) {
-                        (*lu_factors_)(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
-                    }
-                }
-            }
-
-            // Factorize once
-            auto factorize_result = banded_lu_factorize(*lu_factors_);
-            if (!factorize_result) {
-                return factorize_result;  // Propagate error
-            }
-
-            is_factored_ = true;
+        // Ensure matrix is factored (no-op if already done)
+        auto factorize_result = ensure_factored();
+        if (!factorize_result) {
+            return factorize_result;
         }
 
         // Solve using cached LU factors (fast!)
@@ -531,6 +616,25 @@ private:
         return {};
     }
 
+    /// Solve banded system directly into caller's buffer
+    expected<void, std::string> solve_banded_system_to_buffer(
+        std::span<const double> rhs,
+        std::span<double> solution) const
+    {
+        // Ensure matrix is factored (no-op if already done)
+        auto factorize_result = ensure_factored();
+        if (!factorize_result) {
+            return factorize_result;
+        }
+
+        // Solve using cached factors, output to provided buffer
+        auto solve_result = banded_lu_substitution(*lu_factors_, rhs, solution);
+        if (!solve_result) {
+            return solve_result;
+        }
+
+        return {};
+    }
 
     /// Compute max residual ||B*c - f||_∞ using banded storage
     double compute_residual(const std::vector<double>& coeffs,
@@ -554,6 +658,25 @@ private:
         }
 
         return max_res;
+    }
+
+    /// Compute residual from span coefficients
+    double compute_residual_from_span(std::span<const double> coeffs, std::span<const double> values) const {
+        double max_residual = 0.0;
+
+        for (size_t i = 0; i < n_; ++i) {
+            double Bc_i = 0.0;
+            int col_start = band_col_start_[i];
+
+            for (size_t k = 0; k < 4 && (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k) {
+                Bc_i = std::fma(band_values_[i * 4 + k], coeffs[col_start + k], Bc_i);
+            }
+
+            double residual = std::abs(Bc_i - values[i]);
+            max_residual = std::max(max_residual, residual);
+        }
+
+        return max_residual;
     }
 
     /// Estimate 1-norm condition number using cached LU factors
@@ -639,6 +762,35 @@ struct BSplineFit4DSeparableResult {
     size_t failed_slices_axis3;         ///< Number of failed 1D fits along axis3
 };
 
+/// Workspace for B-spline 4D fitting to reduce allocations
+///
+/// Pre-allocates reusable buffers for intermediate results.
+/// Buffers are sized for the largest axis and reused across all slices.
+struct BSplineFitter4DWorkspace {
+    std::vector<double> slice_buffer;     ///< Reusable buffer for slice extraction
+    std::vector<double> coeffs_buffer;    ///< Reusable buffer for fitted coefficients
+
+    /// Create workspace sized for maximum axis dimension
+    ///
+    /// @param max_n Largest dimension across all 4 axes
+    explicit BSplineFitter4DWorkspace(size_t max_n)
+        : slice_buffer(max_n)
+        , coeffs_buffer(max_n)
+    {}
+
+    /// Get slice buffer as span (subspan for smaller axes)
+    std::span<double> get_slice_buffer(size_t n) {
+        assert(n <= slice_buffer.size());
+        return std::span{slice_buffer.data(), n};
+    }
+
+    /// Get coefficients buffer as span
+    std::span<double> get_coeffs_buffer(size_t n) {
+        assert(n <= coeffs_buffer.size());
+        return std::span{coeffs_buffer.data(), n};
+    }
+};
+
 /// Separable 4D B-spline fitter
 ///
 /// Exploits tensor-product structure to avoid solving a massive dense system.
@@ -688,6 +840,10 @@ public:
                     "Value array size mismatch", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         }
 
+        // Create workspace sized for largest axis (eliminates ~15K allocations)
+        size_t max_n = std::max({N0_, N1_, N2_, N3_});
+        BSplineFitter4DWorkspace workspace(max_n);
+
         // Work in-place: copy values to coefficients array
         std::vector<double> coeffs = values;
 
@@ -703,7 +859,7 @@ public:
         // Strides: axis3=1, axis2=N3, axis1=N2*N3, axis0=N1*N2*N3
 
         // Step 1: axis3 (stride=1, contiguous access)
-        if (!fit_axis3(coeffs, tolerance, result)) {
+        if (!fit_axis3(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis3: " +
                                    std::to_string(result.failed_slices_axis3) + " slices failed";
@@ -711,7 +867,7 @@ public:
         }
 
         // Step 2: axis2 (stride=N3, small jumps)
-        if (!fit_axis2(coeffs, tolerance, result)) {
+        if (!fit_axis2(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis2: " +
                                    std::to_string(result.failed_slices_axis2) + " slices failed";
@@ -719,7 +875,7 @@ public:
         }
 
         // Step 3: axis1 (stride=N2*N3, medium jumps)
-        if (!fit_axis1(coeffs, tolerance, result)) {
+        if (!fit_axis1(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis1: " +
                                    std::to_string(result.failed_slices_axis1) + " slices failed";
@@ -727,7 +883,7 @@ public:
         }
 
         // Step 4: axis0 (stride=N1*N2*N3, large jumps - done last)
-        if (!fit_axis0(coeffs, tolerance, result)) {
+        if (!fit_axis0(coeffs, tolerance, result, &workspace)) {
             result.success = false;
             result.error_message = "Failed fitting along axis0: " +
                                    std::to_string(result.failed_slices_axis0) + " slices failed";
@@ -785,32 +941,59 @@ private:
 
     /// Fit along axis0 for all (j,k,l) slices
     bool fit_axis0(std::vector<double>& coeffs, double tolerance,
-                   BSplineFit4DSeparableResult& result) {
-        std::vector<double> slice(N0_);
+                   BSplineFit4DSeparableResult& result,
+                   BSplineFitter4DWorkspace* workspace = nullptr) {
+
+        // Use workspace buffer if provided, else allocate
+        std::vector<double> fallback_slice;
+        std::vector<double> fallback_coeffs;
+        std::span<double> slice_buffer;
+        std::span<double> coeffs_buffer;
+
+        if (workspace) {
+            slice_buffer = workspace->get_slice_buffer(N0_);
+            coeffs_buffer = workspace->get_coeffs_buffer(N0_);
+        } else {
+            fallback_slice.resize(N0_);
+            fallback_coeffs.resize(N0_);
+            slice_buffer = std::span{fallback_slice};
+            coeffs_buffer = std::span{fallback_coeffs};
+        }
+
         std::vector<double> max_residuals;
         std::vector<double> conditions;
 
         for (size_t j = 0; j < N1_; ++j) {
             for (size_t k = 0; k < N2_; ++k) {
                 for (size_t l = 0; l < N3_; ++l) {
-                    // Extract 1D slice along axis0: coeffs[:,j,k,l]
+                    // Extract 1D slice along axis0: coeffs[:,j,k,l] into buffer
                     for (size_t i = 0; i < N0_; ++i) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        slice[i] = coeffs[idx];
+                        slice_buffer[i] = coeffs[idx];
                     }
 
-                    // Fit 1D B-spline
-                    auto fit_result = solver_axis0_->fit(slice, tolerance);
+                    // Fit using workspace buffers (zero allocation!)
+                    BSplineCollocation1DResult fit_result;
+                    if (workspace) {
+                        fit_result = solver_axis0_->fit_with_buffer(
+                            slice_buffer,
+                            coeffs_buffer,
+                            tolerance);
+                    } else {
+                        fit_result = solver_axis0_->fit(
+                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            tolerance);
+                    }
 
                     if (!fit_result.success) {
                         ++result.failed_slices_axis0;
                         return false;
                     }
 
-                    // Write coefficients back
+                    // Write coefficients back from buffer
                     for (size_t i = 0; i < N0_; ++i) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        coeffs[idx] = fit_result.coefficients[i];
+                        coeffs[idx] = workspace ? coeffs_buffer[i] : fit_result.coefficients[i];
                     }
 
                     max_residuals.push_back(fit_result.max_residual);
@@ -826,32 +1009,59 @@ private:
 
     /// Fit along axis1 for all (i,k,l) slices
     bool fit_axis1(std::vector<double>& coeffs, double tolerance,
-                   BSplineFit4DSeparableResult& result) {
-        std::vector<double> slice(N1_);
+                   BSplineFit4DSeparableResult& result,
+                   BSplineFitter4DWorkspace* workspace = nullptr) {
+
+        // Use workspace buffer if provided, else allocate
+        std::vector<double> fallback_slice;
+        std::vector<double> fallback_coeffs;
+        std::span<double> slice_buffer;
+        std::span<double> coeffs_buffer;
+
+        if (workspace) {
+            slice_buffer = workspace->get_slice_buffer(N1_);
+            coeffs_buffer = workspace->get_coeffs_buffer(N1_);
+        } else {
+            fallback_slice.resize(N1_);
+            fallback_coeffs.resize(N1_);
+            slice_buffer = std::span{fallback_slice};
+            coeffs_buffer = std::span{fallback_coeffs};
+        }
+
         std::vector<double> max_residuals;
         std::vector<double> conditions;
 
         for (size_t i = 0; i < N0_; ++i) {
             for (size_t k = 0; k < N2_; ++k) {
                 for (size_t l = 0; l < N3_; ++l) {
-                    // Extract 1D slice along axis1: coeffs[i,:,k,l]
+                    // Extract 1D slice along axis1: coeffs[i,:,k,l] into buffer
                     for (size_t j = 0; j < N1_; ++j) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        slice[j] = coeffs[idx];
+                        slice_buffer[j] = coeffs[idx];
                     }
 
-                    // Fit 1D B-spline
-                    auto fit_result = solver_axis1_->fit(slice, tolerance);
+                    // Fit using workspace buffers (zero allocation!)
+                    BSplineCollocation1DResult fit_result;
+                    if (workspace) {
+                        fit_result = solver_axis1_->fit_with_buffer(
+                            slice_buffer,
+                            coeffs_buffer,
+                            tolerance);
+                    } else {
+                        fit_result = solver_axis1_->fit(
+                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            tolerance);
+                    }
 
                     if (!fit_result.success) {
                         ++result.failed_slices_axis1;
                         return false;
                     }
 
-                    // Write coefficients back
+                    // Write coefficients back from buffer
                     for (size_t j = 0; j < N1_; ++j) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        coeffs[idx] = fit_result.coefficients[j];
+                        coeffs[idx] = workspace ? coeffs_buffer[j] : fit_result.coefficients[j];
                     }
 
                     max_residuals.push_back(fit_result.max_residual);
@@ -867,32 +1077,59 @@ private:
 
     /// Fit along axis2 for all (i,j,l) slices
     bool fit_axis2(std::vector<double>& coeffs, double tolerance,
-                   BSplineFit4DSeparableResult& result) {
-        std::vector<double> slice(N2_);
+                   BSplineFit4DSeparableResult& result,
+                   BSplineFitter4DWorkspace* workspace = nullptr) {
+
+        // Use workspace buffer if provided, else allocate
+        std::vector<double> fallback_slice;
+        std::vector<double> fallback_coeffs;
+        std::span<double> slice_buffer;
+        std::span<double> coeffs_buffer;
+
+        if (workspace) {
+            slice_buffer = workspace->get_slice_buffer(N2_);
+            coeffs_buffer = workspace->get_coeffs_buffer(N2_);
+        } else {
+            fallback_slice.resize(N2_);
+            fallback_coeffs.resize(N2_);
+            slice_buffer = std::span{fallback_slice};
+            coeffs_buffer = std::span{fallback_coeffs};
+        }
+
         std::vector<double> max_residuals;
         std::vector<double> conditions;
 
         for (size_t i = 0; i < N0_; ++i) {
             for (size_t j = 0; j < N1_; ++j) {
                 for (size_t l = 0; l < N3_; ++l) {
-                    // Extract 1D slice along axis2: coeffs[i,j,:,l]
+                    // Extract 1D slice along axis2: coeffs[i,j,:,l] into buffer
                     for (size_t k = 0; k < N2_; ++k) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        slice[k] = coeffs[idx];
+                        slice_buffer[k] = coeffs[idx];
                     }
 
-                    // Fit 1D B-spline
-                    auto fit_result = solver_axis2_->fit(slice, tolerance);
+                    // Fit using workspace buffers (zero allocation!)
+                    BSplineCollocation1DResult fit_result;
+                    if (workspace) {
+                        fit_result = solver_axis2_->fit_with_buffer(
+                            slice_buffer,
+                            coeffs_buffer,
+                            tolerance);
+                    } else {
+                        fit_result = solver_axis2_->fit(
+                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            tolerance);
+                    }
 
                     if (!fit_result.success) {
                         ++result.failed_slices_axis2;
                         return false;
                     }
 
-                    // Write coefficients back
+                    // Write coefficients back from buffer
                     for (size_t k = 0; k < N2_; ++k) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        coeffs[idx] = fit_result.coefficients[k];
+                        coeffs[idx] = workspace ? coeffs_buffer[k] : fit_result.coefficients[k];
                     }
 
                     max_residuals.push_back(fit_result.max_residual);
@@ -908,32 +1145,59 @@ private:
 
     /// Fit along axis3 for all (i,j,k) slices
     bool fit_axis3(std::vector<double>& coeffs, double tolerance,
-                   BSplineFit4DSeparableResult& result) {
-        std::vector<double> slice(N3_);
+                   BSplineFit4DSeparableResult& result,
+                   BSplineFitter4DWorkspace* workspace = nullptr) {
+
+        // Use workspace buffer if provided, else allocate
+        std::vector<double> fallback_slice;
+        std::vector<double> fallback_coeffs;
+        std::span<double> slice_buffer;
+        std::span<double> coeffs_buffer;
+
+        if (workspace) {
+            slice_buffer = workspace->get_slice_buffer(N3_);
+            coeffs_buffer = workspace->get_coeffs_buffer(N3_);
+        } else {
+            fallback_slice.resize(N3_);
+            fallback_coeffs.resize(N3_);
+            slice_buffer = std::span{fallback_slice};
+            coeffs_buffer = std::span{fallback_coeffs};
+        }
+
         std::vector<double> max_residuals;
         std::vector<double> conditions;
 
         for (size_t i = 0; i < N0_; ++i) {
             for (size_t j = 0; j < N1_; ++j) {
                 for (size_t k = 0; k < N2_; ++k) {
-                    // Extract 1D slice along axis3: coeffs[i,j,k,:]
+                    // Extract 1D slice along axis3: coeffs[i,j,k,:] into buffer
                     for (size_t l = 0; l < N3_; ++l) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        slice[l] = coeffs[idx];
+                        slice_buffer[l] = coeffs[idx];
                     }
 
-                    // Fit 1D B-spline
-                    auto fit_result = solver_axis3_->fit(slice, tolerance);
+                    // Fit using workspace buffers (zero allocation!)
+                    BSplineCollocation1DResult fit_result;
+                    if (workspace) {
+                        fit_result = solver_axis3_->fit_with_buffer(
+                            slice_buffer,
+                            coeffs_buffer,
+                            tolerance);
+                    } else {
+                        fit_result = solver_axis3_->fit(
+                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            tolerance);
+                    }
 
                     if (!fit_result.success) {
                         ++result.failed_slices_axis3;
                         return false;
                     }
 
-                    // Write coefficients back
+                    // Write coefficients back from buffer
                     for (size_t l = 0; l < N3_; ++l) {
                         size_t idx = ((i * N1_ + j) * N2_ + k) * N3_ + l;
-                        coeffs[idx] = fit_result.coefficients[l];
+                        coeffs[idx] = workspace ? coeffs_buffer[l] : fit_result.coefficients[l];
                     }
 
                     max_residuals.push_back(fit_result.max_residual);
