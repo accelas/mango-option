@@ -167,13 +167,13 @@ private:
 
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {
-        // CRITICAL: Use K_ref for moneyness, not query.option.strike!
-        const double m = query.option.spot / K_ref_;
+        // CRITICAL: Use K_ref for moneyness, not query.strike!
+        const double m = query.spot / K_ref_;
 
         return m >= m_range_.first && m <= m_range_.second &&
-               query.option.maturity >= tau_range_.first && query.option.maturity <= tau_range_.second &&
+               query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&
                vol >= sigma_range_.first && vol <= sigma_range_.second &&
-               query.option.rate >= r_range_.first && query.option.rate <= r_range_.second;
+               query.rate >= r_range_.first && query.rate <= r_range_.second;
     }
 
     /// Validate query parameters

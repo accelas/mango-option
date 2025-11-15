@@ -180,7 +180,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         auto pde = BlackScholesPDE<double>(
             params_.volatility,
             params_.rate,
-            params_.continuous_dividend_yield);
+            params_.dividend_yield);
         if (shared_spacing) {
             return operators::create_spatial_operator(std::move(pde), shared_spacing);
         }
@@ -198,7 +198,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         const double tau = t;  // Time to maturity (backward PDE time)
         const double discount = std::exp(-params_.rate * tau);
 
-        if (params_.option_type == OptionType::PUT) {
+        if (params_.type == OptionType::PUT) {
             // Deep ITM put: V = K·e^(-r*τ) - S ≈ K·e^(-r*τ) as S → 0
             // Normalized: V/K = e^(-r*τ) - e^(x - r*τ) ≈ e^(-r*τ) as x → -∞
             return discount - std::exp(x) * discount;
@@ -213,7 +213,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         const double tau = t;  // Time to maturity (backward PDE time)
         const double discount = std::exp(-params_.rate * tau);
 
-        if (params_.option_type == OptionType::CALL) {
+        if (params_.type == OptionType::CALL) {
             // Deep ITM call: V = S - K·e^(-r*τ)
             // Normalized: V/K = (S/K) - e^(-r*τ) = e^x - e^(-r*τ)
             return std::exp(x) - discount;
@@ -226,7 +226,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 5. Setup obstacle condition
     AmericanOptionResult result;
 
-    if (params_.option_type == OptionType::PUT) {
+    if (params_.type == OptionType::PUT) {
         // Create PDESolver with obstacle
         PDESolver solver(x_grid, time_domain, trbdf2_config_,
                         left_bc, right_bc, bs_op,

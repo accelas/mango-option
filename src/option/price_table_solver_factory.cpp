@@ -289,16 +289,16 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
                                                  views::iota(size_t{0}, Nr))) {
         size_t idx = k * Nr + l;
 
-        batch_params.push_back({
-            .strike = K_ref,
-            .spot = K_ref,
-            .maturity = T_max,
-            .volatility = volatility[k],
-            .rate = rate[l],
-            .continuous_dividend_yield = config_.dividend_yield,
-            .option_type = config_.option_type,
-            .discrete_dividends = {}
-        });
+        AmericanOptionParams params;
+        params.spot = K_ref;
+        params.strike = K_ref;
+        params.maturity = T_max;
+        params.rate = rate[l];
+        params.dividend_yield = config_.dividend_yield;
+        params.type = config_.option_type;
+        params.volatility = volatility[k];
+        params.discrete_dividends = {};
+        batch_params.push_back(params);
 
         collectors.emplace_back(
             moneyness,

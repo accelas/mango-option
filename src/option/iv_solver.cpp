@@ -49,10 +49,10 @@ double IVSolver::estimate_upper_bound() const {
     // For deep ITM options, time value is small, so high vol is unlikely
 
     double intrinsic_value;
-    if (query_.option.type == OptionType::CALL) {
-        intrinsic_value = std::max(query_.option.spot - query_.option.strike, 0.0);
+    if (query_.type == OptionType::CALL) {
+        intrinsic_value = std::max(query_.spot - query_.strike, 0.0);
     } else {
-        intrinsic_value = std::max(query_.option.strike - query_.option.spot, 0.0);
+        intrinsic_value = std::max(query_.strike - query_.spot, 0.0);
     }
 
     // Time value = Market Price - Intrinsic Value
@@ -79,13 +79,13 @@ double IVSolver::estimate_lower_bound() const {
 double IVSolver::objective_function(double volatility) const {
     // Create American option parameters
     AmericanOptionParams option_params;
-    option_params.strike = query_.option.strike;
-    option_params.spot = query_.option.spot;
-    option_params.maturity = query_.option.maturity;
+    option_params.strike = query_.strike;
+    option_params.spot = query_.spot;
+    option_params.maturity = query_.maturity;
     option_params.volatility = volatility;
-    option_params.rate = query_.option.rate;
-    option_params.continuous_dividend_yield = query_.option.dividend_yield;
-    option_params.option_type = query_.option.type;
+    option_params.rate = query_.rate;
+    option_params.dividend_yield = query_.dividend_yield;
+    option_params.type = query_.type;
 
     // Compute adaptive grid bounds based on spot/strike and config.grid_s_max
     // The grid should:
@@ -93,7 +93,7 @@ double IVSolver::objective_function(double volatility) const {
     // 2. Extend to at least grid_s_max (default 200.0)
     // 3. Use reasonable lower bound (0.5 * spot or smaller if needed)
 
-    double moneyness = query_.option.spot / query_.option.strike;
+    double moneyness = query_.spot / query_.strike;
 
     // Lower bound: ensure we capture deep ITM scenarios
     // Use smaller of: 0.5 * moneyness or 0.5 (whichever extends grid more)
@@ -101,8 +101,8 @@ double IVSolver::objective_function(double volatility) const {
 
     // Upper bound: ensure we capture deep OTM scenarios
     // Use larger of: 2.0 * moneyness or grid_s_max / strike (whichever extends grid more)
-    double max_s = std::max(query_.option.strike * 2.0, config_.grid_s_max);
-    double max_moneyness = std::max(2.0, max_s / query_.option.strike);
+    double max_s = std::max(query_.strike * 2.0, config_.grid_s_max);
+    double max_moneyness = std::max(2.0, max_s / query_.strike);
 
     // Ensure spot is within bounds (with margin for interpolation)
     min_moneyness = std::min(min_moneyness, moneyness * 0.9);
