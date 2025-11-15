@@ -6,6 +6,7 @@
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/support/parallel.hpp"
+#include "src/math/root_finding.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -126,93 +127,39 @@ IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
         };
     }
 
-    // Initial guess: midpoint of bounds
-    double sigma = (sigma_min + sigma_max) / 2.0;
+    // Define objective function: f(σ) = Price(σ) - Market_Price
+    auto objective = [&](double sigma) -> double {
+        return eval_price(moneyness, query.maturity, sigma, query.rate, query.strike) - query.market_price;
+    };
 
-    // Newton-Raphson iterations
-    std::optional<double> last_vega = std::nullopt;
-    std::size_t iter = 0;
-    double error_abs = 0.0;
+    // Define derivative (vega): df/dσ = ∂Price/∂σ
+    auto derivative = [&](double sigma) -> double {
+        return compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+    };
 
-    const std::size_t max_iter = static_cast<std::size_t>(std::max(0, config_.max_iterations));
+    // Use generic bounded Newton-Raphson
+    RootFindingConfig newton_config{
+        .max_iter = static_cast<size_t>(std::max(0, config_.max_iterations)),
+        .tolerance = config_.tolerance
+    };
 
-    for (; iter < max_iter; ++iter) {
-        // Check if current sigma is within surface bounds
-        if (!is_in_bounds(query, sigma)) {
-            return IVResult{
-                .converged = false,
-                .iterations = iter + 1,
-                .implied_vol = sigma,
-                .final_error = error_abs,
-                .failure_reason = "Newton iteration moved outside surface bounds",
-                .vega = last_vega
-            };
-        }
+    const double sigma0 = (sigma_min + sigma_max) / 2.0;  // Initial guess
+    auto result = newton_find_root(objective, derivative, sigma0, sigma_min, sigma_max, newton_config);
 
-        // Evaluate price at current volatility (with strike scaling)
-        const double price = eval_price(moneyness, query.maturity, sigma, query.rate, query.strike);
-
-        // Compute error
-        error_abs = std::abs(price - query.market_price);
-
-        // Compute vega (∂Price/∂σ) with strike scaling
-        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
-        last_vega = vega;
-
-        // Check convergence
-        if (error_abs < config_.tolerance) {
-            return IVResult{
-                .converged = true,
-                .iterations = iter + 1,
-                .implied_vol = sigma,
-                .final_error = error_abs,
-                .failure_reason = std::nullopt,
-                .vega = last_vega
-            };
-        }
-
-        // Check for numerical issues
-        if (std::abs(vega) < 1e-10) {
-            return IVResult{
-                .converged = false,
-                .iterations = iter + 1,
-                .implied_vol = sigma,
-                .final_error = error_abs,
-                .failure_reason = "Vega too small (flat price surface)",
-                .vega = last_vega
-            };
-        }
-
-        // Newton step: σ_{n+1} = σ_n - f(σ_n)/f'(σ_n)
-        const double f = price - query.market_price;
-        const double sigma_new = sigma - f / vega;
-
-        // Enforce bounds
-        sigma = std::clamp(sigma_new, sigma_min, sigma_max);
-
-        // Check if bounds are hit (may indicate convergence issues)
-        if (sigma_new < sigma_min || sigma_new > sigma_max) {
-            if (iter > 10) {
-                return IVResult{
-                    .converged = false,
-                    .iterations = iter + 1,
-                    .implied_vol = sigma,
-                    .final_error = error_abs,
-                    .failure_reason = "Hit volatility bounds without convergence",
-                    .vega = last_vega
-                };
-            }
-        }
+    // Compute final vega for the result
+    std::optional<double> final_vega = std::nullopt;
+    if (result.root.has_value()) {
+        final_vega = derivative(result.root.value());
     }
 
-    // Max iterations reached
+    // Convert RootFindingResult to IVResult
     return IVResult{
-        .converged = false,
-        .iterations = iter,
-        .implied_vol = sigma,
-        .final_error = error_abs,
-        .failure_reason = "Maximum iterations reached without convergence",
-        .vega = last_vega
+        .converged = result.converged,
+        .iterations = result.iterations,
+        .implied_vol = result.root.value_or(sigma0),
+        .final_error = result.final_error,
+        .failure_reason = result.failure_reason,
+        .vega = final_vega
     };
 }
 
