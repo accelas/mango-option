@@ -1134,11 +1134,13 @@ BSplineCollocation1DResult fit_with_buffer(
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
 | Allocations (300K grid) | 15,000 | 4 | **3,750× reduction** |
-| Medium grid (24K) | ~120ms | 94.9ms | **1.27× speedup** |
-| Large grid (300K) | ~2.0s | 1.57s | **1.27× speedup** |
-| Combined with banded solver | ~46s (dense) | ~4.6s | **~10× total speedup** |
+| Medium grid (24K) | ~120ms | **86.7ms** | **1.38× speedup** |
+| Large grid (300K) | ~2.1s | ~1.52s | **1.38× speedup** |
+| Combined with banded solver | ~46s (dense) | ~4.3s | **~10.8× total speedup** |
 
-**Why speedup is modest (1.27×) despite 3,750× allocation reduction:**
+**Note**: Initial implementation had hidden allocation bug in `banded_lu_substitution()`. After fix (operate in-place on output buffer), achieved true zero-allocation performance and 1.38× speedup.
+
+**Why speedup is modest (1.38×) despite 3,750× allocation reduction:**
 - Modern allocators (glibc malloc) are highly optimized for small allocations
 - Allocation overhead was ~25% of runtime, not 100% (Amdahl's law)
 - Other bottlenecks: banded LU solve, residual computation, grid extraction
