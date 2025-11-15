@@ -78,4 +78,19 @@ struct IVQuery {
  */
 std::expected<void, std::string> validate_iv_query(const IVQuery& query);
 
+/**
+ * @brief PDE grid configuration for option pricing
+ *
+ * Specifies the computational grid and option parameters for
+ * solving the PDE using finite difference methods.
+ */
+struct PDEGridConfig {
+    OptionType option_type;    ///< Call or Put
+    double x_min;              ///< Minimum log-moneyness
+    double x_max;              ///< Maximum log-moneyness
+    size_t n_space;            ///< Number of spatial grid points
+    size_t n_time;             ///< Number of time steps
+    double dividend_yield;     ///< Continuous dividend yield
+};
+
 } // namespace mango

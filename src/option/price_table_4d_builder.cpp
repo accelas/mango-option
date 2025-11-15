@@ -147,12 +147,7 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
 
 std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solver(
     std::vector<double>& prices_4d,
-    OptionType option_type,
-    double x_min,
-    double x_max,
-    size_t n_space,
-    size_t n_time,
-    double dividend_yield)
+    const PDEGridConfig& config)
 {
     const size_t Nm = moneyness_.size();
     const size_t Nt = maturity_.size();
@@ -168,12 +163,12 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
         NormalizedSolveRequest base_request{
             .sigma = 0.20,  // Placeholder, set in loop
             .rate = 0.05,   // Placeholder, set in loop
-            .dividend = dividend_yield,
-            .option_type = option_type,
-            .x_min = x_min,
-            .x_max = x_max,
-            .n_space = n_space,
-            .n_time = n_time,
+            .dividend = config.dividend_yield,
+            .option_type = config.option_type,
+            .x_min = config.x_min,
+            .x_max = config.x_max,
+            .n_space = config.n_space,
+            .n_time = config.n_time,
             .T_max = T_max,
             .tau_snapshots = std::span{maturity_}
         };
@@ -238,19 +233,14 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
 
 std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
     std::vector<double>& prices_4d,
-    OptionType option_type,
-    double x_min,
-    double x_max,
-    size_t n_space,
-    size_t n_time,
-    double dividend_yield)
+    const PDEGridConfig& config)
 {
     const size_t Nm = moneyness_.size();
     const size_t Nt = maturity_.size();
     const size_t Nv = volatility_.size();
     const size_t Nr = rate_.size();
     const double T_max = maturity_.back();
-    const double dt = T_max / n_time;
+    const double dt = T_max / config.n_time;
 
     // Precompute step indices for each maturity
     std::vector<size_t> step_indices(Nt);
@@ -260,8 +250,8 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
 
         if (step_rounded < 0) {
             step_indices[j] = 0;
-        } else if (step_rounded >= static_cast<long long>(n_time)) {
-            step_indices[j] = n_time - 1;
+        } else if (step_rounded >= static_cast<long long>(config.n_time)) {
+            step_indices[j] = config.n_time - 1;
         } else {
             step_indices[j] = static_cast<size_t>(step_rounded);
         }
@@ -280,8 +270,8 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
             .maturity = T_max,
             .volatility = volatility_[k],
             .rate = rate_[l],
-            .continuous_dividend_yield = dividend_yield,
-            .option_type = option_type,
+            .continuous_dividend_yield = config.dividend_yield,
+            .option_type = config.option_type,
             .discrete_dividends = {}
         });
     }
@@ -295,7 +285,7 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
             .moneyness = std::span{moneyness_},
             .tau = std::span{maturity_},
             .K_ref = K_ref_,
-            .option_type = option_type,
+            .option_type = config.option_type,
             .payoff_params = nullptr
         };
         collectors.emplace_back(collector_config);
@@ -303,7 +293,7 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
 
     // Solve batch with snapshot registration via callback
     auto results = BatchAmericanOptionSolver::solve_batch(
-        batch_params, x_min, x_max, n_space, n_time,
+        batch_params, config.x_min, config.x_max, config.n_space, config.n_time,
         [&](size_t idx, AmericanOptionSolver& solver) {
             // Register snapshots for all maturities
             for (size_t j = 0; j < Nt; ++j) {
@@ -382,17 +372,25 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // Start timer
     auto start_time = std::chrono::high_resolution_clock::now();
 
+    // Create unified PDE grid configuration
+    PDEGridConfig config{
+        .option_type = option_type,
+        .x_min = x_min,
+        .x_max = x_max,
+        .n_space = n_space,
+        .n_time = n_time,
+        .dividend_yield = dividend_yield
+    };
+
     // Route to appropriate solver based on problem characteristics
     std::expected<void, std::string> solve_result;
 
     if (should_use_normalized_solver(x_min, x_max, n_space, {})) {
         // FAST PATH: Normalized chain solver
-        solve_result = solve_with_normalized_solver(
-            prices_4d, option_type, x_min, x_max, n_space, n_time, dividend_yield);
+        solve_result = solve_with_normalized_solver(prices_4d, config);
     } else {
         // FALLBACK PATH: Batch API with snapshots
-        solve_result = solve_with_batch_api(
-            prices_4d, option_type, x_min, x_max, n_space, n_time, dividend_yield);
+        solve_result = solve_with_batch_api(prices_4d, config);
     }
 
     if (!solve_result) {

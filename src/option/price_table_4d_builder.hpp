@@ -396,22 +396,12 @@ private:
     /// Solve using normalized chain solver (fast path)
     std::expected<void, std::string> solve_with_normalized_solver(
         std::vector<double>& prices_4d,
-        OptionType option_type,
-        double x_min,
-        double x_max,
-        size_t n_space,
-        size_t n_time,
-        double dividend_yield);
+        const PDEGridConfig& config);
 
     /// Solve using batch API with snapshots (fallback path)
     std::expected<void, std::string> solve_with_batch_api(
         std::vector<double>& prices_4d,
-        OptionType option_type,
-        double x_min,
-        double x_max,
-        size_t n_space,
-        size_t n_time,
-        double dividend_yield);
+        const PDEGridConfig& config);
 
     std::vector<double> moneyness_;
     std::vector<double> maturity_;
