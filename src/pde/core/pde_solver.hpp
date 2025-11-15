@@ -74,17 +74,18 @@ public:
     ///
     /// @param grid Spatial grid (x coordinates)
     /// @param time Time domain configuration
-    /// @param config TR-BDF2 configuration (includes Newton solver parameters)
+    /// @param config TR-BDF2 configuration (optional, uses defaults if not provided)
     /// @param left_bc Left boundary condition
     /// @param right_bc Right boundary condition
     /// @param spatial_op Spatial operator L(u)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
+    /// @param external_workspace Optional external workspace for memory reuse
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
-              const TRBDF2Config& config,
-              const BoundaryL& left_bc,
-              const BoundaryR& right_bc,
-              SpatialOp spatial_op,  // Pass by value, move into member
+              const TRBDF2Config& config = {},
+              const BoundaryL& left_bc = {},
+              const BoundaryR& right_bc = {},
+              SpatialOp spatial_op = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
               PDEWorkspace* external_workspace = nullptr)
         : grid_(grid)
