@@ -59,18 +59,6 @@ cc_test(
 )
 
 cc_test(
-    name = "newton_workspace_test",
-    srcs = ["newton_workspace_test.cc"],
-    deps = [
-        "//src/pde/core:newton_workspace",
-        "//src/pde/memory:pde_workspace",
-        "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "spatial_operators_test",
     srcs = ["spatial_operators_test.cc"],
     deps = [

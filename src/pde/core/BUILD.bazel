@@ -54,19 +54,6 @@ cc_library(
 )
 
 cc_library(
-    name = "newton_workspace",
-    hdrs = ["newton_workspace.hpp"],
-    deps = ["//src/pde/memory:pde_workspace"],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "spatial_operators",
     hdrs = ["spatial_operators.hpp"],
     deps = [
@@ -118,7 +105,6 @@ cc_library(
         ":time_domain",
         ":trbdf2_config",
         ":thomas_solver",
-        ":newton_workspace",
         ":root_finding",
         "//src/option:snapshot",
         ":jacobian_view",
