@@ -18,8 +18,15 @@ cc_library(
 
 cc_library(
     name = "bspline_utils",
+    srcs = ["bspline_utils.cpp"],
     hdrs = ["bspline_utils.hpp"],
-    copts = ["-std=c++23"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",  # Enable SIMD instructions
+    ],
     visibility = ["//visibility:public"],
 )
 
