@@ -122,8 +122,11 @@ AmericanOptionSolver::AmericanOptionSolver(
     , trbdf2_config_{}  // Default-initialized
     , workspace_(std::move(workspace))
 {
-    // Validate parameters
-    params_.validate();
+    // Validate parameters using unified validation
+    auto validation = validate_pricing_params(params_);
+    if (!validation) {
+        throw std::invalid_argument(validation.error());
+    }
 
     // Validate workspace is not null
     if (!workspace_) {
@@ -145,7 +148,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     }
 
     // Chain validation and construction using monadic operations
-    return AmericanOptionParams::validate_expected(params)
+    return validate_pricing_params(params)
         .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
             try {
                 return AmericanOptionSolver(params, workspace);

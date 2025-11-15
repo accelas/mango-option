@@ -93,4 +93,46 @@ struct OptionSolverGrid {
     double dividend_yield;     ///< Continuous dividend yield
 };
 
+/**
+ * @brief Complete pricing parameters including volatility
+ *
+ * This struct contains all parameters needed for option pricing:
+ * the option contract specification plus volatility and optional
+ * discrete dividends.
+ *
+ * All parameters are in consistent units:
+ * - Prices in dollars
+ * - Time in years
+ * - Rates and volatility as decimals (e.g., 0.05 for 5%)
+ */
+struct PricingParams {
+    double strike;                      ///< Strike price (dollars)
+    double spot;                        ///< Current spot price (dollars)
+    double maturity;                    ///< Time to maturity (years)
+    double volatility;                  ///< Volatility (fraction, annualized)
+    double rate;                        ///< Risk-free rate (fraction, annualized)
+    double continuous_dividend_yield;   ///< Continuous dividend yield (fraction, annualized)
+    OptionType option_type;             ///< Call or Put
+
+    /// Discrete dividend schedule: (time, amount) pairs
+    /// Time is in years from now, amount is in dollars
+    /// Can be used simultaneously with continuous_dividend_yield
+    std::vector<std::pair<double, double>> discrete_dividends;
+};
+
+/**
+ * @brief Validate pricing parameters
+ *
+ * Checks for:
+ * - Positive prices (spot, strike)
+ * - Positive maturity
+ * - Positive volatility
+ * - Finite and reasonable rate/dividend values
+ * - Valid discrete dividend schedule
+ *
+ * @param params Pricing parameters to validate
+ * @return void on success, error message on failure
+ */
+std::expected<void, std::string> validate_pricing_params(const PricingParams& params);
+
 } // namespace mango
