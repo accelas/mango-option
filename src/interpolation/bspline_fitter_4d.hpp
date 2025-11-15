@@ -226,13 +226,14 @@ inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
 ///
 /// Uses forward and back substitution with pre-computed LU factors.
 /// MUCH faster than re-factorizing for condition number estimation.
+/// Operates in-place on x (copies b into x, then LAPACKE_dgbtrs modifies x).
 ///
 /// Time complexity: O(n)
-/// Space complexity: O(n) for temporary vector
+/// Space complexity: O(1) (zero heap allocations - operates in-place)
 ///
 /// @param LU Pre-factored banded matrix (from banded_lu_factorize)
 /// @param b Right-hand side vector
-/// @param x Solution vector (output)
+/// @param x Solution vector (output, also used as workspace)
 inline expected<void, std::string> banded_lu_substitution(
     const BandedMatrixStorage& LU,
     std::span<const double> b,
@@ -246,7 +247,9 @@ inline expected<void, std::string> banded_lu_substitution(
         return unexpected(std::string("Dimension mismatch in banded_lu_substitution"));
     }
 
-    std::vector<double> rhs(b.begin(), b.end());
+    // Copy b into x, then solve in-place (LAPACKE_dgbtrs modifies RHS)
+    std::copy(b.begin(), b.end(), x.begin());
+
     lapack_int nrhs = 1;
     lapack_int info = LAPACKE_dgbtrs(
         LAPACK_COL_MAJOR,
@@ -258,7 +261,7 @@ inline expected<void, std::string> banded_lu_substitution(
         LU.lapack_band_storage_.data(),
         LU.ldab_,
         LU.pivot_indices_.data(),
-        rhs.data(),
+        x.data(),  // Solve in-place on x (was rhs.data())
         n);
 
     if (info < 0) {
@@ -272,7 +275,7 @@ inline expected<void, std::string> banded_lu_substitution(
             std::to_string(info));
     }
 
-    std::copy(rhs.begin(), rhs.end(), x.begin());
+    // x now contains the solution (no copy needed)
     return {};
 }
 
