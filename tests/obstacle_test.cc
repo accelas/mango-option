@@ -5,7 +5,6 @@
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
-#include "src/pde/core/root_finding.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -27,14 +26,13 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     DirichletBC right_bc{[](double t, double x) { return 0.5; }};
 
     TRBDF2Config trbdf2_config{};
-    RootFindingConfig root_config{};
 
     // Define obstacle: ψ(x,t) = 0.5 everywhere
     auto obstacle = [](double t, std::span<const double> x, std::span<double> psi) {
         std::fill(psi.begin(), psi.end(), 0.5);
     };
 
-    PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op, obstacle);
 
     // Initial condition: u = 0.3 everywhere (violates obstacle u ≥ ψ = 0.5)
@@ -75,14 +73,13 @@ TEST(ObstacleTest, TimeVaryingObstacle) {
     DirichletBC right_bc{[](double t, double x) { return 1.0; }};
 
     TRBDF2Config trbdf2_config{};
-    RootFindingConfig root_config{};
 
     // Time-varying obstacle: ψ(x,t) = t (grows from 0 to 1)
     auto obstacle = [](double t, std::span<const double> x, std::span<double> psi) {
         std::fill(psi.begin(), psi.end(), t);
     };
 
-    PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op, obstacle);
 
     // Initial condition: u = 0.5 everywhere
@@ -115,10 +112,9 @@ TEST(ObstacleTest, NoObstacleOptional) {
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};
 
     TRBDF2Config trbdf2_config{};
-    RootFindingConfig root_config{};
 
     // No obstacle provided (std::nullopt)
-    PDESolver solver(grid.span(), time, trbdf2_config, root_config,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op);
 
     // Initial condition: u = 0.5 everywhere

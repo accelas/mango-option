@@ -12,15 +12,17 @@ namespace mango {
 /// - Stage 2: BDF2 from t_n to t_n+1
 ///
 /// γ = 2 - √2 ≈ 0.5857864376269049 (optimal for L-stability)
+///
+/// Each implicit stage is solved using Newton-Raphson iteration.
 struct TRBDF2Config {
-    /// Maximum iterations for implicit solver
-    size_t max_iter = 20;
-
-    /// Convergence tolerance (relative error)
-    double tolerance = 1e-6;
-
     /// Stage 1 parameter (γ = 2 - √2)
     double gamma = 2.0 - std::sqrt(2.0);
+
+    /// Maximum Newton iterations per stage
+    size_t max_iter = 20;
+
+    /// Convergence tolerance for Newton solver (relative error)
+    double tolerance = 1e-6;
 
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;

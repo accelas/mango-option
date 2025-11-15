@@ -24,8 +24,7 @@ int main() {
 
     mango::TimeDomain time(0.0, 0.1, 0.001);
 
-    mango::TRBDF2Config trbdf2_config;
-    mango::RootFindingConfig root_config{
+    mango::TRBDF2Config trbdf2_config{
         .max_iter = 20,
         .tolerance = 1e-6,
         .jacobian_fd_epsilon = 1e-7
@@ -39,7 +38,7 @@ int main() {
     mango::LaplacianOperator spatial_op{1.0};  // Diffusion coefficient D = 1.0
 
     // Create solver with Newton integration
-    mango::PDESolver solver(grid_buffer.span(), time, trbdf2_config, root_config,
+    mango::PDESolver solver(grid_buffer.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
 
     // Initial condition: u(x, 0) = sin(πx)
@@ -53,8 +52,8 @@ int main() {
     std::cout << "Solving heat equation with Newton-Raphson...\n";
     std::cout << "Grid size: " << n << "\n";
     std::cout << "Time steps: " << time.n_steps() << "\n";
-    std::cout << "Newton config: max_iter=" << root_config.max_iter
-              << ", tol=" << root_config.tolerance << "\n\n";
+    std::cout << "Newton config: max_iter=" << trbdf2_config.max_iter
+              << ", tol=" << trbdf2_config.tolerance << "\n\n";
 
     auto status = solver.solve();
 

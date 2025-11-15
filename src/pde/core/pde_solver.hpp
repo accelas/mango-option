@@ -74,8 +74,7 @@ public:
     ///
     /// @param grid Spatial grid (x coordinates)
     /// @param time Time domain configuration
-    /// @param config TR-BDF2 configuration
-    /// @param root_config Root-finding configuration for Newton solver
+    /// @param config TR-BDF2 configuration (includes Newton solver parameters)
     /// @param left_bc Left boundary condition
     /// @param right_bc Right boundary condition
     /// @param spatial_op Spatial operator L(u)
@@ -83,7 +82,6 @@ public:
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
               const TRBDF2Config& config,
-              const RootFindingConfig& root_config,
               const BoundaryL& left_bc,
               const BoundaryR& right_bc,
               SpatialOp spatial_op,  // Pass by value, move into member
@@ -92,7 +90,6 @@ public:
         : grid_(grid)
         , time_(time)
         , config_(config)
-        , root_config_(root_config)
         , left_bc_(left_bc)
         , right_bc_(right_bc)
         , spatial_op_(std::move(spatial_op))
@@ -207,7 +204,6 @@ private:
     std::span<const double> grid_;
     TimeDomain time_;
     TRBDF2Config config_;
-    RootFindingConfig root_config_;
     BoundaryL left_bc_;
     BoundaryR right_bc_;
     SpatialOp spatial_op_;
@@ -522,7 +518,7 @@ private:
     RootFindingResult solve_implicit_stage(double t, double coeff_dt,
                                            std::span<double> u,
                                            std::span<const double> rhs) {
-        const double eps = root_config_.jacobian_fd_epsilon;
+        const double eps = config_.jacobian_fd_epsilon;
 
         // Apply BCs to initial guess
         apply_boundary_conditions(u, t);
@@ -534,7 +530,7 @@ private:
         std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
 
         // Newton iteration
-        for (size_t iter = 0; iter < root_config_.max_iter; ++iter) {
+        for (size_t iter = 0; iter < config_.max_iter; ++iter) {
             // Evaluate L(u)
             apply_operator_with_blocking(t, u, workspace_->lu());
 
@@ -580,7 +576,7 @@ private:
             // Check convergence via step delta
             double error = compute_step_delta_error(u, newton_ws_.u_old());
 
-            if (error < root_config_.tolerance) {
+            if (error < config_.tolerance) {
                 return {true, iter + 1, error, std::nullopt, std::nullopt};
             }
 
@@ -588,7 +584,7 @@ private:
             std::copy(u.begin(), u.end(), newton_ws_.u_old().begin());
         }
 
-        return {false, root_config_.max_iter,
+        return {false, config_.max_iter,
                compute_step_delta_error(u, newton_ws_.u_old()),
                "Max iterations reached", std::nullopt};
     }
