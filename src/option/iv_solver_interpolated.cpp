@@ -108,8 +108,7 @@ IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
         };
     }
 
-    // CRITICAL: Compute moneyness using K_ref, not query.strike!
-    const double moneyness = query.spot / K_ref_;
+    const double moneyness = query.spot / query.strike;
 
     // Get adaptive bounds
     auto [sigma_min, sigma_max] = adaptive_bounds(query);

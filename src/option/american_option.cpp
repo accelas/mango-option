@@ -195,13 +195,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     //
     // LEFT boundary (x → -∞, S → 0):
     auto left_bc = DirichletBC([this](double t, double x) {
-        const double tau = t;  // Time to maturity (backward PDE time)
-        const double discount = std::exp(-params_.rate * tau);
-
+        (void)t;
         if (params_.type == OptionType::PUT) {
-            // Deep ITM put: V = K·e^(-r*τ) - S ≈ K·e^(-r*τ) as S → 0
-            // Normalized: V/K = e^(-r*τ) - e^(x - r*τ) ≈ e^(-r*τ) as x → -∞
-            return discount - std::exp(x) * discount;
+            // Deep ITM put: exercise immediately ⇒ V/K = 1 - e^x
+            // (no discounting on stock term because exercise happens now)
+            return std::max(1.0 - std::exp(x), 0.0);
         } else {
             // Deep OTM call: V → 0 as S → 0
             return 0.0;
