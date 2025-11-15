@@ -81,82 +81,10 @@ private:
 };
 
 /**
- * American option pricing parameters.
+ * @brief Backward compatibility alias for PricingParams
+ * @deprecated Use PricingParams from option_spec.hpp instead
  */
-struct AmericanOptionParams {
-    double strike;                      ///< Strike price (dollars)
-    double spot;                        ///< Current stock price (dollars)
-    double maturity;                    ///< Time to maturity (years)
-    double volatility;                  ///< Implied volatility (fraction)
-    double rate;                        ///< Risk-free rate (fraction)
-    double continuous_dividend_yield;   ///< Continuous dividend yield (fraction, affects PDE drift)
-    OptionType option_type;             ///< Call or Put
-
-    /// Discrete dividend schedule: (time, amount) pairs
-    /// Time is in years from now, amount is in dollars
-    /// Can be used simultaneously with continuous_dividend_yield
-    std::vector<std::pair<double, double>> discrete_dividends;
-
-    /// Validate parameters (exception-based)
-    void validate() const {
-        if (strike <= 0.0) throw std::invalid_argument("Strike must be positive");
-        if (spot <= 0.0) throw std::invalid_argument("Spot must be positive");
-        if (maturity <= 0.0) throw std::invalid_argument("Maturity must be positive");
-        if (volatility <= 0.0) throw std::invalid_argument("Volatility must be positive");
-        // Note: rate can be negative (EUR, JPY, CHF markets)
-        if (continuous_dividend_yield < 0.0) throw std::invalid_argument("Continuous dividend yield must be non-negative");
-
-        // Validate discrete dividends
-        for (const auto& [time, amount] : discrete_dividends) {
-            if (time < 0.0 || time > maturity) {
-                throw std::invalid_argument("Discrete dividend time must be in [0, maturity]");
-            }
-            if (amount < 0.0) {
-                throw std::invalid_argument("Discrete dividend amount must be non-negative");
-            }
-        }
-    }
-
-    /// Validate parameters (expected-based)
-    static std::expected<void, std::string> validate_expected(const AmericanOptionParams& params) {
-        // Check strike
-        if (params.strike <= 0.0) {
-            return std::unexpected("Strike must be positive");
-        }
-
-        // Check spot
-        if (params.spot <= 0.0) {
-            return std::unexpected("Spot must be positive");
-        }
-
-        // Check maturity
-        if (params.maturity <= 0.0) {
-            return std::unexpected("Maturity must be positive");
-        }
-
-        // Check volatility
-        if (params.volatility <= 0.0) {
-            return std::unexpected("Volatility must be positive");
-        }
-
-        // Check continuous dividend yield (rate can be negative)
-        if (params.continuous_dividend_yield < 0.0) {
-            return std::unexpected("Continuous dividend yield must be non-negative");
-        }
-
-        // Validate discrete dividends
-        for (const auto& [time, amount] : params.discrete_dividends) {
-            if (time < 0.0 || time > params.maturity) {
-                return std::unexpected("Discrete dividend time must be in [0, maturity]");
-            }
-            if (amount < 0.0) {
-                return std::unexpected("Discrete dividend amount must be non-negative");
-            }
-        }
-
-        return {};
-    }
-};
+using AmericanOptionParams = PricingParams;
 
 
 /**
@@ -303,7 +231,8 @@ private:
 ///
 /// Example usage:
 /// ```cpp
-/// std::vector<AmericanOptionParams> batch = { ... };
+/// std::vector<AmericanOptionParams> batch;
+/// batch.emplace_back(spot, strike, maturity, rate, dividend_yield, type, sigma);
 ///
 /// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
 /// ```

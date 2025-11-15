@@ -49,10 +49,10 @@ double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
     // For deep ITM options, time value is small, so high vol is unlikely
 
     double intrinsic_value;
-    if (query.option.type == OptionType::CALL) {
-        intrinsic_value = std::max(query.option.spot - query.option.strike, 0.0);
+    if (query.type == OptionType::CALL) {
+        intrinsic_value = std::max(query.spot - query.strike, 0.0);
     } else {
-        intrinsic_value = std::max(query.option.strike - query.option.spot, 0.0);
+        intrinsic_value = std::max(query.strike - query.spot, 0.0);
     }
 
     // Time value = Market Price - Intrinsic Value
@@ -79,23 +79,23 @@ double IVSolverFDM::estimate_lower_bound() const {
 double IVSolverFDM::objective_function(const IVQuery& query, double volatility) const {
     // Create American option parameters
     AmericanOptionParams option_params;
-    option_params.strike = query.option.strike;
-    option_params.spot = query.option.spot;
-    option_params.maturity = query.option.maturity;
+    option_params.strike = query.strike;
+    option_params.spot = query.spot;
+    option_params.maturity = query.maturity;
     option_params.volatility = volatility;
-    option_params.rate = query.option.rate;
-    option_params.continuous_dividend_yield = query.option.dividend_yield;
-    option_params.option_type = query.option.type;
+    option_params.rate = query.rate;
+    option_params.dividend_yield = query.dividend_yield;
+    option_params.type = query.type;
 
     // Compute adaptive grid bounds based on spot/strike and config.grid_s_max
-    double moneyness = query.option.spot / query.option.strike;
+    double moneyness = query.spot / query.strike;
 
     // Lower bound: ensure we capture deep ITM scenarios
     double min_moneyness = std::min(0.5, moneyness * 0.5);
 
     // Upper bound: ensure we capture deep OTM scenarios
-    double max_s = std::max(query.option.strike * 2.0, config_.grid_s_max);
-    double max_moneyness = std::max(2.0, max_s / query.option.strike);
+    double max_s = std::max(query.strike * 2.0, config_.grid_s_max);
+    double max_moneyness = std::max(2.0, max_s / query.strike);
 
     // Ensure spot is within bounds (with margin for interpolation)
     min_moneyness = std::min(min_moneyness, moneyness * 0.9);

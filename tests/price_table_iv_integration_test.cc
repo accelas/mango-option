@@ -232,18 +232,7 @@ TEST(PriceTableIVIntegrationTest, PutOptionSurfaceRoundTrip) {
     double market_price = bs_price(test_spot, test_strike, test_maturity,
                                    known_sigma, test_rate, OptionType::PUT);
 
-    OptionSpec spec{
-        .spot = test_spot,
-        .strike = test_strike,
-        .maturity = test_maturity,
-        .rate = test_rate,
-        .dividend_yield = 0.0,
-        .type = OptionType::PUT
-    };
-    IVQuery query{
-        .option = spec,
-        .market_price = market_price
-    };
+    IVQuery query{test_spot, test_strike, test_maturity, test_rate, 0.0, OptionType::PUT, market_price};
 
     auto result = iv_solver.solve(query);
 
@@ -366,18 +355,7 @@ TEST(PriceTableIVIntegrationTest, CallOptionSurfaceRoundTrip) {
     double market_price = bs_price(test_spot, test_strike, test_maturity,
                                    known_sigma, test_rate, OptionType::CALL);
 
-    OptionSpec spec{
-        .spot = test_spot,
-        .strike = test_strike,
-        .maturity = test_maturity,
-        .rate = test_rate,
-        .dividend_yield = 0.0,
-        .type = OptionType::CALL
-    };
-    IVQuery query{
-        .option = spec,
-        .market_price = market_price
-    };
+    IVQuery query{test_spot, test_strike, test_maturity, test_rate, 0.0, OptionType::CALL, market_price};
 
     auto result = iv_solver.solve(query);
 
@@ -515,18 +493,7 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     double strike = K_ref;
     double market_price = base_price_kref * (strike / K_ref);
 
-    OptionSpec spec1{
-        .spot = spot,
-        .strike = strike,  // = K_ref
-        .maturity = 1.0,
-        .rate = known_r,
-        .dividend_yield = 0.0,
-        .type = OptionType::PUT
-    };
-    IVQuery query1{
-        .option = spec1,
-        .market_price = market_price
-    };
+    IVQuery query1{spot, strike, 1.0, known_r, 0.0, OptionType::PUT, market_price};
 
     auto result1 = iv_solver.solve(query1);
     EXPECT_TRUE(result1.converged);
@@ -537,18 +504,7 @@ TEST(PriceTableIVIntegrationTest, StrikeScalingValidation) {
     double strike2 = 90.0;
     double market_price2 = base_price_kref * (strike2 / K_ref);
 
-    OptionSpec spec2{
-        .spot = spot,
-        .strike = strike2,  // != K_ref
-        .maturity = 1.0,
-        .rate = known_r,
-        .dividend_yield = 0.0,
-        .type = OptionType::PUT
-    };
-    IVQuery query2{
-        .option = spec2,
-        .market_price = market_price2
-    };
+    IVQuery query2{spot, strike2, 1.0, known_r, 0.0, OptionType::PUT, market_price2};
 
     auto result2 = iv_solver.solve(query2);
     // This should work because we compute moneyness as spot/K_ref
@@ -638,17 +594,14 @@ TEST(PriceTableIVIntegrationTest, SolverCoversAxisBoundaries) {
             scenario.rate,
             OptionType::CALL);
 
-        OptionSpec spec{
-            .spot = spot,
-            .strike = K_ref,
-            .maturity = scenario.tau,
-            .rate = scenario.rate,
-            .dividend_yield = 0.0,
-            .type = OptionType::CALL
-        };
         IVQuery query{
-            .option = spec,
-            .market_price = market_price
+            spot,
+            K_ref,
+            scenario.tau,
+            scenario.rate,
+            0.0,  // dividend_yield
+            OptionType::CALL,
+            market_price
         };
 
         auto result = iv_solver.solve(query);
@@ -727,14 +680,14 @@ TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
     // Test multiple scenarios
     std::vector<IVQuery> test_queries = {
         // ATM
-        {.option = OptionSpec{.spot = 100.0, .strike = K_ref, .maturity = 0.5, .rate = 0.05, .dividend_yield = 0.0, .type = OptionType::PUT},
-         .market_price = bs_price(100.0, 100.0, 0.5, 0.20, 0.05, OptionType::PUT)},
+        IVQuery{100.0, K_ref, 0.5, 0.05, 0.0, OptionType::PUT,
+                bs_price(100.0, 100.0, 0.5, 0.20, 0.05, OptionType::PUT)},
         // ITM
-        {.option = OptionSpec{.spot = 90.0, .strike = K_ref, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.0, .type = OptionType::PUT},
-         .market_price = bs_price(90.0, 100.0, 1.0, 0.25, 0.05, OptionType::PUT)},
+        IVQuery{90.0, K_ref, 1.0, 0.05, 0.0, OptionType::PUT,
+                bs_price(90.0, 100.0, 1.0, 0.25, 0.05, OptionType::PUT)},
         // OTM
-        {.option = OptionSpec{.spot = 110.0, .strike = K_ref, .maturity = 0.25, .rate = 0.025, .dividend_yield = 0.0, .type = OptionType::PUT},
-         .market_price = bs_price(110.0, 100.0, 0.25, 0.15, 0.025, OptionType::PUT)},
+        IVQuery{110.0, K_ref, 0.25, 0.025, 0.0, OptionType::PUT,
+                bs_price(110.0, 100.0, 0.25, 0.15, 0.025, OptionType::PUT)},
     };
 
     for (const auto& query : test_queries) {
@@ -742,9 +695,9 @@ TEST(PriceTableIVIntegrationTest, SIMDVega_MatchesScalarResults) {
 
         // Should converge successfully
         ASSERT_TRUE(result.converged)
-            << "Failed for spot=" << query.option.spot
-            << " maturity=" << query.option.maturity
-            << " rate=" << query.option.rate
+            << "Failed for spot=" << query.spot
+            << " maturity=" << query.maturity
+            << " rate=" << query.rate
             << (result.failure_reason.has_value() ? ": " + *result.failure_reason : "");
 
         // Results should be numerically stable and within reasonable bounds

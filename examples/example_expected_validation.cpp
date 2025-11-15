@@ -15,15 +15,15 @@ int main() {
     // Example 1: Valid parameters
     {
         std::cout << "1. Valid parameters:\n";
-        AmericanOptionParams valid_params{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.2,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT
-        };
+        AmericanOptionParams valid_params(
+            100.0,  // spot
+            100.0,  // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.2     // volatility
+        );
 
         // Create workspace
         constexpr double x_min = -3.0;
@@ -59,15 +59,15 @@ int main() {
     // Example 2: Invalid parameters (strike = 0)
     {
         std::cout << "2. Invalid parameters (strike = 0):\n";
-        AmericanOptionParams invalid_params{
-            .strike = 0.0,  // Invalid!
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.2,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT
-        };
+        AmericanOptionParams invalid_params(
+            100.0,  // spot
+            0.0,    // strike (Invalid)
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.2     // volatility
+        );
 
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
@@ -93,15 +93,15 @@ int main() {
     // Example 3: Invalid grid parameters
     {
         std::cout << "3. Invalid grid parameters (n_space too small):\n";
-        AmericanOptionParams valid_params{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.2,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::CALL
-        };
+        AmericanOptionParams valid_params(
+            100.0,  // spot
+            100.0,  // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::CALL,
+            0.2     // volatility
+        );
 
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
@@ -121,15 +121,15 @@ int main() {
     // Example 4: Multiple validation errors (reports first one)
     {
         std::cout << "4. Multiple validation errors (reports first error):\n";
-        AmericanOptionParams invalid_params{
-            .strike = -50.0,  // Invalid!
-            .spot = 0.0,      // Also invalid!
-            .maturity = -1.0, // Also invalid!
-            .volatility = -0.2,
-            .rate = 0.05,
-            .continuous_dividend_yield = -0.02,
-            .option_type = OptionType::PUT
-        };
+        AmericanOptionParams invalid_params(
+            0.0,          // spot (invalid)
+            -50.0,        // strike (invalid)
+            -1.0,         // maturity (invalid)
+            0.05,         // rate
+            -0.02,        // dividend_yield (invalid)
+            OptionType::PUT,
+            -0.2          // volatility (invalid)
+        );
 
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
@@ -169,15 +169,15 @@ int main() {
             return 1;
         }
 
-        AmericanOptionParams params1{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 0.5,
-            .volatility = 0.25,
-            .rate = 0.03,
-            .continuous_dividend_yield = 0.01,
-            .option_type = OptionType::CALL
-        };
+        AmericanOptionParams params1(
+            100.0,  // spot
+            100.0,  // strike
+            0.5,    // maturity
+            0.03,   // rate
+            0.01,   // dividend_yield
+            OptionType::CALL,
+            0.25    // volatility
+        );
 
         auto result1 = AmericanOptionSolver::create(params1, workspace.value());
 
@@ -192,15 +192,15 @@ int main() {
     // Example 6: Error propagation in solve()
     {
         std::cout << "6. Error propagation in solve():\n";
-        AmericanOptionParams valid_params{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.2,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT
-        };
+        AmericanOptionParams valid_params(
+            100.0,  // spot
+            100.0,  // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.2     // volatility
+        );
 
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;

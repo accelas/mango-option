@@ -63,10 +63,10 @@ std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& q
 std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& query) const {
     // Compute intrinsic value based on option type
     double intrinsic;
-    if (query.option.type == OptionType::CALL) {
-        intrinsic = std::max(query.option.spot - query.option.strike, 0.0);
+    if (query.type == OptionType::CALL) {
+        intrinsic = std::max(query.spot - query.strike, 0.0);
     } else {  // PUT
-        intrinsic = std::max(query.option.strike - query.option.spot, 0.0);
+        intrinsic = std::max(query.strike - query.spot, 0.0);
     }
 
     // Analyze time value to set adaptive bounds
@@ -107,8 +107,8 @@ IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
         };
     }
 
-    // CRITICAL: Compute moneyness using K_ref, not query.option.strike!
-    const double moneyness = query.option.spot / K_ref_;
+    // CRITICAL: Compute moneyness using K_ref, not query.strike!
+    const double moneyness = query.spot / K_ref_;
 
     // Get adaptive bounds
     auto [sigma_min, sigma_max] = adaptive_bounds(query);
@@ -150,13 +150,13 @@ IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
         }
 
         // Evaluate price at current volatility (with strike scaling)
-        const double price = eval_price(moneyness, query.option.maturity, sigma, query.option.rate, query.option.strike);
+        const double price = eval_price(moneyness, query.maturity, sigma, query.rate, query.strike);
 
         // Compute error
         error_abs = std::abs(price - query.market_price);
 
         // Compute vega (∂Price/∂σ) with strike scaling
-        const double vega = compute_vega(moneyness, query.option.maturity, sigma, query.option.rate, query.option.strike);
+        const double vega = compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
         last_vega = vega;
 
         // Check convergence

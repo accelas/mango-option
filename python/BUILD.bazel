@@ -4,7 +4,7 @@ pybind_extension(
     name = "mango_iv",
     srcs = ["mango_bindings.cpp"],
     deps = [
-        "//src/option:iv_solver",
+        "//src/option:iv_solver_fdm",
         "//src/option:american_option",
         "//src/math:root_finding",
         "//src/option:iv_types",

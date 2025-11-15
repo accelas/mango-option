@@ -271,15 +271,15 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
 
         for (const auto& obs : observations) {
             // API STEP 4: Solve for IV
-            OptionSpec spec{
-                .spot = obs.spot,
-                .strike = obs.strike,
-                .maturity = obs.maturity,
-                .rate = obs.rate,
-                .dividend_yield = grid.dividend,
-                .type = obs.type
+            IVQuery query{
+                obs.spot,
+                obs.strike,
+                obs.maturity,
+                obs.rate,
+                grid.dividend,
+                obs.type,
+                obs.market_price
             };
-            IVQuery query{.option = spec, .market_price = obs.market_price};
 
             auto result = iv_solver.solve(query);
 
@@ -343,10 +343,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
 
         size_t converged = 0;
         for (const auto& obs : observations) {
-            IVQuery query{
-                .option = {obs.spot, obs.strike, obs.maturity, obs.rate, 0.0, obs.type},
-                .market_price = obs.market_price
-            };
+            IVQuery query{obs.spot, obs.strike, obs.maturity, obs.rate, 0.0, obs.type, obs.market_price};
             if (iv_solver.solve(query).converged) {
                 converged++;
             }
