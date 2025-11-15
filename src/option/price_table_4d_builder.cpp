@@ -14,6 +14,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <ranges>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -161,7 +162,7 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
 
     size_t failed_count = 0;
 
-#pragma omp parallel
+    #pragma omp parallel
     {
         // Create normalized request template (per-thread)
         NormalizedSolveRequest base_request{
@@ -182,10 +183,10 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
 
         if (!workspace_result) {
             // Workspace creation failed, mark all as errors
-#pragma omp for collapse(2)
+            #pragma omp for collapse(2)
             for (size_t k = 0; k < Nv; ++k) {
                 for (size_t l = 0; l < Nr; ++l) {
-#pragma omp atomic
+                    #pragma omp atomic
                     ++failed_count;
                 }
             }
@@ -193,7 +194,7 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
             auto workspace = std::move(workspace_result.value());
             auto surface = workspace.surface_view();
 
-#pragma omp for collapse(2) schedule(dynamic, 1)
+            #pragma omp for collapse(2) schedule(dynamic, 1)
             for (size_t k = 0; k < Nv; ++k) {
                 for (size_t l = 0; l < Nr; ++l) {
                     // Set (σ, r) for this solve
@@ -206,7 +207,7 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
                         request, workspace, surface);
 
                     if (!solve_result) {
-#pragma omp atomic
+                        #pragma omp atomic
                         ++failed_count;
                         continue;
                     }
@@ -214,14 +215,13 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_normalized_solv
                     // Extract prices from surface
                     // Moneyness convention: m = S/K_ref, strike is always K_ref
                     // Identity: V(S,K_ref,τ) = K_ref · u(ln(m), τ)
-                    for (size_t i = 0; i < Nm; ++i) {
+                    namespace views = std::views;
+                    for (auto [i, j] : views::cartesian_product(views::iota(size_t{0}, Nm),
+                                                                 views::iota(size_t{0}, Nt))) {
                         double x = std::log(moneyness_[i]);  // x = ln(m) = ln(S/K_ref)
-
-                        for (size_t j = 0; j < Nt; ++j) {
-                            double u = surface.interpolate(x, maturity_[j]);
-                            size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                            prices_4d[idx_4d] = K_ref_ * u;  // V = K_ref·u (strike is constant)
-                        }
+                        double u = surface.interpolate(x, maturity_[j]);
+                        size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+                        prices_4d[idx_4d] = K_ref_ * u;  // V = K_ref·u (strike is constant)
                     }
                 }
             }
@@ -271,19 +271,19 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
     std::vector<AmericanOptionParams> batch_params;
     batch_params.reserve(Nv * Nr);
 
-    for (size_t k = 0; k < Nv; ++k) {
-        for (size_t l = 0; l < Nr; ++l) {
-            batch_params.push_back({
-                .strike = K_ref_,
-                .spot = K_ref_,
-                .maturity = T_max,
-                .volatility = volatility_[k],
-                .rate = rate_[l],
-                .continuous_dividend_yield = dividend_yield,
-                .option_type = option_type,
-                .discrete_dividends = {}
-            });
-        }
+    namespace views = std::views;
+    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
+                                                 views::iota(size_t{0}, Nr))) {
+        batch_params.push_back({
+            .strike = K_ref_,
+            .spot = K_ref_,
+            .maturity = T_max,
+            .volatility = volatility_[k],
+            .rate = rate_[l],
+            .continuous_dividend_yield = dividend_yield,
+            .option_type = option_type,
+            .discrete_dividends = {}
+        });
     }
 
     // Create collectors for each batch item
@@ -323,12 +323,11 @@ std::expected<void, std::string> PriceTable4DBuilder::solve_with_batch_api(
         }
 
         auto prices_2d = collectors[idx].prices();
-        for (size_t i = 0; i < Nm; ++i) {
-            for (size_t j = 0; j < Nt; ++j) {
-                size_t idx_2d = i * Nt + j;
-                size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                prices_4d[idx_4d] = prices_2d[idx_2d];
-            }
+        for (auto [i, j] : views::cartesian_product(views::iota(size_t{0}, Nm),
+                                                     views::iota(size_t{0}, Nt))) {
+            size_t idx_2d = i * Nt + j;
+            size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
+            prices_4d[idx_4d] = prices_2d[idx_2d];
         }
     }
 
