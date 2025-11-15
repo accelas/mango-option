@@ -11,3 +11,11 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "crc64",
+    srcs = ["crc64.cpp"],
+    hdrs = ["crc64.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

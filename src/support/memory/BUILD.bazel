@@ -12,14 +12,3 @@ cc_library(
     deps = [":unified_memory_resource"],
     copts = ["-std=c++23"],
 )
-
-cc_library(
-    name = "pde_workspace",
-    hdrs = ["pde_workspace.hpp"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":unified_memory_resource",
-        ":workspace_base",
-    ],
-    copts = ["-std=c++23"],
-)
