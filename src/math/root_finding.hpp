@@ -406,4 +406,104 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
     };
 }
 
+/// Generic root-finding API that dispatches to appropriate method based on available information
+///
+/// This provides a unified interface for root-finding that automatically selects:
+/// - Newton-Raphson if derivative is provided (quadratic convergence)
+/// - Brent's method if only objective function is provided (robust, derivative-free)
+///
+/// **Design Pattern: Concept-based Overloading**
+/// Uses C++20 concepts to select the optimal algorithm at compile-time based on
+/// what information the caller provides.
+///
+/// **Usage Examples:**
+///
+/// **1. Derivative-free (uses Brent automatically):**
+/// ```cpp
+/// auto f = [](double x) { return x*x - 2.0; };
+/// auto result = find_root(f, 0.0, 2.0, config);  // Calls brent_find_root
+/// ```
+///
+/// **2. With derivative (uses Newton automatically):**
+/// ```cpp
+/// auto f = [](double x) { return x*x - 2.0; };
+/// auto df = [](double x) { return 2.0*x; };
+/// auto result = find_root(f, df, 1.0, 0.0, 2.0, config);  // Calls newton_find_root
+/// ```
+///
+/// **3. Bracketed Brent (explicit):**
+/// ```cpp
+/// auto result = find_root_bracketed(f, 0.0, 2.0, config);  // Forces Brent
+/// ```
+///
+/// **4. Bounded Newton (explicit):**
+/// ```cpp
+/// auto result = find_root_bounded(f, df, 1.0, 0.0, 2.0, config);  // Forces Newton
+/// ```
+
+/// Find root using Brent's method (bracketed, derivative-free)
+///
+/// **Signature:** find_root(f, a, b, config)
+/// - Requires: f(a) and f(b) have opposite signs
+/// - Uses: Brent's method (robust, superlinear convergence)
+/// - Best for: Unknown derivative, wide bracket
+///
+/// @tparam F Function type satisfying ObjectiveFunction concept
+/// @param f Objective function to find root of
+/// @param a Left bracket
+/// @param b Right bracket
+/// @param config Root-finding configuration
+/// @return RootFindingResult with root and convergence status
+template<ObjectiveFunction F>
+RootFindingResult find_root(F&& f, double a, double b,
+                            const RootFindingConfig& config) {
+    return brent_find_root(std::forward<F>(f), a, b, config);
+}
+
+/// Find root using Newton-Raphson (bounded, with derivative)
+///
+/// **Signature:** find_root(f, df, x0, x_min, x_max, config)
+/// - Requires: Derivative df available
+/// - Uses: Newton-Raphson (quadratic convergence near root)
+/// - Best for: Good initial guess, cheap derivative
+///
+/// @tparam F Objective function type satisfying ObjectiveFunction concept
+/// @tparam DF Derivative function type satisfying DerivativeFunction concept
+/// @param f Objective function to find root of
+/// @param df Derivative of objective function
+/// @param x0 Initial guess
+/// @param x_min Lower bound
+/// @param x_max Upper bound
+/// @param config Root-finding configuration
+/// @return RootFindingResult with root and convergence status
+template<ObjectiveFunction F, DerivativeFunction DF>
+RootFindingResult find_root(F&& f, DF&& df, double x0,
+                            double x_min, double x_max,
+                            const RootFindingConfig& config) {
+    return newton_find_root(std::forward<F>(f), std::forward<DF>(df),
+                           x0, x_min, x_max, config);
+}
+
+/// Explicit Brent's method call (for clarity when both overloads could apply)
+///
+/// Same as find_root(f, a, b, config) but name makes intention explicit.
+/// Use when you want to be clear that Brent is being used.
+template<ObjectiveFunction F>
+RootFindingResult find_root_bracketed(F&& f, double a, double b,
+                                      const RootFindingConfig& config) {
+    return brent_find_root(std::forward<F>(f), a, b, config);
+}
+
+/// Explicit Newton-Raphson call (for clarity when both overloads could apply)
+///
+/// Same as find_root(f, df, x0, x_min, x_max, config) but name makes intention explicit.
+/// Use when you want to be clear that Newton is being used.
+template<ObjectiveFunction F, DerivativeFunction DF>
+RootFindingResult find_root_bounded(F&& f, DF&& df, double x0,
+                                    double x_min, double x_max,
+                                    const RootFindingConfig& config) {
+    return newton_find_root(std::forward<F>(f), std::forward<DF>(df),
+                           x0, x_min, x_max, config);
+}
+
 }  // namespace mango
