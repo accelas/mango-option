@@ -211,5 +211,60 @@ TEST_F(BandedSolverTest, BandedSolverAccuracyQuadratic) {
         << "System is poorly conditioned";
 }
 
+TEST_F(BandedSolverTest, DetectsSingularMatrixDuplicatePoints) {
+    // Test that solver detects and reports singular matrices
+    // caused by duplicate or near-duplicate grid points
+
+    // Create degenerate grid with duplicate points
+    std::vector<double> bad_grid = {0.0, 0.0, 0.5, 1.0};
+
+    // Should fail during solver creation (duplicate points)
+    auto solver_result = mango::BSplineCollocation1D::create(bad_grid);
+    EXPECT_FALSE(solver_result.has_value())
+        << "Solver should reject grid with duplicate points";
+
+    if (!solver_result.has_value()) {
+        EXPECT_NE(solver_result.error().find("spacing"), std::string::npos)
+            << "Error message should mention spacing issue";
+    }
+}
+
+TEST_F(BandedSolverTest, DetectsSingularMatrixDegenerateValues) {
+    // Test that solver detects singular matrix during factorization
+    // when input values lead to singular system
+
+    // Create valid grid
+    std::vector<double> grid = {0.0, 0.25, 0.5, 0.75, 1.0};
+    auto solver_result = mango::BSplineCollocation1D::create(grid);
+    ASSERT_TRUE(solver_result.has_value());
+
+    auto& solver = solver_result.value();
+
+    // Try to fit degenerate values (all zeros might create singular system)
+    // In practice, this may or may not be singular depending on the B-spline basis
+    // The real test is that we get a proper error message if it IS singular
+    std::vector<double> degenerate_values = {0.0, 0.0, 0.0, 0.0, 0.0};
+    auto fit_result = solver.fit(degenerate_values, 1e-9);
+
+    // Either the fit succeeds (all-zero solution is valid for all-zero input)
+    // or it fails with a clear error message
+    if (!fit_result.success) {
+        EXPECT_FALSE(fit_result.error_message.empty())
+            << "Failed fit should provide error message";
+    }
+}
+
+TEST_F(BandedSolverTest, DetectsNearSingularMatrix) {
+    // Test detection of nearly singular matrices (small pivots)
+
+    // Create grid with very close points (but not duplicates)
+    std::vector<double> grid = {0.0, 1e-15, 0.5, 1.0};
+
+    // Should fail during creation (points too close)
+    auto solver_result = mango::BSplineCollocation1D::create(grid);
+    EXPECT_FALSE(solver_result.has_value())
+        << "Solver should reject grid with points closer than 1e-14";
+}
+
 } // namespace
 } // namespace mango

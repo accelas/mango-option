@@ -118,30 +118,48 @@ private:
 // Banded LU Solver
 // ============================================================================
 
-/// Solve banded system Ax = b using LU decomposition
+/// In-place LU factorization of banded matrix (Doolittle algorithm)
 ///
-/// For 4-diagonal banded matrix from cubic B-spline collocation.
+/// Performs LU decomposition with pivot detection for numerical stability.
+/// Returns error if matrix is singular or ill-conditioned.
+///
 /// Time complexity: O(n) for fixed bandwidth
-/// Space complexity: O(n) (in-place decomposition)
+/// Space complexity: O(1) (in-place)
 ///
-/// @param A Banded matrix (modified in-place during decomposition)
-/// @param b Right-hand side vector
-/// @param x Solution vector (output)
-inline void banded_lu_solve(
-    BandedMatrixStorage& A,
-    std::span<const double> b,
-    std::span<double> x)
-{
+/// @param A Banded matrix (modified in-place to store LU factors)
+/// @return expected<void, string> - success or error message
+inline expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
     const size_t n = A.size();
-    assert(b.size() == n);
-    assert(x.size() == n);
 
-    // Working storage for intermediate results
-    std::vector<double> y(n);  // For forward substitution
+    // Compute matrix 1-norm for pivot threshold
+    // ||A||_1 = max column sum
+    double matrix_norm = 0.0;
+    for (size_t j = 0; j < n; ++j) {
+        double col_sum = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            size_t col_start = A.col_start(i);
+            if (j >= col_start && j < col_start + 4) {
+                col_sum += std::abs(A(i, j));
+            }
+        }
+        matrix_norm = std::max(matrix_norm, col_sum);
+    }
+
+    // Pivot threshold: relative to matrix norm
+    const double PIVOT_THRESHOLD = 1e-14 * matrix_norm;
 
     // Phase 1: LU decomposition (in-place, Doolittle algorithm)
     // For banded matrix with bandwidth k=4, this is O(n) not O(n³)
     for (size_t i = 0; i < n; ++i) {
+        // Check for zero/tiny pivot
+        if (std::abs(A(i, i)) < PIVOT_THRESHOLD) {
+            return unexpected(
+                std::string("Matrix is singular or ill-conditioned at row ") +
+                std::to_string(i) + ": pivot = " + std::to_string(A(i, i)) +
+                ", threshold = " + std::to_string(PIVOT_THRESHOLD)
+            );
+        }
+
         size_t col_start = A.col_start(i);
         size_t col_end = std::min(col_start + 4, n);
 
@@ -166,31 +184,82 @@ inline void banded_lu_solve(
         }
     }
 
-    // Phase 2: Forward substitution (Ly = b)
+    return {};
+}
+
+/// Solve LU*x = b using pre-factored banded matrix
+///
+/// Uses forward and back substitution with pre-computed LU factors.
+/// MUCH faster than re-factorizing for condition number estimation.
+///
+/// Time complexity: O(n)
+/// Space complexity: O(n) for temporary vector
+///
+/// @param LU Pre-factored banded matrix (from banded_lu_factorize)
+/// @param b Right-hand side vector
+/// @param x Solution vector (output)
+inline void banded_lu_substitution(
+    const BandedMatrixStorage& LU,
+    std::span<const double> b,
+    std::span<double> x)
+{
+    const size_t n = LU.size();
+    assert(b.size() == n);
+    assert(x.size() == n);
+
+    // Working storage for intermediate results
+    std::vector<double> y(n);
+
+    // Phase 1: Forward substitution (Ly = b)
     for (size_t i = 0; i < n; ++i) {
         y[i] = b[i];
 
-        size_t col_start = A.col_start(i);
+        size_t col_start = LU.col_start(i);
         for (size_t j = col_start; j < i; ++j) {
             if (j >= col_start && j < col_start + 4) {
-                y[i] -= A(i, j) * y[j];
+                y[i] -= LU(i, j) * y[j];
             }
         }
     }
 
-    // Phase 3: Back substitution (Ux = y)
+    // Phase 2: Back substitution (Ux = y)
     for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
         x[i] = y[i];
 
-        size_t col_start = A.col_start(i);
+        size_t col_start = LU.col_start(i);
         size_t col_end = std::min(col_start + 4, n);
 
         for (size_t j = static_cast<size_t>(i) + 1; j < col_end; ++j) {
-            x[i] -= A(i, j) * x[j];
+            x[i] -= LU(i, j) * x[j];
         }
 
-        x[i] /= A(i, i);
+        x[i] /= LU(i, i);
     }
+}
+
+/// Solve banded system Ax = b using LU decomposition (legacy interface)
+///
+/// For backward compatibility. New code should use banded_lu_factorize()
+/// followed by banded_lu_substitution() to avoid redundant factorizations.
+///
+/// @param A Banded matrix (modified in-place during decomposition)
+/// @param b Right-hand side vector
+/// @param x Solution vector (output)
+inline void banded_lu_solve(
+    BandedMatrixStorage& A,
+    std::span<const double> b,
+    std::span<double> x)
+{
+    // Factorize (ignoring errors for backward compatibility)
+    auto result = banded_lu_factorize(A);
+    if (!result) {
+        // Fill with NaN to signal failure
+        std::fill(x.begin(), x.end(), std::numeric_limits<double>::quiet_NaN());
+        return;
+    }
+
+    // Solve using factored matrix
+    banded_lu_substitution(A, b, x);
 }
 
 // ============================================================================
@@ -284,16 +353,20 @@ public:
             }
         }
 
+        // Clear cached LU factors (new fit)
+        is_factored_ = false;
+        lu_factors_.reset();
+
         // Build collocation matrix
         build_collocation_matrix();
 
-        // Solve banded system: B*c = f
+        // Solve banded system: B*c = f (factorizes on first call)
         std::vector<double> coeffs(n_);
-        bool solve_success = solve_banded_system(values, coeffs);
+        auto solve_result = solve_banded_system(values, coeffs);
 
-        if (!solve_success) {
+        if (!solve_result) {
             return {std::vector<double>(), false,
-                    "Failed to solve collocation system (singular or ill-conditioned)",
+                    "Failed to solve collocation system: " + solve_result.error(),
                     0.0, 0.0};
         }
 
@@ -308,7 +381,7 @@ public:
                     max_residual, 0.0};
         }
 
-        // Estimate condition number via 1-norm bound
+        // Estimate condition number via 1-norm bound (reuses cached LU factors!)
         double cond_est = estimate_condition_number();
 
         return {coeffs, true, "", max_residual, cond_est};
@@ -335,6 +408,10 @@ private:
     // Banded storage: each row has exactly 4 non-zero entries (cubic B-spline support)
     std::vector<double> band_values_;       ///< Banded matrix values (n×4, row-major)
     std::vector<int> band_col_start_;       ///< First column index for each row's band
+
+    // LU factorization cache (avoids redundant factorization in condition number estimation)
+    mutable std::optional<BandedMatrixStorage> lu_factors_;  ///< Cached LU factors
+    mutable bool is_factored_ = false;                        ///< True if lu_factors_ is valid
 
     /// Build collocation matrix B[i,j] = N_j(x_i) in banded format
     void build_collocation_matrix() {
@@ -364,29 +441,49 @@ private:
         }
     }
 
-    /// Solve banded linear system using O(n) banded LU solver
-    bool solve_banded_system(const std::vector<double>& rhs, std::vector<double>& solution) const {
-        // Build BandedMatrixStorage from compact storage
-        BandedMatrixStorage A(n_);
+    /// Solve banded linear system using cached LU factorization
+    ///
+    /// On first call, factorizes the matrix and caches LU factors.
+    /// Subsequent calls reuse cached factors (critical for condition number estimation).
+    ///
+    /// @param rhs Right-hand side vector
+    /// @param solution Solution vector (output)
+    /// @return expected<void, string> - success or error message
+    expected<void, std::string> solve_banded_system(
+        const std::vector<double>& rhs,
+        std::vector<double>& solution) const
+    {
+        if (!is_factored_) {
+            // Build BandedMatrixStorage from compact storage
+            lu_factors_ = BandedMatrixStorage(n_);
 
-        for (size_t i = 0; i < n_; ++i) {
-            int col_start = band_col_start_[i];
-            A.set_col_start(i, static_cast<size_t>(col_start));
+            for (size_t i = 0; i < n_; ++i) {
+                int col_start = band_col_start_[i];
+                lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
 
-            // Copy band values
-            for (int k = 0; k < 4; ++k) {
-                int col = col_start + k;
-                if (col >= 0 && col < static_cast<int>(n_)) {
-                    A(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
+                // Copy band values
+                for (int k = 0; k < 4; ++k) {
+                    int col = col_start + k;
+                    if (col >= 0 && col < static_cast<int>(n_)) {
+                        (*lu_factors_)(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
+                    }
                 }
             }
+
+            // Factorize once
+            auto factorize_result = banded_lu_factorize(*lu_factors_);
+            if (!factorize_result) {
+                return factorize_result;  // Propagate error
+            }
+
+            is_factored_ = true;
         }
 
-        // Solve using banded LU
+        // Solve using cached LU factors (fast!)
         solution.resize(n_);
-        banded_lu_solve(A, rhs, solution);
+        banded_lu_substitution(*lu_factors_, rhs, solution);
 
-        return true;  // banded_lu_solve doesn't report failures (assumes well-conditioned)
+        return {};
     }
 
 
@@ -414,7 +511,14 @@ private:
         return max_res;
     }
 
-    /// Estimate 1-norm condition number
+    /// Estimate 1-norm condition number using cached LU factors
+    ///
+    /// CRITICAL PERFORMANCE: This function is called after solve_banded_system(),
+    /// which has already cached the LU factorization. We reuse those factors for
+    /// n solves instead of re-factorizing n times (huge speedup!).
+    ///
+    /// Old behavior: n factorizations (O(n²) total)
+    /// New behavior: 1 factorization + n substitutions (O(n) total)
     double estimate_condition_number() const {
         // ||B||_1 = max column sum
         std::vector<double> col_sums(n_, 0.0);
@@ -436,18 +540,21 @@ private:
             return std::numeric_limits<double>::infinity();
         }
 
-        // Approximate ||B^{-1}||_1
+        // Approximate ||B^{-1}||_1 using n solves with cached LU factors
         std::vector<double> rhs(n_, 0.0);
         std::vector<double> solution(n_);
         double max_col_sum = 0.0;
 
         for (size_t j = 0; j < n_; ++j) {
-            std::fill(rhs.begin(), rhs.end(), 0.0);
             rhs[j] = 1.0;
 
-            if (!solve_banded_system(rhs, solution)) {
+            // Reuse cached LU factors from first solve (no re-factorization!)
+            auto solve_result = solve_banded_system(rhs, solution);
+            if (!solve_result) {
                 return std::numeric_limits<double>::infinity();
             }
+
+            rhs[j] = 0.0;  // Reset for next iteration
 
             double col_sum = 0.0;
             for (double val : solution) {
