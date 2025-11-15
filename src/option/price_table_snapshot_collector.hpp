@@ -3,7 +3,8 @@
 #include "src/option/snapshot.hpp"
 #include "src/interpolation/snapshot_interpolator.hpp"
 #include "src/option/american_option.hpp"  // For OptionType enum
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <span>
 #include <vector>
 #include <cmath>
@@ -74,8 +75,8 @@ public:
 
     /// Collect snapshot data with exception-safe expected pattern
     /// @param snapshot Read-only snapshot data
-    /// @return expected<void, std::string> - success or error message
-    expected<void, std::string> collect_expected(const Snapshot& snapshot) {
+    /// @return std::expected<void, std::string> - success or error message
+    std::expected<void, std::string> collect_expected(const Snapshot& snapshot) {
         // FIXED: Use user_index to match tau directly (no float comparison!)
         // Snapshot user_index IS the tau index
         const size_t tau_idx = snapshot.user_index;
@@ -88,13 +89,13 @@ public:
             // Grid changed or first snapshot: build interpolators from scratch
             auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
             if (V_error.has_value()) {
-                return unexpected(std::string("Failed to build value interpolator: ") +
+                return std::unexpected(std::string("Failed to build value interpolator: ") +
                                 std::string(V_error.value()));
             }
 
             auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
             if (Lu_error.has_value()) {
-                return unexpected(std::string("Failed to build spatial operator interpolator: ") +
+                return std::unexpected(std::string("Failed to build spatial operator interpolator: ") +
                                 std::string(Lu_error.value()));
             }
 
@@ -105,13 +106,13 @@ public:
             // Grid same as before: fast rebuild with new data
             auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
             if (V_error.has_value()) {
-                return unexpected(std::string("Failed to rebuild value interpolator: ") +
+                return std::unexpected(std::string("Failed to rebuild value interpolator: ") +
                                 std::string(V_error.value()));
             }
 
             auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
             if (Lu_error.has_value()) {
-                return unexpected(std::string("Failed to rebuild spatial operator interpolator: ") +
+                return std::unexpected(std::string("Failed to rebuild spatial operator interpolator: ") +
                                 std::string(Lu_error.value()));
             }
         }

@@ -8,7 +8,8 @@
 
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/spatial_operators.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include "src/option/american_solver_workspace.hpp"
 #include <vector>
@@ -65,39 +66,39 @@ struct AmericanOptionParams {
     }
 
     /// Validate parameters (expected-based)
-    static expected<void, std::string> validate_expected(const AmericanOptionParams& params) {
+    static std::expected<void, std::string> validate_expected(const AmericanOptionParams& params) {
         // Check strike
         if (params.strike <= 0.0) {
-            return unexpected("Strike must be positive");
+            return std::unexpected("Strike must be positive");
         }
 
         // Check spot
         if (params.spot <= 0.0) {
-            return unexpected("Spot must be positive");
+            return std::unexpected("Spot must be positive");
         }
 
         // Check maturity
         if (params.maturity <= 0.0) {
-            return unexpected("Maturity must be positive");
+            return std::unexpected("Maturity must be positive");
         }
 
         // Check volatility
         if (params.volatility <= 0.0) {
-            return unexpected("Volatility must be positive");
+            return std::unexpected("Volatility must be positive");
         }
 
         // Check continuous dividend yield (rate can be negative)
         if (params.continuous_dividend_yield < 0.0) {
-            return unexpected("Continuous dividend yield must be non-negative");
+            return std::unexpected("Continuous dividend yield must be non-negative");
         }
 
         // Validate discrete dividends
         for (const auto& [time, amount] : params.discrete_dividends) {
             if (time < 0.0 || time > params.maturity) {
-                return unexpected("Discrete dividend time must be in [0, maturity]");
+                return std::unexpected("Discrete dividend time must be in [0, maturity]");
             }
             if (amount < 0.0) {
-                return unexpected("Discrete dividend amount must be non-negative");
+                return std::unexpected("Discrete dividend amount must be non-negative");
             }
         }
 
@@ -149,7 +150,7 @@ public:
     /**
      * Factory method with expected-based validation.
      *
-     * Creates an AmericanOptionSolver with validation returning expected<void, std::string>.
+     * Creates an AmericanOptionSolver with validation returning std::expected<void, std::string>.
      * This provides a non-throwing alternative to the constructor.
      *
      * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
@@ -159,7 +160,7 @@ public:
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
      * @return Expected containing solver on success, error message on failure
      */
-    static expected<AmericanOptionSolver, std::string> create(
+    static std::expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
         std::shared_ptr<AmericanSolverWorkspace> workspace);
 
@@ -168,7 +169,7 @@ public:
      *
      * @return Result containing option value and Greeks
      */
-    expected<AmericanOptionResult, SolverError> solve();
+    std::expected<AmericanOptionResult, SolverError> solve();
 
     /**
      * Register snapshot collection at specific step index.
@@ -275,7 +276,7 @@ public:
     /// @param n_time Number of time steps
     /// @param setup Optional callback invoked after solver creation, before solve()
     /// @return Vector of results (same order as input)
-    static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
+    static std::vector<std::expected<AmericanOptionResult, SolverError>> solve_batch(
         std::span<const AmericanOptionParams> params,
         double x_min,
         double x_max,
@@ -283,7 +284,7 @@ public:
         size_t n_time,
         SetupCallback setup = nullptr)
     {
-        std::vector<expected<AmericanOptionResult, SolverError>> results(params.size());
+        std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
 
         // Validate workspace parameters once before parallel loop
         auto validation = AmericanSolverWorkspace::validate_params(x_min, x_max, n_space, n_time);
@@ -295,19 +296,19 @@ public:
                 .iterations = 0
             };
             for (size_t i = 0; i < params.size(); ++i) {
-                results[i] = unexpected(error);
+                results[i] = std::unexpected(error);
             }
             return results;
         }
 
         // Common solve logic
         auto solve_one = [&](size_t i, std::shared_ptr<AmericanSolverWorkspace> workspace)
-            -> expected<AmericanOptionResult, SolverError>
+            -> std::expected<AmericanOptionResult, SolverError>
         {
             // Use factory method to avoid exceptions from constructor
             auto solver_result = AmericanOptionSolver::create(params[i], workspace);
             if (!solver_result) {
-                return unexpected(SolverError{
+                return std::unexpected(SolverError{
                     .code = SolverErrorCode::InvalidConfiguration,
                     .message = solver_result.error(),
                     .iterations = 0
@@ -338,7 +339,7 @@ public:
                 };
 #pragma omp for
                 for (size_t i = 0; i < params.size(); ++i) {
-                    results[i] = unexpected(error);
+                    results[i] = std::unexpected(error);
                 }
             } else {
                 auto thread_workspace = thread_workspace_result.value();
@@ -359,7 +360,7 @@ public:
                 .iterations = 0
             };
             for (size_t i = 0; i < params.size(); ++i) {
-                results[i] = unexpected(error);
+                results[i] = std::unexpected(error);
             }
             return results;
         }
@@ -374,7 +375,7 @@ public:
     }
 
     /// Solve a batch of American options in parallel (vector overload)
-    static std::vector<expected<AmericanOptionResult, SolverError>> solve_batch(
+    static std::vector<std::expected<AmericanOptionResult, SolverError>> solve_batch(
         const std::vector<AmericanOptionParams>& params,
         double x_min,
         double x_max,
@@ -387,7 +388,7 @@ public:
 };
 
 /// Convenience function for batch solving
-inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
+inline std::vector<std::expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
     std::span<const AmericanOptionParams> params,
     double x_min,
     double x_max,
@@ -398,7 +399,7 @@ inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_o
 }
 
 /// Convenience function for batch solving (vector overload)
-inline std::vector<expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
+inline std::vector<std::expected<AmericanOptionResult, SolverError>> solve_american_options_batch(
     const std::vector<AmericanOptionParams>& params,
     double x_min,
     double x_max,

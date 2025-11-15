@@ -11,7 +11,7 @@
 
 namespace mango {
 
-expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
+std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
     std::shared_ptr<const BSpline4D> spline,
     double K_ref,
     std::pair<double, double> m_range,
@@ -21,22 +21,22 @@ expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
     const IVSolverInterpolatedConfig& config)
 {
     if (!spline) {
-        return unexpected(std::string("BSpline4D pointer is null"));
+        return std::unexpected(std::string("BSpline4D pointer is null"));
     }
     if (K_ref <= 0.0) {
-        return unexpected(std::string("K_ref must be positive"));
+        return std::unexpected(std::string("K_ref must be positive"));
     }
 
     return IVSolverInterpolated(
         std::move(spline), K_ref, m_range, tau_range, sigma_range, r_range, config);
 }
 
-expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
+std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
     const PriceTableSurface& surface,
     const IVSolverInterpolatedConfig& config)
 {
     if (!surface.valid()) {
-        return unexpected(std::string("PriceTableSurface is not initialized (workspace is null)"));
+        return std::unexpected(std::string("PriceTableSurface is not initialized (workspace is null)"));
     }
 
     auto spline = std::make_shared<BSpline4D>(*surface.workspace());

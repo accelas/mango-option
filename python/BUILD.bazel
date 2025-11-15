@@ -8,7 +8,7 @@ pybind_extension(
         "//src/option:american_option",
         "//src/pde/core:root_finding",
         "//src/option:iv_types",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",

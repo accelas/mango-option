@@ -134,26 +134,26 @@ AmericanOptionSolver::AmericanOptionSolver(
 // Factory methods with expected-based validation
 // ============================================================================
 
-expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
+std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
     std::shared_ptr<AmericanSolverWorkspace> workspace) {
 
     // Validate parameters using expected-based validation
     auto params_result = AmericanOptionParams::validate_expected(params);
     if (!params_result.has_value()) {
-        return unexpected(params_result.error());
+        return std::unexpected(params_result.error());
     }
 
     // Validate workspace
     if (!workspace) {
-        return unexpected("Workspace cannot be null");
+        return std::unexpected("Workspace cannot be null");
     }
 
     try {
         // All validations passed, create solver
         return AmericanOptionSolver(params, workspace);
     } catch (const std::exception& e) {
-        return unexpected(std::string("Failed to create solver: ") + e.what());
+        return std::unexpected(std::string("Failed to create solver: ") + e.what());
     }
 }
 
@@ -161,7 +161,7 @@ expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // Public API
 // ============================================================================
 
-expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
+std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 1. Acquire grid from workspace
     std::span<const double> x_grid = workspace_->grid_span();
     std::shared_ptr<operators::GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
@@ -270,7 +270,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         // 8. Solve the PDE
         auto solve_status = solver.solve();
         if (!solve_status) {
-            return unexpected(solve_status.error());
+            return std::unexpected(solve_status.error());
         }
         result.converged = true;
 
@@ -330,7 +330,7 @@ expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         // 8. Solve the PDE
         auto solve_status = solver.solve();
         if (!solve_status) {
-            return unexpected(solve_status.error());
+            return std::unexpected(solve_status.error());
         }
         result.converged = true;
 

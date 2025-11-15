@@ -12,7 +12,7 @@
 
 namespace mango {
 
-expected<void, std::string> PriceTableWorkspace::validate_inputs(
+std::expected<void, std::string> PriceTableWorkspace::validate_inputs(
     const std::vector<double>& m_grid,
     const std::vector<double>& tau_grid,
     const std::vector<double>& sigma_grid,
@@ -21,23 +21,23 @@ expected<void, std::string> PriceTableWorkspace::validate_inputs(
 {
     // Validate grid sizes
     if (m_grid.size() < 4) {
-        return unexpected("Moneyness grid must have >= 4 points");
+        return std::unexpected("Moneyness grid must have >= 4 points");
     }
     if (tau_grid.size() < 4) {
-        return unexpected("Maturity grid must have >= 4 points");
+        return std::unexpected("Maturity grid must have >= 4 points");
     }
     if (sigma_grid.size() < 4) {
-        return unexpected("Volatility grid must have >= 4 points");
+        return std::unexpected("Volatility grid must have >= 4 points");
     }
     if (r_grid.size() < 4) {
-        return unexpected("Rate grid must have >= 4 points");
+        return std::unexpected("Rate grid must have >= 4 points");
     }
 
     // Validate coefficient size
     size_t expected_size = m_grid.size() * tau_grid.size() *
                           sigma_grid.size() * r_grid.size();
     if (coefficients.size() != expected_size) {
-        return unexpected("Coefficient size mismatch: expected " +
+        return std::unexpected("Coefficient size mismatch: expected " +
                          std::to_string(expected_size) + ", got " +
                          std::to_string(coefficients.size()));
     }
@@ -48,22 +48,22 @@ expected<void, std::string> PriceTableWorkspace::validate_inputs(
     };
 
     if (!is_sorted(m_grid)) {
-        return unexpected("Moneyness grid must be sorted ascending");
+        return std::unexpected("Moneyness grid must be sorted ascending");
     }
     if (!is_sorted(tau_grid)) {
-        return unexpected("Maturity grid must be sorted ascending");
+        return std::unexpected("Maturity grid must be sorted ascending");
     }
     if (!is_sorted(sigma_grid)) {
-        return unexpected("Volatility grid must be sorted ascending");
+        return std::unexpected("Volatility grid must be sorted ascending");
     }
     if (!is_sorted(r_grid)) {
-        return unexpected("Rate grid must be sorted ascending");
+        return std::unexpected("Rate grid must be sorted ascending");
     }
 
     return {};
 }
 
-expected<PriceTableWorkspace, std::string> PriceTableWorkspace::allocate_and_initialize(
+std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::allocate_and_initialize(
     const std::vector<double>& m_grid,
     const std::vector<double>& tau_grid,
     const std::vector<double>& sigma_grid,
@@ -141,7 +141,7 @@ expected<PriceTableWorkspace, std::string> PriceTableWorkspace::allocate_and_ini
 }
 
 // Helper for zero-copy loading from raw buffers (friend of PriceTableWorkspace)
-expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
+std::expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
     const double* m_data, size_t n_m,
     const double* tau_data, size_t n_tau,
     const double* sigma_data, size_t n_sigma,
@@ -222,7 +222,7 @@ expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buffers(
     return ws;
 }
 
-expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
+std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
     const std::vector<double>& m_grid,
     const std::vector<double>& tau_grid,
     const std::vector<double>& sigma_grid,
@@ -234,7 +234,7 @@ expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
     // Validate inputs first
     auto validation = validate_inputs(m_grid, tau_grid, sigma_grid, r_grid, coefficients);
     if (!validation) {
-        return unexpected(validation.error());
+        return std::unexpected(validation.error());
     }
 
     // Allocate and initialize workspace
@@ -242,7 +242,7 @@ expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
                                    coefficients, K_ref, dividend_yield);
 }
 
-expected<void, std::string> PriceTableWorkspace::save(
+std::expected<void, std::string> PriceTableWorkspace::save(
     const std::string& filepath,
     const std::string& ticker,
     uint8_t option_type) const
@@ -373,7 +373,7 @@ expected<void, std::string> PriceTableWorkspace::save(
         !n_sigma_builder.Append(static_cast<uint32_t>(n_sigma)).ok() ||
         !n_r_builder.Append(static_cast<uint32_t>(n_r)).ok())
     {
-        return unexpected("Failed to append scalar values");
+        return std::unexpected("Failed to append scalar values");
     }
 
     // Helper to append list data
@@ -390,7 +390,7 @@ expected<void, std::string> PriceTableWorkspace::save(
         !append_list(volatility_list_builder, volatility_) ||
         !append_list(rate_list_builder, rate_))
     {
-        return unexpected("Failed to append grid vectors");
+        return std::unexpected("Failed to append grid vectors");
     }
 
     // Append knot vectors
@@ -399,17 +399,17 @@ expected<void, std::string> PriceTableWorkspace::save(
         !append_list(knots_sigma_list_builder, knots_sigma_) ||
         !append_list(knots_r_list_builder, knots_r_))
     {
-        return unexpected("Failed to append knot vectors");
+        return std::unexpected("Failed to append knot vectors");
     }
 
     // Append coefficients
     if (!append_list(coeffs_list_builder, coefficients_)) {
-        return unexpected("Failed to append coefficients");
+        return std::unexpected("Failed to append coefficients");
     }
 
     // Append prices_raw as null (not yet implemented)
     if (!prices_raw_list_builder.AppendNull().ok()) {
-        return unexpected("Failed to append prices_raw (null)");
+        return std::unexpected("Failed to append prices_raw (null)");
     }
 
     // Append fitting statistics (placeholders: 0.0)
@@ -420,7 +420,7 @@ expected<void, std::string> PriceTableWorkspace::save(
         !max_res_overall_builder.Append(0.0).ok() ||
         !cond_num_builder.Append(0.0).ok())
     {
-        return unexpected("Failed to append fitting statistics");
+        return std::unexpected("Failed to append fitting statistics");
     }
 
     // Append build metadata (placeholders: 0)
@@ -429,7 +429,7 @@ expected<void, std::string> PriceTableWorkspace::save(
         !pde_n_space_builder.Append(0).ok() ||
         !pde_n_time_builder.Append(0).ok())
     {
-        return unexpected("Failed to append build metadata");
+        return std::unexpected("Failed to append build metadata");
     }
 
     // Compute CRC64 checksums for data integrity
@@ -451,7 +451,7 @@ expected<void, std::string> PriceTableWorkspace::save(
     if (!checksum_coeffs_builder.Append(checksum_coefficients).ok() ||
         !checksum_grids_builder.Append(checksum_grids).ok())
     {
-        return unexpected("Failed to append checksums");
+        return std::unexpected("Failed to append checksums");
     }
 
     // Finish all builders and create arrays
@@ -499,7 +499,7 @@ expected<void, std::string> PriceTableWorkspace::save(
         !finish_builder(checksum_coeffs_builder) ||
         !finish_builder(checksum_grids_builder))
     {
-        return unexpected("Failed to finish builders");
+        return std::unexpected("Failed to finish builders");
     }
 
     // Create record batch (single row)
@@ -508,41 +508,41 @@ expected<void, std::string> PriceTableWorkspace::save(
     // Open file for writing
     auto file_result = arrow::io::FileOutputStream::Open(filepath);
     if (!file_result.ok()) {
-        return unexpected("Failed to open file: " + file_result.status().ToString());
+        return std::unexpected("Failed to open file: " + file_result.status().ToString());
     }
 
     // Write using Arrow IPC (Feather V2 format)
     auto writer_result = arrow::ipc::MakeFileWriter(*file_result, schema);
     if (!writer_result.ok()) {
-        return unexpected("Failed to create Arrow writer: " + writer_result.status().ToString());
+        return std::unexpected("Failed to create Arrow writer: " + writer_result.status().ToString());
     }
 
     auto writer = *writer_result;
     if (!writer->WriteRecordBatch(*record_batch).ok()) {
-        return unexpected("Failed to write record batch");
+        return std::unexpected("Failed to write record batch");
     }
 
     if (!writer->Close().ok()) {
-        return unexpected("Failed to close Arrow writer");
+        return std::unexpected("Failed to close Arrow writer");
     }
 
     return {};
 }
 
-expected<PriceTableWorkspace, PriceTableWorkspace::LoadError>
+std::expected<PriceTableWorkspace, PriceTableWorkspace::LoadError>
 PriceTableWorkspace::load(const std::string& filepath)
 {
     // 1. Check if file exists
     std::ifstream test_file(filepath);
     if (!test_file.good()) {
-        return unexpected(LoadError::FILE_NOT_FOUND);
+        return std::unexpected(LoadError::FILE_NOT_FOUND);
     }
     test_file.close();
 
     // 2. Open file using Arrow memory-mapped IO for zero-copy
     auto mmap_result = arrow::io::MemoryMappedFile::Open(filepath, arrow::io::FileMode::READ);
     if (!mmap_result.ok()) {
-        return unexpected(LoadError::MMAP_FAILED);
+        return std::unexpected(LoadError::MMAP_FAILED);
     }
     auto mmap_file = *mmap_result;
 
@@ -553,20 +553,20 @@ PriceTableWorkspace::load(const std::string& filepath)
         std::string error_msg = reader_result.status().ToString();
         if (error_msg.find("Not an Arrow file") != std::string::npos ||
             error_msg.find("Invalid") != std::string::npos) {
-            return unexpected(LoadError::NOT_ARROW_FILE);
+            return std::unexpected(LoadError::NOT_ARROW_FILE);
         }
-        return unexpected(LoadError::ARROW_READ_ERROR);
+        return std::unexpected(LoadError::ARROW_READ_ERROR);
     }
     auto reader = *reader_result;
 
     // 4. Read the single record batch
     if (reader->num_record_batches() != 1) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     auto batch_result = reader->ReadRecordBatch(0);
     if (!batch_result.ok()) {
-        return unexpected(LoadError::ARROW_READ_ERROR);
+        return std::unexpected(LoadError::ARROW_READ_ERROR);
     }
     auto batch = *batch_result;
 
@@ -632,15 +632,15 @@ PriceTableWorkspace::load(const std::string& filepath)
     // 7. Validate format version
     auto version_scalar = get_scalar("format_version");
     if (!version_scalar) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
     auto version_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(version_scalar);
     if (!version_uint32) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
     uint32_t format_version = version_uint32->value;
     if (format_version != 1) {
-        return unexpected(LoadError::UNSUPPORTED_VERSION);
+        return std::unexpected(LoadError::UNSUPPORTED_VERSION);
     }
 
     // 8. Extract dimensions
@@ -650,7 +650,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     auto n_r_scalar = get_scalar("n_rate");
 
     if (!n_m_scalar || !n_tau_scalar || !n_sigma_scalar || !n_r_scalar) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     auto n_m_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_m_scalar);
@@ -659,7 +659,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     auto n_r_uint32 = std::dynamic_pointer_cast<arrow::UInt32Scalar>(n_r_scalar);
 
     if (!n_m_uint32 || !n_tau_uint32 || !n_sigma_uint32 || !n_r_uint32) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     uint32_t n_m = n_m_uint32->value;
@@ -669,7 +669,7 @@ PriceTableWorkspace::load(const std::string& filepath)
 
     // 9. Validate dimensions (must be >= 4 for cubic B-splines)
     if (n_m < 4 || n_tau < 4 || n_sigma < 4 || n_r < 4) {
-        return unexpected(LoadError::INSUFFICIENT_GRID_POINTS);
+        return std::unexpected(LoadError::INSUFFICIENT_GRID_POINTS);
     }
 
     // 10. Extract metadata
@@ -677,14 +677,14 @@ PriceTableWorkspace::load(const std::string& filepath)
     auto div_scalar = get_scalar("dividend_yield");
 
     if (!k_ref_scalar || !div_scalar) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     auto k_ref_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(k_ref_scalar);
     auto div_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(div_scalar);
 
     if (!k_ref_double || !div_double) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     double K_ref = k_ref_double->value;
@@ -697,13 +697,13 @@ PriceTableWorkspace::load(const std::string& filepath)
     auto r_view = get_arrow_buffer("rate");
 
     if (!m_view || !tau_view || !sigma_view || !r_view) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     // 12. Validate array sizes match metadata
     if (m_view->size != n_m || tau_view->size != n_tau ||
         sigma_view->size != n_sigma || r_view->size != n_r) {
-        return unexpected(LoadError::SIZE_MISMATCH);
+        return std::unexpected(LoadError::SIZE_MISMATCH);
     }
 
     // 13. Extract knot vectors
@@ -716,7 +716,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     // Note: Schema doc incorrectly stated n + 8, but clamped_knots_cubic() returns n + 4
     if (knots_m.size() != n_m + 4 || knots_tau.size() != n_tau + 4 ||
         knots_sigma.size() != n_sigma + 4 || knots_r.size() != n_r + 4) {
-        return unexpected(LoadError::SIZE_MISMATCH);
+        return std::unexpected(LoadError::SIZE_MISMATCH);
     }
 
     // 14b. Validate knot values match recomputed knots from grids
@@ -742,19 +742,19 @@ PriceTableWorkspace::load(const std::string& filepath)
         !knots_match(knots_tau, knots_tau_computed) ||
         !knots_match(knots_sigma, knots_sigma_computed) ||
         !knots_match(knots_r, knots_r_computed)) {
-        return unexpected(LoadError::CORRUPTED_KNOTS);
+        return std::unexpected(LoadError::CORRUPTED_KNOTS);
     }
 
     // 15. Extract coefficients buffer view (zero-copy)
     auto coeffs_view = get_arrow_buffer("coefficients");
     if (!coeffs_view) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     // 16. Validate coefficient size
     size_t expected_coeffs = static_cast<size_t>(n_m) * n_tau * n_sigma * n_r;
     if (coeffs_view->size != expected_coeffs) {
-        return unexpected(LoadError::COEFFICIENT_SIZE_MISMATCH);
+        return std::unexpected(LoadError::COEFFICIENT_SIZE_MISMATCH);
     }
 
     // 17. Validate grid monotonicity (using grids already created for knot validation)
@@ -764,7 +764,7 @@ PriceTableWorkspace::load(const std::string& filepath)
 
     if (!is_sorted(m_grid) || !is_sorted(tau_grid) ||
         !is_sorted(sigma_grid) || !is_sorted(r_grid)) {
-        return unexpected(LoadError::GRID_NOT_SORTED);
+        return std::unexpected(LoadError::GRID_NOT_SORTED);
     }
 
     // 18. Extract and validate CRC64 checksums
@@ -772,14 +772,14 @@ PriceTableWorkspace::load(const std::string& filepath)
     auto checksum_grids_scalar = get_scalar("checksum_grids");
 
     if (!checksum_coeffs_scalar || !checksum_grids_scalar) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     auto checksum_coeffs_uint64 = std::dynamic_pointer_cast<arrow::UInt64Scalar>(checksum_coeffs_scalar);
     auto checksum_grids_uint64 = std::dynamic_pointer_cast<arrow::UInt64Scalar>(checksum_grids_scalar);
 
     if (!checksum_coeffs_uint64 || !checksum_grids_uint64) {
-        return unexpected(LoadError::SCHEMA_MISMATCH);
+        return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     uint64_t stored_checksum_coeffs = checksum_coeffs_uint64->value;
@@ -800,11 +800,11 @@ PriceTableWorkspace::load(const std::string& filepath)
 
     // Validate checksums
     if (computed_checksum_coeffs != stored_checksum_coeffs) {
-        return unexpected(LoadError::CORRUPTED_COEFFICIENTS);
+        return std::unexpected(LoadError::CORRUPTED_COEFFICIENTS);
     }
 
     if (computed_checksum_grids != stored_checksum_grids) {
-        return unexpected(LoadError::CORRUPTED_GRIDS);
+        return std::unexpected(LoadError::CORRUPTED_GRIDS);
     }
 
     // 19. Create workspace using zero-copy path (single memcpy from Arrow buffers into arena)
@@ -817,7 +817,7 @@ PriceTableWorkspace::load(const std::string& filepath)
         K_ref, dividend_yield);
 
     if (!ws_result) {
-        return unexpected(LoadError::ARROW_READ_ERROR);
+        return std::unexpected(LoadError::ARROW_READ_ERROR);
     }
 
     // 20. Verify alignment of loaded data
@@ -832,7 +832,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     // };
     // if (!check_alignment(ws.moneyness_.data()) ||
     //     !check_alignment(ws.coefficients_.data())) {
-    //     return unexpected(LoadError::INVALID_ALIGNMENT);
+    //     return std::unexpected(LoadError::INVALID_ALIGNMENT);
     // }
 
     return std::move(ws);

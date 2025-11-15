@@ -46,7 +46,7 @@ cc_library(
     deps = [
         ":bspline_utils",
         "//src/pde/core:thomas_solver",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",

@@ -12,7 +12,7 @@ cc_library(
         "//src/pde/memory:pde_workspace",
         "//src/pde/core:grid",
         "//src/pde/operators:grid_spacing",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -29,7 +29,7 @@ cc_library(
         ":american_solver_workspace",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:black_scholes_pde",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",
@@ -100,7 +100,7 @@ cc_library(
         ":american_option",
         ":iv_types",
         "//common:ivcalc_trace_hdr",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",
@@ -145,7 +145,7 @@ cc_library(
     hdrs = ["option_spec.hpp"],
     deps = [
         ":american_option",  # For OptionType enum
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -157,7 +157,7 @@ cc_library(
     deps = [
         ":option_spec",
         ":iv_types",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -176,7 +176,7 @@ cc_library(
         ":american_solver_workspace",
         "//src/support:parallel",
         "//common:ivcalc_trace_hdr",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",
@@ -198,7 +198,7 @@ cc_library(
         ":american_option",
         ":american_solver_workspace",
         ":price_table_snapshot_collector",
-        "//src/support:expected",
+        "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -217,7 +217,7 @@ cc_library(
     srcs = ["price_table_workspace.cpp"],
     hdrs = ["price_table_workspace.hpp"],
     deps = [
-        "//src/support:expected",
+        "//src/support:error_types",
         "//src/interpolation:bspline_utils",
         ":crc64",
         "//third_party/arrow",

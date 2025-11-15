@@ -6,7 +6,8 @@
 #pragma once
 
 #include "src/option/american_option.hpp"  // For OptionType enum
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <string>
 
 namespace mango {
@@ -44,7 +45,7 @@ struct OptionSpec {
  * @param spec Option specification to validate
  * @return void on success, error message on failure
  */
-expected<void, std::string> validate_option_spec(const OptionSpec& spec);
+std::expected<void, std::string> validate_option_spec(const OptionSpec& spec);
 
 /**
  * @brief IV solver query: option spec + observed market price
@@ -68,6 +69,6 @@ struct IVQuery {
  * @param query IV query to validate
  * @return void on success, error message on failure
  */
-expected<void, std::string> validate_iv_query(const IVQuery& query);
+std::expected<void, std::string> validate_iv_query(const IVQuery& query);
 
 } // namespace mango

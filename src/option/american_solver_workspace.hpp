@@ -12,7 +12,8 @@
 #include "src/pde/memory/pde_workspace.hpp"
 #include "src/pde/operators/grid_spacing.hpp"
 #include "src/pde/core/grid.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -145,25 +146,25 @@ public:
      * @param n_time Number of time steps
      * @return Success or error message
      */
-    static expected<void, std::string> validate_params(
+    static std::expected<void, std::string> validate_params(
         double x_min,
         double x_max,
         size_t n_space,
         size_t n_time)
     {
         if (x_min >= x_max) {
-            return unexpected("x_min must be < x_max");
+            return std::unexpected("x_min must be < x_max");
         }
         if (n_space < 3) {
-            return unexpected("n_space must be >= 3");
+            return std::unexpected("n_space must be >= 3");
         }
         if (n_time < 1) {
-            return unexpected("n_time must be >= 1");
+            return std::unexpected("n_time must be >= 1");
         }
 
         double dx = (x_max - x_min) / (n_space - 1);
         if (dx >= 0.5) {
-            return unexpected(
+            return std::unexpected(
                 "Grid too coarse: dx = " + std::to_string(dx) +
                 " >= 0.5 (Von Neumann stability violated)");
         }
@@ -183,7 +184,7 @@ public:
      * @param n_time Number of time steps
      * @return Expected containing shared workspace on success, error message on failure
      */
-    static expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> create(
+    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> create(
         double x_min,
         double x_max,
         size_t n_space,
@@ -191,22 +192,22 @@ public:
     {
         // Validate parameters
         if (n_space < 10) {
-            return unexpected("n_space must be >= 10");
+            return std::unexpected("n_space must be >= 10");
         }
         if (n_time < 10) {
-            return unexpected("n_time must be >= 10");
+            return std::unexpected("n_time must be >= 10");
         }
         if (x_min >= x_max) {
-            return unexpected("x_min must be < x_max");
+            return std::unexpected("x_min must be < x_max");
         }
 
         // Catch allocation failures and grid generation errors
         try {
             return std::make_shared<AmericanSolverWorkspace>(PrivateTag{}, x_min, x_max, n_space, n_time);
         } catch (const std::bad_alloc&) {
-            return unexpected("Failed to allocate workspace (out of memory)");
+            return std::unexpected("Failed to allocate workspace (out of memory)");
         } catch (const std::exception& e) {
-            return unexpected(std::string("Failed to create workspace: ") + e.what());
+            return std::unexpected(std::string("Failed to create workspace: ") + e.what());
         }
     }
 
@@ -237,7 +238,7 @@ public:
      * @param n_time Number of time steps
      * @return Expected containing shared workspace on success, error message on failure
      */
-    static expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> create_standard(
+    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> create_standard(
         size_t n_space,
         size_t n_time)
     {

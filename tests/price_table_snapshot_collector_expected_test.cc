@@ -73,7 +73,7 @@ TEST_F(PriceTableSnapshotCollectorExpectedTest, SuccessfulCollectionReturnsExpec
     mango::PriceTableSnapshotCollector collector(CreateDefaultConfig());
     auto snapshot = CreateValidSnapshot();
 
-    // This should succeed and return expected<void, std::string> with no error
+    // This should succeed and return std::expected<void, std::string> with no error
     auto result = collector.collect_expected(snapshot);
 
     EXPECT_TRUE(result.has_value());

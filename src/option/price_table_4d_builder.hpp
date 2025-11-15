@@ -35,7 +35,8 @@
 #include "src/option/american_option.hpp"
 #include "src/interpolation/bspline_4d.hpp"
 #include "src/interpolation/bspline_fitter_4d.hpp"
-#include "src/support/expected.hpp"
+#include <expected>
+#include "src/support/error_types.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <vector>
 #include <memory>
@@ -321,14 +322,14 @@ public:
     /// @param n_time Number of time steps
     /// @param dividend_yield Continuous dividend yield (default: 0)
     /// @return Result with fitted B-spline evaluator
-    expected<PriceTable4DResult, std::string> precompute(
+    std::expected<PriceTable4DResult, std::string> precompute(
         OptionType option_type,
         size_t n_space,
         size_t n_time,
         double dividend_yield = 0.0);
 
     /// Pre-compute all option prices using a single configuration struct
-    expected<PriceTable4DResult, std::string> precompute(
+    std::expected<PriceTable4DResult, std::string> precompute(
         const PriceTableConfig& config);
 
     /// Pre-compute all option prices on 4D grid (custom bounds)
@@ -351,7 +352,7 @@ public:
     /// @param n_time Number of time steps
     /// @param dividend_yield Continuous dividend yield (default: 0)
     /// @return Result with fitted B-spline evaluator
-    expected<PriceTable4DResult, std::string> precompute(
+    std::expected<PriceTable4DResult, std::string> precompute(
         OptionType option_type,
         double x_min,
         double x_max,
@@ -383,7 +384,7 @@ private:
         }
     }
 
-    expected<void, std::string> validate_grids() const;
+    std::expected<void, std::string> validate_grids() const;
 
     /// Check if we should use normalized solver (fast path)
     bool should_use_normalized_solver(
