@@ -10,8 +10,8 @@
  * - Residual quality
  */
 
-#include "src/interpolation/bspline_fitter_4d.hpp"
-#include "src/interpolation/bspline_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_4d.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>

@@ -43,7 +43,7 @@ cc_library(
     hdrs = ["price_table_snapshot_collector.hpp"],
     deps = [
         "//src/pde/core:snapshot",
-        "//src/interpolation:snapshot_interpolator",
+        "//src/math:cubic_spline_solver",
         ":american_option",
     ],
     copts = ["-std=c++23"],
@@ -57,11 +57,11 @@ cc_library(
     deps = [
         ":american_option",
         ":normalized_chain_solver",
-        "//src/interpolation:bspline_4d",
-        "//src/interpolation:bspline_fitter_4d",
+        "//src/bspline:bspline_4d",
+        "//src/bspline:bspline_fitter_4d",
         ":price_table_snapshot_collector",
         "//src/pde/core:trbdf2_config",
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
     ],
     copts = [
         "-std=c++23",
@@ -88,7 +88,7 @@ cc_library(
     hdrs = ["iv_solver.hpp"],
     deps = [
         "//src/support:parallel",
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
         ":american_option",
         ":iv_types",
         "//common:ivcalc_trace_hdr",
@@ -111,7 +111,7 @@ cc_library(
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],
     deps = [
-        "//src/interpolation:bspline_4d",
+        "//src/bspline:bspline_4d",
         ":american_option",
         ":iv_types",
         ":price_table_4d_builder",
@@ -162,7 +162,7 @@ cc_library(
         ":iv_solver_base",
         ":option_spec",
         ":iv_types",
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
         ":american_option",
         ":american_solver_workspace",
         "//src/support:parallel",
@@ -209,7 +209,7 @@ cc_library(
     hdrs = ["price_table_workspace.hpp"],
     deps = [
         "//src/support:error_types",
-        "//src/interpolation:bspline_utils",
+        "//src/bspline:bspline_utils",
         ":crc64",
         "//third_party/arrow",
     ],

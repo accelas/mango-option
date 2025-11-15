@@ -6,7 +6,7 @@ cc_binary(
         "//src/pde/core:boundary_conditions",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/operators:operator_factory",
-        "//src/pde/core:root_finding",
+        "//src/math:root_finding",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",
     ],

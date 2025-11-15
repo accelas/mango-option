@@ -2,7 +2,7 @@
 
 #include <expected>
 #include "src/support/error_types.hpp"
-#include "src/interpolation/bspline_utils.hpp"
+#include "src/bspline/bspline_utils.hpp"
 #include <vector>
 #include <span>
 #include <string>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/pde/core/root_finding.hpp"
+#include "src/math/root_finding.hpp"
 #include "common/ivcalc_trace.h"
 #include <expected>
 #include "src/support/error_types.hpp"

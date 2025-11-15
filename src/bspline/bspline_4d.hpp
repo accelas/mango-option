@@ -61,7 +61,7 @@
 
 #pragma once
 
-#include "src/interpolation/bspline_utils.hpp"
+#include "src/bspline/bspline_utils.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <vector>
 #include <algorithm>

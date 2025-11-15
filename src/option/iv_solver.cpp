@@ -1,5 +1,5 @@
 #include "src/option/iv_solver.hpp"
-#include "src/pde/core/root_finding.hpp"
+#include "src/math/root_finding.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
 #include <cmath>

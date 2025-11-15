@@ -12,7 +12,7 @@
  * - Speedup: Hardware-dependent, typically 1.5-3x for large grids
  */
 
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>

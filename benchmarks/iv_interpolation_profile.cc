@@ -11,8 +11,8 @@
  * Run with: bazel run -c opt //benchmarks:iv_interpolation_profile -- --benchmark_filter="Vega"
  */
 
-#include "src/interpolation/bspline_4d.hpp"
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>

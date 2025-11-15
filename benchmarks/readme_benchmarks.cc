@@ -1,6 +1,6 @@
 #include "src/option/american_option.hpp"
-#include "src/interpolation/bspline_4d.hpp"
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "src/bspline/bspline_4d.hpp"
+#include "src/bspline/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/normalized_chain_solver.hpp"
