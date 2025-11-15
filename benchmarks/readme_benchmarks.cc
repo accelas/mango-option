@@ -1,7 +1,7 @@
 #include "src/option/american_option.hpp"
 #include "src/bspline/bspline_4d.hpp"
 #include "src/bspline/bspline_fitter_4d.hpp"
-#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/normalized_chain_solver.hpp"
 #include "src/option/price_table_4d_builder.hpp"
@@ -301,15 +301,15 @@ static void BM_README_IV_FDM(benchmark::State& state) {
         6.08    // market_price
     };
 
-    IVConfig config;
+    IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     config.grid_n_space = n_space;
     config.grid_n_time = n_time;
 
+    IVSolverFDM solver(config);
     auto run_once = [&]() {
-        IVSolver solver(query, config);
-        auto result = solver.solve();
+        auto result = solver.solve(query);
         if (!result.converged) {
             throw std::runtime_error(
                 result.failure_reason.value_or("FDM IV solver failed"));
