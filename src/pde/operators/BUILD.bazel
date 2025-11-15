@@ -7,14 +7,6 @@ cc_library(
 )
 
 cc_library(
-    name = "black_scholes_pde",
-    hdrs = ["black_scholes_pde.hpp"],
-    deps = [":grid_spacing"],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "laplacian_pde",
     hdrs = ["laplacian_pde.hpp"],
     copts = ["-std=c++23"],

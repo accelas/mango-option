@@ -5,12 +5,19 @@
 
 #pragma once
 
-#include "src/option/american_option.hpp"  // For OptionType enum
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <string>
 
 namespace mango {
+
+/**
+ * Option type enumeration.
+ */
+enum class OptionType {
+    CALL,
+    PUT
+};
 
 /**
  * @brief Complete specification of an option contract
