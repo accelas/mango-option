@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/option/snapshot.hpp"
+#include "src/pde/core/snapshot.hpp"
 #include "src/interpolation/snapshot_interpolator.hpp"
 #include "src/option/american_option.hpp"  // For OptionType enum
 #include <expected>

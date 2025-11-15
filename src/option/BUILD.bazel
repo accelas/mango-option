@@ -1,11 +1,4 @@
 cc_library(
-    name = "snapshot",
-    hdrs = ["snapshot.hpp"],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "american_solver_workspace",
     hdrs = ["american_solver_workspace.hpp"],
     deps = [
@@ -49,7 +42,7 @@ cc_library(
     name = "price_table_snapshot_collector",
     hdrs = ["price_table_snapshot_collector.hpp"],
     deps = [
-        ":snapshot",
+        "//src/pde/core:snapshot",
         "//src/interpolation:snapshot_interpolator",
         ":american_option",
     ],
