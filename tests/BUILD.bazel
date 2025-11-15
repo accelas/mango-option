@@ -59,23 +59,11 @@ cc_test(
 )
 
 cc_test(
-    name = "spatial_operators_test",
-    srcs = ["spatial_operators_test.cc"],
-    deps = [
-        "//src/pde/core:spatial_operators",
-        "//src/pde/memory:pde_workspace",
-        "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-fopenmp-simd"],
-)
-
-cc_test(
     name = "pde_solver_test",
     srcs = ["pde_solver_test.cc"],
     deps = [
         "//src/pde/core:pde_solver",
-        "//src/pde/core:spatial_operators",
+        
         "//src/pde/core:boundary_conditions",
         "//src/pde/core:root_finding",
         "//src/option:snapshot",
@@ -155,20 +143,6 @@ cc_test(
 )
 
 cc_test(
-    name = "snapshot_optimization_benchmark",
-    srcs = ["snapshot_optimization_benchmark.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/option:price_table_snapshot_collector",
-        "//src/pde/core:spatial_operators",
-        "//src/pde/core:boundary_conditions",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-    tags = ["manual", "slow"],  # Excluded from fast CI: benchmark takes ~30-60s
-)
-
-cc_test(
     name = "iv_solver_test",
     srcs = ["iv_solver_test.cc"],
     deps = [
@@ -184,7 +158,8 @@ cc_test(
     srcs = ["temporal_event_test.cc"],
     deps = [
         "//src/pde/core:pde_solver",
-        "//src/pde/core:spatial_operators",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/operators:operator_factory",
         "//src/pde/core:boundary_conditions",
         "@googletest//:gtest_main",
     ],
@@ -197,7 +172,8 @@ cc_test(
     srcs = ["obstacle_test.cc"],
     deps = [
         "//src/pde/core:pde_solver",
-        "//src/pde/core:spatial_operators",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/operators:operator_factory",
         "//src/pde/core:boundary_conditions",
         "@googletest//:gtest_main",
     ],
@@ -258,7 +234,7 @@ cc_test(
     deps = [
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:black_scholes_pde",
-        "//src/pde/core:spatial_operators",  # Old operators for comparison
+          # Old operators for comparison
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],

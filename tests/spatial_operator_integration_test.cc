@@ -1,6 +1,6 @@
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/operators/black_scholes_pde.hpp"
-#include "src/pde/core/spatial_operators.hpp"  // Old operators
+// Legacy spatial_operators.hpp removed
 #include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>

@@ -1,6 +1,7 @@
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/spatial_operators.hpp"
+#include "src/pde/operators/laplacian_pde.hpp"
+#include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/core/root_finding.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
@@ -35,7 +36,9 @@ int main() {
     mango::DirichletBC right_bc{[](double, double) { return 0.0; }};
 
     // Spatial operator: L(u) = ∂²u/∂x²
-    mango::LaplacianOperator spatial_op{1.0};  // Diffusion coefficient D = 1.0
+    auto pde = mango::operators::LaplacianPDE<double>(1.0);
+    auto grid_view = mango::GridView<double>(grid_buffer.span());
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), grid_view);  // Diffusion coefficient D = 1.0
 
     // Create solver with Newton integration
     mango::PDESolver solver(grid_buffer.span(), time, trbdf2_config,

@@ -1,5 +1,4 @@
 #include "src/pde/core/pde_solver.hpp"
-#include "src/pde/core/spatial_operators.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/option/snapshot.hpp"
 #include "src/pde/operators/operator_factory.hpp"
@@ -45,7 +44,9 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
     // Spatial operator: L(u) = D·d²u/dx²
-    mango::LaplacianOperator heat_op(D);
+    auto pde_heat_op = mango::operators::LaplacianPDE<double>(D);
+    auto grid_view_heat_op = mango::GridView<double>(grid.span());
+    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), grid_view_heat_op);
 
     // Initial condition: u(x,0) = sin(π·x)
     auto ic = [pi](std::span<const double> x, std::span<double> u) {
@@ -100,7 +101,9 @@ TEST(PDESolverTest, NewtonConvergence) {
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
     // Spatial operator: L(u) = D·d²u/dx²
-    mango::LaplacianOperator heat_op(D);
+    auto pde_heat_op = mango::operators::LaplacianPDE<double>(D);
+    auto grid_view_heat_op = mango::GridView<double>(grid.span());
+    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), grid_view_heat_op);
 
     // Initial condition: u(x,0) = sin(π·x)
     auto ic = [pi](std::span<const double> x, std::span<double> u) {
@@ -141,7 +144,9 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
     const double D = 1.0;
-    mango::LaplacianOperator spatial_op(D);
+    auto pde_spatial_op = mango::operators::LaplacianPDE<double>(D);
+    auto grid_view_spatial_op = mango::GridView<double>(grid.span());
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_spatial_op), grid_view_spatial_op);
 
     mango::PDESolver solver(grid.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
@@ -177,7 +182,9 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
 
     const double D = 1.0;
-    mango::LaplacianOperator spatial_op(D);
+    auto pde_spatial_op = mango::operators::LaplacianPDE<double>(D);
+    auto grid_view_spatial_op = mango::GridView<double>(grid.span());
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_spatial_op), grid_view_spatial_op);
 
     mango::PDESolver solver(grid.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
@@ -197,8 +204,10 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
 }
 
 TEST(PDESolverTest, SnapshotRegistration) {
-    mango::LaplacianOperator op(0.1);
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 11).value().generate();
+    auto pde_op = mango::operators::LaplacianPDE<double>(0.1);
+    auto grid_view_op = mango::GridView<double>(grid.span());
+    auto op = mango::operators::create_spatial_operator(std::move(pde_op), grid_view_op);
     mango::TimeDomain time(0.0, 1.0, 0.1);  // 10 steps
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -218,8 +227,10 @@ TEST(PDESolverTest, SnapshotRegistration) {
 
 TEST(PDESolverTest, SnapshotCollection) {
     // Heat equation
-    mango::LaplacianOperator op(0.1);
     auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 21).value().generate();
+    auto pde_op = mango::operators::LaplacianPDE<double>(0.1);
+    auto grid_view_op = mango::GridView<double>(grid.span());
+    auto op = mango::operators::create_spatial_operator(std::move(pde_op), grid_view_op);
     mango::TimeDomain time(0.0, 1.0, 0.25);  // 4 steps: 0.25, 0.5, 0.75, 1.0
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
