@@ -33,7 +33,6 @@
 #pragma once
 
 #include "src/interpolation/bspline_utils.hpp"
-#include "src/pde/core/thomas_solver.hpp"
 #include "src/support/expected.hpp"
 #include <lapacke.h>
 #include <vector>
