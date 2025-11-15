@@ -3,7 +3,7 @@
 #include "src/pde/core/snapshot.hpp"
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"
-#include "src/pde/memory/pde_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>

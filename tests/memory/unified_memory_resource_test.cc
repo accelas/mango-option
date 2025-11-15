@@ -1,4 +1,4 @@
-#include "src/pde/memory/unified_memory_resource.hpp"
+#include "src/support/memory/unified_memory_resource.hpp"
 #include <gtest/gtest.h>
 
 TEST(UnifiedMemoryResourceTest, BasicAllocation) {

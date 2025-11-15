@@ -2,7 +2,7 @@ cc_library(
     name = "american_solver_workspace",
     hdrs = ["american_solver_workspace.hpp"],
     deps = [
-        "//src/pde/memory:pde_workspace",
+        "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
         "//src/pde/operators:grid_spacing",
         "//src/support:error_types",
@@ -196,21 +196,13 @@ cc_library(
 )
 
 cc_library(
-    name = "crc64",
-    srcs = ["crc64.cpp"],
-    hdrs = ["crc64.hpp"],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "price_table_workspace",
     srcs = ["price_table_workspace.cpp"],
     hdrs = ["price_table_workspace.hpp"],
     deps = [
         "//src/support:error_types",
         "//src/bspline:bspline_utils",
-        ":crc64",
+        "//src/support:crc64",
         "//third_party/arrow",
     ],
     copts = ["-std=c++23"],

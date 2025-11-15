@@ -1,4 +1,4 @@
-#include "src/pde/memory/pde_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>

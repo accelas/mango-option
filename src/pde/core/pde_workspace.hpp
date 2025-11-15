@@ -1,6 +1,6 @@
 #pragma once
 
-#include "workspace_base.hpp"
+#include "src/support/memory/workspace_base.hpp"
 #include <span>
 #include <cassert>
 #include <algorithm>
