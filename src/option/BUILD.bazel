@@ -55,11 +55,10 @@ cc_library(
     srcs = ["price_table_4d_builder.cpp"],
     hdrs = ["price_table_4d_builder.hpp"],
     deps = [
-        ":american_option",
-        ":normalized_chain_solver",
+        ":price_table_solver_factory",
         "//src/bspline:bspline_4d",
         "//src/bspline:bspline_fitter_4d",
-        ":price_table_snapshot_collector",
+        ":price_table_workspace",
         "//src/pde/core:trbdf2_config",
         "//src/math:root_finding",
     ],
@@ -69,9 +68,7 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
-        "-fopenmp",
     ],
-    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
 
@@ -192,6 +189,29 @@ cc_library(
         "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_solver_factory",
+    srcs = ["price_table_solver_factory.cpp"],
+    hdrs = ["price_table_solver_factory.hpp"],
+    deps = [
+        ":option_spec",
+        ":normalized_chain_solver",
+        ":american_option",
+        ":american_solver_workspace",
+        ":price_table_snapshot_collector",
+        "//src/support:error_types",
+        "//src/support:parallel",
+    ],
+    copts = [
+        "-std=c++23",
+        "-fopenmp",
+        "-O3",
+        "-march=native",
+    ],
+    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
 

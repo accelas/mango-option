@@ -22,17 +22,32 @@
 // and implement SYCL-specific parallel constructs here
 #if defined(MANGO_USE_SYCL)
     // SYCL parallel constructs (future implementation)
-    #define MANGO_PRAGMA_SIMD              // SYCL will use different syntax
-    #define MANGO_PRAGMA_PARALLEL_FOR      // SYCL will use parallel_for with nd_range
+    #define MANGO_PRAGMA_SIMD                           // SYCL will use different syntax
+    #define MANGO_PRAGMA_PARALLEL_FOR                   // SYCL will use parallel_for with nd_range
+    #define MANGO_PRAGMA_PARALLEL                       // SYCL parallel region
+    #define MANGO_PRAGMA_FOR                            // SYCL single loop inside parallel region
+    #define MANGO_PRAGMA_FOR_COLLAPSE2                  // SYCL nested parallel loops
+    #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC          // SYCL nested parallel loops with scheduling
+    #define MANGO_PRAGMA_ATOMIC                         // SYCL atomic operations
     #warning "SYCL backend not yet implemented"
 #elif defined(_OPENMP)
     // OpenMP parallel constructs (current implementation)
-    #define MANGO_PRAGMA_SIMD              _Pragma("omp simd")
-    #define MANGO_PRAGMA_PARALLEL_FOR      _Pragma("omp parallel for")
+    #define MANGO_PRAGMA_SIMD                           _Pragma("omp simd")
+    #define MANGO_PRAGMA_PARALLEL_FOR                   _Pragma("omp parallel for")
+    #define MANGO_PRAGMA_PARALLEL                       _Pragma("omp parallel")
+    #define MANGO_PRAGMA_FOR                            _Pragma("omp for")
+    #define MANGO_PRAGMA_FOR_COLLAPSE2                  _Pragma("omp for collapse(2)")
+    #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC          _Pragma("omp for collapse(2) schedule(dynamic, 1)")
+    #define MANGO_PRAGMA_ATOMIC                         _Pragma("omp atomic")
 #else
     // Sequential execution (no parallelization)
     #define MANGO_PRAGMA_SIMD
     #define MANGO_PRAGMA_PARALLEL_FOR
+    #define MANGO_PRAGMA_PARALLEL
+    #define MANGO_PRAGMA_FOR
+    #define MANGO_PRAGMA_FOR_COLLAPSE2
+    #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC
+    #define MANGO_PRAGMA_ATOMIC
 #endif
 
 /**
@@ -48,4 +63,13 @@
  *
  * 4. Why _Pragma instead of #pragma: The _Pragma operator allows using pragmas in macro
  *    definitions, which is required for our abstraction layer.
+ *
+ * Available macros:
+ * - MANGO_PRAGMA_SIMD: Vectorize single loop
+ * - MANGO_PRAGMA_PARALLEL_FOR: Parallelize single loop
+ * - MANGO_PRAGMA_PARALLEL: Start parallel region (use with FOR or FOR_COLLAPSE2)
+ * - MANGO_PRAGMA_FOR: Single loop inside parallel region
+ * - MANGO_PRAGMA_FOR_COLLAPSE2: Collapse 2 nested loops (inside parallel region)
+ * - MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC: Collapse 2 loops with dynamic scheduling
+ * - MANGO_PRAGMA_ATOMIC: Atomic operation (increment, etc.)
  */
