@@ -10,8 +10,100 @@
 #include "src/option/price_table_snapshot_collector.hpp"
 #include "src/support/parallel.hpp"
 #include <ranges>
+#include <stdexcept>
+
 
 namespace mango {
+
+namespace {
+
+/// Snapshot collector that writes prices directly into the 4D output buffer.
+class DirectPriceTableSnapshotCollector : public SnapshotCollector {
+public:
+    DirectPriceTableSnapshotCollector(
+        std::span<const double> moneyness,
+        std::span<const double> maturity,
+        double K_ref,
+        double* output_base,
+        size_t stride,
+        size_t base_offset)
+        : log_moneyness_(moneyness.size()),
+          tau_size_(maturity.size()),
+          K_ref_(K_ref),
+          prices_base_(output_base),
+          stride_(stride),
+          base_offset_(base_offset)
+    {
+        for (size_t i = 0; i < moneyness.size(); ++i) {
+            log_moneyness_[i] = std::log(moneyness[i]);
+        }
+    }
+
+    std::expected<void, std::string> collect_expected(const Snapshot& snapshot) {
+        const size_t tau_idx = snapshot.user_index;
+
+        if (tau_idx >= tau_size_) {
+            return std::unexpected("Snapshot tau index out of range");
+        }
+
+        const bool grid_changed = !grids_match(snapshot.spatial_grid);
+
+        if (grid_changed || !interpolator_built_) {
+            auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
+            if (V_error.has_value()) {
+                return std::unexpected(std::string("Failed to build value interpolator: ") +
+                                       std::string(V_error.value()));
+            }
+
+            cached_grid_.assign(snapshot.spatial_grid.begin(), snapshot.spatial_grid.end());
+            interpolator_built_ = true;
+        } else {
+            auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
+            if (V_error.has_value()) {
+                return std::unexpected(std::string("Failed to rebuild value interpolator: ") +
+                                       std::string(V_error.value()));
+            }
+        }
+
+        for (size_t m_idx = 0; m_idx < log_moneyness_.size(); ++m_idx) {
+            const double x = log_moneyness_[m_idx];
+            const double V_norm = value_interp_.eval(x);
+            const size_t table_idx = (m_idx * tau_size_ + tau_idx) * stride_ + base_offset_;
+            prices_base_[table_idx] = K_ref_ * V_norm;
+        }
+
+        return {};
+    }
+
+    void collect(const Snapshot& snapshot) override {
+        auto result = collect_expected(snapshot);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error());
+        }
+    }
+
+private:
+    [[nodiscard]] bool grids_match(std::span<const double> grid) const noexcept {
+        if (cached_grid_.size() != grid.size()) {
+            return false;
+        }
+        return std::equal(cached_grid_.begin(), cached_grid_.end(), grid.begin());
+    }
+
+    std::vector<double> log_moneyness_;
+    size_t tau_size_;
+    double K_ref_;
+    double* prices_base_;
+    size_t stride_;
+    size_t base_offset_;
+
+    SnapshotInterpolator value_interp_;
+    std::vector<double> cached_grid_;
+    bool interpolator_built_ = false;
+};
+
+}  // namespace
+
 
 // ============================================================================
 // Normalized Chain Solver Implementation
@@ -183,13 +275,18 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
 
     // Build batch parameters and collectors (all (σ,r) combinations)
     std::vector<AmericanOptionParams> batch_params;
-    std::vector<PriceTableSnapshotCollector> collectors;
+    std::vector<DirectPriceTableSnapshotCollector> collectors;
     batch_params.reserve(Nv * Nr);
     collectors.reserve(Nv * Nr);
+
+    const size_t slice_stride = Nv * Nr;
+    double* prices_base = prices_4d.data();
 
     namespace views = std::views;
     for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
                                                  views::iota(size_t{0}, Nr))) {
+        size_t idx = k * Nr + l;
+
         batch_params.push_back({
             .strike = K_ref,
             .spot = K_ref,
@@ -201,14 +298,13 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
             .discrete_dividends = {}
         });
 
-        PriceTableSnapshotCollectorConfig collector_config{
-            .moneyness = moneyness,
-            .tau = maturity,
-            .K_ref = K_ref,
-            .option_type = config_.option_type,
-            .payoff_params = nullptr
-        };
-        collectors.emplace_back(collector_config);
+        collectors.emplace_back(
+            moneyness,
+            maturity,
+            K_ref,
+            prices_base,
+            slice_stride,
+            idx);
     }
 
     // Solve batch with snapshot registration
@@ -220,23 +316,14 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
             }
         });
 
-    // Extract prices from collectors
     size_t failed_count = 0;
     for (size_t idx = 0; idx < Nv * Nr; ++idx) {
-        size_t k = idx / Nr;
-        size_t l = idx % Nr;
-
         if (!results[idx].has_value()) {
             ++failed_count;
-            continue;
-        }
-
-        auto prices_2d = collectors[idx].prices();
-        for (auto [i, j] : views::cartesian_product(views::iota(size_t{0}, Nm),
-                                                     views::iota(size_t{0}, Nt))) {
-            size_t idx_2d = i * Nt + j;
-            size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-            prices_4d[idx_4d] = prices_2d[idx_2d];
+            const size_t base_offset = idx;
+            for (size_t ij = 0; ij < Nm * Nt; ++ij) {
+                prices_4d[base_offset + ij * slice_stride] = 0.0;
+            }
         }
     }
 
