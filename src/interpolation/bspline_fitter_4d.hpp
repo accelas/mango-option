@@ -436,7 +436,7 @@ public:
     /// @param tolerance Max allowed residual
     /// @return Fit result WITHOUT coefficients vector (uses coeffs_out)
     BSplineCollocation1DResult fit_with_buffer(
-        const std::vector<double>& values,
+        std::span<const double> values,
         std::span<double> coeffs_out,
         double tolerance = 1e-9)
     {
@@ -615,7 +615,7 @@ private:
 
     /// Solve banded system directly into caller's buffer
     expected<void, std::string> solve_banded_system_to_buffer(
-        const std::vector<double>& rhs,
+        std::span<const double> rhs,
         std::span<double> solution) const
     {
         // Ensure matrix is factored (no-op if already done)
@@ -658,7 +658,7 @@ private:
     }
 
     /// Compute residual from span coefficients
-    double compute_residual_from_span(std::span<const double> coeffs, const std::vector<double>& values) const {
+    double compute_residual_from_span(std::span<const double> coeffs, std::span<const double> values) const {
         double max_residual = 0.0;
 
         for (size_t i = 0; i < n_; ++i) {
@@ -969,7 +969,7 @@ private:
                     BSplineCollocation1DResult fit_result;
                     if (workspace) {
                         fit_result = solver_axis0_->fit_with_buffer(
-                            std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
+                            slice_buffer,
                             coeffs_buffer,
                             tolerance);
                     } else {
