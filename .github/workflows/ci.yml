@@ -71,6 +71,18 @@ jobs:
       - name: Build all targets
         run: bazel build //... --build_tag_filters=-benchmark
 
+      - name: Build benchmarks
+        run: |
+          # Build all benchmarks to ensure they compile
+          # (tagged as manual, so not built by //...)
+          bazel build //benchmarks:component_performance
+          bazel build //benchmarks:readme_benchmarks
+          bazel build //benchmarks:quantlib_performance
+          bazel build //benchmarks:quantlib_accuracy
+          bazel build //benchmarks:bspline_cache_locality
+          bazel build //benchmarks:iv_interpolation_profile
+          bazel build //benchmarks:market_iv_e2e_benchmark
+
       - name: Run test suite
         run: |
           # Run all tests except those tagged as manual
