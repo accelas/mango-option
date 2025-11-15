@@ -136,16 +136,15 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 // ============================================================================
 
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
 
     size_t n_space = state.range(0);
     size_t n_time = 1000;
@@ -174,16 +173,15 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 110.0,  // OTM put
-        .maturity = 0.25,
-        .volatility = 0.30,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        110.0,  // spot (OTM put)
+        100.0,  // strike
+        0.25,   // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.30    // volatility
+    );
 
     size_t n_space = 101;
     size_t n_time = state.range(0);
@@ -212,16 +210,15 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 90.0,  // ITM put
-        .maturity = 2.0,
-        .volatility = 0.25,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        90.0,   // spot (ITM put)
+        100.0,  // strike
+        2.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.25    // volatility
+    );
 
     size_t n_space = 101;
     size_t n_time = 1000;
@@ -250,16 +247,20 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ITM_2Y);
 
 static void BM_AmericanCall_WithDividends(benchmark::State& state) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::CALL,
-        .discrete_dividends = {{0.25, 2.0}, {0.5, 2.0}, {0.75, 2.0}}
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::CALL,
+        0.20,   // volatility
+        {
+            {0.25, 2.0},
+            {0.5, 2.0},
+            {0.75, 2.0}
+        }
+    );
 
     size_t n_space = 101;
     size_t n_time = 1000;
@@ -431,16 +432,15 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
     size_t n_space = state.range(0);
     size_t n_time = state.range(1);
 
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
 
     auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
     if (!workspace_result) {
@@ -497,16 +497,15 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;  // Strikes from 90 to 90 + batch_size*0.5
-        batch.push_back(AmericanOptionParams{
-            .strike = strike,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        });
+        batch.push_back(AmericanOptionParams(
+            100.0,  // spot
+            strike, // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.20    // volatility
+        ));
     }
 
     size_t n_space = 101;

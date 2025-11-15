@@ -187,16 +187,15 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     const size_t n_space = static_cast<size_t>(state.range(0));
     const size_t n_time = static_cast<size_t>(state.range(1));
 
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {}
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
 
     constexpr double x_min = -3.0;
     constexpr double x_max = 3.0;
@@ -249,16 +248,15 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(AmericanOptionParams{
-            .strike = strike,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        });
+        batch.push_back(AmericanOptionParams(
+            100.0,  // spot
+            strike, // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.20    // volatility
+        ));
     }
 
     constexpr double x_min = -3.0;

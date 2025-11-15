@@ -96,8 +96,8 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("maturity", &mango::AmericanOptionParams::maturity)
         .def_readwrite("volatility", &mango::AmericanOptionParams::volatility)
         .def_readwrite("rate", &mango::AmericanOptionParams::rate)
-        .def_readwrite("continuous_dividend_yield", &mango::AmericanOptionParams::continuous_dividend_yield)
-        .def_readwrite("option_type", &mango::AmericanOptionParams::option_type)
+        .def_readwrite("dividend_yield", &mango::AmericanOptionParams::dividend_yield)
+        .def_readwrite("type", &mango::AmericanOptionParams::type)
         .def_readwrite("discrete_dividends", &mango::AmericanOptionParams::discrete_dividends);
 
     // AmericanOptionResult structure

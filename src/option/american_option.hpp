@@ -231,7 +231,8 @@ private:
 ///
 /// Example usage:
 /// ```cpp
-/// std::vector<AmericanOptionParams> batch = { ... };
+/// std::vector<AmericanOptionParams> batch;
+/// batch.emplace_back(spot, strike, maturity, rate, dividend_yield, type, sigma);
 ///
 /// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
 /// ```

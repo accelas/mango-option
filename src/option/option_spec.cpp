@@ -25,17 +25,17 @@ std::expected<void, std::string> validate_option_spec(const OptionSpec& spec) {
         return std::unexpected(std::string("Risk-free rate must be finite"));
     }
 
-    // Validate dividend yield (allow negative but must be finite)
-    if (!std::isfinite(spec.dividend_yield)) {
-        return std::unexpected(std::string("Dividend yield must be finite"));
+    // Validate dividend yield (must be non-negative and finite)
+    if (spec.dividend_yield < 0.0 || !std::isfinite(spec.dividend_yield)) {
+        return std::unexpected(std::string("Dividend yield must be non-negative and finite"));
     }
 
     return {};
 }
 
 std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
-    // Validate option spec first
-    auto spec_validation = validate_option_spec(query.option);
+    // Validate base option spec first (using slicing)
+    auto spec_validation = validate_option_spec(static_cast<const OptionSpec&>(query));
     if (!spec_validation) {
         return spec_validation;
     }
@@ -54,12 +54,12 @@ std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
     double intrinsic;
     double upper_bound;
 
-    if (query.option.type == OptionType::CALL) {
-        intrinsic = std::max(query.option.spot - query.option.strike, 0.0);
-        upper_bound = query.option.spot;
+    if (query.type == OptionType::CALL) {
+        intrinsic = std::max(query.spot - query.strike, 0.0);
+        upper_bound = query.spot;
     } else {  // PUT
-        intrinsic = std::max(query.option.strike - query.option.spot, 0.0);
-        upper_bound = query.option.strike;
+        intrinsic = std::max(query.strike - query.spot, 0.0);
+        upper_bound = query.strike;
     }
 
     if (query.market_price < intrinsic) {
@@ -67,8 +67,8 @@ std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
     }
 
     if (query.market_price > upper_bound) {
-        const char* opt_type = (query.option.type == OptionType::CALL) ? "Call" : "Put";
-        const char* bound_type = (query.option.type == OptionType::CALL) ? "spot" : "strike";
+        const char* opt_type = (query.type == OptionType::CALL) ? "Call" : "Put";
+        const char* bound_type = (query.type == OptionType::CALL) ? "spot" : "strike";
         return std::unexpected(std::string(opt_type) + " price above " + bound_type + " (arbitrage)");
     }
 
@@ -76,34 +76,15 @@ std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
 }
 
 std::expected<void, std::string> validate_pricing_params(const PricingParams& params) {
-    // Check strike
-    if (params.strike <= 0.0 || !std::isfinite(params.strike)) {
-        return std::unexpected("Strike must be positive and finite");
-    }
-
-    // Check spot
-    if (params.spot <= 0.0 || !std::isfinite(params.spot)) {
-        return std::unexpected("Spot must be positive and finite");
-    }
-
-    // Check maturity
-    if (params.maturity <= 0.0 || !std::isfinite(params.maturity)) {
-        return std::unexpected("Maturity must be positive and finite");
+    // Validate base option spec first (using slicing)
+    auto spec_validation = validate_option_spec(static_cast<const OptionSpec&>(params));
+    if (!spec_validation) {
+        return spec_validation;
     }
 
     // Check volatility
     if (params.volatility <= 0.0 || !std::isfinite(params.volatility)) {
         return std::unexpected("Volatility must be positive and finite");
-    }
-
-    // Check rate (allow negative but must be finite)
-    if (!std::isfinite(params.rate)) {
-        return std::unexpected("Rate must be finite");
-    }
-
-    // Check continuous dividend yield (must be non-negative and finite)
-    if (params.continuous_dividend_yield < 0.0 || !std::isfinite(params.continuous_dividend_yield)) {
-        return std::unexpected("Continuous dividend yield must be non-negative and finite");
     }
 
     // Validate discrete dividends

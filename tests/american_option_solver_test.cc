@@ -14,15 +14,15 @@ namespace mango {
 namespace {
 
 TEST(AmericanOptionSolverTest, ConstructorValidation) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::CALL
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::CALL,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -33,15 +33,15 @@ TEST(AmericanOptionSolverTest, ConstructorValidation) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidStrike) {
-    AmericanOptionParams params{
-        .strike = -100.0,  // Invalid
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,   // spot
+        -100.0,  // strike (Invalid)
+        1.0,     // maturity
+        0.05,    // rate
+        0.02,    // dividend_yield
+        OptionType::PUT,
+        0.2      // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -51,15 +51,15 @@ TEST(AmericanOptionSolverTest, InvalidStrike) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidSpot) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 0.0,  // Invalid
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        0.0,    // spot (Invalid)
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -69,15 +69,15 @@ TEST(AmericanOptionSolverTest, InvalidSpot) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidMaturity) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = -1.0,  // Invalid
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::CALL
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        -1.0,   // maturity (Invalid)
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::CALL,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -87,15 +87,15 @@ TEST(AmericanOptionSolverTest, InvalidMaturity) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidVolatility) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = -0.2,  // Invalid
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        -0.2    // volatility (Invalid)
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -106,15 +106,15 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
 
 TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
     // Negative rates are valid (EUR, JPY, CHF markets)
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = -0.01,  // Valid: negative rate
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::CALL
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        -0.01,  // rate (negative but valid)
+        0.02,   // dividend_yield
+        OptionType::CALL,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -124,15 +124,15 @@ TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidDividendYield) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =-0.02,  // Invalid
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        -0.02,  // dividend_yield (Invalid)
+        OptionType::PUT,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -142,15 +142,15 @@ TEST(AmericanOptionSolverTest, InvalidDividendYield) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::CALL
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::CALL,
+        0.2     // volatility
+    );
 
     // Test that workspace factory validates n_space >= 10
     auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 5, 1000);
@@ -159,15 +159,15 @@ TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNTime) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.2     // volatility
+    );
 
     // Test that workspace factory validates n_time >= 10
     auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 5);
@@ -176,15 +176,15 @@ TEST(AmericanOptionSolverTest, InvalidGridNTime) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridBounds) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::CALL
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::CALL,
+        0.2     // volatility
+    );
 
     // Test that workspace factory validates x_min < x_max
     auto result = AmericanSolverWorkspace::create(3.0, -3.0, 101, 1000);
@@ -193,16 +193,19 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividends) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = OptionType::CALL,
-        .discrete_dividends = {{0.25, 1.0}, {0.75, 1.5}}  // Valid dividends
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::CALL,
+        0.2,    // volatility
+        {
+            {0.25, 1.0},
+            {0.75, 1.5}
+        }  // Valid dividends
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -214,16 +217,18 @@ TEST(AmericanOptionSolverTest, DiscreteDividends) {
 
 TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     // Should reject negative time
-    AmericanOptionParams params1{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = OptionType::CALL,
-        .discrete_dividends = {{-0.1, 1.0}}  // Invalid: negative time
-    };
+    AmericanOptionParams params1(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::CALL,
+        0.2,    // volatility
+        {
+            {-0.1, 1.0}
+        }  // Invalid: negative time
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -232,16 +237,18 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     }, std::invalid_argument);
 
     // Should reject time beyond maturity
-    AmericanOptionParams params2{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = OptionType::CALL,
-        .discrete_dividends = {{2.0, 1.0}}  // Invalid: beyond maturity
-    };
+    AmericanOptionParams params2(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::CALL,
+        0.2,    // volatility
+        {
+            {2.0, 1.0}
+        }  // Invalid: beyond maturity
+    );
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params2, workspace);
@@ -249,16 +256,18 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {{0.5, -1.0}}  // Invalid: negative amount
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        0.2,    // volatility
+        {
+            {0.5, -1.0}
+        }  // Invalid: negative amount
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
 
@@ -269,15 +278,15 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
 }
 
 TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -300,15 +309,15 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
 }
 
 TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.02,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.02,   // dividend_yield
+        OptionType::PUT,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -320,15 +329,15 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
 }
 
 TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -346,15 +355,15 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
 }
 
 TEST(AmericanOptionSolverTest, GammaIsComputed) {
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,
-        .option_type = mango::OptionType::PUT
-    };
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        mango::OptionType::PUT,
+        0.2     // volatility
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -377,19 +386,19 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
 TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
     // Test American call option with discrete dividends
     // Dividends make early exercise more attractive for calls
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 110.0,  // ITM call
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,  // No continuous yield
-        .option_type = OptionType::CALL,
-        .discrete_dividends = {
+    AmericanOptionParams params(
+        110.0,  // spot (ITM call)
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield (no continuous yield)
+        OptionType::CALL,
+        0.2,    // volatility
+        {
             {0.25, 2.0},  // $2 dividend at t=0.25 years
             {0.75, 2.0}   // $2 dividend at t=0.75 years
         }
-    };
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -419,19 +428,19 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
 TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     // Test American put option with discrete dividends
     // Dividends make early exercise less attractive for puts
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 90.0,  // ITM put
-        .maturity = 1.0,
-        .volatility = 0.2,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.0,  // No continuous yield
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {
+    AmericanOptionParams params(
+        90.0,   // spot (ITM put)
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield (no continuous yield)
+        OptionType::PUT,
+        0.2,    // volatility
+        {
             {0.25, 1.5},  // $1.50 dividend at t=0.25 years
             {0.75, 1.5}   // $1.50 dividend at t=0.75 years
         }
-    };
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -476,18 +485,18 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
 TEST(AmericanOptionSolverTest, HybridDividendModel) {
     // Test using both continuous and discrete dividends simultaneously
     // This models a stock with continuous yield + known discrete payments
-    AmericanOptionParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.25,
-        .rate = 0.05,
-        .continuous_dividend_yield =0.01,  // 1% continuous yield
-        .option_type = OptionType::PUT,
-        .discrete_dividends = {
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.01,   // dividend_yield (1% continuous yield)
+        OptionType::PUT,
+        0.25,   // volatility
+        {
             {0.5, 2.0}  // $2 discrete dividend at mid-year
         }
-    };
+    );
 
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
@@ -519,16 +528,15 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
 TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     std::vector<AmericanOptionParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = AmericanOptionParams{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20 + 0.02 * i,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        };
+        batch[i] = AmericanOptionParams(
+            100.0,                   // spot
+            100.0,                   // strike
+            1.0,                     // maturity
+            0.05,                    // rate
+            0.02,                    // dividend_yield
+            OptionType::PUT,
+            0.20 + 0.02 * i          // volatility
+        );
     }
 
     // Track callback invocations
@@ -560,16 +568,15 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
 TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
     std::vector<AmericanOptionParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        };
+        batch[i] = AmericanOptionParams(
+            100.0,          // spot
+            100.0,          // strike
+            1.0,            // maturity
+            0.05,           // rate
+            0.02,           // dividend_yield
+            OptionType::PUT,
+            0.20            // volatility
+        );
     }
 
     // Create collectors for each solve
@@ -618,16 +625,15 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
 TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
     std::vector<AmericanOptionParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams{
-            .strike = 100.0,
-            .spot = 100.0,
-            .maturity = 1.0,
-            .volatility = 0.20,
-            .rate = 0.05,
-            .continuous_dividend_yield = 0.02,
-            .option_type = OptionType::PUT,
-            .discrete_dividends = {}
-        };
+        batch[i] = AmericanOptionParams(
+            100.0,          // spot
+            100.0,          // strike
+            1.0,            // maturity
+            0.05,           // rate
+            0.02,           // dividend_yield
+            OptionType::PUT,
+            0.20            // volatility
+        );
     }
 
     // Call without callback (backward compatible)

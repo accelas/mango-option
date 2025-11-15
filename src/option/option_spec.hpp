@@ -8,6 +8,9 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <string>
+#include <vector>
+#include <utility>
+#include <initializer_list>
 
 namespace mango {
 
@@ -33,12 +36,12 @@ enum class OptionType {
  * known volatility, see AmericanOptionParams.
  */
 struct OptionSpec {
-    double spot;             ///< Current spot price (S)
-    double strike;           ///< Strike price (K)
-    double maturity;         ///< Time to maturity in years (T)
-    double rate;             ///< Risk-free rate (annualized, decimal)
-    double dividend_yield = 0.0;  ///< Continuous dividend yield (annualized, decimal)
-    OptionType type;         ///< CALL or PUT
+    double spot = 0.0;             ///< Current spot price (S)
+    double strike = 0.0;           ///< Strike price (K)
+    double maturity = 0.0;         ///< Time to maturity in years (T)
+    double rate = 0.0;             ///< Risk-free rate (annualized, decimal)
+    double dividend_yield = 0.0;   ///< Continuous dividend yield (annualized, decimal)
+    OptionType type = OptionType::CALL; ///< CALL or PUT (default CALL)
 };
 
 /**
@@ -59,10 +62,33 @@ std::expected<void, std::string> validate_option_spec(const OptionSpec& spec);
  *
  * This struct contains everything needed to solve for implied volatility:
  * the option contract specification and the observed market price.
+ *
+ * Inherits from OptionSpec to provide direct access to spot, strike,
+ * maturity, rate, dividend_yield, and type fields.
  */
-struct IVQuery {
-    OptionSpec option;      ///< Option contract specification
+struct IVQuery : OptionSpec {
     double market_price;    ///< Observed market price to match
+
+    /// Helper function to create IVQuery (for testing/convenience)
+    [[nodiscard]] static IVQuery make(
+        double spot_,
+        double strike_,
+        double maturity_,
+        double rate_,
+        double dividend_yield_,
+        OptionType type_,
+        double market_price_)
+    {
+        IVQuery q;
+        q.spot = spot_;
+        q.strike = strike_;
+        q.maturity = maturity_;
+        q.rate = rate_;
+        q.dividend_yield = dividend_yield_;
+        q.type = type_;
+        q.market_price = market_price_;
+        return q;
+    }
 };
 
 /**
@@ -100,24 +126,84 @@ struct OptionSolverGrid {
  * the option contract specification plus volatility and optional
  * discrete dividends.
  *
+ * Inherits from OptionSpec to provide direct access to spot, strike,
+ * maturity, rate, dividend_yield, and type fields.
+ *
  * All parameters are in consistent units:
  * - Prices in dollars
  * - Time in years
  * - Rates and volatility as decimals (e.g., 0.05 for 5%)
  */
-struct PricingParams {
-    double strike;                      ///< Strike price (dollars)
-    double spot;                        ///< Current spot price (dollars)
-    double maturity;                    ///< Time to maturity (years)
-    double volatility;                  ///< Volatility (fraction, annualized)
-    double rate;                        ///< Risk-free rate (fraction, annualized)
-    double continuous_dividend_yield;   ///< Continuous dividend yield (fraction, annualized)
-    OptionType option_type;             ///< Call or Put
+struct PricingParams : OptionSpec {
+    double volatility = 0.0;  ///< Volatility (fraction, annualized)
 
     /// Discrete dividend schedule: (time, amount) pairs
     /// Time is in years from now, amount is in dollars
-    /// Can be used simultaneously with continuous_dividend_yield
+    /// Can be used simultaneously with dividend_yield
     std::vector<std::pair<double, double>> discrete_dividends;
+
+    PricingParams() = default;
+
+    PricingParams(const OptionSpec& spec,
+                  double volatility_,
+                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+        : OptionSpec(spec)
+        , volatility(volatility_)
+        , discrete_dividends(std::move(discrete_dividends_))
+    {}
+
+    PricingParams(double spot_,
+                  double strike_,
+                  double maturity_,
+                  double rate_,
+                  double dividend_yield_,
+                  OptionType type_,
+                  double volatility_,
+                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+        : volatility(volatility_)
+        , discrete_dividends(std::move(discrete_dividends_))
+    {
+        spot = spot_;
+        strike = strike_;
+        maturity = maturity_;
+        rate = rate_;
+        dividend_yield = dividend_yield_;
+        type = type_;
+    }
+
+    PricingParams(double spot_,
+                  double strike_,
+                  double maturity_,
+                  double rate_,
+                  double dividend_yield_,
+                  OptionType type_,
+                  double volatility_,
+                  std::initializer_list<std::pair<double, double>> discrete_dividends_)
+        : PricingParams(spot_, strike_, maturity_, rate_, dividend_yield_, type_, volatility_,
+                        std::vector<std::pair<double, double>>(discrete_dividends_))
+    {}
+
+    /// Helper function to create PricingParams (for testing/convenience)
+    [[nodiscard]] static PricingParams make(
+        double spot_,
+        double strike_,
+        double maturity_,
+        double rate_,
+        double dividend_yield_,
+        OptionType type_,
+        double volatility_,
+        const std::vector<std::pair<double, double>>& discrete_dividends_ = {})
+    {
+        return PricingParams(
+            spot_,
+            strike_,
+            maturity_,
+            rate_,
+            dividend_yield_,
+            type_,
+            volatility_,
+            discrete_dividends_);
+    }
 };
 
 /**
