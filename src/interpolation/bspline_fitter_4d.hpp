@@ -4,7 +4,7 @@
  *
  * This file contains a complete implementation of 4D B-spline fitting:
  * - BandedMatrixStorage: Compact storage for 4-diagonal matrices (O(4n) vs O(n²))
- * - banded_lu_solve(): O(n) banded LU decomposition for collocation systems
+ * - banded_lu_factorize() + banded_lu_substitution(): O(n) banded LU solver
  * - BSplineCollocation1D: 1D cubic B-spline collocation solver (uses banded solver)
  * - BSplineFitter4DSeparable: Separable 4D fitting via sequential 1D solves
  * - BSplineFitter4D: High-level 4D fitter interface
@@ -126,10 +126,6 @@ private:
     friend expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A);
     friend expected<void, std::string> banded_lu_substitution(
         const BandedMatrixStorage& LU,
-        std::span<const double> b,
-        std::span<double> x);
-    friend void banded_lu_solve(
-        BandedMatrixStorage& A,
         std::span<const double> b,
         std::span<double> x);
     friend class BSplineCollocation1D;  // Needs access for dgbcon condition estimation
@@ -278,34 +274,6 @@ inline expected<void, std::string> banded_lu_substitution(
 
     // x now contains the solution (no copy needed)
     return {};
-}
-
-/// Solve banded system Ax = b using LU decomposition (legacy interface)
-///
-/// For backward compatibility. New code should use banded_lu_factorize()
-/// followed by banded_lu_substitution() to avoid redundant factorizations.
-///
-/// @param A Banded matrix (modified in-place during decomposition)
-/// @param b Right-hand side vector
-/// @param x Solution vector (output)
-inline void banded_lu_solve(
-    BandedMatrixStorage& A,
-    std::span<const double> b,
-    std::span<double> x)
-{
-    // Factorize (ignoring errors for backward compatibility)
-    auto result = banded_lu_factorize(A);
-    if (!result) {
-        // Fill with NaN to signal failure
-        std::fill(x.begin(), x.end(), std::numeric_limits<double>::quiet_NaN());
-        return;
-    }
-
-    // Solve using factored matrix
-    auto solve_result = banded_lu_substitution(A, b, x);
-    if (!solve_result) {
-        std::fill(x.begin(), x.end(), std::numeric_limits<double>::quiet_NaN());
-    }
 }
 
 // ============================================================================
