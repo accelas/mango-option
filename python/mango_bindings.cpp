@@ -5,7 +5,8 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "src/option/iv_solver.hpp"
+#include "src/option/option_spec.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
 
 namespace py = pybind11;
@@ -13,22 +14,33 @@ namespace py = pybind11;
 PYBIND11_MODULE(mango_iv, m) {
     m.doc() = "Python bindings for mango-iv American option pricing and IV solver";
 
-    // IVParams structure
-    py::class_<mango::IVParams>(m, "IVParams")
+    // OptionType enum
+    py::enum_<mango::OptionType>(m, "OptionType")
+        .value("CALL", mango::OptionType::CALL)
+        .value("PUT", mango::OptionType::PUT);
+
+    // IVQuery structure (replaces IVParams)
+    py::class_<mango::IVQuery>(m, "IVQuery")
         .def(py::init<>())
-        .def_readwrite("spot_price", &mango::IVParams::spot_price)
-        .def_readwrite("strike", &mango::IVParams::strike)
-        .def_readwrite("time_to_maturity", &mango::IVParams::time_to_maturity)
-        .def_readwrite("risk_free_rate", &mango::IVParams::risk_free_rate)
-        .def_readwrite("market_price", &mango::IVParams::market_price)
-        .def_readwrite("is_call", &mango::IVParams::is_call)
-        .def("__repr__", [](const mango::IVParams& p) {
-            return "<IVParams spot=" + std::to_string(p.spot_price) +
-                   " strike=" + std::to_string(p.strike) +
-                   " maturity=" + std::to_string(p.time_to_maturity) +
-                   " rate=" + std::to_string(p.risk_free_rate) +
-                   " price=" + std::to_string(p.market_price) +
-                   " is_call=" + std::to_string(p.is_call) + ">";
+        .def(py::init<double, double, double, double, double, mango::OptionType, double>(),
+             py::arg("spot"), py::arg("strike"), py::arg("maturity"),
+             py::arg("rate"), py::arg("dividend_yield"), py::arg("type"),
+             py::arg("market_price"))
+        .def_readwrite("spot", &mango::IVQuery::spot)
+        .def_readwrite("strike", &mango::IVQuery::strike)
+        .def_readwrite("maturity", &mango::IVQuery::maturity)
+        .def_readwrite("rate", &mango::IVQuery::rate)
+        .def_readwrite("dividend_yield", &mango::IVQuery::dividend_yield)
+        .def_readwrite("type", &mango::IVQuery::type)
+        .def_readwrite("market_price", &mango::IVQuery::market_price)
+        .def("__repr__", [](const mango::IVQuery& q) {
+            return "<IVQuery spot=" + std::to_string(q.spot) +
+                   " strike=" + std::to_string(q.strike) +
+                   " maturity=" + std::to_string(q.maturity) +
+                   " rate=" + std::to_string(q.rate) +
+                   " dividend_yield=" + std::to_string(q.dividend_yield) +
+                   " type=" + (q.type == mango::OptionType::CALL ? "CALL" : "PUT") +
+                   " market_price=" + std::to_string(q.market_price) + ">";
         });
 
     // RootFindingConfig structure
@@ -39,13 +51,13 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("jacobian_fd_epsilon", &mango::RootFindingConfig::jacobian_fd_epsilon)
         .def_readwrite("brent_tol_abs", &mango::RootFindingConfig::brent_tol_abs);
 
-    // IVConfig structure
-    py::class_<mango::IVConfig>(m, "IVConfig")
+    // IVSolverFDMConfig structure
+    py::class_<mango::IVSolverFDMConfig>(m, "IVSolverFDMConfig")
         .def(py::init<>())
-        .def_readwrite("root_config", &mango::IVConfig::root_config)
-        .def_readwrite("grid_n_space", &mango::IVConfig::grid_n_space)
-        .def_readwrite("grid_n_time", &mango::IVConfig::grid_n_time)
-        .def_readwrite("grid_s_max", &mango::IVConfig::grid_s_max);
+        .def_readwrite("root_config", &mango::IVSolverFDMConfig::root_config)
+        .def_readwrite("grid_n_space", &mango::IVSolverFDMConfig::grid_n_space)
+        .def_readwrite("grid_n_time", &mango::IVSolverFDMConfig::grid_n_time)
+        .def_readwrite("grid_s_max", &mango::IVSolverFDMConfig::grid_s_max);
 
     // IVResult structure
     py::class_<mango::IVResult>(m, "IVResult")
@@ -68,19 +80,15 @@ PYBIND11_MODULE(mango_iv, m) {
             return repr + ">";
         });
 
-    // IVSolver class
-    py::class_<mango::IVSolver>(m, "IVSolver")
-        .def(py::init<const mango::IVParams&, const mango::IVConfig&>(),
-             py::arg("params"), py::arg("config"))
-        .def("solve", &mango::IVSolver::solve,
+    // IVSolver class (now using FDM solver)
+    py::class_<mango::IVSolverFDM>(m, "IVSolverFDM")
+        .def(py::init<const mango::IVSolverFDMConfig&>(),
+             py::arg("config"))
+        .def("solve", &mango::IVSolverFDM::solve_impl,
+             py::arg("query"),
              "Solve for implied volatility");
 
-    // Batch IV solver convenience function
-    m.def("solve_implied_vol_batch",
-          py::overload_cast<const std::vector<mango::IVParams>&, const mango::IVConfig&>(
-              &mango::solve_implied_vol_batch),
-          py::arg("params"), py::arg("config"),
-          "Solve implied volatility for a batch of options in parallel");
+    // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 
     // OptionType enum
     py::enum_<mango::OptionType>(m, "OptionType")

@@ -67,27 +67,25 @@ std::expected<void, std::string> validate_option_spec(const OptionSpec& spec);
  * maturity, rate, dividend_yield, and type fields.
  */
 struct IVQuery : OptionSpec {
-    double market_price;    ///< Observed market price to match
+    double market_price = 0.0;    ///< Observed market price to match
 
-    /// Helper function to create IVQuery (for testing/convenience)
-    [[nodiscard]] static IVQuery make(
-        double spot_,
-        double strike_,
-        double maturity_,
-        double rate_,
-        double dividend_yield_,
-        OptionType type_,
-        double market_price_)
+    IVQuery() = default;
+
+    IVQuery(double spot_,
+            double strike_,
+            double maturity_,
+            double rate_,
+            double dividend_yield_,
+            OptionType type_,
+            double market_price_)
+        : market_price(market_price_)
     {
-        IVQuery q;
-        q.spot = spot_;
-        q.strike = strike_;
-        q.maturity = maturity_;
-        q.rate = rate_;
-        q.dividend_yield = dividend_yield_;
-        q.type = type_;
-        q.market_price = market_price_;
-        return q;
+        spot = spot_;
+        strike = strike_;
+        maturity = maturity_;
+        rate = rate_;
+        dividend_yield = dividend_yield_;
+        type = type_;
     }
 };
 
@@ -182,28 +180,6 @@ struct PricingParams : OptionSpec {
         : PricingParams(spot_, strike_, maturity_, rate_, dividend_yield_, type_, volatility_,
                         std::vector<std::pair<double, double>>(discrete_dividends_))
     {}
-
-    /// Helper function to create PricingParams (for testing/convenience)
-    [[nodiscard]] static PricingParams make(
-        double spot_,
-        double strike_,
-        double maturity_,
-        double rate_,
-        double dividend_yield_,
-        OptionType type_,
-        double volatility_,
-        const std::vector<std::pair<double, double>>& discrete_dividends_ = {})
-    {
-        return PricingParams(
-            spot_,
-            strike_,
-            maturity_,
-            rate_,
-            dividend_yield_,
-            type_,
-            volatility_,
-            discrete_dividends_);
-    }
 };
 
 /**

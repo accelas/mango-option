@@ -7,7 +7,7 @@ using namespace mango;
 class IVSolverTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        query = IVQuery::make(
+        query = IVQuery{
             100.0,  // spot
             100.0,  // strike
             1.0,    // maturity
@@ -15,7 +15,7 @@ protected:
             0.0,    // dividend_yield
             OptionType::PUT,
             10.45   // market_price
-        );
+        };
 
         config = IVSolverFDMConfig{
             .root_config = RootFindingConfig{
