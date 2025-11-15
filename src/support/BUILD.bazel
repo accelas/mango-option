@@ -1,7 +1,6 @@
 cc_library(
     name = "expected",
     hdrs = ["expected.hpp"],
-    deps = ["//3rd/tl:expected"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )

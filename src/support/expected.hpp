@@ -4,17 +4,17 @@
 #include <cstddef>
 #include <variant>
 #include <optional>
-#include "3rd/tl/expected.hpp"
+#include <expected>
 
 namespace mango {
 
 template<typename T, typename E>
-using expected = tl::expected<T, E>;
+using expected = std::expected<T, E>;
 
 template<typename E>
-using unexpected = tl::unexpected<E>;
+using unexpected = std::unexpected<E>;
 
-using tl::unexpected;
+using std::unexpected;
 
 /// High-level solver error categories surfaced through expected results.
 enum class SolverErrorCode {

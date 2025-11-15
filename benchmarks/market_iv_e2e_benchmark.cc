@@ -334,7 +334,12 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         }
 
         // Step 3-4: Compute IVs
-        IVSolverInterpolated iv_solver(surface);
+        auto iv_solver_result = IVSolverInterpolated::create(surface);
+        if (!iv_solver_result) {
+            state.SkipWithError(iv_solver_result.error().c_str());
+            return;
+        }
+        auto& iv_solver = iv_solver_result.value();
 
         size_t converged = 0;
         for (const auto& obs : observations) {

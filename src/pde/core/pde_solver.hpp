@@ -106,10 +106,6 @@ public:
         , newton_ws_(n_, acquire_workspace(grid, external_workspace))
         , isa_target_(cpu::select_isa_target())
     {
-        #ifndef NDEBUG
-        std::cout << "PDESolver ISA target: " << cpu::isa_target_name(isa_target_) << "\n";
-        #endif
-
         // Initialize grid information for legacy operators that need it
         // (e.g., LaplacianOperator) via set_grid() if present
         if constexpr (requires { spatial_op_.set_grid(grid, workspace_->dx()); }) {
