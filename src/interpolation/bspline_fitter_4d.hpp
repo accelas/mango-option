@@ -429,6 +429,73 @@ public:
         return {coeffs, true, "", max_residual, cond_est};
     }
 
+    /// Fit with external coefficient buffer (zero-allocation variant)
+    ///
+    /// @param values Function values at grid points
+    /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
+    /// @param tolerance Max allowed residual
+    /// @return Fit result WITHOUT coefficients vector (uses coeffs_out)
+    BSplineCollocation1DResult fit_with_buffer(
+        const std::vector<double>& values,
+        std::span<double> coeffs_out,
+        double tolerance = 1e-9)
+    {
+        if (values.size() != n_) {
+            return {std::vector<double>(), false,
+                    "Value array size mismatch", 0.0, 0.0};
+        }
+
+        if (coeffs_out.size() != n_) {
+            return {std::vector<double>(), false,
+                    "Coefficients buffer size mismatch", 0.0, 0.0};
+        }
+
+        // Validate input values for NaN/Inf
+        for (size_t i = 0; i < n_; ++i) {
+            if (std::isnan(values[i])) {
+                return {std::vector<double>(), false,
+                        "Input values contain NaN at index " + std::to_string(i), 0.0, 0.0};
+            }
+            if (std::isinf(values[i])) {
+                return {std::vector<double>(), false,
+                        "Input values contain infinite value at index " + std::to_string(i), 0.0, 0.0};
+            }
+        }
+
+        // Clear cached LU factors (new fit)
+        is_factored_ = false;
+        lu_factors_.reset();
+
+        // Build collocation matrix
+        build_collocation_matrix();
+
+        // Solve banded system into provided buffer
+        auto solve_result = solve_banded_system_to_buffer(values, coeffs_out);
+
+        if (!solve_result) {
+            return {std::vector<double>(), false,
+                    "Failed to solve collocation system: " + solve_result.error(),
+                    0.0, 0.0};
+        }
+
+        // Compute residuals
+        double max_residual = compute_residual_from_span(coeffs_out, values);
+
+        // Check residual tolerance
+        if (max_residual > tolerance) {
+            return {std::vector<double>(), false,
+                    "Residual " + std::to_string(max_residual) +
+                    " exceeds tolerance " + std::to_string(tolerance),
+                    max_residual, 0.0};
+        }
+
+        // Estimate condition number
+        double cond_est = estimate_condition_number();
+
+        // Return result without copying coefficients (already in caller's buffer)
+        return {std::vector<double>(), true, "", max_residual, cond_est};
+    }
+
 private:
     /// Constructor (private - use factory method)
     explicit BSplineCollocation1D(std::vector<double> grid)
@@ -531,6 +598,40 @@ private:
         return {};
     }
 
+    /// Solve banded system directly into caller's buffer
+    expected<void, std::string> solve_banded_system_to_buffer(
+        const std::vector<double>& rhs,
+        std::span<double> solution) const
+    {
+        if (!is_factored_) {
+            // First solve: build and factorize matrix
+            lu_factors_ = BandedMatrixStorage(n_);
+
+            // Populate matrix from banded storage
+            for (size_t i = 0; i < n_; ++i) {
+                int col_start = band_col_start_[i];
+                lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
+
+                for (size_t k = 0; k < 4 && (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k) {
+                    (*lu_factors_)(i, col_start + k) = band_values_[i * 4 + k];
+                }
+            }
+
+            auto factorize_result = banded_lu_factorize(*lu_factors_);
+            if (!factorize_result) {
+                return factorize_result;
+            }
+            is_factored_ = true;
+        }
+
+        // Solve using cached factors, output to provided buffer
+        auto solve_result = banded_lu_substitution(*lu_factors_, rhs, solution);
+        if (!solve_result) {
+            return solve_result;
+        }
+
+        return {};
+    }
 
     /// Compute max residual ||B*c - f||_∞ using banded storage
     double compute_residual(const std::vector<double>& coeffs,
@@ -554,6 +655,25 @@ private:
         }
 
         return max_res;
+    }
+
+    /// Compute residual from span coefficients
+    double compute_residual_from_span(std::span<const double> coeffs, const std::vector<double>& values) const {
+        double max_residual = 0.0;
+
+        for (size_t i = 0; i < n_; ++i) {
+            double residual = 0.0;
+            int col_start = band_col_start_[i];
+
+            for (size_t k = 0; k < 4 && (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k) {
+                residual += band_values_[i * 4 + k] * coeffs[col_start + k];
+            }
+
+            residual -= values[i];
+            max_residual = std::max(max_residual, std::abs(residual));
+        }
+
+        return max_residual;
     }
 
     /// Estimate 1-norm condition number using cached LU factors
