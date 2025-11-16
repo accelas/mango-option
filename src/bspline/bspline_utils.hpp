@@ -13,6 +13,7 @@
 #include <limits>
 #include <cmath>
 #include <array>
+#include <span>
 #include <experimental/simd>
 
 namespace mango {
@@ -27,7 +28,7 @@ namespace mango {
 ///
 /// @param x Grid points (must be sorted)
 /// @return Clamped knot vector
-inline std::vector<double> clamped_knots_cubic(const std::vector<double>& x) {
+inline std::vector<double> clamped_knots_cubic(std::span<const double> x) {
     const int n = static_cast<int>(x.size());
     std::vector<double> t(n + 4);
 

@@ -407,6 +407,229 @@ NewtonWorkspace implements hybrid allocation:
 
 Safe borrowing: u_stage and rhs are unused during Newton iteration.
 
+## PMR (Polymorphic Memory Resource) Usage Patterns
+
+The library implements C++17 PMR (Polymorphic Memory Resource) patterns for efficient memory management in repeated solver operations. PMR enables zero-copy data transfer, arena allocation, and memory pooling for high-performance numerical computing.
+
+### SolverMemoryArena Overview
+
+**Purpose**: Memory efficiency for repeated PDE solves with shared memory arenas
+
+**Three-level hierarchy**: pool → arena → tracker
+- **Pool**: `std::pmr::monotonic_buffer_resource` for fast allocation
+- **Arena**: `SolverMemoryArena` for workspace coordination
+- **Tracker**: Reference counting for active workspaces
+
+**Key features**:
+- Factory pattern with `shared_ptr` ownership
+- Thread-safe active workspace counting
+- Zero-cost reset when no workspaces are active
+- 64-byte alignment for AVX-512 SIMD operations
+
+### Creating and Using SolverMemoryArena
+
+**Factory method**: `create_arena()` returns `shared_ptr` for proper lifetime management
+
+**C++ Usage**:
+```cpp
+#include "src/support/memory/solver_memory_arena.hpp"
+
+// Create 1MB memory arena
+auto arena_result = mango::memory::SolverMemoryArena::create(1024 * 1024);
+if (!arena_result.has_value()) {
+    std::cerr << "Failed to create arena: " << arena_result.error() << "\n";
+    return;
+}
+
+auto arena = arena_result.value();
+
+// Get arena statistics
+auto stats = arena->get_stats();
+std::cout << "Total size: " << stats.total_size << "\n";
+std::cout << "Used size: " << stats.used_size << "\n";
+std::cout << "Active workspaces: " << stats.active_workspace_count << "\n";
+
+// Use with PMR-enabled components
+auto collector = PriceTableSnapshotCollector(config, arena);
+
+// Manage workspace lifecycle
+arena->increment_active();  // Start using the arena
+// ... perform computations ...
+arena->decrement_active();  // Done using the arena
+
+// Reset when no workspaces are active (zero-cost)
+auto reset_result = arena->try_reset();
+if (!reset_result.has_value()) {
+    std::cerr << "Cannot reset: " << reset_result.error() << "\n";
+}
+```
+
+**Python Usage** (via bindings):
+```python
+import mango_iv
+
+# Create arena using factory method
+arena = mango_iv.create_arena(1024 * 1024)
+
+# Get statistics
+stats = arena.get_stats()
+print(f"Total size: {stats.total_size}")
+print(f"Used size: {stats.used_size}")
+print(f"Active workspaces: {stats.active_workspace_count}")
+
+# Workspace management
+arena.increment_active()
+# ... do work ...
+arena.decrement_active()
+
+# Memory reset
+try:
+    arena.try_reset()
+    print("Arena reset successful")
+except ValueError as e:
+    print(f"Cannot reset: {e}")
+
+# Get memory resource for PMR integration
+resource = arena.resource()
+```
+
+**SolverMemoryArenaStats**:
+- `total_size`: Total size of the arena in bytes
+- `used_size`: Currently allocated memory
+- `active_workspace_count`: Number of active workspaces using the arena
+
+### PriceTableSnapshotCollector Zero-Copy Pattern
+
+**How pmr::vector enables zero-copy**:
+- Vectors allocated from arena memory are directly accessible as spans
+- No `std::copy` needed between solver workspace and price table
+- Memory is reused across multiple price table operations
+
+**Span accessors for workspace borrowing**:
+```cpp
+PriceTableSnapshotCollector collector(config, arena);
+
+// Zero-copy access to internal buffers
+std::span<double> prices = collector.prices_span();
+std::span<double> deltas = collector.deltas_span();
+std::span<double> gammas = collector.gammas_span();
+std::span<double> thetas = collector.thetas_span();
+
+// Direct modification without allocation
+for (size_t i = 0; i < prices.size(); ++i) {
+    prices[i] = some_computation(i);
+}
+```
+
+**Constructor with memory arena**:
+```cpp
+// Constructor accepts shared_ptr to arena
+PriceTableSnapshotCollector collector(config, arena);
+
+// All internal pmr::vectors use arena memory:
+// - prices_, deltas_, gammas_, thetas_
+// - log_moneyness_, spot_values_, inv_spot_, inv_spot_sq_
+// - cached_grid_
+// - interpolator internals
+```
+
+### Integration with Existing Workspaces
+
+**Pass arena.resource() to workspace constructors**:
+```cpp
+// Create workspace with PMR allocation
+BSplineFitter4DWorkspace workspace(max_grid_size, arena->resource());
+
+// NewtonWorkspace with arena memory
+NewtonWorkspace newton_workspace(grid_size, arena->resource());
+
+// Price table construction with arena
+auto collector = std::make_unique<PriceTableSnapshotCollector>(config, arena);
+```
+
+**Shared_ptr lifetime management**:
+```cpp
+// Arena lifetime managed by shared_ptr
+std::shared_ptr<mango::memory::SolverMemoryArena> arena;
+
+{
+    auto local_arena = mango::memory::SolverMemoryArena::create(size);
+    arena = local_arena.value();
+
+    // Use arena in multiple components
+    auto collector1 = PriceTableSnapshotCollector(config1, arena);
+    auto collector2 = PriceTableSnapshotCollector(config2, arena);
+
+} // local_arena goes out of scope, but arena remains alive
+
+// Arena still valid here due to shared_ptr
+```
+
+**Best practices for repeated solves**:
+```cpp
+// Create arena once for batch operations
+auto arena = mango::memory::SolverMemoryArena::create(arena_size).value();
+
+// Reuse arena across multiple solves
+for (const auto& problem : batch_problems) {
+    arena->increment_active();
+
+    // Create solver components with arena memory
+    auto solver = create_solver_with_arena(problem, arena);
+    auto result = solver.solve();
+
+    // Process results directly from arena-allocated buffers
+    process_results(result);
+
+    arena->decrement_active();
+
+    // Zero-cost reset between solves
+    arena->try_reset();
+}
+```
+
+### USDT Tracing for PMR Operations
+
+**Available probes for arena operations**:
+- `MODULE_MEMORY` (ID: 8) - General memory arena operations
+- `MODULE_PRICE_TABLE_COLLECTOR` (ID: 9) - Price table collection with PMR
+
+**Monitoring memory usage and workspace counts**:
+```bash
+# Monitor arena creation and workspace activity
+sudo bpftrace -e '
+usdt::mango:algo_start /arg0 == 8/ {
+    printf("Arena created: size=%zu bytes\n", arg1);
+}
+usdt::mango:algo_progress /arg0 == 8 && arg3 == 0/ {
+    printf("Active workspaces: %d\n", arg1);
+}
+usdt::mango:algo_progress /arg0 == 8 && arg3 == 1/ {
+    printf("Workspace count decreased: %d remaining\n", arg1);
+}
+' -c './my_program'
+
+# Monitor price table collection with PMR
+sudo bpftrace -e '
+usdt::mango:algo_start /arg0 == 9/ {
+    printf("Price table collection: moneyness=%d tau=%d total=%d\n",
+           arg1, arg2, arg3);
+}
+usdt::mango:algo_progress /arg0 == 9/ {
+    printf("Progress: step=%d/%d message=%s\n", arg1, arg2, str(arg3));
+}
+' -c './my_precompute_program'
+```
+
+**Predefined tracing scripts**:
+```bash
+# Memory arena monitoring
+sudo ./scripts/mango-trace monitor ./my_program --preset=memory
+
+# Memory debugging (catches allocation failures)
+sudo ./scripts/mango-trace monitor ./my_program --preset=debug
+```
+
 ## Implied Volatility Solver
 
 The library provides a complete implied volatility solver for American options using Brent's method with nested PDE evaluation.

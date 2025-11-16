@@ -44,6 +44,7 @@ cc_library(
     deps = [
         "//src/pde/core:snapshot",
         "//src/math:cubic_spline_solver",
+        "//src/support/memory:solver_memory_arena",
         ":american_option",
     ],
     copts = ["-std=c++23"],
