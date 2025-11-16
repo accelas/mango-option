@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <expected>
+#include <memory_resource>
 #include "src/support/memory/solver_memory_arena.hpp"
 
 namespace mango {
@@ -109,6 +110,28 @@ TEST_F(SolverMemoryArenaTest, TryResetAfterAllWorkspacesInactive) {
     // Reset should succeed now
     auto reset_result = arena->try_reset();
     EXPECT_TRUE(reset_result.has_value());
+}
+
+TEST_F(SolverMemoryArenaTest, ResourceCanBeUsedForPmrAllocationsAndReset) {
+    constexpr size_t arena_size = 64 * 1024;  // 64KB arena for test
+
+    auto arena_result = SolverMemoryArena::create(arena_size);
+    ASSERT_TRUE(arena_result.has_value());
+    auto arena = std::move(arena_result.value());
+
+    std::pmr::vector<int> numbers(arena->resource());
+    numbers.resize(256, 42);
+    EXPECT_EQ(numbers.size(), 256);
+
+    // Capture used size before reset. It should be >0 once we allocate.
+    auto before_reset = arena->get_stats();
+    EXPECT_GT(before_reset.used_size, 0u);
+
+    // Release workspace token to allow reset
+    auto reset_result = arena->try_reset();
+    EXPECT_TRUE(reset_result.has_value());
+    auto after_reset = arena->get_stats();
+    EXPECT_EQ(after_reset.used_size, 0u);
 }
 
 }  // namespace testing

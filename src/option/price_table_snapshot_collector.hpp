@@ -21,6 +21,10 @@
 
 namespace mango {
 
+namespace testing {
+struct PriceTableSnapshotCollectorTestPeer;
+}  // namespace testing
+
 // Memory module identifier for tracing
 #define MODULE_PRICE_TABLE_COLLECTOR 9
 
@@ -297,8 +301,8 @@ public:
     /// Constructor with memory arena for PMR allocations
     explicit PriceTableSnapshotCollector(const PriceTableSnapshotCollectorConfig& config,
                                        std::shared_ptr<memory::SolverMemoryArena> arena)
-        : moneyness_(config.moneyness.begin(), config.moneyness.end())
-        , tau_(config.tau.begin(), config.tau.end())
+        : moneyness_(resolve_resource(arena))
+        , tau_(resolve_resource(arena))
         , K_ref_(config.K_ref)
         , option_type_(config.option_type)
         , payoff_params_(config.payoff_params)
@@ -316,6 +320,9 @@ public:
         , arena_usage_(arena ? memory::SolverMemoryArena::ActiveWorkspaceToken(std::move(arena))
                              : memory::SolverMemoryArena::ActiveWorkspaceToken())
     {
+        moneyness_.assign(config.moneyness.begin(), config.moneyness.end());
+        tau_.assign(config.tau.begin(), config.tau.end());
+
         const size_t n = moneyness_.size() * tau_.size();
         prices_.resize(n, 0.0);
         deltas_.resize(n, 0.0);
@@ -382,12 +389,16 @@ public:
                                 std::string(V_error.value()));
             }
 
+            ++value_build_calls_for_test_;
+
             auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
             if (Lu_error.has_value()) {
                 MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PRICE_TABLE_COLLECTOR, 2, 10, 0.0);
                 return std::unexpected(std::string("Failed to build spatial operator interpolator: ") +
                                 std::string(Lu_error.value()));
             }
+
+            ++lu_build_calls_for_test_;
 
             // Cache the grid
             cached_grid_.assign(snapshot.spatial_grid.begin(), snapshot.spatial_grid.end());
@@ -403,12 +414,16 @@ public:
                                 std::string(V_error.value()));
             }
 
+            ++value_rebuild_calls_for_test_;
+
             auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
             if (Lu_error.has_value()) {
                 MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PRICE_TABLE_COLLECTOR, 4, 10, 0.0);
                 return std::unexpected(std::string("Failed to rebuild spatial operator interpolator: ") +
                                 std::string(Lu_error.value()));
             }
+
+            ++lu_rebuild_calls_for_test_;
         }
 
         // PERFORMANCE: Capture epoch after rebuild for O(1) cache freshness checks
@@ -544,6 +559,13 @@ private:
     // RAII token that keeps the arena alive and tracks active usage
     memory::SolverMemoryArena::ActiveWorkspaceToken arena_usage_;
 
+    // TESTING HOOKS: instrumentation exposed via friend peer in tests only
+    friend struct testing::PriceTableSnapshotCollectorTestPeer;
+    size_t value_build_calls_for_test_ = 0;
+    size_t value_rebuild_calls_for_test_ = 0;
+    size_t lu_build_calls_for_test_ = 0;
+    size_t lu_rebuild_calls_for_test_ = 0;
+
     double compute_american_obstacle(double S, double /*tau*/) const {
         // American option intrinsic value (exercise boundary)
         if (option_type_ == OptionType::CALL) {
@@ -553,5 +575,35 @@ private:
         }
     }
 };
+
+namespace testing {
+
+struct PriceTableSnapshotCollectorTestPeer {
+    static std::pmr::memory_resource* moneyness_resource(const PriceTableSnapshotCollector& collector) {
+        return collector.moneyness_.get_allocator().resource();
+    }
+
+    static std::pmr::memory_resource* tau_resource(const PriceTableSnapshotCollector& collector) {
+        return collector.tau_.get_allocator().resource();
+    }
+
+    static size_t value_build_calls(const PriceTableSnapshotCollector& collector) {
+        return collector.value_build_calls_for_test_;
+    }
+
+    static size_t value_rebuild_calls(const PriceTableSnapshotCollector& collector) {
+        return collector.value_rebuild_calls_for_test_;
+    }
+
+    static size_t lu_build_calls(const PriceTableSnapshotCollector& collector) {
+        return collector.lu_build_calls_for_test_;
+    }
+
+    static size_t lu_rebuild_calls(const PriceTableSnapshotCollector& collector) {
+        return collector.lu_rebuild_calls_for_test_;
+    }
+};
+
+}  // namespace testing
 
 }  // namespace mango

@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
-#include <chrono>
 #include <memory_resource>
 
 // Test with known analytical solution: European put Black-Scholes
@@ -351,16 +350,36 @@ TEST(PriceTableSnapshotCollectorTest, InterpolatorsBuiltOnce) {
         .second_derivative = std::span{d2Vnorm_dx2}
     };
 
-    // This should complete quickly (not O(n²))
-    auto start = std::chrono::high_resolution_clock::now();
+    ASSERT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 0u);
+    ASSERT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 0u);
+
     collector.collect(snapshot);
-    auto end = std::chrono::high_resolution_clock::now();
 
-    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 0u);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 0u);
 
-    // With 50 moneyness points, should be <1ms if interpolators built once
-    // Would be >>10ms if rebuilt in loop
-    EXPECT_LT(duration_us, 10000) << "Interpolators likely rebuilt in loop (O(n²))";
+    // Modify snapshot data but keep grid identical to trigger rebuild path
+    V_norm[0] *= 1.1;
+    V_norm[1] *= 0.9;
+    V_norm[2] *= 1.05;
+    Lu_norm[0] *= 1.2;
+    Lu_norm[1] *= 0.8;
+    Lu_norm[2] *= 1.1;
+    dVnorm_dx[0] *= 1.05;
+    dVnorm_dx[1] *= 0.95;
+    dVnorm_dx[2] *= 1.02;
+    d2Vnorm_dx2[0] *= 0.9;
+    d2Vnorm_dx2[1] *= 1.1;
+    d2Vnorm_dx2[2] *= 1.0;
+
+    collector.collect(snapshot);
+
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 1u);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 1u);
 }
 
 // PMR-specific tests
@@ -449,6 +468,24 @@ TEST_F(PriceTableSnapshotCollectorPMRTest, MemoryAccountingWorksCorrectly) {
     EXPECT_TRUE(has_nonzero_price) << "Prices should contain non-zero values after collection";
 }
 
+TEST_F(PriceTableSnapshotCollectorPMRTest, CollectorUsesArenaForPmrVectors) {
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::PUT,
+        .payoff_params = nullptr
+    };
+
+    mango::PriceTableSnapshotCollector collector(config, arena_);
+
+    auto* resource = arena_->resource();
+    ASSERT_NE(resource, nullptr);
+
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::moneyness_resource(collector), resource);
+    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::tau_resource(collector), resource);
+}
+
 TEST_F(PriceTableSnapshotCollectorPMRTest, ArenaUsageIsTrackedViaRaiiToken) {
     mango::PriceTableSnapshotCollectorConfig config{
         .moneyness = moneyness_,
@@ -519,3 +556,7 @@ TEST_F(PriceTableSnapshotCollectorPMRTest, ConstructorWithMemoryArena) {
     mango::PriceTableSnapshotCollector collector(config, arena_);
     EXPECT_EQ(collector.prices().size(), moneyness_.size() * tau_.size());
 }
+#include <memory_resource>
+#include "src/option/price_table_snapshot_collector.hpp"
+#include "src/support/memory/solver_memory_arena.hpp"
+#include "src/support/memory/unified_memory_resource.hpp"
