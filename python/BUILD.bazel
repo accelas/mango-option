@@ -9,6 +9,7 @@ pybind_extension(
         "//src/math:root_finding",
         "//src/option:iv_types",
         "//src/support:error_types",
+        "//src/support/memory:solver_memory_arena",
     ],
     copts = [
         "-std=c++23",
@@ -20,4 +21,21 @@ pybind_extension(
     ],
     linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "test_bindings_simple",
+    srcs = ["test_bindings_simple.cpp"],
+    deps = [
+        "//src/support/memory:solver_memory_arena",
+        "//common:ivcalc_trace_hdr",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O2",
+        "-DHAVE_SYSTEMTAP_SDT",
+    ],
+    visibility = ["//visibility:private"],
 )

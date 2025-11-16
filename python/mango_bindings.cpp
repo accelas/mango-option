@@ -9,6 +9,7 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/support/memory/solver_memory_arena.hpp"
 
 namespace py = pybind11;
 
@@ -112,6 +113,38 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("theta", &mango::AmericanOptionResult::theta)
         .def_readwrite("converged", &mango::AmericanOptionResult::converged);
 
+    // SolverMemoryArenaStats structure
+    py::class_<mango::memory::SolverMemoryArenaStats>(m, "SolverMemoryArenaStats")
+        .def(py::init<>())
+        .def_readwrite("total_size", &mango::memory::SolverMemoryArenaStats::total_size)
+        .def_readwrite("used_size", &mango::memory::SolverMemoryArenaStats::used_size)
+        .def_readwrite("active_workspace_count", &mango::memory::SolverMemoryArenaStats::active_workspace_count)
+        .def("__repr__", [](const mango::memory::SolverMemoryArenaStats& s) {
+            return "<SolverMemoryArenaStats total_size=" + std::to_string(s.total_size) +
+                   " used_size=" + std::to_string(s.used_size) +
+                   " active_workspace_count=" + std::to_string(s.active_workspace_count) + ">";
+        });
+
+    // SolverMemoryArena class
+    py::class_<mango::memory::SolverMemoryArena, std::shared_ptr<mango::memory::SolverMemoryArena>>(m, "SolverMemoryArena")
+        .def("try_reset", [](mango::memory::SolverMemoryArena& self) {
+            auto result = self.try_reset();
+            if (!result.has_value()) {
+                throw std::runtime_error(result.error());
+            }
+        })
+        .def("increment_active", &mango::memory::SolverMemoryArena::increment_active)
+        .def("decrement_active", &mango::memory::SolverMemoryArena::decrement_active)
+        .def("get_stats", &mango::memory::SolverMemoryArena::get_stats)
+        .def("resource", &mango::memory::SolverMemoryArena::resource,
+             "Get the memory resource for this arena")
+        .def("__repr__", [](const mango::memory::SolverMemoryArena& arena) {
+            auto stats = arena.get_stats();
+            return "<SolverMemoryArena total_size=" + std::to_string(stats.total_size) +
+                   " used_size=" + std::to_string(stats.used_size) +
+                   " active_workspaces=" + std::to_string(stats.active_workspace_count) + ">";
+        });
+
     m.def(
         "american_option_price",
         [](const mango::AmericanOptionParams& params,
@@ -158,5 +191,26 @@ PYBIND11_MODULE(mango_iv, m) {
 
             Returns:
                 AmericanOptionResult with value and Greeks.
+        )pbdoc");
+
+    // SolverMemoryArena factory function
+    m.def(
+        "create_arena",
+        [](size_t arena_size) {
+            auto result = mango::memory::SolverMemoryArena::create(arena_size);
+            if (!result) {
+                throw py::value_error("Failed to create SolverMemoryArena: " + result.error());
+            }
+            return result.value();
+        },
+        py::arg("arena_size"),
+        R"pbdoc(
+            Create a solver memory arena for PMR-based memory management.
+
+            Args:
+                arena_size: Size of the memory arena in bytes.
+
+            Returns:
+                SolverMemoryArena instance with shared_ptr ownership.
         )pbdoc");
 }
