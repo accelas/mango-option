@@ -17,8 +17,9 @@ namespace mango::memory {
  */
 class UnifiedMemoryResource {
 public:
-    explicit UnifiedMemoryResource(size_t initial_buffer_size = 1024 * 1024)
-        : upstream_(std::pmr::get_default_resource())
+    explicit UnifiedMemoryResource(size_t initial_buffer_size = 1024 * 1024,
+                                  std::pmr::memory_resource* resource = nullptr)
+        : upstream_(resource ? resource : std::pmr::get_default_resource())
         , monotonic_(initial_buffer_size, upstream_)
         , bytes_allocated_(0)
     {}
@@ -48,6 +49,16 @@ public:
 
     /// Query total bytes allocated
     size_t bytes_allocated() const { return bytes_allocated_; }
+
+    /// Get PMR resource
+    std::pmr::memory_resource* pmr_resource() {
+        return upstream_;
+    }
+
+    /// Get PMR resource (const version)
+    std::pmr::memory_resource* pmr_resource() const {
+        return upstream_;
+    }
 
 private:
     std::pmr::memory_resource* upstream_;

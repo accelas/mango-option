@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <algorithm>
+#include <memory_resource>
 
 namespace mango {
 
@@ -25,8 +26,9 @@ struct TileMetadata {
  */
 class WorkspaceBase {
 public:
-    explicit WorkspaceBase(size_t initial_buffer_size = 1024 * 1024)
-        : resource_(initial_buffer_size)
+    explicit WorkspaceBase(size_t initial_buffer_size = 1024 * 1024,
+                          std::pmr::memory_resource* resource = nullptr)
+        : resource_(initial_buffer_size, resource)
     {}
 
     /// AVX-512: 8 doubles per vector
@@ -39,6 +41,16 @@ public:
 
     /// Query total bytes allocated
     size_t bytes_allocated() const { return resource_.bytes_allocated(); }
+
+    /// Get PMR resource (non-const version)
+    std::pmr::memory_resource* pmr_resource() {
+        return resource_.pmr_resource();
+    }
+
+    /// Get PMR resource (const version)
+    std::pmr::memory_resource* pmr_resource() const {
+        return resource_.pmr_resource();
+    }
 
 protected:
     memory::UnifiedMemoryResource resource_;
