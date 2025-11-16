@@ -54,9 +54,7 @@ public:
     std::pmr::memory_resource* pmr_resource() { return &monotonic_; }
 
     /// Get PMR resource (const version)
-    std::pmr::memory_resource* pmr_resource() const {
-        return const_cast<std::pmr::monotonic_buffer_resource*>(&monotonic_);
-    }
+    const std::pmr::memory_resource* pmr_resource() const { return &monotonic_; }
 
 private:
     std::pmr::memory_resource* upstream_;

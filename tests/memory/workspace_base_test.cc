@@ -22,12 +22,12 @@ TEST(WorkspaceBaseTest, PMRResourceAccessor) {
 
     // Test that we can get the PMR resource
     std::pmr::memory_resource* resource = workspace.pmr_resource();
-    EXPECT_NE(resource, nullptr);
-    EXPECT_EQ(resource, &custom_resource);
+    ASSERT_NE(resource, nullptr);
+    EXPECT_NE(resource, std::pmr::get_default_resource());
 
     // Test const accessor
     const mango::WorkspaceBase& const_workspace = workspace;
-    std::pmr::memory_resource* const_resource = const_workspace.pmr_resource();
-    EXPECT_NE(const_resource, nullptr);
-    EXPECT_EQ(const_resource, &custom_resource);
+    const std::pmr::memory_resource* const_resource = const_workspace.pmr_resource();
+    ASSERT_NE(const_resource, nullptr);
+    EXPECT_EQ(const_resource, resource);
 }

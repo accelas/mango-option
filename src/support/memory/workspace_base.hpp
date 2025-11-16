@@ -48,7 +48,7 @@ public:
     }
 
     /// Get PMR resource (const version)
-    std::pmr::memory_resource* pmr_resource() const {
+    const std::pmr::memory_resource* pmr_resource() const {
         return resource_.pmr_resource();
     }
 
