@@ -490,3 +490,13 @@ cc_test(
     size = "medium",
     timeout = "moderate",
 )
+
+cc_test(
+    name = "solver_memory_arena_test",
+    srcs = ["memory/solver_memory_arena_test.cc"],
+    deps = [
+        "//src/support/memory:solver_memory_arena",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
