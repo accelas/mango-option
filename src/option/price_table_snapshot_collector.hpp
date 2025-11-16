@@ -3,6 +3,8 @@
 #include "src/pde/core/snapshot.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/option/american_option.hpp"  // For OptionType enum
+#include "src/support/memory/solver_memory_arena.hpp"
+#include "common/ivcalc_trace.h"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <span>
@@ -13,8 +15,13 @@
 #include <stdexcept>
 #include <cstdint>
 #include <optional>
+#include <memory_resource>
+#include <memory>
 
 namespace mango {
+
+// Memory module identifier for tracing
+#define MODULE_PRICE_TABLE_COLLECTOR 9
 
 /// Cubic spline interpolator for snapshot data
 ///
@@ -22,7 +29,14 @@ namespace mango {
 /// Supports interpolation from pre-computed derivative arrays.
 class SnapshotInterpolator {
 public:
+    /// Constructor with default memory resource
     SnapshotInterpolator() = default;
+
+    /// Constructor with explicit memory resource
+    explicit SnapshotInterpolator(std::pmr::memory_resource* resource)
+        : x_(resource), y_(resource), cache_{DerivedSplineCache{}, DerivedSplineCache{}}
+    {
+    }
 
     // Rule of five: default move, delete copy
     SnapshotInterpolator(const SnapshotInterpolator&) = delete;
@@ -230,8 +244,8 @@ private:
     }
 
     CubicSpline<double> spline_;
-    std::vector<double> x_;  // Grid points (for eval_from_data)
-    std::vector<double> y_;  // Values (for eval_from_data)
+    std::pmr::vector<double> x_;  // Grid points (for eval_from_data)
+    std::pmr::vector<double> y_;  // Values (for eval_from_data)
     bool built_ = false;
 
     // Epoch counter for tracking data freshness (incremented on rebuild_same_grid)
@@ -273,12 +287,32 @@ struct PriceTableSnapshotCollectorConfig {
 ///   - value_interp_ and lu_interp_ are valid and ready for evaluation
 class PriceTableSnapshotCollector : public SnapshotCollector {
 public:
+    /// Constructor without memory arena (uses default memory resource)
     explicit PriceTableSnapshotCollector(const PriceTableSnapshotCollectorConfig& config)
+        : PriceTableSnapshotCollector(config, nullptr)
+    {
+    }
+
+    /// Constructor with memory arena for PMR allocations
+    explicit PriceTableSnapshotCollector(const PriceTableSnapshotCollectorConfig& config,
+                                       std::shared_ptr<memory::SolverMemoryArena> arena)
         : moneyness_(config.moneyness.begin(), config.moneyness.end())
         , tau_(config.tau.begin(), config.tau.end())
         , K_ref_(config.K_ref)
         , option_type_(config.option_type)
         , payoff_params_(config.payoff_params)
+        , prices_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , deltas_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , gammas_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , thetas_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , log_moneyness_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , spot_values_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , inv_spot_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , inv_spot_sq_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , value_interp_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , lu_interp_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , cached_grid_(arena ? arena->resource() : std::pmr::get_default_resource())
+        , memory_arena_(arena)
     {
         const size_t n = moneyness_.size() * tau_.size();
         prices_.resize(n, 0.0);
@@ -301,12 +335,22 @@ public:
             inv_spot_[i] = 1.0 / spot_values_[i];      // 1/S
             inv_spot_sq_[i] = inv_spot_[i] * inv_spot_[i];  // 1/S²
         }
+
+        MANGO_TRACE_ALGO_START(MODULE_PRICE_TABLE_COLLECTOR,
+                               static_cast<int>(moneyness_.size()),
+                               static_cast<int>(tau_.size()),
+                               static_cast<int>(n));
     }
 
     /// Collect snapshot data with exception-safe expected pattern
     /// @param snapshot Read-only snapshot data
     /// @return std::expected<void, std::string> - success or error message
     std::expected<void, std::string> collect_expected(const Snapshot& snapshot) {
+        MANGO_TRACE_ALGO_START(MODULE_PRICE_TABLE_COLLECTOR,
+                               static_cast<int>(snapshot.user_index),
+                               static_cast<int>(moneyness_.size()),
+                               static_cast<int>(snapshot.spatial_grid.size()));
+
         // FIXED: Use user_index to match tau directly (no float comparison!)
         // Snapshot user_index IS the tau index
         const size_t tau_idx = snapshot.user_index;
@@ -316,15 +360,19 @@ public:
         const bool grid_changed = !grids_match(snapshot.spatial_grid);
 
         if (grid_changed || !interpolators_built_) {
+            MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE_COLLECTOR, 1, 10,
+                                      "Building interpolators from scratch");
             // Grid changed or first snapshot: build interpolators from scratch
             auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
             if (V_error.has_value()) {
+                MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PRICE_TABLE_COLLECTOR, 1, 10, 0.0);
                 return std::unexpected(std::string("Failed to build value interpolator: ") +
                                 std::string(V_error.value()));
             }
 
             auto Lu_error = lu_interp_.build(snapshot.spatial_grid, snapshot.spatial_operator);
             if (Lu_error.has_value()) {
+                MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PRICE_TABLE_COLLECTOR, 2, 10, 0.0);
                 return std::unexpected(std::string("Failed to build spatial operator interpolator: ") +
                                 std::string(Lu_error.value()));
             }
@@ -333,15 +381,19 @@ public:
             cached_grid_.assign(snapshot.spatial_grid.begin(), snapshot.spatial_grid.end());
             interpolators_built_ = true;
         } else {
+            MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE_COLLECTOR, 2, 10,
+                                      "Rebuilding interpolators with same grid");
             // Grid same as before: fast rebuild with new data
             auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
             if (V_error.has_value()) {
+                MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PRICE_TABLE_COLLECTOR, 3, 10, 0.0);
                 return std::unexpected(std::string("Failed to rebuild value interpolator: ") +
                                 std::string(V_error.value()));
             }
 
             auto Lu_error = lu_interp_.rebuild_same_grid(snapshot.spatial_operator);
             if (Lu_error.has_value()) {
+                MANGO_TRACE_CONVERGENCE_FAILED(MODULE_PRICE_TABLE_COLLECTOR, 4, 10, 0.0);
                 return std::unexpected(std::string("Failed to rebuild spatial operator interpolator: ") +
                                 std::string(Lu_error.value()));
             }
@@ -354,6 +406,8 @@ public:
 
         // Fill price table for all moneyness points
         for (size_t m_idx = 0; m_idx < moneyness_.size(); ++m_idx) {
+            MANGO_TRACE_ALGO_PROGRESS(MODULE_PRICE_TABLE_COLLECTOR, static_cast<int>(m_idx + 1),
+                                      static_cast<int>(moneyness_.size()), "Processing moneyness point");
             // PERFORMANCE: Use precomputed values instead of recomputing
             const double x = log_moneyness_[m_idx];      // Cached ln(m)
             const double S = spot_values_[m_idx];         // Cached m * K_ref
@@ -402,6 +456,7 @@ public:
             }
         }
 
+        MANGO_TRACE_ALGO_COMPLETE(MODULE_PRICE_TABLE_COLLECTOR, 0, 0);
         return {};  // Success
     }
 
@@ -418,7 +473,23 @@ public:
     std::span<const double> gammas() const { return gammas_; }
     std::span<const double> thetas() const { return thetas_; }
 
+    /// Span accessors for workspace borrowing (zero-copy)
+    std::span<double> prices_span() { return prices_; }
+    std::span<double> deltas_span() { return deltas_; }
+    std::span<double> gammas_span() { return gammas_; }
+    std::span<double> thetas_span() { return thetas_; }
+
 private:
+    /// Get memory resource from arena or default
+    std::pmr::memory_resource* get_memory_resource() const {
+        // Note: This is safe to call during construction because memory_arena_
+        // is initialized before the pmr::vectors in the constructor
+        if (memory_arena_) {
+            return memory_arena_->resource();
+        }
+        return std::pmr::get_default_resource();
+    }
+
     /// Check if spatial grid matches cached grid
     [[nodiscard]] bool grids_match(std::span<const double> grid) const noexcept {
         if (cached_grid_.size() != grid.size()) {
@@ -429,29 +500,32 @@ private:
         return std::equal(cached_grid_.begin(), cached_grid_.end(), grid.begin());
     }
 
-    std::vector<double> moneyness_;
-    std::vector<double> tau_;
+    std::pmr::vector<double> moneyness_;
+    std::pmr::vector<double> tau_;
     double K_ref_;
     OptionType option_type_;
     const void* payoff_params_;
 
-    std::vector<double> prices_;
-    std::vector<double> deltas_;
-    std::vector<double> gammas_;
-    std::vector<double> thetas_;
+    std::pmr::vector<double> prices_;
+    std::pmr::vector<double> deltas_;
+    std::pmr::vector<double> gammas_;
+    std::pmr::vector<double> thetas_;
 
     // PERFORMANCE: Precomputed values to avoid repeated transcendentals
-    std::vector<double> log_moneyness_;  ///< Cached ln(m) for each moneyness point
-    std::vector<double> spot_values_;    ///< Cached S = m * K_ref
-    std::vector<double> inv_spot_;       ///< Cached 1/S
-    std::vector<double> inv_spot_sq_;    ///< Cached 1/S²
+    std::pmr::vector<double> log_moneyness_;  ///< Cached ln(m) for each moneyness point
+    std::pmr::vector<double> spot_values_;    ///< Cached S = m * K_ref
+    std::pmr::vector<double> inv_spot_;       ///< Cached 1/S
+    std::pmr::vector<double> inv_spot_sq_;    ///< Cached 1/S²
 
     SnapshotInterpolator value_interp_;
     SnapshotInterpolator lu_interp_;
 
     // PERFORMANCE: Cached spatial grid for fast rebuild detection
-    std::vector<double> cached_grid_;
+    std::pmr::vector<double> cached_grid_;
     bool interpolators_built_ = false;
+
+    // Memory arena for PMR allocations
+    std::shared_ptr<memory::SolverMemoryArena> memory_arena_;
 
     double compute_american_obstacle(double S, double /*tau*/) const {
         // American option intrinsic value (exercise boundary)
