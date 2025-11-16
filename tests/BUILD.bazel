@@ -115,6 +115,7 @@ cc_test(
     deps = [
         "//src/option:price_table_snapshot_collector",
         "//src/pde/core:snapshot",
+        "//src/support/memory:solver_memory_arena",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -489,4 +490,14 @@ cc_test(
     copts = ["-std=c++23"],
     size = "medium",
     timeout = "moderate",
+)
+
+cc_test(
+    name = "solver_memory_arena_test",
+    srcs = ["memory/solver_memory_arena_test.cc"],
+    deps = [
+        "//src/support/memory:solver_memory_arena",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
 )

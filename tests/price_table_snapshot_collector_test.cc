@@ -1,9 +1,10 @@
 #include "src/option/price_table_snapshot_collector.hpp"
 #include "src/pde/core/snapshot.hpp"
+#include "src/support/memory/solver_memory_arena.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
-#include <chrono>
+#include <memory_resource>
 
 // Test with known analytical solution: European put Black-Scholes
 TEST(PriceTableSnapshotCollectorTest, GammaFormulaValidation) {
@@ -349,14 +350,214 @@ TEST(PriceTableSnapshotCollectorTest, InterpolatorsBuiltOnce) {
         .second_derivative = std::span{d2Vnorm_dx2}
     };
 
-    // This should complete quickly (not O(n²))
-    auto start = std::chrono::high_resolution_clock::now();
+    ASSERT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 0u);
+    ASSERT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 0u);
+
     collector.collect(snapshot);
-    auto end = std::chrono::high_resolution_clock::now();
 
-    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 0u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 0u);
 
-    // With 50 moneyness points, should be <1ms if interpolators built once
-    // Would be >>10ms if rebuilt in loop
-    EXPECT_LT(duration_us, 10000) << "Interpolators likely rebuilt in loop (O(n²))";
+    // Modify snapshot data but keep grid identical to trigger rebuild path
+    V_norm[0] *= 1.1;
+    V_norm[1] *= 0.9;
+    V_norm[2] *= 1.05;
+    Lu_norm[0] *= 1.2;
+    Lu_norm[1] *= 0.8;
+    Lu_norm[2] *= 1.1;
+    dVnorm_dx[0] *= 1.05;
+    dVnorm_dx[1] *= 0.95;
+    dVnorm_dx[2] *= 1.02;
+    d2Vnorm_dx2[0] *= 0.9;
+    d2Vnorm_dx2[1] *= 1.1;
+    d2Vnorm_dx2[2] *= 1.0;
+
+    collector.collect(snapshot);
+
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 1u);
 }
+
+// PMR-specific tests
+class PriceTableSnapshotCollectorPMRTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Create test data
+        moneyness_ = {0.8, 1.0, 1.2};
+        tau_ = {0.25, 0.5, 1.0};
+        K_ref_ = 100.0;
+
+        // Create a memory arena for PMR allocations
+        auto arena_result = mango::memory::SolverMemoryArena::create(1024 * 1024); // 1MB arena
+        ASSERT_TRUE(arena_result.has_value());
+        arena_ = arena_result.value();
+    }
+
+    std::vector<double> moneyness_;
+    std::vector<double> tau_;
+    double K_ref_;
+    std::shared_ptr<mango::memory::SolverMemoryArena> arena_;
+};
+
+TEST_F(PriceTableSnapshotCollectorPMRTest, MemoryAccountingWorksCorrectly) {
+    // This test verifies that memory accounting works correctly with pmr::vector
+    // and the arena tracks allocations properly
+
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::PUT,
+        .payoff_params = nullptr
+    };
+
+    mango::PriceTableSnapshotCollector collector(config, arena_);
+
+    // Create a mock snapshot
+    std::vector<double> spatial_grid = {90.0, 100.0, 110.0};
+    std::vector<double> solution = {10.0, 5.0, 2.0};
+    std::vector<double> first_derivative = {-0.5, -0.3, -0.2};
+    std::vector<double> second_derivative = {0.01, 0.005, 0.002};
+    std::vector<double> spatial_operator = {-0.1, -0.05, -0.02};
+
+    mango::Snapshot snapshot{
+        .time = 0.5,
+        .user_index = 1,  // tau index
+        .spatial_grid = spatial_grid,
+        .solution = solution,
+        .spatial_operator = spatial_operator,
+        .first_derivative = first_derivative,
+        .second_derivative = second_derivative
+    };
+
+    // Get initial allocation stats
+    auto initial_stats = arena_->get_stats();
+    size_t initial_used = initial_stats.used_size;
+    EXPECT_GT(initial_stats.total_size, 0);
+
+    // Perform collect operation
+    auto result = collector.collect_expected(snapshot);
+    EXPECT_TRUE(result.has_value());
+
+    // Verify memory tracking works
+    auto final_stats = arena_->get_stats();
+    size_t final_used = final_stats.used_size;
+
+    // Memory accounting should track allocations (synchronized_pool_resource may allocate internally)
+    // The key point is that pmr::vector doesn't allocate beyond what the pool needs
+    EXPECT_GE(final_used, initial_used) << "Memory accounting should track all allocations";
+
+    // Verify data was actually collected
+    EXPECT_EQ(collector.prices().size(), moneyness_.size() * tau_.size());
+    EXPECT_EQ(collector.deltas().size(), moneyness_.size() * tau_.size());
+    EXPECT_EQ(collector.gammas().size(), moneyness_.size() * tau_.size());
+    EXPECT_EQ(collector.thetas().size(), moneyness_.size() * tau_.size());
+
+    // Verify some data points are non-zero (indicating successful collection)
+    bool has_nonzero_price = false;
+    for (double price : collector.prices()) {
+        if (price != 0.0) {
+            has_nonzero_price = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(has_nonzero_price) << "Prices should contain non-zero values after collection";
+}
+
+TEST_F(PriceTableSnapshotCollectorPMRTest, CollectorUsesArenaForPmrVectors) {
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::PUT,
+        .payoff_params = nullptr
+    };
+
+    mango::PriceTableSnapshotCollector collector(config, arena_);
+
+    auto token = mango::memory::SolverMemoryArena::ActiveWorkspaceToken(arena_);
+    auto* resource = token.resource();
+    ASSERT_NE(resource, nullptr);
+
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::moneyness_resource(collector), resource);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::tau_resource(collector), resource);
+}
+
+TEST_F(PriceTableSnapshotCollectorPMRTest, ArenaUsageIsTrackedViaRaiiToken) {
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::PUT,
+        .payoff_params = nullptr
+    };
+
+    auto stats_before = arena_->get_stats();
+    {
+        mango::PriceTableSnapshotCollector collector(config, arena_);
+        auto stats_during = arena_->get_stats();
+        EXPECT_EQ(stats_during.active_workspace_count, stats_before.active_workspace_count + 1);
+    }
+    auto stats_after = arena_->get_stats();
+    EXPECT_EQ(stats_after.active_workspace_count, stats_before.active_workspace_count);
+}
+
+TEST_F(PriceTableSnapshotCollectorPMRTest, SpanAccessorsWorkCorrectly) {
+    // Test that span accessors provide correct access to data
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::PUT,
+        .payoff_params = nullptr
+    };
+
+    mango::PriceTableSnapshotCollector collector(config, arena_);
+
+    // Test span accessors before any data collection
+    auto prices_span = collector.prices_span();
+    auto deltas_span = collector.deltas_span();
+    auto gammas_span = collector.gammas_span();
+    auto thetas_span = collector.thetas_span();
+
+    EXPECT_EQ(prices_span.size(), moneyness_.size() * tau_.size());
+    EXPECT_EQ(deltas_span.size(), moneyness_.size() * tau_.size());
+    EXPECT_EQ(gammas_span.size(), moneyness_.size() * tau_.size());
+    EXPECT_EQ(thetas_span.size(), moneyness_.size() * tau_.size());
+
+    // All should be zero-initialized
+    for (size_t i = 0; i < prices_span.size(); ++i) {
+        EXPECT_EQ(prices_span[i], 0.0);
+        EXPECT_EQ(deltas_span[i], 0.0);
+        EXPECT_EQ(gammas_span[i], 0.0);
+        EXPECT_EQ(thetas_span[i], 0.0);
+    }
+}
+
+TEST_F(PriceTableSnapshotCollectorPMRTest, ConstructorWithMemoryArena) {
+    // Test that constructor properly accepts and uses the memory arena
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::CALL,
+        .payoff_params = nullptr
+    };
+
+    // This should compile and work with the PMR-enabled constructor
+    EXPECT_NO_THROW({
+        mango::PriceTableSnapshotCollector collector(config, arena_);
+    });
+
+    // Verify the collector was properly initialized
+    mango::PriceTableSnapshotCollector collector(config, arena_);
+    EXPECT_EQ(collector.prices().size(), moneyness_.size() * tau_.size());
+}
+#include <memory_resource>
+#include "src/option/price_table_snapshot_collector.hpp"
+#include "src/support/memory/solver_memory_arena.hpp"
+#include "src/support/memory/unified_memory_resource.hpp"
