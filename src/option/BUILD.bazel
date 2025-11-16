@@ -204,6 +204,32 @@ cc_library(
 )
 
 cc_library(
+    name = "option_workspace_base",
+    hdrs = ["option_workspace_base.hpp"],
+    deps = [
+        "//src/support/memory:unified_memory_resource",
+        "//src/support/memory:workspace_base",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_workspace_pmr",
+    srcs = ["price_table_workspace_pmr.cpp"],
+    hdrs = ["price_table_workspace_pmr.hpp"],
+    deps = [
+        ":option_workspace_base",
+        "//src/support:error_types",
+        "//src/bspline:bspline_utils",
+        "//src/support:crc64",
+        "//third_party/arrow",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "price_table_workspace",
     srcs = ["price_table_workspace.cpp"],
     hdrs = ["price_table_workspace.hpp"],

@@ -490,3 +490,20 @@ cc_test(
     size = "medium",
     timeout = "moderate",
 )
+
+cc_test(
+    name = "memory_unification_test",
+    srcs = ["memory_unification_test.cc"],
+    deps = [
+        "//src/option:option_workspace_base",
+        "//src/option:price_table_workspace_pmr",
+        "//src/bspline:bspline_4d_pmr",
+        "//src/bspline:bspline_fitter_4d_pmr",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-std=c++23",
+        "-O3",
+        "-march=native",
+    ],
+)

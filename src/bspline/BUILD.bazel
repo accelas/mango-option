@@ -44,3 +44,45 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "bspline_fitter_4d_pmr",
+    hdrs = ["bspline_fitter_4d_pmr.hpp"],
+    deps = [
+        ":bspline_utils",
+        "//src/option:option_workspace_base",
+        "//src/math:thomas_solver",
+        "//src/support:error_types",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    linkopts = [
+        "-llapacke",
+        "-llapack",
+        "-lblas",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_4d_pmr",
+    hdrs = ["bspline_4d_pmr.hpp"],
+    deps = [
+        ":bspline_utils",
+        "//src/option:option_workspace_base",
+        "//src/option:price_table_workspace_pmr",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    visibility = ["//visibility:public"],
+)

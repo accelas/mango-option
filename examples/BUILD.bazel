@@ -21,3 +21,19 @@ cc_binary(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_binary(
+    name = "example_memory_unification",
+    srcs = ["example_memory_unification.cpp"],
+    deps = [
+        "//src/option:option_workspace_base",
+        "//src/option:price_table_workspace_pmr",
+        "//src/bspline:bspline_4d_pmr",
+        "//src/bspline:bspline_fitter_4d_pmr",
+    ],
+    copts = [
+        "-std=c++23",
+        "-O3",
+        "-march=native",
+    ],
+)
