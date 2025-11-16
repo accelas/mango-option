@@ -21,9 +21,9 @@
 
 namespace mango {
 
-namespace testing {
+namespace test_support {
 struct PriceTableSnapshotCollectorTestPeer;
-}  // namespace testing
+}  // namespace test_support
 
 // Memory module identifier for tracing
 #define MODULE_PRICE_TABLE_COLLECTOR 9
@@ -560,7 +560,7 @@ private:
     memory::SolverMemoryArena::ActiveWorkspaceToken arena_usage_;
 
     // TESTING HOOKS: instrumentation exposed via friend peer in tests only
-    friend struct testing::PriceTableSnapshotCollectorTestPeer;
+    friend struct test_support::PriceTableSnapshotCollectorTestPeer;
     size_t value_build_calls_for_test_ = 0;
     size_t value_rebuild_calls_for_test_ = 0;
     size_t lu_build_calls_for_test_ = 0;
@@ -576,7 +576,7 @@ private:
     }
 };
 
-namespace testing {
+namespace test_support {
 
 struct PriceTableSnapshotCollectorTestPeer {
     static std::pmr::memory_resource* moneyness_resource(const PriceTableSnapshotCollector& collector) {
@@ -604,6 +604,6 @@ struct PriceTableSnapshotCollectorTestPeer {
     }
 };
 
-}  // namespace testing
+}  // namespace test_support
 
 }  // namespace mango

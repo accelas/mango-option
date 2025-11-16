@@ -350,15 +350,15 @@ TEST(PriceTableSnapshotCollectorTest, InterpolatorsBuiltOnce) {
         .second_derivative = std::span{d2Vnorm_dx2}
     };
 
-    ASSERT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 0u);
-    ASSERT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 0u);
+    ASSERT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 0u);
+    ASSERT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 0u);
 
     collector.collect(snapshot);
 
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 0u);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 0u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 0u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 0u);
 
     // Modify snapshot data but keep grid identical to trigger rebuild path
     V_norm[0] *= 1.1;
@@ -376,10 +376,10 @@ TEST(PriceTableSnapshotCollectorTest, InterpolatorsBuiltOnce) {
 
     collector.collect(snapshot);
 
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 1u);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_build_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::value_rebuild_calls(collector), 1u);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::lu_rebuild_calls(collector), 1u);
 }
 
 // PMR-specific tests
@@ -483,8 +483,8 @@ TEST_F(PriceTableSnapshotCollectorPMRTest, CollectorUsesArenaForPmrVectors) {
     auto* resource = token.resource();
     ASSERT_NE(resource, nullptr);
 
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::moneyness_resource(collector), resource);
-    EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::tau_resource(collector), resource);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::moneyness_resource(collector), resource);
+    EXPECT_EQ(mango::test_support::PriceTableSnapshotCollectorTestPeer::tau_resource(collector), resource);
 }
 
 TEST_F(PriceTableSnapshotCollectorPMRTest, ArenaUsageIsTrackedViaRaiiToken) {
