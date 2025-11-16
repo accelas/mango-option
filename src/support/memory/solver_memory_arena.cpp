@@ -47,8 +47,10 @@ std::expected<void, std::string> SolverMemoryArena::try_reset() {
         return std::unexpected("Cannot reset: active workspaces exist");
     }
 
-    // Reset the arena (also resets byte counter)
+    // Reset the pool (releases blocks back upstream and clears usage)
     arena_resource_->reset();
+    // Reset the underlying monotonic buffer so the arena frees memory
+    upstream_resource_->reset();
 
     MANGO_TRACE_ALGO_COMPLETE(MODULE_MEMORY, 1, 0);
 

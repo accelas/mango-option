@@ -449,6 +449,25 @@ TEST_F(PriceTableSnapshotCollectorPMRTest, MemoryAccountingWorksCorrectly) {
     EXPECT_TRUE(has_nonzero_price) << "Prices should contain non-zero values after collection";
 }
 
+TEST_F(PriceTableSnapshotCollectorPMRTest, ArenaUsageIsTrackedViaRaiiToken) {
+    mango::PriceTableSnapshotCollectorConfig config{
+        .moneyness = moneyness_,
+        .tau = tau_,
+        .K_ref = K_ref_,
+        .option_type = mango::OptionType::PUT,
+        .payoff_params = nullptr
+    };
+
+    auto stats_before = arena_->get_stats();
+    {
+        mango::PriceTableSnapshotCollector collector(config, arena_);
+        auto stats_during = arena_->get_stats();
+        EXPECT_EQ(stats_during.active_workspace_count, stats_before.active_workspace_count + 1);
+    }
+    auto stats_after = arena_->get_stats();
+    EXPECT_EQ(stats_after.active_workspace_count, stats_before.active_workspace_count);
+}
+
 TEST_F(PriceTableSnapshotCollectorPMRTest, SpanAccessorsWorkCorrectly) {
     // Test that span accessors provide correct access to data
     mango::PriceTableSnapshotCollectorConfig config{

@@ -8,6 +8,7 @@
 #include <memory_resource>
 #include <vector>
 #include <atomic>
+#include <utility>
 #include "common/ivcalc_trace.h"
 #include "unified_memory_resource.hpp"
 
@@ -35,6 +36,57 @@ struct SolverMemoryArenaStats {
  */
 class SolverMemoryArena {
 public:
+    /**
+     * @brief RAII token that tracks active workspace usage.
+     *
+     * Creating a token increments the arena's active count and destroying it
+     * decrements the count. Tokens are move-only and keep the arena alive via
+     * shared_ptr ownership while in scope.
+     */
+    class ActiveWorkspaceToken {
+    public:
+        ActiveWorkspaceToken() = default;
+        explicit ActiveWorkspaceToken(std::shared_ptr<SolverMemoryArena> arena)
+            : arena_(std::move(arena)) {
+            if (arena_) {
+                arena_->increment_active();
+            }
+        }
+
+        ActiveWorkspaceToken(const ActiveWorkspaceToken&) = delete;
+        ActiveWorkspaceToken& operator=(const ActiveWorkspaceToken&) = delete;
+
+        ActiveWorkspaceToken(ActiveWorkspaceToken&& other) noexcept
+            : arena_(std::move(other.arena_)) {}
+
+        ActiveWorkspaceToken& operator=(ActiveWorkspaceToken&& other) noexcept {
+            if (this != &other) {
+                release();
+                arena_ = std::move(other.arena_);
+            }
+            return *this;
+        }
+
+        ~ActiveWorkspaceToken() { release(); }
+
+        [[nodiscard]] SolverMemoryArena* get() const noexcept { return arena_.get(); }
+        [[nodiscard]] std::shared_ptr<SolverMemoryArena> shared() const noexcept { return arena_; }
+        [[nodiscard]] std::pmr::memory_resource* resource() const {
+            return arena_ ? arena_->resource() : nullptr;
+        }
+        explicit operator bool() const noexcept { return static_cast<bool>(arena_); }
+
+    private:
+        void release() {
+            if (arena_) {
+                arena_->decrement_active();
+                arena_.reset();
+            }
+        }
+
+        std::shared_ptr<SolverMemoryArena> arena_;
+    };
+
     ~SolverMemoryArena() = default;
 
     // Delete copy operations

@@ -51,13 +51,11 @@ public:
     size_t bytes_allocated() const { return bytes_allocated_; }
 
     /// Get PMR resource
-    std::pmr::memory_resource* pmr_resource() {
-        return upstream_;
-    }
+    std::pmr::memory_resource* pmr_resource() { return &monotonic_; }
 
     /// Get PMR resource (const version)
     std::pmr::memory_resource* pmr_resource() const {
-        return upstream_;
+        return const_cast<std::pmr::monotonic_buffer_resource*>(&monotonic_);
     }
 
 private:

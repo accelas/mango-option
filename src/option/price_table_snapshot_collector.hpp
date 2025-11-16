@@ -17,6 +17,7 @@
 #include <optional>
 #include <memory_resource>
 #include <memory>
+#include <utility>
 
 namespace mango {
 
@@ -301,18 +302,19 @@ public:
         , K_ref_(config.K_ref)
         , option_type_(config.option_type)
         , payoff_params_(config.payoff_params)
-        , prices_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , deltas_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , gammas_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , thetas_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , log_moneyness_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , spot_values_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , inv_spot_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , inv_spot_sq_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , value_interp_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , lu_interp_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , cached_grid_(arena ? arena->resource() : std::pmr::get_default_resource())
-        , memory_arena_(arena)
+        , prices_(resolve_resource(arena))
+        , deltas_(resolve_resource(arena))
+        , gammas_(resolve_resource(arena))
+        , thetas_(resolve_resource(arena))
+        , log_moneyness_(resolve_resource(arena))
+        , spot_values_(resolve_resource(arena))
+        , inv_spot_(resolve_resource(arena))
+        , inv_spot_sq_(resolve_resource(arena))
+        , value_interp_(resolve_resource(arena))
+        , lu_interp_(resolve_resource(arena))
+        , cached_grid_(resolve_resource(arena))
+        , arena_usage_(arena ? memory::SolverMemoryArena::ActiveWorkspaceToken(std::move(arena))
+                             : memory::SolverMemoryArena::ActiveWorkspaceToken())
     {
         const size_t n = moneyness_.size() * tau_.size();
         prices_.resize(n, 0.0);
@@ -492,12 +494,17 @@ public:
 private:
     /// Get memory resource from arena or default
     std::pmr::memory_resource* get_memory_resource() const {
-        // Note: This is safe to call during construction because memory_arena_
-        // is initialized before the pmr::vectors in the constructor
-        if (memory_arena_) {
-            return memory_arena_->resource();
+        if (arena_usage_) {
+            if (auto* resource = arena_usage_.resource()) {
+                return resource;
+            }
         }
         return std::pmr::get_default_resource();
+    }
+
+    static std::pmr::memory_resource* resolve_resource(
+        const std::shared_ptr<memory::SolverMemoryArena>& arena) {
+        return arena ? arena->resource() : std::pmr::get_default_resource();
     }
 
     /// Check if spatial grid matches cached grid
@@ -534,8 +541,8 @@ private:
     std::pmr::vector<double> cached_grid_;
     bool interpolators_built_ = false;
 
-    // Memory arena for PMR allocations
-    std::shared_ptr<memory::SolverMemoryArena> memory_arena_;
+    // RAII token that keeps the arena alive and tracks active usage
+    memory::SolverMemoryArena::ActiveWorkspaceToken arena_usage_;
 
     double compute_american_obstacle(double S, double /*tau*/) const {
         // American option intrinsic value (exercise boundary)
