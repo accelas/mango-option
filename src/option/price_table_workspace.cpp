@@ -13,11 +13,11 @@
 namespace mango {
 
 std::expected<void, std::string> PriceTableWorkspace::validate_inputs(
-    const std::vector<double>& m_grid,
-    const std::vector<double>& tau_grid,
-    const std::vector<double>& sigma_grid,
-    const std::vector<double>& r_grid,
-    const std::vector<double>& coefficients)
+    std::span<const double> m_grid,
+    std::span<const double> tau_grid,
+    std::span<const double> sigma_grid,
+    std::span<const double> r_grid,
+    std::span<const double> coefficients)
 {
     // Validate grid sizes
     if (m_grid.size() < 4) {
@@ -43,7 +43,7 @@ std::expected<void, std::string> PriceTableWorkspace::validate_inputs(
     }
 
     // Validate monotonicity
-    auto is_sorted = [](const std::vector<double>& v) {
+    auto is_sorted = [](std::span<const double> v) {
         return std::is_sorted(v.begin(), v.end());
     };
 
@@ -64,11 +64,11 @@ std::expected<void, std::string> PriceTableWorkspace::validate_inputs(
 }
 
 std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::allocate_and_initialize(
-    const std::vector<double>& m_grid,
-    const std::vector<double>& tau_grid,
-    const std::vector<double>& sigma_grid,
-    const std::vector<double>& r_grid,
-    const std::vector<double>& coefficients,
+    std::span<const double> m_grid,
+    std::span<const double> tau_grid,
+    std::span<const double> sigma_grid,
+    std::span<const double> r_grid,
+    std::span<const double> coefficients,
     double K_ref,
     double dividend_yield)
 {
@@ -223,11 +223,11 @@ std::expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buf
 }
 
 std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
-    const std::vector<double>& m_grid,
-    const std::vector<double>& tau_grid,
-    const std::vector<double>& sigma_grid,
-    const std::vector<double>& r_grid,
-    const std::vector<double>& coefficients,
+    std::span<const double> m_grid,
+    std::span<const double> tau_grid,
+    std::span<const double> sigma_grid,
+    std::span<const double> r_grid,
+    std::span<const double> coefficients,
     double K_ref,
     double dividend_yield)
 {
@@ -732,7 +732,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     auto knots_r_computed = clamped_knots_cubic(r_grid);
 
     // Compare with tolerance for floating-point errors
-    auto knots_match = [](const std::vector<double>& a, const std::vector<double>& b) {
+    auto knots_match = [](std::span<const double> a, std::span<const double> b) {
         if (a.size() != b.size()) return false;
         return std::equal(a.begin(), a.end(), b.begin(),
                          [](double x, double y) { return std::abs(x - y) < 1e-14; });
@@ -758,7 +758,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     }
 
     // 17. Validate grid monotonicity (using grids already created for knot validation)
-    auto is_sorted = [](const std::vector<double>& v) {
+    auto is_sorted = [](std::span<const double> v) {
         return std::is_sorted(v.begin(), v.end());
     };
 

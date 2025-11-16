@@ -39,11 +39,11 @@ public:
     /// @param dividend_yield Continuous dividend yield
     /// @return Expected workspace or error message
     static std::expected<PriceTableWorkspace, std::string> create(
-        const std::vector<double>& m_grid,
-        const std::vector<double>& tau_grid,
-        const std::vector<double>& sigma_grid,
-        const std::vector<double>& r_grid,
-        const std::vector<double>& coefficients,
+        std::span<const double> m_grid,
+        std::span<const double> tau_grid,
+        std::span<const double> sigma_grid,
+        std::span<const double> r_grid,
+        std::span<const double> coefficients,
         double K_ref,
         double dividend_yield);
 
@@ -117,11 +117,11 @@ private:
 
     /// Allocate aligned arena and set up spans
     static std::expected<PriceTableWorkspace, std::string> allocate_and_initialize(
-        const std::vector<double>& m_grid,
-        const std::vector<double>& tau_grid,
-        const std::vector<double>& sigma_grid,
-        const std::vector<double>& r_grid,
-        const std::vector<double>& coefficients,
+        std::span<const double> m_grid,
+        std::span<const double> tau_grid,
+        std::span<const double> sigma_grid,
+        std::span<const double> r_grid,
+        std::span<const double> coefficients,
         double K_ref,
         double dividend_yield);
 
@@ -137,11 +137,11 @@ private:
 
     /// Validate grids before allocation
     static std::expected<void, std::string> validate_inputs(
-        const std::vector<double>& m_grid,
-        const std::vector<double>& tau_grid,
-        const std::vector<double>& sigma_grid,
-        const std::vector<double>& r_grid,
-        const std::vector<double>& coefficients);
+        std::span<const double> m_grid,
+        std::span<const double> tau_grid,
+        std::span<const double> sigma_grid,
+        std::span<const double> r_grid,
+        std::span<const double> coefficients);
 
     // Single contiguous allocation (64-byte aligned)
     std::vector<double> arena_;
