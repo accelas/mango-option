@@ -2,6 +2,8 @@
 #include <memory>
 #include <expected>
 #include <memory_resource>
+#include <future>
+#include <thread>
 #include "src/support/memory/solver_memory_arena.hpp"
 
 namespace mango {
@@ -45,20 +47,17 @@ TEST_F(SolverMemoryArenaTest, CanIncrementAndDecrementActiveCount) {
     // Initially should be 0
     EXPECT_EQ(arena->get_stats().active_workspace_count, 0);
 
-    // Increment active count
-    arena->increment_active();
-    EXPECT_EQ(arena->get_stats().active_workspace_count, 1);
+    {
+        auto token1 = SolverMemoryArena::ActiveWorkspaceToken(arena);
+        EXPECT_EQ(arena->get_stats().active_workspace_count, 1);
 
-    // Increment again
-    arena->increment_active();
-    EXPECT_EQ(arena->get_stats().active_workspace_count, 2);
+        auto token2 = SolverMemoryArena::ActiveWorkspaceToken(arena);
+        EXPECT_EQ(arena->get_stats().active_workspace_count, 2);
 
-    // Decrement
-    arena->decrement_active();
-    EXPECT_EQ(arena->get_stats().active_workspace_count, 1);
+        token2.reset();
+        EXPECT_EQ(arena->get_stats().active_workspace_count, 1);
+    }
 
-    // Decrement again
-    arena->decrement_active();
     EXPECT_EQ(arena->get_stats().active_workspace_count, 0);
 }
 
@@ -69,8 +68,7 @@ TEST_F(SolverMemoryArenaTest, TryResetFailsWhenWorkspacesActive) {
     ASSERT_TRUE(arena_result.has_value());
     auto arena = std::move(arena_result.value());
 
-    // Increment active count
-    arena->increment_active();
+    auto token = SolverMemoryArena::ActiveWorkspaceToken(arena);
 
     // Try reset should fail when workspaces are active
     auto reset_result = arena->try_reset();
@@ -97,17 +95,14 @@ TEST_F(SolverMemoryArenaTest, TryResetAfterAllWorkspacesInactive) {
     ASSERT_TRUE(arena_result.has_value());
     auto arena = std::move(arena_result.value());
 
-    // Activate and deactivate workspaces
-    arena->increment_active();
-    arena->increment_active();
-    EXPECT_EQ(arena->get_stats().active_workspace_count, 2);
+    {
+        auto token1 = SolverMemoryArena::ActiveWorkspaceToken(arena);
+        auto token2 = SolverMemoryArena::ActiveWorkspaceToken(arena);
+        EXPECT_EQ(arena->get_stats().active_workspace_count, 2);
+    }
 
-    // Deactivate all
-    arena->decrement_active();
-    arena->decrement_active();
     EXPECT_EQ(arena->get_stats().active_workspace_count, 0);
 
-    // Reset should succeed now
     auto reset_result = arena->try_reset();
     EXPECT_TRUE(reset_result.has_value());
 }
@@ -132,6 +127,36 @@ TEST_F(SolverMemoryArenaTest, ResourceCanBeUsedForPmrAllocationsAndReset) {
     EXPECT_TRUE(reset_result.has_value());
     auto after_reset = arena->get_stats();
     EXPECT_EQ(after_reset.used_size, 0u);
+}
+
+TEST_F(SolverMemoryArenaTest, TryResetFailsWhileTokenAliveInAnotherThread) {
+    constexpr size_t arena_size = 1024 * 1024; // 1MB arena
+
+    auto arena_result = SolverMemoryArena::create(arena_size);
+    ASSERT_TRUE(arena_result.has_value());
+    auto arena = std::move(arena_result.value());
+
+    std::promise<void> token_ready;
+    std::promise<void> release_token;
+    auto release_future = release_token.get_future();
+
+    std::thread worker([arena, &token_ready, release_future = std::move(release_future)]() mutable {
+        SolverMemoryArena::ActiveWorkspaceToken token(arena);
+        token_ready.set_value();
+        release_future.wait();
+    });
+
+    token_ready.get_future().wait();
+
+    auto reset_result = arena->try_reset();
+    EXPECT_FALSE(reset_result.has_value());
+    EXPECT_EQ(reset_result.error(), "Cannot reset: active workspaces exist");
+
+    release_token.set_value();
+    worker.join();
+
+    auto reset_after = arena->try_reset();
+    EXPECT_TRUE(reset_after.has_value());
 }
 
 }  // namespace testing

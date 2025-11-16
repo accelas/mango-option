@@ -33,10 +33,10 @@ def demonstrate_api_usage():
     # Example 2: Workspace management
     print("\n2. Workspace Management:")
     print("```python")
-    print("# Track active workspaces")
-    print("arena.increment_active()  # Start using the arena")
-    print("# ... do work ...")
-    print("arena.decrement_active()  # Done using the arena")
+    print("# Track active workspaces via RAII token")
+    print("with mango_iv.ActiveWorkspaceToken(arena) as token:")
+    print("    resource = token.resource  # pmr::memory_resource* for interop")
+    print("    # ... do work ...")
     print("")
     print("# Check workspace count")
     print("stats = arena.get_stats()")
@@ -47,11 +47,11 @@ def demonstrate_api_usage():
     # Example 3: Memory reset functionality
     print("\n3. Memory Reset:")
     print("```python")
-    print("# Try to reset the arena (only works when no active workspaces)")
+    print("# Try to reset the arena (only works when no active tokens)")
     print("try:")
     print("    arena.try_reset()")
     print("    print('Arena reset successful')")
-    print("except ValueError as e:")
+    print("except RuntimeError as e:")
     print("    print(f'Cannot reset: {e}')")
     print("```")
 
@@ -80,8 +80,8 @@ def demonstrate_api_usage():
     print("Key Features of the Python API:")
     print("• Factory method create_arena() returns shared_ptr for proper lifetime management")
     print("• SolverMemoryArenaStats struct exposed with all fields")
-    print("• All public methods available: get_stats(), try_reset(), increment_active(), etc.")
-    print("• resource() method returns memory_resource for PMR integration")
+    print("• ActiveWorkspaceToken replaces manual increment/decrement")
+    print("• token.resource property returns memory_resource for PMR integration")
     print("• Proper error handling with Python exceptions")
     print("• String representations for debugging")
 
@@ -104,10 +104,11 @@ def actual_usage_example():
         stats = arena.get_stats()
         print(f"Arena stats: {stats}")
 
-        # Manage workspaces
-        arena.increment_active()
-        # ... do work ...
-        arena.decrement_active()
+        # Manage workspaces with RAII token
+        token = mango_iv.ActiveWorkspaceToken(arena)
+        resource = token.resource
+        # ... do work using resource ...
+        token.reset()
 
         # Reset when done
         arena.try_reset()

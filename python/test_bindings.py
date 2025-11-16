@@ -34,24 +34,34 @@ def test_basic_functionality():
     print(f"✓ Stats: total_size={stats.total_size}, used_size={stats.used_size}, "
           f"active_workspace_count={stats.active_workspace_count}")
 
-    # Test workspace counting
-    arena.increment_active()
-    stats = arena.get_stats()
-    assert stats.active_workspace_count == 1
-    print("✓ Workspace counting works")
+    # Workspace tokens (context manager)
+    with mango_iv.ActiveWorkspaceToken(arena) as token:
+        stats = arena.get_stats()
+        assert stats.active_workspace_count == 1
+        print("✓ ActiveWorkspaceToken increments workspace count")
 
-    arena.decrement_active()
+        resource = token.resource
+        print(f"✓ Token exposes PMR resource: {resource}")
+
     stats = arena.get_stats()
     assert stats.active_workspace_count == 0
-    print("✓ Workspace counting cleanup works")
+    print("✓ Token releases workspace count on exit")
 
-    # Test reset
-    result = arena.try_reset()
-    print(f"✓ Reset successful: {result}")
+    # try_reset blocked while token active
+    token = mango_iv.ActiveWorkspaceToken(arena)
+    try:
+        arena.try_reset()
+    except RuntimeError:
+        print("✓ try_reset() raises while token is alive")
+    else:
+        raise AssertionError("try_reset should fail while ActiveWorkspaceToken is active")
 
-    # Test resource access
-    resource = arena.resource()
-    print(f"✓ Got memory resource: {resource}")
+    token.reset()
+    assert not token.is_active()
+    print("✓ Token reset manually releases the workspace")
+
+    arena.try_reset()
+    print("✓ Reset succeeds once tokens are released")
 
     print("✓ All basic tests passed!")
 

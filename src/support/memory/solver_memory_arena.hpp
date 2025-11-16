@@ -76,6 +76,11 @@ public:
         }
         explicit operator bool() const noexcept { return static_cast<bool>(arena_); }
 
+        /// Manually release the active workspace claim before destruction
+        void reset() { release(); }
+
+        [[nodiscard]] bool is_active() const noexcept { return static_cast<bool>(arena_); }
+
     private:
         void release() {
             if (arena_) {

@@ -143,6 +143,34 @@ PYBIND11_MODULE(mango_iv, m) {
                    " active_workspaces=" + std::to_string(stats.active_workspace_count) + ">";
         });
 
+    // ActiveWorkspaceToken RAII wrapper
+    py::class_<mango::memory::SolverMemoryArena::ActiveWorkspaceToken>(m, "ActiveWorkspaceToken")
+        .def(py::init<>())
+        .def(py::init<std::shared_ptr<mango::memory::SolverMemoryArena>>(), py::arg("arena"))
+        .def("reset", &mango::memory::SolverMemoryArena::ActiveWorkspaceToken::reset)
+        .def("is_active", &mango::memory::SolverMemoryArena::ActiveWorkspaceToken::is_active)
+        .def_property_readonly(
+            "resource",
+            [](const mango::memory::SolverMemoryArena::ActiveWorkspaceToken& self) {
+                auto* resource = self.resource();
+                if (!resource) {
+                    throw std::runtime_error("ActiveWorkspaceToken has no active arena");
+                }
+                return resource;
+            },
+            py::return_value_policy::reference)
+        .def("shared", &mango::memory::SolverMemoryArena::ActiveWorkspaceToken::shared)
+        .def("__enter__", [](mango::memory::SolverMemoryArena::ActiveWorkspaceToken& self) -> mango::memory::SolverMemoryArena::ActiveWorkspaceToken& {
+            if (!self.is_active()) {
+                throw std::runtime_error("ActiveWorkspaceToken must be constructed with an arena before use");
+            }
+            return self;
+        }, py::return_value_policy::reference)
+        .def("__exit__", [](mango::memory::SolverMemoryArena::ActiveWorkspaceToken& self, py::handle, py::handle, py::handle) {
+            self.reset();
+            return false;
+        });
+
     m.def(
         "american_option_price",
         [](const mango::AmericanOptionParams& params,

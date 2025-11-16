@@ -479,7 +479,8 @@ TEST_F(PriceTableSnapshotCollectorPMRTest, CollectorUsesArenaForPmrVectors) {
 
     mango::PriceTableSnapshotCollector collector(config, arena_);
 
-    auto* resource = arena_->resource();
+    auto token = mango::memory::SolverMemoryArena::ActiveWorkspaceToken(arena_);
+    auto* resource = token.resource();
     ASSERT_NE(resource, nullptr);
 
     EXPECT_EQ(mango::testing::PriceTableSnapshotCollectorTestPeer::moneyness_resource(collector), resource);
