@@ -136,8 +136,6 @@ PYBIND11_MODULE(mango_iv, m) {
         .def("increment_active", &mango::memory::SolverMemoryArena::increment_active)
         .def("decrement_active", &mango::memory::SolverMemoryArena::decrement_active)
         .def("get_stats", &mango::memory::SolverMemoryArena::get_stats)
-        .def("resource", &mango::memory::SolverMemoryArena::resource,
-             "Get the memory resource for this arena")
         .def("__repr__", [](const mango::memory::SolverMemoryArena& arena) {
             auto stats = arena.get_stats();
             return "<SolverMemoryArena total_size=" + std::to_string(stats.total_size) +

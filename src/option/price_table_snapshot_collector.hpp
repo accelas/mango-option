@@ -355,6 +355,16 @@ public:
         // Snapshot user_index IS the tau index
         const size_t tau_idx = snapshot.user_index;
 
+        // SAFETY: Validate tau_idx is in bounds before use
+        if (tau_idx >= tau_.size()) {
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_PRICE_TABLE_COLLECTOR, 1,
+                static_cast<int>(tau_idx), static_cast<int>(tau_.size()));
+            return std::unexpected(
+                std::string("tau index out of range: ") + std::to_string(tau_idx) +
+                " >= " + std::to_string(tau_.size()) +
+                ". Verify PDE time grid matches price table maturity grid.");
+        }
+
         // PERFORMANCE: Cache grid and reuse interpolators
         // For a given (σ,r) pair, all snapshots share the same spatial grid
         const bool grid_changed = !grids_match(snapshot.spatial_grid);

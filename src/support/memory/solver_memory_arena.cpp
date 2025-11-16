@@ -25,21 +25,12 @@ SolverMemoryArena::SolverMemoryArena(size_t arena_size)
     : active_workspace_count_(0),
       arena_size_(arena_size) {
 
-    // Create the three-level PMR hierarchy: upstream → counting → arena
-
-    // Level 1: Create buffer storage for the arena
-    arena_buffer_.resize(arena_size);
-
-    // Level 1: Create the underlying memory resource (UnifiedMemoryResource)
+    // Create the underlying memory resource (UnifiedMemoryResource)
     upstream_resource_ = std::make_unique<UnifiedMemoryResource>(arena_size);
 
-    // Level 2: Create counting wrapper (wraps upstream resource)
-    counting_resource_ = std::make_unique<CountingMemoryResource>(
+    // Create the tracking synchronized resource (combines thread-safety + counting)
+    arena_resource_ = std::make_unique<TrackingSynchronizedResource>(
         upstream_resource_->pmr_resource());
-
-    // Level 3: Create the monotonic buffer resource (uses counting resource as upstream)
-    arena_resource_ = std::make_unique<std::pmr::monotonic_buffer_resource>(
-        arena_buffer_.data(), arena_size, counting_resource_.get());
 
     // Pool options for memory resource (future use)
     pool_options_ = std::make_unique<std::pmr::pool_options>();
@@ -56,9 +47,8 @@ std::expected<void, std::string> SolverMemoryArena::try_reset() {
         return std::unexpected("Cannot reset: active workspaces exist");
     }
 
-    // Reset the arena
-    arena_resource_->release();
-    counting_resource_->reset();
+    // Reset the arena (also resets byte counter)
+    arena_resource_->reset();
 
     MANGO_TRACE_ALGO_COMPLETE(MODULE_MEMORY, 1, 0);
 
@@ -89,7 +79,7 @@ SolverMemoryArenaStats SolverMemoryArena::get_stats() const {
     SolverMemoryArenaStats stats;
     stats.total_size = arena_size_;
     stats.active_workspace_count = active_workspace_count_;
-    stats.used_size = counting_resource_->bytes_used();
+    stats.used_size = arena_resource_->bytes_used();
 
     return stats;
 }

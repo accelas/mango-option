@@ -86,42 +86,47 @@ public:
 
 private:
     /**
-     * @brief Thread-safe counting memory resource wrapper
+     * @brief Thread-safe wrapper around synchronized_pool_resource with tracking
      *
-     * Wraps an upstream memory resource and tracks bytes allocated/deallocated
-     * using atomic operations for lock-free thread safety.
+     * Wraps a synchronized_pool_resource and tracks bytes allocated/deallocated
+     * with atomic operations for thread-safe memory accounting.
      */
-    class CountingMemoryResource : public std::pmr::memory_resource {
+    class TrackingSynchronizedResource : public std::pmr::memory_resource {
     public:
-        explicit CountingMemoryResource(std::pmr::memory_resource* upstream)
-            : upstream_(upstream), bytes_used_(0) {}
+        explicit TrackingSynchronizedResource(std::pmr::memory_resource* upstream)
+            : upstream_(upstream),
+              pool_(std::make_unique<std::pmr::synchronized_pool_resource>(
+                  std::pmr::pool_options{64, 1024}, upstream)),
+              bytes_used_(0) {}
 
         [[nodiscard]] size_t bytes_used() const {
             return bytes_used_.load(std::memory_order_relaxed);
         }
 
         void reset() {
+            pool_->release();
             bytes_used_.store(0, std::memory_order_relaxed);
         }
 
     protected:
         void* do_allocate(size_t bytes, size_t alignment) override {
-            void* ptr = upstream_->allocate(bytes, alignment);
+            void* ptr = pool_->allocate(bytes, alignment);
             bytes_used_.fetch_add(bytes, std::memory_order_relaxed);
             return ptr;
         }
 
         void do_deallocate(void* ptr, size_t bytes, size_t alignment) override {
-            upstream_->deallocate(ptr, bytes, alignment);
+            pool_->deallocate(ptr, bytes, alignment);
             bytes_used_.fetch_sub(bytes, std::memory_order_relaxed);
         }
 
         bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
-            return upstream_->is_equal(other);
+            return pool_->is_equal(other);
         }
 
     private:
         std::pmr::memory_resource* upstream_;
+        std::unique_ptr<std::pmr::synchronized_pool_resource> pool_;
         std::atomic<size_t> bytes_used_;
     };
     /**
@@ -133,10 +138,9 @@ private:
 
     // Member variables
     std::unique_ptr<UnifiedMemoryResource> upstream_resource_;  // Level 1: underlying resource
-    std::unique_ptr<CountingMemoryResource> counting_resource_;  // Level 2: counting wrapper
-    std::unique_ptr<std::pmr::monotonic_buffer_resource> arena_resource_;  // Level 3: arena
+    std::unique_ptr<TrackingSynchronizedResource> arena_resource_;  // Level 2+3: tracking+pool
     std::unique_ptr<std::pmr::pool_options> pool_options_;
-    std::vector<char> arena_buffer_;  // Storage buffer for the arena
+    std::vector<char> arena_buffer_;  // Storage buffer (unused but kept for future)
 
     mutable std::mutex mutex_;
     size_t active_workspace_count_;
