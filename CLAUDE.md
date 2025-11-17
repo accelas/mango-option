@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**mango-iv** is a C23-based PDE (Partial Differential Equation) solver using the finite difference method with TR-BDF2 (Two-stage Runge-Kutta with backward differentiation formula) time-stepping scheme. The project emphasizes flexibility through callback-based architecture, allowing users to define custom initial conditions, boundary conditions, jump conditions, and obstacle constraints.
+**mango-iv** is a modern C++23 library for pricing American options and solving PDEs using finite difference methods. The core solver uses TR-BDF2 (Two-stage Runge-Kutta with backward differentiation formula) time-stepping with Newton iteration for implicit systems. The library provides high-level option pricing APIs, implied volatility solvers (both FDM and interpolation-based), and price table pre-computation for fast repeated queries.
 
 ## Build System
 
@@ -17,26 +17,31 @@ This project uses Bazel with Bzlmod for dependency management.
 bazel build //...
 
 # Build specific targets
-bazel build //src:pde_solver
-bazel build //examples:example_heat_equation
+bazel build //src/pde/core:pde_solver
+bazel build //src/option:american_option
+bazel build //examples:example_newton_solver
 
 # Run all tests
 bazel test //...
 
 # Run specific test suites
 bazel test //tests:pde_solver_test
-bazel test //tests:cubic_spline_test
-bazel test //tests:stability_test
+bazel test //tests:american_option_test
+bazel test //tests:bspline_4d_test
+bazel test //tests:iv_solver_test
 
 # Run tests with verbose output
 bazel test //tests:pde_solver_test --test_output=all
 
-# Run example
-bazel run //examples:example_heat_equation
+# Run examples
+bazel run //examples:example_newton_solver
+bazel run //examples:example_expected_validation
 
-# Run QuantLib comparison benchmark (requires libquantlib0-dev)
-bazel build //tests:quantlib_benchmark
-./bazel-bin/tests/quantlib_benchmark
+# Run QuantLib benchmarks (requires libquantlib0-dev)
+bazel build //benchmarks:quantlib_performance
+bazel build //benchmarks:quantlib_accuracy
+./bazel-bin/benchmarks/quantlib_performance
+./bazel-bin/benchmarks/quantlib_accuracy
 
 # Clean build artifacts
 bazel clean
@@ -48,56 +53,70 @@ bazel clean
 mango-iv/
 ├── MODULE.bazel           # Bazel module with GoogleTest and Benchmark dependencies
 ├── src/
-│   ├── BUILD.bazel        # Build configuration for library
-│   ├── pde_solver.h       # Public API header
-│   └── pde_solver.c       # TR-BDF2 solver implementation
+│   ├── BUILD.bazel        # Build configuration index (see subdirectories)
+│   ├── pde/
+│   │   ├── core/          # Grid, boundary conditions, PDE solver, time domain
+│   │   └── operators/     # Spatial operators (centered difference, Laplacian, Black-Scholes)
+│   ├── option/            # American option pricing, IV solvers, price tables
+│   ├── bspline/           # B-spline interpolation (4D fitters, basis functions)
+│   ├── math/              # Root finding, cubic splines, Thomas solver
+│   └── support/           # Memory management (PMR arenas), CPU features, utilities
 ├── examples/
-│   ├── BUILD.bazel
-│   └── example_heat_equation.c  # Demonstrates heat equation with callbacks
-└── tests/
-    ├── BUILD.bazel
-    ├── pde_solver_test.cc        # Core PDE solver tests
-    ├── cubic_spline_test.cc      # Interpolation tests
-    ├── stability_test.cc          # Numerical stability tests
-    ├── quantlib_benchmark.cc      # Performance comparison with QuantLib
-    └── BENCHMARK.md               # Benchmark documentation
+│   ├── example_newton_solver.cc          # PDE solver with Newton iteration
+│   └── example_expected_validation.cpp   # Expected<T, E> error handling demo
+├── tests/
+│   ├── pde_solver_test.cc                # Core PDE solver tests
+│   ├── american_option_test.cc           # American option pricing tests
+│   ├── bspline_4d_test.cc                # 4D B-spline interpolation tests
+│   ├── iv_solver_test.cc                 # Implied volatility solver tests
+│   ├── price_table_*_test.cc             # Price table and workspace tests
+│   └── ... (38 test files total)
+├── benchmarks/
+│   ├── quantlib_performance.cc           # Performance comparison with QuantLib
+│   └── quantlib_accuracy.cc              # Accuracy validation vs QuantLib
+└── docs/                                 # Architecture, design docs, API guides
 ```
 
 ## Core Architecture
 
-### Callback-Based Design (Vectorized)
+### Modern C++ Template-Based Design
 
-The solver uses a vectorized callback architecture for maximum efficiency and flexibility. All callbacks operate on entire arrays to minimize function call overhead and enable SIMD vectorization.
+The library uses modern C++23 with template-based spatial operators, compile-time boundary condition dispatch, and `std::expected` for error handling.
 
-1. **Initial Condition**: `void (*)(const double *x, size_t n, double *u0, void *user_data)`
-   - Computes u(x, t=0) for all grid points
-   - Vectorized: processes entire array in one call
+**Key API Components:**
 
-2. **Boundary Conditions**: `double (*)(double t, void *user_data)` (scalar)
-   - Returns boundary value at time t
-   - Supports Dirichlet (u=g), Neumann (∂u/∂x=g), Robin (a·u + b·∂u/∂x=g)
-   - Separate callbacks for left and right boundaries
+1. **PDESolver<BoundaryL, BoundaryR, SpatialOp>** (Template Class)
+   - Solves PDEs of the form: ∂u/∂t = L(u, x, t)
+   - Template parameters specify boundary conditions and spatial operator at compile-time
+   - Uses Newton iteration for implicit TR-BDF2 time stepping
+   - Supports obstacle conditions via `ObstacleCallback` function
 
-3. **Spatial Operator**: `void (*)(const double *x, double t, const double *u, size_t n, double *Lu, void *user_data)`
-   - Computes L(u) for PDE ∂u/∂t = L(u)
-   - Vectorized: returns Lu for all grid points
-   - User implements finite difference stencils (e.g., ∂²u/∂x²)
+2. **Boundary Conditions** (Compile-time Dispatch)
+   - `DirichletBC`: u = g(t) at boundary
+   - `NeumannBC`: ∂u/∂x = g(t) at boundary
+   - Generic operator interface: `apply()`, `apply_jacobian()`, `estimate_ghost_value()`
 
-4. **Diffusion Coefficient** (scalar field): `double diffusion_coeff`
-   - Explicit diffusion coefficient D for pure diffusion operators L(u) = D·∂²u/∂x²
-   - **Required for Neumann boundary conditions** to ensure accurate ghost point method
-   - Set to `NAN` if diffusion is variable/spatially-varying (falls back to estimation)
-   - For Black-Scholes: D = σ²/2 (half the variance)
-   - Improves numerical stability and removes estimation errors
+3. **Spatial Operators** (Composable Templates)
+   - `operators::SpatialOperator<PDE, Grid, Backend>`: Generic wrapper for PDE formulas
+   - `BlackScholesPDE`: L(V) = (σ²/2)·∂²V/∂x² + (r-d-σ²/2)·∂V/∂x - r·V
+   - `LaplacianPDE`: Simple diffusion L(u) = D·∂²u/∂x²
+   - Backend dispatch: `CenteredDifference` (scalar or SIMD)
 
-5. **Jump Condition** (optional): `bool (*)(double x, double *jump_value, void *user_data)`
-   - Handles discontinuous coefficients at interfaces
-   - Scalar callback for interface location queries
+4. **High-Level American Option API**
+   ```cpp
+   #include "src/option/american_option.hpp"
 
-6. **Obstacle Condition** (optional): `void (*)(const double *x, double t, size_t n, double *ψ, void *user_data)`
-   - Computes obstacle ψ(x,t) for all grid points
-   - Enforces u(x,t) ≥ ψ(x,t) for variational inequalities
-   - Vectorized for efficiency
+   AmericanOptionParams params{.strike = 100.0, .spot = 100.0, ...};
+   AmericanOptionGrid grid{.n_space = 101, .n_time = 1000, ...};
+
+   AmericanOptionSolver solver(params, grid);
+   auto result = solver.solve();  // Returns Expected<AmericanOptionResult, ErrorCode>
+   ```
+
+5. **Obstacle Conditions** (American Options)
+   - Implemented via `ObstacleCallback`: `std::function<void(double t, span<const double> x, span<double> psi)>`
+   - Enforces u(x,t) ≥ ψ(x,t) via projection after each Newton iteration
+   - Used for early exercise boundary in American options
 
 ### TR-BDF2 Time Stepping
 
@@ -110,36 +129,34 @@ This scheme provides:
 - Second-order accuracy
 - Good damping properties for high-frequency errors
 
-### Implicit Solver
+### Newton Iteration for Implicit Systems
 
-Uses fixed-point iteration with under-relaxation (ω = 0.7) to solve implicit systems. Convergence criteria use relative error with default tolerance of 1e-6.
+The solver uses Newton-Raphson iteration for implicit TR-BDF2 stages:
+- **Analytical Jacobian**: Spatial operators provide analytical Jacobian assembly via `assemble_jacobian()` concept
+- **Convergence**: Relative error with default tolerance of 1e-6, max 20 iterations
+- **Damping**: Not needed (analytical Jacobian ensures quadratic convergence)
 
 ### Memory Management
 
-**Ownership Transfer:**
-- `pde_solver_create()` takes ownership of the grid
-- After creation, `grid.x` is set to `nullptr` to prevent double-free
-- Grid is freed when `pde_solver_destroy()` is called
-- `pde_free_grid()` is only needed if grid is created but never passed to a solver
+**Modern C++ Ownership:**
+- Grid data stored in `std::vector<double>` with RAII semantics
+- Workspace allocated once at solver construction, reused across time steps
+- PMR (Polymorphic Memory Resource) arenas for advanced use cases (price tables, batch IV)
 
-**Single Workspace Buffer:**
-- All solver arrays allocated from one contiguous buffer (10n doubles)
-- 64-byte alignment for AVX-512 SIMD vectorization
-- Better cache locality with sequential memory layout
-- Zero malloc overhead during time stepping
-- Arrays: u_current, u_next, u_stage, rhs, matrix_{diag,upper,lower}, u_old, Lu, u_temp
+**Workspace Design:**
+- `PDEWorkspace`: Contiguous buffer with 64-byte alignment for SIMD
+- Buffers: u_current, u_next, u_stage, rhs, tridiag (diag/upper/lower), u_old, Lu, u_temp
+- Hybrid allocation: Newton workspace borrows from PDE workspace to reduce memory footprint
 
 ### SIMD Vectorization
 
-OpenMP SIMD pragmas on hot loops for automatic vectorization:
-```c
-#pragma omp simd
-for (size_t i = 1; i < n - 1; i++) {
-    Lu[i] = D * (u[i-1] - 2.0*u[i] + u[i+1]) / (dx*dx);
-}
-```
+Two backends for centered difference operators:
+1. **ScalarBackend**: `#pragma omp simd` for compiler auto-vectorization
+2. **SimdBackend**: `std::experimental::simd` with `[[gnu::target_clones("default","avx2","avx512f")]]`
+   - 3-6× speedup on large grids
+   - Automatic ISA selection at runtime
 
-Enables compiler to generate AVX2/AVX-512 instructions for parallel computation.
+Cox-de Boor B-spline basis evaluation also uses SIMD (4-wide cubic basis functions).
 
 ### CenteredDifference: Automatic ISA Selection
 
@@ -180,91 +197,111 @@ EXPECT_NEAR(d2u_scalar[i], d2u_simd[i], 1e-14);  // Allow FP rounding
 - ScalarBackend: `#pragma omp simd` for compiler auto-vectorization
 - SimdBackend: `std::experimental::simd` + `[[gnu::target_clones]]` for multi-ISA
 
-### Cubic Spline Interpolation
+### B-Spline Interpolation
 
-Natural cubic splines allow evaluation of solutions at arbitrary off-grid points:
-- Single workspace buffer for all coefficient arrays (4n doubles)
-- Single temporary buffer during construction (6n doubles)
-- Uses shared tridiagonal solver for efficiency
-- Provides both function and derivative evaluation
-- Convenience function `pde_solver_interpolate()` for quick queries
+The library provides two interpolation strategies:
+
+**1. Cubic Splines** (Thomas solver, legacy):
+- Natural cubic splines for 1D off-grid evaluation
+- Single workspace buffer (4n doubles), uses tridiagonal solver
+- Available via `mango::ThomasCubicSpline` class
+
+**2. B-Spline 4D Interpolation** (Production):
+- Separable 4D B-spline fitting with banded LU solver
+- 4-diagonal collocation matrix exploits cubic basis structure
+- **7.8× speedup** on large grids (50×30×20×10 = 300K points) vs dense solver
+- Used for price table pre-computation and fast interpolated IV
+- See `src/bspline/bspline_fitter_4d.hpp`
 
 ## Development Workflow
 
-### Adding New PDE Problems
+### Pricing American Options (High-Level API)
 
-1. Define callback functions matching the API signatures
-2. Create user_data struct to pass problem-specific parameters
-3. Set up spatial grid and time domain
-4. Configure boundary conditions and TR-BDF2 parameters
-5. Create solver, initialize, and solve
+**Most users should use the high-level American option API:**
 
-**Typical usage pattern:**
-```c
-// Create grid (will transfer ownership to solver)
-SpatialGrid grid = pde_create_grid(0.0, 1.0, 101);
+```cpp
+#include "src/option/american_option.hpp"
 
-// Setup time domain and callbacks
-TimeDomain time = {/* ... */};
-PDECallbacks callbacks = {/* ... */};
+// Define option parameters
+mango::AmericanOptionParams params{
+    .strike = 100.0,
+    .spot = 100.0,
+    .maturity = 1.0,
+    .volatility = 0.20,
+    .rate = 0.05,
+    .continuous_dividend_yield = 0.02,
+    .option_type = OptionType::PUT
+};
 
-// Create solver (takes ownership of grid)
-PDESolver *solver = pde_solver_create(&grid, &time, &bc_config,
-                                      &trbdf2_config, &callbacks);
+// Configure PDE grid
+mango::AmericanOptionGrid grid{
+    .n_space = 101,
+    .n_time = 1000,
+    .x_min = -3.0,
+    .x_max = 3.0
+};
 
-pde_solver_initialize(solver);
-pde_solver_solve(solver);
+// Solve
+mango::AmericanOptionSolver solver(params, grid);
+auto result = solver.solve();
 
-// Cleanup (frees both solver and grid)
-pde_solver_destroy(solver);
-// Note: No pde_free_grid() needed - ownership was transferred
-
-// For multiple solvers, create a new grid each time
-grid = pde_create_grid(0.0, 1.0, 101);
-solver = pde_solver_create(&grid, ...);  // Takes ownership again
+if (result.has_value()) {
+    std::cout << "Price: " << result->price << "\n";
+    std::cout << "Delta: " << result->delta << "\n";
+    std::cout << "Gamma: " << result->gamma << "\n";
+} else {
+    std::cerr << "Error: " << static_cast<int>(result.error()) << "\n";
+}
 ```
 
-See `examples/example_heat_equation.c` for complete examples including:
-- Basic heat equation
-- Jump conditions (discontinuous diffusion coefficients)
-- Obstacle conditions (American option pricing)
+### Solving Custom PDEs (Low-Level API)
 
-### Implementing Spatial Operators (Vectorized)
+For custom PDE problems beyond American options:
 
-For second-order spatial derivatives (e.g., diffusion, ∂²u/∂x²):
-```c
-// Vectorized heat equation: L(u) = D·∂²u/∂x²
-void heat_operator(const double *x, double t, const double *u,
-                   size_t n, double *Lu, void *user_data) {
-    const double dx = x[1] - x[0];
-    const double D = *(double*)user_data;
-    const double dx2_inv = 1.0 / (dx * dx);
+```cpp
+#include "src/pde/core/pde_solver.hpp"
+#include "src/pde/operators/laplacian_pde.hpp"
+#include "src/pde/operators/operator_factory.hpp"
 
-    Lu[0] = Lu[n-1] = 0.0;  // Boundaries
+// 1. Create grid and time domain
+auto grid = mango::Grid(0.0, 1.0, 101);
+mango::TimeDomain time{.t_start = 0.0, .t_end = 1.0, .n_steps = 1000};
 
-    #pragma omp simd
-    for (size_t i = 1; i < n - 1; i++) {
-        Lu[i] = D * (u[i-1] - 2.0*u[i] + u[i+1]) * dx2_inv;
+// 2. Define PDE and spatial operator
+mango::operators::LaplacianPDE pde(0.1);  // Diffusion coefficient D=0.1
+auto spatial_op = mango::operators::make_spatial_operator(pde, grid);
+
+// 3. Define boundary conditions
+auto left_bc = mango::DirichletBC([](double t) { return 0.0; });
+auto right_bc = mango::DirichletBC([](double t) { return 0.0; });
+
+// 4. Create and run solver
+mango::PDESolver solver(grid, time, mango::TRBDF2Config{},
+                        left_bc, right_bc, spatial_op);
+
+// Initial condition: u(x, 0) = sin(π·x)
+solver.initialize([](std::span<const double> x, std::span<double> u) {
+    for (size_t i = 0; i < x.size(); ++i) {
+        u[i] = std::sin(M_PI * x[i]);
     }
-}
-```
+});
 
-For first-order derivatives (e.g., advection, ∂u/∂x):
-```c
-// Vectorized advection: L(u) = -v·∂u/∂x (upwind for v > 0)
-#pragma omp simd
-for (size_t i = 1; i < n - 1; i++) {
-    Lu[i] = -velocity * (u[i] - u[i-1]) / dx;
-}
+bool success = solver.solve();
+auto snapshot = solver.snapshot();  // Final solution
 ```
 
 ### Adding Tests
 
+All tests use GoogleTest with modern C++ APIs:
 - PDE solver tests: `tests/pde_solver_test.cc`
-- Spline tests: `tests/cubic_spline_test.cc`
-- Stability tests: `tests/stability_test.cc`
+- American option tests: `tests/american_option_test.cc`
+- B-spline tests: `tests/bspline_4d_test.cc`
+- IV solver tests: `tests/iv_solver_test.cc`
 
-All tests use GoogleTest framework with C++ wrappers around C API.
+**Test naming convention:**
+- Unit tests: `*_test.cc`
+- Integration tests: `*_integration_test.cc`
+- Performance tests: `*_performance_test.cc`
 
 ## Key Implementation Details
 
@@ -354,10 +391,10 @@ auto result = solver.solve();
 
 ### Memory Management
 
-All structures use explicit create/destroy patterns:
-- `pde_solver_create()` / `pde_solver_destroy()`
-- `pde_spline_create()` / `pde_spline_destroy()`
-- `pde_create_grid()` / `pde_free_grid()`
+Modern C++ RAII patterns - no manual memory management required:
+- `PDESolver` and all grid/workspace objects use RAII (automatic cleanup)
+- `std::vector`, `std::unique_ptr`, `std::shared_ptr` for owned data
+- PMR arenas (`SolverMemoryArena`) for advanced use cases requiring manual control
 
 ## Unified Root-Finding API
 
@@ -366,7 +403,7 @@ The library provides a unified configuration and result interface for all root-f
 ### Configuration
 
 ```cpp
-#include "src/cpp/root_finding.hpp"
+#include "src/math/root_finding.hpp"
 
 mango::RootFindingConfig config{
     .max_iter = 100,
@@ -900,9 +937,9 @@ When adding new library functionality that needs logging:
 **USDT is enabled by default!** Just build normally:
 
 ```bash
-bazel build //src:pde_solver
-bazel build //examples:example_heat_equation
-bazel build //examples:example_american_option
+bazel build //src/pde/core:pde_solver
+bazel build //examples:example_newton_solver
+bazel build //examples:example_expected_validation
 ```
 
 The library gracefully falls back to no-op probes if `systemtap-sdt-dev` is not installed. For best results, install it:
@@ -922,16 +959,16 @@ bazel build //...
 
 ```bash
 # Monitor all library activity
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_newton_solver
 
 # Watch convergence behavior
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_newton_solver --preset=convergence
 
 # Debug failures
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_newton_solver --preset=debug
 
 # Profile performance
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
+sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_newton_solver --preset=performance
 ```
 
 **Available presets:** `all` (default), `convergence`, `debug`, `performance`, `pde`, `iv`
@@ -948,7 +985,7 @@ sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --
 
 ```bash
 # Use pre-made scripts
-sudo bpftrace scripts/tracing/monitor_all.bt -c './bazel-bin/examples/example_heat_equation'
+sudo bpftrace scripts/tracing/monitor_all.bt -c './bazel-bin/examples/example_newton_solver'
 
 # Or write custom one-liners
 sudo bpftrace -e 'usdt::mango:convergence_failed {
@@ -960,10 +997,10 @@ sudo bpftrace -e 'usdt::mango:convergence_failed {
 
 ```bash
 # Check if binary has USDT support
-sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/examples/example_newton_solver
 
 # List all available probes
-sudo ./scripts/mango-trace list ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace list ./bazel-bin/examples/example_newton_solver
 
 # Run specific script
 sudo ./scripts/mango-trace run convergence_watch.bt ./my_program
@@ -980,190 +1017,152 @@ For complete documentation, see:
 
 **Library code** (`src/` directory) must use USDT probes exclusively. No printf, fprintf, or stderr allowed.
 
-## C23 Features Used
+## C++23 Features Used
 
-- `nullptr` keyword
-- Modern type declarations
+- `std::expected<T, E>` for error handling (no exceptions)
 - Designated initializers for structs
+- `std::span` for safe array views
+- `auto` and structured bindings
+- Concepts (`HasAnalyticalJacobian`)
+- `std::experimental::simd` for portable SIMD
+- `[[gnu::target_clones]]` for multi-ISA code generation
+- Three-way comparison operator (`<=>`)
+- `constexpr` and `consteval` for compile-time evaluation
 
 ## Common Patterns
 
-### Setting Up a Simple Diffusion Problem
+### Pattern 1: American Option Pricing
 
-```c
-SpatialGrid grid = pde_create_grid(0.0, 1.0, 101);
-TimeDomain time = {.t_start = 0.0, .t_end = 1.0, .dt = 0.001, .n_steps = 1000};
-PDECallbacks callbacks = {
-    .initial_condition = my_ic_func,
-    .left_boundary = my_left_bc,
-    .right_boundary = my_right_bc,
-    .spatial_operator = my_spatial_op,
-    .diffusion_coeff = 0.1,  // For constant diffusion; set to NAN if variable
-    .user_data = &my_data
+```cpp
+#include "src/option/american_option.hpp"
+
+mango::AmericanOptionParams params{
+    .strike = 100.0, .spot = 100.0, .maturity = 1.0,
+    .volatility = 0.20, .rate = 0.05,
+    .continuous_dividend_yield = 0.02,
+    .option_type = OptionType::PUT
 };
-BoundaryConfig bc = pde_default_boundary_config();
-TRBDF2Config trbdf2 = pde_default_trbdf2_config();
 
-PDESolver *solver = pde_solver_create(&grid, &time, &bc, &trbdf2, &callbacks);
-pde_solver_initialize(solver);
-pde_solver_solve(solver);
+mango::AmericanOptionGrid grid{.n_space = 101, .n_time = 1000};
 
-const double *solution = pde_solver_get_solution(solver);
-// Use solution...
+mango::AmericanOptionSolver solver(params, grid);
+auto result = solver.solve();
 
-pde_solver_destroy(solver);
-pde_free_grid(&grid);
+if (result.has_value()) {
+    std::cout << "Price: " << result->price << "\n";
+}
 ```
 
-### Querying Off-Grid Values
+### Pattern 2: Implied Volatility (FDM-Based)
 
-```c
-double u_at_x = pde_solver_interpolate(solver, 0.123);
+```cpp
+#include "src/option/iv_solver_fdm.hpp"
+
+mango::IVParams params{
+    .spot_price = 100.0,
+    .strike = 100.0,
+    .time_to_maturity = 1.0,
+    .risk_free_rate = 0.05,
+    .market_price = 10.45,
+    .is_call = false
+};
+
+mango::FDMIVSolver solver(params, mango::IVConfig{});
+mango::IVResult result = solver.solve();
+
+if (result.converged) {
+    std::cout << "Implied Vol: " << result.implied_vol << "\n";
+}
+```
+
+### Pattern 3: Fast Interpolated IV (with Pre-computed Price Table)
+
+```cpp
+#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
+
+// Build price table once (expensive)
+auto table = mango::PriceTable4DBuilder()
+    .set_moneyness_grid(/* ... */)
+    .set_maturity_grid(/* ... */)
+    .set_volatility_grid(/* ... */)
+    .set_rate_grid(/* ... */)
+    .build();
+
+// Solve IV using interpolation (~7.5µs vs ~143ms for FDM)
+mango::InterpolatedIVSolver iv_solver(table);
+auto iv_result = iv_solver.solve(params);
 ```
 
 ## Price Table Pre-computation Workflow
 
-The price table module provides fast option pricing through pre-computed lookup tables. This is ideal for applications requiring thousands of pricing queries where computation time dominates.
+Pre-compute 4D American option price surfaces (moneyness × maturity × volatility × rate) with B-spline interpolation for ultra-fast repeated queries (~500ns per lookup).
 
 ### Typical Workflow
 
-**1. Create the price table structure:**
-```c
-// Define grid dimensions (example: 4D table for American puts)
-double *moneyness = malloc(n_m * sizeof(double));
-double *maturity = malloc(n_tau * sizeof(double));
-double *volatility = malloc(n_sigma * sizeof(double));
-double *rate = malloc(n_r * sizeof(double));
+**1. Build the price table:**
+```cpp
+#include "src/option/price_table_4d_builder.hpp"
 
-// Generate grids (log-spaced for moneyness, linear for others)
-generate_log_spaced(moneyness, n_m, 0.7, 1.3);
-generate_linear(maturity, n_tau, 0.027, 2.0);
-generate_linear(volatility, n_sigma, 0.10, 0.80);
-generate_linear(rate, n_r, 0.0, 0.10);
+// Define 4D grids
+auto builder_result = mango::PriceTable4DBuilder::create(
+    {0.7, 0.8, ..., 1.3},   // 50 moneyness points (log-spaced recommended)
+    {0.027, 0.1, ..., 2.0}, // 30 maturity points
+    {0.10, 0.15, ..., 0.80},// 20 volatility points
+    {0.0, 0.02, ..., 0.10}, // 10 rate points
+    100.0                    // K_ref (reference strike)
+);
 
-// Create table (takes ownership of grid arrays)
-OptionPriceTable *table = price_table_create(
-    moneyness, n_m, maturity, n_tau, volatility, n_sigma,
-    rate, n_r, NULL, 0,  // No dividend dimension
-    OPTION_PUT, EXERCISE_AMERICAN);
+if (!builder_result.has_value()) {
+    std::cerr << "Builder creation failed\n";
+    return;
+}
 
-price_table_set_underlying(table, "SPX");
+auto builder = std::move(builder_result.value());
+
+// Pre-compute prices (200 PDE solves, parallelized with OpenMP)
+builder->precompute(OptionType::PUT, 101, 1000);  // n_space, n_time
 ```
 
-**2. Pre-compute all prices:**
-```c
-// Configure FDM solver grid
-AmericanOptionGrid grid = {
-    .n_space = 101,
-    .n_time = 1000,
-    .S_max = 200.0
-};
+**2. Query prices, deltas, vegas, gammas (sub-microsecond):**
+```cpp
+auto surface = builder->get_surface();
 
-// Optionally tune batch size (default: 100)
-setenv("MANGO_PRECOMPUTE_BATCH_SIZE", "200", 1);
+// Single query (~500ns)
+double price = surface.eval(1.05, 0.25, 0.20, 0.05);  // m, tau, sigma, r
 
-// Compute all prices (uses OpenMP parallelization)
-int status = price_table_precompute(table, &grid);
-if (status != 0) {
-    fprintf(stderr, "Pre-computation failed\n");
-    return 1;
+// Greeks also available
+double delta = surface.eval_delta(1.05, 0.25, 0.20, 0.05);
+double vega = surface.eval_vega(1.05, 0.25, 0.20, 0.05);
+double gamma = surface.eval_gamma(1.05, 0.25, 0.20, 0.05);
+
+// Batch queries
+for (const auto& [m, tau, sigma, r] : market_data) {
+    double p = surface.eval(m, tau, sigma, r);
+    double v = surface.eval_vega(m, tau, sigma, r);
+    // Process results...
 }
 ```
 
-**3. Save table for fast loading later:**
-```c
-price_table_save(table, "spx_american_put.bin");
-price_table_destroy(table);
+**3. Save/load for persistence:**
+```cpp
+// Save to binary file (includes grids, coefficients, metadata)
+builder->save("spx_american_put_surface.bin");
 
-// Later: fast load (milliseconds instead of minutes)
-table = price_table_load("spx_american_put.bin");
+// Later: fast load (milliseconds vs minutes for pre-computation)
+auto loaded = mango::PriceTable4DBuilder::load("spx_american_put_surface.bin");
+auto surface = loaded->get_surface();
 ```
 
-**4. Query prices, vegas, and gammas (sub-microsecond):**
-```c
-// Single price query
-double price = price_table_interpolate_4d(table, 1.05, 0.25, 0.20, 0.05);
+### Greeks Computation
 
-// Single vega query (∂V/∂σ)
-double vega = price_table_interpolate_vega_4d(table, 1.05, 0.25, 0.20, 0.05);
+All Greeks are computed during pre-computation using centered finite differences and stored in the B-spline coefficients:
 
-// Single gamma query (∂²V/∂S²)
-double gamma = price_table_interpolate_gamma_4d(table, 1.05, 0.25, 0.20, 0.05);
+**Delta (∂V/∂S):** First derivative w.r.t. moneyness, scaled to spot price
+**Vega (∂V/∂σ):** First derivative w.r.t. volatility
+**Gamma (∂²V/∂S²):** Second derivative w.r.t. moneyness, scaled to spot price
 
-// Multiple queries (typical usage)
-for (size_t i = 0; i < n_queries; i++) {
-    double p = price_table_interpolate_4d(table, m[i], tau[i], sigma[i], r[i]);
-    double v = price_table_interpolate_vega_4d(table, m[i], tau[i], sigma[i], r[i]);
-    double g = price_table_interpolate_gamma_4d(table, m[i], tau[i], sigma[i], r[i]);
-    // Process price, vega, and gamma...
-}
-```
-
-**5. Cleanup:**
-```c
-price_table_destroy(table);
-```
-
-### Vega Interpolation
-
-The price table automatically computes vega (∂V/∂σ) during precomputation using centered finite differences:
-
-```c
-// Vega is computed automatically during precomputation
-price_table_precompute(table, &grid);  // Computes both prices and vegas
-
-// Query vega at any point (4D table)
-double vega = price_table_interpolate_vega_4d(table,
-    1.05,   // moneyness
-    0.5,    // maturity
-    0.20,   // volatility
-    0.05);  // rate
-
-// For 5D tables with dividend
-double vega_5d = price_table_interpolate_vega_5d(table,
-    1.05, 0.5, 0.20, 0.05, 0.02);  // with dividend
-```
-
-**Key Points:**
-- Vega computed during precomputation (centered finite differences)
-- Same interpolation strategy as prices (cubic or multilinear)
-- ~8ns per query (same speed as price interpolation)
-- More accurate than computing vega at query time
-- Enables Newton-based IV inversion
-- Binary save/load preserves vega data
-
-### Gamma Interpolation
-
-The price table automatically computes gamma (∂²V/∂S²) during precomputation using centered finite differences on the moneyness axis:
-
-```c
-// Gamma is computed automatically during precomputation
-price_table_precompute(table, &grid);  // Computes prices, vegas, and gammas
-
-// Query gamma at any point (4D table)
-double gamma = price_table_interpolate_gamma_4d(table,
-    1.05,   // moneyness
-    0.5,    // maturity
-    0.20,   // volatility
-    0.05);  // rate
-
-// For 5D tables with dividend
-double gamma_5d = price_table_interpolate_gamma_5d(table,
-    1.05, 0.5, 0.20, 0.05, 0.02);  // with dividend
-```
-
-**Key Points:**
-- Gamma computed during precomputation (centered finite differences on moneyness)
-- Properly scaled from ∂²V/∂m² to ∂²V/∂S² using chain rule (γ = ∂²V/∂m² / K_ref²)
-- Same interpolation strategy as prices (cubic or multilinear)
-- ~8ns per query (same speed as price interpolation)
-- More accurate than computing gamma at query time (avoids numerical errors)
-- Essential for delta-hedging strategies and convexity analysis
-- Binary save/load preserves gamma data
-- Accuracy depends on grid spacing (finer grids → better second derivatives)
-
-**Note on Accuracy:**
-Second derivatives are inherently more sensitive to grid spacing than first derivatives. For high-accuracy gamma values, use finer moneyness grids (e.g., 50+ points). Typical relative errors: ~5-10% on moderate grids (20 points), <1% on fine grids (50+ points).
+Query cost: ~500ns per Greek (same as price lookup, no additional computation)
 
 ### Performance Characteristics
 
@@ -1287,184 +1286,6 @@ All tests verify:
 
 See `tests/bspline_banded_solver_test.cc` and `tests/bspline_4d_end_to_end_performance_test.cc` for details.
 
-<<<<<<< HEAD
-### Workspace Optimization (Phase 1)
-
-After banded solver optimization (Phase 0), the next bottleneck was memory allocation overhead. The workspace optimization reduces allocations from 15,000 to 4 per fit operation.
-
-**Problem**: 15,000 heap allocations per 300K grid (4 axes × ~3,750 slices/axis)
-- Each allocation: ~80ns overhead (malloc + free)
-- Total overhead: ~1.2ms (~20-30% of runtime after banded solver)
-
-**Solution**: Pre-allocate reusable buffers, pass as `std::span` to eliminate allocations
-
-**Implementation:**
-
-```cpp
-// Workspace infrastructure (internal use only)
-struct BSplineFitter4DWorkspace {
-    std::vector<double> slice_buffer;     // Reusable buffer for slice extraction
-    std::vector<double> coeffs_buffer;    // Reusable buffer for fitted coefficients
-
-    explicit BSplineFitter4DWorkspace(size_t max_n);
-    std::span<double> get_slice_buffer(size_t n);
-    std::span<double> get_coeffs_buffer(size_t n);
-};
-
-// Zero-allocation fit variant (used internally)
-BSplineCollocation1DResult fit_with_buffer(
-    std::span<const double> values,    // Input values (zero-copy)
-    std::span<double> coeffs_out,      // Output buffer (caller-owned)
-    double tolerance = 1e-9);
-```
-
-**Key technical details:**
-- Workspace sized for maximum axis dimension (50 points for typical grids)
-- Buffers reused across all slices within each axis (hundreds of reuses)
-- `std::span` enables zero-copy passing (critical for avoiding forced allocations)
-- Stack-allocated in `fit()` method (RAII cleanup, thread-safe)
-- `ensure_factored()` helper eliminates code duplication
-
-**Performance impact:**
-
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| Allocations (300K grid) | 15,000 | 4 | **3,750× reduction** |
-| Medium grid (24K) | ~120ms | **86.7ms** | **1.38× speedup** |
-| Large grid (300K) | ~2.1s | ~1.52s | **1.38× speedup** |
-| Combined with banded solver | ~46s (dense) | ~4.3s | **~10.8× total speedup** |
-
-**Note**: Initial implementation had hidden allocation bug in `banded_lu_substitution()`. After fix (operate in-place on output buffer), achieved true zero-allocation performance and 1.38× speedup.
-
-**Why speedup is modest (1.38×) despite 3,750× allocation reduction:**
-- Modern allocators (glibc malloc) are highly optimized for small allocations
-- Allocation overhead was ~25% of runtime, not 100% (Amdahl's law)
-- Other bottlenecks: banded LU solve, residual computation, grid extraction
-
-**Usage:** Automatic (workspace created internally in `fit()`)
-
-```cpp
-auto fitter = BSplineFitter4DSeparable::create(...);
-auto result = fitter->fit(values);  // Workspace used automatically, no configuration needed
-```
-
-**Benefits beyond speed:**
-- Enables Phase 2 (Cox-de Boor SIMD): Better cache utilization
-- Enables Phase 3 (OpenMP): Thread-local workspaces for parallelization
-- Predictable memory usage, no heap fragmentation
-- More robust for production workloads
-
-See `docs/plans/PMR_WORKSPACE_SUMMARY.md` for complete implementation details and design rationale.
-
-### Cox-de Boor SIMD Vectorization (Phase 2)
-
-After workspace optimization (Phase 1), Cox-de Boor basis function evaluation was identified as the next optimization target. The SIMD vectorization uses `std::experimental::simd` to compute 4 cubic basis functions in parallel.
-
-**Problem**: Sequential Cox-de Boor recursion
-- Processes 4 basis functions one-by-one (scalar)
-- ~0.5ms overhead (~6% of 81.2ms total runtime on 24K grid)
-- High instruction-level parallelism opportunity (independent operations)
-
-**Solution**: Vectorize using portable SIMD (`std::experimental::simd`)
-
-**Implementation:**
-
-```cpp
-#include <experimental/simd>
-namespace stdx = std::experimental;
-
-// SIMD types for 4-wide vectors (4 basis functions)
-using simd4d = stdx::fixed_size_simd<double, 4>;
-using simd4_mask = stdx::fixed_size_simd_mask<double, 4>;
-
-// Vectorized Cox-de Boor recursion
-[[gnu::target_clones("default","avx2","avx512f")]]
-inline void cubic_basis_nonuniform_simd(
-    const std::vector<double>& t,  // Knot vector
-    int i,                         // Starting index
-    double x,                      // Evaluation point
-    double N[4])                   // Output (4 basis functions)
-{
-    // Degree 0: vectorized interval check
-    simd4d N_curr = cubic_basis_degree0_simd(t, i, x);
-    simd4d N_next(0.0);
-
-    // Degrees 1-3: vectorized recursion
-    for (int p = 1; p <= 3; ++p) {
-        // Gather knot differences for denominators
-        std::array<double, 4> denom_left, denom_right;
-        for (int lane = 0; lane < 4; ++lane) {
-            int idx = i - lane;
-            denom_left[lane] = t[idx + p] - t[idx];
-            denom_right[lane] = t[idx + p + 1] - t[idx + 1];
-        }
-
-        // Load into SIMD vectors and compute
-        simd4d denom_left_vec, denom_right_vec;
-        denom_left_vec.copy_from(denom_left.data(), stdx::element_aligned);
-        denom_right_vec.copy_from(denom_right.data(), stdx::element_aligned);
-
-        // ... (vectorized arithmetic)
-
-        // Handle division by zero using SIMD masks
-        auto left_valid = denom_left_vec != simd4d(0.0);
-        simd4d left_term = stdx::where(left_valid,
-            (left_num / denom_left_vec) * N_curr,
-            simd4d(0.0));
-
-        // Update for next iteration
-        N_next = N_curr;
-        N_curr = left_term + right_term;
-    }
-
-    // Store result
-    N_curr.copy_to(N, stdx::element_aligned);
-}
-```
-
-**Key technical features:**
-- **Portable SIMD**: `std::experimental::simd` works across x86_64, ARM, RISC-V
-- **Multi-ISA**: `[[gnu::target_clones]]` auto-selects AVX2/AVX512/default
-- **Type-safe**: Compile-time width checking prevents lane mismatches
-- **Zero branches**: Division-by-zero handled with `where` expressions (no conditionals)
-- **Aligned buffers**: `alignas(32) double N[4]` for efficient SIMD stores
-
-**Performance impact:**
-
-| Metric | Before SIMD (Phase 0+1) | After SIMD (Phase 0+1+2) | Improvement |
-|--------|------------------------|--------------------------|-------------|
-| Medium grid (24K) | 86.7ms (plan) / 81.2ms (measured) | **81.2ms** (measured) | **~1.0× (no speedup)** |
-| Cox-de Boor time | ~0.5ms (estimated) | ~0.5ms (estimated) | **~1.0× (no change)** |
-| Combined with banded solver + workspace | ~461ms (dense baseline) | **81.2ms** | **~5.7× total speedup** |
-
-**Why speedup is minimal (~1.0× vs 1.14× target):**
-- Cox-de Boor overhead was only ~6% of runtime, not ~20% (bottleneck misidentified)
-- Gather/scatter overhead for non-contiguous knot access
-- Memory-bound after Phase 0+1 (banded solver + workspace already eliminated compute bottleneck)
-- Amdahl's law: Optimizing 6% of runtime can't yield 14% speedup
-
-**Benefits beyond performance:**
-- **Maintainability**: Clean portable code (no intrinsics, no platform-specific #ifdefs)
-- **Numerical stability**: Identical results to scalar (verified to < 1e-14)
-- **Future-ready**: Scales to higher-order splines (quintic, sextic)
-- **CPU utilization**: Better instruction throughput (4 operations per cycle)
-
-**Usage:** Automatic (SIMD used internally in `build_collocation_matrix()`)
-
-```cpp
-auto fitter = BSplineFitter4DSeparable::create(...);
-auto result = fitter->fit(values);  // SIMD Cox-de Boor used automatically
-```
-
-**Testing:**
-- **Correctness**: 3 tests verify scalar-SIMD equivalence (< 1e-14), partition of unity, edge cases
-- **Performance**: Regression test ensures fitting time < 230ms on 24K grid (3× margin for CI)
-- **Numerical accuracy**: All fitting residuals < 1e-9 (unchanged from scalar)
-
-See `docs/plans/COX_DE_BOOR_SIMD_SUMMARY.md` for complete implementation details, design decisions, and performance analysis.
-
-=======
->>>>>>> b9d76b9 (Clean up obsolete files and documentation)
 ## Numerical Considerations
 
 - Spatial discretization determines maximum stable dt for explicit methods
