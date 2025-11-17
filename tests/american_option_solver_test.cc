@@ -545,7 +545,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     std::mutex callback_mutex;
 
     auto batch_result = BatchAmericanOptionSolver::solve_batch(
-        batch, -3.0, 3.0, 101, 1000,
+        batch,
         [&](size_t idx, AmericanOptionSolver& solver) {
             std::lock_guard<std::mutex> lock(callback_mutex);
             callback_indices.push_back(idx);
@@ -598,7 +598,7 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
 
     // Register snapshots via callback
     auto batch_result = BatchAmericanOptionSolver::solve_batch(
-        batch, -3.0, 3.0, 101, 1000,
+        batch,
         [&](size_t idx, AmericanOptionSolver& solver) {
             solver.register_snapshot(499, 0, &collectors[idx]);  // τ=0.5
             solver.register_snapshot(999, 1, &collectors[idx]);  // τ=1.0
@@ -637,9 +637,8 @@ TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
         );
     }
 
-    // Call without callback (backward compatible)
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(
-        batch, -3.0, 3.0, 101, 1000);
+    // Call without callback using simplified API
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
 
     ASSERT_EQ(batch_result.results.size(), 3);
     EXPECT_EQ(batch_result.failed_count, 0);
