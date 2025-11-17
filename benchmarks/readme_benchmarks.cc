@@ -1,4 +1,5 @@
 #include "src/option/american_option.hpp"
+#include "src/option/american_option_batch.hpp"
 #include "src/bspline/bspline_4d.hpp"
 #include "src/bspline/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver_fdm.hpp"

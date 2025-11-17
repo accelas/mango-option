@@ -198,6 +198,7 @@ cc_test(
     srcs = ["american_option_solver_test.cc"],
     deps = [
         "//src/option:american_option",
+        "//src/option:american_option_batch",
         "//src/option:price_table_snapshot_collector",
         "@googletest//:gtest_main",
     ],
@@ -210,6 +211,7 @@ cc_test(
     srcs = ["american_option_test.cc"],
     deps = [
         "//src/option:american_option",
+        "//src/option:american_option_batch",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
