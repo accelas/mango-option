@@ -48,7 +48,7 @@ int main() {
             if (solution.has_value()) {
                 std::cout << "   ✓ Option solved successfully.\n";
                 std::cout << "   ✓ Option value: $" << std::fixed << std::setprecision(4)
-                         << solution.value().value << "\n";
+                         << solution.value().value_at(valid_params.spot) << "\n";
             }
         } else {
             std::cout << "   ✗ Validation failed: " << result.error() << "\n";
@@ -223,7 +223,7 @@ int main() {
         if (solution.has_value()) {
             std::cout << "   ✓ Option solved successfully.\n";
             std::cout << "   ✓ Option value: $" << std::fixed << std::setprecision(4)
-                     << solution.value().value << "\n";
+                     << solution.value().value_at(valid_params.spot) << "\n";
         } else {
             std::cout << "   ✗ Solve failed: " << solution.error().message << "\n";
         }
