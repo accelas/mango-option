@@ -131,7 +131,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         const AmericanOptionResult& result = price_result.value();
 
         // Return difference: V(σ) - V_market
-        return result.value - query.market_price;
+        return result.value_at(query.spot) - query.market_price;
     } catch (...) {
         // If solver throws an exception, capture the error and return NaN
         last_solver_error_ = SolverError{

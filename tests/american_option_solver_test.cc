@@ -301,8 +301,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
     // NOTE: Current implementation has known issues with PDE time evolution
     // The solution is converging but not evolving correctly in time
     // For now, just verify solver completes and produces reasonable bounds
-    EXPECT_GE(result->value, 0.0);  // Non-negative
-    EXPECT_LE(result->value, params.strike);  // Less than strike
+    EXPECT_GE(result->value_at(params.spot), 0.0);  // Non-negative
+    EXPECT_LE(result->value_at(params.spot), params.strike);  // Less than strike
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -349,10 +349,14 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
     // Should converge
     EXPECT_TRUE(result->converged);
 
+    // Compute Greeks
+    auto greeks = solver.compute_greeks();
+    ASSERT_TRUE(greeks.has_value()) << greeks.error().message;
+
     // Delta for ATM put should be negative (around -0.5 for European)
     // American put delta can be different, but should still be negative
-    EXPECT_LT(result->delta, 0.0);
-    EXPECT_GT(result->delta, -1.0);  // Should be between -1 and 0
+    EXPECT_LT(greeks->delta, 0.0);
+    EXPECT_GT(greeks->delta, -1.0);  // Should be between -1 and 0
 }
 
 TEST(AmericanOptionSolverTest, GammaIsComputed) {
@@ -375,13 +379,17 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
     // Should converge
     EXPECT_TRUE(result->converged);
 
+    // Compute Greeks
+    auto greeks = solver.compute_greeks();
+    ASSERT_TRUE(greeks.has_value()) << greeks.error().message;
+
     // NOTE: The PDE solver has known issues with time evolution (Issue #73)
     // Until fixed, we can only verify that gamma is computed and finite
     // Gamma should theoretically be positive (convexity), but the buggy
     // time evolution can cause incorrect solution surfaces
-    EXPECT_TRUE(std::isfinite(result->gamma));
+    EXPECT_TRUE(std::isfinite(greeks->gamma));
     // Sanity check: gamma shouldn't be absurdly large
-    EXPECT_LT(std::abs(result->gamma), 10000.0);
+    EXPECT_LT(std::abs(greeks->gamma), 10000.0);
 }
 
 TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
@@ -411,15 +419,19 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
     EXPECT_TRUE(result->converged);
 
     // ITM call should have positive value
-    EXPECT_GT(result->value, 0.0);
+    EXPECT_GT(result->value_at(params.spot), 0.0);
 
     // Value should be at least intrinsic value (spot - strike)
     double intrinsic = params.spot - params.strike;
-    EXPECT_GE(result->value, intrinsic * 0.9);  // Allow some numerical error
+    EXPECT_GE(result->value_at(params.spot), intrinsic * 0.9);  // Allow some numerical error
+
+    // Compute Greeks
+    auto greeks = solver.compute_greeks();
+    ASSERT_TRUE(greeks.has_value()) << greeks.error().message;
 
     // Delta should be positive for call
-    EXPECT_GT(result->delta, 0.0);
-    EXPECT_LE(result->delta, 1.0);  // Between 0 and 1 for calls
+    EXPECT_GT(greeks->delta, 0.0);
+    EXPECT_LE(greeks->delta, 1.0);  // Between 0 and 1 for calls
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -460,23 +472,27 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     double intrinsic = params.strike - params.spot;  // 10.0
 
     // Value should be at least intrinsic (American options worth at least immediate exercise)
-    EXPECT_GE(result->value, intrinsic);
+    EXPECT_GE(result->value_at(params.spot), intrinsic);
 
     // Value should not exceed strike (theoretical upper bound for puts)
-    EXPECT_LE(result->value, params.strike);
+    EXPECT_LE(result->value_at(params.spot), params.strike);
 
     // Value should be finite and positive
-    EXPECT_TRUE(std::isfinite(result->value));
-    EXPECT_GT(result->value, 0.0);
+    EXPECT_TRUE(std::isfinite(result->value_at(params.spot)));
+    EXPECT_GT(result->value_at(params.spot), 0.0);
+
+    // Compute Greeks
+    auto greeks = solver.compute_greeks();
+    ASSERT_TRUE(greeks.has_value()) << greeks.error().message;
 
     // Delta bounds for put: -1 ≤ delta ≤ 0
-    EXPECT_TRUE(std::isfinite(result->delta));
-    EXPECT_LE(result->delta, 0.0);   // Negative for puts
-    EXPECT_GE(result->delta, -1.0);  // Should not be less than -1
+    EXPECT_TRUE(std::isfinite(greeks->delta));
+    EXPECT_LE(greeks->delta, 0.0);   // Negative for puts
+    EXPECT_GE(greeks->delta, -1.0);  // Should not be less than -1
 
     // Gamma should be positive (convexity) and finite
-    EXPECT_TRUE(std::isfinite(result->gamma));
-    EXPECT_GT(result->gamma, 0.0);  // Options have positive gamma
+    EXPECT_TRUE(std::isfinite(greeks->gamma));
+    EXPECT_GT(greeks->gamma, 0.0);  // Options have positive gamma
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -512,14 +528,18 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
     // For now, just verify solver completes successfully and Greeks are computed
 
     // Value should be non-negative (may be zero due to Issue #73)
-    EXPECT_GE(result->value, 0.0);
+    EXPECT_GE(result->value_at(params.spot), 0.0);
 
     // Value should be bounded by strike
-    EXPECT_LE(result->value, params.strike);
+    EXPECT_LE(result->value_at(params.spot), params.strike);
+
+    // Compute Greeks
+    auto greeks = solver.compute_greeks();
+    ASSERT_TRUE(greeks.has_value()) << greeks.error().message;
 
     // Delta and gamma should be finite
-    EXPECT_TRUE(std::isfinite(result->delta));
-    EXPECT_TRUE(std::isfinite(result->gamma));
+    EXPECT_TRUE(std::isfinite(greeks->delta));
+    EXPECT_TRUE(std::isfinite(greeks->gamma));
 
     // Solution should be available
     auto solution = solver.get_solution();
@@ -642,9 +662,10 @@ TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
 
     ASSERT_EQ(batch_result.results.size(), 3);
     EXPECT_EQ(batch_result.failed_count, 0);
-    for (const auto& result : batch_result.results) {
+    for (size_t i = 0; i < batch_result.results.size(); ++i) {
+        const auto& result = batch_result.results[i];
         EXPECT_TRUE(result.has_value());
-        EXPECT_GT(result.value().value, 0.0);
+        EXPECT_GT(result.value().value_at(batch[i].spot), 0.0);
     }
 }
 

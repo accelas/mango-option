@@ -61,8 +61,8 @@ TEST_F(AmericanOptionPricingTest, PutValueRespectsIntrinsicBound) {
     ASSERT_TRUE(result.converged);
 
     double intrinsic = std::max(params.strike - params.spot, 0.0);
-    EXPECT_GE(result.value, intrinsic - 1e-6);
-    EXPECT_LT(result.value, params.strike);
+    EXPECT_GE(result.value_at(params.spot), intrinsic - 1e-6);
+    EXPECT_LT(result.value_at(params.spot), params.strike);
 }
 
 TEST_F(AmericanOptionPricingTest, CallValueIncreasesWithVolatility) {
@@ -83,11 +83,11 @@ TEST_F(AmericanOptionPricingTest, CallValueIncreasesWithVolatility) {
         ASSERT_TRUE(result.converged);
 
         if (i > 0) {
-            EXPECT_GT(result.value, previous_value)
+            EXPECT_GT(result.value_at(params.spot), previous_value)
                 << "Value did not increase when volatility went from "
                 << previous_vol << " to " << vol;
         }
-        previous_value = result.value;
+        previous_value = result.value_at(params.spot);
         previous_vol = vol;
     }
 }
@@ -110,9 +110,9 @@ TEST_F(AmericanOptionPricingTest, PutValueIncreasesWithMaturity) {
         ASSERT_TRUE(result.converged);
 
         if (previous_value > 0.0) {
-            EXPECT_GE(result.value, previous_value - 5e-3);
+            EXPECT_GE(result.value_at(params.spot), previous_value - 5e-3);
         }
-        previous_value = result.value;
+        previous_value = result.value_at(params.spot);
     }
 }
 
@@ -131,7 +131,7 @@ TEST_F(AmericanOptionPricingTest, DividendsReduceCallValue) {
     ASSERT_TRUE(result_no_div.converged);
     ASSERT_TRUE(result_with_div.converged);
 
-    EXPECT_GT(result_no_div.value, result_with_div.value);
+    EXPECT_GT(result_no_div.value_at(no_dividends.spot), result_with_div.value_at(with_dividends.spot));
 }
 
 TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
@@ -157,8 +157,8 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
         AmericanOptionResult single = SolveWithWorkspace(params[i], workspace);
         ASSERT_TRUE(single.converged);
 
-        const double batch_value = batch_result.results[i]->value;
-        EXPECT_NEAR(single.value, batch_value, 1e-3) << "Mismatch at index " << i;
+        const double batch_value = batch_result.results[i]->value_at(params[i].spot);
+        EXPECT_NEAR(single.value_at(params[i].spot), batch_value, 1e-3) << "Mismatch at index " << i;
     }
 }
 
@@ -180,7 +180,7 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
     ASSERT_TRUE(result.converged);
 
     const double intrinsic = params.strike - params.spot;
-    EXPECT_NEAR(result.value, intrinsic, 0.5)
+    EXPECT_NEAR(result.value_at(params.spot), intrinsic, 0.5)
         << "Left boundary should equal immediate exercise for deep ITM put";
 }
 
