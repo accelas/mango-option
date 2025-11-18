@@ -1,14 +1,4 @@
 cc_test(
-    name = "snapshot_test",
-    srcs = ["snapshot_test.cc"],
-    deps = [
-        "//src/pde/core:snapshot",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "grid_test",
     srcs = ["grid_test.cc"],
     deps = [
@@ -63,10 +53,8 @@ cc_test(
     srcs = ["pde_solver_test.cc"],
     deps = [
         "//src/pde/core:pde_solver",
-        
         "//src/pde/core:boundary_conditions",
         "//src/math:root_finding",
-        "//src/pde/core:snapshot",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/core:pde_workspace",

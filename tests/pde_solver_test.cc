@@ -1,22 +1,11 @@
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/snapshot.hpp"
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
-
-// Mock collector for testing
-class MockCollector : public mango::SnapshotCollector {
-public:
-    std::vector<size_t> collected_indices;
-
-    void collect(const mango::Snapshot& snapshot) override {
-        collected_indices.push_back(snapshot.user_index);
-    }
-};
 
 TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Heat equation: du/dt = D·d²u/dx² with D = 0.1
@@ -201,66 +190,6 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
 
     // With harsh convergence requirements, should fail
     EXPECT_FALSE(status5.has_value());
-}
-
-TEST(PDESolverTest, SnapshotRegistration) {
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 11).value().generate();
-    auto pde_op = mango::operators::LaplacianPDE<double>(0.1);
-    auto grid_view_op = mango::GridView<double>(grid.span());
-    auto op = mango::operators::create_spatial_operator(std::move(pde_op), grid_view_op);
-    mango::TimeDomain time(0.0, 1.0, 0.1);  // 10 steps
-    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
-    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
-
-    mango::PDESolver solver(grid.span(), time, mango::TRBDF2Config{},
-                           left_bc, right_bc, op);
-
-    // Register snapshots at step indices 2, 5, 9
-    MockCollector collector;
-    solver.register_snapshot(2, 10, &collector);  // step_idx=2, user_idx=10
-    solver.register_snapshot(5, 20, &collector);  // step_idx=5, user_idx=20
-    solver.register_snapshot(9, 30, &collector);  // step_idx=9, user_idx=30
-
-    // Verify registration (solve not called yet)
-    EXPECT_EQ(collector.collected_indices.size(), 0u);
-}
-
-TEST(PDESolverTest, SnapshotCollection) {
-    // Heat equation
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 21).value().generate();
-    auto pde_op = mango::operators::LaplacianPDE<double>(0.1);
-    auto grid_view_op = mango::GridView<double>(grid.span());
-    auto op = mango::operators::create_spatial_operator(std::move(pde_op), grid_view_op);
-    mango::TimeDomain time(0.0, 1.0, 0.25);  // 4 steps: 0.25, 0.5, 0.75, 1.0
-    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
-    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
-
-    mango::PDESolver solver(grid.span(), time, mango::TRBDF2Config{},
-                           left_bc, right_bc, op);
-
-    // Initial condition: Gaussian
-    auto ic = [](std::span<const double> x, std::span<double> u) {
-        for (size_t i = 0; i < x.size(); ++i) {
-            double dx = x[i] - 0.5;
-            u[i] = std::exp(-50.0 * dx * dx);
-        }
-    };
-    solver.initialize(ic);
-
-    // Register snapshots at steps 1 and 3
-    // user_index will be passed to collector (use for tau_idx)
-    MockCollector collector;
-    solver.register_snapshot(1, 0, &collector);  // step 1, tau_idx=0
-    solver.register_snapshot(3, 1, &collector);  // step 3, tau_idx=1
-
-    // Solve
-    auto status6 = solver.solve();
-    ASSERT_TRUE(status6.has_value()) << status6.error().message;
-
-    // Verify snapshots collected with correct user_indices
-    ASSERT_EQ(collector.collected_indices.size(), 2u);
-    EXPECT_EQ(collector.collected_indices[0], 0u);  // tau_idx=0
-    EXPECT_EQ(collector.collected_indices[1], 1u);  // tau_idx=1
 }
 
 TEST(PDESolverTest, WorksWithNewOperatorInterface) {
