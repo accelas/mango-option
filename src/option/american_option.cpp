@@ -198,120 +198,121 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // 1. Create strategy and solve using monadic chaining
-    return [&]() -> std::expected<OptionStrategy, SolverError> {
-        switch (params_.type) {
-            case OptionType::CALL:
-                return CallStrategy{};
-            case OptionType::PUT:
-                return PutStrategy{};
+    // 1. Create strategy based on option type
+    OptionStrategy strategy;
+    switch (params_.type) {
+        case OptionType::CALL:
+            strategy = CallStrategy{};
+            break;
+        case OptionType::PUT:
+            strategy = PutStrategy{};
+            break;
+        default:
+            return std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Unknown option type",
+                .iterations = 0
+            });
+    }
+
+    // 2. Acquire grid from workspace
+    std::span<const double> x_grid = workspace_->grid_span();
+    std::shared_ptr<GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
+    PDEWorkspace* external_workspace = workspace_.get();
+
+    // 3. Setup time domain
+    // For option pricing: solve forward in PDE time (backward in calendar time)
+    // t=0: terminal payoff at maturity, t=T: present value
+    TimeDomain time_domain(0.0, params_.maturity, params_.maturity / workspace_->n_time());
+
+    // 4. Create Black-Scholes operator in log-moneyness coordinates
+    auto make_operator = [&]() {
+        auto pde = BlackScholesPDE<double>(
+            params_.volatility,
+            params_.rate,
+            params_.dividend_yield);
+        if (shared_spacing) {
+            return operators::create_spatial_operator(std::move(pde), shared_spacing);
         }
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Unknown option type",
-            .iterations = 0
-        });
-    }()
-    .and_then([&](OptionStrategy strategy) -> std::expected<AmericanOptionResult, SolverError> {
-        // 2. Acquire grid from workspace
-        std::span<const double> x_grid = workspace_->grid_span();
-        std::shared_ptr<GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
-        PDEWorkspace* external_workspace = workspace_.get();
+        auto grid_view = GridView<double>(x_grid);
+        return operators::create_spatial_operator(std::move(pde), grid_view);
+    };
+    auto bs_op = make_operator();
 
-        // 3. Setup time domain
-        // For option pricing: solve forward in PDE time (backward in calendar time)
-        // t=0: terminal payoff at maturity, t=T: present value
-        TimeDomain time_domain(0.0, params_.maturity, params_.maturity / workspace_->n_time());
+    // 5. Single unified solver path using std::visit
+    return std::visit(
+        [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
+            // Setup boundary conditions using strategy (NORMALIZED by K=1)
+            // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
+            // IMPORTANT: Boundaries must account for time evolution via discounting
+            auto left_bc = DirichletBC([&strat](double t, double x) {
+                return strat.left_boundary(t, x);
+            });
 
-        // 4. Create Black-Scholes operator in log-moneyness coordinates
-        auto make_operator = [&]() {
-            auto pde = BlackScholesPDE<double>(
-                params_.volatility,
-                params_.rate,
-                params_.dividend_yield);
-            if (shared_spacing) {
-                return operators::create_spatial_operator(std::move(pde), shared_spacing);
+            auto right_bc = DirichletBC([&strat, this](double t, double x) {
+                return strat.right_boundary(t, x, params_.rate);
+            });
+
+            // Create PDESolver with strategy-specific obstacle
+            PDESolver solver(
+                x_grid, time_domain, TRBDF2Config{},
+                left_bc, right_bc, bs_op,
+                [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
+                external_workspace
+            );
+
+            // Register discrete dividends as temporal events
+            // Convert from calendar time (years from now) to solver time (backward time)
+            for (const auto& [calendar_time, amount] : params_.discrete_dividends) {
+                // Solver time: t=0 at maturity, t=T at present
+                // Calendar time: time=0 now, time=T at maturity
+                double solver_time = params_.maturity - calendar_time;
+
+                // Skip dividends at or beyond maturity (solver_time <= 0)
+                if (solver_time <= 1e-10) continue;
+
+                DividendJump div_jump(amount, params_.strike);
+                solver.add_temporal_event(solver_time,
+                    [div_jump](double t, auto x, auto u) {
+                        div_jump(t, x, u);
+                    });
             }
-            auto grid_view = GridView<double>(x_grid);
-            return operators::create_spatial_operator(std::move(pde), grid_view);
-        };
-        auto bs_op = make_operator();
 
-        // 5. Single unified solver path using std::visit
-        return std::visit(
-            [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
-                // Setup boundary conditions using strategy (NORMALIZED by K=1)
-                // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
-                // IMPORTANT: Boundaries must account for time evolution via discounting
-                auto left_bc = DirichletBC([&strat](double t, double x) {
-                    return strat.left_boundary(t, x);
-                });
+            // Register snapshots (if any requested)
+            for (const auto& req : snapshot_requests_) {
+                solver.register_snapshot(req.step_index, req.user_index, req.collector);
+            }
 
-                auto right_bc = DirichletBC([&strat, this](double t, double x) {
-                    return strat.right_boundary(t, x, params_.rate);
-                });
+            // Initialize with strategy-specific terminal condition (payoff at maturity)
+            // In log-moneyness, initial condition is normalized by K=1
+            solver.initialize([&strat](auto x, auto u) {
+                strat.initial_condition(x, u);
+            });
 
-                // Create PDESolver with strategy-specific obstacle
-                PDESolver solver(
-                    x_grid, time_domain, TRBDF2Config{},
-                    left_bc, right_bc, bs_op,
-                    [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
-                    external_workspace
-                );
+            // Solve the PDE
+            auto solve_result = solver.solve();
+            if (!solve_result) {
+                return std::unexpected(solve_result.error());
+            }
 
-                // Register discrete dividends as temporal events
-                // Convert from calendar time (years from now) to solver time (backward time)
-                for (const auto& [calendar_time, amount] : params_.discrete_dividends) {
-                    // Solver time: t=0 at maturity, t=T at present
-                    // Calendar time: time=0 now, time=T at maturity
-                    double solver_time = params_.maturity - calendar_time;
+            // Extract solution
+            AmericanOptionResult result;
+            result.converged = true;
 
-                    // Skip dividends at or beyond maturity (solver_time <= 0)
-                    if (solver_time <= 1e-10) continue;
+            auto solution_view = solver.solution();
+            solution_.assign(solution_view.begin(), solution_view.end());
+            solved_ = true;
 
-                    DividendJump div_jump(amount, params_.strike);
-                    solver.add_temporal_event(solver_time,
-                        [div_jump](double t, auto x, auto u) {
-                            div_jump(t, x, u);
-                        });
-                }
+            // Store solution surface and grid information
+            result.surface.assign(solution_view.begin(), solution_view.end());
+            result.x_min = workspace_->x_min();
+            result.x_max = workspace_->x_max();
+            result.strike = params_.strike;
 
-                // Register snapshots (if any requested)
-                for (const auto& req : snapshot_requests_) {
-                    solver.register_snapshot(req.step_index, req.user_index, req.collector);
-                }
-
-                // Initialize with strategy-specific terminal condition (payoff at maturity)
-                // In log-moneyness, initial condition is normalized by K=1
-                solver.initialize([&strat](auto x, auto u) {
-                    strat.initial_condition(x, u);
-                });
-
-                // Solve the PDE
-                auto solve_result = solver.solve();
-                if (!solve_result) {
-                    return std::unexpected(solve_result.error());
-                }
-
-                // Extract solution
-                AmericanOptionResult result;
-                result.converged = true;
-
-                auto solution_view = solver.solution();
-                solution_.assign(solution_view.begin(), solution_view.end());
-                solved_ = true;
-
-                // Store solution surface and grid information
-                result.surface.assign(solution_view.begin(), solution_view.end());
-                result.x_min = workspace_->x_min();
-                result.x_max = workspace_->x_max();
-                result.strike = params_.strike;
-
-                return result;
-            },
-            strategy
-        );
-    });
+            return result;
+        },
+        strategy
+    );
 }
 
 std::expected<AmericanOptionGreeks, SolverError> AmericanOptionSolver::compute_greeks() const {
