@@ -16,9 +16,7 @@ struct UniformSpacing {
 };
 
 struct NonUniformSpacing {
-    std::span<const double> grid;
-    std::span<const double> dx;
-    // Precomputed arrays stored in workspace, viewed here
+    // Precomputed arrays owned by GridSpacing
     std::vector<double> dx_left_inv_data;
     std::vector<double> dx_right_inv_data;
     std::vector<double> dx_center_inv_data;
@@ -109,8 +107,6 @@ private:
     {
         size_t n = grid.size();
         NonUniformSpacing nu;
-        nu.grid = grid;
-        nu.dx = dx;
 
         // Allocate precomputed arrays
         nu.dx_left_inv_data.resize(n - 2);

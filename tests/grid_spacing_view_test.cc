@@ -39,5 +39,41 @@ TEST(GridSpacingViewTest, NonUniformSpacing) {
     EXPECT_GT(dx_left.size(), 0);
 }
 
+TEST(GridSpacingViewTest, LifetimeSafety) {
+    // Test that GridSpacing works after source vectors are destroyed
+    GridSpacing spacing = []() {
+        std::vector<double> grid = {0.0, 0.05, 0.15, 0.3};
+        std::vector<double> dx = {0.05, 0.10, 0.15};
+
+        auto result = GridSpacing::create(grid, dx);
+        EXPECT_TRUE(result.has_value());
+
+        return result.value();
+        // grid and dx go out of scope here
+    }();
+
+    // GridSpacing should still be valid because it owns its data
+    EXPECT_FALSE(spacing.is_uniform());
+
+    // Verify we can access the precomputed arrays
+    auto dx_left = spacing.dx_left_inv();
+    auto dx_right = spacing.dx_right_inv();
+    auto dx_center = spacing.dx_center_inv();
+    auto w_left = spacing.w_left();
+    auto w_right = spacing.w_right();
+
+    EXPECT_EQ(dx_left.size(), 2);
+    EXPECT_EQ(dx_right.size(), 2);
+    EXPECT_EQ(dx_center.size(), 2);
+    EXPECT_EQ(w_left.size(), 2);
+    EXPECT_EQ(w_right.size(), 2);
+
+    // Verify values are correct
+    EXPECT_NEAR(dx_left[0], 1.0 / 0.05, 1e-14);
+    EXPECT_NEAR(dx_left[1], 1.0 / 0.10, 1e-14);
+    EXPECT_NEAR(dx_right[0], 1.0 / 0.10, 1e-14);
+    EXPECT_NEAR(dx_right[1], 1.0 / 0.15, 1e-14);
+}
+
 }  // namespace
 }  // namespace mango
