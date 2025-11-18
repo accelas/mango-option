@@ -1,10 +1,10 @@
 cc_library(
     name = "american_solver_workspace",
+    srcs = ["american_solver_workspace.cpp"],
     hdrs = ["american_solver_workspace.hpp"],
     deps = [
-        "//src/pde/core:pde_workspace",
+        "//src/pde/core:pde_workspace_pmr",
         "//src/pde/core:grid",
-        "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
