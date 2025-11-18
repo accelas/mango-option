@@ -71,6 +71,16 @@ cc_library(
 )
 
 cc_library(
+    name = "pde_workspace_pmr",
+    hdrs = ["pde_workspace_pmr.hpp"],
+    deps = [
+        ":grid",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pde_solver",
     hdrs = ["pde_solver.hpp"],
     deps = [

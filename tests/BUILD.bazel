@@ -449,3 +449,13 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "pde_workspace_pmr_test",
+    srcs = ["pde_workspace_pmr_test.cc"],
+    deps = [
+        "//src/pde/core:pde_workspace_pmr",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
