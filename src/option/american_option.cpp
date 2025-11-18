@@ -248,7 +248,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
     std::span<double> output_buffer;
 
     if (collect_full_surface) {
-        // Allocate buffer: [step0][step1]...[stepN][u_old_scratch]
+        // Allocate buffer: [u_old_initial][step0][step1]...[step(n_time-1)]
+        // u_old_initial is scratch space for step 0, then u_old points to previous slice
         surface_storage.resize((n_time + 1) * n_space);
         output_buffer = std::span{surface_storage};
     }
@@ -323,13 +324,13 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
 
-            // Store full surface if collected (exclude u_old scratch space)
+            // Store full surface if collected (skip initial scratch space)
             if (collect_full_surface) {
-                // Buffer layout: [step0][step1]...[stepN][u_old_scratch]
-                // Extract only the time steps (not the scratch space)
+                // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+                // Extract only the time steps (skip initial scratch)
                 result.surface_2d.assign(
-                    surface_storage.begin(),
-                    surface_storage.begin() + n_time * n_space
+                    surface_storage.begin() + n_space,  // Skip u_old_initial
+                    surface_storage.end()                 // Include all time steps
                 );
             }
 

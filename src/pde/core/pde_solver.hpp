@@ -79,7 +79,8 @@ public:
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
     /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
-    ///                      Layout: [step0][step1]...[stepN][scratch_u_old]
+    ///                      Layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+    ///                      After step i, u_old points to step(i-1) (perfect cache locality!)
     ///                      If provided, solver writes directly to buffer (zero-copy)
     ///                      If not provided, solver uses internal workspace
     PDESolver(std::span<const double> grid,
@@ -117,7 +118,7 @@ public:
         // Setup solution storage
         if (!output_buffer.empty()) {
             // External buffer provided - use it directly (zero-copy)
-            // Buffer layout: [step0][step1]...[stepN][u_old_scratch]
+            // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
             // Verify size
             size_t expected_size = (time.n_steps() + 1) * n_;
             if (output_buffer.size() < expected_size) {
@@ -125,9 +126,9 @@ public:
                     std::to_string(expected_size) + " but got " + std::to_string(output_buffer.size()));
             }
 
-            // u_current_ points to step 0, u_old_ points to scratch space
-            u_current_ = output_buffer.subspan(0, n_);
-            u_old_ = output_buffer.subspan(time.n_steps() * n_, n_);
+            // u_old_ points to initial scratch, u_current_ points to step 0
+            u_old_ = output_buffer.subspan(0, n_);
+            u_current_ = output_buffer.subspan(n_, n_);
             output_buffer_ = output_buffer;
             current_step_ = 0;
         } else {
@@ -163,8 +164,11 @@ public:
         for (size_t step = 0; step < time_.n_steps(); ++step) {
             double t_old = t;
 
-            // Store u^n for TR-BDF2
-            std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+            // For internal storage only: copy u_current to u_old
+            // For external buffer: u_old already points to previous slice (no copy!)
+            if (output_buffer_.empty()) {
+                std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+            }
 
             // Stage 1: Trapezoidal rule to t_n + γ·dt
             double t_stage1 = t + config_.gamma * dt;
@@ -186,9 +190,13 @@ public:
             // Process temporal events AFTER completing the step
             process_temporal_events(t_old, t_next, step);
 
-            // Advance u_current_ to next slice if using external buffer
+            // Advance pointers for next iteration (external buffer only)
             if (!output_buffer_.empty() && step + 1 < time_.n_steps()) {
-                u_current_ = output_buffer_.subspan((step + 1) * n_, n_);
+                // Current slice becomes old for next iteration (perfect cache locality!)
+                u_old_ = u_current_;
+                // Advance to next slice: buffer layout is [initial][step0][step1]...
+                // So step i is at offset (i+1)*n
+                u_current_ = output_buffer_.subspan((step + 2) * n_, n_);
             }
         }
 
