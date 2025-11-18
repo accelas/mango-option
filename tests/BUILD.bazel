@@ -185,8 +185,17 @@ cc_test(
     name = "grid_spacing_test",
     srcs = ["grid_spacing_test.cc"],
     deps = [
-        "//src/pde/operators:grid_spacing",
         "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "grid_spacing_data_test",
+    srcs = ["grid_spacing_data_test.cc"],
+    deps = [
+        "//src/pde/core:grid_spacing_data",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -345,7 +354,6 @@ cc_test(
     deps = [
         "//src/pde/operators:centered_difference_simd_backend",
         "//src/pde/operators:centered_difference_scalar",
-        "//src/pde/operators:grid_spacing",
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
@@ -357,7 +365,6 @@ cc_test(
     srcs = ["centered_difference_facade_test.cc"],
     deps = [
         "//src/pde/operators:centered_difference_facade",
-        "//src/pde/operators:grid_spacing",
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],

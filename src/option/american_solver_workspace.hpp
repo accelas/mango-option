@@ -10,7 +10,6 @@
 #pragma once
 
 #include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/operators/grid_spacing.hpp"
 #include "src/pde/core/grid.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -104,18 +103,6 @@ namespace mango {
  * The memory savings from workspace reuse (~1.6 KB per solver) only matter
  * for sequential solving where the same workspace is reused hundreds of times.
  */
-// Helper to initialize grid before PDEWorkspace base class
-class GridHolder {
-protected:
-    GridBuffer<double> grid_buffer_;
-    GridView<double> grid_view_;
-
-    GridHolder(double x_min, double x_max, size_t n_space)
-        : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
-        , grid_view_(grid_buffer_.span())
-    {}
-};
-
 class AmericanSolverWorkspace : private GridHolder, public PDEWorkspace {
 private:
     // Pass-key idiom to allow make_shared while keeping constructor private
@@ -132,7 +119,7 @@ public:
         , x_max_(x_max)
         , n_space_(n_space)
         , n_time_(n_time)
-        , grid_spacing_(std::make_shared<operators::GridSpacing<double>>(grid_view_))
+        , grid_spacing_(std::make_shared<GridSpacing<double>>(grid_view_))
     {
     }
 
@@ -256,7 +243,7 @@ public:
 
     // Grid and spacing accessors
     std::span<const double> grid_span() const { return grid_view_.span(); }
-    std::shared_ptr<operators::GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
+    std::shared_ptr<GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
 
     // Note: PDEWorkspace methods inherited directly:
     // - u_current(), u_next(), u_stage()
@@ -273,7 +260,7 @@ private:
     size_t n_time_;
 
     // GridSpacing (shared for reuse)
-    std::shared_ptr<operators::GridSpacing<double>> grid_spacing_;
+    std::shared_ptr<GridSpacing<double>> grid_spacing_;
 };
 
 }  // namespace mango

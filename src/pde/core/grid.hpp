@@ -4,9 +4,12 @@
 #include <span>
 #include <memory>
 #include <cmath>
+#include <cassert>
 #include <stdexcept>
 #include <expected>
+#include <variant>
 #include "src/support/error_types.hpp"
+#include "src/pde/core/grid_spacing_data.hpp"
 
 namespace mango {
 
@@ -228,5 +231,152 @@ GridBuffer<T> GridSpec<T>::generate() const {
 
     return GridBuffer<T>(std::move(points));
 }
+
+/**
+ * GridHolder: Helper to initialize grid before derived classes
+ *
+ * This class is designed for use as a base class when you need to
+ * initialize grid data before initializing other base classes that
+ * depend on the grid. It uses the base-from-member idiom.
+ *
+ * Example usage:
+ * ```cpp
+ * class MyWorkspace : private GridHolder, public PDEWorkspace {
+ *     MyWorkspace(double x_min, double x_max, size_t n_space, size_t n_time)
+ *         : GridHolder(x_min, x_max, n_space)  // Initialize grid first
+ *         , PDEWorkspace(grid_view_, n_time)   // Then use grid_view_
+ *     {}
+ * };
+ * ```
+ */
+class GridHolder {
+protected:
+    GridBuffer<double> grid_buffer_;
+    GridView<double> grid_view_;
+
+    GridHolder(double x_min, double x_max, size_t n_space)
+        : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
+        , grid_view_(grid_buffer_.span())
+    {}
+};
+
+/**
+ * GridSpacing: Grid spacing information for finite difference operators
+ *
+ * Uses std::variant to store either UniformSpacing or NonUniformSpacing.
+ * Memory efficient: only stores active alternative.
+ *
+ * For UNIFORM grids:
+ *   - Stores constant spacing (dx, dx_inv, dx_inv_sq)
+ *   - Memory: ~40 bytes
+ *
+ * For NON-UNIFORM grids:
+ *   - Precomputes weight arrays during construction
+ *   - Memory: ~40 bytes + 5×(n-2)×8 bytes (~4KB for n=100)
+ *
+ * SIMD INTEGRATION:
+ *   CenteredDifference operators load precomputed arrays via element_aligned spans.
+ */
+template<typename T = double>
+class GridSpacing {
+public:
+    using SpacingVariant = std::variant<UniformSpacing<T>, NonUniformSpacing<T>>;
+
+    /**
+     * Create grid spacing from a grid view
+     *
+     * Auto-detects uniform vs non-uniform and constructs appropriate variant.
+     *
+     * @param grid Grid points (non-owning view)
+     */
+    explicit GridSpacing(GridView<T> grid)
+        : grid_(grid)
+        , spacing_(compute_spacing(grid))
+    {
+    }
+
+    // Query if grid is uniform (zero-cost - checks variant index)
+    bool is_uniform() const {
+        return std::holds_alternative<UniformSpacing<T>>(spacing_);
+    }
+
+    // Get size
+    size_t size() const {
+        return std::visit([](const auto& s) { return s.n; }, spacing_);
+    }
+
+    // Minimum grid size for stencil operations
+    static constexpr size_t min_stencil_size() { return 3; }
+
+    // Get uniform spacing (only valid if is_uniform())
+    T spacing() const {
+        return std::get<UniformSpacing<T>>(spacing_).dx;
+    }
+
+    T spacing_inv() const {
+        return std::get<UniformSpacing<T>>(spacing_).dx_inv;
+    }
+
+    T spacing_inv_sq() const {
+        return std::get<UniformSpacing<T>>(spacing_).dx_inv_sq;
+    }
+
+    // Get non-uniform arrays (only valid if !is_uniform())
+    std::span<const T> dx_left_inv() const {
+        return std::get<NonUniformSpacing<T>>(spacing_).dx_left_inv();
+    }
+
+    std::span<const T> dx_right_inv() const {
+        return std::get<NonUniformSpacing<T>>(spacing_).dx_right_inv();
+    }
+
+    std::span<const T> dx_center_inv() const {
+        return std::get<NonUniformSpacing<T>>(spacing_).dx_center_inv();
+    }
+
+    std::span<const T> w_left() const {
+        return std::get<NonUniformSpacing<T>>(spacing_).w_left();
+    }
+
+    std::span<const T> w_right() const {
+        return std::get<NonUniformSpacing<T>>(spacing_).w_right();
+    }
+
+    // Access to underlying grid
+    const GridView<T>& grid() const { return grid_; }
+
+private:
+    static SpacingVariant compute_spacing(GridView<T> grid) {
+        const size_t n = grid.size();
+
+        if (n < 2) {
+            // Degenerate case: treat as uniform with zero spacing
+            return UniformSpacing<T>(T(0), n);
+        }
+
+        // Check uniformity (within tolerance)
+        const T expected_dx = (grid.x_max() - grid.x_min()) / static_cast<T>(n - 1);
+        constexpr T tolerance = T(1e-10);
+        bool is_uniform = true;
+
+        for (size_t i = 1; i < n; ++i) {
+            const T actual_dx = grid[i] - grid[i-1];
+            if (std::abs(actual_dx - expected_dx) > tolerance) {
+                is_uniform = false;
+                break;
+            }
+        }
+
+        // Construct appropriate variant alternative
+        if (is_uniform) {
+            return UniformSpacing<T>(expected_dx, n);
+        } else {
+            return NonUniformSpacing<T>(grid.span());
+        }
+    }
+
+    GridView<T> grid_;
+    SpacingVariant spacing_;
+};
 
 } // namespace mango

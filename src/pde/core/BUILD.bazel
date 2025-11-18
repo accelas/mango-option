@@ -9,6 +9,7 @@ cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
     deps = [
+        ":grid_spacing_data",
         "//src/support:error_types",
     ],
     copts = [
@@ -17,6 +18,13 @@ cc_library(
         "-Wextra",
         "-O3",
     ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "grid_spacing_data",
+    hdrs = ["grid_spacing_data.hpp"],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
