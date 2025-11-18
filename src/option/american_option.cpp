@@ -288,24 +288,26 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                 });
 
                 // Solve the PDE
+                auto solve_result = solver.solve();
+                if (!solve_result) {
+                    return std::unexpected(solve_result.error());
+                }
+
+                // Extract solution
                 AmericanOptionResult result;
-                return solver.solve()
-                    .transform([&]() {
-                        result.converged = true;
+                result.converged = true;
 
-                        // Extract solution
-                        auto solution_view = solver.solution();
-                        solution_.assign(solution_view.begin(), solution_view.end());
-                        solved_ = true;
+                auto solution_view = solver.solution();
+                solution_.assign(solution_view.begin(), solution_view.end());
+                solved_ = true;
 
-                        // Store solution surface and grid information
-                        result.surface.assign(solution_view.begin(), solution_view.end());
-                        result.x_min = workspace_->x_min();
-                        result.x_max = workspace_->x_max();
-                        result.strike = params_.strike;
+                // Store solution surface and grid information
+                result.surface.assign(solution_view.begin(), solution_view.end());
+                result.x_min = workspace_->x_min();
+                result.x_max = workspace_->x_max();
+                result.strike = params_.strike;
 
-                        return result;
-                    });
+                return result;
             },
             strategy
         );
