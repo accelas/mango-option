@@ -243,10 +243,14 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
     size_t n_space = workspace_->n_space();
     size_t n_time = workspace_->n_time();
 
-    // 6. Prepare surface storage if requested
+    // 6. Prepare surface storage if requested (zero-copy design)
     std::vector<double> surface_storage;
+    std::span<double> output_buffer;
+
     if (collect_full_surface) {
-        surface_storage.resize(n_space * n_time);
+        // Allocate buffer: [step0][step1]...[stepN][u_old_scratch]
+        surface_storage.resize((n_time + 1) * n_space);
+        output_buffer = std::span{surface_storage};
     }
 
     // 7. Single unified solver path using std::visit
@@ -264,21 +268,14 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
                 return strat.right_boundary(t, x, params_.rate);
             });
 
-            // Setup step callback for optional surface collection
-            std::optional<StepCallback> step_cb = std::nullopt;
-            if (collect_full_surface) {
-                step_cb = [&surface_storage, n_space](size_t step, double, std::span<const double> u) {
-                    std::copy(u.begin(), u.end(), surface_storage.begin() + step * n_space);
-                };
-            }
-
-            // Create PDESolver with strategy-specific obstacle and optional callback
+            // Create PDESolver with strategy-specific obstacle and optional output buffer
+            // When output_buffer is provided, solver writes directly to it (zero-copy)
             PDESolver solver(
                 x_grid, time_domain, TRBDF2Config{},
                 left_bc, right_bc, bs_op,
                 [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
                 external_workspace,
-                step_cb
+                output_buffer  // Zero-copy: solver writes directly to surface_storage
             );
 
             // Register discrete dividends as temporal events
@@ -326,9 +323,14 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
 
-            // Store full surface if collected
+            // Store full surface if collected (exclude u_old scratch space)
             if (collect_full_surface) {
-                result.surface_2d = std::move(surface_storage);
+                // Buffer layout: [step0][step1]...[stepN][u_old_scratch]
+                // Extract only the time steps (not the scratch space)
+                result.surface_2d.assign(
+                    surface_storage.begin(),
+                    surface_storage.begin() + n_time * n_space
+                );
             }
 
             return result;

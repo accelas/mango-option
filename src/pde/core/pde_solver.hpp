@@ -23,10 +23,6 @@
 
 namespace mango {
 
-/// Simple callback invoked after each time step completes
-/// Parameters: (step_index, time, solution_span)
-using StepCallback = std::function<void(size_t, double, std::span<const double>)>;
-
 /// Concept to detect spatial operators with analytical Jacobian capability
 template<typename SpatialOp>
 concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, JacobianView jac) {
@@ -82,7 +78,10 @@ public:
     /// @param spatial_op Spatial operator L(u)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
-    /// @param step_callback Optional callback invoked after each time step
+    /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
+    ///                      Layout: [step0][step1]...[stepN][scratch_u_old]
+    ///                      If provided, solver writes directly to buffer (zero-copy)
+    ///                      If not provided, solver uses internal workspace
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
               const TRBDF2Config& config = {},
@@ -91,7 +90,7 @@ public:
               SpatialOp spatial_op = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
               PDEWorkspace* external_workspace = nullptr,
-              std::optional<StepCallback> step_callback = std::nullopt)
+              std::span<double> output_buffer = {})
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -99,12 +98,9 @@ public:
         , right_bc_(right_bc)
         , spatial_op_(std::move(spatial_op))
         , obstacle_(std::move(obstacle))
-        , step_callback_(std::move(step_callback))
         , n_(grid.size())
         , workspace_owner_(nullptr)
         , workspace_(nullptr)
-        , u_current_(n_)
-        , u_old_(n_)
         , rhs_(n_)
         , jacobian_lower_(n_ - 1)
         , jacobian_diag_(n_)
@@ -118,10 +114,29 @@ public:
         // Acquire workspace (either external or create owned)
         acquire_workspace(grid, external_workspace);
 
-        // Initialize grid information for legacy operators that need it
-        // (e.g., LaplacianOperator) via set_grid() if present
-        if constexpr (requires { spatial_op_.set_grid(grid, workspace_->dx()); }) {
-            spatial_op_.set_grid(grid, workspace_->dx());
+        // Setup solution storage
+        if (!output_buffer.empty()) {
+            // External buffer provided - use it directly (zero-copy)
+            // Buffer layout: [step0][step1]...[stepN][u_old_scratch]
+            // Verify size
+            size_t expected_size = (time.n_steps() + 1) * n_;
+            if (output_buffer.size() < expected_size) {
+                throw std::invalid_argument("Output buffer too small: need " +
+                    std::to_string(expected_size) + " but got " + std::to_string(output_buffer.size()));
+            }
+
+            // u_current_ points to step 0, u_old_ points to scratch space
+            u_current_ = output_buffer.subspan(0, n_);
+            u_old_ = output_buffer.subspan(time.n_steps() * n_, n_);
+            output_buffer_ = output_buffer;
+            current_step_ = 0;
+        } else {
+            // No external buffer - use internal storage
+            solution_storage_.resize(2 * n_);
+            u_current_ = std::span{solution_storage_}.subspan(0, n_);
+            u_old_ = std::span{solution_storage_}.subspan(n_, n_);
+            output_buffer_ = {};
+            current_step_ = 0;
         }
     }
 
@@ -171,9 +186,9 @@ public:
             // Process temporal events AFTER completing the step
             process_temporal_events(t_old, t_next, step);
 
-            // Invoke step callback if provided
-            if (step_callback_.has_value()) {
-                (*step_callback_)(step, t, std::span<const double>{u_current_});
+            // Advance u_current_ to next slice if using external buffer
+            if (!output_buffer_.empty() && step + 1 < time_.n_steps()) {
+                u_current_ = output_buffer_.subspan((step + 1) * n_, n_);
             }
         }
 
@@ -212,19 +227,23 @@ private:
     BoundaryR right_bc_;
     SpatialOp spatial_op_;
     std::optional<ObstacleCallback> obstacle_;
-    std::optional<StepCallback> step_callback_;
 
     // Grid size
     size_t n_;
+
+    // Output buffer control
+    std::span<double> output_buffer_;  // External buffer if provided
+    size_t current_step_ = 0;           // Current time step index
 
     // Workspace for cache blocking
     std::unique_ptr<PDEWorkspace> workspace_owner_;
     PDEWorkspace* workspace_;
 
-    // Solution storage
-    std::vector<double> u_current_;  // u^{n+1} or u^{n+γ}
-    std::vector<double> u_old_;      // u^n
-    std::vector<double> rhs_;        // n: RHS vector for stages
+    // Solution storage (spans point into either output_buffer_ or solution_storage_)
+    std::vector<double> solution_storage_;  // Backing storage when no external buffer
+    std::span<double> u_current_;           // u^{n+1} or u^{n+γ}
+    std::span<double> u_old_;               // u^n
+    std::vector<double> rhs_;               // n: RHS vector for stages
 
     // Newton workspace arrays (merged from NewtonWorkspace)
     std::vector<double> jacobian_lower_;      // n-1: Lower diagonal

@@ -5,7 +5,6 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/price_table_snapshot_collector.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <mutex>
@@ -600,8 +599,13 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
         );
     }
 
-    // Solve batch (surface always collected)
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
+    // Solve batch with full surface collection for at_time() access
+    auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
+        batch,
+        -3.0, 3.0,  // x_min, x_max
+        101, 1000,  // n_space, n_time
+        nullptr,    // No setup callback
+        true);      // collect_full_surface=true for at_time()
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);
