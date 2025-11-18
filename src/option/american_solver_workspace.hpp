@@ -58,7 +58,7 @@ public:
            std::pmr::memory_resource* resource);
 
     std::shared_ptr<PDEWorkspace> pde_workspace() const { return pde_workspace_; }
-    std::shared_ptr<GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
+    GridSpacing<double> grid_spacing() const { return grid_spacing_; }
 
     std::span<const double> grid() const {
         return pde_workspace_->grid().subspan(0, pde_workspace_->logical_size());
@@ -83,7 +83,7 @@ public:
 
 private:
     AmericanSolverWorkspace(std::shared_ptr<PDEWorkspace> pde_ws,
-                           std::shared_ptr<GridSpacing<double>> spacing,
+                           GridSpacing<double> spacing,
                            size_t n_time)
         : pde_workspace_(std::move(pde_ws))
         , grid_spacing_(std::move(spacing))
@@ -91,7 +91,7 @@ private:
     {}
 
     std::shared_ptr<PDEWorkspace> pde_workspace_;
-    std::shared_ptr<GridSpacing<double>> grid_spacing_;
+    GridSpacing<double> grid_spacing_;
     size_t n_time_;
 };
 

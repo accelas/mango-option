@@ -26,10 +26,10 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
     // Extract logical grid (without SIMD padding)
     auto logical_grid = pde_ws->grid().subspan(0, pde_ws->logical_size());
     auto grid_view = GridView<double>(logical_grid);
-    auto grid_spacing = std::make_shared<GridSpacing<double>>(grid_view);
+    auto grid_spacing = GridSpacing<double>(grid_view);
 
     return std::shared_ptr<AmericanSolverWorkspace>(
-        new AmericanSolverWorkspace(pde_ws, grid_spacing, n_time));
+        new AmericanSolverWorkspace(pde_ws, std::move(grid_spacing), n_time));
 }
 
 }  // namespace mango

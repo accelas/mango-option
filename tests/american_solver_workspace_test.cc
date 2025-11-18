@@ -37,9 +37,8 @@ TEST(AmericanSolverWorkspaceTest, GridSpacingAvailable) {
     ASSERT_TRUE(workspace.has_value());
 
     auto spacing = workspace.value()->grid_spacing();
-    ASSERT_NE(spacing, nullptr);
-    EXPECT_TRUE(spacing->is_uniform());
-    EXPECT_NEAR(spacing->spacing(), 0.01, 1e-10);
+    EXPECT_TRUE(spacing.is_uniform());
+    EXPECT_NEAR(spacing.spacing(), 0.01, 1e-10);
 }
 
 TEST(AmericanSolverWorkspaceTest, NullResourceReturnsError) {
