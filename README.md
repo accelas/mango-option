@@ -253,18 +253,21 @@ The library provides two complementary approaches for batch American option pric
 
 **1. BatchAmericanOptionSolver** - Parallel solving with per-solver configuration
 ```cpp
-#include "src/option/american_option.hpp"
+#include "src/option/american_option_batch.hpp"
 
 std::vector<AmericanOptionParams> batch = { /* 100 options */ };
 
-// Simple batch solve (no configuration needed)
-auto results = BatchAmericanOptionSolver::solve_batch(
+// Simple batch solve (uses default grid: 101×1000, ±3 log-moneyness)
+auto results = solve_american_options_batch(batch);
+
+// Advanced: custom grid configuration
+auto results = solve_american_options_batch(
     batch, -3.0, 3.0, 101, 1000);
 
 // Advanced: register snapshots via callback
 std::vector<SnapshotCollector> collectors(batch.size());
 auto results = BatchAmericanOptionSolver::solve_batch(
-    batch, -3.0, 3.0, 101, 1000,
+    batch,
     [&](size_t idx, AmericanOptionSolver& solver) {
         // Configure this solver before solve()
         solver.register_snapshot(step, time_idx, &collectors[idx]);
