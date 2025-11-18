@@ -586,7 +586,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     }
 }
 
-TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
+TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
     std::vector<AmericanOptionParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
         batch[i] = AmericanOptionParams(
@@ -600,29 +600,8 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
         );
     }
 
-    // Create collectors for each solve
-    std::vector<double> moneyness = {0.9, 1.0, 1.1};
-    std::vector<double> maturities = {0.5, 1.0};
-
-    std::vector<PriceTableSnapshotCollector> collectors;
-    for (size_t i = 0; i < 3; ++i) {
-        PriceTableSnapshotCollectorConfig config{
-            .moneyness = std::span{moneyness},
-            .tau = std::span{maturities},
-            .K_ref = 100.0,
-            .option_type = OptionType::PUT,
-            .payoff_params = nullptr
-        };
-        collectors.emplace_back(config);
-    }
-
-    // Register snapshots via callback
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(
-        batch,
-        [&](size_t idx, AmericanOptionSolver& solver) {
-            solver.register_snapshot(499, 0, &collectors[idx]);  // τ=0.5
-            solver.register_snapshot(999, 1, &collectors[idx]);  // τ=1.0
-        });
+    // Solve batch (no callback needed)
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);
@@ -631,14 +610,33 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
         EXPECT_TRUE(result.has_value());
     }
 
-    // Verify snapshots were collected
-    for (size_t i = 0; i < 3; ++i) {
-        auto prices = collectors[i].prices();
-        EXPECT_EQ(prices.size(), moneyness.size() * maturities.size());
+    // Extract prices from surface_2d at specific time steps
+    std::vector<double> moneyness = {0.9, 1.0, 1.1};
+    std::vector<size_t> step_indices = {499, 999};  // τ=0.5, τ=1.0
 
-        // All prices should be positive
-        for (double price : prices) {
-            EXPECT_GT(price, 0.0);
+    for (size_t i = 0; i < 3; ++i) {
+        const auto& result = batch_result.results[i].value();
+
+        // Verify surface_2d has data
+        EXPECT_FALSE(result.surface_2d.empty());
+        EXPECT_GT(result.n_space, 0);
+        EXPECT_GT(result.n_time, 0);
+
+        // Extract prices at each time step and moneyness
+        for (size_t step_idx : step_indices) {
+            auto spatial_solution = result.at_time(step_idx);
+            EXPECT_FALSE(spatial_solution.empty());
+
+            // All values should be non-negative (boundary conditions may be zero)
+            size_t non_zero_count = 0;
+            for (double val : spatial_solution) {
+                EXPECT_GE(val, 0.0);
+                if (val > 0.0) {
+                    ++non_zero_count;
+                }
+            }
+            // At least some values should be positive
+            EXPECT_GT(non_zero_count, 0);
         }
     }
 }

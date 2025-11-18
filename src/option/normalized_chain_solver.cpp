@@ -4,7 +4,6 @@
  */
 
 #include "src/option/normalized_chain_solver.hpp"
-#include "src/option/price_table_snapshot_collector.hpp"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
@@ -153,28 +152,9 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     }
     auto solver = std::move(solver_result.value());
 
-    // Setup snapshot collector
-    // PriceTableSnapshotCollector expects moneyness m = S/K_ref
-    // PDE grid is in x = ln(S/K) space, so m = exp(x)
-    std::vector<double> moneyness_values;
-    moneyness_values.reserve(workspace.x_grid_.size());
-    for (double x : workspace.x_grid_) {
-        // x = ln(S/K_ref), so m = S/K_ref = exp(x)
-        double m = std::exp(x);
-        moneyness_values.push_back(m);
-    }
-
-    PriceTableSnapshotCollectorConfig collector_config{
-        .moneyness = std::span{moneyness_values},
-        .tau = std::span{workspace.tau_grid_},
-        .K_ref = 1.0,  // Normalized
-        .option_type = request.option_type,
-        .payoff_params = nullptr
-    };
-    PriceTableSnapshotCollector collector(collector_config);
-
-    // Register snapshots at requested maturities
+    // Precompute step indices for each maturity
     double dt = request.T_max / request.n_time;
+    std::vector<size_t> step_indices(workspace.tau_grid_.size());
     for (size_t j = 0; j < workspace.tau_grid_.size(); ++j) {
         // Compute step index: k = round(τ/dt) - 1
         double step_exact = workspace.tau_grid_[j] / dt - 1.0;
@@ -182,12 +162,12 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
 
         // Clamp to valid range
         if (step_rounded < 0) {
-            step_rounded = 0;
+            step_indices[j] = 0;
         } else if (step_rounded >= static_cast<long long>(request.n_time)) {
-            step_rounded = static_cast<long long>(request.n_time) - 1;
+            step_indices[j] = request.n_time - 1;
+        } else {
+            step_indices[j] = static_cast<size_t>(step_rounded);
         }
-
-        solver.register_snapshot(static_cast<size_t>(step_rounded), j, &collector);
     }
 
     // Solve PDE
@@ -196,21 +176,30 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
         return std::unexpected(solve_result.error());
     }
 
-    // Extract values from collector
-    auto prices_2d = collector.prices();  // Shape: Nx × Ntau
+    // Extract solution from result
+    const auto& result = solve_result.value();
     size_t Nx = workspace.x_grid_.size();
     size_t Ntau = workspace.tau_grid_.size();
 
-    if (prices_2d.size() != Nx * Ntau) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidState,
-            .message = "Snapshot collector returned wrong size",
-            .iterations = 0
-        });
-    }
+    // Copy values from surface_2d to workspace (shape: Nx × Ntau)
+    for (size_t j = 0; j < Ntau; ++j) {
+        size_t step_idx = step_indices[j];
+        std::span<const double> spatial_solution = result.at_time(step_idx);
 
-    // Copy to workspace values (already normalized u = V/K, and K=1)
-    std::copy(prices_2d.begin(), prices_2d.end(), workspace.values_.begin());
+        if (spatial_solution.empty() || spatial_solution.size() != Nx) {
+            return std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidState,
+                .message = "Surface_2d returned wrong size for time step",
+                .iterations = 0
+            });
+        }
+
+        // Copy this time step's spatial solution to workspace
+        // Workspace layout: values_[i * Ntau + j] = V(x_i, tau_j)
+        for (size_t i = 0; i < Nx; ++i) {
+            workspace.values_[i * Ntau + j] = spatial_solution[i];
+        }
+    }
 
     // Update surface view to reference workspace values
     surface_view = workspace.surface_view();

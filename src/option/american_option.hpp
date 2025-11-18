@@ -91,23 +91,39 @@ using AmericanOptionParams = PricingParams;
  * Solver result containing solution surface (interpolate on-demand for specific prices).
  */
 struct AmericanOptionResult {
-    std::vector<double> surface;  ///< Normalized solution V/K on log-moneyness grid
-    double x_min;                  ///< Minimum log-moneyness
-    double x_max;                  ///< Maximum log-moneyness
-    double strike;                 ///< Strike price K (for denormalization)
-    bool converged;                ///< Solver convergence status
+    std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (row-major)
+    size_t n_space;                    ///< Number of spatial grid points
+    size_t n_time;                     ///< Number of time steps
+    double x_min;                      ///< Minimum log-moneyness
+    double x_max;                      ///< Maximum log-moneyness
+    double strike;                     ///< Strike price K (for denormalization)
+    bool converged;                    ///< Solver convergence status
 
     /// Default constructor
     AmericanOptionResult()
-        : surface(), x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
+        : surface_2d(), n_space(0), n_time(0),
+          x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
 
     /**
-     * Interpolate to get option value at specific spot price.
+     * Interpolate to get option value at specific spot price (at final time).
      *
      * @param spot Spot price S
      * @return Option value in dollars (denormalized)
      */
     double value_at(double spot) const;
+
+    /**
+     * Get solution at specific time step.
+     *
+     * @param time_idx Time step index (0 = maturity, n_time-1 = present)
+     * @return Span of spatial solution at that time
+     */
+    std::span<const double> at_time(size_t time_idx) const {
+        if (surface_2d.empty() || time_idx >= n_time) {
+            return {};
+        }
+        return std::span<const double>{surface_2d.data() + time_idx * n_space, n_space};
+    }
 };
 
 /**
@@ -184,20 +200,6 @@ public:
     std::expected<AmericanOptionGreeks, SolverError> compute_greeks() const;
 
     /**
-     * Register snapshot collection at specific step index.
-     *
-     * Must be called before solve(). Snapshots will be collected
-     * during the solve() call.
-     *
-     * @param step_index Step number (0-based) to collect snapshot
-     * @param user_index User-provided index for matching
-     * @param collector Callback to receive snapshot (must outlive solve())
-     */
-    void register_snapshot(size_t step_index, size_t user_index, SnapshotCollector* collector) {
-        snapshot_requests_.push_back({step_index, user_index, collector});
-    }
-
-    /**
      * Get the full solution surface (for debugging/analysis).
      *
      * @return Vector of option values across the spatial grid
@@ -215,14 +217,6 @@ private:
     // Solution state
     std::vector<double> solution_;
     bool solved_ = false;
-
-    // Snapshot requests
-    struct SnapshotRequest {
-        size_t step_index;
-        size_t user_index;
-        SnapshotCollector* collector;
-    };
-    std::vector<SnapshotRequest> snapshot_requests_;
 
     // Helper methods
     double compute_delta() const;

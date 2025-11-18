@@ -28,6 +28,35 @@ namespace mango {
 namespace {
 
 /**
+ * Internal collector for gathering all time steps during solve.
+ */
+class AllTimeStepsCollector : public SnapshotCollector {
+public:
+    explicit AllTimeStepsCollector(size_t n_space, size_t n_time)
+        : n_space_(n_space), n_time_(n_time) {
+        data_.resize(n_space * n_time);
+    }
+
+    void collect(const Snapshot& snapshot) override {
+        size_t time_idx = snapshot.user_index;
+        if (time_idx >= n_time_) return;
+
+        const auto& solution = snapshot.solution;
+        std::copy(solution.begin(), solution.end(),
+                  data_.begin() + time_idx * n_space_);
+    }
+
+    std::vector<double> extract() && {
+        return std::move(data_);
+    }
+
+private:
+    size_t n_space_;
+    size_t n_time_;
+    std::vector<double> data_;
+};
+
+/**
  * Strategy pattern for option-specific behavior (obstacle + initial condition).
  * Using std::variant eliminates ~130 lines of code duplication in solve().
  */
@@ -239,7 +268,14 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     };
     auto bs_op = make_operator();
 
-    // 5. Single unified solver path using std::visit
+    // 5. Get grid dimensions
+    size_t n_space = workspace_->n_space();
+    size_t n_time = workspace_->n_time();
+
+    // 6. Create collector for all time steps
+    AllTimeStepsCollector all_time_collector(n_space, n_time);
+
+    // 7. Single unified solver path using std::visit
     return std::visit(
         [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
             // Setup boundary conditions using strategy (NORMALIZED by K=1)
@@ -248,6 +284,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             auto left_bc = DirichletBC([&strat](double t, double x) {
                 return strat.left_boundary(t, x);
             });
+
 
             auto right_bc = DirichletBC([&strat, this](double t, double x) {
                 return strat.right_boundary(t, x, params_.rate);
@@ -278,9 +315,9 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                     });
             }
 
-            // Register snapshots (if any requested)
-            for (const auto& req : snapshot_requests_) {
-                solver.register_snapshot(req.step_index, req.user_index, req.collector);
+            // Register collector for all time steps
+            for (size_t step_idx = 0; step_idx < n_time; ++step_idx) {
+                solver.register_snapshot(step_idx, step_idx, &all_time_collector);
             }
 
             // Initialize with strategy-specific terminal condition (payoff at maturity)
@@ -304,7 +341,9 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             solved_ = true;
 
             // Store solution surface and grid information
-            result.surface.assign(solution_view.begin(), solution_view.end());
+            result.surface_2d = std::move(all_time_collector).extract();
+            result.n_space = n_space;
+            result.n_time = n_time;
             result.x_min = workspace_->x_min();
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
@@ -336,26 +375,29 @@ double AmericanOptionResult::value_at(double spot) const {
     // Convert spot to log-moneyness
     double x_target = std::log(spot / strike);
 
-    // Get grid size
-    const size_t n = surface.size();
-    if (n == 0) {
+    // Get final time step (present value)
+    // PDE time: t=0 at maturity, t=n_time-1 at present
+    if (surface_2d.empty() || n_space == 0 || n_time == 0) {
         return 0.0;
     }
 
+    // Extract final time step surface
+    std::span<const double> final_surface = at_time(n_time - 1);
+
     // Compute grid spacing (uniform grid)
-    const double dx = (x_max - x_min) / (n - 1);
+    const double dx = (x_max - x_min) / (n_space - 1);
 
     // Boundary cases
     if (x_target <= x_min) {
-        return surface[0] * strike;  // Denormalize
+        return final_surface[0] * strike;  // Denormalize
     }
     if (x_target >= x_max) {
-        return surface[n-1] * strike;  // Denormalize
+        return final_surface[n_space-1] * strike;  // Denormalize
     }
 
     // Find bracketing indices
     size_t i = 0;
-    while (i < n-1 && x_min + (i+1)*dx < x_target) {
+    while (i < n_space-1 && x_min + (i+1)*dx < x_target) {
         i++;
     }
 
@@ -363,7 +405,7 @@ double AmericanOptionResult::value_at(double spot) const {
     double x_i = x_min + i * dx;
     double x_i1 = x_min + (i+1) * dx;
     double t = (x_target - x_i) / (x_i1 - x_i);
-    double normalized_value = (1.0 - t) * surface[i] + t * surface[i+1];
+    double normalized_value = (1.0 - t) * final_surface[i] + t * final_surface[i+1];
 
     return normalized_value * strike;  // Denormalize
 }
