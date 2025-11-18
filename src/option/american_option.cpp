@@ -164,7 +164,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 1. Acquire grid from workspace
     std::span<const double> x_grid = workspace_->grid_span();
-    std::shared_ptr<operators::GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
+    std::shared_ptr<GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
     // Workspace now inherits from PDEWorkspace, so we can use it directly
     PDEWorkspace* external_workspace = workspace_.get();
 

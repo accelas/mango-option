@@ -1,6 +1,5 @@
 #include "src/pde/operators/centered_difference_simd_backend.hpp"
 #include "src/pde/operators/centered_difference_scalar.hpp"
-#include "src/pde/operators/grid_spacing.hpp"
 #include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
@@ -12,7 +11,7 @@ TEST(CenteredDifferenceSIMDTest, UniformSecondDerivative) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::operators::GridSpacing<double> spacing(grid.view());
+    mango::GridSpacing<double> spacing(grid.view());
     mango::operators::SimdBackend<double> stencil(spacing);
 
     // Test function: u(x) = x^2, d2u/dx2 = 2.0 everywhere
@@ -37,7 +36,7 @@ TEST(CenteredDifferenceSIMDTest, TiledComputation) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::operators::GridSpacing<double> spacing(grid.view());
+    mango::GridSpacing<double> spacing(grid.view());
     mango::operators::SimdBackend<double> stencil(spacing);
 
     // u(x) = sin(x), d2u/dx2 = -sin(x)
@@ -64,7 +63,7 @@ TEST(CenteredDifferenceSIMDTest, FirstDerivative) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::operators::GridSpacing<double> spacing(grid.view());
+    mango::GridSpacing<double> spacing(grid.view());
     mango::operators::SimdBackend<double> stencil(spacing);
 
     // u(x) = x^3, du/dx = 3x^2
@@ -92,7 +91,7 @@ TEST(CenteredDifferenceSIMDTest, PaddedArraySafety) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::operators::GridSpacing<double> spacing(grid.view());
+    mango::GridSpacing<double> spacing(grid.view());
     mango::operators::SimdBackend<double> stencil(spacing);
 
     // Allocate with SIMD padding (10 → 16)
@@ -118,7 +117,7 @@ TEST(CenteredDifferenceSIMDTest, NonUniformSecondDerivative) {
     x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
     auto stencil = mango::operators::SimdBackend<double>(spacing);
 
     // Test function: f(x) = x^2, f''(x) = 2
@@ -141,7 +140,7 @@ TEST(CenteredDifferenceSIMDTest, NonUniformFirstDerivative) {
     x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
     auto stencil = mango::operators::SimdBackend<double>(spacing);
 
     // Test function: f(x) = x^2, f'(x) = 2x
@@ -164,7 +163,7 @@ TEST(CenteredDifferenceSIMDTest, NonUniformSecondDerivativeMatchesScalar) {
     x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     // Scalar baseline (old CenteredDifference)
     auto scalar_stencil = mango::operators::ScalarBackend<double>(spacing);
@@ -201,7 +200,7 @@ TEST(CenteredDifferenceSIMDTest, NonUniformFirstDerivativeMatchesScalar) {
     x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     auto scalar_stencil = mango::operators::ScalarBackend<double>(spacing);
     auto simd_stencil = mango::operators::SimdBackend<double>(spacing);
@@ -226,7 +225,7 @@ TEST(CenteredDifferenceSIMDTest, UniformSecondDerivativeMatchesScalar) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    auto spacing = mango::operators::GridSpacing<double>(grid.view());
+    auto spacing = mango::GridSpacing<double>(grid.view());
 
     // Scalar baseline
     auto scalar_stencil = mango::operators::ScalarBackend<double>(spacing);
@@ -259,7 +258,7 @@ TEST(CenteredDifferenceSIMDTest, UniformFirstDerivativeMatchesScalar) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    auto spacing = mango::operators::GridSpacing<double>(grid.view());
+    auto spacing = mango::GridSpacing<double>(grid.view());
 
     auto scalar_stencil = mango::operators::ScalarBackend<double>(spacing);
     auto simd_stencil = mango::operators::SimdBackend<double>(spacing);
@@ -284,7 +283,7 @@ TEST(CenteredDifferenceSIMDTest, ConvenienceWrapperDispatchesCorrectly) {
         std::vector<double> x(11);
         for (size_t i = 0; i < 11; ++i) x[i] = i * 0.1;
         auto grid = mango::GridView<double>(x);
-        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto spacing = mango::GridSpacing<double>(grid);
         auto stencil = mango::operators::SimdBackend<double>(spacing);
 
         std::vector<double> u(11);
@@ -309,7 +308,7 @@ TEST(CenteredDifferenceSIMDTest, ConvenienceWrapperDispatchesCorrectly) {
         x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
         auto grid = mango::GridView<double>(x);
-        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto spacing = mango::GridSpacing<double>(grid);
         auto stencil = mango::operators::SimdBackend<double>(spacing);
 
         std::vector<double> u(11);
@@ -334,7 +333,7 @@ TEST(CenteredDifferenceSIMDTest, FirstDerivativeWrapperDispatchesCorrectly) {
         std::vector<double> x(11);
         for (size_t i = 0; i < 11; ++i) x[i] = i * 0.1;
         auto grid = mango::GridView<double>(x);
-        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto spacing = mango::GridSpacing<double>(grid);
         auto stencil = mango::operators::SimdBackend<double>(spacing);
 
         std::vector<double> u(11);
@@ -359,7 +358,7 @@ TEST(CenteredDifferenceSIMDTest, FirstDerivativeWrapperDispatchesCorrectly) {
         x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
         auto grid = mango::GridView<double>(x);
-        auto spacing = mango::operators::GridSpacing<double>(grid);
+        auto spacing = mango::GridSpacing<double>(grid);
         auto stencil = mango::operators::SimdBackend<double>(spacing);
 
         std::vector<double> u(11);

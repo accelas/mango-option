@@ -1,6 +1,6 @@
 #pragma once
 
-#include "grid_spacing.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/support/parallel.hpp"
 #include <span>
 #include <cmath>
@@ -91,6 +91,15 @@ public:
             du_dx[i] = term1 + term2;
         }
     }
+
+    // Note: Using manual if-else dispatch instead of std::visit for simplicity.
+    // std::visit provides no performance benefit here (compiler optimizes both equally).
+    // Future enhancement: Could use std::visit for pattern-matching clarity:
+    //
+    //   std::visit([&](const auto& spacing_data) {
+    //       if constexpr (std::is_same_v<...>) { /* uniform */ }
+    //       else { /* non-uniform */ }
+    //   }, spacing.spacing_);
 
     // Auto-dispatch second derivative
     void compute_second_derivative(
