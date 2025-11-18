@@ -161,10 +161,11 @@ public:
             }
         } else {
             // Non-uniform grid: per-point coefficients (O(n))
+            const auto& grid = spacing_->grid();
             for (size_t i = 1; i < n - 1; ++i) {
-                // Get local grid spacing
-                const T dx_left = spacing_->left_spacing(i);    // x[i] - x[i-1]
-                const T dx_right = spacing_->right_spacing(i);  // x[i+1] - x[i]
+                // Get local grid spacing directly from grid
+                const T dx_left = grid[i] - grid[i-1];      // x[i] - x[i-1]
+                const T dx_right = grid[i+1] - grid[i];     // x[i+1] - x[i]
                 const T dx_avg = (dx_left + dx_right) / 2.0;
 
                 // Second derivative: (u[i-1]/dx_left - u[i]*(1/dx_left + 1/dx_right) + u[i+1]/dx_right) / dx_avg

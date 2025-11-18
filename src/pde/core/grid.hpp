@@ -342,26 +342,7 @@ public:
         return std::get<NonUniformSpacing<T>>(spacing_).w_right();
     }
 
-    // Legacy accessors for compatibility
-    T left_spacing(size_t i) const {
-        if (is_uniform()) {
-            return spacing();
-        } else {
-            // Compute from grid for non-uniform (supports all points, not just interior)
-            return grid_[i] - grid_[i - 1];
-        }
-    }
-
-    T right_spacing(size_t i) const {
-        if (is_uniform()) {
-            return spacing();
-        } else {
-            // Compute from grid for non-uniform (supports all points, not just interior)
-            return grid_[i + 1] - grid_[i];
-        }
-    }
-
-    // Access to underlying grid (for compatibility)
+    // Access to underlying grid
     const GridView<T>& grid() const { return grid_; }
 
 private:

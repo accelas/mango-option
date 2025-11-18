@@ -14,51 +14,9 @@ TEST(GridSpacingTest, UniformGridSpacing) {
     EXPECT_DOUBLE_EQ(spacing.spacing_inv_sq(), 1.0);
 }
 
-TEST(GridSpacingTest, LeftSpacingUniform) {
-    std::vector<double> x = {0, 1, 2, 3, 4, 5};
-    auto grid = mango::GridView<double>(x);
-    auto spacing = mango::GridSpacing<double>(grid);
 
-    // left_spacing(i) = x[i] - x[i-1]
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(1), 1.0);  // x[1] - x[0] = 1 - 0
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(3), 1.0);  // x[3] - x[2] = 3 - 2
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(5), 1.0);  // x[5] - x[4] = 5 - 4
-}
 
-TEST(GridSpacingTest, RightSpacingUniform) {
-    std::vector<double> x = {0, 1, 2, 3, 4, 5};
-    auto grid = mango::GridView<double>(x);
-    auto spacing = mango::GridSpacing<double>(grid);
 
-    // right_spacing(i) = x[i+1] - x[i]
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(0), 1.0);  // x[1] - x[0] = 1 - 0
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(2), 1.0);  // x[3] - x[2] = 3 - 2
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(4), 1.0);  // x[5] - x[4] = 5 - 4
-}
-
-TEST(GridSpacingTest, LeftSpacingNonUniform) {
-    // Non-uniform grid with variable spacing
-    std::vector<double> x = {0.0, 0.5, 1.0, 2.0, 4.0};
-    auto grid = mango::GridView<double>(x);
-    auto spacing = mango::GridSpacing<double>(grid);
-
-    EXPECT_FALSE(spacing.is_uniform());
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(1), 0.5);  // x[1] - x[0] = 0.5 - 0.0
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(2), 0.5);  // x[2] - x[1] = 1.0 - 0.5
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(3), 1.0);  // x[3] - x[2] = 2.0 - 1.0
-    EXPECT_DOUBLE_EQ(spacing.left_spacing(4), 2.0);  // x[4] - x[3] = 4.0 - 2.0
-}
-
-TEST(GridSpacingTest, RightSpacingNonUniform) {
-    std::vector<double> x = {0.0, 0.5, 1.0, 2.0, 4.0};
-    auto grid = mango::GridView<double>(x);
-    auto spacing = mango::GridSpacing<double>(grid);
-
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(0), 0.5);  // x[1] - x[0] = 0.5 - 0.0
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(1), 0.5);  // x[2] - x[1] = 1.0 - 0.5
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(2), 1.0);  // x[3] - x[2] = 2.0 - 1.0
-    EXPECT_DOUBLE_EQ(spacing.right_spacing(3), 2.0);  // x[4] - x[3] = 4.0 - 2.0
-}
 
 TEST(GridSpacingTest, MinStencilSize) {
     EXPECT_EQ(mango::GridSpacing<double>::min_stencil_size(), 3);
