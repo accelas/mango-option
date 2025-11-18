@@ -153,9 +153,11 @@ private:
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace)
+    std::shared_ptr<AmericanSolverWorkspace> workspace,
+    std::span<double> output_buffer)
     : params_(params)
     , workspace_(std::move(workspace))
+    , output_buffer_(output_buffer)
 {
     // Validate parameters using unified validation
     auto validation = validate_pricing_params(params_);
@@ -167,6 +169,16 @@ AmericanOptionSolver::AmericanOptionSolver(
     if (!workspace_) {
         throw std::invalid_argument("Workspace cannot be null");
     }
+
+    // Validate output buffer size if provided
+    if (!output_buffer_.empty()) {
+        const size_t required_size = (workspace_->n_time() + 1) * workspace_->n_space();
+        if (output_buffer_.size() < required_size) {
+            throw std::invalid_argument("Output buffer too small: need " +
+                std::to_string(required_size) + " but got " +
+                std::to_string(output_buffer_.size()));
+        }
+    }
 }
 
 // ============================================================================
@@ -175,7 +187,8 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace) {
+    std::shared_ptr<AmericanSolverWorkspace> workspace,
+    std::span<double> output_buffer) {
 
     // Validate workspace first
     if (!workspace) {
@@ -186,7 +199,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     return validate_pricing_params(params)
         .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
             try {
-                return AmericanOptionSolver(params, workspace);
+                return AmericanOptionSolver(params, workspace, output_buffer);
             } catch (const std::exception& e) {
                 return std::unexpected(std::string("Failed to create solver: ") + e.what());
             }
@@ -239,8 +252,12 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     };
     auto bs_op = make_operator();
 
-    // 5. Single unified solver path using std::visit
-    return std::visit(
+    // 5. Get grid dimensions
+    size_t n_space = workspace_->n_space();
+    size_t n_time = workspace_->n_time();
+
+    // 7. Single unified solver path using std::visit
+    auto result = std::visit(
         [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
             // Setup boundary conditions using strategy (NORMALIZED by K=1)
             // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
@@ -249,16 +266,19 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                 return strat.left_boundary(t, x);
             });
 
+
             auto right_bc = DirichletBC([&strat, this](double t, double x) {
                 return strat.right_boundary(t, x, params_.rate);
             });
 
-            // Create PDESolver with strategy-specific obstacle
+            // Create PDESolver with strategy-specific obstacle and optional output buffer
+            // When output_buffer_ is provided, solver writes directly to it (zero-copy)
             PDESolver solver(
                 x_grid, time_domain, TRBDF2Config{},
                 left_bc, right_bc, bs_op,
                 [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
-                external_workspace
+                external_workspace,
+                output_buffer_  // Zero-copy: solver writes directly to output_buffer_
             );
 
             // Register discrete dividends as temporal events
@@ -276,11 +296,6 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                     [div_jump](double t, auto x, auto u) {
                         div_jump(t, x, u);
                     });
-            }
-
-            // Register snapshots (if any requested)
-            for (const auto& req : snapshot_requests_) {
-                solver.register_snapshot(req.step_index, req.user_index, req.collector);
             }
 
             // Initialize with strategy-specific terminal condition (payoff at maturity)
@@ -303,16 +318,30 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             solution_.assign(solution_view.begin(), solution_view.end());
             solved_ = true;
 
-            // Store solution surface and grid information
-            result.surface.assign(solution_view.begin(), solution_view.end());
+            // Store final solution and grid information
+            result.solution.assign(solution_view.begin(), solution_view.end());
+            result.n_space = n_space;
+            result.n_time = n_time;
             result.x_min = workspace_->x_min();
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
+
+            // Store full surface if buffer was provided (skip initial scratch space)
+            if (!output_buffer_.empty()) {
+                // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+                // Extract only the time steps (skip initial scratch)
+                result.surface_2d.assign(
+                    output_buffer_.begin() + n_space,  // Skip u_old_initial
+                    output_buffer_.end()                // Include all time steps
+                );
+            }
 
             return result;
         },
         strategy
     );
+
+    return result;
 }
 
 std::expected<AmericanOptionGreeks, SolverError> AmericanOptionSolver::compute_greeks() const {
@@ -336,26 +365,27 @@ double AmericanOptionResult::value_at(double spot) const {
     // Convert spot to log-moneyness
     double x_target = std::log(spot / strike);
 
-    // Get grid size
-    const size_t n = surface.size();
-    if (n == 0) {
+    // Use final solution (fast path, no snapshot overhead)
+    if (solution.empty()) {
         return 0.0;
     }
 
+    std::span<const double> final_surface(solution.data(), solution.size());
+
     // Compute grid spacing (uniform grid)
-    const double dx = (x_max - x_min) / (n - 1);
+    const double dx = (x_max - x_min) / (n_space - 1);
 
     // Boundary cases
     if (x_target <= x_min) {
-        return surface[0] * strike;  // Denormalize
+        return final_surface[0] * strike;  // Denormalize
     }
     if (x_target >= x_max) {
-        return surface[n-1] * strike;  // Denormalize
+        return final_surface[n_space-1] * strike;  // Denormalize
     }
 
     // Find bracketing indices
     size_t i = 0;
-    while (i < n-1 && x_min + (i+1)*dx < x_target) {
+    while (i < n_space-1 && x_min + (i+1)*dx < x_target) {
         i++;
     }
 
@@ -363,7 +393,7 @@ double AmericanOptionResult::value_at(double spot) const {
     double x_i = x_min + i * dx;
     double x_i1 = x_min + (i+1) * dx;
     double t = (x_target - x_i) / (x_i1 - x_i);
-    double normalized_value = (1.0 - t) * surface[i] + t * surface[i+1];
+    double normalized_value = (1.0 - t) * final_surface[i] + t * final_surface[i+1];
 
     return normalized_value * strike;  // Denormalize
 }

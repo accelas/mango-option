@@ -8,7 +8,6 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
 #include "src/math/thomas_solver.hpp"
-#include "src/pde/core/snapshot.hpp"
 #include "src/pde/core/jacobian_view.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -79,6 +78,11 @@ public:
     /// @param spatial_op Spatial operator L(u)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
+    /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
+    ///                      Layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+    ///                      After step i, u_old points to step(i-1) (perfect cache locality!)
+    ///                      If provided, solver writes directly to buffer (zero-copy)
+    ///                      If not provided, solver uses internal workspace
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
               const TRBDF2Config& config = {},
@@ -86,7 +90,8 @@ public:
               const BoundaryR& right_bc = {},
               SpatialOp spatial_op = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
-              PDEWorkspace* external_workspace = nullptr)
+              PDEWorkspace* external_workspace = nullptr,
+              std::span<double> output_buffer = {})
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -97,8 +102,6 @@ public:
         , n_(grid.size())
         , workspace_owner_(nullptr)
         , workspace_(nullptr)
-        , u_current_(n_)
-        , u_old_(n_)
         , rhs_(n_)
         , jacobian_lower_(n_ - 1)
         , jacobian_diag_(n_)
@@ -112,10 +115,27 @@ public:
         // Acquire workspace (either external or create owned)
         acquire_workspace(grid, external_workspace);
 
-        // Initialize grid information for legacy operators that need it
-        // (e.g., LaplacianOperator) via set_grid() if present
-        if constexpr (requires { spatial_op_.set_grid(grid, workspace_->dx()); }) {
-            spatial_op_.set_grid(grid, workspace_->dx());
+        // Setup solution storage
+        if (!output_buffer.empty()) {
+            // External buffer provided - use it directly (zero-copy)
+            // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+            // Verify size
+            size_t expected_size = (time.n_steps() + 1) * n_;
+            if (output_buffer.size() < expected_size) {
+                throw std::invalid_argument("Output buffer too small: need " +
+                    std::to_string(expected_size) + " but got " + std::to_string(output_buffer.size()));
+            }
+
+            // u_old_ points to initial scratch, u_current_ points to step 0
+            u_old_ = output_buffer.subspan(0, n_);
+            u_current_ = output_buffer.subspan(n_, n_);
+            output_buffer_ = output_buffer;
+        } else {
+            // No external buffer - use internal storage
+            solution_storage_.resize(2 * n_);
+            u_current_ = std::span{solution_storage_}.subspan(0, n_);
+            u_old_ = std::span{solution_storage_}.subspan(n_, n_);
+            output_buffer_ = {};
         }
     }
 
@@ -142,8 +162,11 @@ public:
         for (size_t step = 0; step < time_.n_steps(); ++step) {
             double t_old = t;
 
-            // Store u^n for TR-BDF2
-            std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+            // For internal storage only: copy u_current to u_old
+            // For external buffer: u_old already points to previous slice (no copy!)
+            if (output_buffer_.empty()) {
+                std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+            }
 
             // Stage 1: Trapezoidal rule to t_n + γ·dt
             double t_stage1 = t + config_.gamma * dt;
@@ -165,8 +188,14 @@ public:
             // Process temporal events AFTER completing the step
             process_temporal_events(t_old, t_next, step);
 
-            // Process snapshots (CHANGED: pass step index)
-            process_snapshots(step, t);
+            // Advance pointers for next iteration (external buffer only)
+            if (!output_buffer_.empty() && step + 1 < time_.n_steps()) {
+                // Current slice becomes old for next iteration (perfect cache locality!)
+                u_old_ = u_current_;
+                // Advance to next slice: buffer layout is [initial][step0][step1]...
+                // So step i is at offset (i+1)*n
+                u_current_ = output_buffer_.subspan((step + 2) * n_, n_);
+            }
         }
 
         return {};
@@ -180,19 +209,6 @@ public:
     /// Check if obstacle condition is present
     bool has_obstacle() const {
         return obstacle_.has_value();
-    }
-
-    /// Register snapshot collection at specific step index
-    ///
-    /// @param step_index Step number (0-based) to collect snapshot
-    /// @param user_index User-provided index for matching
-    /// @param collector Callback to receive snapshot (must outlive solver)
-    void register_snapshot(size_t step_index, size_t user_index, SnapshotCollector* collector) {
-        snapshot_requests_.push_back({step_index, user_index, collector});
-        // Sort by step index for efficient lookup
-        std::sort(snapshot_requests_.begin(), snapshot_requests_.end(),
-                 [](const auto& a, const auto& b) { return a.step_index < b.step_index; });
-        next_snapshot_idx_ = 0;
     }
 
     /// Add temporal event to be executed at specific time
@@ -221,14 +237,18 @@ private:
     // Grid size
     size_t n_;
 
+    // Output buffer control
+    std::span<double> output_buffer_;  // External buffer if provided
+
     // Workspace for cache blocking
     std::unique_ptr<PDEWorkspace> workspace_owner_;
     PDEWorkspace* workspace_;
 
-    // Solution storage
-    std::vector<double> u_current_;  // u^{n+1} or u^{n+γ}
-    std::vector<double> u_old_;      // u^n
-    std::vector<double> rhs_;        // n: RHS vector for stages
+    // Solution storage (spans point into either output_buffer_ or solution_storage_)
+    std::vector<double> solution_storage_;  // Backing storage when no external buffer
+    std::span<double> u_current_;           // u^{n+1} or u^{n+γ}
+    std::span<double> u_old_;               // u^n
+    std::vector<double> rhs_;               // n: RHS vector for stages
 
     // Newton workspace arrays (merged from NewtonWorkspace)
     std::vector<double> jacobian_lower_;      // n-1: Lower diagonal
@@ -242,22 +262,9 @@ private:
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
 
-    // Snapshot collection
-    struct SnapshotRequest {
-        size_t step_index;        // CHANGED: use step index not time
-        size_t user_index;
-        SnapshotCollector* collector;
-    };
-    std::vector<SnapshotRequest> snapshot_requests_;
-    size_t next_snapshot_idx_ = 0;
-
     // Temporal event system
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
-
-    // Workspace for derivatives
-    std::vector<double> du_dx_;
-    std::vector<double> d2u_dx2_;
 
     PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {
@@ -267,51 +274,6 @@ private:
         workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
         workspace_ = workspace_owner_.get();
         return *workspace_;
-    }
-
-    /// Process snapshots at current step index
-    void process_snapshots(size_t step_idx, double t_current) {
-        while (next_snapshot_idx_ < snapshot_requests_.size()) {
-            const auto& req = snapshot_requests_[next_snapshot_idx_];
-
-            // Check if this step index matches
-            if (req.step_index > step_idx) {
-                break;  // Future snapshot
-            }
-
-            if (req.step_index != step_idx) {
-                ++next_snapshot_idx_;  // Skip missed snapshot
-                continue;
-            }
-
-            // Allocate derivative storage on first use
-            if (du_dx_.empty()) {
-                du_dx_.resize(n_);
-                d2u_dx2_.resize(n_);
-            }
-
-            // Compute derivatives using PDE operator
-            spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_});
-            spatial_op_.compute_second_derivative(std::span{u_current_}, std::span{d2u_dx2_});
-
-            // Build snapshot
-            Snapshot snapshot{
-                .time = t_current,
-                .user_index = req.user_index,
-                .spatial_grid = grid_,
-                .dx = workspace_->dx(),
-                .solution = std::span{u_current_},
-                .spatial_operator = workspace_->lu(),
-                .first_derivative = std::span{du_dx_},
-                .second_derivative = std::span{d2u_dx2_},
-                .problem_params = nullptr
-            };
-
-            // Call collector
-            req.collector->collect(snapshot);
-
-            ++next_snapshot_idx_;
-        }
     }
 
     /// Process temporal events in time interval (t_old, t_new]

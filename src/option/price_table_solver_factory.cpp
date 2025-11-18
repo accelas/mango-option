@@ -8,102 +8,14 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/american_solver_workspace.hpp"
-#include "src/option/price_table_snapshot_collector.hpp"
 #include "src/support/parallel.hpp"
+#include "src/math/cubic_spline_solver.hpp"
 #include <ranges>
 #include <stdexcept>
 
 
 namespace mango {
 
-namespace {
-
-/// Snapshot collector that writes prices directly into the 4D output buffer.
-class DirectPriceTableSnapshotCollector : public SnapshotCollector {
-public:
-    DirectPriceTableSnapshotCollector(
-        std::span<const double> moneyness,
-        std::span<const double> maturity,
-        double K_ref,
-        double* output_base,
-        size_t stride,
-        size_t base_offset)
-        : log_moneyness_(moneyness.size()),
-          tau_size_(maturity.size()),
-          K_ref_(K_ref),
-          prices_base_(output_base),
-          stride_(stride),
-          base_offset_(base_offset)
-    {
-        for (size_t i = 0; i < moneyness.size(); ++i) {
-            log_moneyness_[i] = std::log(moneyness[i]);
-        }
-    }
-
-    std::expected<void, std::string> collect_expected(const Snapshot& snapshot) {
-        const size_t tau_idx = snapshot.user_index;
-
-        if (tau_idx >= tau_size_) {
-            return std::unexpected("Snapshot tau index out of range");
-        }
-
-        const bool grid_changed = !grids_match(snapshot.spatial_grid);
-
-        if (grid_changed || !interpolator_built_) {
-            auto V_error = value_interp_.build(snapshot.spatial_grid, snapshot.solution);
-            if (V_error.has_value()) {
-                return std::unexpected(std::string("Failed to build value interpolator: ") +
-                                       std::string(V_error.value()));
-            }
-
-            cached_grid_.assign(snapshot.spatial_grid.begin(), snapshot.spatial_grid.end());
-            interpolator_built_ = true;
-        } else {
-            auto V_error = value_interp_.rebuild_same_grid(snapshot.solution);
-            if (V_error.has_value()) {
-                return std::unexpected(std::string("Failed to rebuild value interpolator: ") +
-                                       std::string(V_error.value()));
-            }
-        }
-
-        for (size_t m_idx = 0; m_idx < log_moneyness_.size(); ++m_idx) {
-            const double x = log_moneyness_[m_idx];
-            const double V_norm = value_interp_.eval(x);
-            const size_t table_idx = (m_idx * tau_size_ + tau_idx) * stride_ + base_offset_;
-            prices_base_[table_idx] = K_ref_ * V_norm;
-        }
-
-        return {};
-    }
-
-    void collect(const Snapshot& snapshot) override {
-        auto result = collect_expected(snapshot);
-        if (!result.has_value()) {
-            throw std::runtime_error(result.error());
-        }
-    }
-
-private:
-    [[nodiscard]] bool grids_match(std::span<const double> grid) const noexcept {
-        if (cached_grid_.size() != grid.size()) {
-            return false;
-        }
-        return std::equal(cached_grid_.begin(), cached_grid_.end(), grid.begin());
-    }
-
-    std::vector<double> log_moneyness_;
-    size_t tau_size_;
-    double K_ref_;
-    double* prices_base_;
-    size_t stride_;
-    size_t base_offset_;
-
-    SnapshotInterpolator value_interp_;
-    std::vector<double> cached_grid_;
-    bool interpolator_built_ = false;
-};
-
-}  // namespace
 
 
 // ============================================================================
@@ -252,6 +164,7 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     std::span<const double> rate,
     double K_ref)
 {
+    const size_t Nm = moneyness.size();
     const size_t Nt = maturity.size();
     const size_t Nv = volatility.size();
     const size_t Nr = rate.size();
@@ -276,20 +189,19 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         }
     }
 
-    // Build batch parameters and collectors (all (σ,r) combinations)
-    std::vector<AmericanOptionParams> batch_params;
-    std::vector<DirectPriceTableSnapshotCollector> collectors;
-    batch_params.reserve(Nv * Nr);
-    collectors.reserve(Nv * Nr);
+    // Precompute log-moneyness values
+    std::vector<double> log_moneyness(Nm);
+    for (size_t i = 0; i < Nm; ++i) {
+        log_moneyness[i] = std::log(moneyness[i]);
+    }
 
-    const size_t slice_stride = Nv * Nr;
-    double* prices_base = prices_4d.data();
+    // Build batch parameters (all (σ,r) combinations)
+    std::vector<AmericanOptionParams> batch_params;
+    batch_params.reserve(Nv * Nr);
 
     namespace views = std::views;
     for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
                                                  views::iota(size_t{0}, Nr))) {
-        size_t idx = k * Nr + l;
-
         AmericanOptionParams params;
         params.spot = K_ref;
         params.strike = K_ref;
@@ -300,29 +212,78 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         params.volatility = volatility[k];
         params.discrete_dividends = {};
         batch_params.push_back(params);
-
-        collectors.emplace_back(
-            moneyness,
-            maturity,
-            K_ref,
-            prices_base,
-            slice_stride,
-            idx);
     }
 
-    // Solve batch with snapshot registration
+    // Allocate output buffer for full surface collection (needed for at_time())
+    const size_t batch_size = batch_params.size();
+    const size_t surface_size_per_option = (config_.n_time + 1) * config_.n_space;
+    std::vector<double> surface_buffer(batch_size * surface_size_per_option);
+
+    // Solve batch with full surface collection
     auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
         std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
-        [&](size_t idx, AmericanOptionSolver& solver) {
-            for (size_t j = 0; j < Nt; ++j) {
-                solver.register_snapshot(step_indices[j], j, &collectors[idx]);
-            }
-        });
+        nullptr,  // No setup callback
+        std::span{surface_buffer});  // Provide buffer for full surface
 
-    // Check failure count (tracked internally by solve_batch)
+    // Check failure count
     if (batch_result.failed_count > 0) {
         return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
                          " out of " + std::to_string(Nv * Nr) + " PDEs");
+    }
+
+    // Extract prices from surface_2d for each result
+    const size_t slice_stride = Nv * Nr;
+    for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
+        const auto& result_expected = batch_result.results[idx];
+        if (!result_expected.has_value()) {
+            continue;  // Leave zeros for failed solves
+        }
+
+        const auto& result = result_expected.value();
+        if (!result.converged) {
+            continue;  // Leave zeros for failed solves
+        }
+
+        // Build spatial grid for this result (uniform grid)
+        std::vector<double> x_grid(result.n_space);
+        const double dx = (result.x_max - result.x_min) / (result.n_space - 1);
+        for (size_t i = 0; i < result.n_space; ++i) {
+            x_grid[i] = result.x_min + i * dx;
+        }
+
+        // For each maturity time step
+        for (size_t j = 0; j < Nt; ++j) {
+            size_t step_idx = step_indices[j];
+            std::span<const double> spatial_solution = result.at_time(step_idx);
+
+            if (spatial_solution.empty()) {
+                continue;
+            }
+
+            // Build cubic spline for this time step
+            CubicSpline<double> spline;
+            auto build_error = spline.build(x_grid, spatial_solution);
+            if (build_error.has_value()) {
+                // Fall back to boundary values if spline build fails
+                for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+                    const double x = log_moneyness[m_idx];
+                    double V_norm = (x <= result.x_min) ? spatial_solution[0] : spatial_solution[result.n_space - 1];
+                    size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
+                    prices_4d[table_idx] = K_ref * V_norm;
+                }
+                continue;
+            }
+
+            // Interpolate spatial solution to moneyness grid using cubic spline
+            for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+                const double x = log_moneyness[m_idx];
+                double V_norm = spline.eval(x);
+
+                // Store denormalized price
+                size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
+                prices_4d[table_idx] = K_ref * V_norm;
+            }
+        }
     }
 
     return {};

@@ -5,7 +5,6 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/price_table_snapshot_collector.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <mutex>
@@ -586,7 +585,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     }
 }
 
-TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
+TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
     std::vector<AmericanOptionParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
         batch[i] = AmericanOptionParams(
@@ -600,29 +599,21 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
         );
     }
 
-    // Create collectors for each solve
-    std::vector<double> moneyness = {0.9, 1.0, 1.1};
-    std::vector<double> maturities = {0.5, 1.0};
+    // Allocate output buffer for full surface collection (enables at_time())
+    // Buffer layout: [option0_surface][option1_surface][option2_surface]
+    // Each option surface: (n_time + 1) * n_space = (1000 + 1) * 101
+    const size_t n_space = 101;
+    const size_t n_time = 1000;
+    const size_t surface_size_per_option = (n_time + 1) * n_space;
+    std::vector<double> surface_buffer(3 * surface_size_per_option);
 
-    std::vector<PriceTableSnapshotCollector> collectors;
-    for (size_t i = 0; i < 3; ++i) {
-        PriceTableSnapshotCollectorConfig config{
-            .moneyness = std::span{moneyness},
-            .tau = std::span{maturities},
-            .K_ref = 100.0,
-            .option_type = OptionType::PUT,
-            .payoff_params = nullptr
-        };
-        collectors.emplace_back(config);
-    }
-
-    // Register snapshots via callback
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(
+    // Solve batch with full surface collection
+    auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
         batch,
-        [&](size_t idx, AmericanOptionSolver& solver) {
-            solver.register_snapshot(499, 0, &collectors[idx]);  // τ=0.5
-            solver.register_snapshot(999, 1, &collectors[idx]);  // τ=1.0
-        });
+        -3.0, 3.0,  // x_min, x_max
+        n_space, n_time,
+        nullptr,    // No setup callback
+        std::span{surface_buffer});  // Provide buffer for full surface
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);
@@ -631,14 +622,33 @@ TEST(BatchAmericanOptionSolverTest, CallbackWithSnapshots) {
         EXPECT_TRUE(result.has_value());
     }
 
-    // Verify snapshots were collected
-    for (size_t i = 0; i < 3; ++i) {
-        auto prices = collectors[i].prices();
-        EXPECT_EQ(prices.size(), moneyness.size() * maturities.size());
+    // Extract prices from surface_2d at specific time steps
+    std::vector<double> moneyness = {0.9, 1.0, 1.1};
+    std::vector<size_t> step_indices = {499, 999};  // τ=0.5, τ=1.0
 
-        // All prices should be positive
-        for (double price : prices) {
-            EXPECT_GT(price, 0.0);
+    for (size_t i = 0; i < 3; ++i) {
+        const auto& result = batch_result.results[i].value();
+
+        // Verify surface_2d has data
+        EXPECT_FALSE(result.surface_2d.empty());
+        EXPECT_GT(result.n_space, 0);
+        EXPECT_GT(result.n_time, 0);
+
+        // Extract prices at each time step and moneyness
+        for (size_t step_idx : step_indices) {
+            auto spatial_solution = result.at_time(step_idx);
+            EXPECT_FALSE(spatial_solution.empty());
+
+            // All values should be non-negative (boundary conditions may be zero)
+            size_t non_zero_count = 0;
+            for (double val : spatial_solution) {
+                EXPECT_GE(val, 0.0);
+                if (val > 0.0) {
+                    ++non_zero_count;
+                }
+            }
+            // At least some values should be positive
+            EXPECT_GT(non_zero_count, 0);
         }
     }
 }

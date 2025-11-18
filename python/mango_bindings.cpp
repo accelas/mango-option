@@ -107,13 +107,17 @@ PYBIND11_MODULE(mango_iv, m) {
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
         .def(py::init<>())
-        .def_readwrite("surface", &mango::AmericanOptionResult::surface)
+        .def_readwrite("surface_2d", &mango::AmericanOptionResult::surface_2d)
+        .def_readwrite("n_space", &mango::AmericanOptionResult::n_space)
+        .def_readwrite("n_time", &mango::AmericanOptionResult::n_time)
         .def_readwrite("x_min", &mango::AmericanOptionResult::x_min)
         .def_readwrite("x_max", &mango::AmericanOptionResult::x_max)
         .def_readwrite("strike", &mango::AmericanOptionResult::strike)
         .def_readwrite("converged", &mango::AmericanOptionResult::converged)
         .def("value_at", &mango::AmericanOptionResult::value_at, py::arg("spot"),
-             "Interpolate to get option value at specific spot price");
+             "Interpolate to get option value at specific spot price")
+        .def("at_time", &mango::AmericanOptionResult::at_time, py::arg("time_idx"),
+             "Get solution at specific time step");
 
     // AmericanOptionGreeks structure
     py::class_<mango::AmericanOptionGreeks>(m, "AmericanOptionGreeks")
