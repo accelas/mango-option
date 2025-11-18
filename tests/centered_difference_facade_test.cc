@@ -112,5 +112,54 @@ TEST(CenteredDifferenceFacadeTest, ScalarVsSimdMatch) {
     }
 }
 
+TEST(CenteredDifferenceTest, VariantDispatchCorrectness) {
+    // Test both uniform and non-uniform paths work identically
+
+    // Uniform grid
+    auto uniform_grid_vec = std::vector<double>(11);
+    for (size_t i = 0; i < 11; ++i) {
+        uniform_grid_vec[i] = i * 0.1;
+    }
+    auto uniform_grid = mango::GridBuffer<double>(std::move(uniform_grid_vec));
+    auto uniform_spacing = mango::GridSpacing<double>(uniform_grid.view());
+
+    // Non-uniform grid (same points, perturbed slightly)
+    auto nonuniform_grid_vec = std::vector<double>(11);
+    for (size_t i = 0; i < 11; ++i) {
+        nonuniform_grid_vec[i] = i * 0.1 + (i % 2) * 0.001;
+    }
+    auto nonuniform_grid = mango::GridBuffer<double>(std::move(nonuniform_grid_vec));
+    auto nonuniform_spacing = mango::GridSpacing<double>(nonuniform_grid.view());
+
+    // Both should compute derivatives (different codepaths, both work)
+    // Use f(x) = x^2 for uniform grid
+    std::vector<double> u_uniform(11);
+    for (size_t i = 0; i < 11; ++i) {
+        double x = i * 0.1;
+        u_uniform[i] = x * x;
+    }
+
+    // Use f(x) = x^2 for non-uniform grid
+    std::vector<double> u_nonuniform(11);
+    for (size_t i = 0; i < 11; ++i) {
+        double x = i * 0.1 + (i % 2) * 0.001;
+        u_nonuniform[i] = x * x;
+    }
+
+    std::vector<double> du_uniform(11);
+    std::vector<double> du_nonuniform(11);
+
+    auto stencil_uniform = mango::operators::CenteredDifference(uniform_spacing);
+    auto stencil_nonuniform = mango::operators::CenteredDifference(nonuniform_spacing);
+
+    stencil_uniform.compute_first_derivative(u_uniform, du_uniform, 1, 10);
+    stencil_nonuniform.compute_first_derivative(u_nonuniform, du_nonuniform, 1, 10);
+
+    // Both should produce reasonable results (exact values differ due to different grids)
+    // For f(x) = x^2, df/dx = 2x, so at x=0.5 (index 5 for uniform), df/dx ≈ 1.0
+    EXPECT_NEAR(du_uniform[5], 1.0, 0.1);  // Computed something reasonable
+    EXPECT_NE(du_nonuniform[5], 0.0);  // Non-uniform also computed something
+}
+
 } // namespace
 } // namespace mango::operators

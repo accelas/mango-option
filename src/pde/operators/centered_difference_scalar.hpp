@@ -92,6 +92,15 @@ public:
         }
     }
 
+    // Note: Using manual if-else dispatch instead of std::visit for simplicity.
+    // std::visit provides no performance benefit here (compiler optimizes both equally).
+    // Future enhancement: Could use std::visit for pattern-matching clarity:
+    //
+    //   std::visit([&](const auto& spacing_data) {
+    //       if constexpr (std::is_same_v<...>) { /* uniform */ }
+    //       else { /* non-uniform */ }
+    //   }, spacing.spacing_);
+
     // Auto-dispatch second derivative
     void compute_second_derivative(
         std::span<const T> u, std::span<T> d2u_dx2,
