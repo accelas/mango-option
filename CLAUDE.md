@@ -321,17 +321,17 @@ Applied after each iteration to ensure constraints are satisfied. Order matters:
 ### Convergence Issues
 
 If solver fails to converge:
-1. Reduce time step (dt)
-2. Increase max_iter using `solver.set_trbdf2_config()` (see Advanced Configuration below)
-3. Relax tolerance
-4. Check spatial operator implementation for errors
-5. Verify boundary conditions are consistent
+1. Reduce time step (increase n_time in grid configuration)
+2. Increase spatial resolution (increase n_space in grid configuration)
+3. Check spatial operator implementation for errors
+4. Verify boundary conditions are consistent
+5. For advanced users: use PDESolver directly with custom TRBDF2Config
 
 ### American Option API Simplification
 
-The `AmericanOptionSolver` constructor has been simplified to hide internal solver configuration details. Most users should never need to modify TR-BDF2 or Newton solver parameters.
+The `AmericanOptionSolver` provides a simplified, high-level API that hides internal solver configuration details. The TR-BDF2 time-stepping parameters use sensible defaults that work well for most applications.
 
-**Basic Usage (most common):**
+**Basic Usage:**
 ```cpp
 #include "src/option/american_option.hpp"
 
@@ -345,49 +345,21 @@ AmericanOptionParams params{
     .option_type = OptionType::PUT
 };
 
-AmericanOptionGrid grid{
-    .n_space = 101,
-    .n_time = 1000,
-    .x_min = -3.0,
-    .x_max = 3.0
-};
+// Create workspace with grid configuration
+auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
 
 // Simple construction with defaults
-AmericanOptionSolver solver(params, grid);
+AmericanOptionSolver solver(params, workspace.value());
 auto result = solver.solve();
 ```
 
-**Advanced Configuration (rarely needed):**
-If you need to tune internal solver parameters for convergence or accuracy, use setter methods:
-```cpp
-AmericanOptionSolver solver(params, grid);
-
-// Tune TR-BDF2 time-stepping (for stiff problems)
-TRBDF2Config trbdf2_config{
-    .max_iter = 50,        // Increase iterations for convergence
-    .tolerance = 1e-8      // Higher accuracy
-};
-solver.set_trbdf2_config(trbdf2_config);
-
-// Tune Newton solver (for early exercise boundary)
-RootFindingConfig root_config{
-    .max_iter = 200,
-    .tolerance = 1e-8
-};
-solver.set_root_config(root_config);
-
-auto result = solver.solve();
-```
-
-**When to use advanced configuration:**
-- Solver fails to converge with default settings
-- Need higher accuracy than default 1e-6 tolerance
-- Debugging numerical issues
-- Research/benchmarking (comparing different solver configurations)
-
-**Default values (sensible for most applications):**
+**Default solver parameters:**
 - TR-BDF2: 20 iterations, 1e-6 tolerance, gamma = 2 - √2
-- Newton: 100 iterations, 1e-6 tolerance, FD epsilon = 1e-7
+- Time stepping: Implicit L-stable scheme
+- Obstacle projection: Applied after each Newton iteration
+
+**For advanced configuration:**
+If you need to tune TR-BDF2 or Newton solver parameters for convergence or accuracy, use the low-level `PDESolver` API directly instead of `AmericanOptionSolver`. This provides full control over all solver settings.
 
 ### Memory Management
 
