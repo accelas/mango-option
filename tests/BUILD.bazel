@@ -430,8 +430,8 @@ cc_test(
 )
 
 cc_test(
-    name = "pde_workspace_pmr_test",
-    srcs = ["pde_workspace_pmr_test.cc"],
+    name = "pde_workspace_test",
+    srcs = ["pde_workspace_test.cc"],
     deps = [
         "//src/pde/core:pde_workspace",
         "@googletest//:gtest_main",
