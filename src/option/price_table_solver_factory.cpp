@@ -9,6 +9,7 @@
 #include "src/option/american_option_batch.hpp"
 #include "src/option/american_solver_workspace.hpp"
 #include "src/support/parallel.hpp"
+#include "src/math/cubic_spline_solver.hpp"
 #include <ranges>
 #include <stdexcept>
 
@@ -243,6 +244,13 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
             continue;  // Leave zeros for failed solves
         }
 
+        // Build spatial grid for this result (uniform grid)
+        std::vector<double> x_grid(result.n_space);
+        const double dx = (result.x_max - result.x_min) / (result.n_space - 1);
+        for (size_t i = 0; i < result.n_space; ++i) {
+            x_grid[i] = result.x_min + i * dx;
+        }
+
         // For each maturity time step
         for (size_t j = 0; j < Nt; ++j) {
             size_t step_idx = step_indices[j];
@@ -252,30 +260,24 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
                 continue;
             }
 
-            // Interpolate spatial solution to moneyness grid
-            const double dx = (result.x_max - result.x_min) / (result.n_space - 1);
+            // Build cubic spline for this time step
+            CubicSpline<double> spline;
+            auto build_error = spline.build(x_grid, spatial_solution);
+            if (build_error.has_value()) {
+                // Fall back to boundary values if spline build fails
+                for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+                    const double x = log_moneyness[m_idx];
+                    double V_norm = (x <= result.x_min) ? spatial_solution[0] : spatial_solution[result.n_space - 1];
+                    size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
+                    prices_4d[table_idx] = K_ref * V_norm;
+                }
+                continue;
+            }
+
+            // Interpolate spatial solution to moneyness grid using cubic spline
             for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
                 const double x = log_moneyness[m_idx];
-
-                // Linear interpolation
-                double V_norm = 0.0;
-                if (x <= result.x_min) {
-                    V_norm = spatial_solution[0];
-                } else if (x >= result.x_max) {
-                    V_norm = spatial_solution[result.n_space - 1];
-                } else {
-                    // Find bracketing indices
-                    size_t i = 0;
-                    while (i < result.n_space - 1 && result.x_min + (i + 1) * dx < x) {
-                        i++;
-                    }
-
-                    // Interpolate
-                    double x_i = result.x_min + i * dx;
-                    double x_i1 = result.x_min + (i + 1) * dx;
-                    double t = (x - x_i) / (x_i1 - x_i);
-                    V_norm = (1.0 - t) * spatial_solution[i] + t * spatial_solution[i + 1];
-                }
+                double V_norm = spline.eval(x);
 
                 // Store denormalized price
                 size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;

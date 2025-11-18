@@ -196,6 +196,7 @@ cc_library(
         ":american_option",
         ":american_option_batch",
         ":american_solver_workspace",
+        "//src/math:cubic_spline_solver",
         "//src/support:error_types",
         "//src/support:parallel",
     ],
