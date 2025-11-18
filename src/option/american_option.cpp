@@ -226,7 +226,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // Public API
 // ============================================================================
 
-std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
+std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(bool collect_full_surface) {
     // 1. Create strategy based on option type
     OptionStrategy strategy;
     switch (params_.type) {
@@ -315,9 +315,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                     });
             }
 
-            // Register collector for all time steps
-            for (size_t step_idx = 0; step_idx < n_time; ++step_idx) {
-                solver.register_snapshot(step_idx, step_idx, &all_time_collector);
+            // Optionally register collector for all time steps
+            if (collect_full_surface) {
+                for (size_t step_idx = 0; step_idx < n_time; ++step_idx) {
+                    solver.register_snapshot(step_idx, step_idx, &all_time_collector);
+                }
             }
 
             // Initialize with strategy-specific terminal condition (payoff at maturity)
@@ -341,9 +343,16 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             solved_ = true;
 
             // Store solution surface and grid information
-            result.surface_2d = std::move(all_time_collector).extract();
-            result.n_space = n_space;
-            result.n_time = n_time;
+            if (collect_full_surface) {
+                result.surface_2d = std::move(all_time_collector).extract();
+                result.n_space = n_space;
+                result.n_time = n_time;
+            } else {
+                // Empty surface for performance
+                result.surface_2d.clear();
+                result.n_space = 0;
+                result.n_time = 0;
+            }
             result.x_min = workspace_->x_min();
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
