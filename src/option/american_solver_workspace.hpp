@@ -79,7 +79,7 @@ public:
            std::pmr::memory_resource* resource);
 
     PDEWorkspace* pde_workspace() const { return pde_workspace_.get(); }
-    std::shared_ptr<GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
+    GridSpacing<double> grid_spacing() const { return *grid_spacing_; }
 
     std::span<const double> grid() const {
         return grid_buffer_.span();
