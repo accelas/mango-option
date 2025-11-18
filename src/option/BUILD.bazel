@@ -12,27 +12,18 @@ cc_library(
 
 cc_library(
     name = "american_pde_solver",
-    srcs = ["american_pde_solver.cpp"],
     hdrs = ["american_pde_solver.hpp"],
     deps = [
         "//src/pde/core:pde_solver",
         "//src/pde/core:boundary_conditions",
+        "//src/pde/core:time_domain",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:black_scholes_pde",
         ":american_solver_workspace",
         ":option_spec",
         "//src/support:error_types",
     ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        "-O3",
-        "-march=native",
-        "-fopenmp-simd",
-        "-ftree-vectorize",
-    ],
+    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
