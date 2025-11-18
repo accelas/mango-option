@@ -130,14 +130,12 @@ public:
             u_old_ = output_buffer.subspan(0, n_);
             u_current_ = output_buffer.subspan(n_, n_);
             output_buffer_ = output_buffer;
-            current_step_ = 0;
         } else {
             // No external buffer - use internal storage
             solution_storage_.resize(2 * n_);
             u_current_ = std::span{solution_storage_}.subspan(0, n_);
             u_old_ = std::span{solution_storage_}.subspan(n_, n_);
             output_buffer_ = {};
-            current_step_ = 0;
         }
     }
 
@@ -241,7 +239,6 @@ private:
 
     // Output buffer control
     std::span<double> output_buffer_;  // External buffer if provided
-    size_t current_step_ = 0;           // Current time step index
 
     // Workspace for cache blocking
     std::unique_ptr<PDEWorkspace> workspace_owner_;
