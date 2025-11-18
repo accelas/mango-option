@@ -412,8 +412,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
 
-    // Enable surface collection for value_at() to work
-    auto result = solver.solve(true);
+    auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
@@ -459,8 +458,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
     AmericanOptionSolver solver(params, workspace);
 
-    // Enable surface collection for value_at() to work
-    auto result = solver.solve(true);
+    auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
 
     // Should converge
@@ -602,8 +600,8 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
         );
     }
 
-    // Solve batch with surface collection enabled (test extracts from surface_2d)
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch, nullptr, true);
+    // Solve batch (surface always collected)
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);
@@ -658,8 +656,7 @@ TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
     }
 
     // Call without callback using simplified API
-    // Enable surface collection for value_at() to work
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch, nullptr, true);
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
 
     ASSERT_EQ(batch_result.results.size(), 3);
     EXPECT_EQ(batch_result.failed_count, 0);

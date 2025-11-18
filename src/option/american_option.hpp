@@ -185,12 +185,11 @@ public:
     /**
      * Solve for option value.
      *
-     * @param collect_full_surface If true, collects full spatiotemporal surface (all time steps).
-     *                             If false, only stores final time step (faster, less memory).
-     *                             Default false for performance.
+     * Collects full spatiotemporal surface (all time steps) for value_at() and at_time().
+     *
      * @return Result containing option value (compute Greeks separately via compute_greeks())
      */
-    std::expected<AmericanOptionResult, SolverError> solve(bool collect_full_surface = false);
+    std::expected<AmericanOptionResult, SolverError> solve();
 
     /**
      * Compute Greeks (sensitivities) for the current solution.

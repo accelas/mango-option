@@ -170,8 +170,8 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
         }
     }
 
-    // Solve PDE with surface collection enabled (needed for extracting intermediate time steps)
-    auto solve_result = solver.solve(true);
+    // Solve PDE (surface always collected)
+    auto solve_result = solver.solve();
     if (!solve_result) {
         return std::unexpected(solve_result.error());
     }

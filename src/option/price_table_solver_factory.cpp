@@ -213,11 +213,9 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         batch_params.push_back(params);
     }
 
-    // Solve batch with surface collection enabled (needed for price extraction)
+    // Solve batch (surface always collected)
     auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
-        std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
-        nullptr,  // No setup callback needed
-        true);    // collect_full_surface = true
+        std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time);
 
     // Check failure count
     if (batch_result.failed_count > 0) {
