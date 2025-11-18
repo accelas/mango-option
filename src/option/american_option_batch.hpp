@@ -66,14 +66,15 @@ struct BatchAmericanOptionResult {
 /// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
 /// ```
 ///
-/// **Advanced usage with snapshots**:
+/// **Accessing results**:
 /// ```cpp
-/// auto results = BatchAmericanOptionSolver::solve_batch(
-///     batch, -3.0, 3.0, 101, 1000,
-///     [&](size_t idx, AmericanOptionSolver& solver) {
-///         // Register snapshots for this solve
-///         solver.register_snapshot(step, user_idx, collector);
-///     });
+/// for (const auto& result_expected : batch_result.results) {
+///     if (result_expected.has_value()) {
+///         const auto& result = result_expected.value();
+///         double price = result.value_at(spot);
+///         auto spatial_solution = result.at_time(step_idx);
+///     }
+/// }
 /// ```
 ///
 /// Performance:
@@ -83,7 +84,7 @@ class BatchAmericanOptionSolver {
 public:
     /// Setup callback: called before each solve() to configure solver
     /// @param index Index of current option in params vector
-    /// @param solver Reference to solver (can register snapshots, set configs, etc.)
+    /// @param solver Reference to solver for pre-solve configuration
     using SetupCallback = std::function<void(size_t index, AmericanOptionSolver& solver)>;
 
     /// Solve a batch of American options with default grid configuration
@@ -126,6 +127,9 @@ public:
     /// @param n_space Number of spatial grid points
     /// @param n_time Number of time steps
     /// @param setup Optional callback invoked after solver creation, before solve()
+    /// @param output_buffer Optional buffer for full surface. If provided, must be large enough
+    ///                      for (n_time + 1) * n_space * params.size() doubles.
+    ///                      Buffer layout: option 0 surface | option 1 surface | ...
     /// @return Batch result with individual results and failure count
     static BatchAmericanOptionResult solve_batch_with_grid(
         std::span<const AmericanOptionParams> params,
@@ -133,7 +137,8 @@ public:
         double x_max,
         size_t n_space,
         size_t n_time,
-        SetupCallback setup = nullptr)
+        SetupCallback setup = nullptr,
+        std::span<double> output_buffer = {})
     {
         std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
         size_t failed_count = 0;
@@ -156,12 +161,43 @@ public:
             };
         }
 
+        // Calculate buffer slice size for each option (if buffer provided)
+        const size_t slice_size = (n_time + 1) * n_space;
+
+        // Validate buffer size if provided
+        if (!output_buffer.empty()) {
+            const size_t required_size = slice_size * params.size();
+            if (output_buffer.size() < required_size) {
+                SolverError error{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .message = "Output buffer too small: need " +
+                               std::to_string(required_size) + " but got " +
+                               std::to_string(output_buffer.size()),
+                    .iterations = 0
+                };
+                for (size_t i = 0; i < params.size(); ++i) {
+                    results[i] = std::unexpected(error);
+                }
+                return BatchAmericanOptionResult{
+                    .results = std::move(results),
+                    .failed_count = params.size()
+                };
+            }
+        }
+
         // Common solve logic
         auto solve_one = [&](size_t i, std::shared_ptr<AmericanSolverWorkspace> workspace)
             -> std::expected<AmericanOptionResult, SolverError>
         {
+            // Calculate buffer slice for this option (if buffer provided)
+            std::span<double> option_buffer;
+            if (!output_buffer.empty()) {
+                const size_t offset = i * slice_size;
+                option_buffer = output_buffer.subspan(offset, slice_size);
+            }
+
             // Use factory method to avoid exceptions from constructor
-            auto solver_result = AmericanOptionSolver::create(params[i], workspace);
+            auto solver_result = AmericanOptionSolver::create(params[i], workspace, option_buffer);
             if (!solver_result) {
                 return std::unexpected(SolverError{
                     .code = SolverErrorCode::InvalidConfiguration,
@@ -170,7 +206,7 @@ public:
                 });
             }
 
-            // NEW: Invoke setup callback if provided
+            // Invoke setup callback if provided
             if (setup) {
                 setup(i, solver_result.value());
             }

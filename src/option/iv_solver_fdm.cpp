@@ -120,6 +120,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     try {
         auto workspace = workspace_result.value();
         AmericanOptionSolver solver(option_params, workspace);
+        // Surface always collected for value_at()
         auto price_result = solver.solve();
 
         if (!price_result) {

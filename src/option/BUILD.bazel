@@ -58,19 +58,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_snapshot_collector",
-    hdrs = ["price_table_snapshot_collector.hpp"],
-    deps = [
-        "//src/pde/core:snapshot",
-        "//src/math:cubic_spline_solver",
-        "//src/support/memory:solver_memory_arena",
-        ":american_option",
-    ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "price_table_4d_builder",
     srcs = ["price_table_4d_builder.cpp"],
     hdrs = ["price_table_4d_builder.hpp"],
@@ -193,7 +180,6 @@ cc_library(
     deps = [
         ":american_option",
         ":american_solver_workspace",
-        ":price_table_snapshot_collector",
         "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
@@ -210,7 +196,7 @@ cc_library(
         ":american_option",
         ":american_option_batch",
         ":american_solver_workspace",
-        ":price_table_snapshot_collector",
+        "//src/math:cubic_spline_solver",
         "//src/support:error_types",
         "//src/support:parallel",
     ],
