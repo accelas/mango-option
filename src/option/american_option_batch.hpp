@@ -66,14 +66,15 @@ struct BatchAmericanOptionResult {
 /// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
 /// ```
 ///
-/// **Advanced usage with snapshots**:
+/// **Accessing results**:
 /// ```cpp
-/// auto results = BatchAmericanOptionSolver::solve_batch(
-///     batch, -3.0, 3.0, 101, 1000,
-///     [&](size_t idx, AmericanOptionSolver& solver) {
-///         // Register snapshots for this solve
-///         solver.register_snapshot(step, user_idx, collector);
-///     });
+/// for (const auto& result_expected : batch_result.results) {
+///     if (result_expected.has_value()) {
+///         const auto& result = result_expected.value();
+///         double price = result.value_at(spot);
+///         auto spatial_solution = result.at_time(step_idx);
+///     }
+/// }
 /// ```
 ///
 /// Performance:
@@ -83,7 +84,7 @@ class BatchAmericanOptionSolver {
 public:
     /// Setup callback: called before each solve() to configure solver
     /// @param index Index of current option in params vector
-    /// @param solver Reference to solver (can register snapshots, set configs, etc.)
+    /// @param solver Reference to solver for pre-solve configuration
     using SetupCallback = std::function<void(size_t index, AmericanOptionSolver& solver)>;
 
     /// Solve a batch of American options with default grid configuration
