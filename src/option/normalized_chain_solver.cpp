@@ -141,8 +141,12 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     params.volatility = request.sigma;
     params.discrete_dividends = {};  // Normalized solver requires no discrete dividends
 
-    // Create solver with workspace
-    auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_);
+    // Allocate output buffer for full surface collection (needed for at_time())
+    const size_t surface_size = (request.n_time + 1) * request.n_space;
+    std::vector<double> surface_buffer(surface_size);
+
+    // Create solver with workspace and output buffer
+    auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_, std::span{surface_buffer});
     if (!solver_result) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
@@ -170,8 +174,8 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
         }
     }
 
-    // Solve PDE with full surface collection (needed for at_time())
-    auto solve_result = solver.solve(true);
+    // Solve PDE (surface collected to surface_buffer)
+    auto solve_result = solver.solve();
     if (!solve_result) {
         return std::unexpected(solve_result.error());
     }

@@ -599,13 +599,21 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
         );
     }
 
-    // Solve batch with full surface collection for at_time() access
+    // Allocate output buffer for full surface collection (enables at_time())
+    // Buffer layout: [option0_surface][option1_surface][option2_surface]
+    // Each option surface: (n_time + 1) * n_space = (1000 + 1) * 101
+    const size_t n_space = 101;
+    const size_t n_time = 1000;
+    const size_t surface_size_per_option = (n_time + 1) * n_space;
+    std::vector<double> surface_buffer(3 * surface_size_per_option);
+
+    // Solve batch with full surface collection
     auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
         batch,
         -3.0, 3.0,  // x_min, x_max
-        101, 1000,  // n_space, n_time
+        n_space, n_time,
         nullptr,    // No setup callback
-        true);      // collect_full_surface=true for at_time()
+        std::span{surface_buffer});  // Provide buffer for full surface
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);

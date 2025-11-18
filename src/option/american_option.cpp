@@ -153,9 +153,11 @@ private:
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace)
+    std::shared_ptr<AmericanSolverWorkspace> workspace,
+    std::span<double> output_buffer)
     : params_(params)
     , workspace_(std::move(workspace))
+    , output_buffer_(output_buffer)
 {
     // Validate parameters using unified validation
     auto validation = validate_pricing_params(params_);
@@ -167,6 +169,16 @@ AmericanOptionSolver::AmericanOptionSolver(
     if (!workspace_) {
         throw std::invalid_argument("Workspace cannot be null");
     }
+
+    // Validate output buffer size if provided
+    if (!output_buffer_.empty()) {
+        const size_t required_size = (workspace_->n_time() + 1) * workspace_->n_space();
+        if (output_buffer_.size() < required_size) {
+            throw std::invalid_argument("Output buffer too small: need " +
+                std::to_string(required_size) + " but got " +
+                std::to_string(output_buffer_.size()));
+        }
+    }
 }
 
 // ============================================================================
@@ -175,7 +187,8 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace) {
+    std::shared_ptr<AmericanSolverWorkspace> workspace,
+    std::span<double> output_buffer) {
 
     // Validate workspace first
     if (!workspace) {
@@ -186,7 +199,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     return validate_pricing_params(params)
         .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
             try {
-                return AmericanOptionSolver(params, workspace);
+                return AmericanOptionSolver(params, workspace, output_buffer);
             } catch (const std::exception& e) {
                 return std::unexpected(std::string("Failed to create solver: ") + e.what());
             }
@@ -197,7 +210,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // Public API
 // ============================================================================
 
-std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(bool collect_full_surface) {
+std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // 1. Create strategy based on option type
     OptionStrategy strategy;
     switch (params_.type) {
@@ -243,17 +256,6 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
     size_t n_space = workspace_->n_space();
     size_t n_time = workspace_->n_time();
 
-    // 6. Prepare surface storage if requested (zero-copy design)
-    std::vector<double> surface_storage;
-    std::span<double> output_buffer;
-
-    if (collect_full_surface) {
-        // Allocate buffer: [u_old_initial][step0][step1]...[step(n_time-1)]
-        // u_old_initial is scratch space for step 0, then u_old points to previous slice
-        surface_storage.resize((n_time + 1) * n_space);
-        output_buffer = std::span{surface_storage};
-    }
-
     // 7. Single unified solver path using std::visit
     auto result = std::visit(
         [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
@@ -270,13 +272,13 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
             });
 
             // Create PDESolver with strategy-specific obstacle and optional output buffer
-            // When output_buffer is provided, solver writes directly to it (zero-copy)
+            // When output_buffer_ is provided, solver writes directly to it (zero-copy)
             PDESolver solver(
                 x_grid, time_domain, TRBDF2Config{},
                 left_bc, right_bc, bs_op,
                 [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
                 external_workspace,
-                output_buffer  // Zero-copy: solver writes directly to surface_storage
+                output_buffer_  // Zero-copy: solver writes directly to output_buffer_
             );
 
             // Register discrete dividends as temporal events
@@ -324,13 +326,13 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
 
-            // Store full surface if collected (skip initial scratch space)
-            if (collect_full_surface) {
+            // Store full surface if buffer was provided (skip initial scratch space)
+            if (!output_buffer_.empty()) {
                 // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
                 // Extract only the time steps (skip initial scratch)
                 result.surface_2d.assign(
-                    surface_storage.begin() + n_space,  // Skip u_old_initial
-                    surface_storage.end()                 // Include all time steps
+                    output_buffer_.begin() + n_space,  // Skip u_old_initial
+                    output_buffer_.end()                // Include all time steps
                 );
             }
 
@@ -338,6 +340,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(boo
         },
         strategy
     );
+
+    return result;
 }
 
 std::expected<AmericanOptionGreeks, SolverError> AmericanOptionSolver::compute_greeks() const {

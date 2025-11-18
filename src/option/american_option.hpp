@@ -162,9 +162,15 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @param output_buffer Optional buffer for full spatiotemporal surface.
+     *                      If provided, solver writes all time steps to this buffer
+     *                      enabling at_time() access. Buffer layout:
+     *                      [u_old_initial][step0][step1]...[step(n_time-1)]
+     *                      Required size: (n_time + 1) * n_space doubles
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
-                        std::shared_ptr<AmericanSolverWorkspace> workspace);
+                        std::shared_ptr<AmericanSolverWorkspace> workspace,
+                        std::span<double> output_buffer = {});
 
     /**
      * Factory method with expected-based validation.
@@ -177,23 +183,23 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @param output_buffer Optional buffer for full spatiotemporal surface (see constructor)
      * @return Expected containing solver on success, error message on failure
      */
     static std::expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
-        std::shared_ptr<AmericanSolverWorkspace> workspace);
+        std::shared_ptr<AmericanSolverWorkspace> workspace,
+        std::span<double> output_buffer = {});
 
     /**
      * Solve for option value.
      *
-     * Always stores final solution for value_at(). Optionally collects full
-     * spatiotemporal surface (all time steps) for at_time() when needed by
-     * advanced use cases like price table construction.
+     * Always stores final solution for value_at(). If output_buffer was provided
+     * at construction, collects full spatiotemporal surface enabling at_time().
      *
-     * @param collect_full_surface If true, stores all time steps in surface_2d (higher memory usage)
      * @return Result containing option value (compute Greeks separately via compute_greeks())
      */
-    std::expected<AmericanOptionResult, SolverError> solve(bool collect_full_surface = false);
+    std::expected<AmericanOptionResult, SolverError> solve();
 
     /**
      * Compute Greeks (sensitivities) for the current solution.
@@ -219,6 +225,9 @@ private:
     // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
     std::shared_ptr<AmericanSolverWorkspace> workspace_;
+
+    // Optional output buffer for full surface
+    std::span<double> output_buffer_;
 
     // Solution state
     std::vector<double> solution_;

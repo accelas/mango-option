@@ -127,7 +127,9 @@ public:
     /// @param n_space Number of spatial grid points
     /// @param n_time Number of time steps
     /// @param setup Optional callback invoked after solver creation, before solve()
-    /// @param collect_full_surface If true, collect all time steps in surface_2d (for at_time())
+    /// @param output_buffer Optional buffer for full surface. If provided, must be large enough
+    ///                      for (n_time + 1) * n_space * params.size() doubles.
+    ///                      Buffer layout: option 0 surface | option 1 surface | ...
     /// @return Batch result with individual results and failure count
     static BatchAmericanOptionResult solve_batch_with_grid(
         std::span<const AmericanOptionParams> params,
@@ -136,7 +138,7 @@ public:
         size_t n_space,
         size_t n_time,
         SetupCallback setup = nullptr,
-        bool collect_full_surface = false)
+        std::span<double> output_buffer = {})
     {
         std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
         size_t failed_count = 0;
@@ -159,12 +161,43 @@ public:
             };
         }
 
+        // Calculate buffer slice size for each option (if buffer provided)
+        const size_t slice_size = (n_time + 1) * n_space;
+
+        // Validate buffer size if provided
+        if (!output_buffer.empty()) {
+            const size_t required_size = slice_size * params.size();
+            if (output_buffer.size() < required_size) {
+                SolverError error{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .message = "Output buffer too small: need " +
+                               std::to_string(required_size) + " but got " +
+                               std::to_string(output_buffer.size()),
+                    .iterations = 0
+                };
+                for (size_t i = 0; i < params.size(); ++i) {
+                    results[i] = std::unexpected(error);
+                }
+                return BatchAmericanOptionResult{
+                    .results = std::move(results),
+                    .failed_count = params.size()
+                };
+            }
+        }
+
         // Common solve logic
         auto solve_one = [&](size_t i, std::shared_ptr<AmericanSolverWorkspace> workspace)
             -> std::expected<AmericanOptionResult, SolverError>
         {
+            // Calculate buffer slice for this option (if buffer provided)
+            std::span<double> option_buffer;
+            if (!output_buffer.empty()) {
+                const size_t offset = i * slice_size;
+                option_buffer = output_buffer.subspan(offset, slice_size);
+            }
+
             // Use factory method to avoid exceptions from constructor
-            auto solver_result = AmericanOptionSolver::create(params[i], workspace);
+            auto solver_result = AmericanOptionSolver::create(params[i], workspace, option_buffer);
             if (!solver_result) {
                 return std::unexpected(SolverError{
                     .code = SolverErrorCode::InvalidConfiguration,
@@ -173,12 +206,12 @@ public:
                 });
             }
 
-            // NEW: Invoke setup callback if provided
+            // Invoke setup callback if provided
             if (setup) {
                 setup(i, solver_result.value());
             }
 
-            return solver_result.value().solve(collect_full_surface);
+            return solver_result.value().solve();
         };
 
         // Use parallel region + for to enable per-thread workspace reuse

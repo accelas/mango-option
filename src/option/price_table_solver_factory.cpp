@@ -213,11 +213,16 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         batch_params.push_back(params);
     }
 
-    // Solve batch with full surface collection (needed for at_time())
+    // Allocate output buffer for full surface collection (needed for at_time())
+    const size_t batch_size = batch_params.size();
+    const size_t surface_size_per_option = (config_.n_time + 1) * config_.n_space;
+    std::vector<double> surface_buffer(batch_size * surface_size_per_option);
+
+    // Solve batch with full surface collection
     auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
         std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
         nullptr,  // No setup callback
-        true);     // collect_full_surface=true for at_time()
+        std::span{surface_buffer});  // Provide buffer for full surface
 
     // Check failure count
     if (batch_result.failed_count > 0) {
