@@ -4,7 +4,6 @@ cc_library(
     deps = [
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
-        "//src/pde/operators:grid_spacing",
         "//src/support:error_types",
     ],
     copts = ["-std=c++23"],

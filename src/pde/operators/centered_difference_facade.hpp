@@ -1,6 +1,6 @@
 #pragma once
 
-#include "grid_spacing.hpp"
+#include "src/pde/core/grid.hpp"
 #include "centered_difference_scalar.hpp"
 #include "centered_difference_simd_backend.hpp"
 #include "src/support/cpu/feature_detection.hpp"

@@ -1,5 +1,4 @@
 #include "src/pde/operators/centered_difference_facade.hpp"
-#include "src/pde/operators/grid_spacing.hpp"
 #include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>

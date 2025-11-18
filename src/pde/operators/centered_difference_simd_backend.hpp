@@ -1,6 +1,6 @@
 #pragma once
 
-#include "grid_spacing.hpp"
+#include "src/pde/core/grid.hpp"
 #include <experimental/simd>
 #include <span>
 #include <concepts>

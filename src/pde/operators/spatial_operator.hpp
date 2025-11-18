@@ -1,6 +1,6 @@
 #pragma once
 
-#include "grid_spacing.hpp"
+#include "src/pde/core/grid.hpp"
 #include "centered_difference_facade.hpp"
 #include "src/pde/core/jacobian_view.hpp"
 #include <span>

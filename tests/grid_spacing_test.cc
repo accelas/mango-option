@@ -1,4 +1,3 @@
-#include "src/pde/operators/grid_spacing.hpp"
 #include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
@@ -7,7 +6,7 @@ TEST(GridSpacingTest, UniformGridSpacing) {
     // Create uniform grid [0, 10] with 11 points (dx = 1.0)
     std::vector<double> x = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     EXPECT_TRUE(spacing.is_uniform());
     EXPECT_DOUBLE_EQ(spacing.spacing(), 1.0);
@@ -18,7 +17,7 @@ TEST(GridSpacingTest, UniformGridSpacing) {
 TEST(GridSpacingTest, LeftSpacingUniform) {
     std::vector<double> x = {0, 1, 2, 3, 4, 5};
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     // left_spacing(i) = x[i] - x[i-1]
     EXPECT_DOUBLE_EQ(spacing.left_spacing(1), 1.0);  // x[1] - x[0] = 1 - 0
@@ -29,7 +28,7 @@ TEST(GridSpacingTest, LeftSpacingUniform) {
 TEST(GridSpacingTest, RightSpacingUniform) {
     std::vector<double> x = {0, 1, 2, 3, 4, 5};
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     // right_spacing(i) = x[i+1] - x[i]
     EXPECT_DOUBLE_EQ(spacing.right_spacing(0), 1.0);  // x[1] - x[0] = 1 - 0
@@ -41,7 +40,7 @@ TEST(GridSpacingTest, LeftSpacingNonUniform) {
     // Non-uniform grid with variable spacing
     std::vector<double> x = {0.0, 0.5, 1.0, 2.0, 4.0};
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     EXPECT_FALSE(spacing.is_uniform());
     EXPECT_DOUBLE_EQ(spacing.left_spacing(1), 0.5);  // x[1] - x[0] = 0.5 - 0.0
@@ -53,7 +52,7 @@ TEST(GridSpacingTest, LeftSpacingNonUniform) {
 TEST(GridSpacingTest, RightSpacingNonUniform) {
     std::vector<double> x = {0.0, 0.5, 1.0, 2.0, 4.0};
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     EXPECT_DOUBLE_EQ(spacing.right_spacing(0), 0.5);  // x[1] - x[0] = 0.5 - 0.0
     EXPECT_DOUBLE_EQ(spacing.right_spacing(1), 0.5);  // x[2] - x[1] = 1.0 - 0.5
@@ -62,13 +61,13 @@ TEST(GridSpacingTest, RightSpacingNonUniform) {
 }
 
 TEST(GridSpacingTest, MinStencilSize) {
-    EXPECT_EQ(mango::operators::GridSpacing<double>::min_stencil_size(), 3);
+    EXPECT_EQ(mango::GridSpacing<double>::min_stencil_size(), 3);
 }
 
 TEST(GridSpacingTest, DegenerateGridTooSmall) {
     std::vector<double> x = {0.0, 1.0};  // n = 2 < min_stencil_size()
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     // Grid is too small for 3-point stencil
     EXPECT_EQ(spacing.size(), 2);
@@ -82,7 +81,7 @@ TEST(GridSpacingTest, NonUniformPrecomputationCorrectness) {
     x[5] = 0.0; x[6] = 0.05; x[7] = 0.2; x[8] = 0.5; x[9] = 0.8; x[10] = 1.0;
 
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     ASSERT_FALSE(spacing.is_uniform());
 
@@ -106,7 +105,7 @@ TEST(GridSpacingTest, UniformGridNoPrecomputation) {
     for (size_t i = 0; i < 11; ++i) x[i] = i * 0.1;
 
     auto grid = mango::GridView<double>(x);
-    auto spacing = mango::operators::GridSpacing<double>(grid);
+    auto spacing = mango::GridSpacing<double>(grid);
 
     ASSERT_TRUE(spacing.is_uniform());
 
