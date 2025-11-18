@@ -9,6 +9,46 @@
 #include <vector>
 #include <cmath>
 
+// Helper class to use PDESolver with CRTP pattern
+template<typename LeftBC, typename RightBC, typename SpatialOp>
+class ExamplePDESolver : public mango::PDESolver<ExamplePDESolver<LeftBC, RightBC, SpatialOp>> {
+public:
+    ExamplePDESolver(std::span<const double> grid,
+                     const mango::TimeDomain& time,
+                     const mango::TRBDF2Config& config,
+                     LeftBC left_bc,
+                     RightBC right_bc,
+                     SpatialOp spatial_op)
+        : mango::PDESolver<ExamplePDESolver>(
+              grid, time, config, std::nullopt, nullptr, {})
+        , left_bc_(std::move(left_bc))
+        , right_bc_(std::move(right_bc))
+        , spatial_op_(std::move(spatial_op))
+    {}
+
+    // CRTP interface - called by PDESolver base class
+    const LeftBC& left_boundary() const { return left_bc_; }
+    const RightBC& right_boundary() const { return right_bc_; }
+    const SpatialOp& spatial_operator() const { return spatial_op_; }
+
+private:
+    LeftBC left_bc_;
+    RightBC right_bc_;
+    SpatialOp spatial_op_;
+};
+
+// Helper function to create solver with deduced types
+template<typename LeftBC, typename RightBC, typename SpatialOp>
+auto make_solver(std::span<const double> grid,
+                 const mango::TimeDomain& time,
+                 const mango::TRBDF2Config& config,
+                 LeftBC left_bc,
+                 RightBC right_bc,
+                 SpatialOp spatial_op) {
+    return ExamplePDESolver<LeftBC, RightBC, SpatialOp>(
+        grid, time, config, std::move(left_bc), std::move(right_bc), std::move(spatial_op));
+}
+
 int main() {
     // Heat equation: ∂u/∂t = ∂²u/∂x²
     // Domain: x ∈ [0, 1], t ∈ [0, 0.1]
@@ -40,9 +80,9 @@ int main() {
     auto grid_view = mango::GridView<double>(grid_buffer.span());
     auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), grid_view);  // Diffusion coefficient D = 1.0
 
-    // Create solver with Newton integration
-    mango::PDESolver solver(grid_buffer.span(), time, trbdf2_config,
-                           left_bc, right_bc, spatial_op);
+    // Create solver with Newton integration using CRTP helper
+    auto solver = make_solver(grid_buffer.span(), time, trbdf2_config,
+                              left_bc, right_bc, spatial_op);
 
     // Initial condition: u(x, 0) = sin(πx)
     auto initial_condition = [](std::span<const double> x, std::span<double> u) {
