@@ -166,18 +166,6 @@ public:
     }
 
     /**
-     * Set TR-BDF2 solver configuration (advanced).
-     *
-     * Allows fine-tuning of the time-stepping scheme and Newton solver.
-     * Most users should use the default configuration.
-     *
-     * @param config TR-BDF2 solver configuration (includes Newton parameters)
-     */
-    void set_trbdf2_config(const TRBDF2Config& config) {
-        trbdf2_config_ = config;
-    }
-
-    /**
      * Get the full solution surface (for debugging/analysis).
      *
      * @return Vector of option values across the spatial grid
@@ -187,7 +175,6 @@ public:
 private:
     // Parameters
     AmericanOptionParams params_;
-    TRBDF2Config trbdf2_config_;
 
     // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
