@@ -464,7 +464,7 @@ cc_test(
     name = "grid_spacing_view_test",
     srcs = ["grid_spacing_view_test.cc"],
     deps = [
-        "//src/pde/core:grid",
+        "//src/pde/core:grid_spacing",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
