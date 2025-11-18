@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "src/pde/core/pde_workspace_pmr.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
 #include <memory>
 #include <expected>
@@ -45,6 +45,27 @@ namespace mango {
 class AmericanSolverWorkspace {
 public:
     /**
+     * Validate workspace parameters without allocation.
+     */
+    static std::expected<void, std::string> validate_params(
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time);
+
+    /**
+     * Factory method creates workspace from spatial grid bounds.
+     *
+     * @param x_min Minimum log-moneyness
+     * @param x_max Maximum log-moneyness
+     * @param n_space Number of spatial grid points
+     * @param n_time Number of time steps
+     * @return Expected containing shared workspace on success, error message on failure
+     */
+    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
+    create(double x_min, double x_max, size_t n_space, size_t n_time);
+
+    /**
      * Factory method creates workspace from GridSpec.
      *
      * @param grid_spec Grid specification for spatial domain
@@ -57,18 +78,18 @@ public:
            size_t n_time,
            std::pmr::memory_resource* resource);
 
-    std::shared_ptr<PDEWorkspace> pde_workspace() const { return pde_workspace_; }
-    GridSpacing<double> grid_spacing() const { return grid_spacing_; }
+    PDEWorkspace* pde_workspace() const { return pde_workspace_.get(); }
+    std::shared_ptr<GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
 
     std::span<const double> grid() const {
-        return pde_workspace_->grid().subspan(0, pde_workspace_->logical_size());
+        return grid_buffer_.span();
     }
 
     std::span<const double> grid_span() const {
-        return pde_workspace_->grid().subspan(0, pde_workspace_->logical_size());
+        return grid_buffer_.span();
     }
 
-    size_t n_space() const { return pde_workspace_->logical_size(); }
+    size_t n_space() const { return grid_buffer_.size(); }
     size_t n_time() const { return n_time_; }
 
     double x_min() const {
@@ -82,16 +103,19 @@ public:
     }
 
 private:
-    AmericanSolverWorkspace(std::shared_ptr<PDEWorkspace> pde_ws,
-                           GridSpacing<double> spacing,
+    AmericanSolverWorkspace(GridBuffer<double> grid_buf,
+                           std::shared_ptr<PDEWorkspace> pde_ws,
+                           std::shared_ptr<GridSpacing<double>> spacing,
                            size_t n_time)
-        : pde_workspace_(std::move(pde_ws))
+        : grid_buffer_(std::move(grid_buf))
+        , pde_workspace_(std::move(pde_ws))
         , grid_spacing_(std::move(spacing))
         , n_time_(n_time)
     {}
 
+    GridBuffer<double> grid_buffer_;  // Must come before pde_workspace_ (owns grid data)
     std::shared_ptr<PDEWorkspace> pde_workspace_;
-    GridSpacing<double> grid_spacing_;
+    std::shared_ptr<GridSpacing<double>> grid_spacing_;
     size_t n_time_;
 };
 

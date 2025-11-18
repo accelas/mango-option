@@ -53,9 +53,8 @@ public:
         : PDESolver<AmericanPutSolver>(
               workspace->grid_span(),
               TimeDomain(0.0, params.maturity, params.maturity / workspace->n_time()),
-              TRBDF2Config{},
               create_obstacle(),
-              workspace.get(),
+              workspace->pde_workspace(),
               output_buffer)
         , params_(params)
         , workspace_(std::move(workspace))
@@ -145,9 +144,8 @@ public:
         : PDESolver<AmericanCallSolver>(
               workspace->grid_span(),
               TimeDomain(0.0, params.maturity, params.maturity / workspace->n_time()),
-              TRBDF2Config{},
               create_obstacle(),
-              workspace.get(),
+              workspace->pde_workspace(),
               output_buffer)
         , params_(params)
         , workspace_(std::move(workspace))

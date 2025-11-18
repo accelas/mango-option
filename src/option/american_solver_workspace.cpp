@@ -2,6 +2,31 @@
 
 namespace mango {
 
+std::expected<void, std::string>
+AmericanSolverWorkspace::validate_params(double x_min, double x_max, size_t n_space, size_t n_time) {
+    if (x_min >= x_max) {
+        return std::unexpected("x_min must be < x_max");
+    }
+    if (n_space < 3) {
+        return std::unexpected("n_space must be >= 3");
+    }
+    if (n_time < 1) {
+        return std::unexpected("n_time must be >= 1");
+    }
+    return {};
+}
+
+std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
+AmericanSolverWorkspace::create(double x_min, double x_max, size_t n_space, size_t n_time) {
+    // Use default memory resource for convenience method
+    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, n_space, 2.0);
+    if (!grid_spec.has_value()) {
+        return std::unexpected(grid_spec.error());
+    }
+
+    return create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+}
+
 std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
 AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
                                 size_t n_time,
@@ -14,22 +39,20 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
         return std::unexpected("n_time must be positive");
     }
 
-    // Create PDEWorkspace
-    auto pde_ws_result = PDEWorkspace::create(grid_spec, resource);
-    if (!pde_ws_result.has_value()) {
-        return std::unexpected(pde_ws_result.error());
-    }
+    // Generate grid from spec
+    auto grid_buffer = grid_spec.generate();
+    size_t n_space = grid_buffer.size();
 
-    auto pde_ws = pde_ws_result.value();
+    // Create GridSpacing from grid (before moving grid_buffer)
+    auto grid_spacing = std::make_shared<GridSpacing<double>>(grid_buffer.view());
 
-    // Create GridSpacing from workspace grid data
-    // Extract logical grid (without SIMD padding)
-    auto logical_grid = pde_ws->grid().subspan(0, pde_ws->logical_size());
-    auto grid_view = GridView<double>(logical_grid);
-    auto grid_spacing = GridSpacing<double>(grid_view);
+    // Create PDEWorkspace using old API (takes grid size and span)
+    // Note: grid_buffer will be moved into AmericanSolverWorkspace, so PDEWorkspace
+    // will hold a span that points to grid_buffer owned by AmericanSolverWorkspace
+    auto pde_ws = std::make_shared<PDEWorkspace>(n_space, grid_buffer.span());
 
     return std::shared_ptr<AmericanSolverWorkspace>(
-        new AmericanSolverWorkspace(pde_ws, std::move(grid_spacing), n_time));
+        new AmericanSolverWorkspace(std::move(grid_buffer), pde_ws, std::move(grid_spacing), n_time));
 }
 
 }  // namespace mango
