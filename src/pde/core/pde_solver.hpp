@@ -75,7 +75,6 @@ public:
     ///
     /// @param grid Spatial grid (x coordinates)
     /// @param time Time domain configuration
-    /// @param config TR-BDF2 configuration (optional, uses defaults if not provided)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
     /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
@@ -86,15 +85,15 @@ public:
     ///
     /// Note: Boundary conditions and spatial operator are obtained from derived class
     ///       via CRTP calls, not passed as constructor arguments
+    /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
-              const TRBDF2Config& config = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
               PDEWorkspace* external_workspace = nullptr,
               std::span<double> output_buffer = {})
         : grid_(grid)
         , time_(time)
-        , config_(config)
+        , config_{}  // Default-initialized
         , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_owner_(nullptr)
@@ -206,6 +205,16 @@ public:
     /// Check if obstacle condition is present
     bool has_obstacle() const {
         return obstacle_.has_value();
+    }
+
+    /// Set TR-BDF2 configuration
+    void set_config(const TRBDF2Config& config) {
+        config_ = config;
+    }
+
+    /// Get TR-BDF2 configuration
+    const TRBDF2Config& config() const {
+        return config_;
     }
 
     /// Add temporal event to be executed at specific time
