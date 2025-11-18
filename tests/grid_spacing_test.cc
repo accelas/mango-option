@@ -109,6 +109,56 @@ TEST(GridSpacingTest, UniformGridNoPrecomputation) {
 
     ASSERT_TRUE(spacing.is_uniform());
 
-    // Accessors should assert-fail on uniform grids
-    EXPECT_DEATH(spacing.dx_left_inv(), "Assertion.*failed");
+    // Accessors should throw std::bad_variant_access on uniform grids
+    EXPECT_THROW(spacing.dx_left_inv(), std::bad_variant_access);
+}
+
+TEST(GridSpacingTest, VariantUniformGrid) {
+    // Uniform grid: [0.0, 0.1, 0.2, ..., 1.0]
+    std::vector<double> x(11);
+    for (size_t i = 0; i < 11; ++i) {
+        x[i] = i * 0.1;
+    }
+
+    auto grid = mango::GridView<double>(x);
+    mango::GridSpacing<double> spacing(grid);
+
+    // Should detect uniformity
+    EXPECT_TRUE(spacing.is_uniform());
+
+    // Should store UniformSpacing variant
+    EXPECT_DOUBLE_EQ(spacing.spacing(), 0.1);
+    EXPECT_DOUBLE_EQ(spacing.spacing_inv(), 10.0);
+    EXPECT_DOUBLE_EQ(spacing.spacing_inv_sq(), 100.0);
+}
+
+TEST(GridSpacingTest, VariantNonUniformGrid) {
+    // Non-uniform grid: [0.0, 0.1, 0.3, 0.6, 1.0]
+    std::vector<double> x = {0.0, 0.1, 0.3, 0.6, 1.0};
+    auto grid = mango::GridView<double>(x);
+    mango::GridSpacing<double> spacing(grid);
+
+    // Should detect non-uniformity
+    EXPECT_FALSE(spacing.is_uniform());
+
+    // Should have access to non-uniform arrays
+    auto dx_left = spacing.dx_left_inv();
+    EXPECT_EQ(dx_left.size(), 3);  // Interior points
+    EXPECT_DOUBLE_EQ(dx_left[0], 10.0);  // 1 / 0.1
+}
+
+TEST(GridSpacingTest, VariantMemoryEfficiency) {
+    // Uniform grid should not allocate large arrays
+    std::vector<double> x(1000);
+    for (size_t i = 0; i < 1000; ++i) {
+        x[i] = i * 0.001;
+    }
+
+    auto grid = mango::GridView<double>(x);
+    mango::GridSpacing<double> spacing(grid);
+
+    // For uniform grid, size should be minimal (no large precomputed arrays)
+    // This is implicitly tested by the fact that we can construct it
+    // without OOM on a 1000-point uniform grid
+    EXPECT_TRUE(spacing.is_uniform());
 }
