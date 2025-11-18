@@ -6,7 +6,6 @@
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
-#include "src/pde/core/trbdf2_config.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -19,12 +18,11 @@ class TestPDESolver : public mango::PDESolver<TestPDESolver<LeftBC, RightBC, Spa
 public:
     TestPDESolver(std::span<const double> grid,
                   const mango::TimeDomain& time,
-                  const mango::TRBDF2Config& config,
                   LeftBC left_bc,
                   RightBC right_bc,
                   SpatialOp spatial_op)
         : mango::PDESolver<TestPDESolver>(
-              grid, time, config, std::nullopt, nullptr, {})
+              grid, time, std::nullopt, nullptr, {})
         , left_bc_(std::move(left_bc))
         , right_bc_(std::move(right_bc))
         , spatial_op_(std::move(spatial_op))
@@ -45,12 +43,11 @@ private:
 template<typename LeftBC, typename RightBC, typename SpatialOp>
 auto make_test_solver(std::span<const double> grid,
                       const mango::TimeDomain& time,
-                      const mango::TRBDF2Config& config,
                       LeftBC left_bc,
                       RightBC right_bc,
                       SpatialOp spatial_op) {
     return TestPDESolver<LeftBC, RightBC, SpatialOp>(
-        grid, time, config, std::move(left_bc), std::move(right_bc), std::move(spatial_op));
+        grid, time, std::move(left_bc), std::move(right_bc), std::move(spatial_op));
 }
 
 TEST(TemporalEventTest, EventAppliedAfterStep) {
@@ -69,9 +66,7 @@ TEST(TemporalEventTest, EventAppliedAfterStep) {
     DirichletBC left_bc{[](double t, double x) { return 0.0; }};
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};
 
-    TRBDF2Config trbdf2_config{};
-
-    auto solver = make_test_solver(grid.span(), time, trbdf2_config,
+    auto solver = make_test_solver(grid.span(), time,
                                    left_bc, right_bc, spatial_op);
 
     // Initial condition: u = 1 everywhere

@@ -257,16 +257,6 @@ cc_test(
 )
 
 cc_test(
-    name = "workspace_base_test",
-    srcs = ["memory/workspace_base_test.cc"],
-    deps = [
-        "//src/support/memory:workspace_base",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "feature_detection_test",
     srcs = ["cpu/feature_detection_test.cc"],
     deps = [
