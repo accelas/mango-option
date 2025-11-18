@@ -28,35 +28,6 @@ namespace mango {
 namespace {
 
 /**
- * Internal collector for gathering all time steps during solve.
- */
-class AllTimeStepsCollector : public SnapshotCollector {
-public:
-    explicit AllTimeStepsCollector(size_t n_space, size_t n_time)
-        : n_space_(n_space), n_time_(n_time) {
-        data_.resize(n_space * n_time);
-    }
-
-    void collect(const Snapshot& snapshot) override {
-        size_t time_idx = snapshot.user_index;
-        if (time_idx >= n_time_) return;
-
-        const auto& solution = snapshot.solution;
-        std::copy(solution.begin(), solution.end(),
-                  data_.begin() + time_idx * n_space_);
-    }
-
-    std::vector<double> extract() && {
-        return std::move(data_);
-    }
-
-private:
-    size_t n_space_;
-    size_t n_time_;
-    std::vector<double> data_;
-};
-
-/**
  * Strategy pattern for option-specific behavior (obstacle + initial condition).
  * Using std::variant eliminates ~130 lines of code duplication in solve().
  */
@@ -226,7 +197,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // Public API
 // ============================================================================
 
-std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
+std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve(bool collect_full_surface) {
     // 1. Create strategy based on option type
     OptionStrategy strategy;
     switch (params_.type) {
@@ -272,11 +243,14 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     size_t n_space = workspace_->n_space();
     size_t n_time = workspace_->n_time();
 
-    // 6. Create collector for all time steps
-    AllTimeStepsCollector all_time_collector(n_space, n_time);
+    // 6. Prepare surface storage if requested
+    std::vector<double> surface_storage;
+    if (collect_full_surface) {
+        surface_storage.resize(n_space * n_time);
+    }
 
     // 7. Single unified solver path using std::visit
-    return std::visit(
+    auto result = std::visit(
         [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
             // Setup boundary conditions using strategy (NORMALIZED by K=1)
             // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
@@ -290,12 +264,21 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                 return strat.right_boundary(t, x, params_.rate);
             });
 
-            // Create PDESolver with strategy-specific obstacle
+            // Setup step callback for optional surface collection
+            std::optional<StepCallback> step_cb = std::nullopt;
+            if (collect_full_surface) {
+                step_cb = [&surface_storage, n_space](size_t step, double, std::span<const double> u) {
+                    std::copy(u.begin(), u.end(), surface_storage.begin() + step * n_space);
+                };
+            }
+
+            // Create PDESolver with strategy-specific obstacle and optional callback
             PDESolver solver(
                 x_grid, time_domain, TRBDF2Config{},
                 left_bc, right_bc, bs_op,
                 [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
-                external_workspace
+                external_workspace,
+                step_cb
             );
 
             // Register discrete dividends as temporal events
@@ -313,11 +296,6 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
                     [div_jump](double t, auto x, auto u) {
                         div_jump(t, x, u);
                     });
-            }
-
-            // Register collector for all time steps (needed for value_at() and at_time())
-            for (size_t step_idx = 0; step_idx < n_time; ++step_idx) {
-                solver.register_snapshot(step_idx, step_idx, &all_time_collector);
             }
 
             // Initialize with strategy-specific terminal condition (payoff at maturity)
@@ -340,13 +318,18 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             solution_.assign(solution_view.begin(), solution_view.end());
             solved_ = true;
 
-            // Store solution surface and grid information
-            result.surface_2d = std::move(all_time_collector).extract();
+            // Store final solution and grid information
+            result.solution.assign(solution_view.begin(), solution_view.end());
             result.n_space = n_space;
             result.n_time = n_time;
             result.x_min = workspace_->x_min();
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
+
+            // Store full surface if collected
+            if (collect_full_surface) {
+                result.surface_2d = std::move(surface_storage);
+            }
 
             return result;
         },
@@ -375,14 +358,12 @@ double AmericanOptionResult::value_at(double spot) const {
     // Convert spot to log-moneyness
     double x_target = std::log(spot / strike);
 
-    // Get final time step (present value)
-    // PDE time: t=0 at maturity, t=n_time-1 at present
-    if (surface_2d.empty() || n_space == 0 || n_time == 0) {
+    // Use final solution (fast path, no snapshot overhead)
+    if (solution.empty()) {
         return 0.0;
     }
 
-    // Extract final time step surface
-    std::span<const double> final_surface = at_time(n_time - 1);
+    std::span<const double> final_surface(solution.data(), solution.size());
 
     // Compute grid spacing (uniform grid)
     const double dx = (x_max - x_min) / (n_space - 1);

@@ -91,7 +91,8 @@ using AmericanOptionParams = PricingParams;
  * Solver result containing solution surface (interpolate on-demand for specific prices).
  */
 struct AmericanOptionResult {
-    std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (row-major)
+    std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
+    std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (optional, for at_time())
     size_t n_space;                    ///< Number of spatial grid points
     size_t n_time;                     ///< Number of time steps
     double x_min;                      ///< Minimum log-moneyness
@@ -101,7 +102,7 @@ struct AmericanOptionResult {
 
     /// Default constructor
     AmericanOptionResult()
-        : surface_2d(), n_space(0), n_time(0),
+        : solution(), surface_2d(), n_space(0), n_time(0),
           x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
 
     /**
@@ -185,11 +186,14 @@ public:
     /**
      * Solve for option value.
      *
-     * Collects full spatiotemporal surface (all time steps) for value_at() and at_time().
+     * Always stores final solution for value_at(). Optionally collects full
+     * spatiotemporal surface (all time steps) for at_time() when needed by
+     * advanced use cases like price table construction.
      *
+     * @param collect_full_surface If true, stores all time steps in surface_2d (higher memory usage)
      * @return Result containing option value (compute Greeks separately via compute_greeks())
      */
-    std::expected<AmericanOptionResult, SolverError> solve();
+    std::expected<AmericanOptionResult, SolverError> solve(bool collect_full_surface = false);
 
     /**
      * Compute Greeks (sensitivities) for the current solution.

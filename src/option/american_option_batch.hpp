@@ -127,6 +127,7 @@ public:
     /// @param n_space Number of spatial grid points
     /// @param n_time Number of time steps
     /// @param setup Optional callback invoked after solver creation, before solve()
+    /// @param collect_full_surface If true, collect all time steps in surface_2d (for at_time())
     /// @return Batch result with individual results and failure count
     static BatchAmericanOptionResult solve_batch_with_grid(
         std::span<const AmericanOptionParams> params,
@@ -134,7 +135,8 @@ public:
         double x_max,
         size_t n_space,
         size_t n_time,
-        SetupCallback setup = nullptr)
+        SetupCallback setup = nullptr,
+        bool collect_full_surface = false)
     {
         std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
         size_t failed_count = 0;
@@ -176,7 +178,7 @@ public:
                 setup(i, solver_result.value());
             }
 
-            return solver_result.value().solve();
+            return solver_result.value().solve(collect_full_surface);
         };
 
         // Use parallel region + for to enable per-thread workspace reuse

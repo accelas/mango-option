@@ -8,7 +8,6 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
 #include "src/math/thomas_solver.hpp"
-#include "src/pde/core/snapshot.hpp"
 #include "src/pde/core/jacobian_view.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -23,6 +22,10 @@
 #include <iostream>
 
 namespace mango {
+
+/// Simple callback invoked after each time step completes
+/// Parameters: (step_index, time, solution_span)
+using StepCallback = std::function<void(size_t, double, std::span<const double>)>;
 
 /// Concept to detect spatial operators with analytical Jacobian capability
 template<typename SpatialOp>
@@ -79,6 +82,7 @@ public:
     /// @param spatial_op Spatial operator L(u)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
+    /// @param step_callback Optional callback invoked after each time step
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
               const TRBDF2Config& config = {},
@@ -86,7 +90,8 @@ public:
               const BoundaryR& right_bc = {},
               SpatialOp spatial_op = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
-              PDEWorkspace* external_workspace = nullptr)
+              PDEWorkspace* external_workspace = nullptr,
+              std::optional<StepCallback> step_callback = std::nullopt)
         : grid_(grid)
         , time_(time)
         , config_(config)
@@ -94,6 +99,7 @@ public:
         , right_bc_(right_bc)
         , spatial_op_(std::move(spatial_op))
         , obstacle_(std::move(obstacle))
+        , step_callback_(std::move(step_callback))
         , n_(grid.size())
         , workspace_owner_(nullptr)
         , workspace_(nullptr)
@@ -165,8 +171,10 @@ public:
             // Process temporal events AFTER completing the step
             process_temporal_events(t_old, t_next, step);
 
-            // Process snapshots (CHANGED: pass step index)
-            process_snapshots(step, t);
+            // Invoke step callback if provided
+            if (step_callback_.has_value()) {
+                (*step_callback_)(step, t, std::span<const double>{u_current_});
+            }
         }
 
         return {};
@@ -180,19 +188,6 @@ public:
     /// Check if obstacle condition is present
     bool has_obstacle() const {
         return obstacle_.has_value();
-    }
-
-    /// Register snapshot collection at specific step index
-    ///
-    /// @param step_index Step number (0-based) to collect snapshot
-    /// @param user_index User-provided index for matching
-    /// @param collector Callback to receive snapshot (must outlive solver)
-    void register_snapshot(size_t step_index, size_t user_index, SnapshotCollector* collector) {
-        snapshot_requests_.push_back({step_index, user_index, collector});
-        // Sort by step index for efficient lookup
-        std::sort(snapshot_requests_.begin(), snapshot_requests_.end(),
-                 [](const auto& a, const auto& b) { return a.step_index < b.step_index; });
-        next_snapshot_idx_ = 0;
     }
 
     /// Add temporal event to be executed at specific time
@@ -217,6 +212,7 @@ private:
     BoundaryR right_bc_;
     SpatialOp spatial_op_;
     std::optional<ObstacleCallback> obstacle_;
+    std::optional<StepCallback> step_callback_;
 
     // Grid size
     size_t n_;
@@ -242,22 +238,9 @@ private:
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
 
-    // Snapshot collection
-    struct SnapshotRequest {
-        size_t step_index;        // CHANGED: use step index not time
-        size_t user_index;
-        SnapshotCollector* collector;
-    };
-    std::vector<SnapshotRequest> snapshot_requests_;
-    size_t next_snapshot_idx_ = 0;
-
     // Temporal event system
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
-
-    // Workspace for derivatives
-    std::vector<double> du_dx_;
-    std::vector<double> d2u_dx2_;
 
     PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
         if (external_workspace) {
@@ -267,51 +250,6 @@ private:
         workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
         workspace_ = workspace_owner_.get();
         return *workspace_;
-    }
-
-    /// Process snapshots at current step index
-    void process_snapshots(size_t step_idx, double t_current) {
-        while (next_snapshot_idx_ < snapshot_requests_.size()) {
-            const auto& req = snapshot_requests_[next_snapshot_idx_];
-
-            // Check if this step index matches
-            if (req.step_index > step_idx) {
-                break;  // Future snapshot
-            }
-
-            if (req.step_index != step_idx) {
-                ++next_snapshot_idx_;  // Skip missed snapshot
-                continue;
-            }
-
-            // Allocate derivative storage on first use
-            if (du_dx_.empty()) {
-                du_dx_.resize(n_);
-                d2u_dx2_.resize(n_);
-            }
-
-            // Compute derivatives using PDE operator
-            spatial_op_.compute_first_derivative(std::span{u_current_}, std::span{du_dx_});
-            spatial_op_.compute_second_derivative(std::span{u_current_}, std::span{d2u_dx2_});
-
-            // Build snapshot
-            Snapshot snapshot{
-                .time = t_current,
-                .user_index = req.user_index,
-                .spatial_grid = grid_,
-                .dx = workspace_->dx(),
-                .solution = std::span{u_current_},
-                .spatial_operator = workspace_->lu(),
-                .first_derivative = std::span{du_dx_},
-                .second_derivative = std::span{d2u_dx2_},
-                .problem_params = nullptr
-            };
-
-            // Call collector
-            req.collector->collect(snapshot);
-
-            ++next_snapshot_idx_;
-        }
     }
 
     /// Process temporal events in time interval (t_old, t_new]

@@ -170,8 +170,8 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
         }
     }
 
-    // Solve PDE (surface always collected)
-    auto solve_result = solver.solve();
+    // Solve PDE with full surface collection (needed for at_time())
+    auto solve_result = solver.solve(true);
     if (!solve_result) {
         return std::unexpected(solve_result.error());
     }

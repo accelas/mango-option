@@ -1,11 +1,4 @@
 cc_library(
-    name = "snapshot",
-    hdrs = ["snapshot.hpp"],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "grid",
     hdrs = ["grid.hpp"],
     deps = [
@@ -90,7 +83,6 @@ cc_library(
         ":trbdf2_config",
         "//src/math:thomas_solver",
         "//src/math:root_finding",
-        "//src/pde/core:snapshot",
         ":jacobian_view",
         "//src/support:error_types",
     ],
