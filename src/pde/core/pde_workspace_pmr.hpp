@@ -65,6 +65,22 @@ public:
 
     std::span<const double> dx() const { return {dx_.data(), pad_to_simd(n_ - 1)}; }
 
+    // Newton solver arrays
+    std::span<double> jacobian_diag() { return {jacobian_diag_.data(), padded_n_}; }
+    std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), padded_n_}; }
+
+    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), padded_n_}; }
+    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), padded_n_}; }
+
+    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), padded_n_}; }
+    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), padded_n_}; }
+
+    std::span<double> residual() { return {residual_.data(), padded_n_}; }
+    std::span<const double> residual() const { return {residual_.data(), padded_n_}; }
+
+    std::span<double> delta_u() { return {delta_u_.data(), padded_n_}; }
+    std::span<const double> delta_u() const { return {delta_u_.data(), padded_n_}; }
+
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
 
@@ -82,6 +98,11 @@ private:
         , lu_(padded_n_, 0.0, mr)
         , psi_(padded_n_, 0.0, mr)
         , dx_(pad_to_simd(n - 1), 0.0, mr)
+        , jacobian_diag_(padded_n_, 0.0, mr)
+        , jacobian_upper_(padded_n_, 0.0, mr)
+        , jacobian_lower_(padded_n_, 0.0, mr)
+        , residual_(padded_n_, 0.0, mr)
+        , delta_u_(padded_n_, 0.0, mr)
     {
         // Copy grid data
         std::copy(grid_data.begin(), grid_data.end(), grid_.begin());
@@ -104,6 +125,11 @@ private:
     std::pmr::vector<double> lu_;
     std::pmr::vector<double> psi_;
     std::pmr::vector<double> dx_;
+    std::pmr::vector<double> jacobian_diag_;
+    std::pmr::vector<double> jacobian_upper_;
+    std::pmr::vector<double> jacobian_lower_;
+    std::pmr::vector<double> residual_;
+    std::pmr::vector<double> delta_u_;
 };
 
 }  // namespace mango

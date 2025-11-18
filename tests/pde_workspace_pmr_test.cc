@@ -44,5 +44,24 @@ TEST(PDEWorkspacePMRTest, GridAccessReturnsCorrectData) {
     EXPECT_NEAR(grid[100], 1.0, 1e-14);
 }
 
+TEST(PDEWorkspacePMRTest, NewtonArraysAccessible) {
+    std::pmr::synchronized_pool_resource pool;
+    auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
+    auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
+
+    // Test Newton array access
+    auto jac_diag = ws->jacobian_diag();
+    auto jac_upper = ws->jacobian_upper();
+    auto jac_lower = ws->jacobian_lower();
+    auto residual = ws->residual();
+    auto delta_u = ws->delta_u();
+
+    EXPECT_EQ(jac_diag.size(), 104);
+    EXPECT_EQ(jac_upper.size(), 104);
+    EXPECT_EQ(jac_lower.size(), 104);
+    EXPECT_EQ(residual.size(), 104);
+    EXPECT_EQ(delta_u.size(), 104);
+}
+
 }  // namespace
 }  // namespace mango
