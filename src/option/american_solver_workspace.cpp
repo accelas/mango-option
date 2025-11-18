@@ -39,17 +39,16 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
         return std::unexpected("n_time must be positive");
     }
 
-    // Generate grid from spec
+    // Create PDEWorkspace with PMR
+    auto pde_ws_result = PDEWorkspace::create(grid_spec, resource);
+    if (!pde_ws_result.has_value()) {
+        return std::unexpected(pde_ws_result.error());
+    }
+    auto pde_ws = pde_ws_result.value();
+
+    // Create GridSpacing from PDEWorkspace grid
     auto grid_buffer = grid_spec.generate();
-    size_t n_space = grid_buffer.size();
-
-    // Create GridSpacing from grid (before moving grid_buffer)
     auto grid_spacing = std::make_shared<GridSpacing<double>>(grid_buffer.view());
-
-    // Create PDEWorkspace using old API (takes grid size and span)
-    // Note: grid_buffer will be moved into AmericanSolverWorkspace, so PDEWorkspace
-    // will hold a span that points to grid_buffer owned by AmericanSolverWorkspace
-    auto pde_ws = std::make_shared<PDEWorkspace>(n_space, grid_buffer.span());
 
     return std::shared_ptr<AmericanSolverWorkspace>(
         new AmericanSolverWorkspace(std::move(grid_buffer), pde_ws, std::move(grid_spacing), n_time));

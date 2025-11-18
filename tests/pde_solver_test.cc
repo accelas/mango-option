@@ -304,16 +304,18 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
 }
 
 TEST(PDESolverTest, PDEWorkspaceIntegration) {
-    // Verify PDEWorkspace is drop-in replacement for WorkspaceStorage
-    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
-    ASSERT_TRUE(grid_result.has_value());
-    auto grid = grid_result.value().generate();
+    // Verify PDEWorkspace works with PMR
+    std::pmr::synchronized_pool_resource pool;
+    auto grid_spec = mango::GridSpec<>::uniform(0.0, 1.0, 101);
+    ASSERT_TRUE(grid_spec.has_value());
 
-    // This test will pass once we switch to PDEWorkspace
-    mango::PDEWorkspace workspace(101, grid.span());
+    auto workspace_result = mango::PDEWorkspace::create(grid_spec.value(), &pool);
+    ASSERT_TRUE(workspace_result.has_value());
+    auto workspace = workspace_result.value();
 
-    EXPECT_EQ(workspace.u_current().size(), 101);
-    EXPECT_EQ(workspace.dx().size(), 100);
+    EXPECT_EQ(workspace->u_current().size(), 104);  // Padded size
+    EXPECT_EQ(workspace->logical_size(), 101);
+    EXPECT_EQ(workspace->dx().size(), 104);  // Padded dx size
 }
 
 TEST(PDESolverTest, ConstructWithoutConfig) {

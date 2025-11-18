@@ -71,17 +71,6 @@ cc_library(
     hdrs = ["pde_workspace.hpp"],
     deps = [
         ":grid",
-        "//src/support/memory:workspace_base",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "pde_workspace_pmr",
-    hdrs = ["pde_workspace_pmr.hpp"],
-    deps = [
-        ":grid",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],

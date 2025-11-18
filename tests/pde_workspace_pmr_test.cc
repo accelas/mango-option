@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/pde/core/pde_workspace_pmr.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <memory_resource>
 
 namespace mango {

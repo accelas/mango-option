@@ -3,7 +3,7 @@ cc_binary(
     srcs = ["example_newton_solver.cc"],
     deps = [
         "//src/pde/core:pde_solver",
-        "//src/pde/core:pde_workspace_pmr",
+        "//src/pde/core:pde_workspace",
         "//src/pde/core:boundary_conditions",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/operators:operator_factory",
