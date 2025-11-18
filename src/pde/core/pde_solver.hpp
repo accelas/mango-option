@@ -1,7 +1,7 @@
 #pragma once
 
 #include "src/pde/core/grid.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "src/pde/core/pde_workspace_pmr.hpp"
 #include "src/support/cpu/feature_detection.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
@@ -249,7 +249,7 @@ private:
     std::span<double> output_buffer_;  // External buffer if provided
 
     // Workspace for cache blocking
-    std::unique_ptr<PDEWorkspace> workspace_owner_;
+    std::shared_ptr<PDEWorkspace> workspace_owner_;
     PDEWorkspace* workspace_;
 
     // Solution storage (spans point into either output_buffer_ or solution_storage_)
@@ -279,7 +279,20 @@ private:
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
+        // Create GridSpec - assume uniform spacing
+        double x_min = grid.front();
+        double x_max = grid.back();
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, grid.size());
+        if (!grid_spec.has_value()) {
+            throw std::runtime_error("Failed to create grid spec");
+        }
+
+        // Use default memory resource for internal workspace
+        auto ws_result = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        if (!ws_result.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + ws_result.error());
+        }
+        workspace_owner_ = ws_result.value();
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }
@@ -334,7 +347,7 @@ private:
     void apply_obstacle(double t, std::span<double> u) {
         if (!obstacle_) return;
 
-        auto psi = workspace_->psi_buffer();
+        auto psi = workspace_->psi();
         (*obstacle_)(t, grid_, psi);
 
         // Project: u[i] = max(u[i], psi[i])
