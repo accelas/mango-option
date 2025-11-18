@@ -4,152 +4,13 @@
  */
 
 #include "src/option/american_option.hpp"
+#include "src/option/american_pde_solver.hpp"
 #include "src/option/american_solver_workspace.hpp"
-#include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/operators/operator_factory.hpp"
-#include "src/support/parallel.hpp"
-// BlackScholesPDE now defined in american_option.hpp
 #include <algorithm>
-#include <span>
 #include <cmath>
 #include <vector>
-#include <optional>
-#include <variant>
 
 namespace mango {
-
-// ============================================================================
-// Internal implementation details (not exposed in public API)
-// ============================================================================
-
-namespace {
-
-/**
- * Strategy pattern for option-specific behavior (obstacle + initial condition).
- * Using std::variant eliminates ~130 lines of code duplication in solve().
- */
-
-/**
- * American put option strategy in log-moneyness coordinates.
- * Intrinsic value: ψ(x) = max(1 - exp(x), 0) where x = ln(S/K).
- */
-struct PutStrategy {
-    void obstacle(double, std::span<const double> x, std::span<double> psi) const {
-        MANGO_PRAGMA_SIMD
-        for (size_t i = 0; i < x.size(); ++i) {
-            psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-        }
-    }
-
-    void initial_condition(std::span<const double> x, std::span<double> u) const {
-        MANGO_PRAGMA_SIMD
-        for (size_t i = 0; i < x.size(); ++i) {
-            u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-        }
-    }
-
-    double left_boundary(double, double x) const {
-        // Deep ITM put: exercise immediately ⇒ V/K = 1 - e^x
-        return std::max(1.0 - std::exp(x), 0.0);
-    }
-
-    double right_boundary(double, double, double) const {
-        // Deep OTM put: V → 0 as S → ∞
-        return 0.0;
-    }
-};
-
-/**
- * American call option strategy in log-moneyness coordinates.
- * Intrinsic value: ψ(x) = max(exp(x) - 1, 0) where x = ln(S/K).
- */
-struct CallStrategy {
-    void obstacle(double, std::span<const double> x, std::span<double> psi) const {
-        MANGO_PRAGMA_SIMD
-        for (size_t i = 0; i < x.size(); ++i) {
-            psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-        }
-    }
-
-    void initial_condition(std::span<const double> x, std::span<double> u) const {
-        MANGO_PRAGMA_SIMD
-        for (size_t i = 0; i < x.size(); ++i) {
-            u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-        }
-    }
-
-    double left_boundary(double, double) const {
-        // Deep OTM call: V → 0 as S → 0
-        return 0.0;
-    }
-
-    double right_boundary(double t, double x, double rate) const {
-        // Deep ITM call: V = S - K·e^(-r*τ)
-        // Normalized: V/K = e^x - e^(-r*τ)
-        const double discount = std::exp(-rate * t);
-        return std::exp(x) - discount;
-    }
-};
-
-using OptionStrategy = std::variant<CallStrategy, PutStrategy>;
-
-/**
- * Dividend jump event for discrete dividend payments.
- *
- * When dividend D is paid, stock price drops: S → S - D
- * causing jump in log-moneyness: x = ln(S/K) → x' = ln((S-D)/K)
- */
-class DividendJump {
-public:
-    DividendJump(double dividend, double strike)
-        : dividend_(dividend), strike_(strike) {}
-
-    void operator()(double, std::span<const double> x,
-                    std::span<double> u) const {
-        const size_t n = x.size();
-        std::vector<double> u_old(u.begin(), u.end());
-        std::vector<double> x_new(n);
-
-        // Compute new x positions after dividend
-        for (size_t i = 0; i < n; ++i) {
-            const double S = strike_ * std::exp(x[i]);
-            const double S_new = S - dividend_;
-            x_new[i] = (S_new <= 0.0) ? -10.0 : std::log(S_new / strike_);
-        }
-
-        // Interpolate u values to new positions
-        for (size_t i = 0; i < n; ++i) {
-            u[i] = interpolate(x, u_old, x_new[i]);
-        }
-    }
-
-private:
-    double dividend_;
-    double strike_;
-
-    /// Linear interpolation
-    static double interpolate(std::span<const double> x,
-                              std::span<const double> u,
-                              double x_target) {
-        const size_t n = x.size();
-        if (x_target <= x[0]) return u[0];
-        if (x_target >= x[n-1]) return u[n-1];
-
-        auto it = std::lower_bound(x.begin(), x.end(), x_target);
-        size_t j = std::distance(x.begin(), it);
-        if (j == 0) j = 1;
-        size_t i = j - 1;
-
-        double dx = x[j] - x[i];
-        double weight = (x_target - x[i]) / dx;
-        return (1.0 - weight) * u[i] + weight * u[j];
-    }
-};
-
-}  // anonymous namespace
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
@@ -211,136 +72,51 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // 1. Create strategy based on option type
-    OptionStrategy strategy;
-    switch (params_.type) {
-        case OptionType::CALL:
-            strategy = CallStrategy{};
-            break;
-        case OptionType::PUT:
-            strategy = PutStrategy{};
-            break;
-        default:
-            return std::unexpected(SolverError{
-                .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Unknown option type",
-                .iterations = 0
-            });
+    // Create appropriate solver based on option type
+    AmericanSolverVariant solver = [&]() -> AmericanSolverVariant {
+        switch (params_.type) {
+            case OptionType::CALL:
+                return AmericanCallSolver(params_, workspace_, output_buffer_);
+            case OptionType::PUT:
+                return AmericanPutSolver(params_, workspace_, output_buffer_);
+            default:
+                throw std::runtime_error("Unknown option type");
+        }
+    }();
+
+    // Solve using variant dispatch (static, zero-cost)
+    auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
+    if (!solve_result) {
+        return std::unexpected(solve_result.error());
     }
 
-    // 2. Acquire grid from workspace
-    std::span<const double> x_grid = workspace_->grid_span();
-    std::shared_ptr<GridSpacing<double>> shared_spacing = workspace_->grid_spacing();
-    PDEWorkspace* external_workspace = workspace_.get();
+    // Extract solution and grid info from solver
+    AmericanOptionResult result;
+    result.converged = true;
 
-    // 3. Setup time domain
-    // For option pricing: solve forward in PDE time (backward in calendar time)
-    // t=0: terminal payoff at maturity, t=T: present value
-    TimeDomain time_domain(0.0, params_.maturity, params_.maturity / workspace_->n_time());
+    std::visit([&](auto& s) {
+        auto solution_view = s.solution();
+        solution_.assign(solution_view.begin(), solution_view.end());
 
-    // 4. Create Black-Scholes operator in log-moneyness coordinates
-    auto make_operator = [&]() {
-        auto pde = BlackScholesPDE<double>(
-            params_.volatility,
-            params_.rate,
-            params_.dividend_yield);
-        if (shared_spacing) {
-            return operators::create_spatial_operator(std::move(pde), shared_spacing);
-        }
-        auto grid_view = GridView<double>(x_grid);
-        return operators::create_spatial_operator(std::move(pde), grid_view);
-    };
-    auto bs_op = make_operator();
+        // Store grid information
+        result.n_space = s.n_space();
+        result.n_time = s.n_time();
+        result.x_min = s.x_min();
+        result.x_max = s.x_max();
+        result.strike = params_.strike;
 
-    // 5. Get grid dimensions
-    size_t n_space = workspace_->n_space();
-    size_t n_time = workspace_->n_time();
-
-    // 7. Single unified solver path using std::visit
-    auto result = std::visit(
-        [&](const auto& strat) -> std::expected<AmericanOptionResult, SolverError> {
-            // Setup boundary conditions using strategy (NORMALIZED by K=1)
-            // For log-moneyness: x → -∞ (S → 0), x → +∞ (S → ∞)
-            // IMPORTANT: Boundaries must account for time evolution via discounting
-            auto left_bc = DirichletBC([&strat](double t, double x) {
-                return strat.left_boundary(t, x);
-            });
-
-
-            auto right_bc = DirichletBC([&strat, this](double t, double x) {
-                return strat.right_boundary(t, x, params_.rate);
-            });
-
-            // Create PDESolver with strategy-specific obstacle and optional output buffer
-            // When output_buffer_ is provided, solver writes directly to it (zero-copy)
-            PDESolver solver(
-                x_grid, time_domain, TRBDF2Config{},
-                left_bc, right_bc, bs_op,
-                [&strat](double t, auto x, auto psi) { strat.obstacle(t, x, psi); },
-                external_workspace,
-                output_buffer_  // Zero-copy: solver writes directly to output_buffer_
+        // Store full surface if buffer was provided
+        if (!output_buffer_.empty()) {
+            // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+            // Extract only the time steps (skip initial scratch)
+            result.surface_2d.assign(
+                output_buffer_.begin() + s.n_space(),  // Skip u_old_initial
+                output_buffer_.end()                    // Include all time steps
             );
+        }
+    }, solver);
 
-            // Register discrete dividends as temporal events
-            // Convert from calendar time (years from now) to solver time (backward time)
-            for (const auto& [calendar_time, amount] : params_.discrete_dividends) {
-                // Solver time: t=0 at maturity, t=T at present
-                // Calendar time: time=0 now, time=T at maturity
-                double solver_time = params_.maturity - calendar_time;
-
-                // Skip dividends at or beyond maturity (solver_time <= 0)
-                if (solver_time <= 1e-10) continue;
-
-                DividendJump div_jump(amount, params_.strike);
-                solver.add_temporal_event(solver_time,
-                    [div_jump](double t, auto x, auto u) {
-                        div_jump(t, x, u);
-                    });
-            }
-
-            // Initialize with strategy-specific terminal condition (payoff at maturity)
-            // In log-moneyness, initial condition is normalized by K=1
-            solver.initialize([&strat](auto x, auto u) {
-                strat.initial_condition(x, u);
-            });
-
-            // Solve the PDE
-            auto solve_result = solver.solve();
-            if (!solve_result) {
-                return std::unexpected(solve_result.error());
-            }
-
-            // Extract solution
-            AmericanOptionResult result;
-            result.converged = true;
-
-            auto solution_view = solver.solution();
-            solution_.assign(solution_view.begin(), solution_view.end());
-            solved_ = true;
-
-            // Store final solution and grid information
-            result.solution.assign(solution_view.begin(), solution_view.end());
-            result.n_space = n_space;
-            result.n_time = n_time;
-            result.x_min = workspace_->x_min();
-            result.x_max = workspace_->x_max();
-            result.strike = params_.strike;
-
-            // Store full surface if buffer was provided (skip initial scratch space)
-            if (!output_buffer_.empty()) {
-                // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-                // Extract only the time steps (skip initial scratch)
-                result.surface_2d.assign(
-                    output_buffer_.begin() + n_space,  // Skip u_old_initial
-                    output_buffer_.end()                // Include all time steps
-                );
-            }
-
-            return result;
-        },
-        strategy
-    );
-
+    solved_ = true;
     return result;
 }
 
@@ -365,12 +141,14 @@ double AmericanOptionResult::value_at(double spot) const {
     // Convert spot to log-moneyness
     double x_target = std::log(spot / strike);
 
-    // Use final solution (fast path, no snapshot overhead)
-    if (solution.empty()) {
+    // Get final time step (present value)
+    // PDE time: t=0 at maturity, t=n_time-1 at present
+    if (surface_2d.empty() || n_space == 0 || n_time == 0) {
         return 0.0;
     }
 
-    std::span<const double> final_surface(solution.data(), solution.size());
+    // Extract final time step surface
+    std::span<const double> final_surface = at_time(n_time - 1);
 
     // Compute grid spacing (uniform grid)
     const double dx = (x_max - x_min) / (n_space - 1);
