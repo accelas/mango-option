@@ -109,39 +109,6 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
-cc_test(
-    name = "price_table_snapshot_collector_test",
-    srcs = ["price_table_snapshot_collector_test.cc"],
-    deps = [
-        "//src/option:price_table_snapshot_collector",
-        "//src/pde/core:snapshot",
-        "//src/support/memory:solver_memory_arena",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "price_table_snapshot_collector_expected_test",
-    srcs = ["price_table_snapshot_collector_expected_test.cc"],
-    deps = [
-        "//src/option:price_table_snapshot_collector",
-        "//src/pde/core:snapshot",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "minimal_expected_test",
-    srcs = ["minimal_expected_test.cc"],
-    deps = [
-        "//src/option:price_table_snapshot_collector",
-        "//src/pde/core:snapshot",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
 
 cc_test(
     name = "iv_solver_test",
@@ -243,7 +210,6 @@ cc_test(
     deps = [
         "//src/math:thomas_solver",
         "//src/math:cubic_spline_solver",
-        "//src/option:price_table_snapshot_collector",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -291,20 +257,6 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
-cc_test(
-    name = "price_table_iv_integration_test",
-    srcs = ["price_table_iv_integration_test.cc"],
-    deps = [
-        "//src/option:price_table_4d_builder",
-        "//src/option:price_table_snapshot_collector",
-        "//src/option:iv_solver_interpolated",
-        "//src/option:american_option",
-        "//src/bspline:bspline_fitter_4d",
-        "//src/bspline:bspline_4d",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-)
 
 cc_test(
     name = "unified_memory_resource_test",
