@@ -12,6 +12,48 @@
 namespace mango {
 namespace {
 
+// Test helper: Generic PDE solver for tests
+template<typename LeftBC, typename RightBC, typename SpatialOp>
+class TestPDESolver : public mango::PDESolver<TestPDESolver<LeftBC, RightBC, SpatialOp>> {
+public:
+    TestPDESolver(std::span<const double> grid,
+                  const mango::TimeDomain& time,
+                  const mango::TRBDF2Config& config,
+                  LeftBC left_bc,
+                  RightBC right_bc,
+                  SpatialOp spatial_op,
+                  std::optional<mango::ObstacleCallback> obstacle = std::nullopt)
+        : mango::PDESolver<TestPDESolver>(
+              grid, time, config, obstacle, nullptr, {})
+        , left_bc_(std::move(left_bc))
+        , right_bc_(std::move(right_bc))
+        , spatial_op_(std::move(spatial_op))
+    {}
+
+    // CRTP interface
+    const LeftBC& left_boundary() const { return left_bc_; }
+    const RightBC& right_boundary() const { return right_bc_; }
+    const SpatialOp& spatial_operator() const { return spatial_op_; }
+
+private:
+    LeftBC left_bc_;
+    RightBC right_bc_;
+    SpatialOp spatial_op_;
+};
+
+// Helper function to create test solver with deduced types
+template<typename LeftBC, typename RightBC, typename SpatialOp>
+auto make_test_solver(std::span<const double> grid,
+                      const mango::TimeDomain& time,
+                      const mango::TRBDF2Config& config,
+                      LeftBC left_bc,
+                      RightBC right_bc,
+                      SpatialOp spatial_op,
+                      std::optional<mango::ObstacleCallback> obstacle = std::nullopt) {
+    return TestPDESolver<LeftBC, RightBC, SpatialOp>(
+        grid, time, config, std::move(left_bc), std::move(right_bc), std::move(spatial_op), obstacle);
+}
+
 TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     // Create grid
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 51);
@@ -35,7 +77,7 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
         std::fill(psi.begin(), psi.end(), 0.5);
     };
 
-    PDESolver solver(grid.span(), time, trbdf2_config,
+    auto solver = make_test_solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op, obstacle);
 
     // Initial condition: u = 0.3 everywhere (violates obstacle u ≥ ψ = 0.5)
@@ -84,7 +126,7 @@ TEST(ObstacleTest, TimeVaryingObstacle) {
         std::fill(psi.begin(), psi.end(), t);
     };
 
-    PDESolver solver(grid.span(), time, trbdf2_config,
+    auto solver = make_test_solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op, obstacle);
 
     // Initial condition: u = 0.5 everywhere
@@ -121,7 +163,7 @@ TEST(ObstacleTest, NoObstacleOptional) {
     TRBDF2Config trbdf2_config{};
 
     // No obstacle provided (std::nullopt)
-    PDESolver solver(grid.span(), time, trbdf2_config,
+    auto solver = make_test_solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op);
 
     // Initial condition: u = 0.5 everywhere

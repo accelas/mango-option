@@ -97,6 +97,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     std::visit([&](auto& s) {
         auto solution_view = s.solution();
         solution_.assign(solution_view.begin(), solution_view.end());
+        result.solution.assign(solution_view.begin(), solution_view.end());
 
         // Store grid information
         result.n_space = s.n_space();
@@ -141,14 +142,13 @@ double AmericanOptionResult::value_at(double spot) const {
     // Convert spot to log-moneyness
     double x_target = std::log(spot / strike);
 
-    // Get final time step (present value)
-    // PDE time: t=0 at maturity, t=n_time-1 at present
-    if (surface_2d.empty() || n_space == 0 || n_time == 0) {
+    // Get final spatial solution (present value)
+    if (solution.empty() || n_space == 0) {
         return 0.0;
     }
 
-    // Extract final time step surface
-    std::span<const double> final_surface = at_time(n_time - 1);
+    // Use the final solution directly
+    std::span<const double> final_surface(solution.data(), solution.size());
 
     // Compute grid spacing (uniform grid)
     const double dx = (x_max - x_min) / (n_space - 1);

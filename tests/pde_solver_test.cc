@@ -7,6 +7,50 @@
 #include <cmath>
 #include <numbers>
 
+namespace {
+
+// Test helper: Generic PDE solver for tests
+template<typename LeftBC, typename RightBC, typename SpatialOp>
+class TestPDESolver : public mango::PDESolver<TestPDESolver<LeftBC, RightBC, SpatialOp>> {
+public:
+    TestPDESolver(std::span<const double> grid,
+                  const mango::TimeDomain& time,
+                  const mango::TRBDF2Config& config,
+                  LeftBC left_bc,
+                  RightBC right_bc,
+                  SpatialOp spatial_op)
+        : mango::PDESolver<TestPDESolver>(
+              grid, time, config, std::nullopt, nullptr, {})
+        , left_bc_(std::move(left_bc))
+        , right_bc_(std::move(right_bc))
+        , spatial_op_(std::move(spatial_op))
+    {}
+
+    // CRTP interface
+    const LeftBC& left_boundary() const { return left_bc_; }
+    const RightBC& right_boundary() const { return right_bc_; }
+    const SpatialOp& spatial_operator() const { return spatial_op_; }
+
+private:
+    LeftBC left_bc_;
+    RightBC right_bc_;
+    SpatialOp spatial_op_;
+};
+
+// Helper function to create test solver with deduced types
+template<typename LeftBC, typename RightBC, typename SpatialOp>
+auto make_test_solver(std::span<const double> grid,
+                      const mango::TimeDomain& time,
+                      const mango::TRBDF2Config& config,
+                      LeftBC left_bc,
+                      RightBC right_bc,
+                      SpatialOp spatial_op) {
+    return TestPDESolver<LeftBC, RightBC, SpatialOp>(
+        grid, time, config, std::move(left_bc), std::move(right_bc), std::move(spatial_op));
+}
+
+} // anonymous namespace
+
 TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Heat equation: du/dt = D·d²u/dx² with D = 0.1
     // Domain: x ∈ [0, 1], t ∈ [0, 0.1]
@@ -45,7 +89,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     };
 
     // Create solver
-    mango::PDESolver solver(grid.span(), time, trbdf2, left_bc, right_bc, heat_op);
+    auto solver = make_test_solver(grid.span(), time, trbdf2, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -102,7 +146,7 @@ TEST(PDESolverTest, NewtonConvergence) {
     };
 
     // Create solver
-    mango::PDESolver solver(grid.span(), time, config, left_bc, right_bc, heat_op);
+    auto solver = make_test_solver(grid.span(), time, config, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -137,7 +181,7 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
     auto grid_view_spatial_op = mango::GridView<double>(grid.span());
     auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_spatial_op), grid_view_spatial_op);
 
-    mango::PDESolver solver(grid.span(), time, trbdf2_config,
+    auto solver = make_test_solver(grid.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
 
     // Initial condition: u(x, 0) = sin(πx)
@@ -175,7 +219,7 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
     auto grid_view_spatial_op = mango::GridView<double>(grid.span());
     auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_spatial_op), grid_view_spatial_op);
 
-    mango::PDESolver solver(grid.span(), time, trbdf2_config,
+    auto solver = make_test_solver(grid.span(), time, trbdf2_config,
                            left_bc, right_bc, spatial_op);
 
     const double pi = std::numbers::pi;
@@ -234,7 +278,7 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     };
 
     // Create solver with new operator
-    mango::PDESolver solver(grid.span(), time, trbdf2,
+    auto solver = make_test_solver(grid.span(), time, trbdf2,
                            left_bc, right_bc, spatial_op);
 
     // Initialize with IC
