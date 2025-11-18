@@ -107,11 +107,20 @@ PYBIND11_MODULE(mango_iv, m) {
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
         .def(py::init<>())
-        .def_readwrite("value", &mango::AmericanOptionResult::value)
-        .def_readwrite("delta", &mango::AmericanOptionResult::delta)
-        .def_readwrite("gamma", &mango::AmericanOptionResult::gamma)
-        .def_readwrite("theta", &mango::AmericanOptionResult::theta)
-        .def_readwrite("converged", &mango::AmericanOptionResult::converged);
+        .def_readwrite("surface", &mango::AmericanOptionResult::surface)
+        .def_readwrite("x_min", &mango::AmericanOptionResult::x_min)
+        .def_readwrite("x_max", &mango::AmericanOptionResult::x_max)
+        .def_readwrite("strike", &mango::AmericanOptionResult::strike)
+        .def_readwrite("converged", &mango::AmericanOptionResult::converged)
+        .def("value_at", &mango::AmericanOptionResult::value_at, py::arg("spot"),
+             "Interpolate to get option value at specific spot price");
+
+    // AmericanOptionGreeks structure
+    py::class_<mango::AmericanOptionGreeks>(m, "AmericanOptionGreeks")
+        .def(py::init<>())
+        .def_readwrite("delta", &mango::AmericanOptionGreeks::delta)
+        .def_readwrite("gamma", &mango::AmericanOptionGreeks::gamma)
+        .def_readwrite("theta", &mango::AmericanOptionGreeks::theta);
 
     // SolverMemoryArenaStats structure
     py::class_<mango::memory::SolverMemoryArenaStats>(m, "SolverMemoryArenaStats")
