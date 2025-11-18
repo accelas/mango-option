@@ -88,18 +88,40 @@ using AmericanOptionParams = PricingParams;
 
 
 /**
- * Solver result containing option value and Greeks.
+ * Solver result containing solution surface (interpolate on-demand for specific prices).
  */
 struct AmericanOptionResult {
-    double value;    ///< Option value (dollars)
-    double delta;    ///< V/S (first derivative wrt spot)
-    double gamma;    ///< �V/S� (second derivative wrt spot)
-    double theta;    ///< V/t (time decay)
-    bool converged;  ///< Solver convergence status
+    std::vector<double> surface;  ///< Normalized solution V/K on log-moneyness grid
+    double x_min;                  ///< Minimum log-moneyness
+    double x_max;                  ///< Maximum log-moneyness
+    double strike;                 ///< Strike price K (for denormalization)
+    bool converged;                ///< Solver convergence status
 
     /// Default constructor
     AmericanOptionResult()
-        : value(0.0), delta(0.0), gamma(0.0), theta(0.0), converged(false) {}
+        : surface(), x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
+
+    /**
+     * Interpolate to get option value at specific spot price.
+     *
+     * @param spot Spot price S
+     * @return Option value in dollars (denormalized)
+     */
+    double value_at(double spot) const;
+};
+
+/**
+ * Option Greeks (sensitivities).
+ * Computed on-demand via AmericanOptionSolver::compute_greeks().
+ */
+struct AmericanOptionGreeks {
+    double delta;    ///< ∂V/∂S (first derivative wrt spot)
+    double gamma;    ///< ∂²V/∂S² (second derivative wrt spot)
+    double theta;    ///< ∂V/∂t (time decay)
+
+    /// Default constructor
+    AmericanOptionGreeks()
+        : delta(0.0), gamma(0.0), theta(0.0) {}
 };
 
 /**
@@ -145,11 +167,21 @@ public:
         std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
-     * Solve for option value and Greeks.
+     * Solve for option value.
      *
-     * @return Result containing option value and Greeks
+     * @return Result containing option value (compute Greeks separately via compute_greeks())
      */
     std::expected<AmericanOptionResult, SolverError> solve();
+
+    /**
+     * Compute Greeks (sensitivities) for the current solution.
+     *
+     * Must be called after solve() has succeeded. Computes delta, gamma, and theta
+     * based on the current solution state.
+     *
+     * @return Greeks on success, error if solve() hasn't been called yet
+     */
+    std::expected<AmericanOptionGreeks, SolverError> compute_greeks() const;
 
     /**
      * Register snapshot collection at specific step index.
