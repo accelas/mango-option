@@ -21,6 +21,13 @@ cc_library(
 )
 
 cc_library(
+    name = "grid_spacing_data",
+    hdrs = ["grid_spacing_data.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "boundary_conditions",
     hdrs = ["boundary_conditions.hpp"],
     copts = [
