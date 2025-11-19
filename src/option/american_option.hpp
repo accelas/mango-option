@@ -34,8 +34,8 @@ using AmericanOptionParams = PricingParams;
 struct AmericanOptionResult {
     double value;                      ///< Option value at current spot (dollars)
     std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
+    std::vector<double> x_grid;        ///< Spatial grid points (log-moneyness coordinates)
     std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (optional, for at_time())
-    std::vector<double> x_grid;        ///< Actual grid points in log-moneyness space (for proper interpolation)
     size_t n_space;                    ///< Number of spatial grid points
     size_t n_time;                     ///< Number of time steps
     double x_min;                      ///< Minimum log-moneyness
@@ -45,7 +45,7 @@ struct AmericanOptionResult {
 
     /// Default constructor
     AmericanOptionResult()
-        : value(0.0), solution(), surface_2d(), x_grid(), n_space(0), n_time(0),
+        : value(0.0), solution(), x_grid(), surface_2d(), n_space(0), n_time(0),
           x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
 
     /**

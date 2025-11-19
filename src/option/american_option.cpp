@@ -75,6 +75,25 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         }
     }();
 
+    // Initialize with payoff at maturity (t=0 in PDE time)
+    std::visit([&](auto& s) {
+        if (params_.type == OptionType::PUT) {
+            s.initialize([](std::span<const double> x, std::span<double> u) {
+                for (size_t i = 0; i < x.size(); ++i) {
+                    // Normalized put payoff: max(1 - exp(x), 0) where x = ln(S/K)
+                    u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+                }
+            });
+        } else {  // CALL
+            s.initialize([](std::span<const double> x, std::span<double> u) {
+                for (size_t i = 0; i < x.size(); ++i) {
+                    // Normalized call payoff: max(exp(x) - 1, 0) where x = ln(S/K)
+                    u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+                }
+            });
+        }
+    }, solver);
+
     // Solve using variant dispatch (static, zero-cost)
     auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
     if (!solve_result) {
@@ -90,17 +109,19 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         solution_.assign(solution_view.begin(), solution_view.end());
         result.solution.assign(solution_view.begin(), solution_view.end());
 
-        // Store grid information
+        // Store grid information (including actual grid points)
         result.n_space = s.n_space();
         result.n_time = s.n_time();
         result.x_min = s.x_min();
         result.x_max = s.x_max();
         result.strike = params_.strike;
 
+        // Store actual grid points for interpolation
+        auto grid = workspace_->grid();
+        result.x_grid.assign(grid.begin(), grid.end());
+
         // Compute value at current spot using actual grid
         double current_moneyness = std::log(params_.spot / params_.strike);
-        auto grid = workspace_->grid();
-        result.x_grid.assign(grid.begin(), grid.end());  // Store grid for value_at() interpolation
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
@@ -146,7 +167,7 @@ double AmericanOptionResult::value_at(double spot) const {
     // Use the final solution directly
     std::span<const double> final_surface(solution.data(), solution.size());
 
-    // Boundary cases
+    // Boundary cases (use actual grid points)
     if (x_target <= x_grid[0]) {
         return final_surface[0] * strike;  // Denormalize
     }
@@ -154,16 +175,14 @@ double AmericanOptionResult::value_at(double spot) const {
         return final_surface[n_space-1] * strike;  // Denormalize
     }
 
-    // Find bracketing indices using actual grid points (handles non-uniform grids)
+    // Find bracketing indices using actual grid points
     size_t i = 0;
     while (i < n_space-1 && x_grid[i+1] < x_target) {
         i++;
     }
 
-    // Linear interpolation using actual grid points
-    double x_i = x_grid[i];
-    double x_i1 = x_grid[i+1];
-    double t = (x_target - x_i) / (x_i1 - x_i);
+    // Linear interpolation using actual grid spacing
+    double t = (x_target - x_grid[i]) / (x_grid[i+1] - x_grid[i]);
     double normalized_value = (1.0 - t) * final_surface[i] + t * final_surface[i+1];
 
     return normalized_value * strike;  // Denormalize
