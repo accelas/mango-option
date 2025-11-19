@@ -183,7 +183,22 @@ gap_rtol = 1e-6;       // Why 1e-6? Tuned to pass tests.
 min_time_for_active_set = 0.5 * T;  // Why 50%? Tuned to fix IV solver regression.
 ```
 
-The time threshold (50% of maturity) prevents ATM/OTM options from getting locked to payoff near expiry before time value develops. Without this guard, IV solver tests fail with inflated IVs (1.76 instead of 0.25).
+**The 50% time window is particularly problematic:**
+- Disables active set during entire backward march from T → T/2
+- Early exercise matters most throughout solve, including T/2 → 0
+- No guarantee deep ITM nodes stay locked once active set re-enables at t < T/2
+- Tests pass only because nodes happened to lock earlier (not guaranteed)
+- ATM/OTM options would lock to payoff=0 without this guard
+
+**Why it works (fragily):**
+- Without guard: ATM options lock to payoff=0 at terminal, never develop time value
+- With 50% guard: ATM options free until T/2, develop time value by then
+- Deep ITM nodes: Get locked early (t < T/2) and stay locked (usually)
+
+**Why it's wrong:**
+- No theoretical basis for 50% threshold
+- Weakens complementarity enforcement when it still matters
+- Nodes can still flap between locked/free states (Jacobian restored each iteration)
 
 **Problem**: These may fail on different:
 - Grid configurations (different spacing, different concentrations)
