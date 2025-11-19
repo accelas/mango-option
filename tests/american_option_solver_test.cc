@@ -574,7 +574,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     std::vector<size_t> callback_indices;
     std::mutex callback_mutex;
 
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(
+    auto batch_result = BatchAmericanOptionSolver().solve_batch(
         batch,
         [&](size_t idx, AmericanOptionSolver& solver) {
             std::lock_guard<std::mutex> lock(callback_mutex);
@@ -611,7 +611,7 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
     }
 
     // Use automatic grid determination (preferred API)
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
+    auto batch_result = BatchAmericanOptionSolver().solve_batch(batch);
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);
@@ -656,7 +656,7 @@ TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
     }
 
     // Call without callback using simplified API
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
+    auto batch_result = BatchAmericanOptionSolver().solve_batch(batch);
 
     ASSERT_EQ(batch_result.results.size(), 3);
     EXPECT_EQ(batch_result.failed_count, 0);

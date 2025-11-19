@@ -261,8 +261,11 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
         ));
     }
 
+    BatchAmericanOptionSolver solver;
+
     auto run_once = [&]() {
-        auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
+        // Use shared grid for batch processing (more efficient for homogeneous batches)
+        auto batch_result = solver.solve_batch(batch, true);  // use_shared_grid=true
         for (const auto& res : batch_result.results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);

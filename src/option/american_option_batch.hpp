@@ -43,13 +43,24 @@ struct BatchAmericanOptionResult {
 /// std::vector<AmericanOptionParams> batch;
 /// batch.emplace_back(spot, strike, maturity, rate, dividend_yield, type, sigma);
 ///
-/// auto results = BatchAmericanOptionSolver::solve_batch(batch);
+/// BatchAmericanOptionSolver solver;
+/// auto results = solver.solve_batch(batch);
+/// ```
+///
+/// **Adjusting grid accuracy:**
+/// ```cpp
+/// BatchAmericanOptionSolver solver;
+/// GridAccuracyParams accuracy;
+/// accuracy.tol = 1e-6;  // High accuracy mode
+/// solver.set_grid_accuracy(accuracy);
+/// auto results = solver.solve_batch(batch);
 /// ```
 ///
 /// **Price table usage (shared grid):**
 /// ```cpp
 /// // use_shared_grid=true: all options share one global grid
-/// auto results = BatchAmericanOptionSolver::solve_batch(batch, true);
+/// BatchAmericanOptionSolver solver;
+/// auto results = solver.solve_batch(batch, true);
 ///
 /// // Results contain full surfaces for interpolation
 /// for (const auto& result_expected : results.results) {
@@ -61,7 +72,7 @@ struct BatchAmericanOptionResult {
 /// ```
 ///
 /// Performance:
-/// - Single-threaded: ~72 options/sec (101x1000 grid)
+/// - Single-threaded: ~72 options/sec (101x1000 grid, tol=1e-3)
 /// - Parallel (32 cores): ~848 options/sec (11.8x speedup)
 class BatchAmericanOptionSolver {
 public:
@@ -69,6 +80,17 @@ public:
     /// @param index Index of current option in params vector
     /// @param solver Reference to solver for pre-solve configuration
     using SetupCallback = std::function<void(size_t index, AmericanOptionSolver& solver)>;
+
+    /// Set grid accuracy parameters
+    /// @param accuracy Grid accuracy parameters controlling size/resolution tradeoff
+    void set_grid_accuracy(const GridAccuracyParams& accuracy) {
+        grid_accuracy_ = accuracy;
+    }
+
+    /// Get current grid accuracy parameters
+    const GridAccuracyParams& grid_accuracy() const {
+        return grid_accuracy_;
+    }
 
     /// Solve a batch of American options
     ///
@@ -78,7 +100,7 @@ public:
     ///                        Shared grid enables at_time() access by populating surface_2d.
     /// @param setup Optional callback invoked after solver creation, before solve()
     /// @return Batch result with individual results and failure count
-    static BatchAmericanOptionResult solve_batch(
+    BatchAmericanOptionResult solve_batch(
         std::span<const AmericanOptionParams> params,
         bool use_shared_grid = false,
         SetupCallback setup = nullptr)
@@ -93,7 +115,7 @@ public:
         // Precompute shared grid if needed
         std::optional<std::tuple<GridSpec<double>, size_t>> shared_grid;
         if (use_shared_grid) {
-            shared_grid = compute_global_grid_for_batch(params);
+            shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
         }
 
         MANGO_PRAGMA_PARALLEL
@@ -121,7 +143,7 @@ public:
                     workspace = thread_workspace;
                 } else {
                     // Per-option grid: create workspace for this option
-                    auto [grid_spec, n_time] = estimate_grid_for_option(params[i]);
+                    auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
                     auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
                     if (workspace_result.has_value()) {
                         workspace = workspace_result.value();
@@ -174,13 +196,16 @@ public:
     }
 
     /// Solve a batch of American options (vector overload)
-    static BatchAmericanOptionResult solve_batch(
+    BatchAmericanOptionResult solve_batch(
         const std::vector<AmericanOptionParams>& params,
         bool use_shared_grid = false,
         SetupCallback setup = nullptr)
     {
         return solve_batch(std::span{params}, use_shared_grid, setup);
     }
+
+private:
+    GridAccuracyParams grid_accuracy_;  ///< Grid accuracy parameters for automatic estimation
 };
 
 /// Solve a single American option with automatic grid determination
