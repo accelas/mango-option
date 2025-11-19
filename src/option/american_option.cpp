@@ -77,7 +77,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     // Initialize with payoff at maturity (t=0 in PDE time)
     std::visit([&](auto& s) {
-        s.initialize(params_.type == OptionType::PUT ? put_payoff : call_payoff);
+        using SolverType = std::decay_t<decltype(s)>;
+        s.initialize(SolverType::payoff);
     }, solver);
 
     // Solve using variant dispatch (static, zero-cost)
