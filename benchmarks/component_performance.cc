@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <memory_resource>
 #include <stdexcept>
 #include <vector>
 
@@ -144,9 +145,8 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
         0.20    // volatility
     );
 
-    size_t n_space = state.range(0);
-    size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -181,9 +181,8 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
         0.30    // volatility
     );
 
-    size_t n_space = 101;
-    size_t n_time = state.range(0);
-    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -218,9 +217,8 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
         0.25    // volatility
     );
 
-    size_t n_space = 101;
-    size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -260,9 +258,8 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         }
     );
 
-    size_t n_space = 101;
-    size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -392,9 +389,6 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 // ============================================================================
 
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
-    size_t n_space = state.range(0);
-    size_t n_time = state.range(1);
-
     AmericanOptionParams params(
         100.0,  // spot
         100.0,  // strike
@@ -405,7 +399,8 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -439,7 +434,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         state.counters["time_ms"] = avg_time_ms;
     }
 
-    state.SetLabel("Grid: " + std::to_string(n_space) + "x" + std::to_string(n_time));
+    state.SetLabel("Grid: " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
 }
 BENCHMARK(BM_AmericanPut_GridResolution)
     ->Args({51, 500})
@@ -471,9 +466,8 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
         ));
     }
 
-    size_t n_space = 101;
-    size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
+    auto [grid_spec, n_time] = compute_global_grid_for_batch(batch);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
