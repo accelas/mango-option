@@ -20,22 +20,6 @@
 namespace mango {
 
 /**
- * Default grid configuration for batch American option solving.
- *
- * These values provide a good balance of accuracy and performance
- * for most American options:
- * - Covers 50% to 200% moneyness range (deep OTM to deep ITM)
- * - 101 spatial points provides good accuracy
- * - 1000 time steps provides fine temporal resolution
- */
-struct DefaultBatchGrid {
-    static constexpr double x_min = -3.0;      ///< Minimum log-moneyness
-    static constexpr double x_max = 3.0;       ///< Maximum log-moneyness
-    static constexpr size_t n_space = 101;     ///< Spatial grid points
-    static constexpr size_t n_time = 1000;     ///< Time steps
-};
-
-/**
  * Estimate grid parameters for a single option using sinh-grid heuristics.
  *
  * Implements single-pass grid determination from sinh-grid specification:
@@ -140,25 +124,18 @@ struct BatchAmericanOptionResult {
 /// This is significantly faster than solving options sequentially
 /// for embarrassingly parallel workloads.
 ///
-/// **Simple API** (recommended for most use cases):
+/// **Standard API** (recommended):
 /// ```cpp
 /// std::vector<AmericanOptionParams> batch;
 /// batch.emplace_back(spot, strike, maturity, rate, dividend_yield, type, sigma);
 ///
-/// // Uses default grid configuration (101 spatial points, 1000 time steps)
-/// auto results = solve_american_options_batch(batch);
-/// ```
-///
-/// **Automatic Grid API** (for heterogeneous batches):
-/// ```cpp
 /// // Automatically determines optimal grid based on option characteristics
-/// // Recommended when options have varying volatilities/maturities
-/// auto results = solve_american_options_batch_auto(batch);
+/// auto results = solve_american_options_batch(batch);
 /// ```
 ///
 /// **Advanced API** (for custom grid configuration):
 /// ```cpp
-/// // Specify custom grid parameters
+/// // Manually specify grid parameters (for expert users)
 /// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
 /// ```
 ///
@@ -183,48 +160,16 @@ public:
     /// @param solver Reference to solver for pre-solve configuration
     using SetupCallback = std::function<void(size_t index, AmericanOptionSolver& solver)>;
 
-    /// Solve a batch of American options with default grid configuration
-    ///
-    /// Uses sensible defaults (101 spatial points, 1000 time steps,
-    /// log-moneyness range [-3, 3]) suitable for most American options.
-    ///
-    /// @param params Vector of option parameters
-    /// @param setup Optional callback invoked after solver creation, before solve()
-    /// @return Batch result with individual results and failure count
-    static BatchAmericanOptionResult solve_batch(
-        std::span<const AmericanOptionParams> params,
-        SetupCallback setup = nullptr)
-    {
-        return solve_batch_with_grid(
-            params,
-            DefaultBatchGrid::x_min,
-            DefaultBatchGrid::x_max,
-            DefaultBatchGrid::n_space,
-            DefaultBatchGrid::n_time,
-            setup);
-    }
-
-    /// Solve a batch of American options with default grid (vector overload)
-    static BatchAmericanOptionResult solve_batch(
-        const std::vector<AmericanOptionParams>& params,
-        SetupCallback setup = nullptr)
-    {
-        return solve_batch(std::span{params}, setup);
-    }
-
     /// Solve a batch of American options with automatic grid determination
     ///
     /// Automatically determines optimal grid parameters for each option based on
     /// option characteristics (volatility, maturity, moneyness), then uses the
     /// conservative global maximum grid for the entire batch.
     ///
-    /// This is the recommended API for heterogeneous option batches where options
-    /// have varying characteristics (e.g., different volatilities, maturities).
-    ///
     /// @param params Vector of option parameters
     /// @param setup Optional callback invoked after solver creation, before solve()
     /// @return Batch result with individual results and failure count
-    static BatchAmericanOptionResult solve_batch_auto(
+    static BatchAmericanOptionResult solve_batch(
         std::span<const AmericanOptionParams> params,
         SetupCallback setup = nullptr)
     {
@@ -232,12 +177,12 @@ public:
         return solve_batch_with_grid(params, x_min, x_max, n_space, n_time, setup);
     }
 
-    /// Solve a batch of American options with automatic grid (vector overload)
-    static BatchAmericanOptionResult solve_batch_auto(
+    /// Solve a batch of American options (vector overload)
+    static BatchAmericanOptionResult solve_batch(
         const std::vector<AmericanOptionParams>& params,
         SetupCallback setup = nullptr)
     {
-        return solve_batch_auto(std::span{params}, setup);
+        return solve_batch(std::span{params}, setup);
     }
 
     /// Solve a batch of American options with custom grid configuration
@@ -391,11 +336,11 @@ public:
     }
 };
 
-/// Solve a batch of American options with default grid configuration
+/// Solve a batch of American options with automatic grid determination
 ///
 /// This is the recommended API for solving multiple independent options.
-/// Uses sensible default grid parameters (101 spatial points, 1000 time steps,
-/// log-moneyness range [-3, 3]).
+/// Automatically determines optimal grid parameters based on option
+/// characteristics (volatility, maturity, moneyness).
 ///
 /// @param params Vector of option parameters
 /// @return Batch result with individual results and failure count
@@ -405,7 +350,7 @@ inline BatchAmericanOptionResult solve_american_options_batch(
     return BatchAmericanOptionSolver::solve_batch(params);
 }
 
-/// Solve a batch of American options with default grid configuration (vector overload)
+/// Solve a batch of American options (vector overload)
 inline BatchAmericanOptionResult solve_american_options_batch(
     const std::vector<AmericanOptionParams>& params)
 {
@@ -446,25 +391,40 @@ inline BatchAmericanOptionResult solve_american_options_batch(
         params, x_min, x_max, n_space, n_time);
 }
 
-/// Solve a batch of American options with automatic grid determination
+/// Solve a single American option with automatic grid determination
 ///
-/// Recommended for heterogeneous batches where options have varying characteristics.
-/// Automatically computes optimal grid parameters based on option properties
-/// (volatility, maturity, moneyness) and uses conservative global maximum.
+/// Convenience API that automatically determines optimal grid parameters
+/// based on option characteristics, eliminating need for manual grid specification.
 ///
-/// @param params Vector of option parameters
-/// @return Batch result with individual results and failure count
-inline BatchAmericanOptionResult solve_american_options_batch_auto(
-    std::span<const AmericanOptionParams> params)
+/// @param params Option parameters
+/// @return Expected containing result on success, error on failure
+inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
+    const AmericanOptionParams& params)
 {
-    return BatchAmericanOptionSolver::solve_batch_auto(params);
-}
+    // Estimate grid for this option
+    auto [x_min, x_max, n_space, n_time] = estimate_grid_for_option(params);
 
-/// Solve a batch of American options with automatic grid (vector overload)
-inline BatchAmericanOptionResult solve_american_options_batch_auto(
-    const std::vector<AmericanOptionParams>& params)
-{
-    return BatchAmericanOptionSolver::solve_batch_auto(params);
+    // Create workspace with estimated grid
+    auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+    if (!workspace_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = "Failed to create workspace: " + workspace_result.error(),
+            .iterations = 0
+        });
+    }
+
+    // Create and solve
+    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+    if (!solver_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = solver_result.error(),
+            .iterations = 0
+        });
+    }
+
+    return solver_result.value().solve();
 }
 
 }  // namespace mango
