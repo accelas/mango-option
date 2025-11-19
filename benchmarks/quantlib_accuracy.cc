@@ -19,6 +19,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <memory_resource>
 #include <stdexcept>
 #include <algorithm>
 
@@ -118,8 +119,9 @@ static void compare_scenario(
         volatility
     );
 
-    // Create workspace (high resolution for accuracy)
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
+    // Create workspace (use automatic grid determination)
+    auto [grid_spec, n_time] = estimate_grid_for_option(mango_params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
     }
@@ -229,9 +231,6 @@ BENCHMARK(BM_Accuracy_LongMaturity_Put_5Y)->Iterations(1);
 // ============================================================================
 
 static void BM_Convergence_GridResolution(benchmark::State& state) {
-    size_t n_space = state.range(0);
-    size_t n_time = state.range(1);
-
     // Reference: Very high resolution QuantLib result
     static double ql_reference = 0.0;
     if (ql_reference == 0.0) {
@@ -241,7 +240,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         ql_reference = ref.price;
     }
 
-    // Mango-IV pricing at given resolution
+    // Mango-IV pricing at automatically determined resolution
     AmericanOptionParams params(
         100.0,  // spot
         100.0,  // strike
@@ -252,7 +251,8 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -274,7 +274,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         // Just iterate once to report
     }
 
-    state.SetLabel("Grid " + std::to_string(n_space) + "x" + std::to_string(n_time));
+    state.SetLabel("Grid " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
     state.counters["abs_error"] = error;
     state.counters["rel_error_%"] = rel_error;
     state.counters["reference"] = ql_reference;
@@ -303,7 +303,8 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -607,8 +608,9 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
         dividends
     );
 
-    // Create workspace (high resolution)
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
+    // Create workspace (use automatic grid determination)
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -678,7 +680,8 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         dividends
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
