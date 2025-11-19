@@ -31,7 +31,12 @@ int main() {
         constexpr size_t n_space = 101;
         constexpr size_t n_time = 1000;
 
-        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+        if (!grid_spec.has_value()) {
+            std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
+            return 1;
+        }
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -74,7 +79,12 @@ int main() {
         constexpr size_t n_space = 101;
         constexpr size_t n_time = 1000;
 
-        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+        if (!grid_spec.has_value()) {
+            std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
+            return 1;
+        }
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -108,7 +118,13 @@ int main() {
         constexpr size_t n_space = 5;  // Too small!
         constexpr size_t n_time = 1000;
 
-        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+        std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> workspace;
+        if (grid_spec.has_value()) {
+            workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+        } else {
+            workspace = std::unexpected(grid_spec.error());
+        }
 
         if (workspace.has_value()) {
             std::cout << "   ✓ Workspace created (unexpected)!\n";
@@ -136,7 +152,12 @@ int main() {
         constexpr size_t n_space = 101;
         constexpr size_t n_time = 1000;
 
-        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+        if (!grid_spec.has_value()) {
+            std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
+            return 1;
+        }
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -163,7 +184,12 @@ int main() {
         constexpr size_t n_space = 101;
         constexpr size_t n_time = 1000;
 
-        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+        if (!grid_spec.has_value()) {
+            std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
+            return 1;
+        }
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -207,7 +233,12 @@ int main() {
         constexpr size_t n_space = 101;
         constexpr size_t n_time = 1000;
 
-        auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+        if (!grid_spec.has_value()) {
+            std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
+            return 1;
+        }
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
