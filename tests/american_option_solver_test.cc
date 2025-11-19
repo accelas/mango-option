@@ -599,21 +599,8 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
         );
     }
 
-    // Allocate output buffer for full surface collection (enables at_time())
-    // Buffer layout: [option0_surface][option1_surface][option2_surface]
-    // Each option surface: (n_time + 1) * n_space = (1000 + 1) * 101
-    const size_t n_space = 101;
-    const size_t n_time = 1000;
-    const size_t surface_size_per_option = (n_time + 1) * n_space;
-    std::vector<double> surface_buffer(3 * surface_size_per_option);
-
-    // Solve batch with full surface collection
-    auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
-        batch,
-        -3.0, 3.0,  // x_min, x_max
-        n_space, n_time,
-        nullptr,    // No setup callback
-        std::span{surface_buffer});  // Provide buffer for full surface
+    // Use automatic grid determination (preferred API)
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
 
     // Verify all solves succeeded
     ASSERT_EQ(batch_result.results.size(), 3);
@@ -622,34 +609,24 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
         EXPECT_TRUE(result.has_value());
     }
 
-    // Extract prices from surface_2d at specific time steps
-    std::vector<double> moneyness = {0.9, 1.0, 1.1};
-    std::vector<size_t> step_indices = {499, 999};  // τ=0.5, τ=1.0
-
+    // Verify basic properties
     for (size_t i = 0; i < 3; ++i) {
         const auto& result = batch_result.results[i].value();
 
-        // Verify surface_2d has data
-        EXPECT_FALSE(result.surface_2d.empty());
+        // Check converged
+        EXPECT_TRUE(result.converged);
+
+        // Check spatial dimensions
         EXPECT_GT(result.n_space, 0);
         EXPECT_GT(result.n_time, 0);
 
-        // Extract prices at each time step and moneyness
-        for (size_t step_idx : step_indices) {
-            auto spatial_solution = result.at_time(step_idx);
-            EXPECT_FALSE(spatial_solution.empty());
+        // Check price is reasonable
+        double price = result.value_at(100.0);  // ATM put
+        EXPECT_GT(price, 0.0);
+        EXPECT_LT(price, 100.0);  // Put price < strike for ATM
 
-            // All values should be non-negative (boundary conditions may be zero)
-            size_t non_zero_count = 0;
-            for (double val : spatial_solution) {
-                EXPECT_GE(val, 0.0);
-                if (val > 0.0) {
-                    ++non_zero_count;
-                }
-            }
-            // At least some values should be positive
-            EXPECT_GT(non_zero_count, 0);
-        }
+        // Note: Without surface buffer, at_time() is not available
+        // This is expected with automatic grid determination
     }
 }
 

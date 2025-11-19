@@ -195,51 +195,99 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         log_moneyness[i] = std::log(moneyness[i]);
     }
 
-    // Build batch parameters (all (σ,r) combinations)
-    std::vector<AmericanOptionParams> batch_params;
-    batch_params.reserve(Nv * Nr);
-
-    namespace views = std::views;
-    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
-                                                 views::iota(size_t{0}, Nr))) {
-        AmericanOptionParams params;
-        params.spot = K_ref;
-        params.strike = K_ref;
-        params.maturity = T_max;
-        params.rate = rate[l];
-        params.dividend_yield = config_.dividend_yield;
-        params.type = config_.option_type;
-        params.volatility = volatility[k];
-        params.discrete_dividends = {};
-        batch_params.push_back(params);
+    // Validate grid specification (all options use same grid)
+    auto grid_spec_result = GridSpec<double>::uniform(config_.x_min, config_.x_max, config_.n_space);
+    if (!grid_spec_result.has_value()) {
+        return std::unexpected("Invalid grid specification: " + grid_spec_result.error());
     }
+    auto grid_spec = grid_spec_result.value();
 
-    // Allocate output buffer for full surface collection (needed for at_time())
-    const size_t batch_size = batch_params.size();
+    // Build batch parameters and solve each option
+    const size_t batch_size = Nv * Nr;
     const size_t surface_size_per_option = (config_.n_time + 1) * config_.n_space;
     std::vector<double> surface_buffer(batch_size * surface_size_per_option);
 
-    // Solve batch with full surface collection
-    auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
-        std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
-        nullptr,  // No setup callback
-        std::span{surface_buffer});  // Provide buffer for full surface
+    // Pre-allocate results vector with default-constructed elements
+    std::vector<std::optional<AmericanOptionResult>> results(batch_size);
 
-    // Check failure count
-    if (batch_result.failed_count > 0) {
-        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
-                         " out of " + std::to_string(Nv * Nr) + " PDEs");
+    size_t failed_count = 0;
+    namespace views = std::views;
+
+    // Solve options in parallel (each thread creates its own workspace)
+    MANGO_PRAGMA_PARALLEL
+    {
+        // Per-thread pool for cheap workspace reuse within thread
+        std::pmr::unsynchronized_pool_resource thread_pool;
+
+        // Create per-thread workspace (AmericanSolverWorkspace is NOT thread-safe)
+        auto thread_workspace_result = AmericanSolverWorkspace::create(
+            grid_spec, config_.n_time, &thread_pool);
+
+        if (!thread_workspace_result.has_value()) {
+            // If workspace creation fails, increment failed_count for all thread's iterations
+            MANGO_PRAGMA_FOR
+            for (size_t idx = 0; idx < batch_size; ++idx) {
+                MANGO_PRAGMA_ATOMIC
+                ++failed_count;
+            }
+        } else {
+            auto workspace = thread_workspace_result.value();
+
+            MANGO_PRAGMA_FOR
+            for (size_t idx = 0; idx < batch_size; ++idx) {
+                size_t k = idx / Nr;  // volatility index
+                size_t l = idx % Nr;  // rate index
+
+                AmericanOptionParams params;
+                params.spot = K_ref;
+                params.strike = K_ref;
+                params.maturity = T_max;
+                params.rate = rate[l];
+                params.dividend_yield = config_.dividend_yield;
+                params.type = config_.option_type;
+                params.volatility = volatility[k];
+                params.discrete_dividends = {};
+
+                // Create buffer for this option's full surface
+                size_t offset = idx * surface_size_per_option;
+                std::span<double> option_buffer(surface_buffer.data() + offset, surface_size_per_option);
+
+                // Create solver with surface collection buffer
+                auto solver_result = AmericanOptionSolver::create(params, workspace, option_buffer);
+                if (!solver_result.has_value()) {
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
+                    continue;
+                }
+
+                // Solve
+                auto result = solver_result.value().solve();
+                if (!result.has_value() || !result->converged) {
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
+                    continue;
+                }
+
+                // Store result (thread-safe since each thread writes to different index)
+                results[idx] = std::move(result.value());
+            }
+        }
+    }
+
+    // Check failures
+    if (failed_count > 0) {
+        return std::unexpected("Failed to solve " + std::to_string(failed_count) +
+                         " out of " + std::to_string(batch_size) + " PDEs");
     }
 
     // Extract prices from surface_2d for each result
     const size_t slice_stride = Nv * Nr;
-    for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
-        const auto& result_expected = batch_result.results[idx];
-        if (!result_expected.has_value()) {
+    for (size_t idx = 0; idx < results.size(); ++idx) {
+        const auto& result_opt = results[idx];
+        if (!result_opt.has_value()) {
             continue;  // Leave zeros for failed solves
         }
-
-        const auto& result = result_expected.value();
+        const auto& result = result_opt.value();
         if (!result.converged) {
             continue;  // Leave zeros for failed solves
         }
