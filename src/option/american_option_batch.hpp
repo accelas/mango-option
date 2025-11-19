@@ -10,17 +10,19 @@
 #include "src/option/american_solver_workspace.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
+#include "src/pde/core/grid.hpp"
 #include <vector>
 #include <expected>
 #include <span>
 #include <functional>
 #include <memory>
+#include <memory_resource>
 #include <tuple>
 
 namespace mango {
 
 /**
- * Estimate grid parameters for a single option using sinh-grid heuristics.
+ * Estimate grid specification for a single option using sinh-grid heuristics.
  *
  * Implements single-pass grid determination from sinh-grid specification:
  * - Spatial domain: x₀ ± n_sigma·σ√T (covers probability distribution)
@@ -35,9 +37,9 @@ namespace mango {
  * @param alpha Sinh clustering strength (default: 2.0 for Europeans)
  * @param tol Target price tolerance (default: 1e-6)
  * @param c_t Time step safety factor (default: 0.75)
- * @return Tuple of (x_min, x_max, n_space, n_time)
+ * @return Tuple of (GridSpec, n_time)
  */
-inline std::tuple<double, double, size_t, size_t> estimate_grid_for_option(
+inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
     const AmericanOptionParams& params,
     double n_sigma = 5.0,
     double alpha = 2.0,
@@ -68,7 +70,10 @@ inline std::tuple<double, double, size_t, size_t> estimate_grid_for_option(
     size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
     Nt = std::min(Nt, size_t{5000});  // Upper bound for stability
 
-    return {x_min, x_max, Nx, Nt};
+    // Create uniform GridSpec (workspace creation uses uniform grids)
+    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, Nx);
+    // GridSpec factory returns expected, but params are validated above so should never fail
+    return {grid_spec.value(), Nt};
 }
 
 /**
@@ -82,9 +87,9 @@ inline std::tuple<double, double, size_t, size_t> estimate_grid_for_option(
  * @param alpha Sinh clustering parameter (default: 2.0)
  * @param tol Target price tolerance (default: 1e-6)
  * @param c_t Time step safety factor (default: 0.75)
- * @return Tuple of (x_min, x_max, n_space, n_time)
+ * @return Tuple of (GridSpec, n_time)
  */
-inline std::tuple<double, double, size_t, size_t> compute_global_max_grid(
+inline std::tuple<GridSpec<double>, size_t> compute_global_max_grid(
     std::span<const AmericanOptionParams> params,
     double n_sigma = 5.0,
     double alpha = 2.0,
@@ -97,14 +102,15 @@ inline std::tuple<double, double, size_t, size_t> compute_global_max_grid(
     size_t global_Nt = 0;
 
     for (const auto& p : params) {
-        auto [x_min, x_max, Nx, Nt] = estimate_grid_for_option(p, n_sigma, alpha, tol, c_t);
-        global_x_min = std::min(global_x_min, x_min);
-        global_x_max = std::max(global_x_max, x_max);
-        global_Nx = std::max(global_Nx, Nx);
+        auto [grid_spec, Nt] = estimate_grid_for_option(p, n_sigma, alpha, tol, c_t);
+        global_x_min = std::min(global_x_min, grid_spec.x_min());
+        global_x_max = std::max(global_x_max, grid_spec.x_max());
+        global_Nx = std::max(global_Nx, grid_spec.n_points());
         global_Nt = std::max(global_Nt, Nt);
     }
 
-    return {global_x_min, global_x_max, global_Nx, global_Nt};
+    auto grid_spec = GridSpec<double>::uniform(global_x_min, global_x_max, global_Nx);
+    return {grid_spec.value(), global_Nt};
 }
 
 /**
@@ -182,10 +188,11 @@ public:
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
                 // Estimate grid for this specific option
-                auto [x_min, x_max, n_space, n_time] = estimate_grid_for_option(params[i]);
+                auto [grid_spec, n_time] = estimate_grid_for_option(params[i]);
 
                 // Create workspace with estimated grid
-                auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+                auto workspace_result = AmericanSolverWorkspace::create(
+                    grid_spec, n_time, std::pmr::get_default_resource());
                 if (!workspace_result.has_value()) {
                     results[i] = std::unexpected(SolverError{
                         .code = SolverErrorCode::InvalidConfiguration,
@@ -455,10 +462,11 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     const AmericanOptionParams& params)
 {
     // Estimate grid for this option
-    auto [x_min, x_max, n_space, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
     // Create workspace with estimated grid
-    auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(
+        grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
