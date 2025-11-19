@@ -363,6 +363,75 @@ private:
         }
     }
 
+    /// Apply active set heuristic for obstacle problems
+    ///
+    /// Empirical primal-dual active set method that locks nodes in the exercise region.
+    ///
+    /// TODO: Replace with proper PDAS (Hintermüller-Ito-Kunisch) - see Issue #196
+    /// Current heuristic has no convergence guarantees:
+    /// - Jacobian restored every iteration → nodes can flap between locked/free
+    /// - Empirical constants may fail on different grids/parameters
+    /// - No complementarity residual check
+    ///
+    /// @param t Current time
+    /// @param u Current solution vector
+    /// @param jacobian_diag_orig Original Jacobian diagonal (before modifications)
+    void apply_active_set_heuristic(
+        double t,
+        std::span<const double> u,
+        std::span<const double> jacobian_diag_orig)
+    {
+        if (!obstacle_) return;
+
+        auto psi = workspace_->psi();
+        (*obstacle_)(t, grid_, psi);
+
+        // First: Estimate dual multiplier λ from current residual
+        // λ_i = max(0, -F(u)_i / diag_i_original)
+        for (size_t i = 1; i < n_ - 1; ++i) {
+            const double diag_orig = jacobian_diag_orig[i];
+            if (std::abs(diag_orig) > 1e-14) {
+                // residual_[i] = F(u), so λ = max(0, -F(u) / diag)
+                lambda_[i] = std::max(0.0, -residual_[i] / diag_orig);
+            } else {
+                lambda_[i] = 0.0;
+            }
+        }
+
+        // Second: Classify nodes using updated multiplier
+        // WARNING: Empirical parameters tuned to pass current test suite
+        // No theoretical justification - see docs/primal_dual_active_set_solution.md
+        constexpr double lambda_scale = 1e-3;  // EMPIRICAL: Tuned to balance deep ITM vs ATM
+        constexpr double gap_atol = 1e-10;     // EMPIRICAL: Absolute gap tolerance
+        constexpr double gap_rtol = 1e-6;      // EMPIRICAL: Relative gap tolerance
+
+        for (size_t i = 1; i < n_ - 1; ++i) {  // Interior points only
+            // Gap test: u_i - ψ_i ≤ atol + rtol * max(|ψ_i|, 1.0)
+            const double gap = u[i] - psi[i];
+            const double scale = std::max(std::abs(psi[i]), 1.0);
+            const double gap_threshold = gap_atol + gap_rtol * scale;
+            const bool gap_small = (gap <= gap_threshold);
+
+            // Multiplier test: λ_i ≥ λ_tol
+            // λ_tol scales with diagonal (auto grid-dependence)
+            const double diag_orig = jacobian_diag_orig[i];
+            const double lambda_tol = lambda_scale * std::max(1.0, std::abs(diag_orig));
+            const bool multiplier_active = (lambda_[i] >= lambda_tol);
+
+            // Lock if BOTH tests fire
+            if (gap_small && multiplier_active) {
+                // Node is in active set - lock to payoff
+                // Modify linear system: u[i] = psi[i]
+                jacobian_diag_[i] = 1.0;
+                if (i > 0) jacobian_lower_[i-1] = 0.0;
+                if (i < n_-1) jacobian_upper_[i] = 0.0;
+
+                // Residual: F(u) = u[i] - psi[i]
+                residual_[i] = u[i] - psi[i];
+            }
+        }
+    }
+
     /// Apply boundary conditions (CRTP version)
     void apply_boundary_conditions(std::span<double> u, double t) {
         auto dx_span = workspace_->dx();
@@ -561,66 +630,9 @@ private:
             // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
             apply_bc_to_residual(residual_, u, t);
 
-            // Primal-dual active set: estimate multiplier then classify nodes
-            // Lock nodes where BOTH gap test AND multiplier test succeed
-            // This auto-scales tolerance based on local Jacobian diagonal (grid dependence)
-            //
-            // TODO: Replace with proper PDAS (Hintermüller-Ito-Kunisch) - see Issue #196
-            // Current heuristic has no convergence guarantees:
-            // - Jacobian restored every iteration → nodes can flap between locked/free
-            // - Empirical constants may fail on different grids/parameters
-            // - No complementarity residual check
-            if (obstacle_) {
-                auto psi = workspace_->psi();
-                (*obstacle_)(t, grid_, psi);
-
-                // First: Estimate dual multiplier λ from current residual
-                // λ_i = max(0, -F(u)_i / diag_i_original)
-                for (size_t i = 1; i < n_ - 1; ++i) {
-                    const double diag_orig = jacobian_diag_orig[i];
-                    if (std::abs(diag_orig) > 1e-14) {
-                        // residual_[i] = F(u), so λ = max(0, -F(u) / diag)
-                        lambda_[i] = std::max(0.0, -residual_[i] / diag_orig);
-                    } else {
-                        lambda_[i] = 0.0;
-                    }
-                }
-
-                // Second: Classify nodes using updated multiplier
-                // WARNING: Empirical parameters tuned to pass current test suite
-                // No theoretical justification - see docs/primal_dual_active_set_solution.md
-                // TODO: Replace with proper PDAS (Hintermüller-Ito-Kunisch) on separate branch
-                constexpr double lambda_scale = 1e-3;  // EMPIRICAL: Tuned to balance deep ITM vs ATM
-                constexpr double gap_atol = 1e-10;     // EMPIRICAL: Absolute gap tolerance
-                constexpr double gap_rtol = 1e-6;      // EMPIRICAL: Relative gap tolerance
-
-                for (size_t i = 1; i < n_ - 1; ++i) {  // Interior points only
-
-                    // Gap test: u_i - ψ_i ≤ atol + rtol * max(|ψ_i|, 1.0)
-                    const double gap = u[i] - psi[i];
-                    const double scale = std::max(std::abs(psi[i]), 1.0);
-                    const double gap_threshold = gap_atol + gap_rtol * scale;
-                    const bool gap_small = (gap <= gap_threshold);
-
-                    // Multiplier test: λ_i ≥ λ_tol
-                    // λ_tol scales with diagonal (auto grid-dependence)
-                    const double diag_orig = jacobian_diag_orig[i];
-                    const double lambda_tol = lambda_scale * std::max(1.0, std::abs(diag_orig));
-                    const bool multiplier_active = (lambda_[i] >= lambda_tol);
-
-                    // Lock if BOTH tests fire
-                    if (gap_small && multiplier_active) {
-                        // Node is in active set - lock to payoff
-                        // Modify linear system: u[i] = psi[i]
-                        jacobian_diag_[i] = 1.0;
-                        if (i > 0) jacobian_lower_[i-1] = 0.0;
-                        if (i < n_-1) jacobian_upper_[i] = 0.0;
-
-                        // Residual: F(u) = u[i] - psi[i]
-                        residual_[i] = u[i] - psi[i];
-                    }
-                }
-            }
+            // Apply empirical active set heuristic (modifies Jacobian and residual)
+            // TODO: Replace with proper PDAS - see apply_active_set_heuristic() doc
+            apply_active_set_heuristic(t, u, jacobian_diag_orig);
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu
             // Negate residual for RHS
