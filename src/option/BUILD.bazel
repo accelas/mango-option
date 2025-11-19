@@ -1,9 +1,26 @@
 cc_library(
     name = "american_solver_workspace",
+    srcs = ["american_solver_workspace.cpp"],
     hdrs = ["american_solver_workspace.hpp"],
     deps = [
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "american_pde_solver",
+    hdrs = ["american_pde_solver.hpp"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/core:time_domain",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:black_scholes_pde",
+        ":american_solver_workspace",
+        ":option_spec",
         "//src/support:error_types",
     ],
     copts = ["-std=c++23"],
@@ -16,10 +33,10 @@ cc_library(
     hdrs = ["american_option.hpp"],
     deps = [
         "//src/support:parallel",
-        "//src/pde/core:pde_solver",
+        "//src/pde/operators:black_scholes_pde",
+        ":american_pde_solver",
         ":american_solver_workspace",
         ":option_spec",
-        "//src/pde/operators:operator_factory",
         "//src/support:error_types",
     ],
     copts = [

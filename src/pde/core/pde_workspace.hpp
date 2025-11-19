@@ -1,145 +1,135 @@
 #pragma once
 
-#include "src/support/memory/workspace_base.hpp"
+#include "src/pde/core/grid.hpp"
+#include <memory_resource>
 #include <span>
-#include <cassert>
+#include <expected>
+#include <string>
+#include <memory>
 #include <algorithm>
 
 namespace mango {
 
 /**
- * PDEWorkspace: workspace for PDE solver with SoA layout
+ * PDEWorkspace: Unified memory workspace for PDE solver
  *
- * Full Structure-of-Arrays layout for SIMD-friendly access:
- * - Each state array separate and SIMD-padded
- * - Zero-initialized padding for safe tail processing
- * - Dual accessors: logical size and padded size
- *
- * LIFETIME REQUIREMENTS:
- * - The `grid` span passed to constructor must remain valid for the lifetime
- *   of this workspace (stored for reset() reinit).
- *
- * INVALIDATION WARNING:
- * - reset() invalidates all previously returned std::span objects.
- * - After reset(), caller MUST re-acquire spans via accessors.
+ * Uses PMR vectors for all storage. All accessors return SIMD-padded spans.
+ * Caller extracts logical size with .subspan(0, logical_size()) when needed.
  */
-class PDEWorkspace : public WorkspaceBase {
+class PDEWorkspace {
 public:
-    explicit PDEWorkspace(size_t n, std::span<const double> grid,
-                         size_t initial_buffer_size = 1024 * 1024)
-        : WorkspaceBase(initial_buffer_size)
-        , n_(n)
-        , padded_n_(pad_to_simd(n))
-        , grid_(grid)
-    {
-        assert(!grid.empty() && "grid must not be empty");
-        assert(grid.size() == n && "grid size must match n");
-        allocate_and_initialize();
+    static constexpr size_t SIMD_WIDTH = 8;
+
+    static constexpr size_t pad_to_simd(size_t n) {
+        return ((n + SIMD_WIDTH - 1) / SIMD_WIDTH) * SIMD_WIDTH;
     }
 
-    // SoA array accessors (logical size)
-    std::span<double> u_current() { return {u_current_, n_}; }
-    std::span<const double> u_current() const { return {u_current_, n_}; }
+    static std::expected<std::shared_ptr<PDEWorkspace>, std::string>
+    create(const GridSpec<double>& grid_spec,
+           std::pmr::memory_resource* resource) {
+        if (!resource) {
+            return std::unexpected("Memory resource cannot be null");
+        }
 
-    std::span<double> u_next() { return {u_next_, n_}; }
-    std::span<const double> u_next() const { return {u_next_, n_}; }
+        auto grid_buffer = grid_spec.generate();
+        size_t n = grid_buffer.size();
 
-    std::span<double> u_stage() { return {u_stage_, n_}; }
-    std::span<const double> u_stage() const { return {u_stage_, n_}; }
+        if (n == 0) {
+            return std::unexpected("Grid size must be positive");
+        }
 
-    std::span<double> rhs() { return {rhs_, n_}; }
-    std::span<const double> rhs() const { return {rhs_, n_}; }
-
-    std::span<double> lu() { return {lu_, n_}; }
-    std::span<const double> lu() const { return {lu_, n_}; }
-
-    std::span<double> psi_buffer() { return {psi_, n_}; }
-    std::span<const double> psi_buffer() const { return {psi_, n_}; }
-
-    // Padded accessors for SIMD kernels
-    //
-    // CRITICAL: Padded spans do NOT include front guard cells!
-    // - Stencil operators accessing u[i-1] must use start >= 1
-    // - Boundary points (i=0, i=n-1) handled separately by boundary condition code
-    // - Padding is ONLY at the tail for safe SIMD overread
-    //
-    // Example safe usage:
-    //   auto u_padded = workspace.u_current_padded();
-    //   operator.compute(u_padded, Lu, start=1, end=n-1);  // ✓ Safe
-    //   operator.compute(u_padded, Lu, start=0, end=n);    // ✗ UNSAFE: u[-1] access!
-    std::span<double> u_current_padded() { return {u_current_, padded_n_}; }
-    std::span<const double> u_current_padded() const { return {u_current_, padded_n_}; }
-
-    std::span<double> u_next_padded() { return {u_next_, padded_n_}; }
-    std::span<const double> u_next_padded() const { return {u_next_, padded_n_}; }
-
-    std::span<double> lu_padded() { return {lu_, padded_n_}; }
-    std::span<const double> lu_padded() const { return {lu_, padded_n_}; }
-
-    // Grid spacing (SIMD-padded, zero-filled tail)
-    std::span<const double> dx() const { return {dx_, n_ - 1}; }
-    std::span<const double> dx_padded() const { return {dx_, pad_to_simd(n_ - 1)}; }
-
-    /**
-     * Reset and reinitialize
-     * WARNING: Invalidates all previously returned spans!
-     */
-    void reset() {
-        resource_.reset();
-        allocate_and_initialize();
+        return std::shared_ptr<PDEWorkspace>(
+            new PDEWorkspace(n, grid_buffer.span(), resource));
     }
+
+    // Accessors - all return SIMD-padded spans
+    std::span<double> u_current() { return {u_current_.data(), padded_n_}; }
+    std::span<const double> u_current() const { return {u_current_.data(), padded_n_}; }
+
+    std::span<double> u_next() { return {u_next_.data(), padded_n_}; }
+    std::span<const double> u_next() const { return {u_next_.data(), padded_n_}; }
+
+    std::span<double> u_stage() { return {u_stage_.data(), padded_n_}; }
+    std::span<const double> u_stage() const { return {u_stage_.data(), padded_n_}; }
+
+    std::span<double> rhs() { return {rhs_.data(), padded_n_}; }
+    std::span<const double> rhs() const { return {rhs_.data(), padded_n_}; }
+
+    std::span<double> lu() { return {lu_.data(), padded_n_}; }
+    std::span<const double> lu() const { return {lu_.data(), padded_n_}; }
+
+    std::span<double> psi() { return {psi_.data(), padded_n_}; }
+    std::span<const double> psi() const { return {psi_.data(), padded_n_}; }
+
+    std::span<const double> grid() const { return {grid_.data(), padded_n_}; }
+
+    std::span<const double> dx() const { return {dx_.data(), pad_to_simd(n_ - 1)}; }
+
+    // Newton solver arrays
+    std::span<double> jacobian_diag() { return {jacobian_diag_.data(), padded_n_}; }
+    std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), padded_n_}; }
+
+    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), padded_n_}; }
+    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), padded_n_}; }
+
+    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), padded_n_}; }
+    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), padded_n_}; }
+
+    std::span<double> residual() { return {residual_.data(), padded_n_}; }
+    std::span<const double> residual() const { return {residual_.data(), padded_n_}; }
+
+    std::span<double> delta_u() { return {delta_u_.data(), padded_n_}; }
+    std::span<const double> delta_u() const { return {delta_u_.data(), padded_n_}; }
 
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
 
 private:
-    void allocate_and_initialize() {
-        allocate_arrays();
-        precompute_grid_spacing();
-    }
+    PDEWorkspace(size_t n, std::span<const double> grid_data,
+                 std::pmr::memory_resource* mr)
+        : n_(n)
+        , padded_n_(pad_to_simd(n))
+        , resource_(mr)
+        , grid_(padded_n_, 0.0, mr)
+        , u_current_(padded_n_, 0.0, mr)
+        , u_next_(padded_n_, 0.0, mr)
+        , u_stage_(padded_n_, 0.0, mr)
+        , rhs_(padded_n_, 0.0, mr)
+        , lu_(padded_n_, 0.0, mr)
+        , psi_(padded_n_, 0.0, mr)
+        , dx_(pad_to_simd(n - 1), 0.0, mr)
+        , jacobian_diag_(padded_n_, 0.0, mr)
+        , jacobian_upper_(padded_n_, 0.0, mr)
+        , jacobian_lower_(padded_n_, 0.0, mr)
+        , residual_(padded_n_, 0.0, mr)
+        , delta_u_(padded_n_, 0.0, mr)
+    {
+        // Copy grid data
+        std::copy(grid_data.begin(), grid_data.end(), grid_.begin());
 
-    void allocate_arrays() {
-        const size_t array_bytes = padded_n_ * sizeof(double);
-        u_current_ = static_cast<double*>(resource_.allocate(array_bytes));
-        u_next_    = static_cast<double*>(resource_.allocate(array_bytes));
-        u_stage_   = static_cast<double*>(resource_.allocate(array_bytes));
-        rhs_       = static_cast<double*>(resource_.allocate(array_bytes));
-        lu_        = static_cast<double*>(resource_.allocate(array_bytes));
-        psi_       = static_cast<double*>(resource_.allocate(array_bytes));
-
-        // Zero-initialize entire buffers (including padding)
-        std::fill(u_current_, u_current_ + padded_n_, 0.0);
-        std::fill(u_next_, u_next_ + padded_n_, 0.0);
-        std::fill(u_stage_, u_stage_ + padded_n_, 0.0);
-        std::fill(rhs_, rhs_ + padded_n_, 0.0);
-        std::fill(lu_, lu_ + padded_n_, 0.0);
-        std::fill(psi_, psi_ + padded_n_, 0.0);
-    }
-
-    void precompute_grid_spacing() {
-        const size_t dx_padded = pad_to_simd(n_ - 1);
-        const size_t dx_bytes = dx_padded * sizeof(double);
-        dx_ = static_cast<double*>(resource_.allocate(dx_bytes));
-
+        // Precompute dx
         for (size_t i = 0; i < n_ - 1; ++i) {
             dx_[i] = grid_[i + 1] - grid_[i];
         }
-        // Zero padding for safe SIMD tail
-        std::fill(dx_ + (n_ - 1), dx_ + dx_padded, 0.0);
     }
 
     size_t n_;
     size_t padded_n_;
-    std::span<const double> grid_;  // Caller must keep alive!
+    std::pmr::memory_resource* resource_;
 
-    // SoA arrays (separate, SIMD-aligned)
-    double* u_current_;
-    double* u_next_;
-    double* u_stage_;
-    double* rhs_;
-    double* lu_;
-    double* psi_;
-    double* dx_;
+    std::pmr::vector<double> grid_;
+    std::pmr::vector<double> u_current_;
+    std::pmr::vector<double> u_next_;
+    std::pmr::vector<double> u_stage_;
+    std::pmr::vector<double> rhs_;
+    std::pmr::vector<double> lu_;
+    std::pmr::vector<double> psi_;
+    std::pmr::vector<double> dx_;
+    std::pmr::vector<double> jacobian_diag_;
+    std::pmr::vector<double> jacobian_upper_;
+    std::pmr::vector<double> jacobian_lower_;
+    std::pmr::vector<double> residual_;
+    std::pmr::vector<double> delta_u_;
 };
 
-} // namespace mango
+}  // namespace mango
