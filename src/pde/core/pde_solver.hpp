@@ -565,8 +565,20 @@ private:
             // Lock nodes where BOTH gap test AND multiplier test succeed
             // This auto-scales tolerance based on local Jacobian diagonal (grid dependence)
             //
-            // CRITICAL: Skip active set near terminal time to allow time value to develop
-            // Without this, ATM options get locked to payoff=0 and never accumulate time value
+            // CRITICAL: Disable active set near terminal to prevent ATM option lockup
+            //
+            // KNOWN LIMITATION: This is a temporary workaround with NO convergence guarantees.
+            // The active set is disabled for the entire last 50% of the backward march (T → T/2)
+            // to allow ATM options to develop time value before nodes can lock to payoff=0.
+            //
+            // WHY THIS IS WRONG:
+            // - Early exercise matters most throughout the solve, including T/2 → 0
+            // - Nodes can still unlock/relock because Jacobian is restored every iteration
+            // - No guarantee deep ITM nodes stay locked after t < T/2
+            // - Tests pass only because nodes happened to lock earlier
+            //
+            // PROPER FIX: Implement PDAS (Hintermüller-Ito-Kunisch) with theoretical guarantees.
+            // See docs/primal_dual_active_set_solution.md for details.
             const double time_from_terminal = time_.t_end() - t;
             const double min_time_for_active_set = 0.5 * time_.t_end();  // 50% of total time
             const bool far_enough_from_terminal = (time_from_terminal >= min_time_for_active_set);
@@ -596,6 +608,7 @@ private:
                 constexpr double gap_rtol = 1e-6;      // EMPIRICAL: Relative gap tolerance
 
                 for (size_t i = 1; i < n_ - 1; ++i) {  // Interior points only
+
                     // Gap test: u_i - ψ_i ≤ atol + rtol * max(|ψ_i|, 1.0)
                     const double gap = u[i] - psi[i];
                     const double scale = std::max(std::abs(psi[i]), 1.0);

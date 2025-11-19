@@ -222,5 +222,31 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
         << "Left boundary should equal immediate exercise for deep ITM put";
 }
 
+TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
+    // Regression test for Issue #196 IV solver failure
+    // Verifies that ATM options develop time value and don't lock to payoff=0
+    // This guards against the known limitation of the 50% time window guard
+    AmericanOptionParams params(
+        100.0,  // spot ATM
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend yield
+        OptionType::PUT,
+        0.25    // volatility
+    );
+
+    AmericanOptionResult result = Solve(params);
+    ASSERT_TRUE(result.converged);
+
+    // ATM put should have significant time value (not lock to payoff=0)
+    // With σ=0.25, T=1.0, r=0.05, ATM American put should be worth ~$8
+    const double intrinsic = std::max(params.strike - params.spot, 0.0);  // 0 for ATM
+    EXPECT_GT(result.value_at(params.spot), intrinsic + 7.0)
+        << "ATM put must develop time value, not lock to payoff=0";
+    EXPECT_LT(result.value_at(params.spot), 12.0)
+        << "ATM put price seems unreasonably high";
+}
+
 }  // namespace
 }  // namespace mango
