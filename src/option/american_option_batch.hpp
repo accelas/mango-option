@@ -185,14 +185,18 @@ public:
         // Solve each option in parallel with its own optimal grid
         MANGO_PRAGMA_PARALLEL
         {
+            // Per-thread pool for cheap workspace reuse within thread
+            // Pool memory is reused across multiple workspace allocations
+            std::pmr::unsynchronized_pool_resource thread_pool;
+
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
                 // Estimate grid for this specific option
                 auto [grid_spec, n_time] = estimate_grid_for_option(params[i]);
 
-                // Create workspace with estimated grid
+                // Create workspace with estimated grid (uses thread pool for cheap reuse)
                 auto workspace_result = AmericanSolverWorkspace::create(
-                    grid_spec, n_time, std::pmr::get_default_resource());
+                    grid_spec, n_time, &thread_pool);
                 if (!workspace_result.has_value()) {
                     results[i] = std::unexpected(SolverError{
                         .code = SolverErrorCode::InvalidConfiguration,
