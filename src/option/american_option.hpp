@@ -32,6 +32,7 @@ using AmericanOptionParams = PricingParams;
  * Solver result containing solution surface (interpolate on-demand for specific prices).
  */
 struct AmericanOptionResult {
+    double value;                      ///< Option value at current spot (dollars)
     std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
     std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (optional, for at_time())
     size_t n_space;                    ///< Number of spatial grid points
@@ -43,7 +44,7 @@ struct AmericanOptionResult {
 
     /// Default constructor
     AmericanOptionResult()
-        : solution(), surface_2d(), n_space(0), n_time(0),
+        : value(0.0), solution(), surface_2d(), n_space(0), n_time(0),
           x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
 
     /**

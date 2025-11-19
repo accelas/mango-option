@@ -84,7 +84,7 @@ TEST(RealOptionDataTest, SolverMatchesRecordedPrices) {
         ASSERT_TRUE(price_result.has_value())
             << price_result.error().message;
 
-        EXPECT_NEAR(price_result->value_at(params.spot), model_price->Value(i), 1e-6)
+        EXPECT_NEAR(price_result->value, model_price->Value(i), 1e-6)
             << "Mismatch for contract " << i;
     }
 }
