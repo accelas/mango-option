@@ -313,9 +313,10 @@ TEST(PDESolverTest, PDEWorkspaceIntegration) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    EXPECT_EQ(workspace->u_current().size(), 104);  // Padded size
+    EXPECT_EQ(workspace->u_current().size(), 101);  // Logical size
     EXPECT_EQ(workspace->logical_size(), 101);
-    EXPECT_EQ(workspace->dx().size(), 104);  // Padded dx size
+    EXPECT_EQ(workspace->padded_size(), 104);  // Padded size available separately
+    EXPECT_EQ(workspace->dx().size(), 100);  // Logical dx size (n-1)
 }
 
 TEST(PDESolverTest, ConstructWithoutConfig) {

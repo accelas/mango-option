@@ -42,44 +42,44 @@ public:
             new PDEWorkspace(n, grid_buffer.span(), resource));
     }
 
-    // Accessors - all return SIMD-padded spans
-    std::span<double> u_current() { return {u_current_.data(), padded_n_}; }
-    std::span<const double> u_current() const { return {u_current_.data(), padded_n_}; }
+    // Accessors - return logical size spans (SIMD padding is internal detail)
+    std::span<double> u_current() { return {u_current_.data(), n_}; }
+    std::span<const double> u_current() const { return {u_current_.data(), n_}; }
 
-    std::span<double> u_next() { return {u_next_.data(), padded_n_}; }
-    std::span<const double> u_next() const { return {u_next_.data(), padded_n_}; }
+    std::span<double> u_next() { return {u_next_.data(), n_}; }
+    std::span<const double> u_next() const { return {u_next_.data(), n_}; }
 
-    std::span<double> u_stage() { return {u_stage_.data(), padded_n_}; }
-    std::span<const double> u_stage() const { return {u_stage_.data(), padded_n_}; }
+    std::span<double> u_stage() { return {u_stage_.data(), n_}; }
+    std::span<const double> u_stage() const { return {u_stage_.data(), n_}; }
 
-    std::span<double> rhs() { return {rhs_.data(), padded_n_}; }
-    std::span<const double> rhs() const { return {rhs_.data(), padded_n_}; }
+    std::span<double> rhs() { return {rhs_.data(), n_}; }
+    std::span<const double> rhs() const { return {rhs_.data(), n_}; }
 
-    std::span<double> lu() { return {lu_.data(), padded_n_}; }
-    std::span<const double> lu() const { return {lu_.data(), padded_n_}; }
+    std::span<double> lu() { return {lu_.data(), n_}; }
+    std::span<const double> lu() const { return {lu_.data(), n_}; }
 
-    std::span<double> psi() { return {psi_.data(), padded_n_}; }
-    std::span<const double> psi() const { return {psi_.data(), padded_n_}; }
+    std::span<double> psi() { return {psi_.data(), n_}; }
+    std::span<const double> psi() const { return {psi_.data(), n_}; }
 
-    std::span<const double> grid() const { return {grid_.data(), padded_n_}; }
+    std::span<const double> grid() const { return {grid_.data(), n_}; }
 
-    std::span<const double> dx() const { return {dx_.data(), pad_to_simd(n_ - 1)}; }
+    std::span<const double> dx() const { return {dx_.data(), n_ - 1}; }
 
     // Newton solver arrays
-    std::span<double> jacobian_diag() { return {jacobian_diag_.data(), padded_n_}; }
-    std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), padded_n_}; }
+    std::span<double> jacobian_diag() { return {jacobian_diag_.data(), n_}; }
+    std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), n_}; }
 
-    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), padded_n_}; }
-    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), padded_n_}; }
+    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), n_}; }
+    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), n_}; }
 
-    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), padded_n_}; }
-    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), padded_n_}; }
+    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), n_}; }
+    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), n_}; }
 
-    std::span<double> residual() { return {residual_.data(), padded_n_}; }
-    std::span<const double> residual() const { return {residual_.data(), padded_n_}; }
+    std::span<double> residual() { return {residual_.data(), n_}; }
+    std::span<const double> residual() const { return {residual_.data(), n_}; }
 
-    std::span<double> delta_u() { return {delta_u_.data(), padded_n_}; }
-    std::span<const double> delta_u() const { return {delta_u_.data(), padded_n_}; }
+    std::span<double> delta_u() { return {delta_u_.data(), n_}; }
+    std::span<const double> delta_u() const { return {delta_u_.data(), n_}; }
 
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
