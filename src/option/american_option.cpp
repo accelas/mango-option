@@ -106,6 +106,12 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         result.x_max = s.x_max();
         result.strike = params_.strike;
 
+        // Compute value at current spot using actual grid
+        double current_moneyness = std::log(params_.spot / params_.strike);
+        auto grid = workspace_->grid();
+        double normalized_value = interpolate_solution(current_moneyness, grid);
+        result.value = normalized_value * params_.strike;  // Denormalize
+
         // Store full surface if buffer was provided
         if (!output_buffer_.empty()) {
             // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]

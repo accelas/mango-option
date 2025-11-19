@@ -186,7 +186,8 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     EXPECT_EQ(batch_result.failed_count, 0u);
 
     std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, n_space, 2.0);
+    // Use uniform grid to match batch solver (both must use same grid type for comparison)
+    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
     ASSERT_TRUE(grid_spec.has_value());
     auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, &pool).value();
 

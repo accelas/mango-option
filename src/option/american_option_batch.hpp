@@ -35,6 +35,107 @@ struct DefaultBatchGrid {
 };
 
 /**
+ * Estimated grid parameters for an option.
+ *
+ * Computed using sinh-grid specification heuristics based on
+ * option characteristics (volatility, maturity, moneyness).
+ */
+struct GridEstimate {
+    double x_min;       ///< Minimum log-moneyness
+    double x_max;       ///< Maximum log-moneyness
+    size_t n_space;     ///< Spatial grid points
+    size_t n_time;      ///< Time steps
+};
+
+/**
+ * Estimate grid parameters for a single option using sinh-grid heuristics.
+ *
+ * Implements single-pass grid determination from sinh-grid specification:
+ * - Spatial domain: x₀ ± n_sigma·σ√T (covers probability distribution)
+ * - Spatial resolution: Δx ~ σ√tol (target truncation error)
+ * - Temporal resolution: Δt ~ c_t·Δx_min (couples time/space errors)
+ *
+ * Grid is centered on current log-moneyness x₀ = ln(S/K), not at x=0.
+ * This is appropriate for independent options (vs option chains).
+ *
+ * @param params Option parameters (spot, strike, maturity, volatility, etc.)
+ * @param n_sigma Domain half-width in units of σ√T (default: 5.0)
+ * @param alpha Sinh clustering strength (default: 2.0 for Europeans)
+ * @param tol Target price tolerance (default: 1e-6)
+ * @param c_t Time step safety factor (default: 0.75)
+ * @return Estimated grid parameters
+ */
+inline GridEstimate estimate_grid_for_option(
+    const AmericanOptionParams& params,
+    double n_sigma = 5.0,
+    double alpha = 2.0,
+    double tol = 1e-6,
+    double c_t = 0.75)
+{
+    // Domain bounds (centered on current moneyness)
+    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
+    double x0 = std::log(params.spot / params.strike);
+
+    double x_min = x0 - n_sigma * sigma_sqrt_T;
+    double x_max = x0 + n_sigma * sigma_sqrt_T;
+
+    // Spatial resolution (target truncation error)
+    double dx_target = params.volatility * std::sqrt(tol);
+    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
+    Nx = std::clamp(Nx, size_t{200}, size_t{1200});
+
+    // Ensure odd number of points (for centered stencils)
+    if (Nx % 2 == 0) Nx++;
+
+    // Temporal resolution (coupled to smallest spatial spacing)
+    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
+    double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
+    double dx_min = dx_avg * std::exp(-alpha);  // Sinh clustering factor
+
+    double dt = c_t * dx_min;
+    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
+    Nt = std::min(Nt, size_t{5000});  // Upper bound for stability
+
+    return GridEstimate{x_min, x_max, Nx, Nt};
+}
+
+/**
+ * Compute conservative global maximum grid for heterogeneous option batch.
+ *
+ * Takes the union of spatial domains and maximum resolution across all options.
+ * This ensures the grid is large enough for every option in the batch.
+ *
+ * @param params Vector of option parameters
+ * @param n_sigma Domain half-width parameter (default: 5.0)
+ * @param alpha Sinh clustering parameter (default: 2.0)
+ * @param tol Target price tolerance (default: 1e-6)
+ * @param c_t Time step safety factor (default: 0.75)
+ * @return Global maximum grid estimate
+ */
+inline GridEstimate compute_global_max_grid(
+    std::span<const AmericanOptionParams> params,
+    double n_sigma = 5.0,
+    double alpha = 2.0,
+    double tol = 1e-6,
+    double c_t = 0.75)
+{
+    double global_x_min = 0.0;
+    double global_x_max = 0.0;
+    size_t global_Nx = 0;
+    size_t global_Nt = 0;
+
+    for (const auto& p : params) {
+        auto grid = estimate_grid_for_option(p, n_sigma, alpha, tol, c_t);
+        global_x_min = std::min(global_x_min, grid.x_min);
+        global_x_max = std::max(global_x_max, grid.x_max);
+        global_Nx = std::max(global_Nx, grid.n_space);
+        global_Nt = std::max(global_Nt, grid.n_time);
+    }
+
+    return GridEstimate{global_x_min, global_x_max, global_Nx, global_Nt};
+}
+
+/**
  * Batch solver result containing individual results and aggregate statistics.
  */
 struct BatchAmericanOptionResult {
@@ -58,6 +159,13 @@ struct BatchAmericanOptionResult {
 ///
 /// // Uses default grid configuration (101 spatial points, 1000 time steps)
 /// auto results = solve_american_options_batch(batch);
+/// ```
+///
+/// **Automatic Grid API** (for heterogeneous batches):
+/// ```cpp
+/// // Automatically determines optimal grid based on option characteristics
+/// // Recommended when options have varying volatilities/maturities
+/// auto results = solve_american_options_batch_auto(batch);
 /// ```
 ///
 /// **Advanced API** (for custom grid configuration):
@@ -114,6 +222,40 @@ public:
         SetupCallback setup = nullptr)
     {
         return solve_batch(std::span{params}, setup);
+    }
+
+    /// Solve a batch of American options with automatic grid determination
+    ///
+    /// Automatically determines optimal grid parameters for each option based on
+    /// option characteristics (volatility, maturity, moneyness), then uses the
+    /// conservative global maximum grid for the entire batch.
+    ///
+    /// This is the recommended API for heterogeneous option batches where options
+    /// have varying characteristics (e.g., different volatilities, maturities).
+    ///
+    /// @param params Vector of option parameters
+    /// @param setup Optional callback invoked after solver creation, before solve()
+    /// @return Batch result with individual results and failure count
+    static BatchAmericanOptionResult solve_batch_auto(
+        std::span<const AmericanOptionParams> params,
+        SetupCallback setup = nullptr)
+    {
+        auto global_grid = compute_global_max_grid(params);
+        return solve_batch_with_grid(
+            params,
+            global_grid.x_min,
+            global_grid.x_max,
+            global_grid.n_space,
+            global_grid.n_time,
+            setup);
+    }
+
+    /// Solve a batch of American options with automatic grid (vector overload)
+    static BatchAmericanOptionResult solve_batch_auto(
+        const std::vector<AmericanOptionParams>& params,
+        SetupCallback setup = nullptr)
+    {
+        return solve_batch_auto(std::span{params}, setup);
     }
 
     /// Solve a batch of American options with custom grid configuration
@@ -320,6 +462,27 @@ inline BatchAmericanOptionResult solve_american_options_batch(
 {
     return BatchAmericanOptionSolver::solve_batch_with_grid(
         params, x_min, x_max, n_space, n_time);
+}
+
+/// Solve a batch of American options with automatic grid determination
+///
+/// Recommended for heterogeneous batches where options have varying characteristics.
+/// Automatically computes optimal grid parameters based on option properties
+/// (volatility, maturity, moneyness) and uses conservative global maximum.
+///
+/// @param params Vector of option parameters
+/// @return Batch result with individual results and failure count
+inline BatchAmericanOptionResult solve_american_options_batch_auto(
+    std::span<const AmericanOptionParams> params)
+{
+    return BatchAmericanOptionSolver::solve_batch_auto(params);
+}
+
+/// Solve a batch of American options with automatic grid (vector overload)
+inline BatchAmericanOptionResult solve_american_options_batch_auto(
+    const std::vector<AmericanOptionParams>& params)
+{
+    return BatchAmericanOptionSolver::solve_batch_auto(params);
 }
 
 }  // namespace mango
