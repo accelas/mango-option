@@ -54,6 +54,19 @@ public:
         size_t n_time);
 
     /**
+     * Factory method creates workspace with standard log-moneyness bounds.
+     *
+     * Uses standard bounds [-3.0, 3.0] for log-moneyness domain.
+     * Replaces deprecated create_standard() method.
+     *
+     * @param n_space Number of spatial grid points
+     * @param n_time Number of time steps
+     * @return Expected containing shared workspace on success, error message on failure
+     */
+    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
+    create(size_t n_space, size_t n_time);
+
+    /**
      * Factory method creates workspace from spatial grid bounds.
      *
      * @param x_min Minimum log-moneyness

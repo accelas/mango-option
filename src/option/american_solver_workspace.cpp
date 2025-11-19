@@ -17,6 +17,12 @@ AmericanSolverWorkspace::validate_params(double x_min, double x_max, size_t n_sp
 }
 
 std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
+AmericanSolverWorkspace::create(size_t n_space, size_t n_time) {
+    // Use standard log-moneyness bounds [-3.0, 3.0]
+    return create(-3.0, 3.0, n_space, n_time);
+}
+
+std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
 AmericanSolverWorkspace::create(double x_min, double x_max, size_t n_space, size_t n_time) {
     // Use default memory resource for convenience method
     auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, n_space, 2.0);
