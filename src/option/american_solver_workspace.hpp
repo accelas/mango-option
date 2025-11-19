@@ -15,6 +15,8 @@
 #include <tuple>
 #include <cmath>
 #include <algorithm>
+#include <limits>
+#include <span>
 
 namespace mango {
 
@@ -67,10 +69,65 @@ inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
     size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
     Nt = std::min(Nt, size_t{5000});  // Upper bound for stability
 
-    // Create uniform GridSpec (workspace creation uses uniform grids)
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, Nx);
+    // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
+    // Grid is centered on current moneyness x0, with concentration parameter alpha
+    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, alpha);
     // GridSpec factory returns expected, but params are validated above so should never fail
     return {grid_spec.value(), Nt};
+}
+
+/**
+ * Compute global grid for a batch of options requiring shared grid.
+ *
+ * Finds a single grid that accommodates all options in the batch by:
+ * - Taking union of spatial domains (max extent across all options)
+ * - Using maximum resolution (finest grid needed by any option)
+ * - Using maximum time steps (finest temporal resolution)
+ *
+ * This ensures the grid is large enough and fine enough for every option,
+ * enabling consistent interpolation across the batch.
+ *
+ * Use case: Price table construction where all (σ,r) combinations must
+ * share the same grid for 4D interpolation.
+ *
+ * @param params Span of option parameters
+ * @param n_sigma Domain half-width parameter (default: 5.0)
+ * @param alpha Sinh clustering parameter (default: 2.0)
+ * @param tol Target price tolerance (default: 1e-6)
+ * @param c_t Time step safety factor (default: 0.75)
+ * @return Tuple of (GridSpec, n_time) that works for all options
+ */
+inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
+    std::span<const PricingParams> params,
+    double n_sigma = 5.0,
+    double alpha = 2.0,
+    double tol = 1e-6,
+    double c_t = 0.75)
+{
+    if (params.empty()) {
+        // Return minimal valid sinh grid for empty batch
+        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, alpha);
+        return {grid_spec.value(), 100};
+    }
+
+    double global_x_min = std::numeric_limits<double>::max();
+    double global_x_max = std::numeric_limits<double>::lowest();
+    size_t global_Nx = 0;
+    size_t global_Nt = 0;
+
+    // Estimate grid for each option and take union/maximum
+    for (const auto& p : params) {
+        auto [grid_spec, Nt] = estimate_grid_for_option(p, n_sigma, alpha, tol, c_t);
+        global_x_min = std::min(global_x_min, grid_spec.x_min());
+        global_x_max = std::max(global_x_max, grid_spec.x_max());
+        global_Nx = std::max(global_Nx, grid_spec.n_points());
+        global_Nt = std::max(global_Nt, Nt);
+    }
+
+    // Create sinh-spaced grid with same concentration parameter for consistent resolution
+    // Sinh grid provides better resolution near the center (strike region) for all options
+    auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, alpha);
+    return {grid_spec.value(), global_Nt};
 }
 
 /**

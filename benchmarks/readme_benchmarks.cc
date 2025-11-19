@@ -261,13 +261,8 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
         ));
     }
 
-    constexpr double x_min = -3.0;
-    constexpr double x_max = 3.0;
-    constexpr size_t n_space = 101;
-    constexpr size_t n_time = 1000;
-
     auto run_once = [&]() {
-        auto batch_result = solve_american_options_batch(batch, x_min, x_max, n_space, n_time);
+        auto batch_result = BatchAmericanOptionSolver::solve_batch(batch);
         for (const auto& res : batch_result.results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);

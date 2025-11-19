@@ -5,10 +5,12 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
+#include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <mutex>
 #include <algorithm>
+#include <memory_resource>
 
 namespace mango {
 namespace {
@@ -24,7 +26,8 @@ TEST(AmericanOptionSolverTest, ConstructorValidation) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     // Should construct successfully
     EXPECT_NO_THROW({
@@ -43,7 +46,8 @@ TEST(AmericanOptionSolverTest, InvalidStrike) {
         0.2      // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params, workspace);
@@ -61,7 +65,8 @@ TEST(AmericanOptionSolverTest, InvalidSpot) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params, workspace);
@@ -79,7 +84,8 @@ TEST(AmericanOptionSolverTest, InvalidMaturity) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params, workspace);
@@ -97,7 +103,8 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
         -0.2    // volatility (Invalid)
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params, workspace);
@@ -116,7 +123,8 @@ TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_NO_THROW({
         AmericanOptionSolver solver(params, workspace);
@@ -134,7 +142,8 @@ TEST(AmericanOptionSolverTest, InvalidDividendYield) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params, workspace);
@@ -152,27 +161,19 @@ TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
         0.2     // volatility
     );
 
-    // Test that workspace factory validates n_space >= 10
-    auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 5, 1000);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "n_space must be >= 10");
+    // Test that GridSpec validates n_space >= 2
+    auto grid_result = GridSpec<double>::uniform(-3.0, 3.0, 1);
+    EXPECT_FALSE(grid_result.has_value());
+    EXPECT_TRUE(grid_result.error().find("at least 2 points") != std::string::npos);
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNTime) {
-    AmericanOptionParams params(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.2     // volatility
-    );
-
-    // Test that workspace factory validates n_time >= 10
-    auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 5);
+    // Test that workspace validates n_time must be positive
+    // GridSpec handles spatial grid validation, workspace validates temporal
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto result = AmericanSolverWorkspace::create(grid_spec, 0, std::pmr::get_default_resource());
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "n_time must be >= 10");
+    EXPECT_EQ(result.error(), "n_time must be positive");
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridBounds) {
@@ -186,10 +187,10 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
         0.2     // volatility
     );
 
-    // Test that workspace factory validates x_min < x_max
-    auto result = AmericanSolverWorkspace::create(3.0, -3.0, 101, 1000);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "x_min must be < x_max");
+    // Test that GridSpec validates x_min < x_max
+    auto grid_result = GridSpec<double>::uniform(3.0, -3.0, 101);
+    EXPECT_FALSE(grid_result.has_value());
+    EXPECT_TRUE(grid_result.error().find("must be less than") != std::string::npos);
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividends) {
@@ -207,7 +208,8 @@ TEST(AmericanOptionSolverTest, DiscreteDividends) {
         }  // Valid dividends
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     // Should accept valid discrete dividends
     EXPECT_NO_THROW({
@@ -230,7 +232,8 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
         }  // Invalid: negative time
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
         AmericanOptionSolver solver(params1, workspace);
@@ -269,7 +272,8 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
         }  // Invalid: negative amount
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
 
     // Should reject negative amount
     EXPECT_THROW({
@@ -288,7 +292,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
@@ -319,7 +324,8 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     // get_solution() should throw before solve()
@@ -339,7 +345,8 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
@@ -369,7 +376,8 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
         0.2     // volatility
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
@@ -408,7 +416,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
         }
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
@@ -454,7 +463,8 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
         }
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();
@@ -514,7 +524,8 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
         }
     );
 
-    auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+    auto workspace = AmericanSolverWorkspace::create(grid_spec, 1000, std::pmr::get_default_resource()).value();
     AmericanOptionSolver solver(params, workspace);
 
     auto result = solver.solve();

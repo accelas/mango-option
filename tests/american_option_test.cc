@@ -177,7 +177,7 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     params.emplace_back(90.0,  95.0,  0.5, -0.01, 0.01, OptionType::PUT, 0.35);
 
     // Use automatic grid determination for batch solver
-    auto batch_result = solve_american_options_batch(params);
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(params);
     ASSERT_EQ(batch_result.results.size(), params.size());
     EXPECT_EQ(batch_result.failed_count, 0u);
 
