@@ -198,7 +198,11 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     constexpr double x_min = -3.0;
     constexpr double x_max = 3.0;
 
-    auto workspace = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
+    if (!grid_spec.has_value()) {
+        throw std::runtime_error("Failed to create grid: " + grid_spec.error());
+    }
+    auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
     if (!workspace) {
         throw std::runtime_error("Failed to create workspace: " + workspace.error());
     }
