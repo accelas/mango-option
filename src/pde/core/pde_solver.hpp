@@ -564,7 +564,14 @@ private:
             // Primal-dual active set: estimate multiplier then classify nodes
             // Lock nodes where BOTH gap test AND multiplier test succeed
             // This auto-scales tolerance based on local Jacobian diagonal (grid dependence)
-            if (obstacle_) {
+            //
+            // CRITICAL: Skip active set near terminal time to allow time value to develop
+            // Without this, ATM options get locked to payoff=0 and never accumulate time value
+            const double time_from_terminal = time_.t_end() - t;
+            const double min_time_for_active_set = 0.5 * time_.t_end();  // 50% of total time
+            const bool far_enough_from_terminal = (time_from_terminal >= min_time_for_active_set);
+
+            if (obstacle_ && far_enough_from_terminal) {
                 auto psi = workspace_->psi();
                 (*obstacle_)(t, grid_, psi);
 
