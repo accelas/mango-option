@@ -18,8 +18,8 @@ AmericanSolverWorkspace::validate_params(double x_min, double x_max, size_t n_sp
 
 std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
 AmericanSolverWorkspace::create(double x_min, double x_max, size_t n_space, size_t n_time) {
-    // Use default memory resource for convenience method
-    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, n_space, 2.0);
+    // Use uniform grid (value_at() interpolation assumes uniform spacing)
+    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
     if (!grid_spec.has_value()) {
         return std::unexpected(grid_spec.error());
     }
