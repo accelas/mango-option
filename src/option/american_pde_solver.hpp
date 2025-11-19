@@ -52,7 +52,7 @@ public:
                      std::span<double> output_buffer = {})
         : PDESolver<AmericanPutSolver>(
               workspace->grid_span(),
-              TimeDomain(0.0, params.maturity, params.maturity / workspace->n_time()),
+              TimeDomain::from_n_steps(0.0, params.maturity, workspace->n_time()),
               create_obstacle(),
               workspace->pde_workspace(),
               output_buffer)
@@ -144,7 +144,7 @@ public:
                       std::span<double> output_buffer = {})
         : PDESolver<AmericanCallSolver>(
               workspace->grid_span(),
-              TimeDomain(0.0, params.maturity, params.maturity / workspace->n_time()),
+              TimeDomain::from_n_steps(0.0, params.maturity, workspace->n_time()),
               create_obstacle(),
               workspace->pde_workspace(),
               output_buffer)

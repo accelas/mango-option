@@ -201,7 +201,7 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
 
     // Use BatchAmericanOptionSolver with shared grid (use_shared_grid=true)
     // Grid is automatically computed, surfaces are collected
-    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch_params, true);
+    auto batch_result = BatchAmericanOptionSolver().solve_batch(batch_params, true);
 
     // Check failures
     if (batch_result.failed_count > 0) {
