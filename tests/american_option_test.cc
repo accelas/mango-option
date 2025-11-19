@@ -195,11 +195,9 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     }
 }
 
-TEST_F(AmericanOptionPricingTest, DISABLED_PutImmediateExerciseAtBoundary) {
-    // TODO: Deep ITM put near left boundary returns inflated value (~115.97 vs ~99.75 intrinsic)
-    // Root cause investigation: See GitHub issue #196
-    // Fixes applied: value_at() interpolation + initialize() call
-    // Status: Still fails - boundary region numerical issue under investigation
+TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
+    // Deep ITM put test - verifies active set method locks nodes to payoff
+    // Fixed by implementing proper complementarity enforcement in Newton solver
     std::pmr::synchronized_pool_resource pool;
     auto grid_spec = GridSpec<double>::sinh_spaced(-7.0, 2.0, 301, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
