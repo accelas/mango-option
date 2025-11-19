@@ -14,11 +14,9 @@ namespace mango {
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace,
-    std::span<double> output_buffer)
+    std::shared_ptr<AmericanSolverWorkspace> workspace)
     : params_(params)
     , workspace_(std::move(workspace))
-    , output_buffer_(output_buffer)
 {
     // Validate parameters using unified validation
     auto validation = validate_pricing_params(params_);
@@ -30,16 +28,6 @@ AmericanOptionSolver::AmericanOptionSolver(
     if (!workspace_) {
         throw std::invalid_argument("Workspace cannot be null");
     }
-
-    // Validate output buffer size if provided
-    if (!output_buffer_.empty()) {
-        const size_t required_size = (workspace_->n_time() + 1) * workspace_->n_space();
-        if (output_buffer_.size() < required_size) {
-            throw std::invalid_argument("Output buffer too small: need " +
-                std::to_string(required_size) + " but got " +
-                std::to_string(output_buffer_.size()));
-        }
-    }
 }
 
 // ============================================================================
@@ -48,8 +36,7 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace,
-    std::span<double> output_buffer) {
+    std::shared_ptr<AmericanSolverWorkspace> workspace) {
 
     // Validate workspace first
     if (!workspace) {
@@ -60,7 +47,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     return validate_pricing_params(params)
         .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
             try {
-                return AmericanOptionSolver(params, workspace, output_buffer);
+                return AmericanOptionSolver(params, workspace);
             } catch (const std::exception& e) {
                 return std::unexpected(std::string("Failed to create solver: ") + e.what());
             }
@@ -72,13 +59,17 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
+    // Allocate surface buffer
+    const size_t surface_size = (workspace_->n_time() + 1) * workspace_->n_space();
+    std::vector<double> surface_buffer(surface_size);
+
     // Create appropriate solver based on option type
     AmericanSolverVariant solver = [&]() -> AmericanSolverVariant {
         switch (params_.type) {
             case OptionType::CALL:
-                return AmericanCallSolver(params_, workspace_, output_buffer_);
+                return AmericanCallSolver(params_, workspace_, surface_buffer);
             case OptionType::PUT:
-                return AmericanPutSolver(params_, workspace_, output_buffer_);
+                return AmericanPutSolver(params_, workspace_, surface_buffer);
             default:
                 throw std::runtime_error("Unknown option type");
         }
@@ -112,15 +103,13 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
-        // Store full surface if buffer was provided
-        if (!output_buffer_.empty()) {
-            // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-            // Extract only the time steps (skip initial scratch)
-            result.surface_2d.assign(
-                output_buffer_.begin() + s.n_space(),  // Skip u_old_initial
-                output_buffer_.end()                    // Include all time steps
-            );
-        }
+        // Store full surface
+        // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+        // Extract only the time steps (skip initial scratch)
+        result.surface_2d.assign(
+            surface_buffer.begin() + s.n_space(),  // Skip u_old_initial
+            surface_buffer.end()                    // Include all time steps
+        );
     }, solver);
 
     solved_ = true;

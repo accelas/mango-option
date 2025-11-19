@@ -191,8 +191,13 @@ PYBIND11_MODULE(mango_iv, m) {
            double x_max,
            size_t n_space,
            size_t n_time) {
+            auto grid_spec_result = mango::GridSpec<double>::uniform(x_min, x_max, n_space);
+            if (!grid_spec_result.has_value()) {
+                throw py::value_error(
+                    "Failed to create grid: " + grid_spec_result.error());
+            }
             auto workspace_result =
-                mango::AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+                mango::AmericanSolverWorkspace::create(grid_spec_result.value(), n_time, std::pmr::get_default_resource());
             if (!workspace_result) {
                 throw py::value_error(
                     "Failed to create workspace: " + workspace_result.error());

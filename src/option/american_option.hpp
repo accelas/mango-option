@@ -104,15 +104,9 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
-     * @param output_buffer Optional buffer for full spatiotemporal surface.
-     *                      If provided, solver writes all time steps to this buffer
-     *                      enabling at_time() access. Buffer layout:
-     *                      [u_old_initial][step0][step1]...[step(n_time-1)]
-     *                      Required size: (n_time + 1) * n_space doubles
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
-                        std::shared_ptr<AmericanSolverWorkspace> workspace,
-                        std::span<double> output_buffer = {});
+                        std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
      * Factory method with expected-based validation.
@@ -125,13 +119,11 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
-     * @param output_buffer Optional buffer for full spatiotemporal surface (see constructor)
      * @return Expected containing solver on success, error message on failure
      */
     static std::expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
-        std::shared_ptr<AmericanSolverWorkspace> workspace,
-        std::span<double> output_buffer = {});
+        std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
      * Solve for option value.
@@ -167,9 +159,6 @@ private:
     // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
     std::shared_ptr<AmericanSolverWorkspace> workspace_;
-
-    // Optional output buffer for full surface
-    std::span<double> output_buffer_;
 
     // Solution state
     std::vector<double> solution_;

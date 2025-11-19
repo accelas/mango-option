@@ -169,25 +169,9 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     const size_t Nv = volatility.size();
     const size_t Nr = rate.size();
     const double T_max = maturity.back();
-    const double dt = T_max / config_.n_time;
 
     // Zero out entire output array upfront (failed solves leave zeros)
     std::ranges::fill(prices_4d, 0.0);
-
-    // Precompute step indices for each maturity
-    std::vector<size_t> step_indices(Nt);
-    for (size_t j = 0; j < Nt; ++j) {
-        double step_exact = maturity[j] / dt - 1.0;
-        long long step_rounded = std::llround(step_exact);
-
-        if (step_rounded < 0) {
-            step_indices[j] = 0;
-        } else if (step_rounded >= static_cast<long long>(config_.n_time)) {
-            step_indices[j] = config_.n_time - 1;
-        } else {
-            step_indices[j] = static_cast<size_t>(step_rounded);
-        }
-    }
 
     // Precompute log-moneyness values
     std::vector<double> log_moneyness(Nm);
@@ -196,8 +180,9 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     }
 
     // Build batch parameters (all (σ,r) combinations)
+    const size_t batch_size = Nv * Nr;
     std::vector<AmericanOptionParams> batch_params;
-    batch_params.reserve(Nv * Nr);
+    batch_params.reserve(batch_size);
 
     namespace views = std::views;
     for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
@@ -214,35 +199,49 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         batch_params.push_back(params);
     }
 
-    // Allocate output buffer for full surface collection (needed for at_time())
-    const size_t batch_size = batch_params.size();
-    const size_t surface_size_per_option = (config_.n_time + 1) * config_.n_space;
-    std::vector<double> surface_buffer(batch_size * surface_size_per_option);
+    // Use BatchAmericanOptionSolver with shared grid (use_shared_grid=true)
+    // Grid is automatically computed, surfaces are collected
+    auto batch_result = BatchAmericanOptionSolver::solve_batch(batch_params, true);
 
-    // Solve batch with full surface collection
-    auto batch_result = BatchAmericanOptionSolver::solve_batch_with_grid(
-        std::span{batch_params}, config_.x_min, config_.x_max, config_.n_space, config_.n_time,
-        nullptr,  // No setup callback
-        std::span{surface_buffer});  // Provide buffer for full surface
-
-    // Check failure count
+    // Check failures
     if (batch_result.failed_count > 0) {
         return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
-                         " out of " + std::to_string(Nv * Nr) + " PDEs");
+                         " out of " + std::to_string(batch_size) + " PDEs");
+    }
+
+    // Get n_time from first successful result (all results share the same grid)
+    size_t n_time = 0;
+    for (const auto& result_expected : batch_result.results) {
+        if (result_expected.has_value() && result_expected->converged) {
+            n_time = result_expected->n_time;
+            break;
+        }
+    }
+
+    // Precompute step indices for each maturity
+    const double dt = T_max / n_time;
+    std::vector<size_t> step_indices(Nt);
+    for (size_t j = 0; j < Nt; ++j) {
+        double step_exact = maturity[j] / dt - 1.0;
+        long long step_rounded = std::llround(step_exact);
+
+        if (step_rounded < 0) {
+            step_indices[j] = 0;
+        } else if (step_rounded >= static_cast<long long>(n_time)) {
+            step_indices[j] = n_time - 1;
+        } else {
+            step_indices[j] = static_cast<size_t>(step_rounded);
+        }
     }
 
     // Extract prices from surface_2d for each result
     const size_t slice_stride = Nv * Nr;
     for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
         const auto& result_expected = batch_result.results[idx];
-        if (!result_expected.has_value()) {
+        if (!result_expected.has_value() || !result_expected->converged) {
             continue;  // Leave zeros for failed solves
         }
-
         const auto& result = result_expected.value();
-        if (!result.converged) {
-            continue;  // Leave zeros for failed solves
-        }
 
         // Build spatial grid for this result (uniform grid)
         std::vector<double> x_grid(result.n_space);
