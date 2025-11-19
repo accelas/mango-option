@@ -146,7 +146,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
 
     size_t n_space = state.range(0);
     size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -183,7 +183,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
 
     size_t n_space = 101;
     size_t n_time = state.range(0);
-    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -220,7 +220,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
 
     size_t n_space = 101;
     size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -262,7 +262,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
 
     size_t n_space = 101;
     size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -405,7 +405,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -473,7 +473,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
     size_t n_space = 101;
     size_t n_time = 1000;
-    auto workspace_result = AmericanSolverWorkspace::create_standard(n_space, n_time);
+    auto workspace_result = AmericanSolverWorkspace::create(n_space, n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;

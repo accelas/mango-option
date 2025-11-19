@@ -49,7 +49,7 @@ struct TemporalEvent {
     }
 };
 
-/// PDE Solver with TR-BDF2 time stepping and cache blocking
+/// PDE Solver with TR-BDF2 time stepping using CRTP
 ///
 /// Solves PDEs of the form: ∂u/∂t = L(u, x, t)
 /// where L is a spatial operator (e.g., diffusion, advection, reaction)
@@ -59,23 +59,22 @@ struct TemporalEvent {
 /// - Stage 2: BDF2 from t_n to t_n+1
 /// where γ = 2 - √2 for L-stability
 ///
-/// Cache blocking is automatically applied for large grids (n ≥ threshold)
-/// to improve cache locality and reduce memory bandwidth.
+/// Uses CRTP to obtain boundary conditions and spatial operator from
+/// derived class, eliminating redundant constructor parameters.
 ///
-/// @tparam BoundaryL Left boundary condition type
-/// @tparam BoundaryR Right boundary condition type
-/// @tparam SpatialOp Spatial operator type
-template<typename BoundaryL, typename BoundaryR, typename SpatialOp>
+/// Derived classes must implement:
+/// - left_boundary() - Returns left boundary condition object
+/// - right_boundary() - Returns right boundary condition object
+/// - spatial_operator() - Returns spatial operator object
+///
+/// @tparam Derived The derived solver class
+template<typename Derived>
 class PDESolver {
 public:
-    /// Constructor
+    /// Constructor (CRTP version)
     ///
     /// @param grid Spatial grid (x coordinates)
     /// @param time Time domain configuration
-    /// @param config TR-BDF2 configuration (optional, uses defaults if not provided)
-    /// @param left_bc Left boundary condition
-    /// @param right_bc Right boundary condition
-    /// @param spatial_op Spatial operator L(u)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
     /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
@@ -83,21 +82,18 @@ public:
     ///                      After step i, u_old points to step(i-1) (perfect cache locality!)
     ///                      If provided, solver writes directly to buffer (zero-copy)
     ///                      If not provided, solver uses internal workspace
+    ///
+    /// Note: Boundary conditions and spatial operator are obtained from derived class
+    ///       via CRTP calls, not passed as constructor arguments
+    /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
-              const TRBDF2Config& config = {},
-              const BoundaryL& left_bc = {},
-              const BoundaryR& right_bc = {},
-              SpatialOp spatial_op = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
               PDEWorkspace* external_workspace = nullptr,
               std::span<double> output_buffer = {})
         : grid_(grid)
         , time_(time)
-        , config_(config)
-        , left_bc_(left_bc)
-        , right_bc_(right_bc)
-        , spatial_op_(std::move(spatial_op))
+        , config_{}  // Default-initialized
         , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_owner_(nullptr)
@@ -211,6 +207,16 @@ public:
         return obstacle_.has_value();
     }
 
+    /// Set TR-BDF2 configuration
+    void set_config(const TRBDF2Config& config) {
+        config_ = config;
+    }
+
+    /// Get TR-BDF2 configuration
+    const TRBDF2Config& config() const {
+        return config_;
+    }
+
     /// Add temporal event to be executed at specific time
     ///
     /// Events are applied AFTER the TR-BDF2 step completes (not before).
@@ -224,14 +230,16 @@ public:
                   [](const auto& a, const auto& b) { return a.time < b.time; });
     }
 
+protected:
+    // CRTP helper to get derived class instance
+    Derived& derived() { return static_cast<Derived&>(*this); }
+    const Derived& derived() const { return static_cast<const Derived&>(*this); }
+
 private:
     // Grid and configuration
     std::span<const double> grid_;
     TimeDomain time_;
     TRBDF2Config config_;
-    BoundaryL left_bc_;
-    BoundaryR right_bc_;
-    SpatialOp spatial_op_;
     std::optional<ObstacleCallback> obstacle_;
 
     // Grid size
@@ -241,7 +249,7 @@ private:
     std::span<double> output_buffer_;  // External buffer if provided
 
     // Workspace for cache blocking
-    std::unique_ptr<PDEWorkspace> workspace_owner_;
+    std::shared_ptr<PDEWorkspace> workspace_owner_;
     PDEWorkspace* workspace_;
 
     // Solution storage (spans point into either output_buffer_ or solution_storage_)
@@ -271,7 +279,20 @@ private:
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
+        // Create GridSpec - assume uniform spacing
+        double x_min = grid.front();
+        double x_max = grid.back();
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, grid.size());
+        if (!grid_spec.has_value()) {
+            throw std::runtime_error("Failed to create grid spec");
+        }
+
+        // Use default memory resource for internal workspace
+        auto ws_result = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        if (!ws_result.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + ws_result.error());
+        }
+        workspace_owner_ = ws_result.value();
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }
@@ -326,7 +347,7 @@ private:
     void apply_obstacle(double t, std::span<double> u) {
         if (!obstacle_) return;
 
-        auto psi = workspace_->psi_buffer();
+        auto psi = workspace_->psi();
         (*obstacle_)(t, grid_, psi);
 
         // Project: u[i] = max(u[i], psi[i])
@@ -337,24 +358,28 @@ private:
         }
     }
 
-    /// Apply boundary conditions
+    /// Apply boundary conditions (CRTP version)
     void apply_boundary_conditions(std::span<double> u, double t) {
         auto dx_span = workspace_->dx();
+
+        // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
+        const auto& left_bc = derived().left_boundary();
+        const auto& right_bc = derived().right_boundary();
 
         // Left boundary
         double x_left = grid_[0];
         double dx_left = (n_ > 1) ? dx_span[0] : 1.0;
         double u_interior_left = (n_ > 1) ? u[1] : 0.0;
-        left_bc_.apply(u[0], x_left, t, dx_left, u_interior_left, 0.0, bc::BoundarySide::Left);
+        left_bc.apply(u[0], x_left, t, dx_left, u_interior_left, 0.0, bc::BoundarySide::Left);
 
         // Right boundary
         double x_right = grid_[n_ - 1];
         double dx_right = (n_ > 1) ? dx_span[n_ - 2] : 1.0;
         double u_interior_right = (n_ > 1) ? u[n_ - 2] : 0.0;
-        right_bc_.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
+        right_bc.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
     }
 
-    /// Apply spatial operator (single-pass evaluation)
+    /// Apply spatial operator (single-pass evaluation, CRTP version)
     ///
     /// Note: Cache blocking was previously attempted but removed because it was
     /// ineffective. The blocked path still passed full arrays to the stencil,
@@ -366,8 +391,11 @@ private:
                                       std::span<double> Lu) {
         const size_t n = grid_.size();
 
+        // Get spatial operator from derived class via CRTP (use const auto& to avoid copies!)
+        const auto& spatial_op = derived().spatial_operator();
+
         // Direct evaluation (no blocking)
-        spatial_op_.apply(t, u, Lu);
+        spatial_op.apply(t, u, Lu);
 
         // Zero boundary values (BCs will override after)
         Lu[0] = Lu[n-1] = 0.0;
@@ -597,29 +625,39 @@ private:
     void apply_bc_to_residual(std::span<double> residual,
                               std::span<const double> u,
                               double t) {
+        // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
+        const auto& left_bc = derived().left_boundary();
+        const auto& right_bc = derived().right_boundary();
+
         // For Dirichlet BC: F(u) = u - g, so residual = u - g
         // Left boundary
-        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
-            double g = left_bc_.value(t, grid_[0]);
+        using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
+        if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
+            double g = left_bc.value(t, grid_[0]);
             residual[0] = u[0] - g;  // u - g (we want u = g, so F = u - g = 0)
         }
 
         // Right boundary
-        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::dirichlet_tag>) {
-            double g = right_bc_.value(t, grid_[n_ - 1]);
+        using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
+        if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
+            double g = right_bc.value(t, grid_[n_ - 1]);
             residual[n_ - 1] = u[n_ - 1] - g;  // u - g
         }
     }
 
     void build_jacobian(double t, double coeff_dt,
                        std::span<const double> u, double eps) {
+        // Get spatial operator from derived class via CRTP (use const auto& to avoid copies!)
+        const auto& spatial_op = derived().spatial_operator();
+        using SpatialOpType = std::remove_cvref_t<decltype(spatial_op)>;
+
         // Dispatch to analytical or finite-difference Jacobian
-        if constexpr (HasAnalyticalJacobian<SpatialOp>) {
+        if constexpr (HasAnalyticalJacobian<SpatialOpType>) {
             // Analytical Jacobian (O(n) - fast path)
             JacobianView jac(jacobian_lower_,
                            jacobian_diag_,
                            jacobian_upper_);
-            spatial_op_.assemble_jacobian(coeff_dt, jac);
+            spatial_op.assemble_jacobian(coeff_dt, jac);
         } else {
             // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
             build_jacobian_finite_difference(t, coeff_dt, u, eps);
@@ -668,12 +706,18 @@ private:
 
     void build_jacobian_boundaries(double t, double coeff_dt,
                                    std::span<const double> u, double eps) {
+        // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
+        const auto& left_bc = derived().left_boundary();
+        const auto& right_bc = derived().right_boundary();
+        using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
+        using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
+
         // Left boundary
-        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::dirichlet_tag>) {
+        if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
             jacobian_diag_[0] = 1.0;
             jacobian_upper_[0] = 0.0;
-        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryL>, bc::neumann_tag>) {
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             workspace_->u_stage()[0] = u[0] + eps;
             apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
@@ -689,10 +733,10 @@ private:
         }
 
         // Right boundary
-        if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::dirichlet_tag>) {
+        if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
             jacobian_diag_[n_ - 1] = 1.0;
-        } else if constexpr (std::is_same_v<bc::boundary_tag_t<BoundaryR>, bc::neumann_tag>) {
+        } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
             workspace_->u_stage()[i] = u[i] + eps;
