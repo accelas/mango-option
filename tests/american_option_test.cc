@@ -176,29 +176,22 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     params.emplace_back(120.0, 100.0, 1.5, 0.02, 0.0, OptionType::PUT, 0.2);
     params.emplace_back(90.0,  95.0,  0.5, -0.01, 0.01, OptionType::PUT, 0.35);
 
-    constexpr double x_min = -3.0;
-    constexpr double x_max = 3.0;
-    constexpr size_t n_space = 151;
-    constexpr size_t n_time = 1200;
-
-    auto batch_result = solve_american_options_batch(params, x_min, x_max, n_space, n_time);
+    // Use automatic grid determination for batch solver
+    auto batch_result = solve_american_options_batch(params);
     ASSERT_EQ(batch_result.results.size(), params.size());
     EXPECT_EQ(batch_result.failed_count, 0u);
 
-    std::pmr::synchronized_pool_resource pool;
-    // Use uniform grid to match batch solver (both must use same grid type for comparison)
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
-    ASSERT_TRUE(grid_spec.has_value());
-    auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, &pool).value();
-
+    // Compare with single option automatic grid solver
     for (size_t i = 0; i < params.size(); ++i) {
         ASSERT_TRUE(batch_result.results[i].has_value()) << "Batch solve failed for index " << i;
 
-        AmericanOptionResult single = SolveWithWorkspace(params[i], workspace);
-        ASSERT_TRUE(single.converged);
+        auto single_result = solve_american_option_auto(params[i]);
+        ASSERT_TRUE(single_result.has_value()) << "Single solve failed for index " << i;
+        ASSERT_TRUE(single_result->converged);
 
         const double batch_value = batch_result.results[i]->value_at(params[i].spot);
-        EXPECT_NEAR(single.value_at(params[i].spot), batch_value, 1e-3) << "Mismatch at index " << i;
+        const double single_value = single_result->value_at(params[i].spot);
+        EXPECT_NEAR(single_value, batch_value, 1e-3) << "Mismatch at index " << i;
     }
 }
 
