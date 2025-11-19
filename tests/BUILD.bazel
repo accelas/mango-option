@@ -461,3 +461,61 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "debug_deep_itm_test",
+    size = "small",
+    srcs = ["debug_deep_itm_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "debug_boundary_condition_test",
+    size = "small",
+    srcs = ["debug_boundary_condition_test.cc"],
+    deps = [
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "debug_time_direction_test",
+    size = "small",
+    srcs = ["debug_time_direction_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "debug_initial_condition_test",
+    size = "small",
+    srcs = ["debug_initial_condition_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "test_boundary_fix",
+    size = "small",
+    srcs = ["test_boundary_fix.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_pde_solver",
+        "//src/pde/core:pde_solver",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)

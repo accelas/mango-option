@@ -196,9 +196,20 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
 }
 
 TEST_F(AmericanOptionPricingTest, DISABLED_PutImmediateExerciseAtBoundary) {
-    // TODO: Deep ITM put pricing has known numerical issues (value 115.97 vs intrinsic 99.75)
-    // This is a separate issue from the interpolation fix and requires investigation of
-    // the PDE solver's boundary conditions or obstacle handling for deep ITM options
+    // TODO: Deep ITM put pricing has architectural PDE solver issue (value 115.97 vs intrinsic 99.75)
+    //
+    // ROOT CAUSE (via systematic debugging):
+    // The PDE solver is designed for FORWARD parabolic PDEs but option pricing requires
+    // solving BACKWARD from maturity. The solver:
+    // 1. Has no initialization (starts from zeros/garbage)
+    // 2. Uses forward Black-Scholes operator: ∂V/∂t = L(V)
+    // 3. Should use backward operator: ∂V/∂τ = -L(V) where τ = T-t
+    //
+    // Attempted fix: Initialize with payoff + negate operator → caused numerical instability
+    // (values exploded to billions due to ill-posed backward problem with obstacle)
+    //
+    // Proper fix requires: Redesigned PDE solver architecture for backward time-stepping
+    // or transformation to equivalent forward problem with different boundary conditions.
     std::pmr::synchronized_pool_resource pool;
     auto grid_spec = GridSpec<double>::sinh_spaced(-7.0, 2.0, 301, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
