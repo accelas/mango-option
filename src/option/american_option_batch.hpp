@@ -15,6 +15,7 @@
 #include <span>
 #include <functional>
 #include <memory>
+#include <tuple>
 
 namespace mango {
 
@@ -35,19 +36,6 @@ struct DefaultBatchGrid {
 };
 
 /**
- * Estimated grid parameters for an option.
- *
- * Computed using sinh-grid specification heuristics based on
- * option characteristics (volatility, maturity, moneyness).
- */
-struct GridEstimate {
-    double x_min;       ///< Minimum log-moneyness
-    double x_max;       ///< Maximum log-moneyness
-    size_t n_space;     ///< Spatial grid points
-    size_t n_time;      ///< Time steps
-};
-
-/**
  * Estimate grid parameters for a single option using sinh-grid heuristics.
  *
  * Implements single-pass grid determination from sinh-grid specification:
@@ -63,9 +51,9 @@ struct GridEstimate {
  * @param alpha Sinh clustering strength (default: 2.0 for Europeans)
  * @param tol Target price tolerance (default: 1e-6)
  * @param c_t Time step safety factor (default: 0.75)
- * @return Estimated grid parameters
+ * @return Tuple of (x_min, x_max, n_space, n_time)
  */
-inline GridEstimate estimate_grid_for_option(
+inline std::tuple<double, double, size_t, size_t> estimate_grid_for_option(
     const AmericanOptionParams& params,
     double n_sigma = 5.0,
     double alpha = 2.0,
@@ -96,7 +84,7 @@ inline GridEstimate estimate_grid_for_option(
     size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
     Nt = std::min(Nt, size_t{5000});  // Upper bound for stability
 
-    return GridEstimate{x_min, x_max, Nx, Nt};
+    return {x_min, x_max, Nx, Nt};
 }
 
 /**
@@ -110,9 +98,9 @@ inline GridEstimate estimate_grid_for_option(
  * @param alpha Sinh clustering parameter (default: 2.0)
  * @param tol Target price tolerance (default: 1e-6)
  * @param c_t Time step safety factor (default: 0.75)
- * @return Global maximum grid estimate
+ * @return Tuple of (x_min, x_max, n_space, n_time)
  */
-inline GridEstimate compute_global_max_grid(
+inline std::tuple<double, double, size_t, size_t> compute_global_max_grid(
     std::span<const AmericanOptionParams> params,
     double n_sigma = 5.0,
     double alpha = 2.0,
@@ -125,14 +113,14 @@ inline GridEstimate compute_global_max_grid(
     size_t global_Nt = 0;
 
     for (const auto& p : params) {
-        auto grid = estimate_grid_for_option(p, n_sigma, alpha, tol, c_t);
-        global_x_min = std::min(global_x_min, grid.x_min);
-        global_x_max = std::max(global_x_max, grid.x_max);
-        global_Nx = std::max(global_Nx, grid.n_space);
-        global_Nt = std::max(global_Nt, grid.n_time);
+        auto [x_min, x_max, Nx, Nt] = estimate_grid_for_option(p, n_sigma, alpha, tol, c_t);
+        global_x_min = std::min(global_x_min, x_min);
+        global_x_max = std::max(global_x_max, x_max);
+        global_Nx = std::max(global_Nx, Nx);
+        global_Nt = std::max(global_Nt, Nt);
     }
 
-    return GridEstimate{global_x_min, global_x_max, global_Nx, global_Nt};
+    return {global_x_min, global_x_max, global_Nx, global_Nt};
 }
 
 /**
@@ -240,14 +228,8 @@ public:
         std::span<const AmericanOptionParams> params,
         SetupCallback setup = nullptr)
     {
-        auto global_grid = compute_global_max_grid(params);
-        return solve_batch_with_grid(
-            params,
-            global_grid.x_min,
-            global_grid.x_max,
-            global_grid.n_space,
-            global_grid.n_time,
-            setup);
+        auto [x_min, x_max, n_space, n_time] = compute_global_max_grid(params);
+        return solve_batch_with_grid(params, x_min, x_max, n_space, n_time, setup);
     }
 
     /// Solve a batch of American options with automatic grid (vector overload)
