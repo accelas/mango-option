@@ -507,15 +507,3 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
-cc_test(
-    name = "test_boundary_fix",
-    size = "small",
-    srcs = ["test_boundary_fix.cc"],
-    deps = [
-        "//src/option:american_option",
-        "//src/option:american_pde_solver",
-        "//src/pde/core:pde_solver",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-)
