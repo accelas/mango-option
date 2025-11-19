@@ -53,9 +53,8 @@ public:
         : PDESolver<AmericanPutSolver>(
               workspace->grid_span(),
               TimeDomain(0.0, params.maturity, params.maturity / workspace->n_time()),
-              TRBDF2Config{},
               create_obstacle(),
-              workspace.get(),
+              workspace->pde_workspace(),
               output_buffer)
         , params_(params)
         , workspace_(std::move(workspace))
@@ -116,12 +115,13 @@ private:
             params_.volatility,
             params_.rate,
             params_.dividend_yield);
-        return operators::create_spatial_operator(std::move(pde), grid_spacing_);
+        auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_spacing_);
+        return operators::create_spatial_operator(std::move(pde), spacing_ptr);
     }
 
     PricingParams params_;
     std::shared_ptr<AmericanSolverWorkspace> workspace_;
-    std::shared_ptr<GridSpacing<double>> grid_spacing_;
+    GridSpacing<double> grid_spacing_;
 
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
@@ -145,9 +145,8 @@ public:
         : PDESolver<AmericanCallSolver>(
               workspace->grid_span(),
               TimeDomain(0.0, params.maturity, params.maturity / workspace->n_time()),
-              TRBDF2Config{},
               create_obstacle(),
-              workspace.get(),
+              workspace->pde_workspace(),
               output_buffer)
         , params_(params)
         , workspace_(std::move(workspace))
@@ -211,12 +210,13 @@ private:
             params_.volatility,
             params_.rate,
             params_.dividend_yield);
-        return operators::create_spatial_operator(std::move(pde), grid_spacing_);
+        auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_spacing_);
+        return operators::create_spatial_operator(std::move(pde), spacing_ptr);
     }
 
     PricingParams params_;
     std::shared_ptr<AmericanSolverWorkspace> workspace_;
-    std::shared_ptr<GridSpacing<double>> grid_spacing_;
+    GridSpacing<double> grid_spacing_;
 
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;

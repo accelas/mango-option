@@ -6,14 +6,6 @@ cc_library(
 )
 
 cc_library(
-    name = "workspace_base",
-    hdrs = ["workspace_base.hpp"],
-    visibility = ["//visibility:public"],
-    deps = [":unified_memory_resource"],
-    copts = ["-std=c++23"],
-)
-
-cc_library(
     name = "solver_memory_arena",
     srcs = ["solver_memory_arena.cpp"],
     hdrs = ["solver_memory_arena.hpp"],

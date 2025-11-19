@@ -75,7 +75,6 @@ public:
     ///
     /// @param grid Spatial grid (x coordinates)
     /// @param time Time domain configuration
-    /// @param config TR-BDF2 configuration (optional, uses defaults if not provided)
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     /// @param external_workspace Optional external workspace for memory reuse
     /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
@@ -86,15 +85,15 @@ public:
     ///
     /// Note: Boundary conditions and spatial operator are obtained from derived class
     ///       via CRTP calls, not passed as constructor arguments
+    /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
     PDESolver(std::span<const double> grid,
               const TimeDomain& time,
-              const TRBDF2Config& config = {},
               std::optional<ObstacleCallback> obstacle = std::nullopt,
               PDEWorkspace* external_workspace = nullptr,
               std::span<double> output_buffer = {})
         : grid_(grid)
         , time_(time)
-        , config_(config)
+        , config_{}  // Default-initialized
         , obstacle_(std::move(obstacle))
         , n_(grid.size())
         , workspace_owner_(nullptr)
@@ -208,6 +207,16 @@ public:
         return obstacle_.has_value();
     }
 
+    /// Set TR-BDF2 configuration
+    void set_config(const TRBDF2Config& config) {
+        config_ = config;
+    }
+
+    /// Get TR-BDF2 configuration
+    const TRBDF2Config& config() const {
+        return config_;
+    }
+
     /// Add temporal event to be executed at specific time
     ///
     /// Events are applied AFTER the TR-BDF2 step completes (not before).
@@ -240,7 +249,7 @@ private:
     std::span<double> output_buffer_;  // External buffer if provided
 
     // Workspace for cache blocking
-    std::unique_ptr<PDEWorkspace> workspace_owner_;
+    std::shared_ptr<PDEWorkspace> workspace_owner_;
     PDEWorkspace* workspace_;
 
     // Solution storage (spans point into either output_buffer_ or solution_storage_)
@@ -270,7 +279,20 @@ private:
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
+        // Create GridSpec - assume uniform spacing
+        double x_min = grid.front();
+        double x_max = grid.back();
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, grid.size());
+        if (!grid_spec.has_value()) {
+            throw std::runtime_error("Failed to create grid spec");
+        }
+
+        // Use default memory resource for internal workspace
+        auto ws_result = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        if (!ws_result.has_value()) {
+            throw std::runtime_error("Failed to create workspace: " + ws_result.error());
+        }
+        workspace_owner_ = ws_result.value();
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }
@@ -325,7 +347,7 @@ private:
     void apply_obstacle(double t, std::span<double> u) {
         if (!obstacle_) return;
 
-        auto psi = workspace_->psi_buffer();
+        auto psi = workspace_->psi();
         (*obstacle_)(t, grid_, psi);
 
         // Project: u[i] = max(u[i], psi[i])

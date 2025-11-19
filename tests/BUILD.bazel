@@ -257,27 +257,6 @@ cc_test(
 )
 
 cc_test(
-    name = "workspace_base_test",
-    srcs = ["memory/workspace_base_test.cc"],
-    deps = [
-        "//src/support/memory:workspace_base",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "pde_workspace_test",
-    srcs = ["memory/pde_workspace_test.cc"],
-    deps = [
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "feature_detection_test",
     srcs = ["cpu/feature_detection_test.cc"],
     deps = [
@@ -445,6 +424,37 @@ cc_test(
     srcs = ["memory/solver_memory_arena_test.cc"],
     deps = [
         "//src/support/memory:solver_memory_arena",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "pde_workspace_test",
+    srcs = ["pde_workspace_test.cc"],
+    deps = [
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "grid_spacing_view_test",
+    srcs = ["grid_spacing_view_test.cc"],
+    deps = [
+        "//src/pde/core:grid_spacing",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "american_solver_workspace_test",
+    srcs = ["american_solver_workspace_test.cc"],
+    deps = [
+        "//src/option:american_solver_workspace",
+        "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
