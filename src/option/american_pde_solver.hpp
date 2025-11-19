@@ -28,6 +28,20 @@
 
 namespace mango {
 
+/// Normalized put payoff: max(1 - exp(x), 0) where x = ln(S/K)
+inline void put_payoff(std::span<const double> x, std::span<double> u) {
+    for (size_t i = 0; i < x.size(); ++i) {
+        u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+    }
+}
+
+/// Normalized call payoff: max(exp(x) - 1, 0) where x = ln(S/K)
+inline void call_payoff(std::span<const double> x, std::span<double> u) {
+    for (size_t i = 0; i < x.size(); ++i) {
+        u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+    }
+}
+
 // Forward declarations
 class AmericanPutSolver;
 class AmericanCallSolver;

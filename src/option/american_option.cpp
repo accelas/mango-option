@@ -77,21 +77,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     // Initialize with payoff at maturity (t=0 in PDE time)
     std::visit([&](auto& s) {
-        if (params_.type == OptionType::PUT) {
-            s.initialize([](std::span<const double> x, std::span<double> u) {
-                for (size_t i = 0; i < x.size(); ++i) {
-                    // Normalized put payoff: max(1 - exp(x), 0) where x = ln(S/K)
-                    u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-                }
-            });
-        } else {  // CALL
-            s.initialize([](std::span<const double> x, std::span<double> u) {
-                for (size_t i = 0; i < x.size(); ++i) {
-                    // Normalized call payoff: max(exp(x) - 1, 0) where x = ln(S/K)
-                    u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-                }
-            });
-        }
+        s.initialize(params_.type == OptionType::PUT ? put_payoff : call_payoff);
     }, solver);
 
     // Solve using variant dispatch (static, zero-cost)
