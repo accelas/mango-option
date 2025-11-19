@@ -15,6 +15,7 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
 #include <benchmark/benchmark.h>
+#include <memory_resource>
 #include <stdexcept>
 
 // QuantLib includes
@@ -89,7 +90,8 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -145,7 +147,8 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
         0.30    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -201,7 +204,8 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
         0.25    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -249,9 +253,6 @@ BENCHMARK(BM_QuantLib_AmericanPut_ITM);
 // ============================================================================
 
 static void BM_Mango_GridResolution(benchmark::State& state) {
-    size_t n_space = state.range(0);
-    size_t n_time = state.range(1);
-
     AmericanOptionParams params(
         100.0,  // spot
         100.0,  // strike
@@ -262,7 +263,8 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, n_space, n_time);
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -281,7 +283,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         benchmark::DoNotOptimize(*result);
     }
 
-    state.SetLabel("mango " + std::to_string(n_space) + "x" + std::to_string(n_time));
+    state.SetLabel("mango " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
 }
 BENCHMARK(BM_Mango_GridResolution)
     ->Args({101, 1000})
