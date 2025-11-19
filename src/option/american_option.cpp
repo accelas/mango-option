@@ -100,6 +100,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         // Compute value at current spot using actual grid
         double current_moneyness = std::log(params_.spot / params_.strike);
         auto grid = workspace_->grid();
+        result.x_grid.assign(grid.begin(), grid.end());  // Store grid for value_at() interpolation
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
@@ -138,33 +139,30 @@ double AmericanOptionResult::value_at(double spot) const {
     double x_target = std::log(spot / strike);
 
     // Get final spatial solution (present value)
-    if (solution.empty() || n_space == 0) {
+    if (solution.empty() || n_space == 0 || x_grid.empty()) {
         return 0.0;
     }
 
     // Use the final solution directly
     std::span<const double> final_surface(solution.data(), solution.size());
 
-    // Compute grid spacing (uniform grid)
-    const double dx = (x_max - x_min) / (n_space - 1);
-
     // Boundary cases
-    if (x_target <= x_min) {
+    if (x_target <= x_grid[0]) {
         return final_surface[0] * strike;  // Denormalize
     }
-    if (x_target >= x_max) {
+    if (x_target >= x_grid[n_space-1]) {
         return final_surface[n_space-1] * strike;  // Denormalize
     }
 
-    // Find bracketing indices
+    // Find bracketing indices using actual grid points (handles non-uniform grids)
     size_t i = 0;
-    while (i < n_space-1 && x_min + (i+1)*dx < x_target) {
+    while (i < n_space-1 && x_grid[i+1] < x_target) {
         i++;
     }
 
-    // Linear interpolation
-    double x_i = x_min + i * dx;
-    double x_i1 = x_min + (i+1) * dx;
+    // Linear interpolation using actual grid points
+    double x_i = x_grid[i];
+    double x_i1 = x_grid[i+1];
     double t = (x_target - x_i) / (x_i1 - x_i);
     double normalized_value = (1.0 - t) * final_surface[i] + t * final_surface[i+1];
 

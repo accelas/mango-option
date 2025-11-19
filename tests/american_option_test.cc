@@ -196,8 +196,9 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
 }
 
 TEST_F(AmericanOptionPricingTest, DISABLED_PutImmediateExerciseAtBoundary) {
-    // TODO: This test is temporarily disabled while investigating boundary value behavior
-    // The test expects deep ITM put to have value ≈ intrinsic, but currently gets wrong values
+    // TODO: Deep ITM put pricing has known numerical issues (value 115.97 vs intrinsic 99.75)
+    // This is a separate issue from the interpolation fix and requires investigation of
+    // the PDE solver's boundary conditions or obstacle handling for deep ITM options
     std::pmr::synchronized_pool_resource pool;
     auto grid_spec = GridSpec<double>::sinh_spaced(-7.0, 2.0, 301, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
