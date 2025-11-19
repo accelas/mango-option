@@ -7,12 +7,71 @@
 
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
+#include "src/option/option_spec.hpp"
 #include <memory>
 #include <expected>
 #include <string>
 #include <memory_resource>
+#include <tuple>
+#include <cmath>
+#include <algorithm>
 
 namespace mango {
+
+/**
+ * Estimate grid specification for a single option using sinh-grid heuristics.
+ *
+ * Implements single-pass grid determination from sinh-grid specification:
+ * - Spatial domain: x₀ ± n_sigma·σ√T (covers probability distribution)
+ * - Spatial resolution: Δx ~ σ√tol (target truncation error)
+ * - Temporal resolution: Δt ~ c_t·Δx_min (couples time/space errors)
+ *
+ * Grid is centered on current log-moneyness x₀ = ln(S/K), not at x=0.
+ * This is appropriate for independent options (vs option chains).
+ *
+ * @param params Option parameters (spot, strike, maturity, volatility, etc.)
+ * @param n_sigma Domain half-width in units of σ√T (default: 5.0)
+ * @param alpha Sinh clustering strength (default: 2.0 for Europeans)
+ * @param tol Target price tolerance (default: 1e-6)
+ * @param c_t Time step safety factor (default: 0.75)
+ * @return Tuple of (GridSpec, n_time)
+ */
+inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
+    const PricingParams& params,
+    double n_sigma = 5.0,
+    double alpha = 2.0,
+    double tol = 1e-6,
+    double c_t = 0.75)
+{
+    // Domain bounds (centered on current moneyness)
+    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
+    double x0 = std::log(params.spot / params.strike);
+
+    double x_min = x0 - n_sigma * sigma_sqrt_T;
+    double x_max = x0 + n_sigma * sigma_sqrt_T;
+
+    // Spatial resolution (target truncation error)
+    double dx_target = params.volatility * std::sqrt(tol);
+    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
+    Nx = std::clamp(Nx, size_t{200}, size_t{1200});
+
+    // Ensure odd number of points (for centered stencils)
+    if (Nx % 2 == 0) Nx++;
+
+    // Temporal resolution (coupled to smallest spatial spacing)
+    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
+    double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
+    double dx_min = dx_avg * std::exp(-alpha);  // Sinh clustering factor
+
+    double dt = c_t * dx_min;
+    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
+    Nt = std::min(Nt, size_t{5000});  // Upper bound for stability
+
+    // Create uniform GridSpec (workspace creation uses uniform grids)
+    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, Nx);
+    // GridSpec factory returns expected, but params are validated above so should never fail
+    return {grid_spec.value(), Nt};
+}
 
 /**
  * Workspace for American option solving with PMR-based memory allocation.
@@ -44,40 +103,6 @@ namespace mango {
  */
 class AmericanSolverWorkspace {
 public:
-    /**
-     * Validate workspace parameters without allocation.
-     */
-    static std::expected<void, std::string> validate_params(
-        double x_min,
-        double x_max,
-        size_t n_space,
-        size_t n_time);
-
-    /**
-     * Factory method creates workspace with standard log-moneyness bounds.
-     *
-     * Uses standard bounds [-3.0, 3.0] for log-moneyness domain.
-     * Replaces deprecated create_standard() method.
-     *
-     * @param n_space Number of spatial grid points
-     * @param n_time Number of time steps
-     * @return Expected containing shared workspace on success, error message on failure
-     */
-    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
-    create(size_t n_space, size_t n_time);
-
-    /**
-     * Factory method creates workspace from spatial grid bounds.
-     *
-     * @param x_min Minimum log-moneyness
-     * @param x_max Maximum log-moneyness
-     * @param n_space Number of spatial grid points
-     * @param n_time Number of time steps
-     * @return Expected containing shared workspace on success, error message on failure
-     */
-    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
-    create(double x_min, double x_max, size_t n_space, size_t n_time);
-
     /**
      * Factory method creates workspace from GridSpec.
      *

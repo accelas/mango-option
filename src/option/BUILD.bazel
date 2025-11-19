@@ -5,6 +5,7 @@ cc_library(
     deps = [
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
+        ":option_spec",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],

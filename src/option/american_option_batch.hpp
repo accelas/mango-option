@@ -22,61 +22,6 @@
 namespace mango {
 
 /**
- * Estimate grid specification for a single option using sinh-grid heuristics.
- *
- * Implements single-pass grid determination from sinh-grid specification:
- * - Spatial domain: x₀ ± n_sigma·σ√T (covers probability distribution)
- * - Spatial resolution: Δx ~ σ√tol (target truncation error)
- * - Temporal resolution: Δt ~ c_t·Δx_min (couples time/space errors)
- *
- * Grid is centered on current log-moneyness x₀ = ln(S/K), not at x=0.
- * This is appropriate for independent options (vs option chains).
- *
- * @param params Option parameters (spot, strike, maturity, volatility, etc.)
- * @param n_sigma Domain half-width in units of σ√T (default: 5.0)
- * @param alpha Sinh clustering strength (default: 2.0 for Europeans)
- * @param tol Target price tolerance (default: 1e-6)
- * @param c_t Time step safety factor (default: 0.75)
- * @return Tuple of (GridSpec, n_time)
- */
-inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
-    const AmericanOptionParams& params,
-    double n_sigma = 5.0,
-    double alpha = 2.0,
-    double tol = 1e-6,
-    double c_t = 0.75)
-{
-    // Domain bounds (centered on current moneyness)
-    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
-    double x0 = std::log(params.spot / params.strike);
-
-    double x_min = x0 - n_sigma * sigma_sqrt_T;
-    double x_max = x0 + n_sigma * sigma_sqrt_T;
-
-    // Spatial resolution (target truncation error)
-    double dx_target = params.volatility * std::sqrt(tol);
-    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
-    Nx = std::clamp(Nx, size_t{200}, size_t{1200});
-
-    // Ensure odd number of points (for centered stencils)
-    if (Nx % 2 == 0) Nx++;
-
-    // Temporal resolution (coupled to smallest spatial spacing)
-    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
-    double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
-    double dx_min = dx_avg * std::exp(-alpha);  // Sinh clustering factor
-
-    double dt = c_t * dx_min;
-    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
-    Nt = std::min(Nt, size_t{5000});  // Upper bound for stability
-
-    // Create uniform GridSpec (workspace creation uses uniform grids)
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, Nx);
-    // GridSpec factory returns expected, but params are validated above so should never fail
-    return {grid_spec.value(), Nt};
-}
-
-/**
  * Compute conservative global maximum grid for heterogeneous option batch.
  *
  * Takes the union of spatial domains and maximum resolution across all options.
@@ -279,13 +224,13 @@ public:
         std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
         size_t failed_count = 0;
 
-        // Validate workspace parameters once before parallel loop
-        auto validation = AmericanSolverWorkspace::validate_params(x_min, x_max, n_space, n_time);
-        if (!validation) {
-            // If workspace validation fails, return error for all options
+        // Validate grid parameters and n_time once before parallel loop
+        auto grid_spec_result = GridSpec<double>::uniform(x_min, x_max, n_space);
+        if (!grid_spec_result.has_value()) {
+            // If grid validation fails, return error for all options
             SolverError error{
                 .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Invalid workspace parameters: " + validation.error(),
+                .message = "Invalid grid parameters: " + grid_spec_result.error(),
                 .iterations = 0
             };
             for (size_t i = 0; i < params.size(); ++i) {
@@ -296,6 +241,23 @@ public:
                 .failed_count = params.size()
             };
         }
+
+        if (n_time == 0) {
+            SolverError error{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "n_time must be positive",
+                .iterations = 0
+            };
+            for (size_t i = 0; i < params.size(); ++i) {
+                results[i] = std::unexpected(error);
+            }
+            return BatchAmericanOptionResult{
+                .results = std::move(results),
+                .failed_count = params.size()
+            };
+        }
+
+        auto grid_spec = grid_spec_result.value();
 
         // Calculate buffer slice size for each option (if buffer provided)
         const size_t slice_size = (n_time + 1) * n_space;
@@ -354,8 +316,11 @@ public:
         // Note: MANGO_PRAGMA_* macros expand to nothing in sequential mode
         MANGO_PRAGMA_PARALLEL
         {
+            // Per-thread pool for cheap workspace reuse within thread
+            std::pmr::unsynchronized_pool_resource thread_pool;
+
             // Each thread creates ONE workspace and reuses it for all its iterations
-            auto thread_workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+            auto thread_workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
 
             // If per-thread workspace creation fails (e.g., OOM), write error to all thread's results
             if (!thread_workspace_result) {
