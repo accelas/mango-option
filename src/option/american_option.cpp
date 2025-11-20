@@ -198,26 +198,33 @@ std::vector<double> AmericanOptionSolver::get_solution() const {
     return solution_;
 }
 
-double AmericanOptionSolver::compute_delta() const {
-    if (!solved_) {
-        return 0.0;  // No solution available
-    }
-
+size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
     const size_t n = solution_.size();
     auto grid = workspace_->grid();
 
-    // Find current spot in grid
-    double current_moneyness = std::log(params_.spot / params_.strike);
-
-    // Find the grid point closest to current_moneyness using actual grid points
+    // Binary search for closest grid point
     size_t i = 0;
-    while (i < n-1 && grid[i+1] < current_moneyness) {
+    while (i < n-1 && grid[i+1] < log_moneyness) {
         i++;
     }
 
     // Ensure we're in valid interior range for centered differences
     if (i == 0) i = 1;
     if (i >= n-1) i = n-2;
+
+    return i;
+}
+
+double AmericanOptionSolver::compute_delta() const {
+    if (!solved_) {
+        return 0.0;  // No solution available
+    }
+
+    auto grid = workspace_->grid();
+
+    // Find current spot in grid
+    double current_moneyness = std::log(params_.spot / params_.strike);
+    size_t i = find_grid_index(current_moneyness);
 
     // Compute ∂V/∂x using centered finite difference on possibly non-uniform grid
     // For non-uniform grids: f'(x_i) ≈ (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
@@ -242,21 +249,11 @@ double AmericanOptionSolver::compute_gamma() const {
         return 0.0;  // No solution available
     }
 
-    const size_t n = solution_.size();
     auto grid = workspace_->grid();
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
-
-    // Find the grid point closest to current_moneyness using actual grid points
-    size_t i = 0;
-    while (i < n-1 && grid[i+1] < current_moneyness) {
-        i++;
-    }
-
-    // Ensure we're in valid interior range for centered differences
-    if (i == 0) i = 1;
-    if (i >= n-1) i = n-2;
+    size_t i = find_grid_index(current_moneyness);
 
     // Compute derivatives on possibly non-uniform grid
     // For non-uniform grids, we need the actual grid spacings

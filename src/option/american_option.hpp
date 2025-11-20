@@ -170,6 +170,9 @@ private:
     double compute_gamma() const;
     double compute_theta() const;
     double interpolate_solution(double x_target, std::span<const double> x_grid) const;
+
+    // Helper to find grid index for log-moneyness value
+    size_t find_grid_index(double log_moneyness) const;
 };
 
 }  // namespace mango
