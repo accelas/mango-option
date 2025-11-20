@@ -6,13 +6,6 @@ cc_library(
 )
 
 cc_library(
-    name = "black_scholes_pde",
-    hdrs = ["black_scholes_pde.hpp"],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "spatial_operator",
     hdrs = ["spatial_operator.hpp"],
     deps = [

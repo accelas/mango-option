@@ -7,48 +7,6 @@
 #include <cmath>
 #include <numbers>
 
-namespace {
-
-// Test helper: Generic PDE solver for tests
-template<typename LeftBC, typename RightBC, typename SpatialOp>
-class TestPDESolver : public mango::PDESolver<TestPDESolver<LeftBC, RightBC, SpatialOp>> {
-public:
-    TestPDESolver(std::span<const double> grid,
-                  const mango::TimeDomain& time,
-                  LeftBC left_bc,
-                  RightBC right_bc,
-                  SpatialOp spatial_op)
-        : mango::PDESolver<TestPDESolver>(
-              grid, time, std::nullopt, nullptr, {})
-        , left_bc_(std::move(left_bc))
-        , right_bc_(std::move(right_bc))
-        , spatial_op_(std::move(spatial_op))
-    {}
-
-    // CRTP interface
-    const LeftBC& left_boundary() const { return left_bc_; }
-    const RightBC& right_boundary() const { return right_bc_; }
-    const SpatialOp& spatial_operator() const { return spatial_op_; }
-
-private:
-    LeftBC left_bc_;
-    RightBC right_bc_;
-    SpatialOp spatial_op_;
-};
-
-// Helper function to create test solver with deduced types
-template<typename LeftBC, typename RightBC, typename SpatialOp>
-auto make_test_solver(std::span<const double> grid,
-                      const mango::TimeDomain& time,
-                      LeftBC left_bc,
-                      RightBC right_bc,
-                      SpatialOp spatial_op) {
-    return TestPDESolver<LeftBC, RightBC, SpatialOp>(
-        grid, time, std::move(left_bc), std::move(right_bc), std::move(spatial_op));
-}
-
-} // anonymous namespace
-
 TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Heat equation: du/dt = D·d²u/dx² with D = 0.1
     // Domain: x ∈ [0, 1], t ∈ [0, 0.1]
@@ -87,7 +45,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     };
 
     // Create solver
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, heat_op);
+    mango::PDESolver solver(grid.span(), time, trbdf2, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -144,10 +102,7 @@ TEST(PDESolverTest, NewtonConvergence) {
     };
 
     // Create solver
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, heat_op);
-
-    // Set custom config
-    solver.set_config(config);
+    mango::PDESolver solver(grid.span(), time, config, left_bc, right_bc, heat_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -182,10 +137,8 @@ TEST(PDESolverTest, UsesNewtonSolverForStages) {
     auto grid_view_spatial_op = mango::GridView<double>(grid.span());
     auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_spatial_op), grid_view_spatial_op);
 
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, spatial_op);
-
-    // Set custom config
-    solver.set_config(trbdf2_config);
+    mango::PDESolver solver(grid.span(), time, trbdf2_config,
+                           left_bc, right_bc, spatial_op);
 
     // Initial condition: u(x, 0) = sin(πx)
     const double pi = std::numbers::pi;
@@ -222,10 +175,8 @@ TEST(PDESolverTest, NewtonConvergenceReported) {
     auto grid_view_spatial_op = mango::GridView<double>(grid.span());
     auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_spatial_op), grid_view_spatial_op);
 
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, spatial_op);
-
-    // Set custom config
-    solver.set_config(trbdf2_config);
+    mango::PDESolver solver(grid.span(), time, trbdf2_config,
+                           left_bc, right_bc, spatial_op);
 
     const double pi = std::numbers::pi;
     auto ic = [pi](std::span<const double> x, std::span<double> u) {
@@ -283,7 +234,8 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
     };
 
     // Create solver with new operator
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, spatial_op);
+    mango::PDESolver solver(grid.span(), time, trbdf2,
+                           left_bc, right_bc, spatial_op);
 
     // Initialize with IC
     solver.initialize(ic);
@@ -304,62 +256,14 @@ TEST(PDESolverTest, WorksWithNewOperatorInterface) {
 }
 
 TEST(PDESolverTest, PDEWorkspaceIntegration) {
-    // Verify PDEWorkspace works with PMR
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = mango::GridSpec<>::uniform(0.0, 1.0, 101);
-    ASSERT_TRUE(grid_spec.has_value());
+    // Verify PDEWorkspace is drop-in replacement for WorkspaceStorage
+    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
+    ASSERT_TRUE(grid_result.has_value());
+    auto grid = grid_result.value().generate();
 
-    auto workspace_result = mango::PDEWorkspace::create(grid_spec.value(), &pool);
-    ASSERT_TRUE(workspace_result.has_value());
-    auto workspace = workspace_result.value();
+    // This test will pass once we switch to PDEWorkspace
+    mango::PDEWorkspace workspace(101, grid.span());
 
-    EXPECT_EQ(workspace->u_current().size(), 101);  // Logical size
-    EXPECT_EQ(workspace->logical_size(), 101);
-    EXPECT_EQ(workspace->padded_size(), 104);  // Padded size available separately
-    EXPECT_EQ(workspace->dx().size(), 100);  // Logical dx size (n-1)
-}
-
-TEST(PDESolverTest, ConstructWithoutConfig) {
-    // Test that PDESolver can be constructed without passing TRBDF2Config
-    // Should use default config internally
-
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 101).value().generate();
-    mango::TimeDomain time(0.0, 0.1, 0.001);
-
-    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
-    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
-
-    auto pde = mango::operators::LaplacianPDE<double>(1.0);
-    auto grid_view = mango::GridView<double>(grid.span());
-    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), grid_view);
-
-    // Create solver WITHOUT config parameter - should use defaults
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, spatial_op);
-
-    // Should have default TRBDF2Config
-    EXPECT_EQ(solver.config().max_iter, 20);
-    EXPECT_NEAR(solver.config().tolerance, 1e-6, 1e-10);
-}
-
-TEST(PDESolverTest, SetConfigChangesSettings) {
-    // Test that set_config() changes the configuration
-
-    auto grid = mango::GridSpec<>::uniform(0.0, 1.0, 101).value().generate();
-    mango::TimeDomain time(0.0, 0.1, 0.001);
-
-    auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
-    auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
-
-    auto pde = mango::operators::LaplacianPDE<double>(1.0);
-    auto grid_view = mango::GridView<double>(grid.span());
-    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), grid_view);
-
-    auto solver = make_test_solver(grid.span(), time, left_bc, right_bc, spatial_op);
-
-    // Change config
-    mango::TRBDF2Config new_config{.max_iter = 50, .tolerance = 1e-8};
-    solver.set_config(new_config);
-
-    EXPECT_EQ(solver.config().max_iter, 50);
-    EXPECT_NEAR(solver.config().tolerance, 1e-8, 1e-10);
+    EXPECT_EQ(workspace.u_current().size(), 101);
+    EXPECT_EQ(workspace.dx().size(), 100);
 }

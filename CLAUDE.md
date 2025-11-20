@@ -138,21 +138,15 @@ The solver uses Newton-Raphson iteration for implicit TR-BDF2 stages:
 
 ### Memory Management
 
-**Modern C++ PMR Architecture:**
-- PDEWorkspace uses `std::pmr::vector` with caller-provided memory resources
-- `std::pmr::synchronized_pool_resource` for thread-safe workspace allocation
-- Default resource for persistent results (option prices, solutions)
-- Grid data stored in `GridBuffer` with RAII semantics
-- Workspace allocated once, reused across time steps (zero allocation during solve)
+**Modern C++ Ownership:**
+- Grid data stored in `std::vector<double>` with RAII semantics
+- Workspace allocated once at solver construction, reused across time steps
+- PMR (Polymorphic Memory Resource) arenas for advanced use cases (price tables, batch IV)
 
-**PDEWorkspace Design (PMR-based):**
-- All arrays are `std::pmr::vector<double>` allocated from provided resource
-- SIMD padding: Arrays rounded to 8 elements (AVX-512) for safe vectorization
-- Factory pattern with validation: `PDEWorkspace::create(GridSpec, memory_resource*)`
-- Accessors return `std::span` for zero-overhead view access
-- Buffers: `grid`, `dx`, `u_current`, `u_next`, `u_stage`, `rhs`, `lu`, `psi`
-- Newton arrays: `jacobian_diag`, `jacobian_upper`, `jacobian_lower`, `residual`, `delta_u`
-- Total allocation: ~13n doubles for complete PDE + Newton solver
+**Workspace Design:**
+- `PDEWorkspace`: Contiguous buffer with 64-byte alignment for SIMD
+- Buffers: u_current, u_next, u_stage, rhs, tridiag (diag/upper/lower), u_old, Lu, u_temp
+- Hybrid allocation: Newton workspace borrows from PDE workspace to reduce memory footprint
 
 ### GridSpacing: Type-Safe Variant Design
 
@@ -189,32 +183,34 @@ class GridSpacing {
 **Usage Examples:**
 
 ```cpp
-// Example 1: Creating from workspace
-std::pmr::synchronized_pool_resource pool;
-auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
-auto workspace = PDEWorkspace::create(grid_spec.value(), &pool).value();
-
-// GridSpacing created from workspace grid and dx spans
-auto spacing = GridSpacing<double>::create(
-    workspace->grid(),
-    workspace->dx()).value();
+// Example 1: Uniform grid
+auto grid_vec = std::vector<double>(101);
+for (size_t i = 0; i < 101; ++i) {
+    grid_vec[i] = i * 0.01;
+}
+auto grid = GridBuffer<double>(std::move(grid_vec));
+GridSpacing spacing(grid.view());  // Auto-detects uniform
 
 if (spacing.is_uniform()) {
     double dx = spacing.spacing();         // Access uniform spacing
     double dx_inv = spacing.spacing_inv(); // Precomputed 1/dx
 }
 
-// Example 2: AmericanSolverWorkspace provides GridSpacing
-std::pmr::synchronized_pool_resource pool;
-auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0).value();
-auto am_workspace = AmericanSolverWorkspace::create(grid_spec, 1000, &pool).value();
+// Example 2: Non-uniform sinh-spaced grid
+auto sinh_grid = GridSpec<>::sinh_spaced(-3.0, 3.0, 101, 2.0).generate();
+GridSpacing sinh_spacing(sinh_grid.view());  // Auto-detects non-uniform
 
-// AmericanSolverWorkspace creates and stores GridSpacing internally
-GridSpacing spacing = am_workspace->grid_spacing();  // Returns by value
+if (!sinh_spacing.is_uniform()) {
+    auto dx_left = sinh_spacing.dx_left_inv();   // Span of precomputed 1/dx_left
+    auto weights = sinh_spacing.w_left();         // Span of interpolation weights
+}
 
-if (!spacing.is_uniform()) {
-    auto dx_left = spacing.dx_left_inv();   // Span of precomputed 1/dx_left
-    auto weights = spacing.w_left();         // Span of interpolation weights
+// Example 3: Type-safe access (throws if wrong type)
+try {
+    double dx = spacing.spacing();  // Only valid for uniform grids
+} catch (const std::bad_variant_access& e) {
+    // Grid is non-uniform, must use span accessors
+    auto dx_left = spacing.dx_left_inv();
 }
 ```
 
@@ -480,26 +476,23 @@ bool converged = solver.solve();  // Uses Newton for each stage
 ```
 
 **Memory efficiency:**
-- PDEWorkspace allocates all Newton arrays via PMR: jacobian_diag, jacobian_upper, jacobian_lower, residual, delta_u
-- Reuses u_stage and rhs for temporary computations during Newton iteration
-- Total: ~13n doubles for entire PDE + Newton solver
-- All allocations from caller-provided `std::pmr::memory_resource`
+- NewtonWorkspace allocates 8n doubles (Jacobian, residual, delta, workspace)
+- Borrows 2n doubles from WorkspaceStorage (u_stage, rhs as scratch)
+- Total: 13n doubles for entire solver (vs. 15n before)
 
 **Design:**
 - Persistent solver instance (created once, reused)
 - Quasi-Newton: Jacobian built once per stage
-- Compile-time BC dispatch (Dirichlet, Neumann) via CRTP
+- Compile-time BC dispatch (Dirichlet, Neumann)
 - Zero allocation during solve() after construction
-- PDESolver accepts `PDEWorkspace*` for external workspace reuse
 
 ### Workspace Management
 
-PDEWorkspace provides unified memory management:
-- Owns: All PDE arrays (grid, dx, u_current, u_next, u_stage, rhs, lu, psi) via `std::pmr::vector`
-- Owns: All Newton arrays (jacobian_diag/upper/lower, residual, delta_u) via `std::pmr::vector`
-- Factory: `PDEWorkspace::create(GridSpec, memory_resource*)` returns `std::expected`
-- SIMD padding: All arrays padded to 8-element boundaries for AVX-512
-- Accessors: Return `std::span` for zero-overhead access
+NewtonWorkspace implements hybrid allocation:
+- Owns: Jacobian matrices, residual, delta_u, u_old, tridiag_workspace
+- Borrows: Lu (read-only), u_perturb (from u_stage), Lu_perturb (from rhs)
+
+Safe borrowing: u_stage and rhs are unused during Newton iteration.
 
 ## PMR (Polymorphic Memory Resource) Usage Patterns
 
@@ -632,11 +625,10 @@ PriceTableSnapshotCollector collector(config, arena);
 **Pass arena.resource() to workspace constructors**:
 ```cpp
 // Create workspace with PMR allocation
-auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
-auto pde_workspace = PDEWorkspace::create(grid_spec.value(), arena->resource()).value();
+BSplineFitter4DWorkspace workspace(max_grid_size, arena->resource());
 
-// AmericanSolverWorkspace with arena memory
-auto am_workspace = AmericanSolverWorkspace::create(grid_spec.value(), 1000, arena->resource()).value();
+// NewtonWorkspace with arena memory
+NewtonWorkspace newton_workspace(grid_size, arena->resource());
 
 // Price table construction with arena
 auto collector = std::make_unique<PriceTableSnapshotCollector>(config, arena);

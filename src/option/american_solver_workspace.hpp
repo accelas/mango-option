@@ -1,244 +1,266 @@
 /**
  * @file american_solver_workspace.hpp
- * @brief Reusable workspace for American option solving with PMR memory allocation
+ * @brief Reusable workspace for American option solving (grid config + pre-allocated storage)
+ *
+ * Combines grid configuration (spatial + temporal parameters) with pre-allocated
+ * workspace (grid buffer, spacing, SIMD-aligned storage) to enable efficient
+ * batch solving of American options with shared grid but different coefficients.
  */
 
 #pragma once
 
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
-#include "src/option/option_spec.hpp"
-#include <memory>
 #include <expected>
-#include <string>
-#include <memory_resource>
-#include <tuple>
-#include <cmath>
-#include <algorithm>
-#include <limits>
+#include "src/support/error_types.hpp"
+#include <memory>
 #include <span>
+#include <stdexcept>
+#include <string>
 
 namespace mango {
 
 /**
- * Grid accuracy parameters for automatic grid estimation.
+ * Workspace for American option solving with grid configuration.
  *
- * Controls the tradeoff between numerical accuracy and computational cost:
- * - Lower tol → finer spatial grid → higher accuracy, slower computation
- * - Higher c_t → smaller time steps → more stable, slower computation
- *
- * Default values (tol=1e-2) produce ~100-150 spatial points and ~500-1000 time steps,
- * balancing accuracy (~1e-3 price error) with performance (~5ms per option).
- *
- * For higher accuracy (tol=1e-6), grids grow to 1200×5000, achieving ~1e-6 price error
- * but at 60× computational cost relative to default settings.
- */
-struct GridAccuracyParams {
-    /// Domain half-width in units of σ√T (default: 5.0 covers ±5 std devs)
-    double n_sigma = 5.0;
-
-    /// Sinh clustering strength (default: 2.0 concentrates points near strike)
-    double alpha = 2.0;
-
-    /// Target spatial truncation error (default: 1e-2 for ~1e-3 price accuracy)
-    /// - 1e-2: Fast mode (~100-150 points, ~5ms per option)
-    /// - 1e-3: Medium accuracy (~300-400 points, ~50ms per option)
-    /// - 1e-6: High accuracy mode (~1200 points, ~300ms per option)
-    double tol = 1e-2;
-
-    /// CFL safety factor for time step (default: 0.75)
-    double c_t = 0.75;
-
-    /// Minimum spatial grid points (default: 100)
-    size_t min_spatial_points = 100;
-
-    /// Maximum spatial grid points (default: 1200)
-    size_t max_spatial_points = 1200;
-
-    /// Maximum time steps (default: 5000)
-    size_t max_time_steps = 5000;
-};
-
-/**
- * Estimate grid specification for a single option using sinh-grid heuristics.
- *
- * Implements single-pass grid determination from sinh-grid specification:
- * - Spatial domain: x₀ ± n_sigma·σ√T (covers probability distribution)
- * - Spatial resolution: Δx ~ σ√tol (target truncation error)
- * - Temporal resolution: Δt ~ c_t·Δx_min (couples time/space errors)
- *
- * Grid is centered on current log-moneyness x₀ = ln(S/K), not at x=0.
- * This is appropriate for independent options (vs option chains).
- *
- * @param params Option parameters (spot, strike, maturity, volatility, etc.)
- * @param accuracy Grid accuracy parameters controlling size/resolution tradeoff
- * @return Tuple of (GridSpec, n_time)
- */
-inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
-    const PricingParams& params,
-    const GridAccuracyParams& accuracy = GridAccuracyParams{})
-{
-    // Domain bounds (centered on current moneyness)
-    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
-    double x0 = std::log(params.spot / params.strike);
-
-    double x_min = x0 - accuracy.n_sigma * sigma_sqrt_T;
-    double x_max = x0 + accuracy.n_sigma * sigma_sqrt_T;
-
-    // Spatial resolution (target truncation error)
-    double dx_target = params.volatility * std::sqrt(accuracy.tol);
-    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
-    Nx = std::clamp(Nx, accuracy.min_spatial_points, accuracy.max_spatial_points);
-
-    // Ensure odd number of points (for centered stencils)
-    if (Nx % 2 == 0) Nx++;
-
-    // Temporal resolution (coupled to smallest spatial spacing)
-    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
-    double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
-    double dx_min = dx_avg * std::exp(-accuracy.alpha);  // Sinh clustering factor
-
-    double dt = accuracy.c_t * dx_min;
-    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
-    Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound for stability
-
-    // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
-    // Grid is centered on current moneyness x0, with concentration parameter alpha
-    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
-    // GridSpec factory returns expected, but params are validated above so should never fail
-    return {grid_spec.value(), Nt};
-}
-
-/**
- * Compute global grid for a batch of options requiring shared grid.
- *
- * Finds a single grid that accommodates all options in the batch by:
- * - Taking union of spatial domains (max extent across all options)
- * - Using maximum resolution (finest grid needed by any option)
- * - Using maximum time steps (finest temporal resolution)
- *
- * This ensures the grid is large enough and fine enough for every option,
- * enabling consistent interpolation across the batch.
- *
- * Use case: Price table construction where all (σ,r) combinations must
- * share the same grid for 4D interpolation.
- *
- * @param params Span of option parameters
- * @param accuracy Grid accuracy parameters controlling size/resolution tradeoff
- * @return Tuple of (GridSpec, n_time) that works for all options
- */
-inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
-    std::span<const PricingParams> params,
-    const GridAccuracyParams& accuracy = GridAccuracyParams{})
-{
-    if (params.empty()) {
-        // Return minimal valid sinh grid for empty batch
-        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, accuracy.alpha);
-        return {grid_spec.value(), 100};
-    }
-
-    double global_x_min = std::numeric_limits<double>::max();
-    double global_x_max = std::numeric_limits<double>::lowest();
-    size_t global_Nx = 0;
-    size_t global_Nt = 0;
-
-    // Estimate grid for each option and take union/maximum
-    for (const auto& p : params) {
-        auto [grid_spec, Nt] = estimate_grid_for_option(p, accuracy);
-        global_x_min = std::min(global_x_min, grid_spec.x_min());
-        global_x_max = std::max(global_x_max, grid_spec.x_max());
-        global_Nx = std::max(global_Nx, grid_spec.n_points());
-        global_Nt = std::max(global_Nt, Nt);
-    }
-
-    // Create sinh-spaced grid with same concentration parameter for consistent resolution
-    // Sinh grid provides better resolution near the center (strike region) for all options
-    auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
-    return {grid_spec.value(), global_Nt};
-}
-
-/**
- * Workspace for American option solving with PMR-based memory allocation.
- *
- * Provides unified workspace for American option pricing with:
- * - PDEWorkspace allocated from provided memory resource
- * - GridSpacing<double> for spatial operators
- * - Grid configuration (spatial + temporal parameters)
+ * Extends PDEWorkspace with grid configuration (spatial + temporal parameters).
+ * This eliminates redundant allocations when solving multiple options with:
+ * - Same spatial grid structure (x_min, x_max, n_space)
+ * - Same temporal discretization (n_time)
+ * - Different PDE coefficients (σ, r, q, K)
  *
  * Example usage:
  * ```cpp
- * std::pmr::synchronized_pool_resource pool;
- * auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
- *
- * auto workspace = AmericanSolverWorkspace::create(
- *     grid_spec.value(), 1000, &pool);
- *
- * if (!workspace.has_value()) {
- *     std::cerr << "Failed: " << workspace.error() << "\n";
+ * auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+ * if (!workspace_result) {
+ *     std::cerr << "Workspace creation failed: " << workspace_result.error() << "\n";
  *     return;
- *     }
+ * }
+ * auto workspace = workspace_result.value();
  *
- * // Use workspace with solver
- * auto solver = AmericanPutSolver(params, workspace.value());
+ * for (auto [sigma, rate] : parameter_grid) {
+ *     AmericanOptionParams params(
+ *         spot, strike, maturity, rate, dividend_yield, option_type, sigma);
+ *     auto solver_result = AmericanOptionSolver::create(params, workspace);
+ *     if (solver_result) {
+ *         auto result = solver_result.value().solve();
+ *     }
+ * }
  * ```
  *
+ * Inherits from PDEWorkspace, providing direct access to:
+ * - u_current(), u_next(), u_stage() - state arrays
+ * - rhs(), lu(), psi_buffer() - scratch arrays
+ * - All arrays are SIMD-aligned and zero-padded
+ *
+ * Memory savings (vs creating grid+spacing+workspace per solver):
+ * - Grid buffer: ~800 bytes per reuse
+ * - GridSpacing: ~800 bytes per reuse
+ * - PDEWorkspace: ~10n doubles per reuse (SIMD-aligned)
+ *
  * Thread safety: **NOT thread-safe for concurrent solving**.
- * Use BatchAmericanOptionSolver for parallel option pricing.
+ *
+ * Why workspace cannot be shared across threads:
+ * 1. PDEWorkspace contains mutable scratch arrays (u_current, u_next, rhs, etc.)
+ * 2. These arrays are modified during solve() operations
+ * 3. While PMR allocations are thread-safe, concurrent modifications are NOT
+ * 4. Sharing one workspace across threads causes data races in scratch arrays
+ *
+ * Correct usage patterns:
+ * ```cpp
+ * // ✓ CORRECT: Sequential solving (reuse workspace via factory)
+ * auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000);
+ * if (!workspace_result) {
+ *     // Handle error: workspace_result.error()
+ *     return;
+ * }
+ * auto workspace = workspace_result.value();
+ * for (auto params : option_list) {
+ *     auto solver_result = AmericanOptionSolver::create(params, workspace);
+ *     if (solver_result) {
+ *         solver_result.value().solve();  // Safe: no concurrent access
+ *     }
+ * }
+ *
+ * // ✓ CORRECT: Use BatchAmericanOptionSolver (recommended for parallel)
+ * // This handles per-thread workspace creation and error handling automatically
+ * auto results = BatchAmericanOptionSolver::solve_batch(
+ *     option_list, -3.0, 3.0, 101, 1000);
+ *
+ * // ✗ WRONG: Shared workspace across threads (DATA RACE!)
+ * auto workspace = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 1000).value();
+ * #pragma omp parallel for
+ * for (size_t i = 0; i < option_list.size(); ++i) {
+ *     auto solver = AmericanOptionSolver::create(option_list[i], workspace).value();
+ *     results[i] = solver.solve();  // UNSAFE! Multiple threads mutate same scratch arrays
+ * }
+ *
+ * // ✗ WRONG: Direct construction bypasses validation
+ * auto workspace = std::make_shared<AmericanSolverWorkspace>(...);  // WILL NOT COMPILE
+ * ```
+ *
+ * Performance note: Creating per-thread workspaces is cheap (~10 KB, <1ms).
+ * The memory savings from workspace reuse (~1.6 KB per solver) only matter
+ * for sequential solving where the same workspace is reused hundreds of times.
  */
-class AmericanSolverWorkspace {
+class AmericanSolverWorkspace : private GridHolder, public PDEWorkspace {
+private:
+    // Pass-key idiom to allow make_shared while keeping constructor private
+    struct PrivateTag {};
+
 public:
+    // Public constructor that requires pass-key (only factories can provide it)
+    // Note: GridHolder base is initialized first, then PDEWorkspace can use grid_view_
+    // Note: Not noexcept - can throw during grid generation or allocation
+    AmericanSolverWorkspace(PrivateTag, double x_min, double x_max, size_t n_space, size_t n_time)
+        : GridHolder(x_min, x_max, n_space)
+        , PDEWorkspace(n_space, grid_view_.span())
+        , x_min_(x_min)
+        , x_max_(x_max)
+        , n_space_(n_space)
+        , n_time_(n_time)
+        , grid_spacing_(std::make_shared<GridSpacing<double>>(grid_view_))
+    {
+    }
+
     /**
-     * Factory method creates workspace from GridSpec.
+     * Validate workspace parameters without allocation.
      *
-     * @param grid_spec Grid specification for spatial domain
+     * Enables fail-fast in batch operations before parallel region.
+     *
+     * @param x_min Minimum log-moneyness
+     * @param x_max Maximum log-moneyness
+     * @param n_space Number of spatial grid points
      * @param n_time Number of time steps
-     * @param resource PMR memory resource for workspace allocation
+     * @return Success or error message
+     */
+    static std::expected<void, std::string> validate_params(
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time)
+    {
+        if (x_min >= x_max) {
+            return std::unexpected("x_min must be < x_max");
+        }
+        if (n_space < 3) {
+            return std::unexpected("n_space must be >= 3");
+        }
+        if (n_time < 1) {
+            return std::unexpected("n_time must be >= 1");
+        }
+
+        double dx = (x_max - x_min) / (n_space - 1);
+        if (dx >= 0.5) {
+            return std::unexpected(
+                "Grid too coarse: dx = " + std::to_string(dx) +
+                " >= 0.5 (Von Neumann stability violated)");
+        }
+
+        return {};
+    }
+
+    /**
+     * Factory method with expected-based validation.
+     *
+     * Creates a shared_ptr to the workspace, ensuring proper lifetime management
+     * for use with AmericanOptionSolver.
+     *
+     * @param x_min Minimum log-moneyness
+     * @param x_max Maximum log-moneyness
+     * @param n_space Number of spatial grid points
+     * @param n_time Number of time steps
      * @return Expected containing shared workspace on success, error message on failure
      */
-    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
-    create(const GridSpec<double>& grid_spec,
-           size_t n_time,
-           std::pmr::memory_resource* resource);
+    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> create(
+        double x_min,
+        double x_max,
+        size_t n_space,
+        size_t n_time)
+    {
+        // Validate parameters
+        if (n_space < 10) {
+            return std::unexpected("n_space must be >= 10");
+        }
+        if (n_time < 10) {
+            return std::unexpected("n_time must be >= 10");
+        }
+        if (x_min >= x_max) {
+            return std::unexpected("x_min must be < x_max");
+        }
 
-    PDEWorkspace* pde_workspace() const { return pde_workspace_.get(); }
-    GridSpacing<double> grid_spacing() const { return *grid_spacing_; }
-
-    std::span<const double> grid() const {
-        return grid_buffer_.span();
+        // Catch allocation failures and grid generation errors
+        try {
+            return std::make_shared<AmericanSolverWorkspace>(PrivateTag{}, x_min, x_max, n_space, n_time);
+        } catch (const std::bad_alloc&) {
+            return std::unexpected("Failed to allocate workspace (out of memory)");
+        } catch (const std::exception& e) {
+            return std::unexpected(std::string("Failed to create workspace: ") + e.what());
+        }
     }
 
-    std::span<const double> grid_span() const {
-        return grid_buffer_.span();
+    /**
+     * Convenience factory with standard log-moneyness bounds.
+     *
+     * Creates workspace with standard bounds [-3.0, 3.0] in log-moneyness,
+     * which corresponds to moneyness range [e^-3, e^3] ≈ [0.05, 20.09].
+     * This covers most practical option scenarios:
+     * - Deep OTM: m < 0.2 (x < -1.61)
+     * - ATM: m ≈ 1.0 (x ≈ 0)
+     * - Deep ITM: m > 5.0 (x > 1.61)
+     *
+     * For options requiring wider moneyness ranges, use the full factory
+     * method with custom x_min and x_max parameters.
+     *
+     * Example usage:
+     * ```cpp
+     * auto workspace_result = AmericanSolverWorkspace::create_standard(101, 1000);
+     * if (!workspace_result) {
+     *     std::cerr << "Failed: " << workspace_result.error() << "\n";
+     *     return;
+     * }
+     * AmericanOptionSolver solver(params, workspace_result.value());
+     * ```
+     *
+     * @param n_space Number of spatial grid points
+     * @param n_time Number of time steps
+     * @return Expected containing shared workspace on success, error message on failure
+     */
+    static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> create_standard(
+        size_t n_space,
+        size_t n_time)
+    {
+        constexpr double x_min = -3.0;  // Standard log-moneyness range
+        constexpr double x_max = 3.0;
+        return create(x_min, x_max, n_space, n_time);
     }
 
-    size_t n_space() const { return grid_buffer_.size(); }
+    // Grid configuration accessors
+    double x_min() const { return x_min_; }
+    double x_max() const { return x_max_; }
+    size_t n_space() const { return n_space_; }
     size_t n_time() const { return n_time_; }
 
-    double x_min() const {
-        auto g = grid();
-        return g.empty() ? 0.0 : g[0];
-    }
+    // Grid and spacing accessors
+    std::span<const double> grid_span() const { return grid_view_.span(); }
+    std::shared_ptr<GridSpacing<double>> grid_spacing() const { return grid_spacing_; }
 
-    double x_max() const {
-        auto g = grid();
-        return g.empty() ? 0.0 : g[g.size() - 1];
-    }
+    // Note: PDEWorkspace methods inherited directly:
+    // - u_current(), u_next(), u_stage()
+    // - rhs(), lu(), psi_buffer()
+    // - No indirection through workspace() method
 
 private:
-    AmericanSolverWorkspace(GridBuffer<double> grid_buf,
-                           std::shared_ptr<PDEWorkspace> pde_ws,
-                           std::shared_ptr<GridSpacing<double>> spacing,
-                           size_t n_time)
-        : grid_buffer_(std::move(grid_buf))
-        , pde_workspace_(std::move(pde_ws))
-        , grid_spacing_(std::move(spacing))
-        , n_time_(n_time)
-    {}
+    // Note: grid_buffer_ and grid_view_ inherited from GridHolder base class
 
-    GridBuffer<double> grid_buffer_;  // Must come before pde_workspace_ (owns grid data)
-    std::shared_ptr<PDEWorkspace> pde_workspace_;
-    std::shared_ptr<GridSpacing<double>> grid_spacing_;
+    // Grid parameters
+    double x_min_;
+    double x_max_;
+    size_t n_space_;
     size_t n_time_;
+
+    // GridSpacing (shared for reuse)
+    std::shared_ptr<GridSpacing<double>> grid_spacing_;
 };
 
 }  // namespace mango

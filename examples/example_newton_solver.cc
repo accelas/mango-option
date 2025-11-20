@@ -6,46 +6,8 @@
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include <iostream>
-#include <memory_resource>
+#include <vector>
 #include <cmath>
-
-// Helper class to use PDESolver with CRTP pattern
-template<typename LeftBC, typename RightBC, typename SpatialOp>
-class ExamplePDESolver : public mango::PDESolver<ExamplePDESolver<LeftBC, RightBC, SpatialOp>> {
-public:
-    ExamplePDESolver(std::span<const double> grid,
-                     const mango::TimeDomain& time,
-                     LeftBC left_bc,
-                     RightBC right_bc,
-                     SpatialOp spatial_op)
-        : mango::PDESolver<ExamplePDESolver>(
-              grid, time, std::nullopt, nullptr, {})
-        , left_bc_(std::move(left_bc))
-        , right_bc_(std::move(right_bc))
-        , spatial_op_(std::move(spatial_op))
-    {}
-
-    // CRTP interface - called by PDESolver base class
-    const LeftBC& left_boundary() const { return left_bc_; }
-    const RightBC& right_boundary() const { return right_bc_; }
-    const SpatialOp& spatial_operator() const { return spatial_op_; }
-
-private:
-    LeftBC left_bc_;
-    RightBC right_bc_;
-    SpatialOp spatial_op_;
-};
-
-// Helper function to create solver with deduced types
-template<typename LeftBC, typename RightBC, typename SpatialOp>
-auto make_solver(std::span<const double> grid,
-                 const mango::TimeDomain& time,
-                 LeftBC left_bc,
-                 RightBC right_bc,
-                 SpatialOp spatial_op) {
-    return ExamplePDESolver<LeftBC, RightBC, SpatialOp>(
-        grid, time, std::move(left_bc), std::move(right_bc), std::move(spatial_op));
-}
 
 int main() {
     // Heat equation: ∂u/∂t = ∂²u/∂x²
@@ -59,16 +21,7 @@ int main() {
         std::cerr << "Failed to create grid spec: " << grid_spec_result.error() << "\n";
         return 1;
     }
-
-    // Create PMR workspace
-    std::pmr::synchronized_pool_resource pool;
-    auto workspace_result = mango::PDEWorkspace::create(
-        grid_spec_result.value(), &pool);
-    if (!workspace_result.has_value()) {
-        std::cerr << "Failed to create workspace: " << workspace_result.error() << "\n";
-        return 1;
-    }
-    auto workspace = workspace_result.value();
+    auto grid_buffer = grid_spec_result->generate();
 
     mango::TimeDomain time(0.0, 0.1, 0.001);
 
@@ -84,15 +37,12 @@ int main() {
 
     // Spatial operator: L(u) = ∂²u/∂x²
     auto pde = mango::operators::LaplacianPDE<double>(1.0);
-    auto grid_span = workspace->grid().subspan(0, n);
-    auto grid_view = mango::GridView<double>(grid_span);
-    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), grid_view);
+    auto grid_view = mango::GridView<double>(grid_buffer.span());
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), grid_view);  // Diffusion coefficient D = 1.0
 
-    // Create solver with Newton integration using CRTP helper
-    auto solver = make_solver(grid_span, time, left_bc, right_bc, spatial_op);
-
-    // Set config after construction
-    solver.set_config(trbdf2_config);
+    // Create solver with Newton integration
+    mango::PDESolver solver(grid_buffer.span(), time, trbdf2_config,
+                           left_bc, right_bc, spatial_op);
 
     // Initial condition: u(x, 0) = sin(πx)
     auto initial_condition = [](std::span<const double> x, std::span<double> u) {
@@ -118,7 +68,7 @@ int main() {
         // Print solution at a few points
         std::cout << "Solution at t=" << time.t_end() << ":\n";
         for (size_t i = 0; i < n; i += 20) {
-            std::cout << "  u(" << grid_span[i] << ") = " << solution[i] << "\n";
+            std::cout << "  u(" << grid_buffer[i] << ") = " << solution[i] << "\n";
         }
     } else {
         std::cout << "Solver failed to converge: " << status.error().message << "\n";

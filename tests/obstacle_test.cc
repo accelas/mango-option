@@ -5,51 +5,12 @@
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
+#include "src/pde/core/trbdf2_config.hpp"
 #include <cmath>
 #include <algorithm>
 
 namespace mango {
 namespace {
-
-// Test helper: Generic PDE solver for tests
-template<typename LeftBC, typename RightBC, typename SpatialOp>
-class TestPDESolver : public mango::PDESolver<TestPDESolver<LeftBC, RightBC, SpatialOp>> {
-public:
-    TestPDESolver(std::span<const double> grid,
-                  const mango::TimeDomain& time,
-                  LeftBC left_bc,
-                  RightBC right_bc,
-                  SpatialOp spatial_op,
-                  std::optional<mango::ObstacleCallback> obstacle = std::nullopt)
-        : mango::PDESolver<TestPDESolver>(
-              grid, time, obstacle, nullptr, {})
-        , left_bc_(std::move(left_bc))
-        , right_bc_(std::move(right_bc))
-        , spatial_op_(std::move(spatial_op))
-    {}
-
-    // CRTP interface
-    const LeftBC& left_boundary() const { return left_bc_; }
-    const RightBC& right_boundary() const { return right_bc_; }
-    const SpatialOp& spatial_operator() const { return spatial_op_; }
-
-private:
-    LeftBC left_bc_;
-    RightBC right_bc_;
-    SpatialOp spatial_op_;
-};
-
-// Helper function to create test solver with deduced types
-template<typename LeftBC, typename RightBC, typename SpatialOp>
-auto make_test_solver(std::span<const double> grid,
-                      const mango::TimeDomain& time,
-                      LeftBC left_bc,
-                      RightBC right_bc,
-                      SpatialOp spatial_op,
-                      std::optional<mango::ObstacleCallback> obstacle = std::nullopt) {
-    return TestPDESolver<LeftBC, RightBC, SpatialOp>(
-        grid, time, std::move(left_bc), std::move(right_bc), std::move(spatial_op), obstacle);
-}
 
 TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     // Create grid
@@ -67,12 +28,14 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     DirichletBC left_bc{[](double t, double x) { return 0.5; }};
     DirichletBC right_bc{[](double t, double x) { return 0.5; }};
 
+    TRBDF2Config trbdf2_config{};
+
     // Define obstacle: ψ(x,t) = 0.5 everywhere
     auto obstacle = [](double t, std::span<const double> x, std::span<double> psi) {
         std::fill(psi.begin(), psi.end(), 0.5);
     };
 
-    auto solver = make_test_solver(grid.span(), time,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op, obstacle);
 
     // Initial condition: u = 0.3 everywhere (violates obstacle u ≥ ψ = 0.5)
@@ -114,12 +77,14 @@ TEST(ObstacleTest, TimeVaryingObstacle) {
     DirichletBC left_bc{[](double t, double x) { return 1.0; }};
     DirichletBC right_bc{[](double t, double x) { return 1.0; }};
 
+    TRBDF2Config trbdf2_config{};
+
     // Time-varying obstacle: ψ(x,t) = t (grows from 0 to 1)
     auto obstacle = [](double t, std::span<const double> x, std::span<double> psi) {
         std::fill(psi.begin(), psi.end(), t);
     };
 
-    auto solver = make_test_solver(grid.span(), time,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op, obstacle);
 
     // Initial condition: u = 0.5 everywhere
@@ -153,8 +118,10 @@ TEST(ObstacleTest, NoObstacleOptional) {
     DirichletBC left_bc{[](double t, double x) { return 0.0; }};
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};
 
+    TRBDF2Config trbdf2_config{};
+
     // No obstacle provided (std::nullopt)
-    auto solver = make_test_solver(grid.span(), time,
+    PDESolver solver(grid.span(), time, trbdf2_config,
                      left_bc, right_bc, spatial_op);
 
     // Initial condition: u = 0.5 everywhere
