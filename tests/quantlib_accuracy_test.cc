@@ -15,7 +15,6 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/grid_estimation.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -104,15 +103,30 @@ void test_scenario(
         spot, strike, maturity, rate, dividend_yield,
         is_call ? OptionType::CALL : OptionType::PUT, volatility);
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(mango_params);
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
-    ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
-    auto workspace = std::move(workspace_result.value());
+    // Create grid and workspace
+    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
+    ASSERT_TRUE(grid_spec.has_value());
 
-    AmericanOptionSolver solver(mango_params, workspace);
-    auto mango_result = solver.solve();
+    size_t n_time = 2000;
+    auto workspace_result = AmericanSolverWorkspace::create(
+        grid_spec.value(), n_time, std::pmr::get_default_resource());
+    ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
+    auto workspace = workspace_result.value();
+
+    // Allocate buffer for full surface storage
+    size_t n_space = 201;
+    std::vector<double> surface_buffer((n_time + 1) * n_space);
+
+    auto solver_result = AmericanOptionSolver::create(
+        mango_params, workspace, std::span<double>{surface_buffer});
+    ASSERT_TRUE(solver_result.has_value());
+
+    auto mango_result = solver_result.value().solve();
     ASSERT_TRUE(mango_result.has_value()) << mango_result.error().message;
+
+    // Verify full surface was stored
+    ASSERT_FALSE(mango_result->surface_2d.empty())
+        << "Full surface should be stored when output_buffer provided";
 
     // QuantLib reference
     auto ql_result = price_american_option_quantlib(
@@ -131,7 +145,7 @@ void test_scenario(
         << "\n  Abs err:  $" << price_error;
 
     // Compute and check Greeks
-    auto greeks_result = solver.compute_greeks();
+    auto greeks_result = solver_result.value().compute_greeks();
     ASSERT_TRUE(greeks_result.has_value()) << greeks_result.error().message;
     const auto& greeks = greeks_result.value();
 
@@ -203,14 +217,25 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     AmericanOptionParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
-    ASSERT_TRUE(workspace_result.has_value());
-    auto workspace = std::move(workspace_result.value());
+    // Create grid and workspace
+    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
+    ASSERT_TRUE(grid_spec.has_value());
 
-    AmericanOptionSolver solver(params, workspace);
-    auto result = solver.solve();
+    size_t n_time = 2000;
+    size_t n_space = 201;
+    auto workspace_result = AmericanSolverWorkspace::create(
+        grid_spec.value(), n_time, std::pmr::get_default_resource());
+    ASSERT_TRUE(workspace_result.has_value());
+    auto workspace = workspace_result.value();
+
+    // Allocate buffer for full surface storage
+    std::vector<double> surface_buffer((n_time + 1) * n_space);
+
+    auto solver_result = AmericanOptionSolver::create(
+        params, workspace, std::span<double>{surface_buffer});
+    ASSERT_TRUE(solver_result.has_value());
+
+    auto result = solver_result.value().solve();
     ASSERT_TRUE(result.has_value());
 
     double mango_price = result->value_at(params.spot);
@@ -222,7 +247,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
         << "Convergence test failed"
         << "\n  Mango:     $" << mango_price
         << "\n  Reference: $" << ql_reference.price
-        << "\n  Grid:      " << grid_spec.n_points() << "x" << n_time;
+        << "\n  Grid:      " << n_space << "x" << n_time;
 }
 
 // ============================================================================
@@ -233,17 +258,28 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
     AmericanOptionParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
-    ASSERT_TRUE(workspace_result.has_value());
-    auto workspace = std::move(workspace_result.value());
+    // Create grid and workspace
+    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
+    ASSERT_TRUE(grid_spec.has_value());
 
-    AmericanOptionSolver solver(params, workspace);
-    auto result = solver.solve();
+    size_t n_time = 2000;
+    size_t n_space = 201;
+    auto workspace_result = AmericanSolverWorkspace::create(
+        grid_spec.value(), n_time, std::pmr::get_default_resource());
+    ASSERT_TRUE(workspace_result.has_value());
+    auto workspace = workspace_result.value();
+
+    // Allocate buffer for full surface storage
+    std::vector<double> surface_buffer((n_time + 1) * n_space);
+
+    auto solver_result = AmericanOptionSolver::create(
+        params, workspace, std::span<double>{surface_buffer});
+    ASSERT_TRUE(solver_result.has_value());
+
+    auto result = solver_result.value().solve();
     ASSERT_TRUE(result.has_value());
 
-    auto greeks_result = solver.compute_greeks();
+    auto greeks_result = solver_result.value().compute_greeks();
     ASSERT_TRUE(greeks_result.has_value());
     const auto& greeks = greeks_result.value();
 
