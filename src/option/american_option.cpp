@@ -215,6 +215,15 @@ size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
     return i;
 }
 
+const operators::CenteredDifference<double>&
+AmericanOptionSolver::get_diff_operator() const {
+    if (!diff_op_) {
+        diff_op_ = std::make_unique<operators::CenteredDifference<double>>(
+            workspace_->grid_spacing());
+    }
+    return *diff_op_;
+}
+
 double AmericanOptionSolver::compute_delta() const {
     if (!solved_) {
         return 0.0;  // No solution available

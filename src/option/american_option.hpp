@@ -177,6 +177,9 @@ private:
 
     // Helper to find grid index for log-moneyness value
     size_t find_grid_index(double log_moneyness) const;
+
+    // Lazy initialization for diff operator
+    const operators::CenteredDifference<double>& get_diff_operator() const;
 };
 
 }  // namespace mango
