@@ -449,3 +449,17 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "quantlib_accuracy_test",
+    srcs = ["quantlib_accuracy_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:grid_estimation",
+        "@googletest//:gtest_main",
+    ],
+    linkopts = ["-lQuantLib"],
+    copts = ["-std=c++23"],
+    size = "medium",
+    timeout = "moderate",
+)
