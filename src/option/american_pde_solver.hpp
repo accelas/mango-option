@@ -80,6 +80,14 @@ public:
     size_t n_space() const { return workspace_->n_space(); }
     size_t n_time() const { return workspace_->n_time(); }
 
+    /// Normalized put payoff: max(1 - exp(x), 0) where x = ln(S/K)
+    static void payoff(std::span<const double> x, std::span<double> u) {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+        }
+    }
+
 private:
     // Function objects for boundary conditions (zero overhead vs lambdas)
     struct LeftBCFunction {
@@ -171,6 +179,14 @@ public:
     double x_max() const { return workspace_->x_max(); }
     size_t n_space() const { return workspace_->n_space(); }
     size_t n_time() const { return workspace_->n_time(); }
+
+    /// Normalized call payoff: max(exp(x) - 1, 0) where x = ln(S/K)
+    static void payoff(std::span<const double> x, std::span<double> u) {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+        }
+    }
 
 private:
     // Function objects for boundary conditions (zero overhead vs lambdas)
