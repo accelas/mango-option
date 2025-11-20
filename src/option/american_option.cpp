@@ -112,13 +112,10 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
-        // Store full surface
-        // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-        // Extract only the time steps (skip initial scratch)
-        result.surface_2d.assign(
-            surface_buffer.begin() + s.n_space(),  // Skip u_old_initial
-            surface_buffer.end()                    // Include all time steps
-        );
+        // Store full surface (exclude final scratch slice used for u_old)
+        const size_t n_elems = s.n_space() * s.n_time();
+        result.surface_2d.assign(surface_buffer.begin(),
+                                 surface_buffer.begin() + n_elems);
     }, solver);
 
     solved_ = true;
