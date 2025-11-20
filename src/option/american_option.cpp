@@ -244,52 +244,23 @@ double AmericanOptionSolver::compute_delta() const {
 
 double AmericanOptionSolver::compute_gamma() const {
     if (!solved_) {
-        return 0.0;  // No solution available
+        return 0.0;
     }
-
-    auto grid = workspace_->grid();
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
     size_t i = find_grid_index(current_moneyness);
 
-    // Compute derivatives on possibly non-uniform grid
-    // For non-uniform grids, we need the actual grid spacings
-    double dx_left = grid[i] - grid[i-1];
-    double dx_right = grid[i+1] - grid[i];
-    double dx_total = grid[i+1] - grid[i-1];
+    // Compute ∂V/∂x and ∂²V/∂x² using PDE operator
+    std::vector<double> du_dx(solution_.size());
+    std::vector<double> d2u_dx2(solution_.size());
 
-    // Second derivative on non-uniform grid:
-    // f''(x_i) ≈ 2 * [f[i+1]/dx_right/(dx_left+dx_right) - f[i]/(dx_left*dx_right) + f[i-1]/dx_left/(dx_left+dx_right)]
-    double d2Vdx2 = 2.0 * (solution_[i+1] / (dx_right * dx_total)
-                         - solution_[i] / (dx_left * dx_right)
-                         + solution_[i-1] / (dx_left * dx_total));
+    get_diff_operator().compute_first_derivative(solution_, du_dx, i, i+1);
+    get_diff_operator().compute_second_derivative(solution_, d2u_dx2, i, i+1);
 
-    // First derivative (same as in compute_delta)
-    double dVdx = (solution_[i+1] - solution_[i-1]) / dx_total;
-
-    // Transform from log-moneyness to spot using chain rule
-    // x = ln(S/K), so ∂x/∂S = 1/S and ∂²x/∂S² = -1/S²
-    //
-    // V_dollar(S) = K * V_norm(x(S))
-    //
-    // First derivative:
-    // dV/dS = K * dV_norm/dx * dx/dS = K * dV_norm/dx * (1/S)
-    //
-    // Second derivative:
-    // d²V/dS² = d/dS[K * dV_norm/dx * (1/S)]
-    //         = K * d/dS[dV_norm/dx * (1/S)]
-    //         = K * [d²V_norm/dx² * (dx/dS) * (1/S) + dV_norm/dx * d/dS(1/S)]
-    //         = K * [d²V_norm/dx² * (1/S²) + dV_norm/dx * (-1/S²)]
-    //         = (K/S²) * [d²V_norm/dx² - dV_norm/dx]
-    //
-    double S = params_.spot;
-    double K = params_.strike;
-    // Use FMA: (K/S²) * (d2Vdx2 - dVdx) = (K/S²)*d2Vdx2 - (K/S²)*dVdx
-    const double K_over_S2 = K / (S * S);
-    double gamma = std::fma(K_over_S2, d2Vdx2, -K_over_S2 * dVdx);
-
-    return gamma;
+    // Transform: Gamma = (K/S²) * [∂²V/∂x² - ∂V/∂x]
+    double K_over_S2 = params_.strike / (params_.spot * params_.spot);
+    return std::fma(K_over_S2, d2u_dx2[i], -K_over_S2 * du_dx[i]);
 }
 
 double AmericanOptionSolver::compute_theta() const {
