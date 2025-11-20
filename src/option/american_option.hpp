@@ -8,6 +8,7 @@
 
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/operators/black_scholes_pde.hpp"
+#include "src/pde/operators/centered_difference_facade.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
@@ -164,6 +165,9 @@ private:
     // Solution state
     std::vector<double> solution_;
     bool solved_ = false;
+
+    // Lazy-initialized operator for Greeks calculation
+    mutable std::unique_ptr<operators::CenteredDifference<double>> diff_op_;
 
     // Helper methods
     double compute_delta() const;
