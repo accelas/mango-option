@@ -107,6 +107,8 @@ public:
         , newton_u_old_(n_)
         , tridiag_workspace_(2 * n_)
         , lambda_(n_, 0.0)  // Initialize dual multiplier to zero
+        , active_set_(n_, false)  // Initialize active set to empty
+        , active_set_prev_(n_, false)  // Initialize previous active set to empty
         , isa_target_(cpu::select_isa_target())
     {
         // Acquire workspace (either external or create owned)
@@ -268,8 +270,10 @@ private:
     std::vector<double> newton_u_old_;        // n: Previous Newton iterate
     std::vector<double> tridiag_workspace_;   // 2n: Thomas algorithm workspace
 
-    // Primal-dual active set
+    // Primal-dual active set (PDAS)
     std::vector<double> lambda_;              // n: Dual multiplier for obstacle constraint
+    std::vector<bool> active_set_;            // n: Active set indicator (true = locked to obstacle)
+    std::vector<bool> active_set_prev_;       // n: Previous active set (for stability check)
 
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
@@ -340,6 +344,35 @@ private:
 
             next_event_idx_++;
         }
+    }
+
+    /// Compute L_max: maximum absolute row sum of tridiagonal Jacobian
+    ///
+    /// For PDAS parameter θ = β/L_max where L_max is the Lipschitz constant.
+    /// In the discrete setting, L_max = max_i (|lower[i-1]| + |diag[i]| + |upper[i]|).
+    ///
+    /// @return Maximum absolute row sum
+    double compute_L_max() const {
+        double L_max = 0.0;
+
+        // First interior row (i=1): no lower neighbor
+        if (n_ > 1) {
+            double row_sum = std::abs(jacobian_diag_[1]) + std::abs(jacobian_upper_[0]);
+            L_max = std::max(L_max, row_sum);
+        }
+
+        // Interior rows (i=2 to n-2): have both neighbors
+        for (size_t i = 2; i < n_ - 1; ++i) {
+            double row_sum = std::abs(jacobian_lower_[i-1]) +
+                           std::abs(jacobian_diag_[i]) +
+                           std::abs(jacobian_upper_[i]);
+            L_max = std::max(L_max, row_sum);
+        }
+
+        // Last interior row (i=n-1): no upper neighbor (boundary node, skip)
+        // Note: boundary nodes (i=0, i=n-1) handled separately via BC
+
+        return L_max;
     }
 
     /// Apply obstacle condition: u(x,t) ≥ ψ(x,t)
@@ -495,10 +528,10 @@ private:
         // Initial guess: u* = u^n
         std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
 
-        // Solve implicit stage
-        auto result = solve_implicit_stage(t_stage, w1,
-                                          std::span{u_current_},
-                                          std::span{rhs_});
+        // Solve implicit stage (dispatches to PDAS or Newton based on config)
+        auto result = solve_implicit_stage_dispatch(t_stage, w1,
+                                                    std::span{u_current_},
+                                                    std::span{rhs_});
 
         if (!result.converged) {
             SolverError error{
@@ -543,10 +576,10 @@ private:
         // Initial guess: u^{n+1} = u* (already in u_current_)
         // (No need to copy, u_current_ already has u^{n+γ})
 
-        // Solve implicit stage
-        auto result = solve_implicit_stage(t_next, w2,
-                                          std::span{u_current_},
-                                          std::span{rhs_});
+        // Solve implicit stage (dispatches to PDAS or Newton based on config)
+        auto result = solve_implicit_stage_dispatch(t_next, w2,
+                                                    std::span{u_current_},
+                                                    std::span{rhs_});
 
         if (!result.converged) {
             SolverError error{
@@ -594,6 +627,187 @@ private:
     /// @param u Solution vector (input: initial guess, output: converged solution)
     /// @param rhs Right-hand side from previous stage
     /// @return Result with convergence status
+    /// Dispatch implicit stage solver based on obstacle method configuration
+    ///
+    /// Routes to appropriate solver:
+    /// - ObstacleMethod::PDAS → solve_implicit_stage_with_pdas() (HIK algorithm)
+    /// - ObstacleMethod::Heuristic → solve_implicit_stage() (Newton with empirical active set)
+    ///
+    /// @param t Current time
+    /// @param coeff_dt Time step coefficient
+    /// @param u Solution vector (input: initial guess, output: solution)
+    /// @param rhs Right-hand side vector
+    /// @return Convergence result
+    NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
+                                               std::span<double> u,
+                                               std::span<const double> rhs) {
+        if (obstacle_ && config_.obstacle_method == ObstacleMethod::PDAS) {
+            return solve_implicit_stage_with_pdas(t, coeff_dt, u, rhs);
+        } else {
+            return solve_implicit_stage(t, coeff_dt, u, rhs);
+        }
+    }
+
+    /// Solve implicit stage using Primal-Dual Active Set (PDAS) method
+    ///
+    /// Implements Hintermüller-Ito-Kunisch (2003) PDAS algorithm for obstacle problems.
+    /// Replaces Newton iteration with PDAS outer loop that enforces complementarity.
+    ///
+    /// Key differences from Newton solver:
+    /// - Builds Jacobian ONCE (no rebuild each iteration)
+    /// - PDAS loop modifies rows for active set, solves linear system
+    /// - Updates dual multipliers from residual
+    /// - Checks convergence via active set stability + complementarity residual
+    ///
+    /// @param t Current time
+    /// @param coeff_dt Time step coefficient
+    /// @param u Solution vector (input: initial guess, output: solution)
+    /// @param rhs Right-hand side vector
+    /// @return PDAS convergence result
+    NewtonResult solve_implicit_stage_with_pdas(double t, double coeff_dt,
+                                                std::span<double> u,
+                                                std::span<const double> rhs) {
+        // Apply BCs to initial guess
+        apply_boundary_conditions(u, t);
+
+        // Build Jacobian ONCE (reused across all PDAS iterations)
+        build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
+
+        // Compute θ = β/L_max for HIK active set update
+        const double L_max = compute_L_max();
+        if (L_max < 1e-14) {
+            return {false, 0, std::numeric_limits<double>::infinity(),
+                   "L_max too small (Jacobian nearly zero)"};
+        }
+        const double theta = config_.pdas_beta / L_max;
+
+        // Save original Jacobian (will be modified for active set)
+        std::vector<double> jacobian_lower_orig = jacobian_lower_;
+        std::vector<double> jacobian_diag_orig = jacobian_diag_;
+        std::vector<double> jacobian_upper_orig = jacobian_upper_;
+
+        // Get obstacle function
+        if (!obstacle_) {
+            return {false, 0, std::numeric_limits<double>::infinity(),
+                   "PDAS called without obstacle function"};
+        }
+        auto psi = workspace_->psi();
+
+        // PDAS outer loop
+        for (size_t pdas_iter = 0; pdas_iter < config_.pdas_max_iter; ++pdas_iter) {
+            // Save previous active set for stability check
+            active_set_prev_ = active_set_;
+
+            // Restore original Jacobian
+            jacobian_lower_ = jacobian_lower_orig;
+            jacobian_diag_ = jacobian_diag_orig;
+            jacobian_upper_ = jacobian_upper_orig;
+
+            // Evaluate obstacle at current time
+            (*obstacle_)(t, grid_, psi);
+
+            // Evaluate L(u)
+            apply_operator_with_blocking(t, u, workspace_->lu());
+
+            // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
+            compute_residual(u, coeff_dt, workspace_->lu(), rhs, residual_);
+
+            // Apply BC to residual
+            apply_bc_to_residual(residual_, u, t);
+
+            // Task 6: Update dual multipliers from PDE residual (semi-smooth Newton)
+            // For obstacle problems: λ represents Lagrange multiplier for constraint u ≥ ψ
+            // Based on current active set classification from PREVIOUS iteration:
+            // - Active nodes (on obstacle): λ_i = b_i - [A·u]_i (PDE pressure from constraint)
+            // - Inactive nodes (interior): λ_i = 0 (by complementarity condition)
+            //
+            // Our PDE: (I - coeff_dt·L)·u = rhs, so b - A·u = rhs - F(u) = -F(u)
+            // where F(u) = u - rhs - coeff_dt·L(u) is the residual we compute
+            for (size_t i = 1; i < n_ - 1; ++i) {
+                if (active_set_[i]) {
+                    // Node is currently on obstacle: λ = -(residual) = rhs - computed_value
+                    // Positive λ means PDE wants to push u above ψ (active constraint)
+                    lambda_[i] = std::max(0.0, -residual_[i]);
+                } else {
+                    // Node is in interior: λ = 0 by complementarity
+                    lambda_[i] = 0.0;
+                }
+            }
+
+            // Task 5: Update active set using HIK rule
+            // HIK criterion: A_{k+1} = {i : (u_i - ψ_i) - θλ_i ≤ 0}
+            // Nodes with small gap OR large multiplier get locked to obstacle
+            for (size_t i = 1; i < n_ - 1; ++i) {
+                double gap = u[i] - psi[i];
+                double criterion = gap - theta * lambda_[i];
+                active_set_[i] = (criterion <= 0.0);
+            }
+
+            // Apply active set constraints: overwrite Jacobian rows for locked nodes
+            for (size_t i = 1; i < n_ - 1; ++i) {
+                if (active_set_[i]) {
+                    // Lock node to obstacle: u[i] = ψ[i]
+                    jacobian_diag_[i] = 1.0;
+                    if (i > 0) jacobian_lower_[i-1] = 0.0;
+                    if (i < n_-1) jacobian_upper_[i] = 0.0;
+                    residual_[i] = u[i] - psi[i];
+                }
+            }
+
+            // Negate residual for Thomas solver (solves J·δu = -F(u))
+            for (size_t i = 0; i < n_; ++i) {
+                residual_[i] = -residual_[i];
+            }
+
+            // Solve modified linear system
+            auto result = solve_thomas<double>(
+                jacobian_lower_,
+                jacobian_diag_,
+                jacobian_upper_,
+                residual_,
+                delta_u_,
+                tridiag_workspace_
+            );
+
+            if (!result.ok()) {
+                return {false, pdas_iter, std::numeric_limits<double>::infinity(),
+                       "Singular Jacobian in PDAS iteration"};
+            }
+
+            // Update: u ← u + δu
+            for (size_t i = 0; i < n_; ++i) {
+                u[i] += delta_u_[i];
+            }
+
+            // Apply boundary conditions
+            apply_boundary_conditions(u, t);
+
+            // Task 7: Two-pronged convergence check
+            // Condition 1: Active set stability (no changes from previous iteration)
+            bool active_set_stable = (active_set_ == active_set_prev_);
+
+            // Condition 2: Complementarity residual
+            // For obstacle problems: min(u - ψ, λ) = 0 (complementarity condition)
+            // We check the infinity norm of this residual
+            double comp_residual = 0.0;
+            for (size_t i = 1; i < n_ - 1; ++i) {
+                double gap = u[i] - psi[i];
+                double comp = std::min(std::abs(gap), std::abs(lambda_[i]));
+                comp_residual = std::max(comp_residual, comp);
+            }
+
+            // Convergence: both conditions satisfied
+            if (active_set_stable && comp_residual < config_.pdas_tol) {
+                return {true, pdas_iter + 1, comp_residual, std::nullopt};
+            }
+        }
+
+        // Max iterations reached without convergence
+        return {false, config_.pdas_max_iter,
+               std::numeric_limits<double>::infinity(),
+               "PDAS max iterations reached"};
+    }
+
     NewtonResult solve_implicit_stage(double t, double coeff_dt,
                                       std::span<double> u,
                                       std::span<const double> rhs) {
