@@ -114,7 +114,7 @@ public:
         // Setup solution storage
         if (!output_buffer.empty()) {
             // External buffer provided - use it directly (zero-copy)
-            // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+            // Buffer layout: [step0][step1]...[step(n_time-1)][u_old_scratch]
             // Verify size
             size_t expected_size = (time.n_steps() + 1) * n_;
             if (output_buffer.size() < expected_size) {
@@ -122,9 +122,10 @@ public:
                     std::to_string(expected_size) + " but got " + std::to_string(output_buffer.size()));
             }
 
-            // u_old_ points to initial scratch, u_current_ points to step 0
-            u_old_ = output_buffer.subspan(0, n_);
-            u_current_ = output_buffer.subspan(n_, n_);
+            // u_current_ points to step 0 (where initial condition will be written)
+            // u_old_ points to scratch space at the end
+            u_current_ = output_buffer.subspan(0, n_);
+            u_old_ = output_buffer.subspan(time.n_steps() * n_, n_);
             output_buffer_ = output_buffer;
         } else {
             // No external buffer - use internal storage
@@ -194,9 +195,9 @@ public:
             if (!output_buffer_.empty() && step + 1 < time_.n_steps()) {
                 // Current slice becomes old for next iteration (perfect cache locality!)
                 u_old_ = u_current_;
-                // Advance to next slice: buffer layout is [initial][step0][step1]...
-                // So step i is at offset (i+1)*n
-                u_current_ = output_buffer_.subspan((step + 2) * n_, n_);
+                // Advance to next slice: buffer layout is [step0][step1]...[step(n_time-1)][scratch]
+                // After step i, we're at step i+1, which is at offset (step+1)*n
+                u_current_ = output_buffer_.subspan((step + 1) * n_, n_);
             }
         }
 

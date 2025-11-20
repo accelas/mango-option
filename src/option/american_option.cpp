@@ -84,6 +84,28 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         }
     }();
 
+    // Initialize with terminal payoff (payoff at maturity for backward PDE)
+    // In log-moneyness normalization (K=1):
+    // - Put: V(x,T) = max(1 - e^x, 0)
+    // - Call: V(x,T) = max(e^x - 1, 0)
+    if (params_.type == OptionType::PUT) {
+        std::visit([](auto& s) {
+            s.initialize([](std::span<const double> x, std::span<double> u) {
+                for (size_t i = 0; i < x.size(); ++i) {
+                    u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+                }
+            });
+        }, solver);
+    } else {  // CALL
+        std::visit([](auto& s) {
+            s.initialize([](std::span<const double> x, std::span<double> u) {
+                for (size_t i = 0; i < x.size(); ++i) {
+                    u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+                }
+            });
+        }, solver);
+    }
+
     // Solve using variant dispatch (static, zero-cost)
     auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
     if (!solve_result) {
