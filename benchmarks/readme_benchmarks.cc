@@ -202,7 +202,7 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     if (!grid_spec.has_value()) {
         throw std::runtime_error("Failed to create grid: " + grid_spec.error());
     }
-    auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+    auto workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
     if (!workspace) {
         throw std::runtime_error("Failed to create workspace: " + workspace.error());
     }

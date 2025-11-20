@@ -24,9 +24,10 @@ int main() {
     }
 
     auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.value(),
-        1500,
-        std::pmr::get_default_resource()
+        grid_spec.value().x_min(),
+        grid_spec.value().x_max(),
+        grid_spec.value().n_points(),
+        1500
     );
 
     if (!workspace_result.has_value()) {

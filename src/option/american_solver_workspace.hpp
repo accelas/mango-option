@@ -114,7 +114,7 @@ public:
     // Note: Not noexcept - can throw during grid generation or allocation
     AmericanSolverWorkspace(PrivateTag, double x_min, double x_max, size_t n_space, size_t n_time)
         : GridHolder(x_min, x_max, n_space)
-        , PDEWorkspace(n_space, grid_view_.span())
+        , PDEWorkspace(n_space, grid_view_.span(), std::pmr::get_default_resource())
         , x_min_(x_min)
         , x_max_(x_max)
         , n_space_(n_space)

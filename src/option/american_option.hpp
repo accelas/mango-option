@@ -164,9 +164,11 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @param output_buffer Optional buffer for collecting all time steps (zero-copy)
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
-                        std::shared_ptr<AmericanSolverWorkspace> workspace);
+                        std::shared_ptr<AmericanSolverWorkspace> workspace,
+                        std::span<double> output_buffer = {});
 
     /**
      * Factory method with expected-based validation.
@@ -179,11 +181,13 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @param output_buffer Optional buffer for collecting all time steps (zero-copy)
      * @return Expected containing solver on success, error message on failure
      */
     static std::expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
-        std::shared_ptr<AmericanSolverWorkspace> workspace);
+        std::shared_ptr<AmericanSolverWorkspace> workspace,
+        std::span<double> output_buffer = {});
 
     /**
      * Solve for option value.
@@ -219,6 +223,9 @@ private:
     // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
     std::shared_ptr<AmericanSolverWorkspace> workspace_;
+
+    // Optional output buffer for zero-copy time step collection
+    std::span<double> output_buffer_;
 
     // Solution state
     std::vector<double> solution_;

@@ -116,7 +116,10 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 
     auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec_result.value(), config_.grid_n_time, std::pmr::get_default_resource());
+        grid_spec_result.value().x_min(),
+        grid_spec_result.value().x_max(),
+        grid_spec_result.value().n_points(),
+        config_.grid_n_time);
 
     if (!workspace_result) {
         last_solver_error_ = SolverError{

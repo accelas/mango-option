@@ -284,7 +284,7 @@ private:
             workspace_ = external_workspace;
             return *workspace_;
         }
-        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid);
+        workspace_owner_ = std::make_unique<PDEWorkspace>(n_, grid, std::pmr::get_default_resource());
         workspace_ = workspace_owner_.get();
         return *workspace_;
     }
@@ -614,8 +614,8 @@ private:
         std::vector<double> rhs_with_bc(rhs.begin(), rhs.end());
 
         // Apply Dirichlet boundary values to RHS
-        const auto& left_bc = derived().left_boundary();
-        const auto& right_bc = derived().right_boundary();
+        const auto& left_bc = left_bc_;
+        const auto& right_bc = right_bc_;
         using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
 

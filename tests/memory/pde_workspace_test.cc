@@ -2,13 +2,14 @@
 #include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <memory_resource>
 
 TEST(PDEWorkspaceTest, BasicConstruction) {
     auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 101);
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::PDEWorkspace workspace(101, grid.span());
+    mango::PDEWorkspace workspace(101, grid.span(), std::pmr::get_default_resource());
 
     EXPECT_EQ(workspace.logical_size(), 101);
     EXPECT_EQ(workspace.padded_size(), 104);  // Rounded to 8
@@ -27,17 +28,16 @@ TEST(PDEWorkspaceTest, PaddedAccessors) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::PDEWorkspace workspace(101, grid.span());
+    mango::PDEWorkspace workspace(101, grid.span(), std::pmr::get_default_resource());
 
-    EXPECT_EQ(workspace.u_current_padded().size(), 104);
-    EXPECT_EQ(workspace.u_next_padded().size(), 104);
-    EXPECT_EQ(workspace.lu_padded().size(), 104);
+    // After revert, there are no separate _padded() accessors
+    // The padding is internal - accessors return logical size only
+    EXPECT_EQ(workspace.u_current().size(), 101);
+    EXPECT_EQ(workspace.u_next().size(), 101);
+    EXPECT_EQ(workspace.lu().size(), 101);
 
-    // Padding should be zero-initialized
-    auto u_padded = workspace.u_current_padded();
-    EXPECT_DOUBLE_EQ(u_padded[101], 0.0);
-    EXPECT_DOUBLE_EQ(u_padded[102], 0.0);
-    EXPECT_DOUBLE_EQ(u_padded[103], 0.0);
+    // Padded size is accessible but padding is internal implementation detail
+    EXPECT_EQ(workspace.padded_size(), 104);
 }
 
 TEST(PDEWorkspaceTest, GridSpacing) {
@@ -45,7 +45,7 @@ TEST(PDEWorkspaceTest, GridSpacing) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();  // 0, 2, 4, 6, 8, 10
 
-    mango::PDEWorkspace workspace(6, grid.span());
+    mango::PDEWorkspace workspace(6, grid.span(), std::pmr::get_default_resource());
 
     auto dx = workspace.dx();
     EXPECT_EQ(dx.size(), 5);
@@ -53,10 +53,8 @@ TEST(PDEWorkspaceTest, GridSpacing) {
         EXPECT_DOUBLE_EQ(dx[i], 2.0);
     }
 
-    // Padded dx (size 5 → 8)
-    auto dx_padded = workspace.dx_padded();
-    EXPECT_EQ(dx_padded.size(), 8);
-    EXPECT_DOUBLE_EQ(dx_padded[5], 0.0);  // Zero-padded tail
+    // After revert, there's no dx_padded() accessor
+    // Padding is internal implementation detail
 }
 
 TEST(PDEWorkspaceTest, ArraysAreIndependent) {
@@ -64,7 +62,7 @@ TEST(PDEWorkspaceTest, ArraysAreIndependent) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    mango::PDEWorkspace workspace(10, grid.span());
+    mango::PDEWorkspace workspace(10, grid.span(), std::pmr::get_default_resource());
 
     // Write to one array
     auto u = workspace.u_current();
@@ -75,20 +73,21 @@ TEST(PDEWorkspaceTest, ArraysAreIndependent) {
     EXPECT_DOUBLE_EQ(v[0], 0.0);
 }
 
-TEST(PDEWorkspaceTest, ResetInvalidatesSpans) {
-    auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 10);
-    ASSERT_TRUE(grid_result.has_value());
-    auto grid = grid_result.value().generate();
-
-    mango::PDEWorkspace workspace(10, grid.span());
-
-    auto u_before = workspace.u_current();
-    u_before[0] = 999.0;
-
-    workspace.reset();
-
-    // Must re-acquire span after reset
-    auto u_after = workspace.u_current();
-    EXPECT_DOUBLE_EQ(u_after[0], 0.0);  // Freshly allocated
-}
+// After revert: PDEWorkspace doesn't have reset() method
+// TEST(PDEWorkspaceTest, ResetInvalidatesSpans) {
+//     auto grid_result = mango::GridSpec<>::uniform(0.0, 1.0, 10);
+//     ASSERT_TRUE(grid_result.has_value());
+//     auto grid = grid_result.value().generate();
+//
+//     mango::PDEWorkspace workspace(10, grid.span(), std::pmr::get_default_resource());
+//
+//     auto u_before = workspace.u_current();
+//     u_before[0] = 999.0;
+//
+//     workspace.reset();
+//
+//     // Must re-acquire span after reset
+//     auto u_after = workspace.u_current();
+//     EXPECT_DOUBLE_EQ(u_after[0], 0.0);  // Freshly allocated
+// }
 

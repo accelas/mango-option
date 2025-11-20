@@ -30,6 +30,41 @@ using namespace mango;
 namespace ql = QuantLib;
 
 // ============================================================================
+// Compatibility shims for post-revert API
+// ============================================================================
+
+// Helper function to estimate grid parameters from option params
+inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
+    const PricingParams& params,
+    double n_sigma = 5.0,
+    double tol = 1e-6)
+{
+    // Domain bounds (centered on current moneyness)
+    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
+    double x0 = std::log(params.spot / params.strike);
+
+    double x_min = x0 - n_sigma * sigma_sqrt_T;
+    double x_max = x0 + n_sigma * sigma_sqrt_T;
+
+    // Spatial resolution (target truncation error)
+    double dx_target = params.volatility * std::sqrt(tol);
+    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
+    Nx = std::clamp(Nx, size_t{200}, size_t{1200});
+
+    // Ensure odd number of points (for centered stencils)
+    if (Nx % 2 == 0) Nx++;
+
+    // Temporal resolution (CFL-like condition for stability)
+    double dx_actual = (x_max - x_min) / (Nx - 1);
+    double dt_target = 0.75 * dx_actual * dx_actual / (params.volatility * params.volatility);
+    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt_target));
+    Nt = std::clamp(Nt, size_t{200}, size_t{4000});
+
+    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, Nx);
+    return {grid_spec.value(), Nt};
+}
+
+// ============================================================================
 // Helper: QuantLib American Option Pricer
 // ============================================================================
 
@@ -121,7 +156,8 @@ static void compare_scenario(
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, n_time] = estimate_grid_for_option(mango_params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(
+        grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
     }
@@ -252,7 +288,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -304,7 +340,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -610,7 +646,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -681,7 +717,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }

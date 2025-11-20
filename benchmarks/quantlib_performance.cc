@@ -91,7 +91,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -148,7 +148,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -205,7 +205,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -264,7 +264,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;

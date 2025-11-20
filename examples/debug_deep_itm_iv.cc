@@ -58,7 +58,10 @@ int main() {
     }
 
     auto workspace = AmericanSolverWorkspace::create(
-        grid_spec.value(), config.grid_n_time, std::pmr::get_default_resource());
+        grid_spec.value().x_min(),
+        grid_spec.value().x_max(),
+        grid_spec.value().n_points(),
+        config.grid_n_time);
 
     if (!workspace.has_value()) {
         std::cerr << "Workspace creation failed\n";

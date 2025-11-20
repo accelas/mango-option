@@ -36,7 +36,7 @@ int main() {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -84,7 +84,7 @@ int main() {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -121,7 +121,7 @@ int main() {
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
         std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string> workspace;
         if (grid_spec.has_value()) {
-            workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+            workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
         } else {
             workspace = std::unexpected(grid_spec.error());
         }
@@ -157,7 +157,7 @@ int main() {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -189,7 +189,7 @@ int main() {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -238,7 +238,7 @@ int main() {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+        auto workspace = AmericanSolverWorkspace::create(grid_spec.value().x_min(), grid_spec.value().x_max(), grid_spec.value().n_points(), n_time);
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;

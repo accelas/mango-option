@@ -17,6 +17,10 @@ namespace mango {
  * Caller extracts logical size with .subspan(0, logical_size()) when needed.
  */
 class PDEWorkspace {
+    // Friend declaration to allow PDESolver to construct workspace
+    template<typename BoundaryL, typename BoundaryR, typename SpatialOp>
+    friend class PDESolver;
+
 public:
     static constexpr size_t SIMD_WIDTH = 8;
 
@@ -61,6 +65,10 @@ public:
     std::span<double> psi() { return {psi_.data(), n_}; }
     std::span<const double> psi() const { return {psi_.data(), n_}; }
 
+    // Compatibility accessor for pre-revert code
+    std::span<double> psi_buffer() { return psi(); }
+    std::span<const double> psi_buffer() const { return psi(); }
+
     std::span<const double> grid() const { return {grid_.data(), n_}; }
 
     std::span<const double> dx() const { return {dx_.data(), n_ - 1}; }
@@ -90,7 +98,8 @@ public:
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
 
-private:
+    // Direct constructor (for internal use by PDESolver and derived classes)
+    // Prefer using create() factory method for safer construction
     PDEWorkspace(size_t n, std::span<const double> grid_data,
                  std::pmr::memory_resource* mr)
         : n_(n)
