@@ -75,6 +75,12 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         }
     }();
 
+    // Initialize with payoff at maturity (t=0 in PDE time)
+    std::visit([&](auto& s) {
+        using SolverType = std::decay_t<decltype(s)>;
+        s.initialize(SolverType::payoff);
+    }, solver);
+
     // Solve using variant dispatch (static, zero-cost)
     auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
     if (!solve_result) {
@@ -90,16 +96,19 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         solution_.assign(solution_view.begin(), solution_view.end());
         result.solution.assign(solution_view.begin(), solution_view.end());
 
-        // Store grid information
+        // Store grid information (including actual grid points)
         result.n_space = s.n_space();
         result.n_time = s.n_time();
         result.x_min = s.x_min();
         result.x_max = s.x_max();
         result.strike = params_.strike;
 
+        // Store actual grid points for interpolation
+        auto grid = workspace_->grid();
+        result.x_grid.assign(grid.begin(), grid.end());
+
         // Compute value at current spot using actual grid
         double current_moneyness = std::log(params_.spot / params_.strike);
-        auto grid = workspace_->grid();
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
@@ -138,34 +147,29 @@ double AmericanOptionResult::value_at(double spot) const {
     double x_target = std::log(spot / strike);
 
     // Get final spatial solution (present value)
-    if (solution.empty() || n_space == 0) {
+    if (solution.empty() || n_space == 0 || x_grid.empty()) {
         return 0.0;
     }
 
     // Use the final solution directly
     std::span<const double> final_surface(solution.data(), solution.size());
 
-    // Compute grid spacing (uniform grid)
-    const double dx = (x_max - x_min) / (n_space - 1);
-
-    // Boundary cases
-    if (x_target <= x_min) {
+    // Boundary cases (use actual grid points)
+    if (x_target <= x_grid[0]) {
         return final_surface[0] * strike;  // Denormalize
     }
-    if (x_target >= x_max) {
+    if (x_target >= x_grid[n_space-1]) {
         return final_surface[n_space-1] * strike;  // Denormalize
     }
 
-    // Find bracketing indices
+    // Find bracketing indices using actual grid points
     size_t i = 0;
-    while (i < n_space-1 && x_min + (i+1)*dx < x_target) {
+    while (i < n_space-1 && x_grid[i+1] < x_target) {
         i++;
     }
 
-    // Linear interpolation
-    double x_i = x_min + i * dx;
-    double x_i1 = x_min + (i+1) * dx;
-    double t = (x_target - x_i) / (x_i1 - x_i);
+    // Linear interpolation using actual grid spacing
+    double t = (x_target - x_grid[i]) / (x_grid[i+1] - x_grid[i]);
     double normalized_value = (1.0 - t) * final_surface[i] + t * final_surface[i+1];
 
     return normalized_value * strike;  // Denormalize
