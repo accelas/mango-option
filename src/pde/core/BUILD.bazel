@@ -99,7 +99,8 @@ cc_library(
     hdrs = ["pde_solver.hpp"],
     deps = [
         ":grid",
-        ":pde_workspace",
+        ":grid_with_solution",
+        ":pde_workspace_spans",
         "//src/support/cpu:feature_detection",
         "//src/pde/operators:centered_difference_facade",
         ":boundary_conditions",

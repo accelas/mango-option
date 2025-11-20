@@ -1,7 +1,8 @@
 #pragma once
 
 #include "src/pde/core/grid.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "src/pde/core/grid_with_solution.hpp"
+#include "src/pde/core/pde_workspace_spans.hpp"
 #include "src/support/cpu/feature_detection.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
@@ -71,69 +72,28 @@ struct TemporalEvent {
 template<typename Derived>
 class PDESolver {
 public:
-    /// Constructor (CRTP version)
+    /// Constructor (New design: Grid + Workspace separation)
     ///
-    /// @param grid Spatial grid (x coordinates)
-    /// @param time Time domain configuration
+    /// @param grid Grid with solution storage (outlives solver, passed by shared_ptr)
+    /// @param workspace Named spans to caller-managed PMR buffers
     /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
-    /// @param external_workspace Optional external workspace for memory reuse
-    /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
-    ///                      Layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-    ///                      After step i, u_old points to step(i-1) (perfect cache locality!)
-    ///                      If provided, solver writes directly to buffer (zero-copy)
-    ///                      If not provided, solver uses internal workspace
     ///
     /// Note: Boundary conditions and spatial operator are obtained from derived class
     ///       via CRTP calls, not passed as constructor arguments
     /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
-    PDESolver(std::span<const double> grid,
-              const TimeDomain& time,
-              std::optional<ObstacleCallback> obstacle = std::nullopt,
-              PDEWorkspace* external_workspace = nullptr,
-              std::span<double> output_buffer = {})
-        : grid_(grid)
-        , time_(time)
+    PDESolver(std::shared_ptr<GridWithSolution<double>> grid,
+              PDEWorkspaceSpans workspace,
+              std::optional<ObstacleCallback> obstacle = std::nullopt)
+        : grid_with_solution_(grid)  // Copy shared_ptr (not move - shared ownership)
+        , grid_(grid->x())  // Span to persistent grid data
         , config_{}  // Default-initialized
         , obstacle_(std::move(obstacle))
-        , n_(grid.size())
-        , workspace_owner_(nullptr)
-        , workspace_(nullptr)
-        , rhs_(n_)
-        , jacobian_lower_(n_ - 1)
-        , jacobian_diag_(n_)
-        , jacobian_upper_(n_ - 1)
-        , residual_(n_)
-        , delta_u_(n_)
-        , newton_u_old_(n_)
-        , tridiag_workspace_(2 * n_)
+        , n_(grid->n_space())
+        , workspace_(workspace)
         , isa_target_(cpu::select_isa_target())
     {
-        // Acquire workspace (either external or create owned)
-        acquire_workspace(grid, external_workspace);
-
-        // Setup solution storage
-        if (!output_buffer.empty()) {
-            // External buffer provided - use it directly (zero-copy)
-            // Buffer layout: [step0][step1]...[step(n_time-1)][u_old_scratch]
-            // Verify size
-            size_t expected_size = (time.n_steps() + 1) * n_;
-            if (output_buffer.size() < expected_size) {
-                throw std::invalid_argument("Output buffer too small: need " +
-                    std::to_string(expected_size) + " but got " + std::to_string(output_buffer.size()));
-            }
-
-            // u_current_ points to step 0 (where initial condition will be written)
-            // u_old_ points to scratch space at the end
-            u_current_ = output_buffer.subspan(0, n_);
-            u_old_ = output_buffer.subspan(time.n_steps() * n_, n_);
-            output_buffer_ = output_buffer;
-        } else {
-            // No external buffer - use internal storage
-            solution_storage_.resize(2 * n_);
-            u_current_ = std::span{solution_storage_}.subspan(0, n_);
-            u_old_ = std::span{solution_storage_}.subspan(n_, n_);
-            output_buffer_ = {};
-        }
+        // Grid owns solution storage, workspace provides temporary buffers
+        // No allocation needed in constructor
     }
 
     /// Initialize with initial condition
@@ -243,49 +203,21 @@ protected:
     const Derived& derived() const { return static_cast<const Derived&>(*this); }
 
 private:
-    // Grid and configuration
+    // Grid with solution storage (persistent, outlives solver)
+    std::shared_ptr<GridWithSolution<double>> grid_with_solution_;
+
+    // Grid data (for backward compatibility, points to grid_with_solution_->x())
     std::span<const double> grid_;
-    TimeDomain time_;
+
+    // Configuration
     TRBDF2Config config_;
     std::optional<ObstacleCallback> obstacle_;
 
     // Grid size
     size_t n_;
 
-    // Output buffer control
-    std::span<double> output_buffer_;  // External buffer if provided
-
-    // Workspace for cache blocking
-    std::shared_ptr<PDEWorkspace> workspace_owner_;
-    PDEWorkspace* workspace_;
-
-    // Solution storage (spans point into either output_buffer_ or solution_storage_)
-    std::vector<double> solution_storage_;  // Backing storage when no external buffer
-    std::span<double> u_current_;           // u^{n+1} or u^{n+γ}
-    std::span<double> u_old_;               // u^n
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // PDESolver INTERNAL working arrays (NOT duplicates of workspace arrays!)
-    // ═══════════════════════════════════════════════════════════════════════
-    // These std::vector arrays are PDESolver's PRIMARY working memory for:
-    //   - TR-BDF2 stage computations (rhs_)
-    //   - Newton iteration (jacobian_*, residual_, delta_u_, newton_u_old_)
-    //   - Tridiagonal solver (tridiag_workspace_)
-    //
-    // PDEWorkspace arrays serve a DIFFERENT purpose (batch/external sharing).
-    // DO NOT remove these arrays thinking they are "duplicates"!
-    // ═══════════════════════════════════════════════════════════════════════
-    std::vector<double> rhs_;                 // n: RHS vector for TR-BDF2 stages
-
-    // Newton iteration working arrays
-    std::vector<double> jacobian_lower_;      // n-1: Jacobian lower diagonal
-    std::vector<double> jacobian_diag_;       // n: Jacobian main diagonal
-    std::vector<double> jacobian_upper_;      // n-1: Jacobian upper diagonal
-    std::vector<double> residual_;            // n: Newton residual F(u)
-    std::vector<double> delta_u_;             // n: Newton correction δu
-    std::vector<double> newton_u_old_;        // n: Previous Newton iterate
-    std::vector<double> tridiag_workspace_;   // 2n: Thomas algorithm workspace
-
+    // Workspace spans (caller-managed PMR buffers)
+    PDEWorkspaceSpans workspace_;
 
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
@@ -293,29 +225,6 @@ private:
     // Temporal event system
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
-
-    PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
-        if (external_workspace) {
-            workspace_ = external_workspace;
-            return *workspace_;
-        }
-        // Create GridSpec - assume uniform spacing
-        double x_min = grid.front();
-        double x_max = grid.back();
-        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, grid.size());
-        if (!grid_spec.has_value()) {
-            throw std::runtime_error("Failed to create grid spec");
-        }
-
-        // Use default memory resource for internal workspace
-        auto ws_result = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
-        if (!ws_result.has_value()) {
-            throw std::runtime_error("Failed to create workspace: " + ws_result.error());
-        }
-        workspace_owner_ = ws_result.value();
-        workspace_ = workspace_owner_.get();
-        return *workspace_;
-    }
 
     /// Process temporal events in time interval (t_old, t_new]
     ///
