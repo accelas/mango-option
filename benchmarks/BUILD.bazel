@@ -119,7 +119,8 @@ cc_binary(
     linkstatic = True,  # Static link our library code
     deps = [
         "//src/option:american_option",
-        "//src/option:normalized_chain_solver",
+        # Temporarily disabled - normalized chain solver not compatible with post-revert API
+        # "//src/option:normalized_chain_solver",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],

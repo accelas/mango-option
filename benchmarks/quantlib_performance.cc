@@ -14,6 +14,7 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/option/grid_estimation.hpp"
 #include <benchmark/benchmark.h>
 #include <memory_resource>
 #include <stdexcept>

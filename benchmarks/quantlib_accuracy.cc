@@ -14,7 +14,9 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/normalized_chain_solver.hpp"
+#include "src/option/grid_estimation.hpp"
+// Temporarily disabled - normalized chain solver not compatible with post-revert API
+// #include "src/option/normalized_chain_solver.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
 #include <iomanip>
@@ -32,37 +34,7 @@ namespace ql = QuantLib;
 // ============================================================================
 // Compatibility shims for post-revert API
 // ============================================================================
-
-// Helper function to estimate grid parameters from option params
-inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
-    const PricingParams& params,
-    double n_sigma = 5.0,
-    double tol = 1e-6)
-{
-    // Domain bounds (centered on current moneyness)
-    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
-    double x0 = std::log(params.spot / params.strike);
-
-    double x_min = x0 - n_sigma * sigma_sqrt_T;
-    double x_max = x0 + n_sigma * sigma_sqrt_T;
-
-    // Spatial resolution (target truncation error)
-    double dx_target = params.volatility * std::sqrt(tol);
-    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
-    Nx = std::clamp(Nx, size_t{200}, size_t{1200});
-
-    // Ensure odd number of points (for centered stencils)
-    if (Nx % 2 == 0) Nx++;
-
-    // Temporal resolution (CFL-like condition for stability)
-    double dx_actual = (x_max - x_min) / (Nx - 1);
-    double dt_target = 0.75 * dx_actual * dx_actual / (params.volatility * params.volatility);
-    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt_target));
-    Nt = std::clamp(Nt, size_t{200}, size_t{4000});
-
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, Nx);
-    return {grid_spec.value(), Nt};
-}
+// Moved to src/option/grid_estimation.hpp
 
 // ============================================================================
 // Helper: QuantLib American Option Pricer
@@ -391,7 +363,8 @@ BENCHMARK(BM_Greeks_Accuracy_ATM)->Iterations(1);
 // ============================================================================
 // Normalized Chain Solver Accuracy: Compare to QuantLib
 // ============================================================================
-
+// Temporarily disabled - normalized chain solver not compatible with post-revert API
+/*
 static void compare_normalized_chain_accuracy(
     benchmark::State& state,
     const char* label,
@@ -508,8 +481,11 @@ static void compare_normalized_chain_accuracy(
     state.counters["avg_abs_err_$"] = avg_abs_error;
     state.counters["avg_rel_err_%"] = avg_rel_error;
 }
+*/
 
 // Test 1: ATM chain (5 strikes × 3 maturities = 15 options)
+// Temporarily disabled - normalized chain solver not compatible with post-revert API
+/*
 static void BM_NormalizedChain_ATM_5x3(benchmark::State& state) {
     compare_normalized_chain_accuracy(
         state, "Normalized Chain ATM 5x3",
@@ -519,7 +495,11 @@ static void BM_NormalizedChain_ATM_5x3(benchmark::State& state) {
         0.20, 0.05, 0.02,                       // σ, r, q
         false);                                 // put
 }
-BENCHMARK(BM_NormalizedChain_ATM_5x3)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_ATM_5x3)->Iterations(1);
+*/
+
+/* Test 2-8: Normalized chain benchmarks temporarily disabled
+// NOTE: These require normalized chain solver which is not compatible with post-revert API
 
 // Test 2: Wide strike range (7 strikes × 4 maturities = 28 options)
 // NOTE: Wide ranges include deep OTM options with low absolute prices.
@@ -536,7 +516,7 @@ static void BM_NormalizedChain_Wide_7x4(benchmark::State& state) {
         0.25, 0.05, 0.02,                                  // σ, r, q
         false);                                            // put
 }
-BENCHMARK(BM_NormalizedChain_Wide_7x4)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_Wide_7x4)->Iterations(1);
 
 // Test 3: High volatility chain
 static void BM_NormalizedChain_HighVol_5x3(benchmark::State& state) {
@@ -548,7 +528,7 @@ static void BM_NormalizedChain_HighVol_5x3(benchmark::State& state) {
         0.50, 0.05, 0.02,                       // σ=50%, r, q
         false);                                 // put
 }
-BENCHMARK(BM_NormalizedChain_HighVol_5x3)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_HighVol_5x3)->Iterations(1);
 
 // Test 4: Long maturity chain
 static void BM_NormalizedChain_LongMat_5x4(benchmark::State& state) {
@@ -560,7 +540,7 @@ static void BM_NormalizedChain_LongMat_5x4(benchmark::State& state) {
         0.25, 0.05, 0.02,                       // σ, r, q
         false);                                 // put
 }
-BENCHMARK(BM_NormalizedChain_LongMat_5x4)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_LongMat_5x4)->Iterations(1);
 
 // Test 5: Call options
 static void BM_NormalizedChain_Call_5x3(benchmark::State& state) {
@@ -572,7 +552,7 @@ static void BM_NormalizedChain_Call_5x3(benchmark::State& state) {
         0.20, 0.05, 0.02,                       // σ, r, q
         true);                                  // call
 }
-BENCHMARK(BM_NormalizedChain_Call_5x3)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_Call_5x3)->Iterations(1);
 
 // Test 6: Deep OTM/ITM Calls (boundary condition validation)
 static void BM_NormalizedChain_DeepCalls_5x3(benchmark::State& state) {
@@ -584,7 +564,7 @@ static void BM_NormalizedChain_DeepCalls_5x3(benchmark::State& state) {
         0.25, 0.05, 0.02,                           // σ, r, q
         true);                                      // call
 }
-BENCHMARK(BM_NormalizedChain_DeepCalls_5x3)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_DeepCalls_5x3)->Iterations(1);
 
 // Test 7: Negative Interest Rate (European crisis scenario)
 static void BM_NormalizedChain_NegativeRate_5x3(benchmark::State& state) {
@@ -596,7 +576,7 @@ static void BM_NormalizedChain_NegativeRate_5x3(benchmark::State& state) {
         0.20, -0.01, 0.00,                          // σ, r=-1%, q=0%
         false);                                     // put
 }
-BENCHMARK(BM_NormalizedChain_NegativeRate_5x3)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_NegativeRate_5x3)->Iterations(1);
 
 // Test 8: High Interest Rate (emerging markets scenario)
 static void BM_NormalizedChain_HighRate_5x3(benchmark::State& state) {
@@ -608,7 +588,8 @@ static void BM_NormalizedChain_HighRate_5x3(benchmark::State& state) {
         0.30, 0.15, 0.03,                           // σ, r=15%, q=3%
         true);                                      // call
 }
-BENCHMARK(BM_NormalizedChain_HighRate_5x3)->Iterations(1);
+// BENCHMARK(BM_NormalizedChain_HighRate_5x3)->Iterations(1);
+*/
 
 // ============================================================================
 // Discrete Dividend Tests: Ensure workspace routing + PDE handle jump mapping

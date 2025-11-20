@@ -1,4 +1,15 @@
 cc_library(
+    name = "grid_estimation",
+    hdrs = ["grid_estimation.hpp"],
+    deps = [
+        ":option_spec",
+        "//src/pde/core:grid",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_solver_workspace",
     hdrs = ["american_solver_workspace.hpp"],
     deps = [
@@ -41,6 +52,7 @@ cc_library(
     deps = [
         ":american_option",
         ":american_solver_workspace",
+        ":grid_estimation",
         "//src/support:error_types",
         "//src/support:parallel",
     ],

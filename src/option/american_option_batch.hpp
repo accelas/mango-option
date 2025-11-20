@@ -8,6 +8,7 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/option/grid_estimation.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include "src/pde/core/grid.hpp"
@@ -127,7 +128,8 @@ public:
             std::shared_ptr<AmericanSolverWorkspace> thread_workspace;
             if (use_shared_grid) {
                 auto [grid_spec, n_time] = shared_grid.value();
-                auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
+                auto workspace_result = AmericanSolverWorkspace::create(
+                    grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
                 if (workspace_result.has_value()) {
                     thread_workspace = workspace_result.value();
                 }
@@ -144,7 +146,8 @@ public:
                 } else {
                     // Per-option grid: create workspace for this option
                     auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
-                    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
+                    auto workspace_result = AmericanSolverWorkspace::create(
+                        grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
                     if (workspace_result.has_value()) {
                         workspace = workspace_result.value();
                     }
@@ -223,7 +226,7 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
 
     // Create workspace with estimated grid
     auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec, n_time, std::pmr::get_default_resource());
+        grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), n_time);
     if (!workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
@@ -243,6 +246,95 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     }
 
     return solver_result.value().solve();
+}
+
+/// Solve a batch of American options with shared grid
+///
+/// Convenience function for batch solving with explicit grid parameters.
+/// All options use the same PDE grid for efficiency.
+///
+/// @param params Vector or span of option parameters
+/// @param x_min Minimum log-moneyness for grid
+/// @param x_max Maximum log-moneyness for grid
+/// @param n_space Number of spatial grid points
+/// @param n_time Number of time steps
+/// @return Batch result with individual results and failure count
+inline BatchAmericanOptionResult solve_american_options_batch(
+    std::span<const AmericanOptionParams> params,
+    double x_min,
+    double x_max,
+    size_t n_space,
+    size_t n_time)
+{
+    if (params.empty()) {
+        return BatchAmericanOptionResult{.results = {}, .failed_count = 0};
+    }
+
+    std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
+    size_t failed_count = 0;
+
+    MANGO_PRAGMA_PARALLEL
+    {
+        // Per-thread pool for workspace reuse
+        std::pmr::unsynchronized_pool_resource thread_pool;
+
+        // Per-thread workspace (shared by all options in this thread)
+        auto workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+        if (!workspace_result.has_value()) {
+            // Workspace creation failed - all solves in this thread will fail
+            MANGO_PRAGMA_FOR
+            for (size_t i = 0; i < params.size(); ++i) {
+                results[i] = std::unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .message = "Failed to create workspace: " + workspace_result.error(),
+                    .iterations = 0
+                });
+                MANGO_PRAGMA_ATOMIC
+                ++failed_count;
+            }
+        } else {
+            auto workspace = workspace_result.value();
+
+            MANGO_PRAGMA_FOR
+            for (size_t i = 0; i < params.size(); ++i) {
+                // Create solver
+                auto solver_result = AmericanOptionSolver::create(params[i], workspace);
+                if (!solver_result.has_value()) {
+                    results[i] = std::unexpected(SolverError{
+                        .code = SolverErrorCode::InvalidConfiguration,
+                        .message = solver_result.error(),
+                        .iterations = 0
+                    });
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
+                    continue;
+                }
+
+                // Solve
+                results[i] = solver_result.value().solve();
+                if (!results[i].has_value()) {
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
+                }
+            }
+        }
+    }
+
+    return BatchAmericanOptionResult{
+        .results = std::move(results),
+        .failed_count = failed_count
+    };
+}
+
+/// Vector overload for solve_american_options_batch
+inline BatchAmericanOptionResult solve_american_options_batch(
+    const std::vector<AmericanOptionParams>& params,
+    double x_min,
+    double x_max,
+    size_t n_space,
+    size_t n_time)
+{
+    return solve_american_options_batch(std::span{params}, x_min, x_max, n_space, n_time);
 }
 
 }  // namespace mango

@@ -262,7 +262,7 @@ TEST(PDESolverTest, PDEWorkspaceIntegration) {
     auto grid = grid_result.value().generate();
 
     // This test will pass once we switch to PDEWorkspace
-    mango::PDEWorkspace workspace(101, grid.span());
+    mango::PDEWorkspace workspace(101, grid.span(), std::pmr::get_default_resource());
 
     EXPECT_EQ(workspace.u_current().size(), 101);
     EXPECT_EQ(workspace.dx().size(), 100);
