@@ -58,8 +58,8 @@ TEST(PDEWorkspacePMRTest, NewtonArraysAccessible) {
     auto delta_u = ws->delta_u();
 
     EXPECT_EQ(jac_diag.size(), 101);
-    EXPECT_EQ(jac_upper.size(), 101);
-    EXPECT_EQ(jac_lower.size(), 101);
+    EXPECT_EQ(jac_upper.size(), 100);  // n-1 for tridiagonal
+    EXPECT_EQ(jac_lower.size(), 100);  // n-1 for tridiagonal
     EXPECT_EQ(residual.size(), 101);
     EXPECT_EQ(delta_u.size(), 101);
 }

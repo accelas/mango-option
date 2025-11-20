@@ -69,17 +69,26 @@ public:
     std::span<double> jacobian_diag() { return {jacobian_diag_.data(), n_}; }
     std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), n_}; }
 
-    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), n_}; }
-    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), n_}; }
+    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), n_ - 1}; }
+    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), n_ - 1}; }
 
-    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), n_}; }
-    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), n_}; }
+    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), n_ - 1}; }
+    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), n_ - 1}; }
 
     std::span<double> residual() { return {residual_.data(), n_}; }
     std::span<const double> residual() const { return {residual_.data(), n_}; }
 
     std::span<double> delta_u() { return {delta_u_.data(), n_}; }
     std::span<const double> delta_u() const { return {delta_u_.data(), n_}; }
+
+    std::span<double> newton_u_old() { return {newton_u_old_.data(), n_}; }
+    std::span<const double> newton_u_old() const { return {newton_u_old_.data(), n_}; }
+
+    std::span<double> tridiag_workspace() { return {tridiag_workspace_.data(), 2 * n_}; }
+    std::span<const double> tridiag_workspace() const { return {tridiag_workspace_.data(), 2 * n_}; }
+
+    std::span<double> lambda() { return {lambda_.data(), n_}; }
+    std::span<const double> lambda() const { return {lambda_.data(), n_}; }
 
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
@@ -103,6 +112,9 @@ private:
         , jacobian_lower_(padded_n_, 0.0, mr)
         , residual_(padded_n_, 0.0, mr)
         , delta_u_(padded_n_, 0.0, mr)
+        , newton_u_old_(padded_n_, 0.0, mr)
+        , tridiag_workspace_(pad_to_simd(2 * n), 0.0, mr)
+        , lambda_(padded_n_, 0.0, mr)
     {
         // Copy grid data
         std::copy(grid_data.begin(), grid_data.end(), grid_.begin());
@@ -130,6 +142,9 @@ private:
     std::pmr::vector<double> jacobian_lower_;
     std::pmr::vector<double> residual_;
     std::pmr::vector<double> delta_u_;
+    std::pmr::vector<double> newton_u_old_;
+    std::pmr::vector<double> tridiag_workspace_;
+    std::pmr::vector<double> lambda_;
 };
 
 }  // namespace mango
