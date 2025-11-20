@@ -583,25 +583,13 @@ private:
         // Quasi-Newton: Build Jacobian once and reuse
         build_jacobian(t, coeff_dt, u, eps);
 
-        // Save original Jacobian for active set modifications
-        std::vector<double> jacobian_lower_orig(workspace_->jacobian_lower().begin(), workspace_->jacobian_lower().end());
-        std::vector<double> jacobian_diag_orig(workspace_->jacobian_diag().begin(), workspace_->jacobian_diag().end());
-        std::vector<double> jacobian_upper_orig(workspace_->jacobian_upper().begin(), workspace_->jacobian_upper().end());
-
         // Copy initial guess
         std::copy(u.begin(), u.end(), workspace_->newton_u_old().begin());
 
         // Newton iteration
         for (size_t iter = 0; iter < config_.max_iter; ++iter) {
-            // Restore Jacobian from original (for changing active sets)
-            // Store spans in local variables to avoid temporary lifetime issues
-            auto jac_lower = workspace_->jacobian_lower();
-            auto jac_diag = workspace_->jacobian_diag();
-            auto jac_upper = workspace_->jacobian_upper();
-
-            std::copy(jacobian_lower_orig.begin(), jacobian_lower_orig.end(), jac_lower.begin());
-            std::copy(jacobian_diag_orig.begin(), jacobian_diag_orig.end(), jac_diag.begin());
-            std::copy(jacobian_upper_orig.begin(), jacobian_upper_orig.end(), jac_upper.begin());
+            // NOTE: No Jacobian restoration needed for solve_implicit_stage
+            // (obstacle handling now uses solve_implicit_stage_projected instead)
 
             // Evaluate L(u)
             apply_operator_with_blocking(t, u, workspace_->lu());
@@ -612,10 +600,6 @@ private:
 
             // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
             apply_bc_to_residual(workspace_->residual(), u, t);
-
-            // Apply empirical active set heuristic (modifies Jacobian and residual)
-            // TODO: Replace with proper PDAS - see apply_active_set_heuristic() doc
-            apply_active_set_heuristic(t, u, jacobian_diag_orig);
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu
             // Negate residual for RHS
