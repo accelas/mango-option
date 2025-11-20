@@ -22,3 +22,28 @@ cc_binary(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_binary(
+    name = "debug_pdas",
+    srcs = ["debug_pdas.cc"],
+    deps = [
+        "//src/option:american_pde_solver",
+        "//src/option:american_solver_workspace",
+        "//src/option:option_spec",
+    ],
+    copts = [
+        "-std=c++23",
+        "-fopenmp",
+    ],
+)
+
+cc_binary(
+    name = "debug_deep_itm",
+    srcs = ["debug_deep_itm.cc"],
+    deps = [
+        "//src/option:american_option",
+    ],
+    copts = [
+        "-std=c++23",
+    ],
+)

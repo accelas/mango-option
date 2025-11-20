@@ -45,7 +45,7 @@ TEST_F(IVSolverTest, ConstructionSucceeds) {
 // Test 2: Basic ATM put IV calculation
 // DISABLED: Active set heuristic causes ATM options to lock to payoff=0 at terminal time
 // This breaks IV solver (reports inflated IVs ~1.76 instead of ~0.25)
-// TODO: Re-enable after implementing proper PDAS (Issue #196)
+// TODO: Re-enable after fixing active set heuristic or switching to ProjectedThomas (Issue #196)
 TEST_F(IVSolverTest, DISABLED_ATMPutIVCalculation) {
     IVSolverFDM solver(config);
 
@@ -148,7 +148,7 @@ TEST_F(IVSolverTest, DISABLED_DeepITMPutIVCalculation) {
 
 // Test 10: Deep OTM put (tests adaptive grid bounds)
 // DISABLED: Same ATM lockup issue affects deep OTM options
-// TODO: Re-enable after implementing proper PDAS (Issue #196)
+// TODO: Re-enable after fixing active set heuristic or switching to ProjectedThomas (Issue #196)
 TEST_F(IVSolverTest, DISABLED_DeepOTMPutIVCalculation) {
     query.spot = 200.0;  // Deep out of the money (S/K = 2.0)
     query.strike = 100.0;
@@ -165,7 +165,7 @@ TEST_F(IVSolverTest, DISABLED_DeepOTMPutIVCalculation) {
 
 // Test 11: Call option IV calculation
 // DISABLED: Same ATM lockup issue affects call options
-// TODO: Re-enable after implementing proper PDAS (Issue #196)
+// TODO: Re-enable after fixing active set heuristic or switching to ProjectedThomas (Issue #196)
 TEST_F(IVSolverTest, DISABLED_ATMCallIVCalculation) {
     query.type = OptionType::CALL;
     query.market_price = 10.0;  // ATM call price

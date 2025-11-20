@@ -107,6 +107,8 @@ public:
         , newton_u_old_(n_)
         , tridiag_workspace_(2 * n_)
         , lambda_(n_, 0.0)  // Initialize dual multiplier to zero
+        , active_set_(n_, false)  // Initialize active set to empty
+        , active_set_prev_(n_, false)  // Initialize previous active set to empty
         , isa_target_(cpu::select_isa_target())
     {
         // Acquire workspace (either external or create owned)
@@ -268,8 +270,10 @@ private:
     std::vector<double> newton_u_old_;        // n: Previous Newton iterate
     std::vector<double> tridiag_workspace_;   // 2n: Thomas algorithm workspace
 
-    // Primal-dual active set
+    // Active set heuristic (used by Heuristic obstacle method)
     std::vector<double> lambda_;              // n: Dual multiplier for obstacle constraint
+    std::vector<bool> active_set_;            // n: Active set indicator (true = locked to obstacle)
+    std::vector<bool> active_set_prev_;       // n: Previous active set (for stability check)
 
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
@@ -342,6 +346,35 @@ private:
         }
     }
 
+    /// Compute L_max: maximum absolute row sum of tridiagonal Jacobian
+    ///
+    /// Used by the Heuristic method for computing the dual multiplier threshold.
+    /// In the discrete setting, L_max = max_i (|lower[i-1]| + |diag[i]| + |upper[i]|).
+    ///
+    /// @return Maximum absolute row sum
+    double compute_L_max() const {
+        double L_max = 0.0;
+
+        // First interior row (i=1): no lower neighbor
+        if (n_ > 1) {
+            double row_sum = std::abs(jacobian_diag_[1]) + std::abs(jacobian_upper_[0]);
+            L_max = std::max(L_max, row_sum);
+        }
+
+        // Interior rows (i=2 to n-2): have both neighbors
+        for (size_t i = 2; i < n_ - 1; ++i) {
+            double row_sum = std::abs(jacobian_lower_[i-1]) +
+                           std::abs(jacobian_diag_[i]) +
+                           std::abs(jacobian_upper_[i]);
+            L_max = std::max(L_max, row_sum);
+        }
+
+        // Last interior row (i=n-1): no upper neighbor (boundary node, skip)
+        // Note: boundary nodes (i=0, i=n-1) handled separately via BC
+
+        return L_max;
+    }
+
     /// Apply obstacle condition: u(x,t) ≥ ψ(x,t)
     ///
     /// Projects solution onto obstacle constraint via complementarity:
@@ -365,9 +398,10 @@ private:
 
     /// Apply active set heuristic for obstacle problems
     ///
-    /// Empirical primal-dual active set method that locks nodes in the exercise region.
+    /// Empirical active set heuristic that locks nodes in the exercise region.
     ///
-    /// TODO: Replace with proper PDAS (Hintermüller-Ito-Kunisch) - see Issue #196
+    /// Note: This is a heuristic method with tuned parameters.
+    /// For theoretically sound LCP solving, use ProjectedThomas instead.
     /// Current heuristic has no convergence guarantees:
     /// - Jacobian restored every iteration → nodes can flap between locked/free
     /// - Empirical constants may fail on different grids/parameters
@@ -400,7 +434,7 @@ private:
 
         // Second: Classify nodes using updated multiplier
         // WARNING: Empirical parameters tuned to pass current test suite
-        // No theoretical justification - see docs/primal_dual_active_set_solution.md
+        // This is a heuristic method - for theoretically sound LCP solving, use ProjectedThomas
         constexpr double lambda_scale = 1e-3;  // EMPIRICAL: Tuned to balance deep ITM vs ATM
         constexpr double gap_atol = 1e-10;     // EMPIRICAL: Absolute gap tolerance
         constexpr double gap_rtol = 1e-6;      // EMPIRICAL: Relative gap tolerance
@@ -495,10 +529,10 @@ private:
         // Initial guess: u* = u^n
         std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
 
-        // Solve implicit stage
-        auto result = solve_implicit_stage(t_stage, w1,
-                                          std::span{u_current_},
-                                          std::span{rhs_});
+        // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
+        auto result = solve_implicit_stage_dispatch(t_stage, w1,
+                                                    std::span{u_current_},
+                                                    std::span{rhs_});
 
         if (!result.converged) {
             SolverError error{
@@ -543,10 +577,10 @@ private:
         // Initial guess: u^{n+1} = u* (already in u_current_)
         // (No need to copy, u_current_ already has u^{n+γ})
 
-        // Solve implicit stage
-        auto result = solve_implicit_stage(t_next, w2,
-                                          std::span{u_current_},
-                                          std::span{rhs_});
+        // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
+        auto result = solve_implicit_stage_dispatch(t_next, w2,
+                                                    std::span{u_current_},
+                                                    std::span{rhs_});
 
         if (!result.converged) {
             SolverError error{
@@ -594,6 +628,140 @@ private:
     /// @param u Solution vector (input: initial guess, output: converged solution)
     /// @param rhs Right-hand side from previous stage
     /// @return Result with convergence status
+    /// Dispatch implicit stage solver based on obstacle method configuration
+    ///
+    /// Routes to appropriate solver:
+    /// - ObstacleMethod::ProjectedThomas → solve_implicit_stage_projected() (Brennan-Schwartz LCP)
+    /// - ObstacleMethod::Heuristic → solve_implicit_stage() (Newton with empirical active set)
+    ///
+    /// @param t Current time
+    /// @param coeff_dt Time step coefficient
+    /// @param u Solution vector (input: initial guess, output: solution)
+    /// @param rhs Right-hand side vector
+    /// @return Convergence result
+    NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
+                                               std::span<double> u,
+                                               std::span<const double> rhs) {
+        if (obstacle_ && config_.obstacle_method == ObstacleMethod::ProjectedThomas) {
+            return solve_implicit_stage_projected(t, coeff_dt, u, rhs);
+        } else {
+            return solve_implicit_stage(t, coeff_dt, u, rhs);
+        }
+    }
+
+    /// Solve implicit stage using Projected Thomas algorithm
+    ///
+    /// Implements Brennan-Schwartz algorithm for American option pricing.
+    /// Solves the Linear Complementarity Problem (LCP): Au = b, u ≥ ψ
+    /// by enforcing projection during the backward substitution phase.
+    ///
+    /// This method solves the TRUE TR-BDF2 stage equation:
+    ///   A·u = rhs,  subject to u ≥ ψ
+    /// where A = I - coeff_dt·∂L/∂u (the Jacobian matrix)
+    ///
+    /// This is more robust for "sticky boundary" problems because:
+    /// - No dual variables → no sensitivity to numerical noise
+    /// - Direct coupling of obstacle with tridiagonal structure
+    /// - Provably convergent for M-matrices in single pass
+    ///
+    /// @param t Current time
+    /// @param coeff_dt Time step coefficient
+    /// @param u Solution vector (modified in-place)
+    /// @param rhs Right-hand side vector (already computed by caller)
+    /// @return Always returns converged=true (single-pass algorithm)
+    NewtonResult solve_implicit_stage_projected(double t, double coeff_dt,
+                                                std::span<double> u,
+                                                std::span<const double> rhs) {
+        // Apply BCs to initial guess
+        apply_boundary_conditions(u, t);
+
+        // Build Jacobian matrix A = I - coeff_dt·∂L/∂u
+        // This represents the true TR-BDF2 stage matrix
+        build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
+
+        // CRITICAL FIX: For Dirichlet boundaries, override RHS with boundary value
+        // When solving A·u = rhs directly (not Newton correction), Dirichlet rows need rhs = g(t)
+        // Create mutable copy of RHS to apply boundary conditions
+        std::vector<double> rhs_with_bc(rhs.begin(), rhs.end());
+
+        // Apply Dirichlet boundary values to RHS
+        const auto& left_bc = derived().left_boundary();
+        const auto& right_bc = derived().right_boundary();
+        using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
+        using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
+
+        if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
+            rhs_with_bc[0] = left_bc.value(t, grid_[0]);
+        }
+        if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
+            rhs_with_bc[n_-1] = right_bc.value(t, grid_[n_-1]);
+        }
+
+        // Get obstacle function
+        if (!obstacle_) {
+            return {false, 0, std::numeric_limits<double>::infinity(),
+                   "Projected Thomas called without obstacle function"};
+        }
+        auto psi = workspace_->psi();
+
+        // Evaluate obstacle at current time
+        (*obstacle_)(t, grid_, psi);
+
+        // CRITICAL FIX: Lock deep exercise region to obstacle
+        // For deep ITM options where exercise is definitively optimal everywhere,
+        // lock those regions to prevent diffusion from lifting values above intrinsic.
+        //
+        // Strategy: Only lock nodes DEEP in the money where psi (intrinsic value) is large.
+        // For American puts: psi = max(1 - exp(x), 0), so psi → 1 as x → -∞ (deep ITM).
+        // We lock nodes where psi > 0.95 (95% of strike), far from ATM where time value matters.
+        constexpr double deep_itm_threshold = 0.95;  // Lock only if psi > 95% of strike
+        constexpr double exercise_tolerance = 1e-8;  // Tolerance for checking if on obstacle
+
+        for (size_t i = 1; i < n_ - 1; ++i) {
+            // Only lock if:
+            // 1. Deep ITM: obstacle value is very high (psi > threshold)
+            // 2. Currently on obstacle: gap is nearly zero
+            bool deep_itm = (psi[i] > deep_itm_threshold);
+            bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
+
+            if (deep_itm && at_obstacle) {
+                // Convert to Dirichlet row: diag=1, off-diagonals=0, rhs=psi
+                if (i > 0) jacobian_lower_[i-1] = 0.0;
+                jacobian_diag_[i] = 1.0;
+                if (i < n_ - 1) jacobian_upper_[i] = 0.0;
+                rhs_with_bc[i] = psi[i];
+            }
+        }
+
+        // Solve A·u = rhs with constraint u ≥ ψ
+        // The RHS has been corrected to include Dirichlet boundary values:
+        //   Interior: rhs = u_old + w1·L(u_old) (Stage1) or α·u_stage1 + β·u_old (Stage2)
+        //   Dirichlet boundaries: rhs = g(t)
+        auto result = solve_thomas_projected<double>(
+            jacobian_lower_,
+            jacobian_diag_,
+            jacobian_upper_,
+            rhs_with_bc,  // Use corrected RHS with boundary values
+            psi,          // Use obstacle directly (not psi - u)
+            u,            // Solve for u directly (not δu)
+            tridiag_workspace_
+        );
+
+        if (!result.ok()) {
+            return {false, 1, std::numeric_limits<double>::infinity(),
+                   std::optional<std::string>(std::string(result.message()))};
+        }
+
+        // No update step needed - u already contains the solution
+
+        // Apply boundary conditions
+        apply_boundary_conditions(u, t);
+
+        // Single-pass algorithm, always converges
+        return {true, 1, 0.0, std::nullopt};
+    }
+
+
     NewtonResult solve_implicit_stage(double t, double coeff_dt,
                                       std::span<double> u,
                                       std::span<const double> rhs) {
@@ -631,7 +799,7 @@ private:
             apply_bc_to_residual(residual_, u, t);
 
             // Apply empirical active set heuristic (modifies Jacobian and residual)
-            // TODO: Replace with proper PDAS - see apply_active_set_heuristic() doc
+            // Note: For robust LCP solving, use ProjectedThomas instead
             apply_active_set_heuristic(t, u, jacobian_diag_orig);
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu

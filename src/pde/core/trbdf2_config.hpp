@@ -7,6 +7,12 @@
 
 namespace mango {
 
+/// Method for handling obstacle constraints in American options
+enum class ObstacleMethod {
+    Heuristic,       ///< Empirical active set heuristic (tuned parameters)
+    ProjectedThomas  ///< Projected Thomas (Brennan-Schwartz LCP solver)
+};
+
 /// Result from Newton-Raphson iteration for implicit PDE stages
 struct NewtonResult {
     bool converged;                              ///< Convergence status
@@ -23,12 +29,13 @@ struct NewtonResult {
 ///
 /// γ = 2 - √2 ≈ 0.5857864376269049 (optimal for L-stability)
 ///
-/// Each implicit stage is solved using Newton-Raphson iteration.
+/// Each implicit stage is solved using Newton-Raphson iteration (no obstacle)
+/// or Projected Thomas LCP solver (with obstacle constraint).
 struct TRBDF2Config {
     /// Stage 1 parameter (γ = 2 - √2)
     double gamma = 2.0 - std::sqrt(2.0);
 
-    /// Maximum Newton iterations per stage
+    /// Maximum Newton iterations per stage (no obstacle)
     size_t max_iter = 20;
 
     /// Convergence tolerance for Newton solver (relative error)
@@ -36,6 +43,9 @@ struct TRBDF2Config {
 
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;
+
+    /// Obstacle constraint method (default: ProjectedThomas for robust LCP solving)
+    ObstacleMethod obstacle_method = ObstacleMethod::ProjectedThomas;
 
     /// Compute weight for Stage 1 update
     ///
