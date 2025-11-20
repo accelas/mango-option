@@ -142,15 +142,11 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     params.discrete_dividends = {};  // Normalized solver requires no discrete dividends
 
     // Create solver (surface is always collected for at_time() access)
-    auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_);
-    if (!solver_result) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Failed to create solver: " + solver_result.error(),
-            .iterations = 0
-        });
-    }
-    auto solver = std::move(solver_result.value());
+    // After CRTP revert: AmericanOptionSolver uses direct constructor, not factory
+    // Allocate buffer for full surface collection ((n_time + 1) × n_space)
+    // Note: +1 for initial condition at t=0
+    std::vector<double> surface_buffer((request.n_time + 1) * request.n_space);
+    AmericanOptionSolver solver(params, workspace.pde_workspace_, surface_buffer);
 
     // Precompute step indices for each maturity
     double dt = request.T_max / request.n_time;
