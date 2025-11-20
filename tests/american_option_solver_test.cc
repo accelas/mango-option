@@ -576,6 +576,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
 
     auto batch_result = BatchAmericanOptionSolver().solve_batch(
         batch,
+        false,  // use_shared_grid
         [&](size_t idx, AmericanOptionSolver& solver) {
             std::lock_guard<std::mutex> lock(callback_mutex);
             callback_indices.push_back(idx);

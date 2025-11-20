@@ -112,13 +112,10 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
-        // Store full surface
-        // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-        // Extract only the time steps (skip initial scratch)
-        result.surface_2d.assign(
-            surface_buffer.begin() + s.n_space(),  // Skip u_old_initial
-            surface_buffer.end()                    // Include all time steps
-        );
+        // Store full surface (exclude final scratch slice used for u_old)
+        const size_t n_elems = s.n_space() * s.n_time();
+        result.surface_2d.assign(surface_buffer.begin(),
+                                 surface_buffer.begin() + n_elems);
     }, solver);
 
     solved_ = true;
@@ -207,17 +204,14 @@ double AmericanOptionSolver::compute_delta() const {
     }
 
     const size_t n = solution_.size();
-    const double x_min = workspace_->x_min();
-    const double x_max = workspace_->x_max();
-    const double dx = (x_max - x_min) / (n - 1);
+    auto grid = workspace_->grid();
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
 
-    // Find the grid point closest to current_moneyness
-    // Use the same approach as interpolate_solution
+    // Find the grid point closest to current_moneyness using actual grid points
     size_t i = 0;
-    while (i < n-1 && x_min + (i+1)*dx < current_moneyness) {
+    while (i < n-1 && grid[i+1] < current_moneyness) {
         i++;
     }
 
@@ -225,10 +219,11 @@ double AmericanOptionSolver::compute_delta() const {
     if (i == 0) i = 1;
     if (i >= n-1) i = n-2;
 
-    // Compute ∂V/∂x using centered finite difference
+    // Compute ∂V/∂x using centered finite difference on possibly non-uniform grid
+    // For non-uniform grids: f'(x_i) ≈ (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
     // Note: solution_ stores V/K (normalized)
-    const double half_dx_inv = 1.0 / (2.0 * dx);
-    double dVdx = (solution_[i+1] - solution_[i-1]) * half_dx_inv;
+    double dx_total = grid[i+1] - grid[i-1];
+    double dVdx = (solution_[i+1] - solution_[i-1]) / dx_total;
 
     // Transform from log-moneyness to spot
     // V_dollar = V_norm * K
@@ -248,16 +243,14 @@ double AmericanOptionSolver::compute_gamma() const {
     }
 
     const size_t n = solution_.size();
-    const double x_min = workspace_->x_min();
-    const double x_max = workspace_->x_max();
-    const double dx = (x_max - x_min) / (n - 1);
+    auto grid = workspace_->grid();
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
 
-    // Find the grid point closest to current_moneyness
+    // Find the grid point closest to current_moneyness using actual grid points
     size_t i = 0;
-    while (i < n-1 && x_min + (i+1)*dx < current_moneyness) {
+    while (i < n-1 && grid[i+1] < current_moneyness) {
         i++;
     }
 
@@ -265,12 +258,20 @@ double AmericanOptionSolver::compute_gamma() const {
     if (i == 0) i = 1;
     if (i >= n-1) i = n-2;
 
-    // Centered second derivative: [V(i+1) - 2*V(i) + V(i-1)] / dx²
-    // Use FMA: (V(i+1) + V(i-1)) / dx² - 2*V(i) / dx²
-    const double dx2_inv = 1.0 / (dx * dx);
-    double d2Vdx2 = std::fma(solution_[i+1] + solution_[i-1], dx2_inv, -2.0*solution_[i]*dx2_inv);
-    // Centered first derivative: [V(i+1) - V(i-1)] / (2*dx)
-    double dVdx = (solution_[i+1] - solution_[i-1]) / (2.0 * dx);
+    // Compute derivatives on possibly non-uniform grid
+    // For non-uniform grids, we need the actual grid spacings
+    double dx_left = grid[i] - grid[i-1];
+    double dx_right = grid[i+1] - grid[i];
+    double dx_total = grid[i+1] - grid[i-1];
+
+    // Second derivative on non-uniform grid:
+    // f''(x_i) ≈ 2 * [f[i+1]/dx_right/(dx_left+dx_right) - f[i]/(dx_left*dx_right) + f[i-1]/dx_left/(dx_left+dx_right)]
+    double d2Vdx2 = 2.0 * (solution_[i+1] / (dx_right * dx_total)
+                         - solution_[i] / (dx_left * dx_right)
+                         + solution_[i-1] / (dx_left * dx_total));
+
+    // First derivative (same as in compute_delta)
+    double dVdx = (solution_[i+1] - solution_[i-1]) / dx_total;
 
     // Transform from log-moneyness to spot using chain rule
     // x = ln(S/K), so ∂x/∂S = 1/S and ∂²x/∂S² = -1/S²
