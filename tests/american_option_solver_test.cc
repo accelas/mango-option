@@ -168,12 +168,10 @@ TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNTime) {
-    // Test that workspace validates n_time must be positive
-    // GridSpec handles spatial grid validation, workspace validates temporal
-    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
-    auto result = AmericanSolverWorkspace::create(grid_spec.x_min(), grid_spec.x_max(), grid_spec.n_points(), 0);
+    // Test that workspace validates n_time minimum requirement
+    auto result = AmericanSolverWorkspace::create(-3.0, 3.0, 101, 0);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "n_time must be positive");
+    EXPECT_EQ(result.error(), "n_time must be >= 10");
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridBounds) {
