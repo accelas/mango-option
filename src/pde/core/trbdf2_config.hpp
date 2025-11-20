@@ -44,7 +44,7 @@ struct TRBDF2Config {
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;
 
-    /// Obstacle constraint method (default: Heuristic until PDAS is validated)
+    /// Obstacle constraint method (default: Heuristic - PDAS under development)
     ObstacleMethod obstacle_method = ObstacleMethod::Heuristic;
 
     /// Maximum PDAS iterations per stage (with obstacle)
@@ -53,9 +53,18 @@ struct TRBDF2Config {
     /// PDAS convergence tolerance for complementarity residual
     double pdas_tol = 1e-8;
 
-    /// PDAS parameter β ∈ (0,1) for θ = β/L_max
+    /// PDAS parameter β ∈ (0,1) for θ = β/L_max (final value after ramp)
     /// Literature suggests β = 0.9 (Hintermüller-Ito-Kunisch 2003)
     double pdas_beta = 0.9;
+
+    /// PDAS initial β for ramping (smaller value prevents premature locking)
+    /// Ramped from beta_initial to beta over first few PDAS iterations
+    double pdas_beta_initial = 0.2;
+
+    /// Number of Newton/Heuristic warm-up iterations before PDAS
+    /// Gives ATM/OTM nodes chance to develop time value (gap > 0)
+    /// Deep ITM nodes will still lock correctly due to large negative gap
+    size_t pdas_warmup_iters = 3;
 
     /// Compute weight for Stage 1 update
     ///

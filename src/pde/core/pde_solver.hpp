@@ -670,22 +670,6 @@ private:
         // Apply BCs to initial guess
         apply_boundary_conditions(u, t);
 
-        // Build Jacobian ONCE (reused across all PDAS iterations)
-        build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
-
-        // Compute θ = β/L_max for HIK active set update
-        const double L_max = compute_L_max();
-        if (L_max < 1e-14) {
-            return {false, 0, std::numeric_limits<double>::infinity(),
-                   "L_max too small (Jacobian nearly zero)"};
-        }
-        const double theta = config_.pdas_beta / L_max;
-
-        // Save original Jacobian (will be modified for active set)
-        std::vector<double> jacobian_lower_orig = jacobian_lower_;
-        std::vector<double> jacobian_diag_orig = jacobian_diag_;
-        std::vector<double> jacobian_upper_orig = jacobian_upper_;
-
         // Get obstacle function
         if (!obstacle_) {
             return {false, 0, std::numeric_limits<double>::infinity(),
@@ -693,8 +677,84 @@ private:
         }
         auto psi = workspace_->psi();
 
+        // Phase 1: Newton/Heuristic warm-up iterations
+        // Run a few Newton iterations with obstacle projection to move ATM/OTM
+        // nodes away from gap≈0 before starting strict PDAS
+        if (config_.pdas_warmup_iters > 0) {
+            for (size_t warmup_iter = 0; warmup_iter < config_.pdas_warmup_iters; ++warmup_iter) {
+                // Build Jacobian for current u
+                build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
+
+                // Evaluate L(u)
+                apply_operator_with_blocking(t, u, workspace_->lu());
+
+                // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
+                compute_residual(u, coeff_dt, workspace_->lu(), rhs, residual_);
+
+                // Apply BC to residual
+                apply_bc_to_residual(residual_, u, t);
+
+                // Negate for Thomas solver
+                for (size_t i = 0; i < n_; ++i) {
+                    residual_[i] = -residual_[i];
+                }
+
+                // Solve J·δu = -F(u)
+                auto result = solve_thomas<double>(
+                    jacobian_lower_, jacobian_diag_, jacobian_upper_,
+                    residual_, delta_u_, tridiag_workspace_
+                );
+
+                if (!result.ok()) {
+                    return {false, warmup_iter, std::numeric_limits<double>::infinity(),
+                           "Singular Jacobian in warm-up"};
+                }
+
+                // Update: u ← u + δu
+                for (size_t i = 0; i < n_; ++i) {
+                    u[i] += delta_u_[i];
+                }
+
+                // Apply boundary conditions
+                apply_boundary_conditions(u, t);
+
+                // Apply obstacle projection (heuristic-style)
+                apply_obstacle(t, u);
+            }
+        }
+
+        // Phase 2: PDAS iterations with ramped θ
+        // Build Jacobian ONCE from warm-started u (reused across all PDAS iterations)
+        build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
+
+        // Compute L_max for θ scaling
+        const double L_max = compute_L_max();
+        if (L_max < 1e-14) {
+            return {false, 0, std::numeric_limits<double>::infinity(),
+                   "L_max too small (Jacobian nearly zero)"};
+        }
+
+        // Save original Jacobian (will be modified for active set)
+        std::vector<double> jacobian_lower_orig = jacobian_lower_;
+        std::vector<double> jacobian_diag_orig = jacobian_diag_;
+        std::vector<double> jacobian_upper_orig = jacobian_upper_;
+
         // PDAS outer loop
         for (size_t pdas_iter = 0; pdas_iter < config_.pdas_max_iter; ++pdas_iter) {
+            // Compute ramped β: start at beta_initial, ramp to beta over first 5 iterations
+            // This prevents premature locking in early iterations
+            constexpr size_t ramp_iters = 5;
+            double beta_current;
+            if (pdas_iter < ramp_iters) {
+                // Linear ramp from beta_initial to beta
+                double t_ramp = static_cast<double>(pdas_iter) / ramp_iters;
+                beta_current = config_.pdas_beta_initial +
+                             t_ramp * (config_.pdas_beta - config_.pdas_beta_initial);
+            } else {
+                beta_current = config_.pdas_beta;
+            }
+            const double theta = beta_current / L_max;
+
             // Save previous active set for stability check
             active_set_prev_ = active_set_;
 
