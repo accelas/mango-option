@@ -146,6 +146,12 @@ public:
         double t = time_.t_start();
         apply_obstacle(t, std::span{u_current_});
         apply_boundary_conditions(std::span{u_current_}, t);
+
+        // CRITICAL: When using external buffer, u_old_ is not automatically updated
+        // Copy initial condition to u_old_ so first iteration has valid "previous" state
+        if (!output_buffer_.empty()) {
+            std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
+        }
     }
 
     /// Solve PDE from t_start to t_end
