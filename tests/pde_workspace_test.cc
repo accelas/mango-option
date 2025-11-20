@@ -58,10 +58,16 @@ TEST(PDEWorkspacePMRTest, NewtonArraysAccessible) {
     auto delta_u = ws->delta_u();
 
     EXPECT_EQ(jac_diag.size(), 101);
-    EXPECT_EQ(jac_upper.size(), 101);
-    EXPECT_EQ(jac_lower.size(), 101);
+    EXPECT_EQ(jac_upper.size(), 100);  // Off-diagonal: n-1
+    EXPECT_EQ(jac_lower.size(), 100);  // Off-diagonal: n-1
     EXPECT_EQ(residual.size(), 101);
     EXPECT_EQ(delta_u.size(), 101);
+
+    // Test new Newton arrays
+    auto newton_u_old = ws->newton_u_old();
+    auto tridiag_ws = ws->tridiag_workspace();
+    EXPECT_EQ(newton_u_old.size(), 101);
+    EXPECT_EQ(tridiag_ws.size(), 202);  // 2*n
 }
 
 }  // namespace
