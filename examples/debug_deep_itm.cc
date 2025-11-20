@@ -41,7 +41,7 @@ int main() {
         std::cerr << "Solver creation failed: " << solver_result.error() << "\n";
         return 1;
     }
-    auto solver = solver_result.value();
+    auto solver = std::move(solver_result.value());
 
     std::cout << "=== Deep ITM Put Test (Projected Thomas - Reformulated) ===\n";
     std::cout << "S=" << params.spot << " K=" << params.strike << " T=" << params.maturity << "\n";
