@@ -125,21 +125,40 @@ private:
     size_t padded_n_;
     std::pmr::memory_resource* resource_;
 
-    std::pmr::vector<double> grid_;
-    std::pmr::vector<double> u_current_;
-    std::pmr::vector<double> u_next_;
-    std::pmr::vector<double> u_stage_;
-    std::pmr::vector<double> rhs_;
-    std::pmr::vector<double> lu_;
-    std::pmr::vector<double> psi_;
-    std::pmr::vector<double> dx_;
-    std::pmr::vector<double> jacobian_diag_;
-    std::pmr::vector<double> jacobian_upper_;
-    std::pmr::vector<double> jacobian_lower_;
-    std::pmr::vector<double> residual_;
-    std::pmr::vector<double> delta_u_;
-    std::pmr::vector<double> newton_u_old_;
-    std::pmr::vector<double> tridiag_workspace_;
+    // ═══════════════════════════════════════════════════════════════════════
+    // IMPORTANT: PDEWorkspace arrays are CURRENTLY UNUSED (reserved for future)
+    // ═══════════════════════════════════════════════════════════════════════
+    // PDESolver has its OWN separate std::vector arrays for internal computation
+    // and does NOT use these PMR arrays.
+    //
+    // These arrays are ALLOCATED but UNUSED in current code. They are reserved for:
+    //   1. Future batch operations (multiple solvers sharing memory arena)
+    //   2. Future external workspace management
+    //   3. Future zero-copy sharing between solver instances
+    //
+    // STATUS: As of PR #202, these arrays exist but are never accessed by PDESolver.
+    //         They consume memory (~13n doubles) without providing current value.
+    //
+    // DO NOT attempt to "deduplicate" by removing PDESolver's arrays!
+    // PDESolver MUST keep its own std::vector members for internal computation.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // MUST be declared in same order as constructor initialization!
+    std::pmr::vector<double> grid_;              // Spatial grid points
+    std::pmr::vector<double> u_current_;         // Current solution u^{n+1}
+    std::pmr::vector<double> u_next_;            // Next solution (for multi-stage)
+    std::pmr::vector<double> u_stage_;           // Stage solution u^{n+γ}
+    std::pmr::vector<double> rhs_;               // Right-hand side vector
+    std::pmr::vector<double> lu_;                // Spatial operator output L(u)
+    std::pmr::vector<double> psi_;               // Obstacle constraint ψ(x,t)
+    std::pmr::vector<double> dx_;                // Precomputed grid spacing (n-1)
+    std::pmr::vector<double> jacobian_diag_;     // Jacobian main diagonal (n)
+    std::pmr::vector<double> jacobian_upper_;    // Jacobian upper diagonal (n-1)
+    std::pmr::vector<double> jacobian_lower_;    // Jacobian lower diagonal (n-1)
+    std::pmr::vector<double> residual_;          // Newton residual F(u)
+    std::pmr::vector<double> delta_u_;           // Newton correction δu
+    std::pmr::vector<double> newton_u_old_;      // Previous Newton iterate
+    std::pmr::vector<double> tridiag_workspace_; // Thomas solver workspace (2n)
 };
 
 }  // namespace mango
