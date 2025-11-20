@@ -256,14 +256,26 @@ private:
     std::vector<double> solution_storage_;  // Backing storage when no external buffer
     std::span<double> u_current_;           // u^{n+1} or u^{n+γ}
     std::span<double> u_old_;               // u^n
-    std::vector<double> rhs_;               // n: RHS vector for stages
 
-    // Newton workspace arrays (merged from NewtonWorkspace)
-    std::vector<double> jacobian_lower_;      // n-1: Lower diagonal
-    std::vector<double> jacobian_diag_;       // n: Main diagonal
-    std::vector<double> jacobian_upper_;      // n-1: Upper diagonal
-    std::vector<double> residual_;            // n: Residual vector
-    std::vector<double> delta_u_;             // n: Newton step
+    // ═══════════════════════════════════════════════════════════════════════
+    // PDESolver INTERNAL working arrays (NOT duplicates of workspace arrays!)
+    // ═══════════════════════════════════════════════════════════════════════
+    // These std::vector arrays are PDESolver's PRIMARY working memory for:
+    //   - TR-BDF2 stage computations (rhs_)
+    //   - Newton iteration (jacobian_*, residual_, delta_u_, newton_u_old_)
+    //   - Tridiagonal solver (tridiag_workspace_)
+    //
+    // PDEWorkspace arrays serve a DIFFERENT purpose (batch/external sharing).
+    // DO NOT remove these arrays thinking they are "duplicates"!
+    // ═══════════════════════════════════════════════════════════════════════
+    std::vector<double> rhs_;                 // n: RHS vector for TR-BDF2 stages
+
+    // Newton iteration working arrays
+    std::vector<double> jacobian_lower_;      // n-1: Jacobian lower diagonal
+    std::vector<double> jacobian_diag_;       // n: Jacobian main diagonal
+    std::vector<double> jacobian_upper_;      // n-1: Jacobian upper diagonal
+    std::vector<double> residual_;            // n: Newton residual F(u)
+    std::vector<double> delta_u_;             // n: Newton correction δu
     std::vector<double> newton_u_old_;        // n: Previous Newton iterate
     std::vector<double> tridiag_workspace_;   // 2n: Thomas algorithm workspace
 
