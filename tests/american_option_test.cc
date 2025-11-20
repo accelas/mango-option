@@ -218,8 +218,8 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
     ASSERT_TRUE(result.converged);
 
     const double intrinsic = params.strike - params.spot;
-    EXPECT_NEAR(result.value_at(params.spot), intrinsic, 0.5)
-        << "Left boundary should equal immediate exercise for deep ITM put";
+    EXPECT_NEAR(result.value_at(params.spot), intrinsic, 1e-3)
+        << "Left boundary should equal immediate exercise for deep ITM put (error < 0.001)";
 }
 
 TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
