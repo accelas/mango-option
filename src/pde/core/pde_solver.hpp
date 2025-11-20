@@ -106,9 +106,6 @@ public:
         , delta_u_(n_)
         , newton_u_old_(n_)
         , tridiag_workspace_(2 * n_)
-        , lambda_(n_, 0.0)  // Initialize dual multiplier to zero
-        , active_set_(n_, false)  // Initialize active set to empty
-        , active_set_prev_(n_, false)  // Initialize previous active set to empty
         , isa_target_(cpu::select_isa_target())
     {
         // Acquire workspace (either external or create owned)
@@ -270,10 +267,6 @@ private:
     std::vector<double> newton_u_old_;        // n: Previous Newton iterate
     std::vector<double> tridiag_workspace_;   // 2n: Thomas algorithm workspace
 
-    // Active set heuristic (used by Heuristic obstacle method)
-    std::vector<double> lambda_;              // n: Dual multiplier for obstacle constraint
-    std::vector<bool> active_set_;            // n: Active set indicator (true = locked to obstacle)
-    std::vector<bool> active_set_prev_;       // n: Previous active set (for stability check)
 
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
@@ -346,35 +339,6 @@ private:
         }
     }
 
-    /// Compute L_max: maximum absolute row sum of tridiagonal Jacobian
-    ///
-    /// Used by the Heuristic method for computing the dual multiplier threshold.
-    /// In the discrete setting, L_max = max_i (|lower[i-1]| + |diag[i]| + |upper[i]|).
-    ///
-    /// @return Maximum absolute row sum
-    double compute_L_max() const {
-        double L_max = 0.0;
-
-        // First interior row (i=1): no lower neighbor
-        if (n_ > 1) {
-            double row_sum = std::abs(jacobian_diag_[1]) + std::abs(jacobian_upper_[0]);
-            L_max = std::max(L_max, row_sum);
-        }
-
-        // Interior rows (i=2 to n-2): have both neighbors
-        for (size_t i = 2; i < n_ - 1; ++i) {
-            double row_sum = std::abs(jacobian_lower_[i-1]) +
-                           std::abs(jacobian_diag_[i]) +
-                           std::abs(jacobian_upper_[i]);
-            L_max = std::max(L_max, row_sum);
-        }
-
-        // Last interior row (i=n-1): no upper neighbor (boundary node, skip)
-        // Note: boundary nodes (i=0, i=n-1) handled separately via BC
-
-        return L_max;
-    }
-
     /// Apply obstacle condition: u(x,t) ≥ ψ(x,t)
     ///
     /// Projects solution onto obstacle constraint via complementarity:
@@ -392,76 +356,6 @@ private:
         for (size_t i = 0; i < u.size(); ++i) {
             if (u[i] < psi[i]) {
                 u[i] = psi[i];
-            }
-        }
-    }
-
-    /// Apply active set heuristic for obstacle problems
-    ///
-    /// Empirical active set heuristic that locks nodes in the exercise region.
-    ///
-    /// Note: This is a heuristic method with tuned parameters.
-    /// For theoretically sound LCP solving, use ProjectedThomas instead.
-    /// Current heuristic has no convergence guarantees:
-    /// - Jacobian restored every iteration → nodes can flap between locked/free
-    /// - Empirical constants may fail on different grids/parameters
-    /// - No complementarity residual check
-    ///
-    /// @param t Current time
-    /// @param u Current solution vector
-    /// @param jacobian_diag_orig Original Jacobian diagonal (before modifications)
-    void apply_active_set_heuristic(
-        double t,
-        std::span<const double> u,
-        std::span<const double> jacobian_diag_orig)
-    {
-        if (!obstacle_) return;
-
-        auto psi = workspace_->psi();
-        (*obstacle_)(t, grid_, psi);
-
-        // First: Estimate dual multiplier λ from current residual
-        // λ_i = max(0, -F(u)_i / diag_i_original)
-        for (size_t i = 1; i < n_ - 1; ++i) {
-            const double diag_orig = jacobian_diag_orig[i];
-            if (std::abs(diag_orig) > 1e-14) {
-                // residual_[i] = F(u), so λ = max(0, -F(u) / diag)
-                lambda_[i] = std::max(0.0, -residual_[i] / diag_orig);
-            } else {
-                lambda_[i] = 0.0;
-            }
-        }
-
-        // Second: Classify nodes using updated multiplier
-        // WARNING: Empirical parameters tuned to pass current test suite
-        // This is a heuristic method - for theoretically sound LCP solving, use ProjectedThomas
-        constexpr double lambda_scale = 1e-3;  // EMPIRICAL: Tuned to balance deep ITM vs ATM
-        constexpr double gap_atol = 1e-10;     // EMPIRICAL: Absolute gap tolerance
-        constexpr double gap_rtol = 1e-6;      // EMPIRICAL: Relative gap tolerance
-
-        for (size_t i = 1; i < n_ - 1; ++i) {  // Interior points only
-            // Gap test: u_i - ψ_i ≤ atol + rtol * max(|ψ_i|, 1.0)
-            const double gap = u[i] - psi[i];
-            const double scale = std::max(std::abs(psi[i]), 1.0);
-            const double gap_threshold = gap_atol + gap_rtol * scale;
-            const bool gap_small = (gap <= gap_threshold);
-
-            // Multiplier test: λ_i ≥ λ_tol
-            // λ_tol scales with diagonal (auto grid-dependence)
-            const double diag_orig = jacobian_diag_orig[i];
-            const double lambda_tol = lambda_scale * std::max(1.0, std::abs(diag_orig));
-            const bool multiplier_active = (lambda_[i] >= lambda_tol);
-
-            // Lock if BOTH tests fire
-            if (gap_small && multiplier_active) {
-                // Node is in active set - lock to payoff
-                // Modify linear system: u[i] = psi[i]
-                jacobian_diag_[i] = 1.0;
-                if (i > 0) jacobian_lower_[i-1] = 0.0;
-                if (i < n_-1) jacobian_upper_[i] = 0.0;
-
-                // Residual: F(u) = u[i] - psi[i]
-                residual_[i] = u[i] - psi[i];
             }
         }
     }
@@ -628,11 +522,11 @@ private:
     /// @param u Solution vector (input: initial guess, output: converged solution)
     /// @param rhs Right-hand side from previous stage
     /// @return Result with convergence status
-    /// Dispatch implicit stage solver based on obstacle method configuration
+    /// Dispatch implicit stage solver based on obstacle presence
     ///
     /// Routes to appropriate solver:
-    /// - ObstacleMethod::ProjectedThomas → solve_implicit_stage_projected() (Brennan-Schwartz LCP)
-    /// - ObstacleMethod::Heuristic → solve_implicit_stage() (Newton with empirical active set)
+    /// - With obstacle → solve_implicit_stage_projected() (Brennan-Schwartz LCP)
+    /// - Without obstacle → solve_implicit_stage() (Standard Newton iteration)
     ///
     /// @param t Current time
     /// @param coeff_dt Time step coefficient
@@ -642,7 +536,7 @@ private:
     NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
                                                std::span<double> u,
                                                std::span<const double> rhs) {
-        if (obstacle_ && config_.obstacle_method == ObstacleMethod::ProjectedThomas) {
+        if (obstacle_) {
             return solve_implicit_stage_projected(t, coeff_dt, u, rhs);
         } else {
             return solve_implicit_stage(t, coeff_dt, u, rhs);
@@ -887,21 +781,11 @@ private:
         // Quasi-Newton: Build Jacobian once and reuse
         build_jacobian(t, coeff_dt, u, eps);
 
-        // Save original Jacobian for active set modifications
-        std::vector<double> jacobian_lower_orig = jacobian_lower_;
-        std::vector<double> jacobian_diag_orig = jacobian_diag_;
-        std::vector<double> jacobian_upper_orig = jacobian_upper_;
-
         // Copy initial guess
         std::copy(u.begin(), u.end(), newton_u_old_.begin());
 
         // Newton iteration
         for (size_t iter = 0; iter < config_.max_iter; ++iter) {
-            // Restore Jacobian from original (for changing active sets)
-            jacobian_lower_ = jacobian_lower_orig;
-            jacobian_diag_ = jacobian_diag_orig;
-            jacobian_upper_ = jacobian_upper_orig;
-
             // Evaluate L(u)
             apply_operator_with_blocking(t, u, workspace_->lu());
 
@@ -911,10 +795,6 @@ private:
 
             // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
             apply_bc_to_residual(residual_, u, t);
-
-            // Apply empirical active set heuristic (modifies Jacobian and residual)
-            // Note: For robust LCP solving, use ProjectedThomas instead
-            apply_active_set_heuristic(t, u, jacobian_diag_orig);
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu
             // Negate residual for RHS

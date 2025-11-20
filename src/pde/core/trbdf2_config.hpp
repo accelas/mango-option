@@ -9,7 +9,6 @@ namespace mango {
 
 /// Method for handling obstacle constraints in American options
 enum class ObstacleMethod {
-    Heuristic,       ///< Empirical active set heuristic (tuned parameters)
     ProjectedThomas  ///< Projected Thomas (Brennan-Schwartz LCP solver)
 };
 
