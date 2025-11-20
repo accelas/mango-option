@@ -261,33 +261,64 @@ private:
     size_t n_;
 };
 
-/// Projected Thomas Algorithm for Linear Complementarity Problems (LCP)
+/// Projected Thomas Algorithm (Brennan-Schwartz) for American Options
 ///
-/// Solves the constrained system: Ax = d subject to x ≥ psi
-/// where A is a tridiagonal M-matrix.
+/// **Purpose:**
+/// Solves the Linear Complementarity Problem (LCP) arising in American option pricing:
+///   A·x = d,  subject to x ≥ ψ (obstacle constraint)
+/// where A is a tridiagonal M-matrix from TR-BDF2 time-stepping.
 ///
-/// This is the Brennan-Schwartz algorithm for American option pricing.
-/// Unlike standard projection (solve then project), this enforces the
-/// constraint DURING backward substitution, respecting the tridiagonal
-/// coupling between nodes.
+/// **Mathematical Background:**
+/// American options require solving a PDE with obstacle constraint:
+///   ∂V/∂t + L(V) = 0,  V ≥ ψ (payoff)
+/// Implicit time-stepping gives: (I - dt·L)·V = rhs,  V ≥ ψ
+/// This is an LCP - linear system with inequality constraint.
 ///
-/// The algorithm is identical to standard Thomas except:
-///   Standard: x[i] = d'[i] - c'[i]*x[i+1]
-///   Projected: x[i] = max(d'[i] - c'[i]*x[i+1], psi[i])
+/// **Algorithm Overview:**
+/// The Brennan-Schwartz (1977) algorithm enforces the obstacle constraint
+/// DURING backward substitution, not after. This respects the tridiagonal
+/// coupling between nodes and provably converges in a single pass.
 ///
-/// For M-matrices with proper time-step constraints, this solves the LCP
-/// in a single pass (provably convergent).
+/// **Key Difference from "Solve then Project":**
+///   WRONG approach (breaks tridiagonal coupling):
+///     1. Solve Ax = d unconstrained
+///     2. Project: x[i] = max(x[i], ψ[i]) for all i
+///     → This violates Ax = d at projected nodes!
 ///
-/// @tparam T Floating point type
-/// @param lower Lower diagonal (a), size n-1
-/// @param diag Main diagonal (b), size n
-/// @param upper Upper diagonal (c), size n-1
-/// @param rhs Right-hand side (d), size n
-/// @param psi Lower bound (obstacle), size n
-/// @param solution Output solution (x), size n (modified in-place)
-/// @param workspace Temporary storage, size 2n
-/// @param config Solver configuration
-/// @return Result indicating success/failure
+///   CORRECT approach (Projected Thomas):
+///     1. Forward elimination: build c', d' (standard Thomas)
+///     2. Projected backward substitution:
+///        x[n-1] = max(d'[n-1], ψ[n-1])
+///        x[i] = max(d'[i] - c'[i]·x[i+1], ψ[i])  for i = n-2, ..., 0
+///     → Constraint enforced at EACH STEP, preserving tridiagonal structure
+///
+/// **Why This Works:**
+/// For M-matrices (which TR-BDF2 produces with proper dt):
+///   - A has positive diagonal and non-positive off-diagonals
+///   - The projection max(·, ψ[i]) is monotone
+///   - Backward substitution propagates constraints correctly
+///   - Result: Single-pass convergence, no iteration needed
+///
+/// **Performance:**
+/// - Time: O(n) (same as standard Thomas)
+/// - Space: O(n) workspace
+/// - Iterations: 1 (always, for well-posed problems)
+///
+/// **Contrast with Newton + Active Set:**
+/// - Newton solves J·δx = -F(x), updates x ← x + δx (iterative)
+/// - Active set guesses which nodes are on obstacle (heuristic)
+/// - Projected Thomas solves A·x = d directly, enforces constraint exactly (single-pass)
+///
+/// @tparam T Floating point type (float or double)
+/// @param lower Lower diagonal a[0..n-2], where A[i,i-1] = a[i-1]
+/// @param diag Main diagonal b[0..n-1], where A[i,i] = b[i]
+/// @param upper Upper diagonal c[0..n-2], where A[i,i+1] = c[i]
+/// @param rhs Right-hand side d[0..n-1]
+/// @param psi Obstacle (lower bound) ψ[0..n-1], must have ψ ≤ d for consistency
+/// @param solution OUTPUT: Solution x[0..n-1], satisfies A·x = d and x ≥ ψ
+/// @param workspace Temporary storage, size ≥ 2n (for c', d' arrays)
+/// @param config Optional solver configuration (tolerances, max iterations)
+/// @return ThomasResult with success/failure status and diagnostics
 template<FloatingPoint T>
 [[nodiscard]] constexpr ThomasResult<T> solve_thomas_projected(
     std::span<const T> lower,

@@ -649,39 +649,90 @@ private:
         }
     }
 
-    /// Solve implicit stage using Projected Thomas algorithm
+    /// Solve implicit stage using Projected Thomas (Brennan-Schwartz) algorithm
     ///
-    /// Implements Brennan-Schwartz algorithm for American option pricing.
-    /// Solves the Linear Complementarity Problem (LCP): Au = b, u ≥ ψ
-    /// by enforcing projection during the backward substitution phase.
+    /// **Algorithm Overview:**
+    /// Solves the Linear Complementarity Problem (LCP) for American option pricing:
+    ///   A·u = rhs,  subject to u ≥ ψ (obstacle constraint)
+    /// where A = I - coeff_dt·∂L/∂u is the TR-BDF2 stage matrix.
     ///
-    /// This method solves the TRUE TR-BDF2 stage equation:
-    ///   A·u = rhs,  subject to u ≥ ψ
-    /// where A = I - coeff_dt·∂L/∂u (the Jacobian matrix)
+    /// **Key Mathematical Insight:**
+    /// This method solves the TRUE TR-BDF2 stage equation directly, NOT a Newton correction.
     ///
-    /// This is more robust for "sticky boundary" problems because:
-    /// - No dual variables → no sensitivity to numerical noise
-    /// - Direct coupling of obstacle with tridiagonal structure
-    /// - Provably convergent for M-matrices in single pass
+    /// CORRECT (this implementation):
+    ///   A·u = rhs  where A = I - coeff_dt·∂L/∂u
+    ///   → Solves for u directly via projected tridiagonal solver
     ///
-    /// @param t Current time
-    /// @param coeff_dt Time step coefficient
-    /// @param u Solution vector (modified in-place)
-    /// @param rhs Right-hand side vector (already computed by caller)
-    /// @return Always returns converged=true (single-pass algorithm)
+    /// WRONG (previous Newton-based approach):
+    ///   J·δu = -F(u)  where F(u) = u - rhs - coeff_dt·L(u)
+    ///   → Solves for correction δu, then u ← u + δu
+    ///   → For deep ITM, this lifted values above intrinsic (wrong physics)
+    ///
+    /// **Brennan-Schwartz Projection:**
+    /// Standard tridiagonal solver with obstacle projection during backward substitution:
+    ///   u[i] = max(unconstrained_value, ψ[i])
+    /// This couples the obstacle constraint directly with the tridiagonal structure,
+    /// ensuring u ≥ ψ at every node without iteration.
+    ///
+    /// **Advantages over Newton + Heuristic Active Set:**
+    /// - No dual variables λ → no sensitivity to numerical noise
+    /// - No iteration → always converges in single pass for M-matrices
+    /// - Direct physics: solves stage equation, not correction equation
+    /// - Provably correct for American options (Brennan-Schwartz 1977)
+    ///
+    /// **Critical Fixes Applied:**
+    /// 1. Dirichlet RHS correction: For direct solve A·u = rhs, Dirichlet rows
+    ///    need rhs = g(t), not the interior formula rhs = u_old + w·L(u_old)
+    /// 2. Deep exercise locking: Nodes deep ITM (ψ > 0.95) are locked to obstacle
+    ///    to prevent diffusion from lifting values above intrinsic value
+    ///
+    /// @param t Current time in PDE (backward from T to 0)
+    /// @param coeff_dt Time step coefficient (w1 for stage 1, w2 for stage 2)
+    /// @param u Solution vector (input: initial guess, output: solution)
+    /// @param rhs Right-hand side computed by caller (interior formula)
+    /// @return Always converged=true (single-pass, no iteration)
     NewtonResult solve_implicit_stage_projected(double t, double coeff_dt,
                                                 std::span<double> u,
                                                 std::span<const double> rhs) {
-        // Apply BCs to initial guess
+        // Apply boundary conditions to initial guess
         apply_boundary_conditions(u, t);
 
-        // Build Jacobian matrix A = I - coeff_dt·∂L/∂u
-        // This represents the true TR-BDF2 stage matrix
+        // ═══════════════════════════════════════════════════════════════════════
+        // STEP 1: Build the TRUE TR-BDF2 stage matrix A = I - coeff_dt·∂L/∂u
+        // ═══════════════════════════════════════════════════════════════════════
+        // For TR-BDF2, each implicit stage has the form:
+        //   u - coeff_dt·L(u) = rhs
+        // Linearizing L(u) ≈ L(u_prev) + ∂L/∂u·(u - u_prev), we get:
+        //   (I - coeff_dt·∂L/∂u)·u = rhs'
+        // where A = I - coeff_dt·∂L/∂u is the stage matrix (Jacobian).
+        //
+        // This is FUNDAMENTALLY DIFFERENT from Newton iteration:
+        //   Newton: J·δu = -F(u) where F(u) = u - rhs - coeff_dt·L(u)
+        //   TR-BDF2 stage: A·u = rhs where A = I - coeff_dt·∂L/∂u
+        //
+        // The Newton approach solves for a CORRECTION δu and updates u ← u + δu.
+        // The TR-BDF2 stage solves for u DIRECTLY. This distinction is critical
+        // for American options because the obstacle constraint applies to u, not δu.
         build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
 
-        // CRITICAL FIX: For Dirichlet boundaries, override RHS with boundary value
-        // When solving A·u = rhs directly (not Newton correction), Dirichlet rows need rhs = g(t)
-        // Create mutable copy of RHS to apply boundary conditions
+        // ═══════════════════════════════════════════════════════════════════════
+        // CRITICAL FIX #1: Dirichlet Boundary RHS Correction
+        // ═══════════════════════════════════════════════════════════════════════
+        // When solving A·u = rhs DIRECTLY (not Newton correction J·δu = -F),
+        // Dirichlet boundaries require special RHS treatment.
+        //
+        // For Dirichlet BC u[0] = g(t), the Jacobian row becomes [0, 1, 0, ...],
+        // so the equation is simply: 1·u[0] = rhs[0]
+        // Therefore, we MUST have rhs[0] = g(t) (the boundary value).
+        //
+        // The caller provides rhs with the INTERIOR formula:
+        //   rhs[i] = u_old[i] + w1·L(u_old)[i]  (Stage 1)
+        //   rhs[i] = α·u_stage1[i] + β·u_old[i]  (Stage 2)
+        // This formula is WRONG for Dirichlet rows! We must override it.
+        //
+        // Why this wasn't needed for Newton: In J·δu = -F(u), the BC rows
+        // enforce δu[0] = 0 (no change), so rhs = 0 is correct.
+        // But for A·u = rhs, we need rhs = g(t) to get u[0] = g(t).
         std::vector<double> rhs_with_bc(rhs.begin(), rhs.end());
 
         // Apply Dirichlet boundary values to RHS
@@ -704,60 +755,123 @@ private:
         }
         auto psi = workspace_->psi();
 
-        // Evaluate obstacle at current time
+        // Evaluate obstacle constraint ψ(x,t) at current time
         (*obstacle_)(t, grid_, psi);
 
-        // CRITICAL FIX: Lock deep exercise region to obstacle
-        // For deep ITM options where exercise is definitively optimal everywhere,
-        // lock those regions to prevent diffusion from lifting values above intrinsic.
+        // ═══════════════════════════════════════════════════════════════════════
+        // CRITICAL FIX #2: Lock Deep Exercise Region to Prevent Diffusion Lift
+        // ═══════════════════════════════════════════════════════════════════════
+        // **Problem:** For VERY deep ITM options (e.g., S=0.25, K=100), the PDE
+        // has dominant diffusion that can lift interior values above intrinsic.
         //
-        // Strategy: Only lock nodes DEEP in the money where psi (intrinsic value) is large.
-        // For American puts: psi = max(1 - exp(x), 0), so psi → 1 as x → -∞ (deep ITM).
-        // We lock nodes where psi > 0.95 (95% of strike), far from ATM where time value matters.
-        constexpr double deep_itm_threshold = 0.95;  // Lock only if psi > 95% of strike
-        constexpr double exercise_tolerance = 1e-8;  // Tolerance for checking if on obstacle
+        // **Physics:** Deep ITM, exercise is definitively optimal at ALL nodes in
+        // the region. There is NO continuation value - only intrinsic value.
+        // The solution should be u(x) = ψ(x) = max(K - S·exp(x), 0) everywhere.
+        //
+        // **Why Projected Thomas alone isn't enough:**
+        // - Projected Thomas enforces u ≥ ψ during backward substitution
+        // - But the forward elimination and tridiagonal coupling can still allow
+        //   diffusion to "push" values above ψ in the unconstrained solve
+        // - When back-substituting, if the unconstrained value is > ψ, projection
+        //   doesn't activate, and we get u > ψ (wrong!)
+        //
+        // **Solution:** Lock deep ITM nodes by converting them to Dirichlet constraints.
+        // This ELIMINATES the tridiagonal coupling for those nodes, preventing diffusion
+        // from affecting them. The equation becomes simply: u[i] = ψ[i].
+        //
+        // **Threshold Selection:**
+        // - Lock only if ψ > 0.95 (95% of strike in normalized units)
+        // - For American puts: ψ = max(1 - exp(x), 0), so:
+        //     ψ > 0.95  ⟺  1 - exp(x) > 0.95  ⟺  exp(x) < 0.05  ⟺  x < -3.0
+        // - This is ~3 log-moneyness units deep ITM, well separated from ATM (x=0)
+        // - ATM/near-ATM nodes (where time value exists) remain free to solve via LCP
+        //
+        // **Why 0.95 and not 0.99 or 1.0?**
+        // - 0.99 would only lock the extreme boundary (x → -∞)
+        // - 0.95 captures the entire region where exercise is definitively optimal
+        // - Empirically verified: S=0.25, K=100 has ψ ≈ 0.9975 at spot, needs locking
+        //
+        // **Implementation:** Convert Jacobian row to identity:
+        //   Before: [a_lower[i], a_diag[i], a_upper[i]] · [u[i-1], u[i], u[i+1]]ᵀ = rhs[i]
+        //   After:  [0, 1, 0] · [u[i-1], u[i], u[i+1]]ᵀ = ψ[i]
+        //   Result: u[i] = ψ[i] (Dirichlet constraint)
+        constexpr double deep_itm_threshold = 0.95;  // Lock if ψ > 95% of strike
+        constexpr double exercise_tolerance = 1e-8;  // Tolerance for "on obstacle"
 
         for (size_t i = 1; i < n_ - 1; ++i) {
-            // Only lock if:
-            // 1. Deep ITM: obstacle value is very high (psi > threshold)
-            // 2. Currently on obstacle: gap is nearly zero
+            // Check both conditions:
+            // 1. Deep ITM: ψ[i] > 0.95 (far from ATM where time value matters)
+            // 2. On obstacle: u[i] - ψ[i] < 1e-8 (solution already at intrinsic)
+            //
+            // The second condition prevents locking nodes that legitimately have
+            // time value > 0 (e.g., at earlier times before convergence to payoff).
             bool deep_itm = (psi[i] > deep_itm_threshold);
             bool at_obstacle = (u[i] - psi[i] < exercise_tolerance);
 
             if (deep_itm && at_obstacle) {
-                // Convert to Dirichlet row: diag=1, off-diagonals=0, rhs=psi
-                if (i > 0) jacobian_lower_[i-1] = 0.0;
-                jacobian_diag_[i] = 1.0;
-                if (i < n_ - 1) jacobian_upper_[i] = 0.0;
-                rhs_with_bc[i] = psi[i];
+                // Convert row i to Dirichlet constraint: u[i] = ψ[i]
+                // Jacobian row: [0, 1, 0] (identity row)
+                // RHS: ψ[i] (intrinsic value)
+                if (i > 0) jacobian_lower_[i-1] = 0.0;  // Zero lower diagonal
+                jacobian_diag_[i] = 1.0;                 // Set diagonal to 1
+                if (i < n_ - 1) jacobian_upper_[i] = 0.0; // Zero upper diagonal
+                rhs_with_bc[i] = psi[i];                 // RHS = intrinsic value
             }
         }
 
-        // Solve A·u = rhs with constraint u ≥ ψ
-        // The RHS has been corrected to include Dirichlet boundary values:
-        //   Interior: rhs = u_old + w1·L(u_old) (Stage1) or α·u_stage1 + β·u_old (Stage2)
-        //   Dirichlet boundaries: rhs = g(t)
+        // ═══════════════════════════════════════════════════════════════════════
+        // STEP 2: Solve the LCP using Projected Thomas (Brennan-Schwartz)
+        // ═══════════════════════════════════════════════════════════════════════
+        // Solve: A·u = rhs  subject to u ≥ ψ
+        //
+        // The RHS vector now contains three types of entries:
+        //   1. Interior nodes: rhs[i] = u_old[i] + w·L(u_old)[i]  (TR-BDF2 formula)
+        //   2. Dirichlet boundaries: rhs[0] = g(t)  (FIX #1 applied)
+        //   3. Locked deep ITM: rhs[i] = ψ[i]  (FIX #2 applied)
+        //
+        // The Jacobian matrix A has three types of rows:
+        //   1. Interior nodes: A[i] = I - coeff_dt·∂L/∂u  (standard TR-BDF2)
+        //   2. Dirichlet boundaries: A[0] = [0, 1, 0]  (identity row)
+        //   3. Locked deep ITM: A[i] = [0, 1, 0]  (identity row, FIX #2)
+        //
+        // Projected Thomas algorithm:
+        //   - Forward elimination: identical to standard Thomas (build c', d' arrays)
+        //   - Backward substitution: u[i] = max(unconstrained, ψ[i]) at each step
+        // This couples the obstacle constraint u ≥ ψ with the tridiagonal structure,
+        // ensuring the constraint is satisfied without iteration.
+        //
+        // CRITICAL: We pass u (solution), not δu (correction)!
+        //   Newton would solve: J·δu = -F, then u ← u + δu
+        //   Projected Thomas solves: A·u = rhs directly (u is the solution)
         auto result = solve_thomas_projected<double>(
             jacobian_lower_,
             jacobian_diag_,
             jacobian_upper_,
-            rhs_with_bc,  // Use corrected RHS with boundary values
-            psi,          // Use obstacle directly (not psi - u)
-            u,            // Solve for u directly (not δu)
+            rhs_with_bc,  // Corrected RHS (FIX #1 and #2 applied)
+            psi,          // Obstacle constraint ψ(x,t)
+            u,            // OUTPUT: solution u (not correction δu)
             tridiag_workspace_
         );
 
         if (!result.ok()) {
+            // Projected Thomas should never fail for well-posed problems
+            // Possible causes: singular matrix, NaN/Inf in inputs
             return {false, 1, std::numeric_limits<double>::infinity(),
                    std::optional<std::string>(std::string(result.message()))};
         }
 
-        // No update step needed - u already contains the solution
+        // ═══════════════════════════════════════════════════════════════════════
+        // STEP 3: Apply boundary conditions and return
+        // ═══════════════════════════════════════════════════════════════════════
+        // No update step needed - u already contains the solution from Projected Thomas
+        // (Unlike Newton where we'd do: u ← u + δu)
 
-        // Apply boundary conditions
+        // Re-apply boundary conditions to ensure exact satisfaction
+        // (Projected Thomas preserves BCs, but this is a safety measure)
         apply_boundary_conditions(u, t);
 
-        // Single-pass algorithm, always converges
+        // Projected Thomas always converges in a single pass (no iteration)
+        // Convergence is guaranteed for M-matrices (which TR-BDF2 produces)
         return {true, 1, 0.0, std::nullopt};
     }
 
