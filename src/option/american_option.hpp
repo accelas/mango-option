@@ -32,7 +32,9 @@ using AmericanOptionParams = PricingParams;
  * Solver result containing solution surface (interpolate on-demand for specific prices).
  */
 struct AmericanOptionResult {
+    double value;                      ///< Option value at current spot (dollars)
     std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
+    std::vector<double> x_grid;        ///< Spatial grid points (log-moneyness coordinates)
     std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (optional, for at_time())
     size_t n_space;                    ///< Number of spatial grid points
     size_t n_time;                     ///< Number of time steps
@@ -43,7 +45,7 @@ struct AmericanOptionResult {
 
     /// Default constructor
     AmericanOptionResult()
-        : solution(), surface_2d(), n_space(0), n_time(0),
+        : value(0.0), solution(), x_grid(), surface_2d(), n_space(0), n_time(0),
           x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
 
     /**
@@ -103,15 +105,9 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
-     * @param output_buffer Optional buffer for full spatiotemporal surface.
-     *                      If provided, solver writes all time steps to this buffer
-     *                      enabling at_time() access. Buffer layout:
-     *                      [u_old_initial][step0][step1]...[step(n_time-1)]
-     *                      Required size: (n_time + 1) * n_space doubles
      */
     AmericanOptionSolver(const AmericanOptionParams& params,
-                        std::shared_ptr<AmericanSolverWorkspace> workspace,
-                        std::span<double> output_buffer = {});
+                        std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
      * Factory method with expected-based validation.
@@ -124,13 +120,11 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
-     * @param output_buffer Optional buffer for full spatiotemporal surface (see constructor)
      * @return Expected containing solver on success, error message on failure
      */
     static std::expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
-        std::shared_ptr<AmericanSolverWorkspace> workspace,
-        std::span<double> output_buffer = {});
+        std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
      * Solve for option value.
@@ -166,9 +160,6 @@ private:
     // Workspace (contains grid configuration and pre-allocated storage)
     // Uses shared_ptr to keep workspace alive for the solver's lifetime
     std::shared_ptr<AmericanSolverWorkspace> workspace_;
-
-    // Optional output buffer for full surface
-    std::span<double> output_buffer_;
 
     // Solution state
     std::vector<double> solution_;

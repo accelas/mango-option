@@ -42,44 +42,50 @@ public:
             new PDEWorkspace(n, grid_buffer.span(), resource));
     }
 
-    // Accessors - all return SIMD-padded spans
-    std::span<double> u_current() { return {u_current_.data(), padded_n_}; }
-    std::span<const double> u_current() const { return {u_current_.data(), padded_n_}; }
+    // Accessors - return logical size spans (SIMD padding is internal detail)
+    std::span<double> u_current() { return {u_current_.data(), n_}; }
+    std::span<const double> u_current() const { return {u_current_.data(), n_}; }
 
-    std::span<double> u_next() { return {u_next_.data(), padded_n_}; }
-    std::span<const double> u_next() const { return {u_next_.data(), padded_n_}; }
+    std::span<double> u_next() { return {u_next_.data(), n_}; }
+    std::span<const double> u_next() const { return {u_next_.data(), n_}; }
 
-    std::span<double> u_stage() { return {u_stage_.data(), padded_n_}; }
-    std::span<const double> u_stage() const { return {u_stage_.data(), padded_n_}; }
+    std::span<double> u_stage() { return {u_stage_.data(), n_}; }
+    std::span<const double> u_stage() const { return {u_stage_.data(), n_}; }
 
-    std::span<double> rhs() { return {rhs_.data(), padded_n_}; }
-    std::span<const double> rhs() const { return {rhs_.data(), padded_n_}; }
+    std::span<double> rhs() { return {rhs_.data(), n_}; }
+    std::span<const double> rhs() const { return {rhs_.data(), n_}; }
 
-    std::span<double> lu() { return {lu_.data(), padded_n_}; }
-    std::span<const double> lu() const { return {lu_.data(), padded_n_}; }
+    std::span<double> lu() { return {lu_.data(), n_}; }
+    std::span<const double> lu() const { return {lu_.data(), n_}; }
 
-    std::span<double> psi() { return {psi_.data(), padded_n_}; }
-    std::span<const double> psi() const { return {psi_.data(), padded_n_}; }
+    std::span<double> psi() { return {psi_.data(), n_}; }
+    std::span<const double> psi() const { return {psi_.data(), n_}; }
 
-    std::span<const double> grid() const { return {grid_.data(), padded_n_}; }
+    std::span<const double> grid() const { return {grid_.data(), n_}; }
 
-    std::span<const double> dx() const { return {dx_.data(), pad_to_simd(n_ - 1)}; }
+    std::span<const double> dx() const { return {dx_.data(), n_ - 1}; }
 
     // Newton solver arrays
-    std::span<double> jacobian_diag() { return {jacobian_diag_.data(), padded_n_}; }
-    std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), padded_n_}; }
+    std::span<double> jacobian_diag() { return {jacobian_diag_.data(), n_}; }
+    std::span<const double> jacobian_diag() const { return {jacobian_diag_.data(), n_}; }
 
-    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), padded_n_}; }
-    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), padded_n_}; }
+    std::span<double> jacobian_upper() { return {jacobian_upper_.data(), n_ - 1}; }
+    std::span<const double> jacobian_upper() const { return {jacobian_upper_.data(), n_ - 1}; }
 
-    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), padded_n_}; }
-    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), padded_n_}; }
+    std::span<double> jacobian_lower() { return {jacobian_lower_.data(), n_ - 1}; }
+    std::span<const double> jacobian_lower() const { return {jacobian_lower_.data(), n_ - 1}; }
 
-    std::span<double> residual() { return {residual_.data(), padded_n_}; }
-    std::span<const double> residual() const { return {residual_.data(), padded_n_}; }
+    std::span<double> residual() { return {residual_.data(), n_}; }
+    std::span<const double> residual() const { return {residual_.data(), n_}; }
 
-    std::span<double> delta_u() { return {delta_u_.data(), padded_n_}; }
-    std::span<const double> delta_u() const { return {delta_u_.data(), padded_n_}; }
+    std::span<double> delta_u() { return {delta_u_.data(), n_}; }
+    std::span<const double> delta_u() const { return {delta_u_.data(), n_}; }
+
+    std::span<double> newton_u_old() { return {newton_u_old_.data(), n_}; }
+    std::span<const double> newton_u_old() const { return {newton_u_old_.data(), n_}; }
+
+    std::span<double> tridiag_workspace() { return {tridiag_workspace_.data(), 2 * n_}; }
+    std::span<const double> tridiag_workspace() const { return {tridiag_workspace_.data(), 2 * n_}; }
 
     size_t logical_size() const { return n_; }
     size_t padded_size() const { return padded_n_; }
@@ -99,10 +105,12 @@ private:
         , psi_(padded_n_, 0.0, mr)
         , dx_(pad_to_simd(n - 1), 0.0, mr)
         , jacobian_diag_(padded_n_, 0.0, mr)
-        , jacobian_upper_(padded_n_, 0.0, mr)
-        , jacobian_lower_(padded_n_, 0.0, mr)
+        , jacobian_upper_(pad_to_simd(n - 1), 0.0, mr)
+        , jacobian_lower_(pad_to_simd(n - 1), 0.0, mr)
         , residual_(padded_n_, 0.0, mr)
         , delta_u_(padded_n_, 0.0, mr)
+        , newton_u_old_(padded_n_, 0.0, mr)
+        , tridiag_workspace_(pad_to_simd(2 * n), 0.0, mr)
     {
         // Copy grid data
         std::copy(grid_data.begin(), grid_data.end(), grid_.begin());
@@ -117,19 +125,40 @@ private:
     size_t padded_n_;
     std::pmr::memory_resource* resource_;
 
-    std::pmr::vector<double> grid_;
-    std::pmr::vector<double> u_current_;
-    std::pmr::vector<double> u_next_;
-    std::pmr::vector<double> u_stage_;
-    std::pmr::vector<double> rhs_;
-    std::pmr::vector<double> lu_;
-    std::pmr::vector<double> psi_;
-    std::pmr::vector<double> dx_;
-    std::pmr::vector<double> jacobian_diag_;
-    std::pmr::vector<double> jacobian_upper_;
-    std::pmr::vector<double> jacobian_lower_;
-    std::pmr::vector<double> residual_;
-    std::pmr::vector<double> delta_u_;
+    // ═══════════════════════════════════════════════════════════════════════
+    // IMPORTANT: PDEWorkspace arrays are CURRENTLY UNUSED (reserved for future)
+    // ═══════════════════════════════════════════════════════════════════════
+    // PDESolver has its OWN separate std::vector arrays for internal computation
+    // and does NOT use these PMR arrays.
+    //
+    // These arrays are ALLOCATED but UNUSED in current code. They are reserved for:
+    //   1. Future batch operations (multiple solvers sharing memory arena)
+    //   2. Future external workspace management
+    //   3. Future zero-copy sharing between solver instances
+    //
+    // STATUS: As of PR #202, these arrays exist but are never accessed by PDESolver.
+    //         They consume memory (~13n doubles) without providing current value.
+    //
+    // DO NOT attempt to "deduplicate" by removing PDESolver's arrays!
+    // PDESolver MUST keep its own std::vector members for internal computation.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // MUST be declared in same order as constructor initialization!
+    std::pmr::vector<double> grid_;              // Spatial grid points
+    std::pmr::vector<double> u_current_;         // Current solution u^{n+1}
+    std::pmr::vector<double> u_next_;            // Next solution (for multi-stage)
+    std::pmr::vector<double> u_stage_;           // Stage solution u^{n+γ}
+    std::pmr::vector<double> rhs_;               // Right-hand side vector
+    std::pmr::vector<double> lu_;                // Spatial operator output L(u)
+    std::pmr::vector<double> psi_;               // Obstacle constraint ψ(x,t)
+    std::pmr::vector<double> dx_;                // Precomputed grid spacing (n-1)
+    std::pmr::vector<double> jacobian_diag_;     // Jacobian main diagonal (n)
+    std::pmr::vector<double> jacobian_upper_;    // Jacobian upper diagonal (n-1)
+    std::pmr::vector<double> jacobian_lower_;    // Jacobian lower diagonal (n-1)
+    std::pmr::vector<double> residual_;          // Newton residual F(u)
+    std::pmr::vector<double> delta_u_;           // Newton correction δu
+    std::pmr::vector<double> newton_u_old_;      // Previous Newton iterate
+    std::pmr::vector<double> tridiag_workspace_; // Thomas solver workspace (2n)
 };
 
 }  // namespace mango

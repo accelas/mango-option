@@ -104,8 +104,19 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     // Create workspace for PDE solver
     double x_min = std::log(min_moneyness);  // Adaptive lower bound
     double x_max = std::log(max_moneyness);  // Adaptive upper bound
+
+    auto grid_spec_result = GridSpec<double>::uniform(x_min, x_max, config_.grid_n_space);
+    if (!grid_spec_result.has_value()) {
+        last_solver_error_ = SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = "Invalid grid specification: " + grid_spec_result.error(),
+            .iterations = 0
+        };
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
     auto workspace_result = AmericanSolverWorkspace::create(
-        x_min, x_max, config_.grid_n_space, config_.grid_n_time);
+        grid_spec_result.value(), config_.grid_n_time, std::pmr::get_default_resource());
 
     if (!workspace_result) {
         last_solver_error_ = SolverError{

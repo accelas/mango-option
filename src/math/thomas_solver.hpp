@@ -261,4 +261,191 @@ private:
     size_t n_;
 };
 
+/// Projected Thomas Algorithm (Brennan-Schwartz) for American Options
+///
+/// **Purpose:**
+/// Solves the Linear Complementarity Problem (LCP) arising in American option pricing:
+///   A·x = d,  subject to x ≥ ψ (obstacle constraint)
+/// where A is a tridiagonal M-matrix from TR-BDF2 time-stepping.
+///
+/// **Mathematical Background:**
+/// American options require solving a PDE with obstacle constraint:
+///   ∂V/∂t + L(V) = 0,  V ≥ ψ (payoff)
+/// Implicit time-stepping gives: (I - dt·L)·V = rhs,  V ≥ ψ
+/// This is an LCP - linear system with inequality constraint.
+///
+/// **Algorithm Overview:**
+/// The Brennan-Schwartz (1977) algorithm enforces the obstacle constraint
+/// DURING backward substitution, not after. This respects the tridiagonal
+/// coupling between nodes and provably converges in a single pass.
+///
+/// **Key Difference from "Solve then Project":**
+///   WRONG approach (breaks tridiagonal coupling):
+///     1. Solve Ax = d unconstrained
+///     2. Project: x[i] = max(x[i], ψ[i]) for all i
+///     → This violates Ax = d at projected nodes!
+///
+///   CORRECT approach (Projected Thomas):
+///     1. Forward elimination: build c', d' (standard Thomas)
+///     2. Projected backward substitution:
+///        x[n-1] = max(d'[n-1], ψ[n-1])
+///        x[i] = max(d'[i] - c'[i]·x[i+1], ψ[i])  for i = n-2, ..., 0
+///     → Constraint enforced at EACH STEP, preserving tridiagonal structure
+///
+/// **Why This Works:**
+/// For M-matrices (which TR-BDF2 produces with proper dt):
+///   - A has positive diagonal and non-positive off-diagonals
+///   - The projection max(·, ψ[i]) is monotone
+///   - Backward substitution propagates constraints correctly
+///   - Result: Single-pass convergence, no iteration needed
+///
+/// **Performance:**
+/// - Time: O(n) (same as standard Thomas)
+/// - Space: O(n) workspace
+/// - Iterations: 1 (always, for well-posed problems)
+///
+/// **Contrast with Newton + Active Set:**
+/// - Newton solves J·δx = -F(x), updates x ← x + δx (iterative)
+/// - Active set guesses which nodes are on obstacle (heuristic)
+/// - Projected Thomas solves A·x = d directly, enforces constraint exactly (single-pass)
+///
+/// @tparam T Floating point type (float or double)
+/// @param lower Lower diagonal a[0..n-2], where A[i,i-1] = a[i-1]
+/// @param diag Main diagonal b[0..n-1], where A[i,i] = b[i]
+/// @param upper Upper diagonal c[0..n-2], where A[i,i+1] = c[i]
+/// @param rhs Right-hand side d[0..n-1]
+/// @param psi Obstacle (lower bound) ψ[0..n-1], must have ψ ≤ d for consistency
+/// @param solution OUTPUT: Solution x[0..n-1], satisfies A·x = d and x ≥ ψ
+/// @param workspace Temporary storage, size ≥ 2n (for c', d' arrays)
+/// @param config Optional solver configuration (tolerances, max iterations)
+/// @return ThomasResult with success/failure status and diagnostics
+template<FloatingPoint T>
+[[nodiscard]] constexpr ThomasResult<T> solve_thomas_projected(
+    std::span<const T> lower,
+    std::span<const T> diag,
+    std::span<const T> upper,
+    std::span<const T> rhs,
+    std::span<const T> psi,
+    std::span<T> solution,
+    std::span<T> workspace,
+    const ThomasConfig<T>& config = {}) noexcept
+{
+    using Result = ThomasResult<T>;
+
+    const size_t n = diag.size();
+
+    // Validate dimensions
+    if (lower.size() != n - 1) {
+        return Result::error_result("Lower diagonal size must be n-1");
+    }
+    if (upper.size() != n - 1) {
+        return Result::error_result("Upper diagonal size must be n-1");
+    }
+    if (rhs.size() != n) {
+        return Result::error_result("RHS size must be n");
+    }
+    if (psi.size() != n) {
+        return Result::error_result("Obstacle size must be n");
+    }
+    if (solution.size() != n) {
+        return Result::error_result("Solution size must be n");
+    }
+    if (workspace.size() < 2 * n) {
+        return Result::error_result("Workspace size must be at least 2n");
+    }
+
+    // Handle trivial cases
+    if (n == 0) {
+        return Result::ok_result();
+    }
+
+    if (n == 1) {
+        if (std::abs(diag[0]) < config.singularity_tol) {
+            return Result::error_result("Singular matrix (diagonal[0] ≈ 0)");
+        }
+        solution[0] = std::max(rhs[0] / diag[0], psi[0]);
+        return Result::ok_result();
+    }
+
+    // Split workspace into c' and d' arrays
+    std::span<T> c_prime = workspace.subspan(0, n);
+    std::span<T> d_prime = workspace.subspan(n, n);
+
+    // ========== Forward Elimination (IDENTICAL to standard Thomas) ==========
+
+    // First row
+    if (std::abs(diag[0]) < config.singularity_tol) {
+        return Result::error_result("Singular matrix (diagonal[0] ≈ 0)");
+    }
+
+    c_prime[0] = upper[0] / diag[0];
+    d_prime[0] = rhs[0] / diag[0];
+
+    // Middle rows
+    for (size_t i = 1; i < n - 1; ++i) {
+        const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
+
+        if (std::abs(denom) < config.singularity_tol) {
+            return Result::error_result("Singular or ill-conditioned matrix");
+        }
+
+        const T inv_denom = static_cast<T>(1) / denom;
+        c_prime[i] = upper[i] * inv_denom;
+        d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) * inv_denom;
+    }
+
+    // Last row
+    {
+        const size_t i = n - 1;
+        const T denom = std::fma(-lower[i-1], c_prime[i-1], diag[i]);
+
+        if (std::abs(denom) < config.singularity_tol) {
+            return Result::error_result("Singular matrix (at last row)");
+        }
+
+        d_prime[i] = std::fma(-lower[i-1], d_prime[i-1], rhs[i]) / denom;
+    }
+
+    // ========== Projected Back Substitution (KEY DIFFERENCE) ==========
+
+    // Last element with projection
+    solution[n-1] = std::max(d_prime[n-1], psi[n-1]);
+
+    // Backward iteration with projection at each step
+    // This couples the obstacle constraint with the tridiagonal structure
+    for (size_t i = n - 1; i > 0; --i) {
+        T unconstrained = std::fma(-c_prime[i-1], solution[i], d_prime[i-1]);
+        solution[i-1] = std::max(unconstrained, psi[i-1]);
+    }
+
+    return Result::ok_result();
+}
+
+/// Convenience wrapper for projected Thomas with automatic workspace
+///
+/// @tparam T Floating point type
+/// @param lower Lower diagonal, size n-1
+/// @param diag Main diagonal, size n
+/// @param upper Upper diagonal, size n-1
+/// @param rhs Right-hand side, size n
+/// @param psi Lower bound (obstacle), size n
+/// @param solution Output solution, size n
+/// @param config Solver configuration
+/// @return Result indicating success/failure
+template<FloatingPoint T>
+[[nodiscard]] inline ThomasResult<T> solve_thomas_projected_alloc(
+    std::span<const T> lower,
+    std::span<const T> diag,
+    std::span<const T> upper,
+    std::span<const T> rhs,
+    std::span<const T> psi,
+    std::span<T> solution,
+    const ThomasConfig<T>& config = {})
+{
+    const size_t n = diag.size();
+    std::vector<T> workspace(2 * n);
+    return solve_thomas_projected(lower, diag, upper, rhs, psi, solution,
+                                  std::span{workspace}, config);
+}
+
 }  // namespace mango

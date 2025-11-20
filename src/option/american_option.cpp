@@ -14,11 +14,9 @@ namespace mango {
 
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace,
-    std::span<double> output_buffer)
+    std::shared_ptr<AmericanSolverWorkspace> workspace)
     : params_(params)
     , workspace_(std::move(workspace))
-    , output_buffer_(output_buffer)
 {
     // Validate parameters using unified validation
     auto validation = validate_pricing_params(params_);
@@ -30,16 +28,6 @@ AmericanOptionSolver::AmericanOptionSolver(
     if (!workspace_) {
         throw std::invalid_argument("Workspace cannot be null");
     }
-
-    // Validate output buffer size if provided
-    if (!output_buffer_.empty()) {
-        const size_t required_size = (workspace_->n_time() + 1) * workspace_->n_space();
-        if (output_buffer_.size() < required_size) {
-            throw std::invalid_argument("Output buffer too small: need " +
-                std::to_string(required_size) + " but got " +
-                std::to_string(output_buffer_.size()));
-        }
-    }
 }
 
 // ============================================================================
@@ -48,8 +36,7 @@ AmericanOptionSolver::AmericanOptionSolver(
 
 std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     const AmericanOptionParams& params,
-    std::shared_ptr<AmericanSolverWorkspace> workspace,
-    std::span<double> output_buffer) {
+    std::shared_ptr<AmericanSolverWorkspace> workspace) {
 
     // Validate workspace first
     if (!workspace) {
@@ -60,7 +47,7 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     return validate_pricing_params(params)
         .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
             try {
-                return AmericanOptionSolver(params, workspace, output_buffer);
+                return AmericanOptionSolver(params, workspace);
             } catch (const std::exception& e) {
                 return std::unexpected(std::string("Failed to create solver: ") + e.what());
             }
@@ -72,39 +59,27 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
+    // Allocate surface buffer
+    const size_t surface_size = (workspace_->n_time() + 1) * workspace_->n_space();
+    std::vector<double> surface_buffer(surface_size);
+
     // Create appropriate solver based on option type
     AmericanSolverVariant solver = [&]() -> AmericanSolverVariant {
         switch (params_.type) {
             case OptionType::CALL:
-                return AmericanCallSolver(params_, workspace_, output_buffer_);
+                return AmericanCallSolver(params_, workspace_, surface_buffer);
             case OptionType::PUT:
-                return AmericanPutSolver(params_, workspace_, output_buffer_);
+                return AmericanPutSolver(params_, workspace_, surface_buffer);
             default:
                 throw std::runtime_error("Unknown option type");
         }
     }();
 
-    // Initialize with terminal payoff (payoff at maturity for backward PDE)
-    // In log-moneyness normalization (K=1):
-    // - Put: V(x,T) = max(1 - e^x, 0)
-    // - Call: V(x,T) = max(e^x - 1, 0)
-    if (params_.type == OptionType::PUT) {
-        std::visit([](auto& s) {
-            s.initialize([](std::span<const double> x, std::span<double> u) {
-                for (size_t i = 0; i < x.size(); ++i) {
-                    u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-                }
-            });
-        }, solver);
-    } else {  // CALL
-        std::visit([](auto& s) {
-            s.initialize([](std::span<const double> x, std::span<double> u) {
-                for (size_t i = 0; i < x.size(); ++i) {
-                    u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-                }
-            });
-        }, solver);
-    }
+    // Initialize with payoff at maturity (t=0 in PDE time)
+    std::visit([&](auto& s) {
+        using SolverType = std::decay_t<decltype(s)>;
+        s.initialize(SolverType::payoff);
+    }, solver);
 
     // Solve using variant dispatch (static, zero-cost)
     auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
@@ -121,22 +96,29 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         solution_.assign(solution_view.begin(), solution_view.end());
         result.solution.assign(solution_view.begin(), solution_view.end());
 
-        // Store grid information
+        // Store grid information (including actual grid points)
         result.n_space = s.n_space();
         result.n_time = s.n_time();
         result.x_min = s.x_min();
         result.x_max = s.x_max();
         result.strike = params_.strike;
 
-        // Store full surface if buffer was provided
-        if (!output_buffer_.empty()) {
-            // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-            // Extract only the time steps (skip initial scratch)
-            result.surface_2d.assign(
-                output_buffer_.begin() + s.n_space(),  // Skip u_old_initial
-                output_buffer_.end()                    // Include all time steps
-            );
-        }
+        // Store actual grid points for interpolation
+        auto grid = workspace_->grid();
+        result.x_grid.assign(grid.begin(), grid.end());
+
+        // Compute value at current spot using actual grid
+        double current_moneyness = std::log(params_.spot / params_.strike);
+        double normalized_value = interpolate_solution(current_moneyness, grid);
+        result.value = normalized_value * params_.strike;  // Denormalize
+
+        // Store full surface
+        // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
+        // Extract only the time steps (skip initial scratch)
+        result.surface_2d.assign(
+            surface_buffer.begin() + s.n_space(),  // Skip u_old_initial
+            surface_buffer.end()                    // Include all time steps
+        );
     }, solver);
 
     solved_ = true;
@@ -165,34 +147,29 @@ double AmericanOptionResult::value_at(double spot) const {
     double x_target = std::log(spot / strike);
 
     // Get final spatial solution (present value)
-    if (solution.empty() || n_space == 0) {
+    if (solution.empty() || n_space == 0 || x_grid.empty()) {
         return 0.0;
     }
 
     // Use the final solution directly
     std::span<const double> final_surface(solution.data(), solution.size());
 
-    // Compute grid spacing (uniform grid)
-    const double dx = (x_max - x_min) / (n_space - 1);
-
-    // Boundary cases
-    if (x_target <= x_min) {
+    // Boundary cases (use actual grid points)
+    if (x_target <= x_grid[0]) {
         return final_surface[0] * strike;  // Denormalize
     }
-    if (x_target >= x_max) {
+    if (x_target >= x_grid[n_space-1]) {
         return final_surface[n_space-1] * strike;  // Denormalize
     }
 
-    // Find bracketing indices
+    // Find bracketing indices using actual grid points
     size_t i = 0;
-    while (i < n_space-1 && x_min + (i+1)*dx < x_target) {
+    while (i < n_space-1 && x_grid[i+1] < x_target) {
         i++;
     }
 
-    // Linear interpolation
-    double x_i = x_min + i * dx;
-    double x_i1 = x_min + (i+1) * dx;
-    double t = (x_target - x_i) / (x_i1 - x_i);
+    // Linear interpolation using actual grid spacing
+    double t = (x_target - x_grid[i]) / (x_grid[i+1] - x_grid[i]);
     double normalized_value = (1.0 - t) * final_surface[i] + t * final_surface[i+1];
 
     return normalized_value * strike;  // Denormalize
@@ -230,17 +207,14 @@ double AmericanOptionSolver::compute_delta() const {
     }
 
     const size_t n = solution_.size();
-    const double x_min = workspace_->x_min();
-    const double x_max = workspace_->x_max();
-    const double dx = (x_max - x_min) / (n - 1);
+    auto grid = workspace_->grid();
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
 
-    // Find the grid point closest to current_moneyness
-    // Use the same approach as interpolate_solution
+    // Find the grid point closest to current_moneyness using actual grid points
     size_t i = 0;
-    while (i < n-1 && x_min + (i+1)*dx < current_moneyness) {
+    while (i < n-1 && grid[i+1] < current_moneyness) {
         i++;
     }
 
@@ -248,10 +222,11 @@ double AmericanOptionSolver::compute_delta() const {
     if (i == 0) i = 1;
     if (i >= n-1) i = n-2;
 
-    // Compute ∂V/∂x using centered finite difference
+    // Compute ∂V/∂x using centered finite difference on possibly non-uniform grid
+    // For non-uniform grids: f'(x_i) ≈ (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
     // Note: solution_ stores V/K (normalized)
-    const double half_dx_inv = 1.0 / (2.0 * dx);
-    double dVdx = (solution_[i+1] - solution_[i-1]) * half_dx_inv;
+    double dx_total = grid[i+1] - grid[i-1];
+    double dVdx = (solution_[i+1] - solution_[i-1]) / dx_total;
 
     // Transform from log-moneyness to spot
     // V_dollar = V_norm * K
@@ -271,16 +246,14 @@ double AmericanOptionSolver::compute_gamma() const {
     }
 
     const size_t n = solution_.size();
-    const double x_min = workspace_->x_min();
-    const double x_max = workspace_->x_max();
-    const double dx = (x_max - x_min) / (n - 1);
+    auto grid = workspace_->grid();
 
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
 
-    // Find the grid point closest to current_moneyness
+    // Find the grid point closest to current_moneyness using actual grid points
     size_t i = 0;
-    while (i < n-1 && x_min + (i+1)*dx < current_moneyness) {
+    while (i < n-1 && grid[i+1] < current_moneyness) {
         i++;
     }
 
@@ -288,12 +261,20 @@ double AmericanOptionSolver::compute_gamma() const {
     if (i == 0) i = 1;
     if (i >= n-1) i = n-2;
 
-    // Centered second derivative: [V(i+1) - 2*V(i) + V(i-1)] / dx²
-    // Use FMA: (V(i+1) + V(i-1)) / dx² - 2*V(i) / dx²
-    const double dx2_inv = 1.0 / (dx * dx);
-    double d2Vdx2 = std::fma(solution_[i+1] + solution_[i-1], dx2_inv, -2.0*solution_[i]*dx2_inv);
-    // Centered first derivative: [V(i+1) - V(i-1)] / (2*dx)
-    double dVdx = (solution_[i+1] - solution_[i-1]) / (2.0 * dx);
+    // Compute derivatives on possibly non-uniform grid
+    // For non-uniform grids, we need the actual grid spacings
+    double dx_left = grid[i] - grid[i-1];
+    double dx_right = grid[i+1] - grid[i];
+    double dx_total = grid[i+1] - grid[i-1];
+
+    // Second derivative on non-uniform grid:
+    // f''(x_i) ≈ 2 * [f[i+1]/dx_right/(dx_left+dx_right) - f[i]/(dx_left*dx_right) + f[i-1]/dx_left/(dx_left+dx_right)]
+    double d2Vdx2 = 2.0 * (solution_[i+1] / (dx_right * dx_total)
+                         - solution_[i] / (dx_left * dx_right)
+                         + solution_[i-1] / (dx_left * dx_total));
+
+    // First derivative (same as in compute_delta)
+    double dVdx = (solution_[i+1] - solution_[i-1]) / dx_total;
 
     // Transform from log-moneyness to spot using chain rule
     // x = ln(S/K), so ∂x/∂S = 1/S and ∂²x/∂S² = -1/S²

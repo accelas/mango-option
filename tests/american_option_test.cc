@@ -176,34 +176,28 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     params.emplace_back(120.0, 100.0, 1.5, 0.02, 0.0, OptionType::PUT, 0.2);
     params.emplace_back(90.0,  95.0,  0.5, -0.01, 0.01, OptionType::PUT, 0.35);
 
-    constexpr double x_min = -3.0;
-    constexpr double x_max = 3.0;
-    constexpr size_t n_space = 151;
-    constexpr size_t n_time = 1200;
-
-    auto batch_result = solve_american_options_batch(params, x_min, x_max, n_space, n_time);
+    // Use automatic grid determination for batch solver
+    auto batch_result = BatchAmericanOptionSolver().solve_batch(params);
     ASSERT_EQ(batch_result.results.size(), params.size());
     EXPECT_EQ(batch_result.failed_count, 0u);
 
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, n_space, 2.0);
-    ASSERT_TRUE(grid_spec.has_value());
-    auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, &pool).value();
-
+    // Compare with single option automatic grid solver
     for (size_t i = 0; i < params.size(); ++i) {
         ASSERT_TRUE(batch_result.results[i].has_value()) << "Batch solve failed for index " << i;
 
-        AmericanOptionResult single = SolveWithWorkspace(params[i], workspace);
-        ASSERT_TRUE(single.converged);
+        auto single_result = solve_american_option_auto(params[i]);
+        ASSERT_TRUE(single_result.has_value()) << "Single solve failed for index " << i;
+        ASSERT_TRUE(single_result->converged);
 
         const double batch_value = batch_result.results[i]->value_at(params[i].spot);
-        EXPECT_NEAR(single.value_at(params[i].spot), batch_value, 1e-3) << "Mismatch at index " << i;
+        const double single_value = single_result->value_at(params[i].spot);
+        EXPECT_NEAR(single_value, batch_value, 1e-3) << "Mismatch at index " << i;
     }
 }
 
-TEST_F(AmericanOptionPricingTest, DISABLED_PutImmediateExerciseAtBoundary) {
-    // TODO: This test is temporarily disabled while investigating boundary value behavior
-    // The test expects deep ITM put to have value ≈ intrinsic, but currently gets wrong values
+TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
+    // Deep ITM put test - verifies active set method locks nodes to payoff
+    // Fixed by implementing proper complementarity enforcement in Newton solver
     std::pmr::synchronized_pool_resource pool;
     auto grid_spec = GridSpec<double>::sinh_spaced(-7.0, 2.0, 301, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
@@ -224,8 +218,34 @@ TEST_F(AmericanOptionPricingTest, DISABLED_PutImmediateExerciseAtBoundary) {
     ASSERT_TRUE(result.converged);
 
     const double intrinsic = params.strike - params.spot;
-    EXPECT_NEAR(result.value_at(params.spot), intrinsic, 0.5)
-        << "Left boundary should equal immediate exercise for deep ITM put";
+    EXPECT_NEAR(result.value_at(params.spot), intrinsic, 1e-3)
+        << "Left boundary should equal immediate exercise for deep ITM put (error < 0.001)";
+}
+
+TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
+    // Regression test for Issue #196 IV solver failure
+    // Verifies that ATM options develop time value and don't lock to payoff=0
+    // This guards against the known limitation of the 50% time window guard
+    AmericanOptionParams params(
+        100.0,  // spot ATM
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend yield
+        OptionType::PUT,
+        0.25    // volatility
+    );
+
+    AmericanOptionResult result = Solve(params);
+    ASSERT_TRUE(result.converged);
+
+    // ATM put should have significant time value (not lock to payoff=0)
+    // With σ=0.25, T=1.0, r=0.05, ATM American put should be worth ~$8
+    const double intrinsic = std::max(params.strike - params.spot, 0.0);  // 0 for ATM
+    EXPECT_GT(result.value_at(params.spot), intrinsic + 7.0)
+        << "ATM put must develop time value, not lock to payoff=0";
+    EXPECT_LT(result.value_at(params.spot), 12.0)
+        << "ATM put price seems unreasonably high";
 }
 
 }  // namespace

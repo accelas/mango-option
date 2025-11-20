@@ -113,12 +113,8 @@ void test_scenario(
     ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
     auto workspace = workspace_result.value();
 
-    // Allocate buffer for full surface storage
-    size_t n_space = 201;
-    std::vector<double> surface_buffer((n_time + 1) * n_space);
-
-    auto solver_result = AmericanOptionSolver::create(
-        mango_params, workspace, std::span<double>{surface_buffer});
+    // Surface buffer is now allocated internally
+    auto solver_result = AmericanOptionSolver::create(mango_params, workspace);
     ASSERT_TRUE(solver_result.has_value());
 
     auto mango_result = solver_result.value().solve();
@@ -126,7 +122,7 @@ void test_scenario(
 
     // Verify full surface was stored
     ASSERT_FALSE(mango_result->surface_2d.empty())
-        << "Full surface should be stored when output_buffer provided";
+        << "Full surface should be automatically stored by solver";
 
     // QuantLib reference
     auto ql_result = price_american_option_quantlib(
@@ -222,17 +218,13 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     ASSERT_TRUE(grid_spec.has_value());
 
     size_t n_time = 2000;
-    size_t n_space = 201;
     auto workspace_result = AmericanSolverWorkspace::create(
         grid_spec.value(), n_time, std::pmr::get_default_resource());
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    // Allocate buffer for full surface storage
-    std::vector<double> surface_buffer((n_time + 1) * n_space);
-
-    auto solver_result = AmericanOptionSolver::create(
-        params, workspace, std::span<double>{surface_buffer});
+    // Surface buffer is now allocated internally
+    auto solver_result = AmericanOptionSolver::create(params, workspace);
     ASSERT_TRUE(solver_result.has_value());
 
     auto result = solver_result.value().solve();
@@ -247,7 +239,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
         << "Convergence test failed"
         << "\n  Mango:     $" << mango_price
         << "\n  Reference: $" << ql_reference.price
-        << "\n  Grid:      " << n_space << "x" << n_time;
+        << "\n  Grid:      " << 201 << "x" << n_time;
 }
 
 // ============================================================================
@@ -263,17 +255,13 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
     ASSERT_TRUE(grid_spec.has_value());
 
     size_t n_time = 2000;
-    size_t n_space = 201;
     auto workspace_result = AmericanSolverWorkspace::create(
         grid_spec.value(), n_time, std::pmr::get_default_resource());
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    // Allocate buffer for full surface storage
-    std::vector<double> surface_buffer((n_time + 1) * n_space);
-
-    auto solver_result = AmericanOptionSolver::create(
-        params, workspace, std::span<double>{surface_buffer});
+    // Surface buffer is now allocated internally
+    auto solver_result = AmericanOptionSolver::create(params, workspace);
     ASSERT_TRUE(solver_result.has_value());
 
     auto result = solver_result.value().solve();

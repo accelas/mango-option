@@ -10,29 +10,16 @@
 #include "src/option/american_solver_workspace.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
+#include "src/pde/core/grid.hpp"
 #include <vector>
 #include <expected>
 #include <span>
 #include <functional>
 #include <memory>
+#include <memory_resource>
+#include <tuple>
 
 namespace mango {
-
-/**
- * Default grid configuration for batch American option solving.
- *
- * These values provide a good balance of accuracy and performance
- * for most American options:
- * - Covers 50% to 200% moneyness range (deep OTM to deep ITM)
- * - 101 spatial points provides good accuracy
- * - 1000 time steps provides fine temporal resolution
- */
-struct DefaultBatchGrid {
-    static constexpr double x_min = -3.0;      ///< Minimum log-moneyness
-    static constexpr double x_max = 3.0;       ///< Maximum log-moneyness
-    static constexpr size_t n_space = 101;     ///< Spatial grid points
-    static constexpr size_t n_time = 1000;     ///< Time steps
-};
 
 /**
  * Batch solver result containing individual results and aggregate statistics.
@@ -51,34 +38,41 @@ struct BatchAmericanOptionResult {
 /// This is significantly faster than solving options sequentially
 /// for embarrassingly parallel workloads.
 ///
-/// **Simple API** (recommended for most use cases):
+/// **Basic usage (per-option grids):**
 /// ```cpp
 /// std::vector<AmericanOptionParams> batch;
 /// batch.emplace_back(spot, strike, maturity, rate, dividend_yield, type, sigma);
 ///
-/// // Uses default grid configuration (101 spatial points, 1000 time steps)
-/// auto results = solve_american_options_batch(batch);
+/// BatchAmericanOptionSolver solver;
+/// auto results = solver.solve_batch(batch);
 /// ```
 ///
-/// **Advanced API** (for custom grid configuration):
+/// **Adjusting grid accuracy:**
 /// ```cpp
-/// // Specify custom grid parameters
-/// auto results = solve_american_options_batch(batch, -3.0, 3.0, 101, 1000);
+/// BatchAmericanOptionSolver solver;
+/// GridAccuracyParams accuracy;
+/// accuracy.tol = 1e-6;  // High accuracy mode
+/// solver.set_grid_accuracy(accuracy);
+/// auto results = solver.solve_batch(batch);
 /// ```
 ///
-/// **Accessing results**:
+/// **Price table usage (shared grid):**
 /// ```cpp
-/// for (const auto& result_expected : batch_result.results) {
+/// // use_shared_grid=true: all options share one global grid
+/// BatchAmericanOptionSolver solver;
+/// auto results = solver.solve_batch(batch, true);
+///
+/// // Results contain full surfaces for interpolation
+/// for (const auto& result_expected : results.results) {
 ///     if (result_expected.has_value()) {
 ///         const auto& result = result_expected.value();
-///         double price = result.value_at(spot);
 ///         auto spatial_solution = result.at_time(step_idx);
 ///     }
 /// }
 /// ```
 ///
 /// Performance:
-/// - Single-threaded: ~72 options/sec (101x1000 grid)
+/// - Single-threaded: ~72 options/sec (101x1000 grid, tol=1e-3)
 /// - Parallel (32 cores): ~848 options/sec (11.8x speedup)
 class BatchAmericanOptionSolver {
 public:
@@ -87,163 +81,110 @@ public:
     /// @param solver Reference to solver for pre-solve configuration
     using SetupCallback = std::function<void(size_t index, AmericanOptionSolver& solver)>;
 
-    /// Solve a batch of American options with default grid configuration
-    ///
-    /// Uses sensible defaults (101 spatial points, 1000 time steps,
-    /// log-moneyness range [-3, 3]) suitable for most American options.
-    ///
-    /// @param params Vector of option parameters
-    /// @param setup Optional callback invoked after solver creation, before solve()
-    /// @return Batch result with individual results and failure count
-    static BatchAmericanOptionResult solve_batch(
-        std::span<const AmericanOptionParams> params,
-        SetupCallback setup = nullptr)
-    {
-        return solve_batch_with_grid(
-            params,
-            DefaultBatchGrid::x_min,
-            DefaultBatchGrid::x_max,
-            DefaultBatchGrid::n_space,
-            DefaultBatchGrid::n_time,
-            setup);
+    /// Set grid accuracy parameters
+    /// @param accuracy Grid accuracy parameters controlling size/resolution tradeoff
+    void set_grid_accuracy(const GridAccuracyParams& accuracy) {
+        grid_accuracy_ = accuracy;
     }
 
-    /// Solve a batch of American options with default grid (vector overload)
-    static BatchAmericanOptionResult solve_batch(
-        const std::vector<AmericanOptionParams>& params,
-        SetupCallback setup = nullptr)
-    {
-        return solve_batch(std::span{params}, setup);
+    /// Get current grid accuracy parameters
+    const GridAccuracyParams& grid_accuracy() const {
+        return grid_accuracy_;
     }
 
-    /// Solve a batch of American options with custom grid configuration
-    ///
-    /// Use this when you need fine control over the grid parameters.
-    /// All options in the batch will use the same grid configuration.
+    /// Solve a batch of American options
     ///
     /// @param params Vector of option parameters
-    /// @param x_min Minimum log-moneyness
-    /// @param x_max Maximum log-moneyness
-    /// @param n_space Number of spatial grid points
-    /// @param n_time Number of time steps
+    /// @param use_shared_grid If true, all options share one global grid (required for price tables).
+    ///                        If false (default), each option gets its own optimal grid.
+    ///                        Shared grid enables at_time() access by populating surface_2d.
     /// @param setup Optional callback invoked after solver creation, before solve()
-    /// @param output_buffer Optional buffer for full surface. If provided, must be large enough
-    ///                      for (n_time + 1) * n_space * params.size() doubles.
-    ///                      Buffer layout: option 0 surface | option 1 surface | ...
     /// @return Batch result with individual results and failure count
-    static BatchAmericanOptionResult solve_batch_with_grid(
+    BatchAmericanOptionResult solve_batch(
         std::span<const AmericanOptionParams> params,
-        double x_min,
-        double x_max,
-        size_t n_space,
-        size_t n_time,
-        SetupCallback setup = nullptr,
-        std::span<double> output_buffer = {})
+        bool use_shared_grid = false,
+        SetupCallback setup = nullptr)
     {
+        if (params.empty()) {
+            return BatchAmericanOptionResult{.results = {}, .failed_count = 0};
+        }
+
         std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
         size_t failed_count = 0;
 
-        // Validate workspace parameters once before parallel loop
-        auto validation = AmericanSolverWorkspace::validate_params(x_min, x_max, n_space, n_time);
-        if (!validation) {
-            // If workspace validation fails, return error for all options
-            SolverError error{
-                .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Invalid workspace parameters: " + validation.error(),
-                .iterations = 0
-            };
-            for (size_t i = 0; i < params.size(); ++i) {
-                results[i] = std::unexpected(error);
-            }
-            return BatchAmericanOptionResult{
-                .results = std::move(results),
-                .failed_count = params.size()
-            };
+        // Precompute shared grid if needed
+        std::optional<std::tuple<GridSpec<double>, size_t>> shared_grid;
+        if (use_shared_grid) {
+            shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
         }
 
-        // Calculate buffer slice size for each option (if buffer provided)
-        const size_t slice_size = (n_time + 1) * n_space;
-
-        // Validate buffer size if provided
-        if (!output_buffer.empty()) {
-            const size_t required_size = slice_size * params.size();
-            if (output_buffer.size() < required_size) {
-                SolverError error{
-                    .code = SolverErrorCode::InvalidConfiguration,
-                    .message = "Output buffer too small: need " +
-                               std::to_string(required_size) + " but got " +
-                               std::to_string(output_buffer.size()),
-                    .iterations = 0
-                };
-                for (size_t i = 0; i < params.size(); ++i) {
-                    results[i] = std::unexpected(error);
-                }
-                return BatchAmericanOptionResult{
-                    .results = std::move(results),
-                    .failed_count = params.size()
-                };
-            }
-        }
-
-        // Common solve logic
-        auto solve_one = [&](size_t i, std::shared_ptr<AmericanSolverWorkspace> workspace)
-            -> std::expected<AmericanOptionResult, SolverError>
-        {
-            // Calculate buffer slice for this option (if buffer provided)
-            std::span<double> option_buffer;
-            if (!output_buffer.empty()) {
-                const size_t offset = i * slice_size;
-                option_buffer = output_buffer.subspan(offset, slice_size);
-            }
-
-            // Use factory method to avoid exceptions from constructor
-            auto solver_result = AmericanOptionSolver::create(params[i], workspace, option_buffer);
-            if (!solver_result) {
-                return std::unexpected(SolverError{
-                    .code = SolverErrorCode::InvalidConfiguration,
-                    .message = solver_result.error(),
-                    .iterations = 0
-                });
-            }
-
-            // Invoke setup callback if provided
-            if (setup) {
-                setup(i, solver_result.value());
-            }
-
-            return solver_result.value().solve();
-        };
-
-        // Use parallel region + for to enable per-thread workspace reuse
-        // Note: MANGO_PRAGMA_* macros expand to nothing in sequential mode
         MANGO_PRAGMA_PARALLEL
         {
-            // Each thread creates ONE workspace and reuses it for all its iterations
-            auto thread_workspace_result = AmericanSolverWorkspace::create(x_min, x_max, n_space, n_time);
+            // Per-thread pool for cheap workspace reuse
+            std::pmr::unsynchronized_pool_resource thread_pool;
 
-            // If per-thread workspace creation fails (e.g., OOM), write error to all thread's results
-            if (!thread_workspace_result) {
-                SolverError error{
-                    .code = SolverErrorCode::InvalidConfiguration,
-                    .message = "Failed to create per-thread workspace: " + thread_workspace_result.error(),
-                    .iterations = 0
-                };
-                MANGO_PRAGMA_FOR
-                for (size_t i = 0; i < params.size(); ++i) {
-                    results[i] = std::unexpected(error);
+            // Per-thread workspace (only for shared grid strategy)
+            std::shared_ptr<AmericanSolverWorkspace> thread_workspace;
+            if (use_shared_grid) {
+                auto [grid_spec, n_time] = shared_grid.value();
+                auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
+                if (workspace_result.has_value()) {
+                    thread_workspace = workspace_result.value();
+                }
+                // If creation failed, thread_workspace remains null and we'll fail in loop
+            }
+
+            MANGO_PRAGMA_FOR
+            for (size_t i = 0; i < params.size(); ++i) {
+                // Get or create workspace for this iteration
+                std::shared_ptr<AmericanSolverWorkspace> workspace;
+                if (use_shared_grid) {
+                    // Shared grid: reuse thread workspace
+                    workspace = thread_workspace;
+                } else {
+                    // Per-option grid: create workspace for this option
+                    auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
+                    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
+                    if (workspace_result.has_value()) {
+                        workspace = workspace_result.value();
+                    }
+                }
+
+                if (!workspace) {
+                    // Workspace creation failed (either shared or per-option)
+                    results[i] = std::unexpected(SolverError{
+                        .code = SolverErrorCode::InvalidConfiguration,
+                        .message = "Failed to create workspace",
+                        .iterations = 0
+                    });
                     MANGO_PRAGMA_ATOMIC
                     ++failed_count;
+                    continue;
                 }
-            } else {
-                auto thread_workspace = thread_workspace_result.value();
 
-                MANGO_PRAGMA_FOR
-                for (size_t i = 0; i < params.size(); ++i) {
-                    results[i] = solve_one(i, thread_workspace);
-                    if (!results[i].has_value()) {
-                        MANGO_PRAGMA_ATOMIC
-                        ++failed_count;
-                    }
+                // Create solver
+                auto solver_result = AmericanOptionSolver::create(params[i], workspace);
+                if (!solver_result.has_value()) {
+                    results[i] = std::unexpected(SolverError{
+                        .code = SolverErrorCode::InvalidConfiguration,
+                        .message = solver_result.error(),
+                        .iterations = 0
+                    });
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
+                    continue;
+                }
+
+                // Invoke setup callback if provided
+                if (setup) {
+                    setup(i, solver_result.value());
+                }
+
+                // Solve
+                results[i] = solver_result.value().solve();
+                if (!results[i].has_value()) {
+                    MANGO_PRAGMA_ATOMIC
+                    ++failed_count;
                 }
             }
         }
@@ -254,72 +195,54 @@ public:
         };
     }
 
-    /// Solve a batch of American options with custom grid (vector overload)
-    static BatchAmericanOptionResult solve_batch_with_grid(
+    /// Solve a batch of American options (vector overload)
+    BatchAmericanOptionResult solve_batch(
         const std::vector<AmericanOptionParams>& params,
-        double x_min,
-        double x_max,
-        size_t n_space,
-        size_t n_time,
+        bool use_shared_grid = false,
         SetupCallback setup = nullptr)
     {
-        return solve_batch_with_grid(std::span{params}, x_min, x_max, n_space, n_time, setup);
+        return solve_batch(std::span{params}, use_shared_grid, setup);
     }
+
+private:
+    GridAccuracyParams grid_accuracy_;  ///< Grid accuracy parameters for automatic estimation
 };
 
-/// Solve a batch of American options with default grid configuration
+/// Solve a single American option with automatic grid determination
 ///
-/// This is the recommended API for solving multiple independent options.
-/// Uses sensible default grid parameters (101 spatial points, 1000 time steps,
-/// log-moneyness range [-3, 3]).
+/// Convenience API that automatically determines optimal grid parameters
+/// based on option characteristics, eliminating need for manual grid specification.
 ///
-/// @param params Vector of option parameters
-/// @return Batch result with individual results and failure count
-inline BatchAmericanOptionResult solve_american_options_batch(
-    std::span<const AmericanOptionParams> params)
+/// @param params Option parameters
+/// @return Expected containing result on success, error on failure
+inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
+    const AmericanOptionParams& params)
 {
-    return BatchAmericanOptionSolver::solve_batch(params);
-}
+    // Estimate grid for this option
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
-/// Solve a batch of American options with default grid configuration (vector overload)
-inline BatchAmericanOptionResult solve_american_options_batch(
-    const std::vector<AmericanOptionParams>& params)
-{
-    return BatchAmericanOptionSolver::solve_batch(params);
-}
+    // Create workspace with estimated grid
+    auto workspace_result = AmericanSolverWorkspace::create(
+        grid_spec, n_time, std::pmr::get_default_resource());
+    if (!workspace_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = "Failed to create workspace: " + workspace_result.error(),
+            .iterations = 0
+        });
+    }
 
-/// Solve a batch of American options with custom grid configuration
-///
-/// Advanced API for when you need fine control over the grid parameters.
-/// All options in the batch will use the same grid configuration.
-///
-/// @param params Vector of option parameters
-/// @param x_min Minimum log-moneyness
-/// @param x_max Maximum log-moneyness
-/// @param n_space Number of spatial grid points
-/// @param n_time Number of time steps
-/// @return Batch result with individual results and failure count
-inline BatchAmericanOptionResult solve_american_options_batch(
-    std::span<const AmericanOptionParams> params,
-    double x_min,
-    double x_max,
-    size_t n_space,
-    size_t n_time)
-{
-    return BatchAmericanOptionSolver::solve_batch_with_grid(
-        params, x_min, x_max, n_space, n_time);
-}
+    // Create and solve
+    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+    if (!solver_result.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = solver_result.error(),
+            .iterations = 0
+        });
+    }
 
-/// Solve a batch of American options with custom grid configuration (vector overload)
-inline BatchAmericanOptionResult solve_american_options_batch(
-    const std::vector<AmericanOptionParams>& params,
-    double x_min,
-    double x_max,
-    size_t n_space,
-    size_t n_time)
-{
-    return BatchAmericanOptionSolver::solve_batch_with_grid(
-        params, x_min, x_max, n_space, n_time);
+    return solver_result.value().solve();
 }
 
 }  // namespace mango

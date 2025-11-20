@@ -19,13 +19,14 @@ TEST(PDEWorkspacePMRTest, FactoryCreatesWorkspace) {
     EXPECT_EQ(ws->padded_size(), 104);  // Rounded to SIMD_WIDTH=8
 }
 
-TEST(PDEWorkspacePMRTest, AccessorsReturnPaddedSpans) {
+TEST(PDEWorkspacePMRTest, AccessorsReturnLogicalSpans) {
     std::pmr::synchronized_pool_resource pool;
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
     auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
 
     auto u_current = ws->u_current();
-    EXPECT_EQ(u_current.size(), 104);  // Padded size
+    EXPECT_EQ(u_current.size(), 101);  // Logical size
+    EXPECT_EQ(ws->padded_size(), 104);  // Padded size available separately
 
     // Check we can write to all elements
     for (size_t i = 0; i < u_current.size(); ++i) {
@@ -39,7 +40,7 @@ TEST(PDEWorkspacePMRTest, GridAccessReturnsCorrectData) {
     auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
 
     auto grid = ws->grid();
-    EXPECT_EQ(grid.size(), 104);  // Padded
+    EXPECT_EQ(grid.size(), 101);  // Logical size
     EXPECT_NEAR(grid[0], 0.0, 1e-14);
     EXPECT_NEAR(grid[100], 1.0, 1e-14);
 }
@@ -49,18 +50,24 @@ TEST(PDEWorkspacePMRTest, NewtonArraysAccessible) {
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
     auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
 
-    // Test Newton array access
+    // Test Newton array access - should return logical sizes
     auto jac_diag = ws->jacobian_diag();
     auto jac_upper = ws->jacobian_upper();
     auto jac_lower = ws->jacobian_lower();
     auto residual = ws->residual();
     auto delta_u = ws->delta_u();
 
-    EXPECT_EQ(jac_diag.size(), 104);
-    EXPECT_EQ(jac_upper.size(), 104);
-    EXPECT_EQ(jac_lower.size(), 104);
-    EXPECT_EQ(residual.size(), 104);
-    EXPECT_EQ(delta_u.size(), 104);
+    EXPECT_EQ(jac_diag.size(), 101);
+    EXPECT_EQ(jac_upper.size(), 100);  // Off-diagonal: n-1
+    EXPECT_EQ(jac_lower.size(), 100);  // Off-diagonal: n-1
+    EXPECT_EQ(residual.size(), 101);
+    EXPECT_EQ(delta_u.size(), 101);
+
+    // Test new Newton arrays
+    auto newton_u_old = ws->newton_u_old();
+    auto tridiag_ws = ws->tridiag_workspace();
+    EXPECT_EQ(newton_u_old.size(), 101);
+    EXPECT_EQ(tridiag_ws.size(), 202);  // 2*n
 }
 
 }  // namespace

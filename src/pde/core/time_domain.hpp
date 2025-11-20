@@ -12,7 +12,7 @@ namespace mango {
 /// Computes the number of time steps needed to reach t_end.
 class TimeDomain {
 public:
-    /// Construct time domain
+    /// Construct time domain from time step size
     ///
     /// @param t_start Initial time
     /// @param t_end Final time
@@ -23,6 +23,28 @@ public:
         , dt_(dt)
         , n_steps_(static_cast<size_t>(std::ceil((t_end - t_start) / dt)))
     {}
+
+    /// Construct time domain from number of steps (avoids floating-point rounding)
+    ///
+    /// Preferred when n_steps is known exactly to avoid ceil() rounding issues.
+    ///
+    /// @param t_start Initial time
+    /// @param t_end Final time
+    /// @param n_steps Number of time steps
+    static TimeDomain from_n_steps(double t_start, double t_end, size_t n_steps) {
+        TimeDomain td;
+        td.t_start_ = t_start;
+        td.t_end_ = t_end;
+        td.n_steps_ = n_steps;
+        td.dt_ = (t_end - t_start) / static_cast<double>(n_steps);
+        return td;
+    }
+
+private:
+    // Private default constructor for from_n_steps factory
+    TimeDomain() = default;
+
+public:
 
     double t_start() const { return t_start_; }
     double t_end() const { return t_end_; }
