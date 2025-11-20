@@ -9,8 +9,9 @@ namespace mango {
 
 /// Method for handling obstacle constraints in American options
 enum class ObstacleMethod {
-    Heuristic,  ///< Empirical active set heuristic (tuned parameters)
-    PDAS        ///< Primal-Dual Active Set (Hintermüller-Ito-Kunisch)
+    Heuristic,       ///< Empirical active set heuristic (tuned parameters)
+    PDAS,            ///< Primal-Dual Active Set (Hintermüller-Ito-Kunisch)
+    ProjectedThomas  ///< Projected Thomas (Brennan-Schwartz LCP solver)
 };
 
 /// Result from Newton-Raphson iteration for implicit PDE stages
@@ -44,8 +45,8 @@ struct TRBDF2Config {
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;
 
-    /// Obstacle constraint method (default: Heuristic - PDAS under development)
-    ObstacleMethod obstacle_method = ObstacleMethod::Heuristic;
+    /// Obstacle constraint method (default: ProjectedThomas for robust LCP solving)
+    ObstacleMethod obstacle_method = ObstacleMethod::ProjectedThomas;
 
     /// Maximum PDAS iterations per stage (with obstacle)
     size_t pdas_max_iter = 20;

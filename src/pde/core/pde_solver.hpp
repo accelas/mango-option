@@ -630,6 +630,7 @@ private:
     /// Dispatch implicit stage solver based on obstacle method configuration
     ///
     /// Routes to appropriate solver:
+    /// - ObstacleMethod::ProjectedThomas → solve_implicit_stage_projected() (Brennan-Schwartz LCP)
     /// - ObstacleMethod::PDAS → solve_implicit_stage_with_pdas() (HIK algorithm)
     /// - ObstacleMethod::Heuristic → solve_implicit_stage() (Newton with empirical active set)
     ///
@@ -641,11 +642,96 @@ private:
     NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
                                                std::span<double> u,
                                                std::span<const double> rhs) {
-        if (obstacle_ && config_.obstacle_method == ObstacleMethod::PDAS) {
+        if (obstacle_ && config_.obstacle_method == ObstacleMethod::ProjectedThomas) {
+            return solve_implicit_stage_projected(t, coeff_dt, u, rhs);
+        } else if (obstacle_ && config_.obstacle_method == ObstacleMethod::PDAS) {
             return solve_implicit_stage_with_pdas(t, coeff_dt, u, rhs);
         } else {
             return solve_implicit_stage(t, coeff_dt, u, rhs);
         }
+    }
+
+    /// Solve implicit stage using Projected Thomas algorithm
+    ///
+    /// Implements Brennan-Schwartz algorithm for American option pricing.
+    /// Solves the Linear Complementarity Problem (LCP): Au = b, u ≥ ψ
+    /// by enforcing projection during the backward substitution phase.
+    ///
+    /// This is more robust than PDAS for "sticky boundary" problems because:
+    /// - No dual variables (λ) → no sensitivity to numerical noise
+    /// - Direct coupling of obstacle with tridiagonal structure
+    /// - Provably convergent for M-matrices in single pass
+    ///
+    /// @param t Current time
+    /// @param coeff_dt Time step coefficient
+    /// @param u Solution vector (modified in-place)
+    /// @param rhs Right-hand side vector
+    /// @return Always returns converged=true (single-pass algorithm)
+    NewtonResult solve_implicit_stage_projected(double t, double coeff_dt,
+                                                std::span<double> u,
+                                                std::span<const double> rhs) {
+        // Apply BCs to initial guess
+        apply_boundary_conditions(u, t);
+
+        // Build Jacobian once
+        build_jacobian(t, coeff_dt, u, config_.jacobian_fd_epsilon);
+
+        // Get obstacle function
+        if (!obstacle_) {
+            return {false, 0, std::numeric_limits<double>::infinity(),
+                   "Projected Thomas called without obstacle function"};
+        }
+        auto psi = workspace_->psi();
+
+        // Evaluate obstacle at current time
+        (*obstacle_)(t, grid_, psi);
+
+        // Evaluate L(u)
+        apply_operator_with_blocking(t, u, workspace_->lu());
+
+        // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
+        compute_residual(u, coeff_dt, workspace_->lu(), rhs, residual_);
+
+        // Apply BC to residual
+        apply_bc_to_residual(residual_, u, t);
+
+        // Negate for Thomas solver (solves J·δu = -F(u))
+        for (size_t i = 0; i < n_; ++i) {
+            residual_[i] = -residual_[i];
+        }
+
+        // Solve with Projected Thomas: J·δu = -F(u), subject to (u + δu) ≥ ψ
+        // This is equivalent to: δu ≥ ψ - u
+        std::vector<double> psi_delta(n_);
+        for (size_t i = 0; i < n_; ++i) {
+            psi_delta[i] = psi[i] - u[i];
+        }
+
+        auto result = solve_thomas_projected<double>(
+            jacobian_lower_,
+            jacobian_diag_,
+            jacobian_upper_,
+            residual_,
+            std::span{psi_delta},
+            delta_u_,
+            tridiag_workspace_
+        );
+
+        if (!result.ok()) {
+            return {false, 1, std::numeric_limits<double>::infinity(),
+                   std::string(result.message())};
+        }
+
+        // Update: u ← u + δu (already constrained during solve)
+        for (size_t i = 0; i < n_; ++i) {
+            u[i] += delta_u_[i];
+        }
+
+        // Apply boundary conditions
+        apply_boundary_conditions(u, t);
+
+        // Single-pass algorithm, always converges
+        return {true, 1, 0.0, std::nullopt};
     }
 
     /// Solve implicit stage using Primal-Dual Active Set (PDAS) method

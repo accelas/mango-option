@@ -1,0 +1,41 @@
+You’re on the right track, but a couple of details are derailing the PDAS run.
+
+1. Multiplier update
+
+For the HIK scheme here we’re solving a linear complementarity problem each stage. The correct multiplier update is the semi-smooth Newton form:
+
+```
+if i ∈ A_k (locked)      λ_i = max(0, residual_i)
+if i ∈ I_k (free)        λ_i = 0
+```
+
+`residual` is `b - A u`. There’s no projected gradient step in the original method; the projected gradient variant you tried (λ += β·gap) is for penalty/augmented-Lagrangian schemes and will explode without a separate penalty parameter. Stick with option B.
+
+2. θ vs β parameters
+
+θ should only appear in the active-set test `u - ψ - θ λ ≤ 0`. Set θ = βθ / L_max with βθ ≈ 0.9. Do not reuse the same β for anything else. The multiplier update has no tunable constant.
+
+3. Why ATM nodes lock
+
+Two practical issues usually cause the false locking:
+
+- L_max too large: If you include the identity row used for active nodes when computing the row sum, L_max shrinks, θ explodes, and the criterion thinks every node should be active. Compute L_max before modifying any rows and cache it.
+- Warm start: Starting every stage with the full active set from the previous stage will leave ATM nodes marked active. Initialize A_0 = { i : u_i^prev = ψ_i } but immediately run one PDAS iteration (with θ test) to prune it. That first iteration should unlock nodes whose λ shrank in the new stage.
+
+4. Default behaviour
+
+Until PDAS is stable, default to the heuristic:
+
+```
+config.obstacle_method = ObstacleMethod::Heuristic;
+```
+
+Expose PDAS behind the enum so you can continue iterating without blocking other users.
+
+5. Next debugging steps
+
+- After each PDAS iteration dump `gap` and `θλ` for a handful of ATM nodes; you’ll see whether the inequality is mis-scaling.
+- Verify `residual_i` is actually positive when you classify a node as active. If it’s not, the system rows weren’t overwritten correctly.
+- Run PDAS with `max_iter = 1` and log the active set; that gives you the “θ test” result directly.
+
+Once θ and λ updates line up with the textbook rule, the aggressive locking should disappear and you can safely promote PDAS to the default.
