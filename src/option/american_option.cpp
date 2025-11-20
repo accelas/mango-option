@@ -326,6 +326,9 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             result.x_max = workspace_->x_max();
             result.strike = params_.strike;
 
+            // Compute option value at current spot price
+            result.value = result.value_at(params_.spot);
+
             // Store full surface if buffer was provided (skip initial scratch space)
             if (!output_buffer_.empty()) {
                 // Buffer layout: [u_old_initial][step0][step1]...[step(n_time-1)]
