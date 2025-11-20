@@ -19,6 +19,26 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_with_solution_test",
+    srcs = ["grid_with_solution_test.cc"],
+    deps = [
+        "//src/pde/core:grid_with_solution",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "pde_workspace_spans_test",
+    srcs = ["pde_workspace_spans_test.cc"],
+    deps = [
+        "//src/pde/core:pde_workspace_spans",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
     name = "boundary_conditions_test",
     srcs = ["boundary_conditions_test.cc"],
     deps = [
