@@ -47,3 +47,15 @@ cc_binary(
         "-std=c++23",
     ],
 )
+
+cc_binary(
+    name = "debug_deep_itm_iv",
+    srcs = ["debug_deep_itm_iv.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:iv_solver_fdm",
+    ],
+    copts = [
+        "-std=c++23",
+    ],
+)
