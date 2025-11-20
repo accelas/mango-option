@@ -129,10 +129,10 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
 }
 
 // Test 9: Deep ITM put (tests adaptive grid bounds)
+// TODO: Re-enable after investigating IV solver configuration
+// Deep ITM pricing is fixed for direct American option solver (PR #200),
+// but IV solver still needs investigation
 TEST_F(IVSolverTest, DISABLED_DeepITMPutIVCalculation) {
-    // TODO: Deep ITM put pricing fails due to architectural PDE solver issue
-    // See detailed root cause analysis in DISABLED_PutImmediateExerciseAtBoundary
-    // in american_option_test.cc
     query.spot = 50.0;  // Deep in the money (S/K = 0.5)
     query.strike = 100.0;
     query.market_price = 51.0;  // Intrinsic value is 50
