@@ -229,28 +229,17 @@ double AmericanOptionSolver::compute_delta() const {
         return 0.0;  // No solution available
     }
 
-    auto grid = workspace_->grid();
-
     // Find current spot in grid
     double current_moneyness = std::log(params_.spot / params_.strike);
     size_t i = find_grid_index(current_moneyness);
 
-    // Compute ∂V/∂x using centered finite difference on possibly non-uniform grid
-    // For non-uniform grids: f'(x_i) ≈ (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
-    // Note: solution_ stores V/K (normalized)
-    double dx_total = grid[i+1] - grid[i-1];
-    double dVdx = (solution_[i+1] - solution_[i-1]) / dx_total;
+    // Compute ∂V/∂x using PDE operator (handles non-uniform grids + SIMD)
+    std::vector<double> du_dx(solution_.size());
+    get_diff_operator().compute_first_derivative(
+        solution_, du_dx, i, i+1);
 
-    // Transform from log-moneyness to spot
-    // V_dollar = V_norm * K
-    // Delta = ∂V_dollar/∂S = K * ∂V_norm/∂x * ∂x/∂S
-    //       = K * dVdx * (1/S)
-    //       = (K/S) * dVdx
-    // Use FMA: (K/S) * dVdx
-    const double K_over_S = params_.strike / params_.spot;
-    double delta = K_over_S * dVdx;
-
-    return delta;
+    // Transform: Delta = (K/S) * ∂V/∂x
+    return (params_.strike / params_.spot) * du_dx[i];
 }
 
 double AmericanOptionSolver::compute_gamma() const {
