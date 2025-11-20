@@ -165,26 +165,18 @@ public:
                     continue;
                 }
 
-                // Create solver
-                auto solver_result = AmericanOptionSolver::create(params[i], workspace);
-                if (!solver_result.has_value()) {
-                    results[i] = std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        .message = solver_result.error(),
-                        .iterations = 0
-                    });
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                    continue;
-                }
+                // Create solver (after CRTP revert: direct constructor, no factory)
+                // Allocate surface buffer for full time history: (n_time + 1) × n_space
+                std::vector<double> surface_buffer((workspace->n_time() + 1) * workspace->n_space());
+                AmericanOptionSolver solver(params[i], workspace, surface_buffer);
 
                 // Invoke setup callback if provided
                 if (setup) {
-                    setup(i, solver_result.value());
+                    setup(i, solver);
                 }
 
                 // Solve
-                results[i] = solver_result.value().solve();
+                results[i] = solver.solve();
                 if (!results[i].has_value()) {
                     MANGO_PRAGMA_ATOMIC
                     ++failed_count;
@@ -235,17 +227,9 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
         });
     }
 
-    // Create and solve
-    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-    if (!solver_result.has_value()) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = solver_result.error(),
-            .iterations = 0
-        });
-    }
-
-    return solver_result.value().solve();
+    // Create and solve (after CRTP revert: direct constructor, no factory)
+    AmericanOptionSolver solver(params, workspace_result.value());
+    return solver.solve();
 }
 
 /// Solve a batch of American options with shared grid
@@ -297,21 +281,13 @@ inline BatchAmericanOptionResult solve_american_options_batch(
 
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
-                // Create solver
-                auto solver_result = AmericanOptionSolver::create(params[i], workspace);
-                if (!solver_result.has_value()) {
-                    results[i] = std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        .message = solver_result.error(),
-                        .iterations = 0
-                    });
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                    continue;
-                }
+                // Create solver (after CRTP revert: direct constructor, no factory)
+                // Allocate surface buffer for full time history: (n_time + 1) × n_space
+                std::vector<double> surface_buffer((workspace->n_time() + 1) * workspace->n_space());
+                AmericanOptionSolver solver(params[i], workspace, surface_buffer);
 
                 // Solve
-                results[i] = solver_result.value().solve();
+                results[i] = solver.solve();
                 if (!results[i].has_value()) {
                     MANGO_PRAGMA_ATOMIC
                     ++failed_count;
