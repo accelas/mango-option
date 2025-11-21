@@ -50,10 +50,7 @@ public:
     AmericanPutSolver(const PricingParams& params,
                      std::shared_ptr<Grid<double>> grid,
                      PDEWorkspace workspace)
-        : PDESolver<AmericanPutSolver>(
-              grid,
-              workspace,
-              create_obstacle())
+        : PDESolver<AmericanPutSolver>(grid, workspace)
         , params_(params)
         , grid_(grid)
         , left_bc_(create_left_bc())
@@ -70,6 +67,14 @@ public:
     const auto& left_boundary() const { return left_bc_; }
     const auto& right_boundary() const { return right_bc_; }
     const auto& spatial_operator() const { return spatial_op_; }
+
+    // Obstacle condition for American put: V ≥ max(1 - e^x, 0)
+    void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+        }
+    }
 
     // Grid info accessors
     size_t n_space() const { return grid_->n_space(); }
@@ -96,14 +101,6 @@ private:
             return 0.0;
         }
     };
-
-    static ObstacleCallback create_obstacle() {
-        return [](double /*t*/, std::span<const double> x, std::span<double> psi) {
-            for (size_t i = 0; i < x.size(); ++i) {
-                psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-            }
-        };
-    }
 
     static DirichletBC<LeftBCFunction> create_left_bc() {
         return DirichletBC(LeftBCFunction{});
@@ -144,10 +141,7 @@ public:
     AmericanCallSolver(const PricingParams& params,
                       std::shared_ptr<Grid<double>> grid,
                       PDEWorkspace workspace)
-        : PDESolver<AmericanCallSolver>(
-              grid,
-              workspace,
-              create_obstacle())
+        : PDESolver<AmericanCallSolver>(grid, workspace)
         , params_(params)
         , grid_(grid)
         , left_bc_(create_left_bc())
@@ -164,6 +158,14 @@ public:
     const auto& left_boundary() const { return left_bc_; }
     const auto& right_boundary() const { return right_bc_; }
     const auto& spatial_operator() const { return spatial_op_; }
+
+    // Obstacle condition for American call: V ≥ max(e^x - 1, 0)
+    void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+        }
+    }
 
     // Grid info accessors
     size_t n_space() const { return grid_->n_space(); }
@@ -193,14 +195,6 @@ private:
             return std::exp(x) - discount;
         }
     };
-
-    static ObstacleCallback create_obstacle() {
-        return [](double /*t*/, std::span<const double> x, std::span<double> psi) {
-            for (size_t i = 0; i < x.size(); ++i) {
-                psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-            }
-        };
-    }
 
     static DirichletBC<LeftBCFunction> create_left_bc() {
         return DirichletBC(LeftBCFunction{});

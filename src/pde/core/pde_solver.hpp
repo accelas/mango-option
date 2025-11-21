@@ -30,12 +30,18 @@ concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, Ja
     { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
 };
 
+/// Concept to detect if derived class provides obstacle condition
+template<typename Derived>
+concept HasObstacle = requires(const Derived& d, double t, std::span<const double> x, std::span<double> psi) {
+    { d.obstacle(t, x, psi) } -> std::same_as<void>;
+};
+
 // Temporal event callback signature
 using TemporalEventCallback = std::function<void(double t,
                                                   std::span<const double> x,
                                                   std::span<double> u)>;
 
-// Obstacle callback signature
+// Obstacle callback signature (legacy - used for std::function obstacle callbacks)
 using ObstacleCallback = std::function<void(double t,
                                              std::span<const double> x,
                                              std::span<double> psi)>;
@@ -60,13 +66,14 @@ struct TemporalEvent {
 /// - Stage 2: BDF2 from t_n to t_n+1
 /// where γ = 2 - √2 for L-stability
 ///
-/// Uses CRTP to obtain boundary conditions and spatial operator from
-/// derived class, eliminating redundant constructor parameters.
+/// Uses CRTP to obtain boundary conditions, spatial operator, and obstacle
+/// from derived class, eliminating redundant constructor parameters.
 ///
 /// Derived classes must implement:
 /// - left_boundary() - Returns left boundary condition object
 /// - right_boundary() - Returns right boundary condition object
 /// - spatial_operator() - Returns spatial operator object
+/// - obstacle(t, x, psi) - Optional: computes obstacle constraint (if HasObstacle<Derived>)
 ///
 /// @tparam Derived The derived solver class
 template<typename Derived>
@@ -76,17 +83,14 @@ public:
     ///
     /// @param grid Grid with solution storage (outlives solver, passed by shared_ptr)
     /// @param workspace Named spans to caller-managed PMR buffers
-    /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
     ///
-    /// Note: Boundary conditions and spatial operator are obtained from derived class
-    ///       via CRTP calls, not passed as constructor arguments
+    /// Note: Boundary conditions, spatial operator, and obstacle are obtained from
+    ///       derived class via CRTP calls, not passed as constructor arguments
     /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
     PDESolver(std::shared_ptr<Grid<double>> grid,
-              PDEWorkspace workspace,
-              std::optional<ObstacleCallback> obstacle = std::nullopt)
+              PDEWorkspace workspace)
         : grid_(grid)  // Copy shared_ptr (not move - shared ownership)
         , config_{}  // Default-initialized
-        , obstacle_(std::move(obstacle))
         , n_(grid->n_space())
         , workspace_(workspace)
         , isa_target_(cpu::select_isa_target())
@@ -160,9 +164,9 @@ public:
         return grid_->solution();
     }
 
-    /// Check if obstacle condition is present
-    bool has_obstacle() const {
-        return obstacle_.has_value();
+    /// Check if obstacle condition is present (compile-time concept check)
+    static constexpr bool has_obstacle() {
+        return HasObstacle<Derived>;
     }
 
     /// Set TR-BDF2 configuration
@@ -199,7 +203,6 @@ private:
 
     // Configuration
     TRBDF2Config config_;
-    std::optional<ObstacleCallback> obstacle_;
 
     // Grid size
     size_t n_;
@@ -263,16 +266,19 @@ private:
     ///
     /// This is called AFTER each Newton update to enforce variational
     /// inequality constraints (e.g., American option early exercise).
+    ///
+    /// Uses CRTP with concept check - only calls derived().obstacle() if
+    /// Derived class satisfies HasObstacle<Derived> concept.
     void apply_obstacle(double t, std::span<double> u) {
-        if (!obstacle_) return;
+        if constexpr (HasObstacle<Derived>) {
+            auto psi = workspace_.psi();
+            derived().obstacle(t, grid_->x(), psi);
 
-        auto psi = workspace_.psi();
-        (*obstacle_)(t, grid_->x(), psi);
-
-        // Project: u[i] = max(u[i], psi[i])
-        for (size_t i = 0; i < u.size(); ++i) {
-            if (u[i] < psi[i]) {
-                u[i] = psi[i];
+            // Project: u[i] = max(u[i], psi[i])
+            for (size_t i = 0; i < u.size(); ++i) {
+                if (u[i] < psi[i]) {
+                    u[i] = psi[i];
+                }
             }
         }
     }
@@ -455,7 +461,7 @@ private:
     NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
                                                std::span<double> u,
                                                std::span<const double> rhs) {
-        if (obstacle_) {
+        if constexpr (HasObstacle<Derived>) {
             return solve_implicit_stage_projected(t, coeff_dt, u, rhs);
         } else {
             return solve_implicit_stage(t, coeff_dt, u, rhs);
@@ -561,15 +567,13 @@ private:
             rhs_with_bc[n_-1] = right_bc.value(t, grid_->x()[n_-1]);
         }
 
-        // Get obstacle function
-        if (!obstacle_) {
-            return {false, 0, std::numeric_limits<double>::infinity(),
-                   "Projected Thomas called without obstacle function"};
-        }
+        // Get obstacle constraint via CRTP
+        // Note: This method is only called when HasObstacle<Derived> is true,
+        // so we can safely call derived().obstacle()
         auto psi = workspace_.psi();
 
         // Evaluate obstacle constraint ψ(x,t) at current time
-        (*obstacle_)(t, grid_->x(), psi);
+        derived().obstacle(t, grid_->x(), psi);
 
         // ═══════════════════════════════════════════════════════════════════════
         // CRITICAL FIX #2: Lock Deep Exercise Region to Prevent Diffusion Lift
