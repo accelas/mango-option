@@ -56,29 +56,39 @@ if (result.converged) {
 Fast parallel IV calculation for option chains.
 
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 #include <vector>
 
 // Prepare batch of options
-std::vector<mango::IVParams> batch = {
-    {.spot_price = 100.0, .strike = 95.0, .time_to_maturity = 1.0,
-     .risk_free_rate = 0.05, .market_price = 8.5, .is_call = false},
-    {.spot_price = 100.0, .strike = 100.0, .time_to_maturity = 1.0,
-     .risk_free_rate = 0.05, .market_price = 10.45, .is_call = false},
-    {.spot_price = 100.0, .strike = 105.0, .time_to_maturity = 1.0,
-     .risk_free_rate = 0.05, .market_price = 12.8, .is_call = false},
+std::vector<mango::IVQuery> queries = {
+    {.option = {.spot = 100.0, .strike = 95.0, .maturity = 1.0,
+                .rate = 0.05, .type = OptionType::PUT},
+     .market_price = 8.5},
+    {.option = {.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                .rate = 0.05, .type = OptionType::PUT},
+     .market_price = 10.45},
+    {.option = {.spot = 100.0, .strike = 105.0, .maturity = 1.0,
+                .rate = 0.05, .type = OptionType::PUT},
+     .market_price = 12.8},
 };
 
 // Shared configuration for all options
-mango::IVConfig config{
-    .root_config = mango::RootFindingConfig{.max_iter = 100, .tolerance = 1e-6},
+mango::IVSolverFDMConfig config{
+    .root_config = {.max_iter = 100, .tolerance = 1e-6},
     .grid_n_space = 101,
     .grid_n_time = 1000,
     .grid_s_max = 200.0
 };
 
-// Solve in parallel
-auto results = mango::solve_implied_vol_batch(batch, config);
+// Create solver and solve in parallel
+mango::IVSolverFDM solver(config);
+std::vector<mango::IVResult> results(queries.size());
+auto status = solver.solve_batch(queries, results);
+
+if (!status) {
+    std::cerr << "Batch solve failed: " << status.error() << "\n";
+    return;
+}
 
 // Process results
 for (size_t i = 0; i < results.size(); ++i) {
@@ -417,14 +427,14 @@ Is this a single option calculation?
 │        See Example 1
 │
 └─ NO → Multiple options?
-         ├─ <10 options → Use BatchIVSolver (FDM)
+         ├─ <10 options → Use IVSolverFDM::solve_batch
          │              Fast parallel, no pre-computation needed
          │              ~107 options/sec on 32 cores
          │              See Example 2
          │
          └─ >100 options → Build Price Table
                           ├─ Do you need results in <1 minute? 
-                          │  ├─ YES → Use BatchIVSolver (FDM)
+                          │  ├─ YES → Use IVSolverFDM::solve_batch
                           │  │        Parallel, reasonably fast
                           │  │
                           │  └─ NO → Pre-compute Table
@@ -444,7 +454,7 @@ Is this a single option calculation?
 | Method | Single IV | Batch | Setup Time | Query Time | Use Case |
 |--------|-----------|-------|------------|------------|----------|
 | IVSolver (FDM) | ~143ms | ~107/sec | None | ~143ms | Single, ground truth |
-| BatchIVSolver | N/A | ~107/sec | None | Batch | Small batches <10 options |
+| IVSolverFDM::solve_batch | N/A | ~107/sec | None | Batch | Small batches <10 options |
 | PriceTable | N/A | N/A | ~24sec | N/A | Setup for fast queries |
 | IVSolverInterpolated | ~20µs | 50K+/sec | ~24sec | ~20µs | Many queries, pre-computed |
 
