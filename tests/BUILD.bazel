@@ -314,7 +314,7 @@ cc_test(
     name = "bspline_fitter_4d_separable_test",
     srcs = ["bspline_fitter_4d_separable_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],

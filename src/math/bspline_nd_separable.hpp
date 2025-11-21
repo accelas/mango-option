@@ -35,6 +35,7 @@
 #include <string>
 #include <cassert>
 #include <limits>
+#include <memory>
 
 namespace mango {
 

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <cmath>
 #include <vector>
 
@@ -37,42 +37,42 @@ TEST_F(BSplineWorkspaceTest, WorkspaceGivesIdenticalResults) {
     }
 
     // Fit with workspace (current code path)
-    auto fitter1_result = BSplineFitter4DSeparable::create(axis0_, axis1_, axis2_, axis3_);
+    auto fitter1_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{axis0_, axis1_, axis2_, axis3_});
     ASSERT_TRUE(fitter1_result.has_value());
-    auto result_workspace = fitter1_result.value().fit(values, 1e-6);
+    auto result_workspace = fitter1_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
     EXPECT_TRUE(result_workspace.success) << "Workspace path failed: "
                                           << result_workspace.error_message;
     EXPECT_EQ(result_workspace.coefficients.size(), n_total_);
 
     // Check residuals
-    EXPECT_LT(result_workspace.max_residual_axis0, 1e-6);
-    EXPECT_LT(result_workspace.max_residual_axis1, 1e-6);
-    EXPECT_LT(result_workspace.max_residual_axis2, 1e-6);
-    EXPECT_LT(result_workspace.max_residual_axis3, 1e-6);
+    EXPECT_LT(result_workspace.max_residual_per_axis[0], 1e-6);
+    EXPECT_LT(result_workspace.max_residual_per_axis[1], 1e-6);
+    EXPECT_LT(result_workspace.max_residual_per_axis[2], 1e-6);
+    EXPECT_LT(result_workspace.max_residual_per_axis[3], 1e-6);
 
     // Check no failed slices
-    EXPECT_EQ(result_workspace.failed_slices_axis0, 0);
-    EXPECT_EQ(result_workspace.failed_slices_axis1, 0);
-    EXPECT_EQ(result_workspace.failed_slices_axis2, 0);
-    EXPECT_EQ(result_workspace.failed_slices_axis3, 0);
+    EXPECT_EQ(result_workspace.failed_slices[0], 0);
+    EXPECT_EQ(result_workspace.failed_slices[1], 0);
+    EXPECT_EQ(result_workspace.failed_slices[2], 0);
+    EXPECT_EQ(result_workspace.failed_slices[3], 0);
 }
 
 TEST_F(BSplineWorkspaceTest, HandlesLargestAxisCorrectly) {
     // axis3 is largest (6 points), ensure workspace sized correctly
     std::vector<double> values(n_total_, 1.0);  // Constant function
 
-    auto fitter_result = BSplineFitter4DSeparable::create(axis0_, axis1_, axis2_, axis3_);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{axis0_, axis1_, axis2_, axis3_});
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto result = fitter_result.value().fit(values, 1e-6);
+    auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
     EXPECT_TRUE(result.success);
 
     // For constant function, residuals should be near zero
-    EXPECT_LT(result.max_residual_axis0, 1e-9);
-    EXPECT_LT(result.max_residual_axis1, 1e-9);
-    EXPECT_LT(result.max_residual_axis2, 1e-9);
-    EXPECT_LT(result.max_residual_axis3, 1e-9);
+    EXPECT_LT(result.max_residual_per_axis[0], 1e-9);
+    EXPECT_LT(result.max_residual_per_axis[1], 1e-9);
+    EXPECT_LT(result.max_residual_per_axis[2], 1e-9);
+    EXPECT_LT(result.max_residual_per_axis[3], 1e-9);
 }
 
 TEST_F(BSplineWorkspaceTest, WorksWithRealisticGrid) {
@@ -102,16 +102,16 @@ TEST_F(BSplineWorkspaceTest, WorksWithRealisticGrid) {
         }
     }
 
-    auto fitter_result = BSplineFitter4DSeparable::create(
-        moneyness, maturity, volatility, rate);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(
+        std::array<std::vector<double>, 4>{moneyness, maturity, volatility, rate});
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto result = fitter_result.value().fit(prices, 1e-3);  // Relaxed tolerance
+    auto result = fitter_result.value().fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});  // Relaxed tolerance
     EXPECT_TRUE(result.success);
 
     // All axes should converge
-    EXPECT_EQ(result.failed_slices_axis0, 0);
-    EXPECT_EQ(result.failed_slices_axis1, 0);
-    EXPECT_EQ(result.failed_slices_axis2, 0);
-    EXPECT_EQ(result.failed_slices_axis3, 0);
+    EXPECT_EQ(result.failed_slices[0], 0);
+    EXPECT_EQ(result.failed_slices[1], 0);
+    EXPECT_EQ(result.failed_slices[2], 0);
+    EXPECT_EQ(result.failed_slices[3], 0);
 }

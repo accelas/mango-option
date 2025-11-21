@@ -151,9 +151,9 @@ TEST(BSplineFitter4DTest, FactoryCreateMultipleErrors) {
     auto result = BSplineFitter4D::create(m, t, v, r);
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
-    // Should mention failing axes
-    EXPECT_TRUE(result.error().find("axis0") != std::string::npos ||
-                result.error().find("axis1") != std::string::npos);
+    // Should mention failing axes (generic template uses "axis 0", "axis 1", etc.)
+    EXPECT_TRUE(result.error().find("axis 0") != std::string::npos ||
+                result.error().find("axis 1") != std::string::npos);
 }
 
 TEST(BSplineFitter4DTest, FactoryCreateExactlyFourPoints) {

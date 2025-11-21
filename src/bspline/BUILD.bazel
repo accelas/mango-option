@@ -3,7 +3,7 @@ cc_library(
     hdrs = ["bspline_fitter_4d.hpp"],
     deps = [
         "//src/math:bspline_basis",
-        "//src/math:bspline_collocation",
+        "//src/math:bspline_nd_separable",
         "//src/support:error_types",
     ],
     copts = [
