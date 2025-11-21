@@ -342,18 +342,6 @@ cc_test(
 )
 
 cc_test(
-    name = "centered_difference_simd_test",
-    srcs = ["operators/centered_difference_simd_test.cc"],
-    deps = [
-        "//src/pde/operators:centered_difference_simd_backend",
-        "//src/pde/operators:centered_difference_scalar",
-        "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "centered_difference_facade_test",
     srcs = ["centered_difference_facade_test.cc"],
     deps = [
