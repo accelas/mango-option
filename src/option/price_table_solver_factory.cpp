@@ -153,9 +153,10 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
         log_moneyness[i] = std::log(grid.moneyness[i]);
     }
 
-    // Pre-allocate workspaces and surfaces for all (σ, r) combinations
+    // Pre-allocate workspaces, buffers, and surfaces for all (σ, r) combinations
     const size_t batch_size = Nv * Nr;
     std::vector<std::optional<NormalizedWorkspace>> workspaces(batch_size);
+    std::vector<std::pmr::vector<double>> workspace_buffers(batch_size);
     std::vector<std::optional<NormalizedSurfaceView>> surfaces(batch_size);
 
     // Create workspaces outside parallel region
@@ -177,7 +178,11 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
         request.T_max = T_max;
         request.tau_snapshots = grid.maturity;
 
-        auto ws_result = NormalizedWorkspace::create(request);
+        // Allocate buffer for PDEWorkspace
+        size_t required_size = PDEWorkspace::required_size(config_.n_space);
+        workspace_buffers[idx].resize(required_size);
+
+        auto ws_result = NormalizedWorkspace::create(request, workspace_buffers[idx]);
         if (ws_result.has_value()) {
             workspaces[idx] = std::move(ws_result.value());
         } else {

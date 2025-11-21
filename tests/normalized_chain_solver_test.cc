@@ -25,7 +25,10 @@ TEST(NormalizedChainSolverTest, WorkspaceCreation) {
         .tau_snapshots = tau_snapshots
     };
 
-    auto workspace_result = NormalizedWorkspace::create(request);
+    // Allocate buffer for PDEWorkspace
+    std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
+
+    auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
     ASSERT_TRUE(workspace_result.has_value());
 
     auto workspace = std::move(workspace_result.value());
@@ -137,7 +140,10 @@ TEST(NormalizedChainSolverTest, SolveAndInterpolate) {
         .tau_snapshots = tau_snapshots
     };
 
-    auto workspace_result = NormalizedWorkspace::create(request);
+    // Allocate buffer for PDEWorkspace
+    std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
+
+    auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
     ASSERT_TRUE(workspace_result.has_value());
 
     auto workspace = std::move(workspace_result.value());
@@ -182,7 +188,10 @@ TEST(NormalizedChainSolverTest, ScaleInvariance) {
         .tau_snapshots = tau_snapshots
     };
 
-    auto workspace_result = NormalizedWorkspace::create(request);
+    // Allocate buffer for PDEWorkspace
+    std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
+
+    auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
     ASSERT_TRUE(workspace_result.has_value());
 
     auto workspace = std::move(workspace_result.value());

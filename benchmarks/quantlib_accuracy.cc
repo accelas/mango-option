@@ -378,8 +378,11 @@ static void compare_normalized_chain_accuracy(
         .tau_snapshots = maturities
     };
 
+    // Allocate buffer for PDEWorkspace
+    std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
+
     // Solve with normalized chain solver
-    auto workspace_result = NormalizedWorkspace::create(request);
+    auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }

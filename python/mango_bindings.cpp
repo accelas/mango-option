@@ -179,7 +179,7 @@ PYBIND11_MODULE(mango_iv, m) {
            double x_min,
            double x_max,
            size_t n_space,
-           size_t n_time) {
+           [[maybe_unused]] size_t n_time) {
             auto grid_spec_result = mango::GridSpec<double>::uniform(x_min, x_max, n_space);
             if (!grid_spec_result.has_value()) {
                 throw py::value_error(

@@ -122,9 +122,17 @@ int main() {
         constexpr size_t n_space = 5;  // Too small!
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
-        auto workspace = grid_spec.has_value()
-            ? PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource())
-            : std::expected<PDEWorkspaceOwned, std::string>(std::unexpected(grid_spec.error()));
+
+        std::expected<PDEWorkspace, std::string> workspace = std::unexpected("Grid spec failed");
+        std::pmr::vector<double> buffer;
+
+        if (grid_spec.has_value()) {
+            size_t n = grid_spec.value().n_points();
+            buffer.resize(PDEWorkspace::required_size(n));
+            workspace = PDEWorkspace::from_buffer(buffer, n);
+        } else {
+            workspace = std::unexpected(grid_spec.error());
+        }
 
         if (workspace.has_value()) {
             std::cout << "   ✓ Workspace created (unexpected)!\n";

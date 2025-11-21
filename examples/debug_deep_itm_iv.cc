@@ -49,25 +49,28 @@ int main() {
             vol
         );
 
-    double moneyness = query.spot / query.strike;
-    double x_min = std::log(std::min(0.5, moneyness * 0.5));
-    double x_max = std::log(std::max(2.0, 200.0 / query.strike));
+        double moneyness = query.spot / query.strike;
+        double x_min = std::log(std::min(0.5, moneyness * 0.5));
+        double x_max = std::log(std::max(2.0, 200.0 / query.strike));
 
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, config.grid_n_space);
-    if (!grid_spec.has_value()) {
-        std::cerr << "Grid creation failed\n";
-        return 1;
-    }
-
-        std::pmr::synchronized_pool_resource pool;
-        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), &pool);
-
-        if (!workspace.has_value()) {
-            std::cerr << "Workspace creation failed\n";
+        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, config.grid_n_space);
+        if (!grid_spec.has_value()) {
+            std::cerr << "Grid creation failed\n";
             return 1;
         }
 
-        AmericanOptionSolver solver(params, workspace.value().workspace);
+        // Allocate buffer for workspace
+        std::pmr::synchronized_pool_resource pool;
+        size_t n = grid_spec.value().n_points();
+        std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+        auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+        if (!workspace_result.has_value()) {
+            std::cerr << "Workspace creation failed: " << workspace_result.error() << "\n";
+            return 1;
+        }
+
+        AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
 
         if (result.has_value()) {

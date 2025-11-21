@@ -50,7 +50,9 @@ std::expected<void, std::string> NormalizedSolveRequest::validate() const {
 }
 
 std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
-    const NormalizedSolveRequest& request)
+    const NormalizedSolveRequest& request,
+    std::span<double> pde_buffer,
+    [[maybe_unused]] std::pmr::memory_resource* resource)
 {
     // Validate request
     auto validation = request.validate();
@@ -74,13 +76,16 @@ std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
     }
     workspace.grid_ = grid_result.value();
 
-    // Allocate PMR buffer for workspace (reused across solves)
+    // Create workspace spans from caller-provided buffer
     size_t n = request.n_space;
-    size_t buffer_size = PDEWorkspace::required_size(n);
-    workspace.pde_buffer_ = std::pmr::vector<double>(buffer_size, std::pmr::get_default_resource());
+    size_t required = PDEWorkspace::required_size(n);
+    if (pde_buffer.size() < required) {
+        return std::unexpected(std::format(
+            "PDEWorkspace buffer too small: {} < {} required",
+            pde_buffer.size(), required));
+    }
 
-    // Create workspace spans from buffer
-    auto pde_workspace_result = PDEWorkspace::from_buffer(workspace.pde_buffer_, n);
+    auto pde_workspace_result = PDEWorkspace::from_buffer(pde_buffer, n);
     if (!pde_workspace_result.has_value()) {
         return std::unexpected("Failed to create PDEWorkspace: " + pde_workspace_result.error());
     }

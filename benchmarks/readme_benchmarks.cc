@@ -427,8 +427,11 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
     double spot = 100.0;
 
     for (auto _ : state) {
+        // Allocate buffer for PDEWorkspace
+        std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
+
         // Create workspace
-        auto workspace_result = NormalizedWorkspace::create(request);
+        auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
         if (!workspace_result) continue;
         auto workspace = std::move(workspace_result.value());
         auto surface = workspace.surface_view();
