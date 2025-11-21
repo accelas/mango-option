@@ -57,75 +57,118 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
     const size_t Nr = rate.size();
     const double T_max = maturity.back();
 
-    size_t failed_count = 0;
+    // Build batch parameters for (σ, r) grid
+    // All options share: spot=strike=K_ref, maturity=T_max, same grid
+    const size_t batch_size = Nv * Nr;
+    std::vector<AmericanOptionParams> batch_params;
+    batch_params.reserve(batch_size);
 
-    MANGO_PRAGMA_PARALLEL
-    {
-        // Create normalized request template (per-thread)
-        NormalizedSolveRequest base_request{
-            .sigma = 0.20,  // Placeholder, set in loop
-            .rate = 0.05,   // Placeholder, set in loop
-            .dividend = config_.dividend_yield,
-            .option_type = config_.option_type,
-            .x_min = config_.x_min,
-            .x_max = config_.x_max,
-            .n_space = config_.n_space,
-            .n_time = config_.n_time,
-            .T_max = T_max,
-            .tau_snapshots = maturity
-        };
+    namespace views = std::views;
+    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
+                                                 views::iota(size_t{0}, Nr))) {
+        AmericanOptionParams params;
+        params.spot = K_ref;
+        params.strike = K_ref;
+        params.maturity = T_max;
+        params.rate = rate[l];
+        params.dividend_yield = config_.dividend_yield;
+        params.type = config_.option_type;
+        params.volatility = volatility[k];
+        params.discrete_dividends = {};
+        batch_params.push_back(params);
+    }
 
-        // Create workspace once per thread
-        auto workspace_result = NormalizedWorkspace::create(base_request);
+    // Solve batch with shared grid (use_shared_grid=true)
+    // This is equivalent to the manual OpenMP loop but reuses BatchAmericanOptionSolver
+    BatchAmericanOptionSolver batch_solver;
+    auto batch_result = batch_solver.solve_batch(batch_params, true);
 
-        if (!workspace_result) {
-            // Workspace creation failed
-            MANGO_PRAGMA_FOR_COLLAPSE2
-            for (size_t k = 0; k < Nv; ++k) {
-                for (size_t l = 0; l < Nr; ++l) {
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                }
-            }
-        } else {
-            auto workspace = std::move(workspace_result.value());
-            auto surface = workspace.surface_view();
+    // Check for failures
+    if (batch_result.failed_count > 0) {
+        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
+                         " out of " + std::to_string(batch_size) + " PDEs");
+    }
 
-            MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC
-            for (size_t k = 0; k < Nv; ++k) {
-                for (size_t l = 0; l < Nr; ++l) {
-                    // Set (σ, r) for this solve
-                    NormalizedSolveRequest request = base_request;
-                    request.sigma = volatility[k];
-                    request.rate = rate[l];
-
-                    // Solve normalized PDE
-                    auto solve_result = NormalizedChainSolver::solve(
-                        request, workspace, surface);
-
-                    if (!solve_result) {
-                        MANGO_PRAGMA_ATOMIC
-                        ++failed_count;
-                        continue;
-                    }
-
-                    // Extract prices from surface
-                    namespace views = std::views;
-                    for (auto [i, j] : views::cartesian_product(views::iota(size_t{0}, Nm),
-                                                                 views::iota(size_t{0}, Nt))) {
-                        double x = std::log(moneyness[i]);
-                        double u = surface.interpolate(x, maturity[j]);
-                        size_t idx_4d = ((i * Nt + j) * Nv + k) * Nr + l;
-                        prices_4d[idx_4d] = K_ref * u;
-                    }
-                }
-            }
+    // Get n_time from first successful result (all share same grid)
+    size_t n_time = 0;
+    for (const auto& result_expected : batch_result.results) {
+        if (result_expected.has_value() && result_expected->converged) {
+            n_time = result_expected->n_time;
+            break;
         }
     }
 
-    if (failed_count > 0) {
-        return std::unexpected("Failed to solve " + std::to_string(failed_count) +
-                         " out of " + std::to_string(Nv * Nr) + " PDEs");
+    // Precompute step indices for each maturity
+    const double dt = T_max / n_time;
+    std::vector<size_t> step_indices(Nt);
+    for (size_t j = 0; j < Nt; ++j) {
+        double step_exact = maturity[j] / dt - 1.0;
+        long long step_rounded = std::llround(step_exact);
+
+        if (step_rounded < 0) {
+            step_indices[j] = 0;
+        } else if (step_rounded >= static_cast<long long>(n_time)) {
+            step_indices[j] = n_time - 1;
+        } else {
+            step_indices[j] = static_cast<size_t>(step_rounded);
+        }
+    }
+
+    // Precompute log-moneyness values
+    std::vector<double> log_moneyness(Nm);
+    for (size_t i = 0; i < Nm; ++i) {
+        log_moneyness[i] = std::log(moneyness[i]);
+    }
+
+    // Extract prices from surfaces for each (σ, r) result
+    const size_t slice_stride = Nv * Nr;
+    for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
+        const auto& result_expected = batch_result.results[idx];
+        if (!result_expected.has_value() || !result_expected->converged) {
+            continue;  // Leave zeros for failed solves
+        }
+        const auto& result = result_expected.value();
+
+        // Build spatial grid for this result (uniform grid)
+        std::vector<double> x_grid(result.n_space);
+        const double dx = (result.x_max - result.x_min) / (result.n_space - 1);
+        for (size_t i = 0; i < result.n_space; ++i) {
+            x_grid[i] = result.x_min + i * dx;
+        }
+
+        // For each maturity time step
+        for (size_t j = 0; j < Nt; ++j) {
+            size_t step_idx = step_indices[j];
+            std::span<const double> spatial_solution = result.at_time(step_idx);
+
+            if (spatial_solution.empty()) {
+                continue;
+            }
+
+            // Build cubic spline for this time step
+            CubicSpline<double> spline;
+            auto build_error = spline.build(x_grid, spatial_solution);
+            if (build_error.has_value()) {
+                // Fall back to boundary values if spline build fails
+                for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+                    const double x = log_moneyness[m_idx];
+                    double V_norm = (x <= result.x_min) ? spatial_solution[0] : spatial_solution[result.n_space - 1];
+                    size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
+                    prices_4d[table_idx] = K_ref * V_norm;
+                }
+                continue;
+            }
+
+            // Interpolate spatial solution to moneyness grid using cubic spline
+            for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+                const double x = log_moneyness[m_idx];
+                double V_norm = spline.eval(x);
+
+                // Store denormalized price
+                size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
+                prices_4d[table_idx] = K_ref * V_norm;
+            }
+        }
     }
 
     return {};
