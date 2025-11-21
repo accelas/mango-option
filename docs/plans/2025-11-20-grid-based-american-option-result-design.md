@@ -81,8 +81,9 @@ public:
 
     // Query snapshots
     bool has_snapshots() const;
-    std::span<const double> at(size_t snapshot_idx) const;  // Returns spatial solution at snapshot
+    std::span<const T> at(size_t snapshot_idx) const;  // Returns spatial solution at snapshot
     size_t num_snapshots() const;  // Number of recorded snapshots
+    std::span<const double> snapshot_times() const;  // Times corresponding to each snapshot (after snapping)
 
     // For PDESolver (internal use only)
     bool should_record(size_t time_step_idx) const;  // Check if time step should be recorded
@@ -90,6 +91,7 @@ public:
 
 private:
     std::vector<size_t> snapshot_indices_;  // Sorted time step indices to record
+    std::vector<double> snapshot_times_;  // Actual times after snapping (for query)
     std::optional<std::vector<T>> surface_history_;  // 2D: num_snapshots × n_space (row-major)
 
     // Helper: Map time step index → snapshot index (or nullopt if not recorded)
@@ -158,14 +160,41 @@ std::expected<std::vector<size_t>, std::string> convert_times_to_indices(
 
 ```cpp
 // In PDESolver::solve() time-stepping loop:
+
+// Record initial condition at t=0 if requested
+if (grid_->should_record(0)) {
+    grid_->record(0, u_current);
+}
+
 for (size_t step = 0; step < time.n_steps(); ++step) {
     // ... TR-BDF2 stages ...
 
-    // Record snapshot if requested
-    if (grid_->should_record(step)) {
-        grid_->record(step, u_current);
+    // Process temporal events (discrete dividends, etc.)
+    process_temporal_events(step + 1, u_current);
+
+    // Record snapshot AFTER events (captures true PDE state at t_{n+1})
+    if (grid_->should_record(step + 1)) {
+        grid_->record(step + 1, u_current);
     }
 }
+```
+
+**Snapshot Timing Details:**
+
+The snapshot system uses **state indices** (not time step indices) in the range `[0, n_steps]`:
+- State 0: Initial condition at `t = 0` (maturity in backward PDE)
+- State n: Final state at `t = n * dt`
+
+When snapshots are recorded **after** TR-BDF2 stages and temporal events:
+- Snapshot at state index `k` captures the PDE state **after** the k-th time step completes
+- Initial condition (state 0) must be recorded explicitly **before** the time-stepping loop
+- All other states are recorded **after** events to capture the true PDE state
+
+The time-to-index conversion maps user-specified times to state indices:
+```cpp
+// User requests snapshot at t=0.5 (maturity in backward PDE)
+// Convert to state index: floor(0.5 / dt + 0.5)
+// If dt=0.1, state_idx = 5 → captures state after 5 time steps
 ```
 
 ### 2. AmericanOptionSolver Changes
@@ -197,6 +226,16 @@ AmericanOptionSolver::solve() {
     // Compute grid configuration from params
     auto [grid_spec, n_time] = estimate_grid_for_option(params_);
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params_.maturity, n_time);
+
+    // Validate workspace size matches grid
+    if (workspace_.size() != grid_spec.n_points()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = std::format(
+                "Workspace size mismatch: workspace has {} points, grid requires {}",
+                workspace_.size(), grid_spec.n_points())
+        });
+    }
 
     // Create Grid with optional snapshots (NOT REUSABLE)
     auto grid_result = Grid<double>::create(grid_spec, time_domain, snapshot_times_);
@@ -269,6 +308,7 @@ public:
         return grid_->at(snapshot_idx);
     }
     size_t num_snapshots() const { return grid_->num_snapshots(); }
+    std::span<const double> snapshot_times() const { return grid_->snapshot_times(); }
 
     // Direct grid access (for advanced users)
     const Grid<double>& grid() const { return *grid_; }
@@ -430,9 +470,22 @@ for (const auto& params : option_batch) {
 }
 ```
 
-**Important:** Workspace size must match grid size. Either:
+**Important:** Workspace size must match grid size. The solver validates this at the start of `solve()` and returns an error on mismatch. Either:
 1. Allocate for maximum grid size and create appropriately-sized spans per solve (shown above)
 2. Recreate workspace for each option if grid sizes vary significantly
+
+**Workspace Size Validation:**
+```cpp
+// AmericanOptionSolver::solve() checks workspace size
+if (workspace_.size() != grid_spec.n_points()) {
+    return std::unexpected(SolverError{
+        .code = SolverErrorCode::InvalidConfiguration,
+        .message = "Workspace size mismatch: ..."
+    });
+}
+```
+
+This prevents silent out-of-bounds writes if a caller reuses a workspace sized for a different grid.
 
 ## Migration Path
 
@@ -520,6 +573,30 @@ The benefits outweigh the costs, and the new API is more honest about ownership 
 **Question:** Should AmericanOptionResult be thread-safe?
 
 **Answer:** No - documented as NOT thread-safe for concurrent reads due to lazy Greeks cache. Each solve gets its own result. If thread-safe reads are needed later, can add eager Greeks computation option.
+
+### 7. Snapshot Return Type Consistency
+**Question:** Should `Grid::at()` return `std::span<const T>` or `std::span<const double>`?
+
+**Answer:** Must return `std::span<const T>` to be consistent with Grid template parameter. Using hardcoded `double` breaks non-double instantiations.
+
+### 8. Snapshot Time Metadata
+**Question:** How do callers know which time each snapshot corresponds to after snapping/deduplication?
+
+**Answer:** Grid exposes `snapshot_times()` method returning the actual recorded times (after snapping). This allows callers to correlate snapshot indices with times reliably.
+
+### 9. Initial Condition and Temporal Event Ordering
+**Question:** When should snapshots be recorded relative to initial condition and temporal events?
+
+**Answer:**
+- Initial condition (state 0) is recorded **before** time-stepping loop
+- All other snapshots are recorded **after** TR-BDF2 stages AND temporal events
+- This ensures stored states reflect the true PDE state including discrete dividends
+- Snapshot system uses state indices `[0, n_steps]`, not time step indices `[0, n_steps-1]`
+
+### 10. Workspace Size Validation
+**Question:** How to prevent out-of-bounds writes if workspace size doesn't match grid size?
+
+**Answer:** AmericanOptionSolver validates `workspace_.size() == grid_spec.n_points()` at start of `solve()` and returns `SolverError` on mismatch. This catches reuse errors early before PDESolver iterations.
 
 ## Open Questions
 
