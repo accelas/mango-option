@@ -1,5 +1,5 @@
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <iostream>
 #include <iomanip>
 #include <memory_resource>
@@ -25,20 +25,16 @@ int main() {
         return 1;
     }
 
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.value(),
-        1500,
-        std::pmr::get_default_resource()
-    );
+    std::pmr::synchronized_pool_resource pool;
+    auto workspace_result = PDEWorkspace::create(grid_spec.value(), &pool);
 
     if (!workspace_result.has_value()) {
         std::cerr << "Workspace creation failed: " << workspace_result.error() << "\n";
         return 1;
     }
-    auto workspace = workspace_result.value();
 
-    // Create solver with Projected Thomas
-    AmericanOptionSolver solver(params, workspace->workspace_spans());
+    // Create solver with PDEWorkspace
+    AmericanOptionSolver solver(params, workspace_result.value());
 
     std::cout << "=== Deep ITM Put Test (Projected Thomas - Reformulated) ===\n";
     std::cout << "S=" << params.spot << " K=" << params.strike << " T=" << params.maturity << "\n";

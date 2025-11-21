@@ -1,6 +1,6 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <iostream>
 #include <iomanip>
 #include <memory_resource>
@@ -60,15 +60,14 @@ int main() {
     }
 
         std::pmr::synchronized_pool_resource pool;
-        auto workspace = AmericanSolverWorkspace::create(
-            grid_spec.value(), config.grid_n_time, &pool);
+        auto workspace = PDEWorkspace::create(grid_spec.value(), &pool);
 
         if (!workspace.has_value()) {
             std::cerr << "Workspace creation failed\n";
             return 1;
         }
 
-        AmericanOptionSolver solver(params, workspace.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace.value());
         auto result = solver.solve();
 
         if (result.has_value()) {
