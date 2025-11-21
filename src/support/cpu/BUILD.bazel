@@ -1,6 +1,6 @@
 cc_library(
-    name = "feature_detection",
-    hdrs = ["feature_detection.hpp"],
+    name = "cpu_diagnostics",
+    hdrs = ["cpu_diagnostics.hpp"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )

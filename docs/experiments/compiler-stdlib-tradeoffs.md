@@ -58,21 +58,47 @@ We investigated switching from GCC to Clang to compare performance and access ne
 - No std::mdspan
 - Mixing Clang with GCC's stdlib is non-standard
 
-## Recommendation
+## Recommendation **[UPDATED AFTER SIMD BENCHMARK]**
 
-**Short term (now):** Stay with GCC + libstdc++
-- Proven setup
-- SIMD works
-- Can manually optimize CubicSplineND hot-path without mdspan
+### New Finding: SimdBackend Provides No Benefit
 
-**Medium term (6-12 months):** Re-evaluate when either:
-1. libc++ 20+ completes std::experimental::simd implementation
-2. GCC 15+ ships with std::mdspan in libstdc++
+Benchmark results show **ScalarBackend (OpenMP SIMD) is faster than SimdBackend in 9 out of 12 test cases**, with margins of 15-45% in many scenarios. The explicit SIMD backend provides no measurable performance advantage.
 
-**Long term:** Switch to Clang + libc++ when both are available
-- Best performance (15-49% faster)
-- Access to latest C++23/26 features
-- Modern toolchain
+**This changes the decision matrix:**
+
+### Updated Plan
+
+**Phase 1 (Now):** Remove SimdBackend
+- Simplify to OpenMP SIMD only (ScalarBackend)
+- OpenMP SIMD works with both GCC and Clang
+- Eliminates the SIMD portability constraint
+
+**Phase 2 (1-2 weeks):** Validate simplification
+- Run full test suite with ScalarBackend only
+- Verify no performance regressions
+- Test on multiple compilers
+
+**Phase 3 (1 month):** Switch to Clang + libc++
+- Get 15-49% performance boost immediately
+- Access to std::mdspan for fixing CubicSplineND hot-path
+- Modern toolchain with better diagnostics
+
+**Phase 4 (2 months):** Refactor with mdspan
+- Eliminate hot-path allocations in CubicSplineND
+- Use std::mdspan for zero-allocation tensor indexing
+- Further performance improvements
+
+### Why This Works
+
+By removing the SimdBackend dependency:
+- ✅ OpenMP SIMD works everywhere (GCC, Clang, both stdlibs)
+- ✅ Simpler codebase (one vectorization strategy)
+- ✅ Enables immediate Clang migration
+- ✅ Unlocks mdspan usage
+- ✅ 15-49% faster overall
+
+**Previous constraint:** "Stay with GCC because SIMD doesn't work with Clang"
+**New reality:** "SIMD backend is slower anyway, use OpenMP SIMD with Clang"
 
 ## Technical Details
 

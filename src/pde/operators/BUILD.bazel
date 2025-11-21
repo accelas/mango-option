@@ -56,7 +56,7 @@ cc_library(
     deps = [
         ":centered_difference_scalar",
         "//src/pde/core:grid",
-        "//src/support/cpu:feature_detection",
+        "//src/support/cpu:cpu_diagnostics",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],

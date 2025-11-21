@@ -22,4 +22,4 @@
 #   (grid_spacing, operator_factory, centered_difference_facade, black_scholes_pde, etc.)
 #
 # - CPU features: //src/support/cpu:BUILD.bazel
-#   (feature_detection)
+#   (cpu_diagnostics)
