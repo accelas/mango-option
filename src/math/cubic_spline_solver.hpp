@@ -422,8 +422,12 @@ public:
     ///
     /// @param x_eval X-coordinate to evaluate
     /// @param y_eval Y-coordinate to evaluate
-    /// @return Interpolated value z(x_eval, y_eval)
+    /// @return Interpolated value z(x_eval, y_eval), or 0.0 if not built
     [[nodiscard]] T eval(T x_eval, T y_eval) const {
+        if (!is_built()) {
+            return T{0};
+        }
+
         const size_t ny = y_.size();
 
         // Step 1: Evaluate all x-direction splines at x_eval
