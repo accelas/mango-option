@@ -364,6 +364,17 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "target_clones_test",
+    srcs = ["operators/target_clones_test.cc"],
+    deps = [
+        "//src/pde/operators:centered_difference_scalar",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-fopenmp-simd"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
