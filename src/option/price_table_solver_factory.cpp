@@ -16,70 +16,23 @@
 
 namespace mango {
 
+namespace {
 
-
-// ============================================================================
-// Normalized Chain Solver Implementation
-// ============================================================================
-
-class NormalizedPriceTableSolver : public IPriceTableSolver {
-public:
-    explicit NormalizedPriceTableSolver(const OptionSolverGrid& config)
-        : config_(config) {}
-
-    std::expected<void, std::string> solve(
-        std::span<double> prices_4d,
-        const PriceTableGrid& grid) override;
-
-    const char* strategy_name() const override {
-        return "NormalizedChainSolver";
-    }
-
-private:
-    OptionSolverGrid config_;
-};
-
-std::expected<void, std::string> NormalizedPriceTableSolver::solve(
+/// Extract prices from batch results into 4D array
+///
+/// Shared logic for both normalized and batch solvers.
+/// Interpolates spatial solutions to moneyness grid using cubic splines.
+void extract_batch_results_to_4d(
+    const BatchAmericanOptionResult& batch_result,
     std::span<double> prices_4d,
-    const PriceTableGrid& grid)
+    const PriceTableGrid& grid,
+    double K_ref)
 {
     const size_t Nm = grid.moneyness.size();
     const size_t Nt = grid.maturity.size();
     const size_t Nv = grid.volatility.size();
     const size_t Nr = grid.rate.size();
     const double T_max = grid.maturity.back();
-
-    // Build batch parameters for (σ, r) grid
-    // All options share: spot=strike=K_ref, maturity=T_max, same grid
-    const size_t batch_size = Nv * Nr;
-    std::vector<AmericanOptionParams> batch_params;
-    batch_params.reserve(batch_size);
-
-    namespace views = std::views;
-    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
-                                                 views::iota(size_t{0}, Nr))) {
-        AmericanOptionParams params;
-        params.spot = grid.K_ref;
-        params.strike = grid.K_ref;
-        params.maturity = T_max;
-        params.rate = grid.rate[l];
-        params.dividend_yield = config_.dividend_yield;
-        params.type = config_.option_type;
-        params.volatility = grid.volatility[k];
-        params.discrete_dividends = {};
-        batch_params.push_back(params);
-    }
-
-    // Solve batch with shared grid (use_shared_grid=true)
-    // This is equivalent to the manual OpenMP loop but reuses BatchAmericanOptionSolver
-    BatchAmericanOptionSolver batch_solver;
-    auto batch_result = batch_solver.solve_batch(batch_params, true);
-
-    // Check for failures
-    if (batch_result.failed_count > 0) {
-        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
-                         " out of " + std::to_string(batch_size) + " PDEs");
-    }
 
     // Get n_time from first successful result (all share same grid)
     size_t n_time = 0;
@@ -146,7 +99,7 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
                     const double x = log_moneyness[m_idx];
                     double V_norm = (x <= result.x_min) ? spatial_solution[0] : spatial_solution[result.n_space - 1];
                     size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
-                    prices_4d[table_idx] = grid.K_ref * V_norm;
+                    prices_4d[table_idx] = K_ref * V_norm;
                 }
                 continue;
             }
@@ -158,10 +111,77 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
 
                 // Store denormalized price
                 size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
-                prices_4d[table_idx] = grid.K_ref * V_norm;
+                prices_4d[table_idx] = K_ref * V_norm;
             }
         }
     }
+}
+
+} // anonymous namespace
+
+// ============================================================================
+// Normalized Chain Solver Implementation
+// ============================================================================
+
+class NormalizedPriceTableSolver : public IPriceTableSolver {
+public:
+    explicit NormalizedPriceTableSolver(const OptionSolverGrid& config)
+        : config_(config) {}
+
+    std::expected<void, std::string> solve(
+        std::span<double> prices_4d,
+        const PriceTableGrid& grid) override;
+
+    const char* strategy_name() const override {
+        return "NormalizedChainSolver";
+    }
+
+private:
+    OptionSolverGrid config_;
+};
+
+std::expected<void, std::string> NormalizedPriceTableSolver::solve(
+    std::span<double> prices_4d,
+    const PriceTableGrid& grid)
+{
+    const size_t Nv = grid.volatility.size();
+    const size_t Nr = grid.rate.size();
+    const double T_max = grid.maturity.back();
+
+    // Build batch parameters for (σ, r) grid
+    // All options share: spot=strike=K_ref, maturity=T_max, same grid
+    const size_t batch_size = Nv * Nr;
+    std::vector<AmericanOptionParams> batch_params;
+    batch_params.reserve(batch_size);
+
+    namespace views = std::views;
+    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
+                                                 views::iota(size_t{0}, Nr))) {
+        AmericanOptionParams params;
+        params.spot = grid.K_ref;
+        params.strike = grid.K_ref;
+        params.maturity = T_max;
+        params.rate = grid.rate[l];
+        params.dividend_yield = config_.dividend_yield;
+        params.type = config_.option_type;
+        params.volatility = grid.volatility[k];
+        params.discrete_dividends = {};
+        batch_params.push_back(params);
+    }
+
+    // Solve batch with shared grid (use_shared_grid=true)
+    // This is equivalent to the manual OpenMP loop but reuses BatchAmericanOptionSolver
+    BatchAmericanOptionSolver batch_solver;
+    auto batch_result = batch_solver.solve_batch(batch_params, true);
+
+    // Check for failures
+    if (batch_result.failed_count > 0) {
+        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
+                         " out of " + std::to_string(batch_size) + " PDEs");
+    }
+
+    // Extract prices using shared logic
+    extract_batch_results_to_4d(batch_result, prices_4d, grid, grid.K_ref);
 
     return {};
 }
@@ -191,20 +211,12 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     std::span<double> prices_4d,
     const PriceTableGrid& grid)
 {
-    const size_t Nm = grid.moneyness.size();
-    const size_t Nt = grid.maturity.size();
     const size_t Nv = grid.volatility.size();
     const size_t Nr = grid.rate.size();
     const double T_max = grid.maturity.back();
 
     // Zero out entire output array upfront (failed solves leave zeros)
     std::ranges::fill(prices_4d, 0.0);
-
-    // Precompute log-moneyness values
-    std::vector<double> log_moneyness(Nm);
-    for (size_t i = 0; i < Nm; ++i) {
-        log_moneyness[i] = std::log(grid.moneyness[i]);
-    }
 
     // Build batch parameters (all (σ,r) combinations)
     const size_t batch_size = Nv * Nr;
@@ -236,81 +248,8 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
                          " out of " + std::to_string(batch_size) + " PDEs");
     }
 
-    // Get n_time from first successful result (all results share the same grid)
-    size_t n_time = 0;
-    for (const auto& result_expected : batch_result.results) {
-        if (result_expected.has_value() && result_expected->converged) {
-            n_time = result_expected->n_time;
-            break;
-        }
-    }
-
-    // Precompute step indices for each maturity
-    const double dt = T_max / n_time;
-    std::vector<size_t> step_indices(Nt);
-    for (size_t j = 0; j < Nt; ++j) {
-        double step_exact = grid.maturity[j] / dt - 1.0;
-        long long step_rounded = std::llround(step_exact);
-
-        if (step_rounded < 0) {
-            step_indices[j] = 0;
-        } else if (step_rounded >= static_cast<long long>(n_time)) {
-            step_indices[j] = n_time - 1;
-        } else {
-            step_indices[j] = static_cast<size_t>(step_rounded);
-        }
-    }
-
-    // Extract prices from surface_2d for each result
-    const size_t slice_stride = Nv * Nr;
-    for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
-        const auto& result_expected = batch_result.results[idx];
-        if (!result_expected.has_value() || !result_expected->converged) {
-            continue;  // Leave zeros for failed solves
-        }
-        const auto& result = result_expected.value();
-
-        // Build spatial grid for this result (uniform grid)
-        std::vector<double> x_grid(result.n_space);
-        const double dx = (result.x_max - result.x_min) / (result.n_space - 1);
-        for (size_t i = 0; i < result.n_space; ++i) {
-            x_grid[i] = result.x_min + i * dx;
-        }
-
-        // For each maturity time step
-        for (size_t j = 0; j < grid.maturity.size(); ++j) {
-            size_t step_idx = step_indices[j];
-            std::span<const double> spatial_solution = result.at_time(step_idx);
-
-            if (spatial_solution.empty()) {
-                continue;
-            }
-
-            // Build cubic spline for this time step
-            CubicSpline<double> spline;
-            auto build_error = spline.build(x_grid, spatial_solution);
-            if (build_error.has_value()) {
-                // Fall back to boundary values if spline build fails
-                for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
-                    const double x = log_moneyness[m_idx];
-                    double V_norm = (x <= result.x_min) ? spatial_solution[0] : spatial_solution[result.n_space - 1];
-                    size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
-                    prices_4d[table_idx] = grid.K_ref * V_norm;
-                }
-                continue;
-            }
-
-            // Interpolate spatial solution to moneyness grid using cubic spline
-            for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
-                const double x = log_moneyness[m_idx];
-                double V_norm = spline.eval(x);
-
-                // Store denormalized price
-                size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
-                prices_4d[table_idx] = grid.K_ref * V_norm;
-            }
-        }
-    }
+    // Extract prices using shared logic
+    extract_batch_results_to_4d(batch_result, prices_4d, grid, grid.K_ref);
 
     return {};
 }
