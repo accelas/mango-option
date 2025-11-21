@@ -5,8 +5,8 @@ One-page cheat sheet for using mango-iv's three IV solving approaches.
 ## Choose Your Solver
 
 ```
-Single option? → IVSolver (FDM) [143ms]
-Few options (5-50)? → BatchIVSolver (FDM parallel) [107 IV/s on 32 cores]
+Single option? → IVSolverFDM [143ms]
+Few options (5-50)? → IVSolverFDM::solve_batch (FDM parallel) [107 IV/s on 32 cores]
 Many queries (100s)? → IVSolverInterpolated [~20µs, requires pre-computed table]
 ```
 
@@ -37,11 +37,14 @@ if (result.converged) {
 ## 2. Batch Options (FDM Parallel)
 
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 
-std::vector<mango::IVParams> batch = { ... };
-mango::IVConfig config{...};
-auto results = mango::solve_implied_vol_batch(batch, config);
+std::vector<mango::IVQuery> queries = { ... };
+mango::IVSolverFDMConfig config{...};
+
+mango::IVSolverFDM solver(config);
+std::vector<mango::IVResult> results(queries.size());
+auto status = solver.solve_batch(queries, results);
 ```
 
 ---
@@ -146,8 +149,8 @@ if (iv.converged) {
 
 | Method | Speed | Setup | Queries |
 |--------|-------|-------|---------|
-| IVSolver | 143ms | - | Single |
-| BatchIVSolver | 107/sec | - | Batch |
+| IVSolverFDM | 143ms | - | Single |
+| IVSolverFDM::solve_batch | 107/sec | - | Batch |
 | IVSolverInterpolated | 20µs | 24s | 50K+/sec |
 
 ---
@@ -167,8 +170,8 @@ if (iv.converged) {
 - Always: σ_lower = 1%
 
 **Thread Safety:**
-- IVSolver: Thread-safe (creates own workspace)
-- BatchIVSolver: Uses MANGO_PRAGMA_PARALLEL_FOR
+- IVSolverFDM: Not thread-safe (stateful objective function)
+- IVSolverFDM::solve_batch: Thread-safe (creates thread-local solvers with OpenMP)
 - IVSolverInterpolated: Read-only surface, thread-safe
 
 ---
@@ -196,8 +199,8 @@ if (!result.converged) {
 ## Files to Include
 
 ```cpp
-// Single option or batch
-#include "src/option/iv_solver.hpp"
+// FDM-based IV solving (single or batch)
+#include "src/option/iv_solver_fdm.hpp"
 
 // Pre-computed table
 #include "src/option/price_table_4d_builder.hpp"
