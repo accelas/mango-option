@@ -118,24 +118,36 @@ std::expected<std::vector<size_t>, std::string> convert_times_to_indices(
     std::span<const double> times,
     const TimeDomain& time_domain)
 {
-    const double dt = time_domain.dt();
-    const double t_max = time_domain.t_end();
+    const double t_start = time_domain.t_start();
+    const double t_end = time_domain.t_end();
     const size_t n_steps = time_domain.n_steps();
+
+    // Validate TimeDomain preconditions
+    if (n_steps == 0) {
+        return std::unexpected("TimeDomain has zero time steps");
+    }
+
+    const double dt = (t_end - t_start) / n_steps;
+    if (dt <= 0.0) {
+        return std::unexpected(std::format(
+            "Invalid TimeDomain: dt={} (t_start={}, t_end={}, n_steps={})",
+            dt, t_start, t_end, n_steps));
+    }
 
     std::vector<size_t> indices;
     indices.reserve(times.size());
 
     for (double t : times) {
         // Validate time is in valid range
-        if (t < 0.0 || t > t_max) {
+        if (t < t_start || t > t_end) {
             return std::unexpected(std::format(
-                "Snapshot time {} out of range [0, {}]", t, t_max));
+                "Snapshot time {} out of range [{}, {}]", t, t_start, t_end));
         }
 
         // Convert to nearest state index (snap to grid)
         // Use floor + 0.5 to round to nearest, not llround (which can overshoot)
         // State indices are in range [0, n_steps], not [0, n_steps-1]
-        double step_exact = t / dt;
+        double step_exact = (t - t_start) / dt;
         size_t state_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
 
         // Clamp to valid state range (handles floating point rounding at boundaries)
@@ -153,10 +165,12 @@ std::expected<std::vector<size_t>, std::string> convert_times_to_indices(
 }
 ```
 
-**Key differences from clamping approach:**
-1. **Validates** out-of-range times instead of silently clamping (catches user errors)
-2. **Snaps to nearest** time step using floor(t/dt + 0.5) instead of llround (more predictable)
-3. **Returns expected** to propagate validation errors to caller
+**Key features:**
+1. **Validates TimeDomain preconditions**: Checks n_steps > 0 and dt > 0 before conversion
+2. **Handles non-zero t_start**: Uses (t - t_start) / dt instead of assuming t_start == 0
+3. **Validates snapshot times**: Ensures times are in [t_start, t_end] range
+4. **Snaps to nearest state**: Uses floor(step_exact + 0.5) for predictable rounding
+5. **Returns expected**: Propagates validation errors to caller with clear messages
 
 **PDESolver integration:**
 
@@ -169,15 +183,22 @@ if (grid_->should_record(0)) {
 }
 
 for (size_t step = 0; step < time.n_steps(); ++step) {
+    double t_old = t;
+    double t_next = t + dt;
+
     // ... TR-BDF2 stages ...
 
     // Process temporal events (discrete dividends, etc.)
-    process_temporal_events(step + 1, u_current);
+    // Signature: void process_temporal_events(double t_old, double t_new, size_t step, std::span<double> u)
+    process_temporal_events(t_old, t_next, step, u_current);
 
     // Record snapshot AFTER events (captures true PDE state at t_{n+1})
+    // State index = step + 1 (state after completing step)
     if (grid_->should_record(step + 1)) {
         grid_->record(step + 1, u_current);
     }
+
+    t = t_next;
 }
 ```
 
@@ -575,11 +596,13 @@ The benefits outweigh the costs, and the new API is more honest about ownership 
 ## Resolved Design Questions
 
 ### 1. Snapshot Indexing
-**Question:** Is `record(idx)` parameter a time step or snapshot sequence index?
+**Question:** Is `record(idx)` parameter a state index or snapshot sequence index?
 
-**Answer:** `record(time_step_idx)` takes time step index. Grid internally maps to snapshot sequence index using `find_snapshot_index()`. Clear separation between:
-- Time step index: 0 to n_steps-1 (PDE loop counter)
-- Snapshot index: 0 to num_snapshots-1 (storage array index)
+**Answer:** `record(state_idx)` takes state index (not time step index). Grid internally maps to snapshot sequence index using `find_snapshot_index()`. Clear separation between:
+- State index: 0 to n_steps (includes initial condition and final state)
+- Snapshot index: 0 to num_snapshots-1 (storage array index after filtering)
+
+State indices represent PDE solution states at discrete times, with state 0 being the initial condition and state n_steps being the final state after n_steps time steps.
 
 ### 2. Interpolation and Boundary Handling
 **Question:** How are boundaries handled in `value_at()` and Greeks?
