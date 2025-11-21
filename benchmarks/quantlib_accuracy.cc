@@ -134,12 +134,10 @@ static void compare_scenario(
     }
     const AmericanOptionResult& mango_result = *mango_result_expected;
 
-    // Compute Greeks
-    auto greeks_result = solver.compute_greeks();
-    if (!greeks_result) {
-        throw std::runtime_error("Failed to compute Greeks: " + greeks_result.error().message);
-    }
-    const AmericanOptionGreeks& greeks = *greeks_result;
+    // Get Greeks from result
+    double delta = mango_result.delta();
+    double gamma = mango_result.gamma();
+    double theta = mango_result.theta();
 
     // QuantLib pricing
     auto ql_result = price_american_option_quantlib(
@@ -151,9 +149,9 @@ static void compare_scenario(
     double price_error = std::abs(mango_price - ql_result.price);
     double price_rel_error = price_error / ql_result.price * 100.0;
 
-    double delta_error = std::abs(greeks.delta - ql_result.delta);
-    double gamma_error = std::abs(greeks.gamma - ql_result.gamma);
-    double theta_error = std::abs(greeks.theta - ql_result.theta);
+    double delta_error = std::abs(delta - ql_result.delta);
+    double gamma_error = std::abs(gamma - ql_result.gamma);
+    double theta_error = std::abs(theta - ql_result.theta);
 
     // Report results (not part of benchmark timing)
     for (auto _ : state) {
@@ -316,23 +314,22 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
         throw std::runtime_error(mango_result_expected.error().message);
     }
 
-    // Compute Greeks
-    auto greeks_result = solver.compute_greeks();
-    if (!greeks_result) {
-        throw std::runtime_error("Failed to compute Greeks: " + greeks_result.error().message);
-    }
-    const AmericanOptionGreeks& greeks = *greeks_result;
+    // Get Greeks from result
+    const AmericanOptionResult& mango_result = *mango_result_expected;
+    double delta = mango_result.delta();
+    double gamma = mango_result.gamma();
+    double theta = mango_result.theta();
 
     auto ql_result = price_american_option_quantlib(
         100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false, 201, 2000);
 
-    double delta_error = std::abs(greeks.delta - ql_result.delta);
+    double delta_error = std::abs(delta - ql_result.delta);
     double delta_rel = delta_error / std::abs(ql_result.delta) * 100.0;
 
-    double gamma_error = std::abs(greeks.gamma - ql_result.gamma);
+    double gamma_error = std::abs(gamma - ql_result.gamma);
     double gamma_rel = gamma_error / std::abs(ql_result.gamma) * 100.0;
 
-    double theta_error = std::abs(greeks.theta - ql_result.theta);
+    double theta_error = std::abs(theta - ql_result.theta);
     double theta_rel = theta_error / std::abs(ql_result.theta) * 100.0;
 
     for (auto _ : state) {
@@ -341,13 +338,13 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
 
     state.SetLabel("Greeks accuracy");
     state.counters["delta_ql"] = ql_result.delta;
-    state.counters["delta_mango"] = greeks.delta;
+    state.counters["delta_mango"] = delta;
     state.counters["delta_rel_err_%"] = delta_rel;
     state.counters["gamma_ql"] = ql_result.gamma;
-    state.counters["gamma_mango"] = greeks.gamma;
+    state.counters["gamma_mango"] = gamma;
     state.counters["gamma_rel_err_%"] = gamma_rel;
     state.counters["theta_ql"] = ql_result.theta;
-    state.counters["theta_mango"] = greeks.theta;
+    state.counters["theta_mango"] = theta;
     state.counters["theta_rel_err_%"] = theta_rel;
 }
 BENCHMARK(BM_Greeks_Accuracy_ATM)->Iterations(1);
@@ -623,18 +620,13 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
         throw std::runtime_error("Failed to solve with discrete dividend");
     }
 
-    // Compute Greeks
-    auto greeks_result = solver.compute_greeks();
-    if (!greeks_result) {
-        throw std::runtime_error("Failed to compute Greeks: " + greeks_result.error().message);
-    }
-    const AmericanOptionGreeks& greeks = *greeks_result;
-
     // QuantLib reference with discrete dividend
     // TODO: Add QuantLib DividendVanillaOption comparison when helper is implemented
     // For now, just verify the solve succeeds and produces reasonable values
 
     double mango_price = result->value_at(spot);
+    double delta = result->delta();
+    double gamma = result->gamma();
 
     for (auto _ : state) {
         // Report results
@@ -642,8 +634,8 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
 
     state.SetLabel("Discrete Div Call: S=$100 K=$100 div=$1@0.25y");
     state.counters["price_$"] = mango_price;
-    state.counters["delta"] = greeks.delta;
-    state.counters["gamma"] = greeks.gamma;
+    state.counters["delta"] = delta;
+    state.counters["gamma"] = gamma;
 
     // Sanity checks
     if (mango_price <= 0.0 || mango_price > spot) {
@@ -694,14 +686,9 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         throw std::runtime_error("Failed to solve with quarterly dividends");
     }
 
-    // Compute Greeks
-    auto greeks_result = solver.compute_greeks();
-    if (!greeks_result) {
-        throw std::runtime_error("Failed to compute Greeks: " + greeks_result.error().message);
-    }
-    const AmericanOptionGreeks& greeks = *greeks_result;
-
     double mango_price = result->value_at(spot);
+    double delta = result->delta();
+    double gamma = result->gamma();
 
     for (auto _ : state) {
         // Report results
@@ -709,8 +696,8 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
 
     state.SetLabel("Discrete Div Put: S=$100 K=$100 quarterly=$0.50");
     state.counters["price_$"] = mango_price;
-    state.counters["delta"] = greeks.delta;
-    state.counters["gamma"] = greeks.gamma;
+    state.counters["delta"] = delta;
+    state.counters["gamma"] = gamma;
 
     // Sanity checks
     if (mango_price <= 0.0 || mango_price > strike) {

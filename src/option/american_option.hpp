@@ -12,10 +12,10 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
-#include "src/option/american_solver_workspace.hpp"
-#include "src/option/american_option_result.hpp"  // NEW: Wrapper result class
+#include "src/option/american_option_result.hpp"
 #include "src/option/option_spec.hpp"  // For OptionType enum
 #include "src/pde/core/pde_workspace.hpp"
+#include "src/option/american_solver_workspace.hpp"  // For deprecated constructor
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -31,68 +31,6 @@ namespace mango {
  */
 using AmericanOptionParams = PricingParams;
 
-
-/**
- * @brief Legacy solver result struct (DEPRECATED)
- * @deprecated Use AmericanOptionResult wrapper class from american_option_result.hpp
- *
- * This struct is kept for backward compatibility but will be removed in a future release.
- * New code should use the AmericanOptionResult wrapper class which provides a cleaner API.
- */
-struct [[deprecated("Use AmericanOptionResult wrapper class from american_option_result.hpp")]]
-AmericanOptionResultLegacy {
-    double value;                      ///< Option value at current spot (dollars)
-    std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
-    std::vector<double> x_grid;        ///< Spatial grid points (log-moneyness coordinates)
-    std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (optional, for at_time())
-    size_t n_space;                    ///< Number of spatial grid points
-    size_t n_time;                     ///< Number of time steps
-    double x_min;                      ///< Minimum log-moneyness
-    double x_max;                      ///< Maximum log-moneyness
-    double strike;                     ///< Strike price K (for denormalization)
-    bool converged;                    ///< Solver convergence status
-
-    /// Default constructor
-    AmericanOptionResultLegacy()
-        : value(0.0), solution(), x_grid(), surface_2d(), n_space(0), n_time(0),
-          x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
-
-    /**
-     * Interpolate to get option value at specific spot price (at final time).
-     *
-     * @param spot Spot price S
-     * @return Option value in dollars (denormalized)
-     */
-    double value_at(double spot) const;
-
-    /**
-     * Get solution at specific time step.
-     *
-     * @param time_idx Time step index (0 = maturity, n_time-1 = present)
-     * @return Span of spatial solution at that time
-     */
-    std::span<const double> at_time(size_t time_idx) const {
-        if (surface_2d.empty() || time_idx >= n_time) {
-            return {};
-        }
-        return std::span<const double>{surface_2d.data() + time_idx * n_space, n_space};
-    }
-};
-
-/**
- * Option Greeks (sensitivities).
- * Computed on-demand via AmericanOptionSolver::compute_greeks().
- */
-struct AmericanOptionGreeks {
-    double delta;    ///< ∂V/∂S (first derivative wrt spot)
-    double gamma;    ///< ∂²V/∂S² (second derivative wrt spot)
-    double theta;    ///< ∂V/∂t (time decay)
-
-    /// Default constructor
-    AmericanOptionGreeks()
-        : delta(0.0), gamma(0.0), theta(0.0) {}
-};
-
 /**
  * American option pricing solver using finite difference method.
  *
@@ -103,11 +41,11 @@ struct AmericanOptionGreeks {
 class AmericanOptionSolver {
 public:
     /**
-     * NEW: Direct PDEWorkspace constructor (target API).
+     * Direct PDEWorkspace constructor.
      *
-     * This constructor takes PDEWorkspace directly, enabling more flexible
+     * This constructor takes PDEWorkspace directly, enabling flexible
      * memory management. The solver creates Grid internally and returns
-     * the new AmericanOptionResult wrapper.
+     * the AmericanOptionResult wrapper.
      *
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
@@ -118,36 +56,31 @@ public:
                         std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     /**
-     * OLD: Constructor with workspace (DEPRECATED).
+     * DEPRECATED: Constructor with AmericanSolverWorkspace.
      *
-     * This constructor enables efficient batch solving by reusing
-     * grid allocations across multiple solver instances. Use when
-     * solving many options with same grid but different coefficients.
+     * This constructor is retained for backward compatibility with batch solver code.
+     * New code should use the PDEWorkspace constructor instead.
      *
-     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
-     * to ensure proper lifetime management.
-     *
-     * @param params Option pricing parameters (including discrete dividends)
-     * @param workspace Shared workspace with grid configuration and pre-allocated storage
-     * @deprecated Use PDEWorkspace directly instead of AmericanSolverWorkspace
+     * @param params Option pricing parameters
+     * @param workspace Shared workspace with grid configuration
+     * @deprecated Use PDEWorkspace constructor instead
      */
-    [[deprecated("Use PDEWorkspace directly instead of AmericanSolverWorkspace")]]
+    [[deprecated("Use PDEWorkspace constructor instead")]]
     AmericanOptionSolver(const AmericanOptionParams& params,
                         std::shared_ptr<AmericanSolverWorkspace> workspace);
 
     /**
-     * Factory method with expected-based validation.
+     * DEPRECATED: Factory method with expected-based validation.
      *
-     * Creates an AmericanOptionSolver with validation returning std::expected<void, std::string>.
-     * This provides a non-throwing alternative to the constructor.
+     * This method is retained for backward compatibility with batch solver code.
+     * New code should use the PDEWorkspace constructor directly.
      *
-     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
-     * to ensure proper lifetime management.
-     *
-     * @param params Option pricing parameters (including discrete dividends)
-     * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @param params Option pricing parameters
+     * @param workspace Shared workspace with grid configuration
      * @return Expected containing solver on success, error message on failure
+     * @deprecated Use PDEWorkspace constructor instead
      */
+    [[deprecated("Use PDEWorkspace constructor instead")]]
     static std::expected<AmericanOptionSolver, std::string> create(
         const AmericanOptionParams& params,
         std::shared_ptr<AmericanSolverWorkspace> workspace);
@@ -155,7 +88,7 @@ public:
     /**
      * Solve for option value.
      *
-     * Returns new AmericanOptionResult wrapper containing Grid and PricingParams.
+     * Returns AmericanOptionResult wrapper containing Grid and PricingParams.
      * If snapshot_times were provided at construction, the Grid will contain
      * recorded solution snapshots.
      *
@@ -163,59 +96,18 @@ public:
      */
     std::expected<AmericanOptionResult, SolverError> solve();
 
-    /**
-     * Compute Greeks (sensitivities) for the current solution (LEGACY).
-     *
-     * Must be called after solve() has succeeded. Computes delta, gamma, and theta
-     * based on the current solution state.
-     *
-     * @return Greeks on success, error if solve() hasn't been called yet
-     * @deprecated Use AmericanOptionResult::delta(), gamma(), theta() instead
-     */
-    [[deprecated("Use AmericanOptionResult::delta(), gamma(), theta() instead")]]
-    std::expected<AmericanOptionGreeks, SolverError> compute_greeks() const;
-
-    /**
-     * Get the full solution surface (for debugging/analysis) (LEGACY).
-     *
-     * @return Vector of option values across the spatial grid
-     * @deprecated Access grid via AmericanOptionResult::grid() instead
-     */
-    [[deprecated("Access grid via AmericanOptionResult::grid() instead")]]
-    std::vector<double> get_solution() const;
-
 private:
     // Parameters
     PricingParams params_;
 
-    // NEW API: PDEWorkspace (owns spans to external buffer)
+    // PDEWorkspace (owns spans to external buffer)
     std::optional<PDEWorkspace> workspace_;
 
-    // NEW API: Snapshot times for Grid creation
+    // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
 
-    // OLD API: AmericanSolverWorkspace (owns Grid + PMR buffer)
+    // DEPRECATED: Legacy workspace for backward compatibility
     std::shared_ptr<AmericanSolverWorkspace> legacy_workspace_;
-
-    // OLD API: Solution state
-    std::vector<double> solution_;
-    bool solved_ = false;
-
-    // OLD API: Lazy-initialized operator for Greeks calculation
-    mutable std::unique_ptr<GridSpacing<double>> grid_spacing_;
-    mutable std::unique_ptr<operators::CenteredDifference<double>> diff_op_;
-
-    // Helper methods (legacy)
-    double compute_delta() const;
-    double compute_gamma() const;
-    double compute_theta() const;
-    double interpolate_solution(double x_target, std::span<const double> x_grid) const;
-
-    // Helper to find grid index for log-moneyness value
-    size_t find_grid_index(double log_moneyness) const;
-
-    // Lazy initialization for diff operator
-    const operators::CenteredDifference<double>& get_diff_operator() const;
 
     // Helper to determine which API was used
     bool using_new_api() const { return workspace_.has_value(); }
