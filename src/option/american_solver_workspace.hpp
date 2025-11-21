@@ -161,9 +161,10 @@ inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
  * Workspace for American option solving with PMR-based memory allocation.
  *
  * Provides unified workspace for American option pricing with:
+ * - Grid for grid + solution storage
  * - PDEWorkspace allocated from provided memory resource
+ * - PDEWorkspace for non-owning spans to workspace buffers
  * - GridSpacing<double> for spatial operators
- * - Grid configuration (spatial + temporal parameters)
  *
  * Example usage:
  * ```cpp
@@ -179,7 +180,7 @@ inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
  *     }
  *
  * // Use workspace with solver
- * auto solver = AmericanPutSolver(params, workspace.value());
+ * auto solver = AmericanPutSolver(params, workspace->grid_with_solution(), workspace->workspace_spans());
  * ```
  *
  * Thread safety: **NOT thread-safe for concurrent solving**.
@@ -198,47 +199,38 @@ public:
     static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
     create(const GridSpec<double>& grid_spec,
            size_t n_time,
-           std::pmr::memory_resource* resource);
+           std::pmr::memory_resource* resource,
+           double maturity = 1.0);
 
-    PDEWorkspace* pde_workspace() const { return pde_workspace_.get(); }
-    GridSpacing<double> grid_spacing() const { return *grid_spacing_; }
+    // New API: Grid + PDEWorkspace
+    std::shared_ptr<Grid<double>> grid_with_solution() const { return grid_; }
+    PDEWorkspace workspace_spans() const { return workspace_spans_; }
 
-    std::span<const double> grid() const {
-        return grid_buffer_.span();
-    }
-
-    std::span<const double> grid_span() const {
-        return grid_buffer_.span();
-    }
-
-    size_t n_space() const { return grid_buffer_.size(); }
-    size_t n_time() const { return n_time_; }
+    size_t n_space() const { return grid_->n_space(); }
+    size_t n_time() const { return grid_->time().n_steps(); }
 
     double x_min() const {
-        auto g = grid();
+        auto g = grid_->x();
         return g.empty() ? 0.0 : g[0];
     }
 
     double x_max() const {
-        auto g = grid();
+        auto g = grid_->x();
         return g.empty() ? 0.0 : g[g.size() - 1];
     }
 
 private:
-    AmericanSolverWorkspace(GridBuffer<double> grid_buf,
-                           std::shared_ptr<PDEWorkspace> pde_ws,
-                           std::shared_ptr<GridSpacing<double>> spacing,
-                           size_t n_time)
-        : grid_buffer_(std::move(grid_buf))
-        , pde_workspace_(std::move(pde_ws))
-        , grid_spacing_(std::move(spacing))
-        , n_time_(n_time)
+    AmericanSolverWorkspace(std::shared_ptr<Grid<double>> grid_sol,
+                           std::pmr::vector<double>&& pmr_buffer,
+                           PDEWorkspace workspace_spans)
+        : grid_(std::move(grid_sol))
+        , pmr_buffer_(std::move(pmr_buffer))
+        , workspace_spans_(workspace_spans)
     {}
 
-    GridBuffer<double> grid_buffer_;  // Must come before pde_workspace_ (owns grid data)
-    std::shared_ptr<PDEWorkspace> pde_workspace_;
-    std::shared_ptr<GridSpacing<double>> grid_spacing_;
-    size_t n_time_;
+    std::shared_ptr<Grid<double>> grid_;
+    std::pmr::vector<double> pmr_buffer_;  // Contiguous PMR buffer for workspace
+    PDEWorkspace workspace_spans_;     // Spans into pmr_buffer_
 };
 
 }  // namespace mango

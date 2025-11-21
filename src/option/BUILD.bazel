@@ -5,6 +5,7 @@ cc_library(
     deps = [
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
         ":option_spec",
     ],
     copts = ["-std=c++23"],

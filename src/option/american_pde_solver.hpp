@@ -48,23 +48,17 @@ using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver
 class AmericanPutSolver : public PDESolver<AmericanPutSolver> {
 public:
     AmericanPutSolver(const PricingParams& params,
-                     std::shared_ptr<AmericanSolverWorkspace> workspace,
-                     std::span<double> output_buffer = {})
-        : PDESolver<AmericanPutSolver>(
-              workspace->grid_span(),
-              TimeDomain::from_n_steps(0.0, params.maturity, workspace->n_time()),
-              create_obstacle(),
-              workspace->pde_workspace(),
-              output_buffer)
+                     std::shared_ptr<Grid<double>> grid,
+                     PDEWorkspace workspace)
+        : PDESolver<AmericanPutSolver>(grid, workspace)
         , params_(params)
-        , workspace_(std::move(workspace))
-        , grid_spacing_(workspace_->grid_spacing())
+        , grid_(grid)
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
         , spatial_op_(create_spatial_op())
     {
-        if (!workspace_) {
-            throw std::invalid_argument("Workspace cannot be null");
+        if (!grid_) {
+            throw std::invalid_argument("Grid cannot be null");
         }
     }
 
@@ -74,11 +68,17 @@ public:
     const auto& right_boundary() const { return right_bc_; }
     const auto& spatial_operator() const { return spatial_op_; }
 
+    // Obstacle condition for American put: V ≥ max(1 - e^x, 0)
+    void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+        }
+    }
+
     // Grid info accessors
-    double x_min() const { return workspace_->x_min(); }
-    double x_max() const { return workspace_->x_max(); }
-    size_t n_space() const { return workspace_->n_space(); }
-    size_t n_time() const { return workspace_->n_time(); }
+    size_t n_space() const { return grid_->n_space(); }
+    size_t n_time() const { return grid_->time().n_steps(); }
 
     /// Normalized put payoff: max(1 - exp(x), 0) where x = ln(S/K)
     static void payoff(std::span<const double> x, std::span<double> u) {
@@ -102,14 +102,6 @@ private:
         }
     };
 
-    static ObstacleCallback create_obstacle() {
-        return [](double /*t*/, std::span<const double> x, std::span<double> psi) {
-            for (size_t i = 0; i < x.size(); ++i) {
-                psi[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-            }
-        };
-    }
-
     static DirichletBC<LeftBCFunction> create_left_bc() {
         return DirichletBC(LeftBCFunction{});
     }
@@ -123,13 +115,12 @@ private:
             params_.volatility,
             params_.rate,
             params_.dividend_yield);
-        auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_spacing_);
+        auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
         return operators::create_spatial_operator(std::move(pde), spacing_ptr);
     }
 
     PricingParams params_;
-    std::shared_ptr<AmericanSolverWorkspace> workspace_;
-    GridSpacing<double> grid_spacing_;
+    std::shared_ptr<Grid<double>> grid_;
 
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
@@ -148,23 +139,17 @@ private:
 class AmericanCallSolver : public PDESolver<AmericanCallSolver> {
 public:
     AmericanCallSolver(const PricingParams& params,
-                      std::shared_ptr<AmericanSolverWorkspace> workspace,
-                      std::span<double> output_buffer = {})
-        : PDESolver<AmericanCallSolver>(
-              workspace->grid_span(),
-              TimeDomain::from_n_steps(0.0, params.maturity, workspace->n_time()),
-              create_obstacle(),
-              workspace->pde_workspace(),
-              output_buffer)
+                      std::shared_ptr<Grid<double>> grid,
+                      PDEWorkspace workspace)
+        : PDESolver<AmericanCallSolver>(grid, workspace)
         , params_(params)
-        , workspace_(std::move(workspace))
-        , grid_spacing_(workspace_->grid_spacing())
+        , grid_(grid)
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
         , spatial_op_(create_spatial_op())
     {
-        if (!workspace_) {
-            throw std::invalid_argument("Workspace cannot be null");
+        if (!grid_) {
+            throw std::invalid_argument("Grid cannot be null");
         }
     }
 
@@ -174,11 +159,17 @@ public:
     const auto& right_boundary() const { return right_bc_; }
     const auto& spatial_operator() const { return spatial_op_; }
 
+    // Obstacle condition for American call: V ≥ max(e^x - 1, 0)
+    void obstacle(double /*t*/, std::span<const double> x, std::span<double> psi) const {
+        #pragma omp simd
+        for (size_t i = 0; i < x.size(); ++i) {
+            psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+        }
+    }
+
     // Grid info accessors
-    double x_min() const { return workspace_->x_min(); }
-    double x_max() const { return workspace_->x_max(); }
-    size_t n_space() const { return workspace_->n_space(); }
-    size_t n_time() const { return workspace_->n_time(); }
+    size_t n_space() const { return grid_->n_space(); }
+    size_t n_time() const { return grid_->time().n_steps(); }
 
     /// Normalized call payoff: max(exp(x) - 1, 0) where x = ln(S/K)
     static void payoff(std::span<const double> x, std::span<double> u) {
@@ -205,14 +196,6 @@ private:
         }
     };
 
-    static ObstacleCallback create_obstacle() {
-        return [](double /*t*/, std::span<const double> x, std::span<double> psi) {
-            for (size_t i = 0; i < x.size(); ++i) {
-                psi[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
-            }
-        };
-    }
-
     static DirichletBC<LeftBCFunction> create_left_bc() {
         return DirichletBC(LeftBCFunction{});
     }
@@ -226,13 +209,12 @@ private:
             params_.volatility,
             params_.rate,
             params_.dividend_yield);
-        auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_spacing_);
+        auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
         return operators::create_spatial_operator(std::move(pde), spacing_ptr);
     }
 
     PricingParams params_;
-    std::shared_ptr<AmericanSolverWorkspace> workspace_;
-    GridSpacing<double> grid_spacing_;
+    std::shared_ptr<Grid<double>> grid_;
 
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
