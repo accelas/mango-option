@@ -655,10 +655,8 @@ void compute_derivative(...) { /* ... */ }
 
 ### Internal Documents
 
-- **[SIMD Decision Summary](../experiments/SIMD_DECISION_SUMMARY.md)**: Full benchmark results and decision rationale
-- **[Fat Binary Strategy](../experiments/fat-binary-strategy.md)**: Technical details on target_clones + IFUNC
-- **[CPU Detection Refactoring](../experiments/cpu-detection-refactoring.md)**: Why CPU detection is diagnostic-only
 - **[CLAUDE.md](../../CLAUDE.md)**: Project-wide conventions and architecture overview
+- **[Implementation Plan](../plans/2025-11-21-simplify-to-openmp-simd-only.md)**: Historical context on OpenMP SIMD refactoring
 
 ### Implementation Files
 
