@@ -2,8 +2,9 @@
 
 #include "src/pde/core/grid.hpp"
 #include "centered_difference_scalar.hpp"
-#include "centered_difference_simd_backend.hpp"
-#include "src/support/cpu/feature_detection.hpp"
+// TEMPORARY: Disabled for Clang experiment (linking issues with std::experimental::simd)
+// #include "centered_difference_simd_backend.hpp"
+// #include "src/support/cpu/feature_detection.hpp"
 #include <span>
 #include <memory>
 #include <cassert>
@@ -92,16 +93,18 @@ inline CenteredDifference<T>::CenteredDifference(const GridSpacing<T>& spacing,
                                                   Mode mode)
 {
     if (mode == Mode::Auto) {
-        // Check CPU features AND OS support
-        auto features = cpu::detect_cpu_features();
-        bool os_supports_avx = cpu::check_os_avx_support();
+        // TEMPORARY: Force Scalar mode for Clang experiment
+        // Clang has linking issues with std::experimental::simd + target_clones
+        mode = Mode::Scalar;
 
-        // Use SIMD if both CPU and OS support it
-        if ((features.has_avx2 || features.has_avx512f) && os_supports_avx) {
-            mode = Mode::Simd;
-        } else {
-            mode = Mode::Scalar;
-        }
+        // Original logic (commented out for experiment):
+        // auto features = cpu::detect_cpu_features();
+        // bool os_supports_avx = cpu::check_os_avx_support();
+        // if ((features.has_avx2 || features.has_avx512f) && os_supports_avx) {
+        //     mode = Mode::Simd;
+        // } else {
+        //     mode = Mode::Scalar;
+        // }
     }
 
     switch (mode) {
@@ -109,7 +112,9 @@ inline CenteredDifference<T>::CenteredDifference(const GridSpacing<T>& spacing,
             impl_ = std::make_unique<BackendImpl<ScalarBackend<T>>>(spacing);
             break;
         case Mode::Simd:
-            impl_ = std::make_unique<BackendImpl<SimdBackend<T>>>(spacing);
+            // TEMPORARY: SIMD disabled for Clang experiment
+            // impl_ = std::make_unique<BackendImpl<SimdBackend<T>>>(spacing);
+            impl_ = std::make_unique<BackendImpl<ScalarBackend<T>>>(spacing);
             break;
         case Mode::Auto:
             // Already resolved above
