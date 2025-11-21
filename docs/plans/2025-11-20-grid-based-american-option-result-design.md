@@ -265,10 +265,10 @@ public:
 
     // Snapshot access (delegates to grid)
     bool has_snapshots() const { return grid_->has_snapshots(); }
-    std::span<const double> at_time(size_t time_idx) const {
-        return grid_->at(time_idx);
+    std::span<const double> at_time(size_t snapshot_idx) const {
+        return grid_->at(snapshot_idx);
     }
-    size_t num_snapshots() const { return grid_->snapshots(); }
+    size_t num_snapshots() const { return grid_->num_snapshots(); }
 
     // Direct grid access (for advanced users)
     const Grid<double>& grid() const { return *grid_; }
@@ -291,7 +291,7 @@ private:
 - `value()`: Shortcut for `value_at(params_.spot)`
 - `value_at(spot)`: Interpolates to arbitrary spot, denormalizes using `params_.strike`
 - Greeks: Use existing `CenteredDifference` infrastructure (lazy-computed, mutable cache)
-- `at_time(idx)`: Returns snapshot at snapshot index (if enabled)
+- `at_time(snapshot_idx)`: Returns spatial solution at snapshot index (NOT time step index)
 
 **Thread Safety:**
 - **AmericanOptionResult is NOT thread-safe for concurrent reads** due to mutable Greeks cache
@@ -402,21 +402,37 @@ if (result.has_value()) {
 ### Example 3: Workspace Reuse
 
 ```cpp
-// Allocate workspace once
+// Allocate workspace once for maximum grid size
 std::pmr::synchronized_pool_resource pool;
-auto [grid_spec, n_time] = estimate_grid_for_option(params1);
-size_t n_space = grid_spec.n_points();
 
-std::pmr::vector<double> buffer(PDEWorkspace::required_size(n_space), 0.0, &pool);
-auto workspace = PDEWorkspace::from_buffer(buffer, n_space).value();
+// IMPORTANT: Workspace must be sized for largest grid in batch
+// Compute max n_space across all options
+size_t max_n_space = 0;
+for (const auto& params : option_batch) {
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    max_n_space = std::max(max_n_space, grid_spec.n_points());
+}
+
+// Allocate workspace for maximum size
+std::pmr::vector<double> buffer(PDEWorkspace::required_size(max_n_space), 0.0, &pool);
 
 // Solve multiple options (reuse workspace)
 for (const auto& params : option_batch) {
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    size_t n_space = grid_spec.n_points();
+
+    // Create workspace spans for this grid size
+    auto workspace = PDEWorkspace::from_buffer(buffer, n_space).value();
+
     AmericanOptionSolver solver(params, workspace);
     auto result = solver.solve();
-    // Each solve creates fresh Grid, reuses workspace buffers
+    // Each solve creates fresh Grid, reuses workspace buffer
 }
 ```
+
+**Important:** Workspace size must match grid size. Either:
+1. Allocate for maximum grid size and create appropriately-sized spans per solve (shown above)
+2. Recreate workspace for each option if grid sizes vary significantly
 
 ## Migration Path
 
