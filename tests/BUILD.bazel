@@ -307,7 +307,8 @@ cc_test(
         "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    linkopts = ["-fopenmp"],
 )
 
 cc_test(
@@ -317,7 +318,8 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    linkopts = ["-fopenmp"],
 )
 
 cc_test(
@@ -410,7 +412,8 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"],
     size = "large",
     timeout = "moderate",
 )
@@ -423,7 +426,9 @@ cc_test(
         "-Wall",
         "-Wextra",
         "-march=native",
+        "-fopenmp",
     ],
+    linkopts = ["-fopenmp"],
     deps = [
         "//src/option:bspline_price_table",
         "//src/math:bspline_nd_separable",
@@ -459,7 +464,8 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"], 
 )
 
 cc_test(
@@ -469,7 +475,8 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"], 
     size = "small",
 )
 
@@ -480,7 +487,8 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"], 
     size = "medium",
     timeout = "moderate",
 )

@@ -27,6 +27,7 @@
 #pragma once
 
 #include "src/math/bspline_collocation.hpp"
+#include "src/support/parallel.hpp"
 #include <expected>
 #include <span>
 #include <vector>
@@ -139,7 +140,7 @@ public:
         return BSplineNDSeparable(std::move(grids));
     }
 
-    /// Fit B-spline coefficients via separable collocation
+    /// Fit B-spline coefficients via separable collocation (lvalue overload)
     ///
     /// Processes axes in reverse order (N-1 → 0) for cache locality.
     /// Each axis performs 1D fits on slices perpendicular to that dimension.
@@ -149,6 +150,23 @@ public:
     /// @return Fit result with coefficients and per-axis diagnostics
     [[nodiscard]] Result fit(
         const std::vector<T>& values,
+        const Config& config = {})
+    {
+        // Delegate to rvalue version with a copy
+        std::vector<T> values_copy = values;
+        return fit(std::move(values_copy), config);
+    }
+
+    /// Fit B-spline coefficients via separable collocation (rvalue overload, zero-copy)
+    ///
+    /// Move-optimized version that works directly on the input array.
+    /// Use when you don't need the input values after fitting.
+    ///
+    /// @param values Function values at grid points (moved in, modified in-place)
+    /// @param config Solver configuration
+    /// @return Fit result with coefficients and per-axis diagnostics
+    [[nodiscard]] Result fit(
+        std::vector<T>&& values,
         const Config& config = {})
     {
         // Verify size
@@ -165,6 +183,7 @@ public:
         }
 
         // Validate input values for NaN/Inf
+        // Note: Can't use SIMD with early return, so check sequentially
         for (size_t i = 0; i < values.size(); ++i) {
             if (std::isnan(values[i])) {
                 return Result::error_result(
@@ -176,8 +195,8 @@ public:
             }
         }
 
-        // Work in-place: copy values to coefficients
-        std::vector<T> coeffs = values;
+        // Work in-place: move values into coefficients (zero-copy)
+        std::vector<T> coeffs = std::move(values);
 
         // Initialize diagnostics
         std::array<T, N> max_residuals{};
@@ -352,7 +371,8 @@ private:
         const size_t n_axis = dims_[Axis];
         const size_t stride = strides_[Axis];
 
-        // Extract 1D slice along this axis
+        // Extract 1D slice along this axis (SIMD-optimized)
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_axis; ++i) {
             slice_buffer[i] = coeffs[base_offset + i * stride];
         }
@@ -374,7 +394,8 @@ private:
         max_residual = std::max(max_residual, fit_result.max_residual);
         max_condition = std::max(max_condition, fit_result.condition_estimate);
 
-        // Write coefficients back
+        // Write coefficients back (SIMD-optimized)
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_axis; ++i) {
             coeffs[base_offset + i * stride] = coeffs_buffer[i];
         }

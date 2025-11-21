@@ -250,7 +250,6 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/math:bspline_nd_separable",
-        "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -272,6 +271,48 @@ cc_binary(
         "//src/math:cubic_spline_solver",
         "//src/math:cubic_spline_nd",
         "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "bspline_nd_optimization_bench",
+    srcs = ["bspline_nd_optimization_bench.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/math:bspline_nd_separable",
+        "@google_benchmark//:benchmark_main",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "bspline_move_semantics_demo",
+    srcs = ["bspline_move_semantics_demo.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/math:bspline_nd_separable",
+        "@google_benchmark//:benchmark_main",
     ],
     tags = ["benchmark", "manual"],
 )

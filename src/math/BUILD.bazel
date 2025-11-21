@@ -70,6 +70,7 @@ cc_library(
     hdrs = ["bspline_nd_separable.hpp"],
     deps = [
         ":bspline_collocation",
+        "//src/support:parallel",
     ],
     copts = [
         "-std=c++23",
@@ -77,6 +78,8 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
+        "-fopenmp",
     ],
+    linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
