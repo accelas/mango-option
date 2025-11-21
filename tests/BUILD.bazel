@@ -320,17 +320,6 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
-
-cc_test(
-    name = "unified_memory_resource_test",
-    srcs = ["memory/unified_memory_resource_test.cc"],
-    deps = [
-        "//src/support/memory:unified_memory_resource",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
 cc_test(
     name = "cpu_diagnostics_test",
     srcs = ["cpu/cpu_diagnostics_test.cc"],
@@ -495,17 +484,6 @@ cc_test(
     size = "medium",
     timeout = "moderate",
 )
-
-cc_test(
-    name = "solver_memory_arena_test",
-    srcs = ["memory/solver_memory_arena_test.cc"],
-    deps = [
-        "//src/support/memory:solver_memory_arena",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
 
 cc_test(
     name = "quantlib_accuracy_test",

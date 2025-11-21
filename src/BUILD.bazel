@@ -15,9 +15,6 @@
 # - Utilities: //src/support:BUILD.bazel
 #   (expected, parallel, error_types)
 #
-# - Memory management: //src/support/memory:BUILD.bazel
-#   (unified_memory_resource, solver_memory_arena)
-#
 # - Operators: //src/pde/operators:BUILD.bazel
 #   (grid_spacing, operator_factory, centered_difference_facade, black_scholes_pde, etc.)
 #
