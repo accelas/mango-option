@@ -61,14 +61,14 @@ TEST_F(BandedSolverTest, BandedStorageStructure) {
     // Test that banded matrix is stored compactly (4 diagonals × n entries)
     // instead of dense n×n storage
 
-    mango::BandedMatrixStorage mat(n_);
+    mango::BandedMatrix<double> mat(n_, 4);
 
     // Verify compact storage: 4n entries, not n²
     EXPECT_EQ(mat.band_values().size(), 4 * n_);
     EXPECT_EQ(mat.col_starts().size(), n_);
 
     // Test accessor for simple 3×3 case
-    mango::BandedMatrixStorage small(3);
+    mango::BandedMatrix<double> small(3, 4);
     small.set_col_start(0, 0);
     small.set_col_start(1, 0);
     small.set_col_start(2, 0);
@@ -90,7 +90,7 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
     //     [0 -1  2]         [1]
     // Solution: x = [1, 1, 1]
 
-    mango::BandedMatrixStorage A(3);
+    mango::BandedMatrix<double> A(3, 4);
     std::vector<double> b = {1.0, 0.0, 1.0};
     std::vector<double> x(3);
 
@@ -103,12 +103,13 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
     A(1, 0) = -1.0; A(1, 1) = 2.0; A(1, 2) = -1.0;
     A(2, 1) = -1.0; A(2, 2) = 2.0;
 
-    // Solve using modern interface
-    auto factor_result = mango::banded_lu_factorize(A);
-    ASSERT_TRUE(factor_result.has_value()) << "Factorization failed: " << factor_result.error();
+    // Solve using modern interface with workspace
+    mango::BandedLUWorkspace<double> workspace(3, 4);
+    auto factor_result = mango::factorize_banded(A, workspace);
+    ASSERT_TRUE(factor_result.ok()) << "Factorization failed: " << factor_result.message();
 
-    auto solve_result = mango::banded_lu_substitution(A, b, x);
-    ASSERT_TRUE(solve_result.has_value()) << "Substitution failed: " << solve_result.error();
+    auto solve_result = mango::solve_banded(workspace, std::span<const double>(b), std::span<double>(x));
+    ASSERT_TRUE(solve_result.ok()) << "Substitution failed: " << solve_result.message();
 
     EXPECT_NEAR(x[0], 1.0, 1e-10);
     EXPECT_NEAR(x[1], 1.0, 1e-10);
@@ -118,7 +119,7 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
 TEST_F(BandedSolverTest, BandedLUSolveLarger) {
     // Test on larger system (n=10) with random RHS
     const size_t n = 10;
-    mango::BandedMatrixStorage A(n);
+    mango::BandedMatrix<double> A(n, 4);
     std::vector<double> b(n);
     std::vector<double> x(n);
 
@@ -145,12 +146,13 @@ TEST_F(BandedSolverTest, BandedLUSolveLarger) {
         }
     }
 
-    // Solve using modern interface
-    auto factor_result = mango::banded_lu_factorize(A);
-    ASSERT_TRUE(factor_result.has_value()) << "Factorization failed: " << factor_result.error();
+    // Solve using modern interface with workspace
+    mango::BandedLUWorkspace<double> workspace(n, 4);
+    auto factor_result = mango::factorize_banded(A, workspace);
+    ASSERT_TRUE(factor_result.ok()) << "Factorization failed: " << factor_result.message();
 
-    auto solve_result = mango::banded_lu_substitution(A, b, x);
-    ASSERT_TRUE(solve_result.has_value()) << "Substitution failed: " << solve_result.error();
+    auto solve_result = mango::solve_banded(workspace, std::span<const double>(b), std::span<double>(x));
+    ASSERT_TRUE(solve_result.ok()) << "Substitution failed: " << solve_result.message();
 
     // Verify residual ||Ax - b|| is small
     std::vector<double> residual(n, 0.0);
@@ -179,13 +181,13 @@ TEST_F(BandedSolverTest, CollocationAccuracy) {
     // for a quadratic function (should fit perfectly with cubic B-splines)
 
     // Create collocation solver
-    auto solver_result = mango::BSplineCollocation1D::create(x_);
+    auto solver_result = mango::BSplineCollocation1D<double>::create(x_);
     ASSERT_TRUE(solver_result.has_value()) << "Failed to create solver: " << solver_result.error();
 
     auto& solver = solver_result.value();
 
     // Fit quadratic function
-    auto fit_result = solver.fit(y_, 1e-9);
+    auto fit_result = solver.fit(y_, mango::BSplineCollocationConfig<double>{.tolerance = 1e-9});
 
     EXPECT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
     EXPECT_LT(fit_result.max_residual, 1e-6) << "Residual too large";
@@ -197,13 +199,13 @@ TEST_F(BandedSolverTest, BandedSolverAccuracyQuadratic) {
     // For a quadratic function y=x², cubic B-splines should fit perfectly
 
     // Create solver
-    auto solver_result = mango::BSplineCollocation1D::create(x_);
+    auto solver_result = mango::BSplineCollocation1D<double>::create(x_);
     ASSERT_TRUE(solver_result.has_value()) << "Failed to create solver: " << solver_result.error();
 
     auto& solver = solver_result.value();
 
     // Fit quadratic function y = x²
-    auto fit_result = solver.fit(y_, 1e-9);
+    auto fit_result = solver.fit(y_, mango::BSplineCollocationConfig<double>{.tolerance = 1e-9});
     ASSERT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
 
     // For a quadratic function fit with cubic B-splines, residuals should be extremely small
@@ -227,7 +229,7 @@ TEST_F(BandedSolverTest, DetectsSingularMatrixDuplicatePoints) {
     std::vector<double> bad_grid = {0.0, 0.0, 0.5, 1.0};
 
     // Should fail during solver creation (duplicate points)
-    auto solver_result = mango::BSplineCollocation1D::create(bad_grid);
+    auto solver_result = mango::BSplineCollocation1D<double>::create(bad_grid);
     EXPECT_FALSE(solver_result.has_value())
         << "Solver should reject grid with duplicate points";
 
@@ -243,7 +245,7 @@ TEST_F(BandedSolverTest, DetectsSingularMatrixDegenerateValues) {
 
     // Create valid grid
     std::vector<double> grid = {0.0, 0.25, 0.5, 0.75, 1.0};
-    auto solver_result = mango::BSplineCollocation1D::create(grid);
+    auto solver_result = mango::BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
 
     auto& solver = solver_result.value();
@@ -252,7 +254,7 @@ TEST_F(BandedSolverTest, DetectsSingularMatrixDegenerateValues) {
     // In practice, this may or may not be singular depending on the B-spline basis
     // The real test is that we get a proper error message if it IS singular
     std::vector<double> degenerate_values = {0.0, 0.0, 0.0, 0.0, 0.0};
-    auto fit_result = solver.fit(degenerate_values, 1e-9);
+    auto fit_result = solver.fit(degenerate_values, mango::BSplineCollocationConfig<double>{.tolerance = 1e-9});
 
     // Either the fit succeeds (all-zero solution is valid for all-zero input)
     // or it fails with a clear error message
@@ -269,7 +271,7 @@ TEST_F(BandedSolverTest, DetectsNearSingularMatrix) {
     std::vector<double> grid = {0.0, 1e-15, 0.5, 1.0};
 
     // Should fail during creation (points too close)
-    auto solver_result = mango::BSplineCollocation1D::create(grid);
+    auto solver_result = mango::BSplineCollocation1D<double>::create(grid);
     EXPECT_FALSE(solver_result.has_value())
         << "Solver should reject grid with points closer than 1e-14";
 }

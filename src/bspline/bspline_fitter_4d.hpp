@@ -1,723 +1,55 @@
 /**
  * @file bspline_fitter_4d.hpp
- * @brief Complete 4D B-spline coefficient fitting using separable collocation
+ * @brief 4D B-spline coefficient fitting using separable collocation
  *
- * This file contains a complete implementation of 4D B-spline fitting:
- * - BandedMatrixStorage: Compact storage for 4-diagonal matrices (O(4n) vs O(n²))
- * - banded_lu_factorize() + banded_lu_substitution(): O(n) banded LU solver
- * - BSplineCollocation1D: 1D cubic B-spline collocation solver (uses banded solver)
+ * This file contains 4D-specific B-spline fitting logic:
  * - BSplineFitter4DSeparable: Separable 4D fitting via sequential 1D solves
  * - BSplineFitter4D: High-level 4D fitter interface
+ * - BSplineFitter4DWorkspace: Workspace for reducing allocations
  *
  * Uses tensor-product structure to fit B-spline coefficients efficiently.
  * Instead of a massive O(n⁴) dense system, we solve sequential 1D systems
  * along each axis: axis0 → axis1 → axis2 → axis3.
  *
- * Performance: O(N0² + N1² + N2² + N3²) with banded solver (was O(N0³ + N1³ + N2³ + N3³))
+ * Performance: O(N0² + N1² + N2² + N3²) with banded solver
  *   For 50×30×20×10: ~6ms fitting time (7.8× speedup from banded solver)
  *
  * Accuracy: Residuals <1e-6 at all grid points (validated per-axis)
  *
+ * **Generic math modules used:**
+ * - src/math/banded_matrix_solver.hpp: Banded LU factorization
+ * - src/math/bspline_basis.hpp: Cox-de Boor recursion, knot vectors
+ * - src/math/bspline_collocation.hpp: 1D B-spline collocation solver
+ *
  * Usage:
- *   auto fitter_result = BSplineFitter4D::create(axis0_grid, axis1_grid, axis2_grid, axis3_grid);
+ *   auto fitter_result = BSplineFitter4D::create(
+ *       axis0_grid, axis1_grid, axis2_grid, axis3_grid);
  *   if (fitter_result.has_value()) {
  *       auto result = fitter_result.value().fit(values_4d);
  *       if (result.success) {
  *           // Use result.coefficients with BSpline4D
  *       }
- *   } else {
- *       // Handle creation error: fitter_result.error()
  *   }
  */
 
 #pragma once
 
 #include "src/bspline/bspline_utils.hpp"
+#include "src/math/bspline_collocation.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
-#include <lapacke.h>
 #include <vector>
-#include <cmath>
 #include <algorithm>
 #include <optional>
 #include <string>
-#include <stdexcept>
 #include <memory>
 #include <span>
 #include <cassert>
-#include <limits>
 
 namespace mango {
 
 // ============================================================================
-// Banded Matrix Storage
-// ============================================================================
-
-/// Compact storage for 4-diagonal banded matrix from cubic B-spline collocation
-///
-/// Matrix structure for cubic B-spline (degree 3):
-///   - Each basis function has compact support → at most 4 non-zero entries per row
-///   - Banded structure: entries in columns [j-3, j-2, j-1, j]
-///
-/// Storage layout (row-major):
-///   band_values_[i*4 + k] = A[i, col_start[i] + k] for k ∈ [0,3]
-///
-/// Memory: O(4n) vs O(n²) for dense
-class BandedMatrixStorage {
-public:
-    /// Construct banded storage for n×n matrix with bandwidth 4
-    explicit BandedMatrixStorage(size_t n)
-        : n_(n)
-        , band_values_(4 * n, 0.0)
-        , col_start_(n, 0)
-    {}
-
-    /// Get reference to band entry A[row, col]
-    /// Assumes col ∈ [col_start[row], col_start[row] + 3]
-    double& operator()(size_t row, size_t col) {
-        assert(row < n_);
-        assert(col >= col_start_[row] && col < col_start_[row] + 4);
-        size_t k = col - col_start_[row];
-        return band_values_[row * 4 + k];
-    }
-
-    /// Get const reference to band entry
-    double operator()(size_t row, size_t col) const {
-        assert(row < n_);
-        assert(col >= col_start_[row] && col < col_start_[row] + 4);
-        size_t k = col - col_start_[row];
-        return band_values_[row * 4 + k];
-    }
-
-    /// Get starting column index for row
-    size_t col_start(size_t row) const {
-        assert(row < n_);
-        return col_start_[row];
-    }
-
-    /// Set starting column index for row
-    void set_col_start(size_t row, size_t col) {
-        assert(row < n_);
-        col_start_[row] = col;
-    }
-
-    /// Get number of rows (and columns)
-    size_t size() const { return n_; }
-
-    /// Get raw band values (for debugging/testing)
-    std::span<const double> band_values() const { return band_values_; }
-
-    /// Get raw column starts (for debugging/testing)
-    std::span<const size_t> col_starts() const { return col_start_; }
-
-private:
-    size_t n_;                          ///< Matrix dimension
-    std::vector<double> band_values_;   ///< Banded storage (4n entries)
-    std::vector<size_t> col_start_;     ///< Starting column for each row
-
-    // LAPACK factorization storage
-    mutable std::vector<double> lapack_band_storage_;  ///< Storage in LAPACK band layout
-    mutable std::vector<lapack_int> pivot_indices_;    ///< Pivot indices from dgbtrf
-    mutable lapack_int kl_ = 0;                        ///< Number of sub-diagonals
-    mutable lapack_int ku_ = 0;                        ///< Number of super-diagonals
-    mutable lapack_int ldab_ = 0;                      ///< Leading dimension for band storage
-    mutable bool factored_ = false;                    ///< True if LAPACK factorization computed
-
-    friend std::expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A);
-    friend std::expected<void, std::string> banded_lu_substitution(
-        const BandedMatrixStorage& LU,
-        std::span<const double> b,
-        std::span<double> x);
-    friend class BSplineCollocation1D;  // Needs access for dgbcon condition estimation
-};
-
-// ============================================================================
-// Banded LU Solver
-// ============================================================================
-
-/// In-place LU factorization of banded matrix (Doolittle algorithm)
-///
-/// Performs LU decomposition with pivot detection for numerical stability.
-/// Returns error if matrix is singular or ill-conditioned.
-///
-/// Time complexity: O(n) for fixed bandwidth
-/// Space complexity: O(1) (in-place)
-///
-/// @param A Banded matrix (modified in-place to store LU factors)
-/// @return std::expected<void, string> - success or error message
-inline std::expected<void, std::string> banded_lu_factorize(BandedMatrixStorage& A) {
-    const lapack_int n = static_cast<lapack_int>(A.size());
-    if (n == 0) {
-        return std::unexpected(std::string("Matrix dimension must be > 0"));
-    }
-
-    // Determine bandwidths by inspecting row column ranges
-    lapack_int kl = 0;
-    lapack_int ku = 0;
-    for (lapack_int i = 0; i < n; ++i) {
-        size_t col_start = A.col_start_[static_cast<size_t>(i)];
-        for (size_t k = 0; k < 4; ++k) {
-            size_t col = col_start + k;
-            if (col >= A.size()) {
-                continue;
-            }
-            lapack_int col_idx = static_cast<lapack_int>(col);
-            kl = std::max(kl, i - col_idx);
-            ku = std::max(ku, col_idx - i);
-        }
-    }
-
-    // LAPACK band storage has leading dimension ldab = 2*kl + ku + 1
-    lapack_int ldab = 2 * kl + ku + 1;
-    A.lapack_band_storage_.assign(static_cast<size_t>(ldab) * static_cast<size_t>(n), 0.0);
-
-    // Populate LAPACK band storage (column-major)
-    for (lapack_int i = 0; i < n; ++i) {
-        size_t col_start = A.col_start_[static_cast<size_t>(i)];
-        for (size_t k = 0; k < 4; ++k) {
-            size_t col = col_start + k;
-            if (col >= A.size()) {
-                continue;
-            }
-            double value = A.band_values_[static_cast<size_t>(i) * 4 + k];
-            lapack_int col_idx = static_cast<lapack_int>(col);
-            lapack_int row_idx = kl + ku + i - col_idx;
-            if (row_idx < 0 || row_idx >= ldab) {
-                continue;
-            }
-            size_t storage_index = static_cast<size_t>(row_idx + col_idx * ldab);
-            A.lapack_band_storage_[storage_index] = value;
-        }
-    }
-
-    A.pivot_indices_.resize(static_cast<size_t>(n));
-    lapack_int info = LAPACKE_dgbtrf(
-        LAPACK_COL_MAJOR,
-        n,
-        n,
-        kl,
-        ku,
-        A.lapack_band_storage_.data(),
-        ldab,
-        A.pivot_indices_.data());
-
-    if (info < 0) {
-        return std::unexpected(
-            std::string("LAPACKE_dgbtrf: invalid argument at position ") +
-            std::to_string(-info));
-    }
-    if (info > 0) {
-        return std::unexpected(
-            std::string("Banded matrix is singular; zero pivot encountered at row ") +
-            std::to_string(info));
-    }
-
-    A.kl_ = kl;
-    A.ku_ = ku;
-    A.ldab_ = ldab;
-    A.factored_ = true;
-    return {};
-}
-
-/// Solve LU*x = b using pre-factored banded matrix
-///
-/// Uses forward and back substitution with pre-computed LU factors.
-/// MUCH faster than re-factorizing for condition number estimation.
-/// Operates in-place on x (copies b into x, then LAPACKE_dgbtrs modifies x).
-///
-/// Time complexity: O(n)
-/// Space complexity: O(1) (zero heap allocations - operates in-place)
-///
-/// @param LU Pre-factored banded matrix (from banded_lu_factorize)
-/// @param b Right-hand side vector
-/// @param x Solution vector (output, also used as workspace)
-inline std::expected<void, std::string> banded_lu_substitution(
-    const BandedMatrixStorage& LU,
-    std::span<const double> b,
-    std::span<double> x)
-{
-    const lapack_int n = static_cast<lapack_int>(LU.size());
-    if (!LU.factored_) {
-        return std::unexpected(std::string("Banded matrix has not been factorized"));
-    }
-    if (b.size() != static_cast<size_t>(n) || x.size() != static_cast<size_t>(n)) {
-        return std::unexpected(std::string("Dimension mismatch in banded_lu_substitution"));
-    }
-
-    // Copy b into x, then solve in-place (LAPACKE_dgbtrs modifies RHS)
-    std::copy(b.begin(), b.end(), x.begin());
-
-    lapack_int nrhs = 1;
-    lapack_int info = LAPACKE_dgbtrs(
-        LAPACK_COL_MAJOR,
-        'N',
-        n,
-        LU.kl_,
-        LU.ku_,
-        nrhs,
-        LU.lapack_band_storage_.data(),
-        LU.ldab_,
-        LU.pivot_indices_.data(),
-        x.data(),  // Solve in-place on x (was rhs.data())
-        n);
-
-    if (info < 0) {
-        return std::unexpected(
-            std::string("LAPACKE_dgbtrs: invalid argument at position ") +
-            std::to_string(-info));
-    }
-    if (info > 0) {
-        return std::unexpected(
-            std::string("LAPACKE_dgbtrs failed; zero pivot encountered at row ") +
-            std::to_string(info));
-    }
-
-    // x now contains the solution (no copy needed)
-    return {};
-}
-
-// ============================================================================
-// 1D B-spline Collocation Solver
-// ============================================================================
-
-/// Result of 1D B-spline collocation fitting
-struct BSplineCollocation1DResult {
-    std::vector<double> coefficients;  ///< Fitted control points
-    bool success;                       ///< Fit succeeded
-    std::string error_message;          ///< Error if failed
-    double max_residual;                ///< Max |B*c - f|
-    double condition_estimate;          ///< Rough condition number estimate
-};
-
-/// 1D Cubic B-spline collocation solver
-///
-/// Solves the collocation system: B*c = f
-/// where B[i,j] = N_j(x_i) is the collocation matrix.
-///
-/// Builds and solves the collocation system to find control points
-/// that make the B-spline interpolate the given data.
-class BSplineCollocation1D {
-public:
-    /// Factory method to create BSplineCollocation1D instance
-    ///
-    /// @param grid Data grid points (sorted, ≥4 points)
-    /// @return std::expected<BSplineCollocation1D, std::string> containing either the solver or error message
-    static std::expected<BSplineCollocation1D, std::string> create(std::vector<double> grid) {
-        try {
-            // Validate grid size
-            if (grid.size() < 4) {
-                return std::unexpected(std::string("Grid must have ≥4 points for cubic B-splines, got ") +
-                               std::to_string(grid.size()) + " points");
-            }
-
-            // Validate grid is sorted
-            if (!std::is_sorted(grid.begin(), grid.end())) {
-                return std::unexpected(std::string("Grid must be sorted in ascending order"));
-            }
-
-            // Check for duplicate or near-duplicate points
-            constexpr double MIN_SPACING = 1e-14;
-            for (size_t i = 1; i < grid.size(); ++i) {
-                double spacing = grid[i] - grid[i-1];
-                if (spacing < MIN_SPACING) {
-                    return std::unexpected(
-                        std::string("Grid points too close together (spacing < 1e-14). ") +
-                        "Found grid[" + std::to_string(i-1) + "] = " + std::to_string(grid[i-1]) +
-                        " and grid[" + std::to_string(i) + "] = " + std::to_string(grid[i]) +
-                        " with spacing " + std::to_string(spacing)
-                    );
-                }
-            }
-
-            // Check for zero-width grid
-            if (grid.back() - grid.front() < MIN_SPACING) {
-                return std::unexpected(std::string("Grid has zero width (all points nearly identical)"));
-            }
-
-            // All validations passed - create the solver
-            return BSplineCollocation1D(std::move(grid));
-        } catch (const std::exception& e) {
-            return std::unexpected(std::string("BSplineCollocation1D creation failed: ") + e.what());
-        }
-    }
-
-
-    /// Fit B-spline coefficients via collocation
-    ///
-    /// Solves B*c = f where B is the collocation matrix
-    ///
-    /// @param values Function values at grid points (size n)
-    /// @param tolerance Max allowed residual (default 1e-9)
-    /// @return Fit result with coefficients and diagnostics
-    BSplineCollocation1DResult fit(const std::vector<double>& values, double tolerance = 1e-9) {
-        if (values.size() != n_) {
-            return {std::vector<double>(), false,
-                    "Value array size mismatch", 0.0, 0.0};
-        }
-
-        // Validate input values for NaN/Inf
-        for (size_t i = 0; i < n_; ++i) {
-            if (std::isnan(values[i])) {
-                return {std::vector<double>(), false,
-                        "Input values contain NaN at index " + std::to_string(i), 0.0, 0.0};
-            }
-            if (std::isinf(values[i])) {
-                return {std::vector<double>(), false,
-                        "Input values contain infinite value at index " + std::to_string(i), 0.0, 0.0};
-            }
-        }
-
-        // Clear cached LU factors (new fit)
-        is_factored_ = false;
-        lu_factors_.reset();
-
-        // Build collocation matrix
-        build_collocation_matrix();
-
-        // Solve banded system: B*c = f (factorizes on first call)
-        std::vector<double> coeffs(n_);
-        auto solve_result = solve_banded_system(values, coeffs);
-
-        if (!solve_result) {
-            return {std::vector<double>(), false,
-                    "Failed to solve collocation system: " + solve_result.error(),
-                    0.0, 0.0};
-        }
-
-        // Compute residuals: ||B*c - f||
-        double max_residual = compute_residual(coeffs, values);
-
-        // Check residual tolerance
-        if (max_residual > tolerance) {
-            return {std::vector<double>(), false,
-                    "Residual " + std::to_string(max_residual) +
-                    " exceeds tolerance " + std::to_string(tolerance),
-                    max_residual, 0.0};
-        }
-
-        // Estimate condition number via 1-norm bound (reuses cached LU factors!)
-        double cond_est = estimate_condition_number();
-
-        return {coeffs, true, "", max_residual, cond_est};
-    }
-
-    /// Fit with external coefficient buffer (zero-allocation variant)
-    ///
-    /// @param values Function values at grid points
-    /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
-    /// @param tolerance Max allowed residual
-    /// @return Fit result WITHOUT coefficients vector (uses coeffs_out)
-    BSplineCollocation1DResult fit_with_buffer(
-        std::span<const double> values,
-        std::span<double> coeffs_out,
-        double tolerance = 1e-9)
-    {
-        if (values.size() != n_) {
-            return {std::vector<double>(), false,
-                    "Value array size mismatch", 0.0, 0.0};
-        }
-
-        if (coeffs_out.size() != n_) {
-            return {std::vector<double>(), false,
-                    "Coefficients buffer size mismatch", 0.0, 0.0};
-        }
-
-        // Validate input values for NaN/Inf
-        for (size_t i = 0; i < n_; ++i) {
-            if (std::isnan(values[i])) {
-                return {std::vector<double>(), false,
-                        "Input values contain NaN at index " + std::to_string(i), 0.0, 0.0};
-            }
-            if (std::isinf(values[i])) {
-                return {std::vector<double>(), false,
-                        "Input values contain infinite value at index " + std::to_string(i), 0.0, 0.0};
-            }
-        }
-
-        // Clear cached LU factors (new fit)
-        is_factored_ = false;
-        lu_factors_.reset();
-
-        // Build collocation matrix
-        build_collocation_matrix();
-
-        // Solve banded system into provided buffer
-        auto solve_result = solve_banded_system_to_buffer(values, coeffs_out);
-
-        if (!solve_result) {
-            return {std::vector<double>(), false,
-                    "Failed to solve collocation system: " + solve_result.error(),
-                    0.0, 0.0};
-        }
-
-        // Compute residuals
-        double max_residual = compute_residual_from_span(coeffs_out, values);
-
-        // Check residual tolerance
-        if (max_residual > tolerance) {
-            return {std::vector<double>(), false,
-                    "Residual " + std::to_string(max_residual) +
-                    " exceeds tolerance " + std::to_string(tolerance),
-                    max_residual, 0.0};
-        }
-
-        // Estimate condition number
-        double cond_est = estimate_condition_number();
-
-        // Return result without copying coefficients (already in caller's buffer)
-        return {std::vector<double>(), true, "", max_residual, cond_est};
-    }
-
-private:
-    /// Constructor (private - use factory method)
-    explicit BSplineCollocation1D(std::vector<double> grid)
-        : grid_(std::move(grid))
-        , n_(grid_.size())
-    {
-        // Build knot vector (clamped cubic)
-        knots_ = clamped_knots_cubic(grid_);
-
-        // Pre-allocate banded storage (4 entries per row for cubic B-splines)
-        band_values_.resize(n_ * 4, 0.0);
-        band_col_start_.resize(n_, 0);
-    }
-
-    std::vector<double> grid_;              ///< Data grid points
-    std::vector<double> knots_;             ///< Knot vector (clamped)
-    size_t n_;                              ///< Number of grid points
-
-    // Banded storage: each row has exactly 4 non-zero entries (cubic B-spline support)
-    std::vector<double> band_values_;       ///< Banded matrix values (n×4, row-major)
-    std::vector<int> band_col_start_;       ///< First column index for each row's band
-
-    // LU factorization cache (avoids redundant factorization in condition number estimation)
-    mutable std::optional<BandedMatrixStorage> lu_factors_;  ///< Cached LU factors
-    mutable bool is_factored_ = false;                        ///< True if lu_factors_ is valid
-
-    /// Build collocation matrix B[i,j] = N_j(x_i) in banded format
-    void build_collocation_matrix() {
-        for (size_t i = 0; i < n_; ++i) {
-            const double x = grid_[i];
-
-            // Find knot span
-            int span = find_span_cubic(knots_, x);
-
-            // Evaluate 4 non-zero basis functions at x
-            double basis[4];
-            cubic_basis_nonuniform(knots_, span, x, basis);
-
-            // Store in banded format
-            band_col_start_[i] = std::max(0, span - 3);
-
-            // Fill band values (left to right order)
-            for (int k = 0; k < 4; ++k) {
-                int col = span - k;
-                if (col >= 0 && col < static_cast<int>(n_)) {
-                    int band_idx = col - band_col_start_[i];
-                    if (band_idx >= 0 && band_idx < 4) {
-                        band_values_[i * 4 + band_idx] = basis[k];
-                    }
-                }
-            }
-        }
-    }
-
-    /// Ensure matrix is factored (builds and factorizes if not already done)
-    ///
-    /// Extracts common factorization logic to avoid duplication.
-    /// @return std::expected<void, string> - success or error message
-    std::expected<void, std::string> ensure_factored() const {
-        if (is_factored_) {
-            return {};  // Already factored
-        }
-
-        // Build BandedMatrixStorage from compact storage
-        lu_factors_ = BandedMatrixStorage(n_);
-
-        for (size_t i = 0; i < n_; ++i) {
-            int col_start = band_col_start_[i];
-            lu_factors_->set_col_start(i, static_cast<size_t>(col_start));
-
-            // Copy band values with bounds checking
-            for (int k = 0; k < 4; ++k) {
-                int col = col_start + k;
-                if (col >= 0 && col < static_cast<int>(n_)) {
-                    (*lu_factors_)(i, static_cast<size_t>(col)) = band_values_[i * 4 + k];
-                }
-            }
-        }
-
-        // Factorize once
-        auto factorize_result = banded_lu_factorize(*lu_factors_);
-        if (!factorize_result) {
-            return factorize_result;  // Propagate error
-        }
-
-        is_factored_ = true;
-        return {};
-    }
-
-    /// Solve banded linear system using cached LU factorization
-    ///
-    /// On first call, factorizes the matrix and caches LU factors.
-    /// Subsequent calls reuse cached factors (critical for condition number estimation).
-    ///
-    /// @param rhs Right-hand side vector
-    /// @param solution Solution vector (output)
-    /// @return std::expected<void, string> - success or error message
-    std::expected<void, std::string> solve_banded_system(
-        const std::vector<double>& rhs,
-        std::vector<double>& solution) const
-    {
-        // Ensure matrix is factored (no-op if already done)
-        auto factorize_result = ensure_factored();
-        if (!factorize_result) {
-            return factorize_result;
-        }
-
-        // Solve using cached LU factors (fast!)
-        solution.resize(n_);
-        auto sub_result = banded_lu_substitution(*lu_factors_, rhs, solution);
-        if (!sub_result) {
-            return sub_result;
-        }
-
-        return {};
-    }
-
-    /// Solve banded system directly into caller's buffer
-    std::expected<void, std::string> solve_banded_system_to_buffer(
-        std::span<const double> rhs,
-        std::span<double> solution) const
-    {
-        // Ensure matrix is factored (no-op if already done)
-        auto factorize_result = ensure_factored();
-        if (!factorize_result) {
-            return factorize_result;
-        }
-
-        // Solve using cached factors, output to provided buffer
-        auto solve_result = banded_lu_substitution(*lu_factors_, rhs, solution);
-        if (!solve_result) {
-            return solve_result;
-        }
-
-        return {};
-    }
-
-    /// Compute max residual ||B*c - f||_∞ using banded storage
-    double compute_residual(const std::vector<double>& coeffs,
-                           const std::vector<double>& values) const {
-        double max_res = 0.0;
-
-        for (size_t i = 0; i < n_; ++i) {
-            // Compute (B*c)[i] - only sum over 4 non-zero entries
-            double Bc_i = 0.0;
-            int j_start = band_col_start_[i];
-            int j_end = std::min(j_start + 4, static_cast<int>(n_));
-
-            for (int j = j_start; j < j_end; ++j) {
-                int band_idx = j - j_start;
-                double b_ij = band_values_[i * 4 + band_idx];
-                Bc_i = std::fma(b_ij, coeffs[j], Bc_i);
-            }
-
-            double residual = std::abs(Bc_i - values[i]);
-            max_res = std::max(max_res, residual);
-        }
-
-        return max_res;
-    }
-
-    /// Compute residual from span coefficients
-    double compute_residual_from_span(std::span<const double> coeffs, std::span<const double> values) const {
-        double max_residual = 0.0;
-
-        for (size_t i = 0; i < n_; ++i) {
-            double Bc_i = 0.0;
-            int col_start = band_col_start_[i];
-
-            for (size_t k = 0; k < 4 && (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k) {
-                Bc_i = std::fma(band_values_[i * 4 + k], coeffs[col_start + k], Bc_i);
-            }
-
-            double residual = std::abs(Bc_i - values[i]);
-            max_residual = std::max(max_residual, residual);
-        }
-
-        return max_residual;
-    }
-
-    /// Estimate 1-norm condition number using LAPACKE_dgbcon
-    ///
-    /// CRITICAL PERFORMANCE: Uses LAPACKE_dgbcon to estimate condition number
-    /// directly from cached LU factors WITHOUT additional solver calls.
-    ///
-    /// Old behavior: 1 factorization + n substitutions (O(n) total)
-    /// New behavior: 1 factorization + dgbcon estimation (O(n) but much faster!)
-    ///
-    /// Speedup: Eliminates n expensive LAPACKE_dgbtrs calls (~50% reduction in solver overhead)
-    double estimate_condition_number() const {
-        // Ensure LU factors are available
-        if (!lu_factors_ || !lu_factors_->factored_) {
-            return std::numeric_limits<double>::infinity();
-        }
-
-        // Compute ||B||_1 = max column sum of original matrix
-        std::vector<double> col_sums(n_, 0.0);
-
-        for (size_t i = 0; i < n_; ++i) {
-            int j_start = band_col_start_[i];
-            int j_end = std::min(j_start + 4, static_cast<int>(n_));
-
-            for (int j = j_start; j < j_end; ++j) {
-                int band_idx = j - j_start;
-                double b_ij = band_values_[i * 4 + band_idx];
-                col_sums[j] += std::abs(b_ij);
-            }
-        }
-
-        double norm_B = *std::max_element(col_sums.begin(), col_sums.end());
-
-        if (norm_B == 0.0) {
-            return std::numeric_limits<double>::infinity();
-        }
-
-        // Use LAPACKE_dgbcon to estimate ||B^{-1}||_1 from LU factors
-        // This is MUCH faster than n solver calls!
-        double rcond = 0.0;  // Reciprocal condition number (output)
-
-        lapack_int n_int = static_cast<lapack_int>(n_);
-        lapack_int info = LAPACKE_dgbcon(
-            LAPACK_COL_MAJOR,           // Matrix layout
-            '1',                         // 1-norm
-            n_int,                       // Matrix dimension
-            lu_factors_->kl_,            // Number of subdiagonals
-            lu_factors_->ku_,            // Number of superdiagonals
-            lu_factors_->lapack_band_storage_.data(),  // LU factors (from dgbtrf)
-            lu_factors_->ldab_,          // Leading dimension
-            lu_factors_->pivot_indices_.data(),        // Pivot indices (from dgbtrf)
-            norm_B,                      // ||B||_1 (original matrix norm)
-            &rcond                       // Output: 1/cond
-        );
-
-        if (info != 0) {
-            // dgbcon failed (shouldn't happen if dgbtrf succeeded)
-            return std::numeric_limits<double>::infinity();
-        }
-
-        if (rcond == 0.0) {
-            // Singular matrix
-            return std::numeric_limits<double>::infinity();
-        }
-
-        // Return condition number = 1 / rcond
-        return 1.0 / rcond;
-    }
-};
-
-// ============================================================================
-// Separable 4D B-spline Fitter
+// Separable 4D B-spline Fitting
 // ============================================================================
 
 /// Result of separable 4D fitting with per-axis diagnostics
@@ -891,10 +223,10 @@ private:
         , N3_(axis3_grid_.size())
     {
         // Create 1D solvers for each axis using factory method
-        auto axis0_result = BSplineCollocation1D::create(axis0_grid_);
-        auto axis1_result = BSplineCollocation1D::create(axis1_grid_);
-        auto axis2_result = BSplineCollocation1D::create(axis2_grid_);
-        auto axis3_result = BSplineCollocation1D::create(axis3_grid_);
+        auto axis0_result = BSplineCollocation1D<double>::create(axis0_grid_);
+        auto axis1_result = BSplineCollocation1D<double>::create(axis1_grid_);
+        auto axis2_result = BSplineCollocation1D<double>::create(axis2_grid_);
+        auto axis3_result = BSplineCollocation1D<double>::create(axis3_grid_);
 
         // Collect all error messages if any solver construction fails
         if (!axis0_result.has_value() || !axis1_result.has_value() ||
@@ -906,19 +238,19 @@ private:
                                    (axis3_result.has_value() ? "" : "axis3: " + axis3_result.error()));
         }
 
-        solver_axis0_ = std::make_unique<BSplineCollocation1D>(std::move(axis0_result.value()));
-        solver_axis1_ = std::make_unique<BSplineCollocation1D>(std::move(axis1_result.value()));
-        solver_axis2_ = std::make_unique<BSplineCollocation1D>(std::move(axis2_result.value()));
-        solver_axis3_ = std::make_unique<BSplineCollocation1D>(std::move(axis3_result.value()));
+        solver_axis0_ = std::make_unique<BSplineCollocation1D<double>>(std::move(axis0_result.value()));
+        solver_axis1_ = std::make_unique<BSplineCollocation1D<double>>(std::move(axis1_result.value()));
+        solver_axis2_ = std::make_unique<BSplineCollocation1D<double>>(std::move(axis2_result.value()));
+        solver_axis3_ = std::make_unique<BSplineCollocation1D<double>>(std::move(axis3_result.value()));
     }
 
     std::vector<double> axis0_grid_, axis1_grid_, axis2_grid_, axis3_grid_;
     size_t N0_, N1_, N2_, N3_;
 
-    std::unique_ptr<BSplineCollocation1D> solver_axis0_;
-    std::unique_ptr<BSplineCollocation1D> solver_axis1_;
-    std::unique_ptr<BSplineCollocation1D> solver_axis2_;
-    std::unique_ptr<BSplineCollocation1D> solver_axis3_;
+    std::unique_ptr<BSplineCollocation1D<double>> solver_axis0_;
+    std::unique_ptr<BSplineCollocation1D<double>> solver_axis1_;
+    std::unique_ptr<BSplineCollocation1D<double>> solver_axis2_;
+    std::unique_ptr<BSplineCollocation1D<double>> solver_axis3_;
 
     /// Fit along axis0 for all (j,k,l) slices
     bool fit_axis0(std::vector<double>& coeffs, double tolerance,
@@ -954,16 +286,16 @@ private:
                     }
 
                     // Fit using workspace buffers (zero allocation!)
-                    BSplineCollocation1DResult fit_result;
+                    BSplineCollocationResult<double> fit_result;
                     if (workspace) {
                         fit_result = solver_axis0_->fit_with_buffer(
                             slice_buffer,
                             coeffs_buffer,
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     } else {
                         fit_result = solver_axis0_->fit(
                             std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     }
 
                     if (!fit_result.success) {
@@ -1022,16 +354,16 @@ private:
                     }
 
                     // Fit using workspace buffers (zero allocation!)
-                    BSplineCollocation1DResult fit_result;
+                    BSplineCollocationResult<double> fit_result;
                     if (workspace) {
                         fit_result = solver_axis1_->fit_with_buffer(
                             slice_buffer,
                             coeffs_buffer,
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     } else {
                         fit_result = solver_axis1_->fit(
                             std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     }
 
                     if (!fit_result.success) {
@@ -1090,16 +422,16 @@ private:
                     }
 
                     // Fit using workspace buffers (zero allocation!)
-                    BSplineCollocation1DResult fit_result;
+                    BSplineCollocationResult<double> fit_result;
                     if (workspace) {
                         fit_result = solver_axis2_->fit_with_buffer(
                             slice_buffer,
                             coeffs_buffer,
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     } else {
                         fit_result = solver_axis2_->fit(
                             std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     }
 
                     if (!fit_result.success) {
@@ -1158,16 +490,16 @@ private:
                     }
 
                     // Fit using workspace buffers (zero allocation!)
-                    BSplineCollocation1DResult fit_result;
+                    BSplineCollocationResult<double> fit_result;
                     if (workspace) {
                         fit_result = solver_axis3_->fit_with_buffer(
                             slice_buffer,
                             coeffs_buffer,
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     } else {
                         fit_result = solver_axis3_->fit(
                             std::vector<double>(slice_buffer.begin(), slice_buffer.end()),
-                            tolerance);
+                            BSplineCollocationConfig<double>{.tolerance = tolerance});
                     }
 
                     if (!fit_result.success) {
@@ -1350,10 +682,10 @@ private:
           N3_(axis3_grid_.size())
     {
         // Pre-compute knot vectors (no validation needed - delegated to separable fitter)
-        t0_ = clamped_knots_cubic(axis0_grid_);
-        t1_ = clamped_knots_cubic(axis1_grid_);
-        t2_ = clamped_knots_cubic(axis2_grid_);
-        t3_ = clamped_knots_cubic(axis3_grid_);
+        t0_ = clamped_knots_cubic<double>(axis0_grid_);
+        t1_ = clamped_knots_cubic<double>(axis1_grid_);
+        t2_ = clamped_knots_cubic<double>(axis2_grid_);
+        t3_ = clamped_knots_cubic<double>(axis3_grid_);
     }
 
     // Friend declaration for factory method to access private constructor

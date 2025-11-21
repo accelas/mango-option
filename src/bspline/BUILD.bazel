@@ -1,6 +1,9 @@
 cc_library(
     name = "bspline_utils",
     hdrs = ["bspline_utils.hpp"],
+    deps = [
+        "//src/math:bspline_basis",
+    ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
@@ -27,7 +30,7 @@ cc_library(
     hdrs = ["bspline_fitter_4d.hpp"],
     deps = [
         ":bspline_utils",
-        "//src/math:thomas_solver",
+        "//src/math:bspline_collocation",
         "//src/support:error_types",
     ],
     copts = [
@@ -36,11 +39,6 @@ cc_library(
         "-Wextra",
         "-O3",
         "-march=native",
-    ],
-    linkopts = [
-        "-llapacke",
-        "-llapack",
-        "-lblas",
     ],
     visibility = ["//visibility:public"],
 )

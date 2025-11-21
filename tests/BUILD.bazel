@@ -535,3 +535,14 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "cubic_spline_nd_test",
+    size = "small",
+    srcs = ["cubic_spline_nd_test.cc"],
+    deps = [
+        "//src/math:cubic_spline_nd",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
