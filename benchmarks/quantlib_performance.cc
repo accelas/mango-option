@@ -98,12 +98,8 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -155,12 +151,8 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -212,12 +204,8 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -271,12 +259,8 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }

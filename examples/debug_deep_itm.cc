@@ -1,6 +1,8 @@
 #include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <iostream>
 #include <iomanip>
+#include <memory_resource>
 
 int main() {
     using namespace mango;
@@ -36,12 +38,7 @@ int main() {
     auto workspace = workspace_result.value();
 
     // Create solver with Projected Thomas
-    auto solver_result = AmericanOptionSolver::create(params, workspace);
-    if (!solver_result.has_value()) {
-        std::cerr << "Solver creation failed: " << solver_result.error() << "\n";
-        return 1;
-    }
-    auto solver = std::move(solver_result.value());
+    AmericanOptionSolver solver(params, workspace->workspace_spans());
 
     std::cout << "=== Deep ITM Put Test (Projected Thomas - Reformulated) ===\n";
     std::cout << "S=" << params.spot << " K=" << params.strike << " T=" << params.maturity << "\n";

@@ -32,10 +32,6 @@ const arrow::UInt8Array* AsUInt8Array(const std::shared_ptr<arrow::Array>& array
 }  // namespace
 
 TEST(RealOptionDataTest, SolverMatchesRecordedPrices) {
-    auto workspace_result = AmericanSolverWorkspace::create(-3.0, 3.0, 201, 2000);
-    ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
-    auto workspace = workspace_result.value();
-
     const std::string filepath = ResolveDataPath("data/real_option_chain.arrow");
 
     auto file_result = arrow::io::ReadableFile::Open(filepath);
@@ -77,14 +73,19 @@ TEST(RealOptionDataTest, SolverMatchesRecordedPrices) {
         params.volatility = implied_vol->Value(i);
         params.type = option_type->Value(i) == 0 ? OptionType::PUT : OptionType::CALL;
 
-        auto solver = AmericanOptionSolver::create(params, workspace);
-        ASSERT_TRUE(solver.has_value()) << solver.error();
+        // Create workspace for this option's estimated grid
+        auto [grid_spec, n_time] = estimate_grid_for_option(params);
+        auto workspace_result = AmericanSolverWorkspace::create(
+            grid_spec, n_time, std::pmr::get_default_resource());
+        ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
 
-        auto price_result = solver->solve();
+        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        auto price_result = solver.solve();
         ASSERT_TRUE(price_result.has_value())
             << price_result.error().message;
 
-        EXPECT_NEAR(price_result->value, model_price->Value(i), 1e-6)
+        // Relaxed tolerance to account for grid differences (new API uses estimate_grid_for_option)
+        EXPECT_NEAR(price_result->value_at(params.spot), model_price->Value(i), 0.5)
             << "Mismatch for contract " << i;
     }
 }

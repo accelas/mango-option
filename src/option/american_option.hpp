@@ -15,7 +15,6 @@
 #include "src/option/american_option_result.hpp"
 #include "src/option/option_spec.hpp"  // For OptionType enum
 #include "src/pde/core/pde_workspace.hpp"
-#include "src/option/american_solver_workspace.hpp"  // For deprecated constructor
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -56,36 +55,6 @@ public:
                         std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     /**
-     * DEPRECATED: Constructor with AmericanSolverWorkspace.
-     *
-     * This constructor is retained for backward compatibility with batch solver code.
-     * New code should use the PDEWorkspace constructor instead.
-     *
-     * @param params Option pricing parameters
-     * @param workspace Shared workspace with grid configuration
-     * @deprecated Use PDEWorkspace constructor instead
-     */
-    [[deprecated("Use PDEWorkspace constructor instead")]]
-    AmericanOptionSolver(const AmericanOptionParams& params,
-                        std::shared_ptr<AmericanSolverWorkspace> workspace);
-
-    /**
-     * DEPRECATED: Factory method with expected-based validation.
-     *
-     * This method is retained for backward compatibility with batch solver code.
-     * New code should use the PDEWorkspace constructor directly.
-     *
-     * @param params Option pricing parameters
-     * @param workspace Shared workspace with grid configuration
-     * @return Expected containing solver on success, error message on failure
-     * @deprecated Use PDEWorkspace constructor instead
-     */
-    [[deprecated("Use PDEWorkspace constructor instead")]]
-    static std::expected<AmericanOptionSolver, std::string> create(
-        const AmericanOptionParams& params,
-        std::shared_ptr<AmericanSolverWorkspace> workspace);
-
-    /**
      * Solve for option value.
      *
      * Returns AmericanOptionResult wrapper containing Grid and PricingParams.
@@ -101,16 +70,10 @@ private:
     PricingParams params_;
 
     // PDEWorkspace (owns spans to external buffer)
-    std::optional<PDEWorkspace> workspace_;
+    PDEWorkspace workspace_;
 
     // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
-
-    // DEPRECATED: Legacy workspace for backward compatibility
-    std::shared_ptr<AmericanSolverWorkspace> legacy_workspace_;
-
-    // Helper to determine which API was used
-    bool using_new_api() const { return workspace_.has_value(); }
 };
 
 }  // namespace mango

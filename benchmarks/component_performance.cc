@@ -154,12 +154,8 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -190,12 +186,8 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -226,12 +218,8 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -267,12 +255,8 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
@@ -412,12 +396,8 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
 
     for (auto _ : state) {
         auto start = std::chrono::high_resolution_clock::now();
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace->workspace_spans());
+        auto result = solver.solve();
         auto end = std::chrono::high_resolution_clock::now();
 
         if (!result) {

@@ -4,8 +4,10 @@
  */
 
 #include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <iostream>
 #include <iomanip>
+#include <memory_resource>
 
 using namespace mango;
 
@@ -42,21 +44,20 @@ int main() {
             return 1;
         }
 
-        // Using factory method with expected-based validation
-        auto result = AmericanOptionSolver::create(valid_params, workspace.value());
-
-        if (result.has_value()) {
+        // Using constructor with exception-based validation
+        try {
+            AmericanOptionSolver solver(valid_params, workspace.value()->workspace_spans());
             std::cout << "   ✓ Validation passed! Solver created successfully.\n";
 
             // Solve the option
-            auto solution = result.value().solve();
+            auto solution = solver.solve();
             if (solution.has_value()) {
                 std::cout << "   ✓ Option solved successfully.\n";
                 std::cout << "   ✓ Option value: $" << std::fixed << std::setprecision(4)
                          << solution.value().value_at(valid_params.spot) << "\n";
             }
-        } else {
-            std::cout << "   ✗ Validation failed: " << result.error() << "\n";
+        } catch (const std::exception& e) {
+            std::cout << "   ✗ Validation failed: " << e.what() << "\n";
         }
         std::cout << "\n";
     }
@@ -90,12 +91,11 @@ int main() {
             return 1;
         }
 
-        auto result = AmericanOptionSolver::create(invalid_params, workspace.value());
-
-        if (result.has_value()) {
+        try {
+            AmericanOptionSolver solver(invalid_params, workspace.value()->workspace_spans());
             std::cout << "   ✓ Validation passed!\n";
-        } else {
-            std::cout << "   ✗ Validation failed: " << result.error() << "\n";
+        } catch (const std::exception& e) {
+            std::cout << "   ✗ Validation failed: " << e.what() << "\n";
         }
         std::cout << "\n";
     }
@@ -163,12 +163,11 @@ int main() {
             return 1;
         }
 
-        auto result = AmericanOptionSolver::create(invalid_params, workspace.value());
-
-        if (result.has_value()) {
+        try {
+            AmericanOptionSolver solver(invalid_params, workspace.value()->workspace_spans());
             std::cout << "   ✓ Validation passed!\n";
-        } else {
-            std::cout << "   ✗ Validation failed: " << result.error() << "\n";
+        } catch (const std::exception& e) {
+            std::cout << "   ✗ Validation failed: " << e.what() << "\n";
             std::cout << "   (Note: Only the first validation error is reported)\n";
         }
         std::cout << "\n";
@@ -205,12 +204,11 @@ int main() {
             0.25    // volatility
         );
 
-        auto result1 = AmericanOptionSolver::create(params1, workspace.value());
-
-        if (result1.has_value()) {
+        try {
+            AmericanOptionSolver solver1(params1, workspace.value()->workspace_spans());
             std::cout << "   ✓ First solver created with shared workspace.\n";
-        } else {
-            std::cout << "   ✗ Validation failed: " << result1.error() << "\n";
+        } catch (const std::exception& e) {
+            std::cout << "   ✗ Validation failed: " << e.what() << "\n";
         }
         std::cout << "\n";
     }
@@ -244,13 +242,8 @@ int main() {
             return 1;
         }
 
-        auto solver_result = AmericanOptionSolver::create(valid_params, workspace.value());
-        if (!solver_result) {
-            std::cout << "   ✗ Solver creation failed: " << solver_result.error() << "\n\n";
-            return 1;
-        }
-
-        auto solution = solver_result.value().solve();
+        AmericanOptionSolver solver(valid_params, workspace.value()->workspace_spans());
+        auto solution = solver.solve();
         if (solution.has_value()) {
             std::cout << "   ✓ Option solved successfully.\n";
             std::cout << "   ✓ Option value: $" << std::fixed << std::setprecision(4)

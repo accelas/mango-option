@@ -106,8 +106,6 @@ PYBIND11_MODULE(mango_iv, m) {
 
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
-        .def(py::init<>())
-        .def_property_readonly("converged", &mango::AmericanOptionResult::converged)
         .def("value_at", &mango::AmericanOptionResult::value_at, py::arg("spot"),
              "Interpolate to get option value at specific spot price")
         .def("delta", &mango::AmericanOptionResult::delta,
@@ -194,21 +192,15 @@ PYBIND11_MODULE(mango_iv, m) {
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            auto solver_result = mango::AmericanOptionSolver::create(
-                params, workspace_result.value());
-            if (!solver_result) {
-                throw py::value_error(
-                    "Failed to create solver: " + solver_result.error());
-            }
-
-            auto solve_result = solver_result.value().solve();
+            mango::AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+            auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();
                 throw py::value_error(
                     "American option solve failed: " + error.message);
             }
 
-            return solve_result.value();
+            return std::move(solve_result.value());
         },
         py::arg("params"),
         py::arg("x_min") = -3.0,

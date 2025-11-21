@@ -113,11 +113,8 @@ void test_scenario(
     ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
     auto workspace = workspace_result.value();
 
-    // Surface buffer is now allocated internally
-    auto solver_result = AmericanOptionSolver::create(mango_params, workspace);
-    ASSERT_TRUE(solver_result.has_value());
-
-    auto mango_result = solver_result.value().solve();
+    AmericanOptionSolver solver(mango_params, workspace->workspace_spans());
+    auto mango_result = solver.solve();
     ASSERT_TRUE(mango_result.has_value()) << mango_result.error().message;
 
     // Verify full surface was stored
@@ -145,12 +142,12 @@ void test_scenario(
     ASSERT_TRUE(greeks_result.has_value()) << greeks_result.error().message;
     const auto& greeks = greeks_result.value();
 
-    double delta_error = std::abs(greeks.delta - ql_result.delta);
+    double delta_error = std::abs(delta_val - ql_result.delta);
     double delta_rel = (delta_error / std::abs(ql_result.delta)) * 100.0;
 
     EXPECT_LT(delta_rel, tolerance_pct * 2.0)  // 2x tolerance for Greeks
         << "Delta relative error: " << delta_rel << "%"
-        << "\n  Mango:    " << greeks.delta
+        << "\n  Mango:    " << delta_val
         << "\n  QuantLib: " << ql_result.delta;
 }
 
@@ -223,11 +220,8 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    // Surface buffer is now allocated internally
-    auto solver_result = AmericanOptionSolver::create(params, workspace);
-    ASSERT_TRUE(solver_result.has_value());
-
-    auto result = solver_result.value().solve();
+    AmericanOptionSolver solver(params, workspace->workspace_spans());
+    auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
     double mango_price = result->value_at(params.spot);
@@ -260,31 +254,29 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    // Surface buffer is now allocated internally
-    auto solver_result = AmericanOptionSolver::create(params, workspace);
-    ASSERT_TRUE(solver_result.has_value());
-
-    auto result = solver_result.value().solve();
+    AmericanOptionSolver solver(params, workspace->workspace_spans());
+    auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
-    auto greeks_result = solver_result.value().compute_greeks();
-    ASSERT_TRUE(greeks_result.has_value());
-    const auto& greeks = greeks_result.value();
+    // Greeks are available directly from result
+    double delta_val = result->delta();
+    double gamma_val = result->gamma();
+    double theta_val = result->theta();
 
     auto ql_result = price_american_option_quantlib(
         100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false, 201, 2000);
 
     // Delta within 2%
-    double delta_error = std::abs(greeks.delta - ql_result.delta);
+    double delta_error = std::abs(delta_val - ql_result.delta);
     double delta_rel = (delta_error / std::abs(ql_result.delta)) * 100.0;
     EXPECT_LT(delta_rel, 2.0)
-        << "Delta: mango=" << greeks.delta << " ql=" << ql_result.delta;
+        << "Delta: mango=" << delta_val << " ql=" << ql_result.delta;
 
     // Gamma within 5% (second derivative, less accurate)
-    double gamma_error = std::abs(greeks.gamma - ql_result.gamma);
+    double gamma_error = std::abs(gamma_val - ql_result.gamma);
     double gamma_rel = (gamma_error / std::abs(ql_result.gamma)) * 100.0;
     EXPECT_LT(gamma_rel, 5.0)
-        << "Gamma: mango=" << greeks.gamma << " ql=" << ql_result.gamma;
+        << "Gamma: mango=" << gamma_val << " ql=" << ql_result.gamma;
 
     // Note: Theta computation not yet implemented in compute_greeks()
     // Skip theta test for now

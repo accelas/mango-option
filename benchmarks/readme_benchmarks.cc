@@ -207,11 +207,8 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     }
 
     auto run_once = [&]() {
-        auto solver = AmericanOptionSolver::create(params, workspace.value());
-        if (!solver) {
-            throw std::runtime_error("Failed to create solver: " + solver.error());
-        }
-        auto result = solver.value().solve();
+        AmericanOptionSolver solver(params, workspace.value()->workspace_spans());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }

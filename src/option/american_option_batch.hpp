@@ -176,26 +176,16 @@ public:
                     continue;
                 }
 
-                // Create solver
-                auto solver_result = AmericanOptionSolver::create(params[i], workspace);
-                if (!solver_result.has_value()) {
-                    results[i] = std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        .message = solver_result.error(),
-                        .iterations = 0
-                    });
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                    continue;
-                }
+                // Create solver using new PDEWorkspace API
+                AmericanOptionSolver solver(params[i], workspace->workspace_spans());
 
                 // Invoke setup callback if provided
                 if (setup) {
-                    setup(i, solver_result.value());
+                    setup(i, solver);
                 }
 
                 // Solve (use placement new to avoid copy/move assignment issues)
-                auto solve_result = solver_result.value().solve();
+                auto solve_result = solver.solve();
                 results[i].~expected();  // Destroy sentinel value
                 new (&results[i]) std::expected<AmericanOptionResult, SolverError>(std::move(solve_result));
 
@@ -249,17 +239,9 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
         });
     }
 
-    // Create and solve
-    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-    if (!solver_result.has_value()) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = solver_result.error(),
-            .iterations = 0
-        });
-    }
-
-    return solver_result.value().solve();
+    // Create and solve using new PDEWorkspace API
+    AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+    return solver.solve();
 }
 
 // ============================================================================

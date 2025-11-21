@@ -115,8 +115,9 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         return std::numeric_limits<double>::quiet_NaN();
     }
 
+    std::pmr::synchronized_pool_resource pool;
     auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec_result.value(), config_.grid_n_time, std::pmr::get_default_resource());
+        grid_spec_result.value(), config_.grid_n_time, &pool);
 
     if (!workspace_result) {
         last_solver_error_ = SolverError{
@@ -130,7 +131,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     // Create solver and solve
     try {
         auto workspace = workspace_result.value();
-        AmericanOptionSolver solver(option_params, workspace);
+        AmericanOptionSolver solver(option_params, workspace->workspace_spans());
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 

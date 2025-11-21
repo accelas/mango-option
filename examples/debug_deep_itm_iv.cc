@@ -1,7 +1,9 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
+#include "src/option/american_solver_workspace.hpp"
 #include <iostream>
 #include <iomanip>
+#include <memory_resource>
 
 int main() {
     using namespace mango;
@@ -57,15 +59,16 @@ int main() {
         return 1;
     }
 
-    auto workspace = AmericanSolverWorkspace::create(
-        grid_spec.value(), config.grid_n_time, std::pmr::get_default_resource());
+        std::pmr::synchronized_pool_resource pool;
+        auto workspace = AmericanSolverWorkspace::create(
+            grid_spec.value(), config.grid_n_time, &pool);
 
-    if (!workspace.has_value()) {
-        std::cerr << "Workspace creation failed\n";
-        return 1;
-    }
+        if (!workspace.has_value()) {
+            std::cerr << "Workspace creation failed\n";
+            return 1;
+        }
 
-        AmericanOptionSolver solver(params, workspace.value());
+        AmericanOptionSolver solver(params, workspace.value()->workspace_spans());
         auto result = solver.solve();
 
         if (result.has_value()) {
