@@ -310,8 +310,8 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
     BatchAmericanOptionSolver solver;
 
     auto run_once = [&]() {
-        // Use shared grid for batch processing (more efficient for homogeneous batches)
-        auto batch_result = solver.solve_batch(batch, true);  // use_shared_grid=true
+        // Use per-option grids with OpenMP parallelization
+        auto batch_result = solver.solve_batch(batch, false);  // use_shared_grid=false (per-option grids)
         for (const auto& res : batch_result.results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);
