@@ -13,7 +13,7 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <memory_resource>
 #include <stdexcept>
@@ -91,14 +91,14 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
@@ -144,14 +144,14 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
@@ -197,14 +197,14 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
@@ -252,14 +252,14 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);

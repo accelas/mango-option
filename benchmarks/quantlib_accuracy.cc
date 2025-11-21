@@ -121,7 +121,7 @@ static void compare_scenario(
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, n_time] = estimate_grid_for_option(mango_params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
     }
@@ -250,7 +250,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -302,7 +302,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -607,7 +607,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
@@ -673,7 +673,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }

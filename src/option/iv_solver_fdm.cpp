@@ -116,10 +116,8 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    std::pmr::synchronized_pool_resource pool;
-
     // Create PDEWorkspace
-    auto pde_workspace_result = PDEWorkspace::create(grid_spec_result.value(), &pool);
+    auto pde_workspace_result = PDEWorkspace::create(grid_spec_result.value(), std::pmr::get_default_resource());
     if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,

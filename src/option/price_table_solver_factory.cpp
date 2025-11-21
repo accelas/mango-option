@@ -6,7 +6,6 @@
 #include "src/option/price_table_solver_factory.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/american_solver_workspace.hpp"
 #include "src/support/parallel.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include <ranges>

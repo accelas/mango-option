@@ -107,13 +107,12 @@ void test_scenario(
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
 
-    size_t n_time = 2000;
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.value(), n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(
+        grid_spec.value(), std::pmr::get_default_resource());
     ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(mango_params, workspace->workspace_spans());
+    AmericanOptionSolver solver(mango_params, workspace);
     auto mango_result = solver.solve();
     ASSERT_TRUE(mango_result.has_value()) << mango_result.error().message;
 
@@ -214,13 +213,12 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
 
-    size_t n_time = 2000;
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.value(), n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(
+        grid_spec.value(), std::pmr::get_default_resource());
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace->workspace_spans());
+    AmericanOptionSolver solver(params, workspace);
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -248,13 +246,12 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
 
-    size_t n_time = 2000;
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.value(), n_time, std::pmr::get_default_resource());
+    auto workspace_result = PDEWorkspace::create(
+        grid_spec.value(), std::pmr::get_default_resource());
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace->workspace_spans());
+    AmericanOptionSolver solver(params, workspace);
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 

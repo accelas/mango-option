@@ -201,13 +201,13 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     if (!grid_spec.has_value()) {
         throw std::runtime_error("Failed to create grid: " + grid_spec.error());
     }
-    auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+    auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
     if (!workspace) {
         throw std::runtime_error("Failed to create workspace: " + workspace.error());
     }
 
     auto run_once = [&]() {
-        AmericanOptionSolver solver(params, workspace.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace.value());
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);

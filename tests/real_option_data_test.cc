@@ -1,5 +1,5 @@
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
@@ -75,11 +75,10 @@ TEST(RealOptionDataTest, SolverMatchesRecordedPrices) {
 
         // Create workspace for this option's estimated grid
         auto [grid_spec, n_time] = estimate_grid_for_option(params);
-        auto workspace_result = AmericanSolverWorkspace::create(
-            grid_spec, n_time, std::pmr::get_default_resource());
+        auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
         ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
 
-        AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+        AmericanOptionSolver solver(params, workspace_result.value());
         auto price_result = solver.solve();
         ASSERT_TRUE(price_result.has_value())
             << price_result.error().message;
