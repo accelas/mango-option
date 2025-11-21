@@ -1,18 +1,8 @@
 cc_library(
-    name = "bspline_utils",
-    hdrs = ["bspline_utils.hpp"],
-    deps = [
-        "//src/math:bspline_basis",
-    ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "bspline_4d",
     hdrs = ["bspline_4d.hpp"],
     deps = [
-        ":bspline_utils",
+        "//src/math:bspline_basis",
         "//src/option:price_table_workspace",
     ],
     copts = [
@@ -29,7 +19,7 @@ cc_library(
     name = "bspline_fitter_4d",
     hdrs = ["bspline_fitter_4d.hpp"],
     deps = [
-        ":bspline_utils",
+        "//src/math:bspline_basis",
         "//src/math:bspline_collocation",
         "//src/support:error_types",
     ],

@@ -219,7 +219,7 @@ cc_library(
     hdrs = ["price_table_workspace.hpp"],
     deps = [
         "//src/support:error_types",
-        "//src/bspline:bspline_utils",
+        "//src/math:bspline_basis",
         "//src/support:crc64",
         "//third_party/arrow",
     ],

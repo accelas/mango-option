@@ -34,7 +34,7 @@
 
 #pragma once
 
-#include "src/bspline/bspline_utils.hpp"
+#include "src/math/bspline_basis.hpp"
 #include "src/math/bspline_collocation.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
