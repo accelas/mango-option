@@ -38,7 +38,7 @@ class IVCalculator:
             raise ImportError("mango_iv module not available. Build with Bazel first.")
 
         # Create solver configuration
-        self.config = mango_iv.IVConfig()
+        self.config = mango_iv.IVSolverFDMConfig()
         self.config.grid_n_space = grid_n_space
         self.config.grid_n_time = grid_n_time
         self.config.root_config.max_iter = max_iter
@@ -67,18 +67,19 @@ class IVCalculator:
             - failure_reason: Error message if failed
             - vega: Vega at the solution (if available)
         """
-        # Create IV parameters
-        params = mango_iv.IVParams()
-        params.spot_price = float(spot_price)
-        params.strike = float(strike)
-        params.time_to_maturity = float(time_to_maturity)
-        params.risk_free_rate = float(risk_free_rate)
-        params.market_price = float(market_price)
-        params.is_call = bool(is_call)
+        # Create IV query
+        query = mango_iv.IVQuery()
+        query.spot = float(spot_price)
+        query.strike = float(strike)
+        query.maturity = float(time_to_maturity)
+        query.rate = float(risk_free_rate)
+        query.market_price = float(market_price)
+        query.type = mango_iv.OptionType.CALL if is_call else mango_iv.OptionType.PUT
+        query.dividend_yield = 0.0  # Default to 0
 
         # Create solver and solve
-        solver = mango_iv.IVSolver(params, self.config)
-        result = solver.solve()
+        solver = mango_iv.IVSolverFDM(self.config)
+        result = solver.solve(query)
 
         # Convert result to dict
         return {
@@ -102,33 +103,20 @@ class IVCalculator:
         Returns:
             List of result dicts (same order as input)
         """
-        # Create list of IVParams
-        iv_params = []
+        # TODO: Batch API needs Python bindings for IVSolverFDM.solve_batch()
+        # For now, fall back to sequential processing
+        results = []
         for p in params_list:
-            params = mango_iv.IVParams()
-            params.spot_price = float(p['spot_price'])
-            params.strike = float(p['strike'])
-            params.time_to_maturity = float(p['time_to_maturity'])
-            params.risk_free_rate = float(p['risk_free_rate'])
-            params.market_price = float(p['market_price'])
-            params.is_call = bool(p.get('is_call', True))
-            iv_params.append(params)
-
-        # Solve batch in parallel
-        results = mango_iv.solve_implied_vol_batch(iv_params, self.config)
-
-        # Convert results to dicts
-        return [
-            {
-                'implied_vol': r.implied_vol if r.converged else None,
-                'converged': r.converged,
-                'iterations': r.iterations,
-                'final_error': r.final_error,
-                'failure_reason': r.failure_reason if hasattr(r, 'failure_reason') else None,
-                'vega': r.vega if hasattr(r, 'vega') else None,
-            }
-            for r in results
-        ]
+            result = self.calculate_iv(
+                spot_price=p['spot_price'],
+                strike=p['strike'],
+                time_to_maturity=p['time_to_maturity'],
+                risk_free_rate=p['risk_free_rate'],
+                market_price=p['market_price'],
+                is_call=p.get('is_call', True)
+            )
+            results.append(result)
+        return results
 
     def calculate_chain_iv(self, options_df: pd.DataFrame, spot_price: float,
                           risk_free_rate: float, time_to_maturity: float,
