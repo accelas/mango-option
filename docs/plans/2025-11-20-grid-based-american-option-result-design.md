@@ -121,13 +121,13 @@ std::expected<std::vector<size_t>, std::string> convert_times_to_indices(
     const double t_start = time_domain.t_start();
     const double t_end = time_domain.t_end();
     const size_t n_steps = time_domain.n_steps();
+    const double dt = time_domain.dt();  // Use TimeDomain's dt (matches PDESolver's marching grid)
 
     // Validate TimeDomain preconditions
     if (n_steps == 0) {
         return std::unexpected("TimeDomain has zero time steps");
     }
 
-    const double dt = (t_end - t_start) / n_steps;
     if (dt <= 0.0) {
         return std::unexpected(std::format(
             "Invalid TimeDomain: dt={} (t_start={}, t_end={}, n_steps={})",
@@ -280,22 +280,32 @@ AmericanOptionSolver::solve() {
         dx_span[i] = grid_points[i + 1] - grid_points[i];
     }
 
-    // Create PDESolver with Grid + Workspace
-    // PDESolver is created fresh each solve, takes Grid by shared_ptr
-    AmericanPutSolver pde_solver(grid, workspace_);
+    // Create appropriate solver based on option type
+    // Solvers take params, grid, and workspace
+    if (params_.type == OptionType::PUT) {
+        AmericanPutSolver pde_solver(params_, grid, workspace_);
 
-    // Initialize PDE with payoff condition
-    pde_solver.initialize([](std::span<const double> x, std::span<double> u) {
-        for (size_t i = 0; i < x.size(); ++i) {
-            u[i] = std::max(1.0 - std::exp(x[i]), 0.0);  // Put payoff in log-moneyness
+        // Initialize with put payoff: max(1 - e^x, 0)
+        pde_solver.initialize(AmericanPutSolver::payoff);
+
+        // Solve PDE (modifies Grid in-place, records snapshots if configured)
+        auto solve_result = pde_solver.solve();
+
+        if (!solve_result.has_value()) {
+            return std::unexpected(solve_result.error());
         }
-    });
+    } else {
+        AmericanCallSolver pde_solver(params_, grid, workspace_);
 
-    // Solve PDE (modifies Grid in-place, records snapshots if configured)
-    auto solve_result = pde_solver.solve();
+        // Initialize with call payoff: max(e^x - 1, 0)
+        pde_solver.initialize(AmericanCallSolver::payoff);
 
-    if (!solve_result.has_value()) {
-        return std::unexpected(solve_result.error());
+        // Solve PDE (modifies Grid in-place, records snapshots if configured)
+        auto solve_result = pde_solver.solve();
+
+        if (!solve_result.has_value()) {
+            return std::unexpected(solve_result.error());
+        }
     }
 
     // Wrap Grid + params → AmericanOptionResult (explicit, no metaprogramming)
@@ -305,11 +315,21 @@ AmericanOptionSolver::solve() {
 
 **PDESolver Construction Pattern:**
 
-PDESolver is constructed fresh for each solve, taking:
-1. `std::shared_ptr<Grid>` - Grid to solve on (created above)
-2. `PDEWorkspace` - Temporary workspace buffers (reused from caller)
+The appropriate solver type (Put or Call) is selected at runtime based on `params_.type`:
+- `AmericanPutSolver` for puts
+- `AmericanCallSolver` for calls
 
-PDESolver stores a reference/pointer to Grid and modifies it in-place during `solve()`.
+Each solver is constructed with:
+1. `PricingParams` - Option parameters (volatility, rate, dividend, type)
+2. `std::shared_ptr<Grid>` - Grid to solve on (created above)
+3. `PDEWorkspace` - Temporary workspace buffers (reused from caller)
+
+The solver stores the Grid and modifies it in-place during `solve()`.
+
+Each solver type has:
+- Type-specific boundary conditions (e.g., Put: V=max(1-e^x,0) on left, V=0 on right)
+- Type-specific obstacle condition (early exercise constraint)
+- Type-specific payoff function (static method for initialization)
 
 ### 3. AmericanOptionResult Wrapper
 
