@@ -283,7 +283,7 @@ cc_test(
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
         "//src/bspline:bspline_fitter_4d",
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -293,7 +293,7 @@ cc_test(
     name = "bspline_4d_test",
     srcs = ["bspline_4d_test.cc"],
     deps = [
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
@@ -304,7 +304,7 @@ cc_test(
     srcs = ["bspline_fitter_4d_test.cc"],
     deps = [
         "//src/bspline:bspline_fitter_4d",
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
@@ -425,7 +425,7 @@ cc_test(
         "-march=native",
     ],
     deps = [
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "//src/bspline:bspline_fitter_4d",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -508,17 +508,6 @@ cc_test(
         "//src/option:american_option_result",
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-)
-
-cc_test(
-    name = "cubic_spline_nd_test",
-    size = "small",
-    srcs = ["cubic_spline_nd_test.cc"],
-    deps = [
-        "//src/math:cubic_spline_nd",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],

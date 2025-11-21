@@ -1,21 +1,4 @@
 cc_library(
-    name = "bspline_4d",
-    hdrs = ["bspline_4d.hpp"],
-    deps = [
-        "//src/math:bspline_basis",
-        "//src/option:price_table_workspace",
-    ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",  # Enable FMA instructions
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "bspline_fitter_4d",
     hdrs = ["bspline_fitter_4d.hpp"],
     deps = [

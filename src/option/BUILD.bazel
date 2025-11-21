@@ -84,12 +84,23 @@ cc_library(
 )
 
 cc_library(
+    name = "bspline_price_table",
+    hdrs = ["bspline_price_table.hpp"],
+    deps = [
+        "//src/math:bspline_nd",
+        ":price_table_workspace",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "price_table_4d_builder",
     srcs = ["price_table_4d_builder.cpp"],
     hdrs = ["price_table_4d_builder.hpp"],
     deps = [
         ":price_table_solver_factory",
-        "//src/bspline:bspline_4d",
+        ":bspline_price_table",
         "//src/bspline:bspline_fitter_4d",
         ":price_table_workspace",
         "//src/pde/core:trbdf2_config",
@@ -117,7 +128,7 @@ cc_library(
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],
     deps = [
-        "//src/bspline:bspline_4d",
+        ":bspline_price_table",
         ":american_option",
         ":iv_types",
         ":price_table_4d_builder",

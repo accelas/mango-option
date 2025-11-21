@@ -56,16 +56,6 @@ cc_library(
 )
 
 cc_library(
-    name = "cubic_spline_nd",
-    hdrs = ["cubic_spline_nd.hpp"],
-    deps = [
-        ":cubic_spline_solver",
-    ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "bspline_nd",
     hdrs = ["bspline_nd.hpp"],
     deps = [

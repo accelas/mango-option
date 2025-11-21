@@ -32,7 +32,7 @@ cc_binary(
         "//src/option:american_option",
         "//src/option:iv_solver_fdm",
         "//src/option:option_spec",
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "//src/bspline:bspline_fitter_4d",
         "//src/option:iv_solver_interpolated",
         "@google_benchmark//:benchmark",
@@ -63,7 +63,7 @@ cc_binary(
         "//src/option:american_option_batch",
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "//src/bspline:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
     ],
@@ -159,7 +159,7 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "//src/bspline:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
     ],
@@ -187,7 +187,7 @@ cc_binary(
     deps = [
         "//src/option:price_table_4d_builder",
         "//src/option:iv_solver_interpolated",
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "//src/bspline:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
     ],
@@ -210,6 +210,47 @@ cc_binary(
     deps = [
         "//src/pde/core:grid",
         "//src/pde/operators:centered_difference_scalar",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "bspline_template_vs_hardcoded",
+    srcs = ["bspline_template_vs_hardcoded.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/option:bspline_price_table",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "cubic_spline_template_vs_hardcoded",
+    srcs = ["cubic_spline_template_vs_hardcoded.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/math:cubic_spline_solver",
+        "//src/math:cubic_spline_nd",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],

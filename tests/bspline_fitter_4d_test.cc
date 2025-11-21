@@ -11,7 +11,7 @@
  */
 
 #include "src/bspline/bspline_fitter_4d.hpp"
-#include "src/bspline/bspline_4d.hpp"
+#include "src/option/bspline_price_table.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>

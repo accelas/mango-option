@@ -4,7 +4,7 @@
  */
 
 #include "src/bspline/bspline_fitter_4d.hpp"
-#include "src/bspline/bspline_4d.hpp"  // For evaluation
+#include "src/option/bspline_price_table.hpp"  // For evaluation
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
