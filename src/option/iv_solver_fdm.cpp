@@ -89,36 +89,11 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     option_params.dividend_yield = query.dividend_yield;
     option_params.type = query.type;
 
-    // Compute adaptive grid bounds based on spot/strike and config.grid_s_max
-    double moneyness = query.spot / query.strike;
-
-    // Lower bound: ensure we capture deep ITM scenarios
-    double min_moneyness = std::min(0.5, moneyness * 0.5);
-
-    // Upper bound: ensure we capture deep OTM scenarios
-    double max_s = std::max(query.strike * 2.0, config_.grid_s_max);
-    double max_moneyness = std::max(2.0, max_s / query.strike);
-
-    // Ensure spot is within bounds (with margin for interpolation)
-    min_moneyness = std::min(min_moneyness, moneyness * 0.9);
-    max_moneyness = std::max(max_moneyness, moneyness * 1.1);
-
-    // Create workspace for PDE solver
-    double x_min = std::log(min_moneyness);  // Adaptive lower bound
-    double x_max = std::log(max_moneyness);  // Adaptive upper bound
-
-    auto grid_spec_result = GridSpec<double>::uniform(x_min, x_max, config_.grid_n_space);
-    if (!grid_spec_result.has_value()) {
-        last_solver_error_ = SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Invalid grid specification: " + grid_spec_result.error(),
-            .iterations = 0
-        };
-        return std::numeric_limits<double>::quiet_NaN();
-    }
+    // Use automatic grid estimation (same as AmericanOptionSolver does internally)
+    auto [grid_spec, n_time] = estimate_grid_for_option(option_params);
 
     // Allocate workspace buffer (local, temporary)
-    size_t n = grid_spec_result.value().n_points();
+    size_t n = grid_spec.n_points();
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
 
     auto pde_workspace_result = PDEWorkspace::from_buffer(buffer, n);
