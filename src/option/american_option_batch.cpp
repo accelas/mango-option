@@ -1,14 +1,19 @@
 /**
- * @file normalized_chain_solver.cpp
- * @brief Implementation of normalized chain solver
+ * @file american_option_batch.cpp
+ * @brief Implementation of batch and normalized chain solvers
  */
 
-#include "src/option/normalized_chain_solver.hpp"
+#include "src/option/american_option_batch.hpp"
+#include "common/ivcalc_trace.h"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
 
 namespace mango {
+
+// ============================================================================
+// Normalized Solver Implementations
+// ============================================================================
 
 std::expected<void, std::string> NormalizedSolveRequest::validate() const {
     if (sigma <= 0.0) {
@@ -89,45 +94,31 @@ NormalizedSurfaceView NormalizedWorkspace::surface_view() {
     return NormalizedSurfaceView(x_grid_, tau_grid_, values_);
 }
 
+std::optional<std::string> NormalizedSurfaceView::build_cache() {
+    // Build 2D cubic spline from the surface data
+    // Note: CubicSpline2D expects row-major layout: z[i*ny + j] = z(x[i], y[j])
+    // Our layout: values[i*Ntau + j] = u(x[i], τ[j])
+    return spline2d_.build(x_grid_, tau_grid_, values_);
+}
+
 double NormalizedSurfaceView::interpolate(double x, double tau) const {
-    // Find x interval [x_grid[i], x_grid[i+1]]
-    auto x_it = std::lower_bound(x_grid_.begin(), x_grid_.end(), x);
-    if (x_it == x_grid_.begin()) {
-        x_it = x_grid_.begin() + 1;  // Clamp to first interval
-    } else if (x_it == x_grid_.end()) {
-        x_it = x_grid_.end() - 1;  // Clamp to last interval
+    // Ensure cache is built
+    if (!spline2d_.is_built()) {
+        // Auto-build cache on first call (for convenience)
+        // Note: This modifies mutable state, safe for const method
+        auto error = const_cast<NormalizedSurfaceView*>(this)->build_cache();
+        if (error.has_value()) {
+            // Log cache build failure via USDT tracing
+            MANGO_TRACE_RUNTIME_ERROR(MODULE_NORMALIZED_CHAIN,
+                                     static_cast<int>(x_grid_.size()),
+                                     static_cast<int>(tau_grid_.size()));
+            // Fallback to boundary values if cache build fails
+            return 0.0;
+        }
     }
-    size_t i_x = x_it - x_grid_.begin() - 1;
 
-    // Find tau interval [tau_grid[j], tau_grid[j+1]]
-    auto tau_it = std::lower_bound(tau_grid_.begin(), tau_grid_.end(), tau);
-    if (tau_it == tau_grid_.begin()) {
-        tau_it = tau_grid_.begin() + 1;
-    } else if (tau_it == tau_grid_.end()) {
-        tau_it = tau_grid_.end() - 1;
-    }
-    size_t i_tau = tau_it - tau_grid_.begin() - 1;
-
-    // Bilinear interpolation
-    double x0 = x_grid_[i_x];
-    double x1 = x_grid_[i_x + 1];
-    double tau0 = tau_grid_[i_tau];
-    double tau1 = tau_grid_[i_tau + 1];
-
-    double fx = (x - x0) / (x1 - x0);
-    double ft = (tau - tau0) / (tau1 - tau0);
-
-    // Values stored row-major: values[i*Ntau + j]
-    size_t Ntau = tau_grid_.size();
-    double v00 = values_[i_x * Ntau + i_tau];
-    double v01 = values_[i_x * Ntau + (i_tau + 1)];
-    double v10 = values_[(i_x + 1) * Ntau + i_tau];
-    double v11 = values_[(i_x + 1) * Ntau + (i_tau + 1)];
-
-    return (1.0 - fx) * (1.0 - ft) * v00 +
-           (1.0 - fx) * ft * v01 +
-           fx * (1.0 - ft) * v10 +
-           fx * ft * v11;
+    // Use 2D cubic spline interpolation
+    return spline2d_.eval(x, tau);
 }
 
 std::expected<void, SolverError> NormalizedChainSolver::solve(
@@ -208,6 +199,16 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
 
     // Update surface view to reference workspace values
     surface_view = workspace.surface_view();
+
+    // Build interpolation cache (x-direction cubic splines)
+    auto cache_error = surface_view.build_cache();
+    if (cache_error.has_value()) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidState,
+            .message = "Failed to build interpolation cache: " + cache_error.value(),
+            .iterations = 0
+        });
+    }
 
     return {};
 }

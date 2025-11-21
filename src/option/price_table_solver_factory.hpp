@@ -14,6 +14,25 @@
 namespace mango {
 
 /**
+ * @brief Price table grid specification
+ *
+ * Represents a 4D grid of option parameters to be solved.
+ * Output will be prices_4d[i, j, k, l] for (moneyness[i], maturity[j], volatility[k], rate[l]).
+ */
+struct PriceTableGrid {
+    std::span<const double> moneyness;   ///< Moneyness grid (M/K_ref)
+    std::span<const double> maturity;    ///< Time to maturity grid (years)
+    std::span<const double> volatility;  ///< Volatility grid
+    std::span<const double> rate;        ///< Interest rate grid
+    double K_ref;                         ///< Reference strike price
+
+    /// Get total number of grid points
+    size_t size() const {
+        return moneyness.size() * maturity.size() * volatility.size() * rate.size();
+    }
+};
+
+/**
  * @brief Abstract interface for price table solvers
  *
  * Defines the contract that both normalized and batch solvers must implement.
@@ -25,21 +44,13 @@ public:
     /**
      * @brief Solve for prices on 4D grid
      *
-     * @param prices_4d Output array (Nm × Nt × Nv × Nr), must be pre-sized
-     * @param moneyness Moneyness grid
-     * @param maturity Maturity grid
-     * @param volatility Volatility grid
-     * @param rate Rate grid
-     * @param K_ref Reference strike
+     * @param prices_4d Output array (Nm × Nt × Nv × Nr), must be pre-sized to grid.size()
+     * @param grid Grid specification containing all parameter arrays
      * @return void on success, error message on failure
      */
     virtual std::expected<void, std::string> solve(
         std::span<double> prices_4d,
-        std::span<const double> moneyness,
-        std::span<const double> maturity,
-        std::span<const double> volatility,
-        std::span<const double> rate,
-        double K_ref) = 0;
+        const PriceTableGrid& grid) = 0;
 
     /**
      * @brief Get solver strategy name for diagnostics
@@ -76,16 +87,18 @@ public:
      *
      * This method:
      * 1. Validates the grid configuration
-     * 2. Checks if normalized chain solver is eligible
+     * 2. Checks if normalized chain solver is eligible (if not disabled)
      * 3. Creates either NormalizedChainSolver or BatchSolver
      *
      * @param config Grid configuration (validated)
      * @param moneyness Moneyness grid (used for eligibility check)
+     * @param force_batch If true, always use batch solver (for testing)
      * @return Solver instance or validation error
      */
     static std::expected<std::unique_ptr<IPriceTableSolver>, std::string> create(
         const OptionSolverGrid& config,
-        std::span<const double> moneyness);
+        std::span<const double> moneyness,
+        bool force_batch = false);
 
 private:
     /**

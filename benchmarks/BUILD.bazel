@@ -64,7 +64,6 @@ cc_binary(
         "//src/option:american_option_batch",
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
-        "//src/option:normalized_chain_solver",
         "//src/bspline:bspline_4d",
         "//src/bspline:bspline_fitter_4d",
         "@google_benchmark//:benchmark",
@@ -119,7 +118,7 @@ cc_binary(
     linkstatic = True,  # Static link our library code
     deps = [
         "//src/option:american_option",
-        "//src/option:normalized_chain_solver",
+        "//src/option:american_option_batch",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
