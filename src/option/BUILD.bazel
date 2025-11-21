@@ -5,7 +5,6 @@ cc_library(
     deps = [
         "//src/pde/core:pde_workspace_spans",
         "//src/pde/core:grid",
-        "//src/pde/core:grid_with_solution",
         "//src/pde/core:time_domain",
         ":option_spec",
     ],

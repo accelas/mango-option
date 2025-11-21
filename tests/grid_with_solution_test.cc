@@ -1,4 +1,4 @@
-#include "src/pde/core/grid_with_solution.hpp"
+#include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {

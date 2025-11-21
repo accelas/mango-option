@@ -1,7 +1,7 @@
 #pragma once
 
 #include "src/pde/core/grid.hpp"
-#include "src/pde/core/grid_with_solution.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/pde/core/pde_workspace_spans.hpp"
 #include "src/support/cpu/feature_detection.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"

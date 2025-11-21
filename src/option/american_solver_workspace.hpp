@@ -7,7 +7,6 @@
 
 #include "src/pde/core/pde_workspace_spans.hpp"
 #include "src/pde/core/grid.hpp"
-#include "src/pde/core/grid_with_solution.hpp"
 #include "src/option/option_spec.hpp"
 #include <memory>
 #include <expected>

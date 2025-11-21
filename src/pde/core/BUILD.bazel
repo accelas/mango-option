@@ -67,17 +67,6 @@ cc_library(
 )
 
 cc_library(
-    name = "grid_with_solution",
-    hdrs = ["grid_with_solution.hpp"],
-    deps = [
-        ":grid",
-        ":time_domain",
-    ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "pde_workspace_spans",
     hdrs = ["pde_workspace_spans.hpp"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -99,7 +88,6 @@ cc_library(
     hdrs = ["pde_solver.hpp"],
     deps = [
         ":grid",
-        ":grid_with_solution",
         ":pde_workspace_spans",
         "//src/support/cpu:feature_detection",
         "//src/pde/operators:centered_difference_facade",

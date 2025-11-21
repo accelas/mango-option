@@ -1,4 +1,5 @@
 #include "src/pde/core/pde_solver.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"
 #include "src/pde/operators/operator_factory.hpp"

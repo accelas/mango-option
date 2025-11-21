@@ -10,6 +10,7 @@
 #include <variant>
 #include "src/support/error_types.hpp"
 #include "src/pde/core/grid_spacing_data.hpp"
+#include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 
@@ -233,34 +234,6 @@ GridBuffer<T> GridSpec<T>::generate() const {
 }
 
 /**
- * GridHolder: Helper to initialize grid before derived classes
- *
- * This class is designed for use as a base class when you need to
- * initialize grid data before initializing other base classes that
- * depend on the grid. It uses the base-from-member idiom.
- *
- * Example usage:
- * ```cpp
- * class MyWorkspace : private GridHolder, public PDEWorkspace {
- *     MyWorkspace(double x_min, double x_max, size_t n_space, size_t n_time)
- *         : GridHolder(x_min, x_max, n_space)  // Initialize grid first
- *         , PDEWorkspace(grid_view_, n_time)   // Then use grid_view_
- *     {}
- * };
- * ```
- */
-class GridHolder {
-protected:
-    GridBuffer<double> grid_buffer_;
-    GridView<double> grid_view_;
-
-    GridHolder(double x_min, double x_max, size_t n_space)
-        : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
-        , grid_view_(grid_buffer_.span())
-    {}
-};
-
-/**
  * GridSpacing: Grid spacing information for finite difference operators
  *
  * Uses std::variant to store either UniformSpacing or NonUniformSpacing.
@@ -378,5 +351,112 @@ private:
     GridView<T> grid_;
     SpacingVariant spacing_;
 };
+
+// ============================================================================
+// Grid: Main grid class with solution storage
+// ============================================================================
+
+/// Grid with persistent solution storage and metadata
+/// Outlives PDESolver, passed via shared_ptr for lifetime management
+template<typename T = double>
+class Grid {
+public:
+    /// Create grid with solution storage
+    /// @param grid_spec Grid specification (uniform, sinh, etc)
+    /// @param time_domain Time domain information
+    /// @return Grid instance or error message
+    static std::expected<std::shared_ptr<Grid<T>>, std::string>
+    create(const GridSpec<T>& grid_spec, const TimeDomain& time_domain) {
+        // Generate grid buffer
+        auto grid_buffer = grid_spec.generate();
+        auto grid_view = grid_buffer.view();
+
+        // Create GridSpacing
+        auto spacing = GridSpacing<T>(grid_view);
+
+        size_t n = grid_view.size();
+
+        // Allocate solution storage (2 × n for current + previous)
+        std::vector<T> solution(2 * n);
+
+        // Create instance (private constructor, so use new)
+        auto grid = std::shared_ptr<Grid<T>>(
+            new Grid<T>(
+                std::move(grid_buffer),
+                std::move(spacing),
+                time_domain,
+                std::move(solution)
+            )
+        );
+
+        return grid;
+    }
+
+    // Accessors
+
+    /// Spatial grid points (read-only)
+    std::span<const T> x() const {
+        return grid_buffer_.span();
+    }
+
+    /// Grid spacing object (reference, safe since Grid outlives solver)
+    const GridSpacing<T>& spacing() const {
+        return spacing_;
+    }
+
+    /// Time domain information
+    const TimeDomain& time() const {
+        return time_;
+    }
+
+    /// Current solution (last time step)
+    std::span<T> solution() {
+        return std::span{solution_.data(), n_space()};
+    }
+
+    std::span<const T> solution() const {
+        return std::span{solution_.data(), n_space()};
+    }
+
+    /// Previous solution (second-to-last time step)
+    std::span<T> solution_prev() {
+        return std::span{solution_.data() + n_space(), n_space()};
+    }
+
+    std::span<const T> solution_prev() const {
+        return std::span{solution_.data() + n_space(), n_space()};
+    }
+
+    /// Number of spatial points
+    size_t n_space() const {
+        return grid_buffer_.size();
+    }
+
+    /// Time step size
+    double dt() const {
+        return time_.dt();
+    }
+
+private:
+    // Private constructor (use factory method)
+    Grid(GridBuffer<T>&& grid_buffer,
+         GridSpacing<T>&& spacing,
+         const TimeDomain& time,
+         std::vector<T>&& solution)
+        : grid_buffer_(std::move(grid_buffer))
+        , spacing_(std::move(spacing))
+        , time_(time)
+        , solution_(std::move(solution))
+    {}
+
+    GridBuffer<T> grid_buffer_;     // Spatial grid points
+    GridSpacing<T> spacing_;        // Grid spacing (uniform or non-uniform)
+    TimeDomain time_;               // Time domain metadata
+    std::vector<T> solution_;       // [u_current | u_prev] (2 × n_space)
+};
+
+// Backward compatibility alias (deprecated)
+template<typename T = double>
+using GridWithSolution = Grid<T>;
 
 } // namespace mango

@@ -22,7 +22,7 @@ cc_test(
     name = "grid_with_solution_test",
     srcs = ["grid_with_solution_test.cc"],
     deps = [
-        "//src/pde/core:grid_with_solution",
+        "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -134,6 +134,9 @@ cc_test(
     srcs = ["temporal_event_test.cc"],
     deps = [
         "//src/pde/core:pde_solver",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:pde_workspace_spans",
+        "//src/pde/core:grid",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/operators:operator_factory",
         "//src/pde/core:boundary_conditions",
