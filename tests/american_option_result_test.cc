@@ -200,4 +200,66 @@ TEST_F(AmericanOptionResultTest, ThetaStub) {
     EXPECT_DOUBLE_EQ(theta, 0.0);
 }
 
+// Test 11: Gamma correction term verification
+// Verify that gamma() uses the corrected formula with both first and second derivatives
+TEST_F(AmericanOptionResultTest, GammaAccuracy) {
+    // Create a fine grid for better finite difference accuracy
+    auto fine_grid_spec = GridSpec<double>::uniform(-1.0, 1.0, 201);
+    ASSERT_TRUE(fine_grid_spec.has_value());
+    auto time_domain = TimeDomain::from_n_steps(0.0, 1.0, 100);
+    auto fine_grid = Grid<double>::create(fine_grid_spec.value(), time_domain).value();
+
+    // Use a quadratic function: V(x) = 1 + 2x + 3x²
+    // This has: dV/dx = 2 + 6x, d²V/dx² = 6
+    auto x_span = fine_grid->x();
+    auto solution = fine_grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        double x = x_span[i];
+        solution[i] = 1.0 + 2.0 * x + 3.0 * x * x;
+    }
+
+    // Test at spot = 90 (ITM put)
+    double spot = 90.0;
+    PricingParams test_params(
+        spot,    // spot
+        100.0,   // strike
+        1.0,     // maturity
+        0.05,    // rate
+        0.02,    // dividend_yield
+        OptionType::PUT,
+        0.20     // volatility
+    );
+
+    AmericanOptionResult result(fine_grid, test_params);
+    double gamma_computed = result.gamma();
+
+    // Analytical derivatives at x_spot = ln(90/100) ≈ -0.10536
+    double x_spot = std::log(spot / test_params.strike);
+    double dv_dx_exact = 2.0 + 6.0 * x_spot;
+    double d2v_dx2_exact = 6.0;
+
+    // Correct gamma formula: (K/S²) * [d²V/dx² - dV/dx]
+    double K_over_S2 = test_params.strike / (spot * spot);
+    double gamma_correct = K_over_S2 * (d2v_dx2_exact - dv_dx_exact);
+
+    // With fine grid (201 points), finite differences should be accurate to ~1%
+    double rel_error = std::abs(gamma_computed - gamma_correct) / std::abs(gamma_correct);
+    EXPECT_LT(rel_error, 0.01)
+        << "Gamma should match analytical formula within 1% on fine grid"
+        << "\n  computed: " << gamma_computed
+        << "\n  exact:    " << gamma_correct
+        << "\n  error:    " << rel_error * 100 << "%";
+
+    // Verify the correction term is significant
+    double correction_term = -K_over_S2 * dv_dx_exact;
+    double second_deriv_term = K_over_S2 * d2v_dx2_exact;
+    double correction_fraction = std::abs(correction_term / second_deriv_term);
+
+    EXPECT_GT(correction_fraction, 0.1)
+        << "Correction term should be significant (> 10% of second derivative term)"
+        << "\n  correction term: " << correction_term
+        << "\n  second deriv term: " << second_deriv_term
+        << "\n  fraction: " << correction_fraction * 100 << "%";
+}
+
 } // namespace

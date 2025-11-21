@@ -97,17 +97,25 @@ double AmericanOptionResult::gamma() const {
     // Clamp to interior points
     idx = std::max<size_t>(1, std::min(idx, x_grid.size() - 2));
 
-    // Compute second derivative: d²V/dx²
+    // Compute first and second derivatives: dV/dx and d²V/dx²
+    std::vector<double> dv_dx(x_grid.size());
     std::vector<double> d2v_dx2(x_grid.size());
+    operator_->compute_first_derivative(
+        solution, std::span(dv_dx), 1, x_grid.size() - 2);
     operator_->compute_second_derivative(
         solution, std::span(d2v_dx2), 1, x_grid.size() - 2);
 
-    // Convert to gamma: d²V/dS² ≈ (d²V/dx²) / S²
-    // Since V is normalized by K: gamma = (d²V_normalized/dx²) * (K/S²)
-    double gamma_normalized = d2v_dx2[idx];
-    double gamma = gamma_normalized * (params_.strike / (params_.spot * params_.spot));
-
-    return gamma;
+    // Convert to gamma using correct change-of-variables formula:
+    // Gamma = ∂²V/∂S² = (K/S²) * [∂²V/∂x² - ∂V/∂x]
+    //
+    // Derivation: Given x = ln(S/K), V = K * V_normalized(x)
+    // ∂V/∂S = (K/S) * ∂V_normalized/∂x
+    // ∂²V/∂S² = ∂/∂S[(K/S) * ∂V_normalized/∂x]
+    //         = (K/S²) * [∂²V_normalized/∂x² - ∂V_normalized/∂x]
+    //
+    // This matches AmericanOptionSolver::compute_gamma() implementation.
+    double K_over_S2 = params_.strike / (params_.spot * params_.spot);
+    return std::fma(K_over_S2, d2v_dx2[idx], -K_over_S2 * dv_dx[idx]);
 }
 
 double AmericanOptionResult::theta() const {
