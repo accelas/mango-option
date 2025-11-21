@@ -200,7 +200,8 @@ public:
     static std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
     create(const GridSpec<double>& grid_spec,
            size_t n_time,
-           std::pmr::memory_resource* resource);
+           std::pmr::memory_resource* resource,
+           double maturity = 1.0);
 
     // New API: GridWithSolution + PDEWorkspaceSpans
     std::shared_ptr<GridWithSolution<double>> grid_with_solution() const { return grid_with_solution_; }

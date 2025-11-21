@@ -167,6 +167,7 @@ private:
     bool solved_ = false;
 
     // Lazy-initialized operator for Greeks calculation
+    mutable std::unique_ptr<GridSpacing<double>> grid_spacing_;
     mutable std::unique_ptr<operators::CenteredDifference<double>> diff_op_;
 
     // Helper methods

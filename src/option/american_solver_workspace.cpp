@@ -7,7 +7,8 @@ namespace mango {
 std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
 AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
                                 size_t n_time,
-                                std::pmr::memory_resource* resource) {
+                                std::pmr::memory_resource* resource,
+                                double maturity) {
     if (!resource) {
         return std::unexpected("Memory resource cannot be null");
     }
@@ -16,14 +17,18 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
         return std::unexpected("n_time must be positive");
     }
 
+    if (maturity <= 0.0) {
+        return std::unexpected("Maturity must be positive");
+    }
+
     // Generate grid
     auto grid_buffer = grid_spec.generate();
     size_t n = grid_buffer.size();
 
     // Create TimeDomain for GridWithSolution
     // For American options, we solve backward from maturity (t_start=0) to present (t_end=maturity)
-    // The time domain represents backward time τ = T - t
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, n_time);
+    // The time domain represents backward time τ = T - t, with actual maturity in years
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, maturity, n_time);
 
     // Create GridWithSolution (Grid + solution storage)
     auto grid_with_sol = GridWithSolution<double>::create(grid_spec, time_domain);

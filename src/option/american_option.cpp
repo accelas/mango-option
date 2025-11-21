@@ -216,11 +216,12 @@ size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
 const operators::CenteredDifference<double>&
 AmericanOptionSolver::get_diff_operator() const {
     if (!diff_op_) {
-        // Create GridSpacing from GridWithSolution's grid (NEW API)
+        // Create and store GridSpacing from GridWithSolution's grid (NEW API)
+        // Must store GridSpacing to avoid dangling reference in CenteredDifference
         auto grid_view = GridView<double>(workspace_->grid_with_solution()->x());
-        auto grid_spacing = GridSpacing<double>(grid_view);
+        grid_spacing_ = std::make_unique<GridSpacing<double>>(grid_view);
         diff_op_ = std::make_unique<operators::CenteredDifference<double>>(
-            grid_spacing);
+            *grid_spacing_);
     }
     return *diff_op_;
 }
