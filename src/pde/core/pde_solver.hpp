@@ -2,7 +2,7 @@
 
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/grid.hpp"
-#include "src/pde/core/pde_workspace_spans.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/support/cpu/feature_detection.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
@@ -82,7 +82,7 @@ public:
     ///       via CRTP calls, not passed as constructor arguments
     /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
     PDESolver(std::shared_ptr<Grid<double>> grid,
-              PDEWorkspaceSpans workspace,
+              PDEWorkspace workspace,
               std::optional<ObstacleCallback> obstacle = std::nullopt)
         : grid_with_solution_(grid)  // Copy shared_ptr (not move - shared ownership)
         , grid_(grid->x())  // Span to persistent grid data
@@ -209,7 +209,7 @@ private:
     size_t n_;
 
     // Workspace spans (caller-managed PMR buffers)
-    PDEWorkspaceSpans workspace_;
+    PDEWorkspace workspace_;
 
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;

@@ -49,7 +49,7 @@ class AmericanPutSolver : public PDESolver<AmericanPutSolver> {
 public:
     AmericanPutSolver(const PricingParams& params,
                      std::shared_ptr<Grid<double>> grid,
-                     PDEWorkspaceSpans workspace)
+                     PDEWorkspace workspace)
         : PDESolver<AmericanPutSolver>(
               grid,
               workspace,
@@ -143,7 +143,7 @@ class AmericanCallSolver : public PDESolver<AmericanCallSolver> {
 public:
     AmericanCallSolver(const PricingParams& params,
                       std::shared_ptr<Grid<double>> grid,
-                      PDEWorkspaceSpans workspace)
+                      PDEWorkspace workspace)
         : PDESolver<AmericanCallSolver>(
               grid,
               workspace,

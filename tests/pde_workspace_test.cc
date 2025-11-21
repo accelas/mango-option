@@ -1,73 +1,165 @@
-#include <gtest/gtest.h>
 #include "src/pde/core/pde_workspace.hpp"
-#include <memory_resource>
+#include <gtest/gtest.h>
+#include <vector>
 
 namespace mango {
 namespace {
 
-TEST(PDEWorkspacePMRTest, FactoryCreatesWorkspace) {
-    std::pmr::synchronized_pool_resource pool;
+TEST(PDEWorkspaceTest, RequiredSize) {
+    // For n=100:
+    // - 12 arrays @ padded(100) = 12 × 104 = 1248
+    // - 3 arrays @ padded(99) = 3 × 104 = 312
+    // - tridiag @ padded(200) = 200
+    // Total = 1760
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
 
-    auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
-    ASSERT_TRUE(grid_spec.has_value());
+    size_t n_padded = PDEWorkspace::pad_to_simd(n);  // 104
+    size_t n_minus_1_padded = PDEWorkspace::pad_to_simd(n - 1);  // 104
+    size_t tridiag_padded = PDEWorkspace::pad_to_simd(2 * n);  // 200
 
-    auto workspace = PDEWorkspace::create(grid_spec.value(), &pool);
-    ASSERT_TRUE(workspace.has_value());
-
-    auto ws = workspace.value();
-    EXPECT_EQ(ws->logical_size(), 101);
-    EXPECT_EQ(ws->padded_size(), 104);  // Rounded to SIMD_WIDTH=8
+    size_t expected = 12 * n_padded + 3 * n_minus_1_padded + tridiag_padded;
+    EXPECT_EQ(required, expected);
 }
 
-TEST(PDEWorkspacePMRTest, AccessorsReturnLogicalSpans) {
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
-    auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
+TEST(PDEWorkspaceTest, CreateFromBuffer) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
 
-    auto u_current = ws->u_current();
-    EXPECT_EQ(u_current.size(), 101);  // Logical size
-    EXPECT_EQ(ws->padded_size(), 104);  // Padded size available separately
+    std::vector<double> buffer(required, 0.0);
 
-    // Check we can write to all elements
-    for (size_t i = 0; i < u_current.size(); ++i) {
-        u_current[i] = static_cast<double>(i);
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+    ASSERT_TRUE(workspace_result.has_value());
+
+    auto workspace = workspace_result.value();
+
+    // Verify sizes
+    EXPECT_EQ(workspace.size(), n);
+    EXPECT_EQ(workspace.dx().size(), n - 1);
+    EXPECT_EQ(workspace.u_stage().size(), n);
+    EXPECT_EQ(workspace.rhs().size(), n);
+    EXPECT_EQ(workspace.lu().size(), n);
+    EXPECT_EQ(workspace.psi().size(), n);
+    EXPECT_EQ(workspace.jacobian_diag().size(), n);
+    EXPECT_EQ(workspace.jacobian_upper().size(), n - 1);
+    EXPECT_EQ(workspace.jacobian_lower().size(), n - 1);
+    EXPECT_EQ(workspace.residual().size(), n);
+    EXPECT_EQ(workspace.delta_u().size(), n);
+    EXPECT_EQ(workspace.newton_u_old().size(), n);
+    EXPECT_EQ(workspace.u_next().size(), n);
+    EXPECT_EQ(workspace.tridiag_workspace().size(), 2 * n);
+}
+
+TEST(PDEWorkspaceTest, BufferTooSmall) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
+
+    std::vector<double> buffer(required - 1, 0.0);  // One element too small
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+    ASSERT_FALSE(workspace_result.has_value());
+    EXPECT_TRUE(workspace_result.error().find("too small") != std::string::npos);
+}
+
+TEST(PDEWorkspaceTest, GridSizeTooSmall) {
+    std::vector<double> buffer(100, 0.0);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, 1);
+    ASSERT_FALSE(workspace_result.has_value());
+    EXPECT_TRUE(workspace_result.error().find("at least 2") != std::string::npos);
+}
+
+TEST(PDEWorkspaceTest, FromBufferAndGrid) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
+
+    std::vector<double> buffer(required, 0.0);
+    std::vector<double> grid(n);
+
+    // Create uniform grid [0, 1]
+    for (size_t i = 0; i < n; ++i) {
+        grid[i] = static_cast<double>(i) / (n - 1);
+    }
+
+    auto workspace_result = PDEWorkspace::from_buffer_and_grid(buffer, grid, n);
+    ASSERT_TRUE(workspace_result.has_value());
+
+    auto workspace = workspace_result.value();
+
+    // Verify dx was computed
+    auto dx = workspace.dx();
+    double expected_dx = 1.0 / (n - 1);
+    for (size_t i = 0; i < n - 1; ++i) {
+        EXPECT_NEAR(dx[i], expected_dx, 1e-14);
     }
 }
 
-TEST(PDEWorkspacePMRTest, GridAccessReturnsCorrectData) {
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
-    auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
+TEST(PDEWorkspaceTest, GridSizeMismatch) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
 
-    auto grid = ws->grid();
-    EXPECT_EQ(grid.size(), 101);  // Logical size
-    EXPECT_NEAR(grid[0], 0.0, 1e-14);
-    EXPECT_NEAR(grid[100], 1.0, 1e-14);
+    std::vector<double> buffer(required, 0.0);
+    std::vector<double> grid(n + 1);  // Wrong size
+
+    auto workspace_result = PDEWorkspace::from_buffer_and_grid(buffer, grid, n);
+    ASSERT_FALSE(workspace_result.has_value());
+    EXPECT_TRUE(workspace_result.error().find("mismatch") != std::string::npos);
 }
 
-TEST(PDEWorkspacePMRTest, NewtonArraysAccessible) {
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
-    auto ws = PDEWorkspace::create(grid_spec.value(), &pool).value();
+TEST(PDEWorkspaceTest, IndependentArrays) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
 
-    // Test Newton array access - should return logical sizes
-    auto jac_diag = ws->jacobian_diag();
-    auto jac_upper = ws->jacobian_upper();
-    auto jac_lower = ws->jacobian_lower();
-    auto residual = ws->residual();
-    auto delta_u = ws->delta_u();
+    std::vector<double> buffer(required, 0.0);
 
-    EXPECT_EQ(jac_diag.size(), 101);
-    EXPECT_EQ(jac_upper.size(), 100);  // Off-diagonal: n-1
-    EXPECT_EQ(jac_lower.size(), 100);  // Off-diagonal: n-1
-    EXPECT_EQ(residual.size(), 101);
-    EXPECT_EQ(delta_u.size(), 101);
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+    ASSERT_TRUE(workspace_result.has_value());
 
-    // Test new Newton arrays
-    auto newton_u_old = ws->newton_u_old();
-    auto tridiag_ws = ws->tridiag_workspace();
-    EXPECT_EQ(newton_u_old.size(), 101);
-    EXPECT_EQ(tridiag_ws.size(), 202);  // 2*n
+    auto workspace = workspace_result.value();
+
+    // Write to different arrays
+    auto rhs = workspace.rhs();
+    auto lu = workspace.lu();
+    auto psi = workspace.psi();
+
+    for (size_t i = 0; i < n; ++i) {
+        rhs[i] = static_cast<double>(i);
+        lu[i] = static_cast<double>(i * 2);
+        psi[i] = static_cast<double>(i * 3);
+    }
+
+    // Verify independence
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_DOUBLE_EQ(rhs[i], static_cast<double>(i));
+        EXPECT_DOUBLE_EQ(lu[i], static_cast<double>(i * 2));
+        EXPECT_DOUBLE_EQ(psi[i], static_cast<double>(i * 3));
+    }
+}
+
+TEST(PDEWorkspaceTest, ConstAccessors) {
+    size_t n = 100;
+    size_t required = PDEWorkspace::required_size(n);
+
+    std::vector<double> buffer(required, 0.0);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+    ASSERT_TRUE(workspace_result.has_value());
+
+    auto workspace = workspace_result.value();
+
+    // Write via mutable accessor
+    auto rhs_mut = workspace.rhs();
+    for (size_t i = 0; i < n; ++i) {
+        rhs_mut[i] = static_cast<double>(i);
+    }
+
+    // Read via const accessor
+    const auto& workspace_const = workspace;
+    auto rhs_const = workspace_const.rhs();
+
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_DOUBLE_EQ(rhs_const[i], static_cast<double>(i));
+    }
 }
 
 }  // namespace

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/core/pde_workspace_spans.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"
@@ -20,8 +20,8 @@ namespace {
 template<typename LeftBC, typename RightBC, typename SpatialOp>
 class TestPDESolver : public mango::PDESolver<TestPDESolver<LeftBC, RightBC, SpatialOp>> {
 public:
-    TestPDESolver(std::shared_ptr<GridWithSolution<double>> grid,
-                  PDEWorkspaceSpans workspace,
+    TestPDESolver(std::shared_ptr<Grid<double>> grid,
+                  PDEWorkspace workspace,
                   LeftBC left_bc,
                   RightBC right_bc,
                   SpatialOp spatial_op)
@@ -45,8 +45,8 @@ private:
 
 // Helper function to create test solver with deduced types
 template<typename LeftBC, typename RightBC, typename SpatialOp>
-auto make_test_solver(std::shared_ptr<GridWithSolution<double>> grid,
-                      PDEWorkspaceSpans workspace,
+auto make_test_solver(std::shared_ptr<Grid<double>> grid,
+                      PDEWorkspace workspace,
                       LeftBC left_bc,
                       RightBC right_bc,
                       SpatialOp spatial_op) {
@@ -62,17 +62,17 @@ TEST(TemporalEventTest, EventAppliedAfterStep) {
     // Create TimeDomain
     TimeDomain time = TimeDomain::from_n_steps(0.0, 1.0, 10);
 
-    // Create GridWithSolution
-    auto grid_with_sol = GridWithSolution<double>::create(grid_spec.value(), time);
+    // Create Grid
+    auto grid_with_sol = Grid<double>::create(grid_spec.value(), time);
     ASSERT_TRUE(grid_with_sol.has_value());
 
     // Create PMR workspace
     std::pmr::synchronized_pool_resource pool;
     size_t n = grid_spec->n_points();
-    size_t buffer_size = PDEWorkspaceSpans::required_size(n);
+    size_t buffer_size = PDEWorkspace::required_size(n);
     std::pmr::vector<double> pmr_buffer(buffer_size, 0.0, &pool);
 
-    auto workspace_spans = PDEWorkspaceSpans::from_buffer_and_grid(
+    auto workspace_spans = PDEWorkspace::from_buffer_and_grid(
         std::span{pmr_buffer.data(), pmr_buffer.size()},
         grid_with_sol.value()->x(),
         n

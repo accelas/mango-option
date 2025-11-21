@@ -36,12 +36,12 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
         return std::unexpected(grid_with_sol.error());
     }
 
-    // Allocate contiguous PMR buffer for PDEWorkspaceSpans
-    size_t buffer_size = PDEWorkspaceSpans::required_size(n);
+    // Allocate contiguous PMR buffer for PDEWorkspace
+    size_t buffer_size = PDEWorkspace::required_size(n);
     std::pmr::vector<double> pmr_buffer(buffer_size, 0.0, resource);
 
-    // Create PDEWorkspaceSpans from buffer and grid
-    auto workspace_spans_result = PDEWorkspaceSpans::from_buffer_and_grid(
+    // Create PDEWorkspace from buffer and grid
+    auto workspace_spans_result = PDEWorkspace::from_buffer_and_grid(
         std::span{pmr_buffer.data(), pmr_buffer.size()},
         grid_with_sol.value()->x(),
         n

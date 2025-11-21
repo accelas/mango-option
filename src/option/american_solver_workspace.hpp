@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "src/pde/core/pde_workspace_spans.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/option/option_spec.hpp"
 #include <memory>
@@ -163,7 +163,7 @@ inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
  * Provides unified workspace for American option pricing with:
  * - Grid for grid + solution storage
  * - PDEWorkspace allocated from provided memory resource
- * - PDEWorkspaceSpans for non-owning spans to workspace buffers
+ * - PDEWorkspace for non-owning spans to workspace buffers
  * - GridSpacing<double> for spatial operators
  *
  * Example usage:
@@ -202,9 +202,9 @@ public:
            std::pmr::memory_resource* resource,
            double maturity = 1.0);
 
-    // New API: Grid + PDEWorkspaceSpans
+    // New API: Grid + PDEWorkspace
     std::shared_ptr<Grid<double>> grid_with_solution() const { return grid_with_solution_; }
-    PDEWorkspaceSpans workspace_spans() const { return workspace_spans_; }
+    PDEWorkspace workspace_spans() const { return workspace_spans_; }
 
     size_t n_space() const { return grid_with_solution_->n_space(); }
     size_t n_time() const { return grid_with_solution_->time().n_steps(); }
@@ -222,7 +222,7 @@ public:
 private:
     AmericanSolverWorkspace(std::shared_ptr<Grid<double>> grid_sol,
                            std::pmr::vector<double>&& pmr_buffer,
-                           PDEWorkspaceSpans workspace_spans)
+                           PDEWorkspace workspace_spans)
         : grid_with_solution_(std::move(grid_sol))
         , pmr_buffer_(std::move(pmr_buffer))
         , workspace_spans_(workspace_spans)
@@ -230,7 +230,7 @@ private:
 
     std::shared_ptr<Grid<double>> grid_with_solution_;
     std::pmr::vector<double> pmr_buffer_;  // Contiguous PMR buffer for workspace
-    PDEWorkspaceSpans workspace_spans_;     // Spans into pmr_buffer_
+    PDEWorkspace workspace_spans_;     // Spans into pmr_buffer_
 };
 
 }  // namespace mango

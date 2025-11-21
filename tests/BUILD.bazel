@@ -29,10 +29,10 @@ cc_test(
 )
 
 cc_test(
-    name = "pde_workspace_spans_test",
-    srcs = ["pde_workspace_spans_test.cc"],
+    name = "pde_workspace_test",
+    srcs = ["pde_workspace_test.cc"],
     deps = [
-        "//src/pde/core:pde_workspace_spans",
+        "//src/pde/core:pde_workspace",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -135,7 +135,6 @@ cc_test(
     deps = [
         "//src/pde/core:pde_solver",
         "//src/pde/core:pde_workspace",
-        "//src/pde/core:pde_workspace_spans",
         "//src/pde/core:grid",
         "//src/pde/operators:laplacian_pde",
         "//src/pde/operators:operator_factory",
@@ -449,16 +448,6 @@ cc_test(
     srcs = ["memory/solver_memory_arena_test.cc"],
     deps = [
         "//src/support/memory:solver_memory_arena",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "pde_workspace_test",
-    srcs = ["pde_workspace_test.cc"],
-    deps = [
-        "//src/pde/core:pde_workspace",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
