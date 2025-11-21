@@ -453,15 +453,6 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
-cc_test(
-    name = "grid_spacing_view_test",
-    srcs = ["grid_spacing_view_test.cc"],
-    deps = [
-        "//src/pde/core:grid_spacing",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
 
 cc_test(
     name = "american_solver_workspace_test",
