@@ -187,6 +187,7 @@ cc_library(
     deps = [
         ":american_option",
         ":american_solver_workspace",
+        "//src/math:cubic_spline_solver",
         "//src/support:error_types",
     ],
     copts = ["-std=c++23"],

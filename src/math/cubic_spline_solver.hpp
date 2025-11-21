@@ -14,6 +14,7 @@
 #include <concepts>
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 namespace mango {
 
@@ -348,6 +349,118 @@ private:
 
         return std::min(idx, x_.size() - 2);
     }
+};
+
+/// Separable 2D Cubic Spline Interpolation
+///
+/// Interpolates a 2D surface z(x,y) using separable cubic splines:
+/// 1. Builds and caches x-direction splines (one per y-slice)
+/// 2. Evaluates x-splines at query point to get intermediate values
+/// 3. Builds y-direction spline from intermediate values
+/// 4. Evaluates y-spline at query point
+///
+/// This provides C² continuity in both dimensions with natural boundary conditions.
+///
+/// @tparam T Floating point type (float, double, long double)
+template<FloatingPoint T>
+class CubicSpline2D {
+public:
+    /// Default constructor (empty spline)
+    CubicSpline2D() = default;
+
+    /// Construct and build 2D spline from gridded data
+    ///
+    /// @param x X-coordinates (must be strictly increasing)
+    /// @param y Y-coordinates (must be strictly increasing)
+    /// @param z Z-values in row-major order: z[i*ny + j] = z(x[i], y[j])
+    /// @param config Spline configuration (applied to both dimensions)
+    /// @return Optional error message (nullopt on success)
+    [[nodiscard]] std::optional<std::string> build(
+        std::span<const T> x,
+        std::span<const T> y,
+        std::span<const T> z,
+        const CubicSplineConfig<T>& config = {})
+    {
+        const size_t nx = x.size();
+        const size_t ny = y.size();
+
+        if (nx < 2 || ny < 2) {
+            return "Grid too small for 2D cubic spline (need at least 2 points per dimension)";
+        }
+
+        if (z.size() != nx * ny) {
+            return "Z array size must equal nx * ny";
+        }
+
+        // Store grid coordinates
+        x_ = std::vector<T>(x.begin(), x.end());
+        y_ = std::vector<T>(y.begin(), y.end());
+
+        // Build x-direction splines (one per y-slice)
+        x_splines_.resize(ny);
+        for (size_t j = 0; j < ny; ++j) {
+            // Extract z-values for this y-slice: z(x_i, y_j)
+            std::vector<T> z_slice(nx);
+            for (size_t i = 0; i < nx; ++i) {
+                z_slice[i] = z[i * ny + j];
+            }
+
+            // Build spline for this slice
+            auto error = x_splines_[j].build(x_, z_slice, config);
+            if (error.has_value()) {
+                return "Failed to build x-spline for y-slice " + std::to_string(j) + ": " + std::string(error.value());
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    /// Evaluate interpolated value at (x_eval, y_eval)
+    ///
+    /// Uses separable cubic spline interpolation with natural boundary conditions.
+    /// Extrapolation uses nearest boundary value.
+    ///
+    /// @param x_eval X-coordinate to evaluate
+    /// @param y_eval Y-coordinate to evaluate
+    /// @return Interpolated value z(x_eval, y_eval)
+    [[nodiscard]] T eval(T x_eval, T y_eval) const {
+        const size_t ny = y_.size();
+
+        // Step 1: Evaluate all x-direction splines at x_eval
+        std::vector<T> y_values(ny);
+        for (size_t j = 0; j < ny; ++j) {
+            y_values[j] = x_splines_[j].eval(x_eval);
+        }
+
+        // Step 2: Build y-direction spline from interpolated values
+        CubicSpline<T> y_spline;
+        auto error = y_spline.build(y_, y_values);
+        if (error.has_value()) {
+            // Fallback to linear interpolation if spline build fails
+            auto it = std::lower_bound(y_.begin(), y_.end(), y_eval);
+            if (it == y_.begin()) {
+                return y_values[0];
+            } else if (it == y_.end()) {
+                return y_values[ny - 1];
+            }
+            size_t j = std::distance(y_.begin(), it) - 1;
+            T t = (y_eval - y_[j]) / (y_[j + 1] - y_[j]);
+            return (static_cast<T>(1) - t) * y_values[j] + t * y_values[j + 1];
+        }
+
+        // Step 3: Evaluate y-direction spline at y_eval
+        return y_spline.eval(y_eval);
+    }
+
+    /// Check if spline is built and ready
+    [[nodiscard]] bool is_built() const noexcept {
+        return !x_splines_.empty();
+    }
+
+private:
+    std::vector<T> x_;                        ///< X-coordinates
+    std::vector<T> y_;                        ///< Y-coordinates
+    std::vector<CubicSpline<T>> x_splines_;   ///< Cached x-direction splines (one per y-slice)
 };
 
 }  // namespace mango

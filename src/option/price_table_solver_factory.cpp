@@ -144,44 +144,121 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
     std::span<double> prices_4d,
     const PriceTableGrid& grid)
 {
+    const size_t Nm = grid.moneyness.size();
+    const size_t Nt = grid.maturity.size();
     const size_t Nv = grid.volatility.size();
     const size_t Nr = grid.rate.size();
     const double T_max = grid.maturity.back();
 
-    // Build batch parameters for (σ, r) grid
-    // All options share: spot=strike=K_ref, maturity=T_max, same grid
-    const size_t batch_size = Nv * Nr;
-    std::vector<AmericanOptionParams> batch_params;
-    batch_params.reserve(batch_size);
+    // Precompute log-moneyness values for interpolation queries
+    std::vector<double> log_moneyness(Nm);
+    for (size_t i = 0; i < Nm; ++i) {
+        log_moneyness[i] = std::log(grid.moneyness[i]);
+    }
 
+    // Pre-allocate workspaces and surfaces for all (σ, r) combinations
+    const size_t batch_size = Nv * Nr;
+    std::vector<std::optional<NormalizedWorkspace>> workspaces(batch_size);
+    std::vector<std::optional<NormalizedSurfaceView>> surfaces(batch_size);
+
+    // Create workspaces outside parallel region
+    size_t workspace_failed = 0;
     namespace views = std::views;
     for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
                                                  views::iota(size_t{0}, Nr))) {
-        AmericanOptionParams params;
-        params.spot = grid.K_ref;
-        params.strike = grid.K_ref;
-        params.maturity = T_max;
-        params.rate = grid.rate[l];
-        params.dividend_yield = config_.dividend_yield;
-        params.type = config_.option_type;
-        params.volatility = grid.volatility[k];
-        params.discrete_dividends = {};
-        batch_params.push_back(params);
+        size_t idx = k + l * Nv;
+
+        NormalizedSolveRequest request;
+        request.sigma = grid.volatility[k];
+        request.rate = grid.rate[l];
+        request.dividend = config_.dividend_yield;
+        request.option_type = config_.option_type;
+        request.x_min = config_.x_min;
+        request.x_max = config_.x_max;
+        request.n_space = config_.n_space;
+        request.n_time = config_.n_time;
+        request.T_max = T_max;
+        request.tau_snapshots = grid.maturity;
+
+        auto ws_result = NormalizedWorkspace::create(request);
+        if (ws_result.has_value()) {
+            workspaces[idx] = std::move(ws_result.value());
+        } else {
+            ++workspace_failed;
+        }
     }
 
-    // Solve batch with shared grid (use_shared_grid=true)
-    // This is equivalent to the manual OpenMP loop but reuses BatchAmericanOptionSolver
-    BatchAmericanOptionSolver batch_solver;
-    auto batch_result = batch_solver.solve_batch(batch_params, true);
+    // Parallel solve for each (σ, r) combination
+    size_t failed_count = workspace_failed;
+    #pragma omp parallel for reduction(+:failed_count) collapse(2)
+    for (size_t k = 0; k < Nv; ++k) {
+        for (size_t l = 0; l < Nr; ++l) {
+            size_t idx = k + l * Nv;
 
-    // Check for failures
-    if (batch_result.failed_count > 0) {
-        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
-                         " out of " + std::to_string(batch_size) + " PDEs");
+            // Skip if workspace creation failed
+            if (!workspaces[idx].has_value()) {
+                continue;
+            }
+
+            NormalizedSolveRequest request;
+            request.sigma = grid.volatility[k];
+            request.rate = grid.rate[l];
+            request.dividend = config_.dividend_yield;
+            request.option_type = config_.option_type;
+            request.x_min = config_.x_min;
+            request.x_max = config_.x_max;
+            request.n_space = config_.n_space;
+            request.n_time = config_.n_time;
+            request.T_max = T_max;
+            request.tau_snapshots = grid.maturity;
+
+            NormalizedSurfaceView surface_view(
+                std::span<const double>{},
+                std::span<const double>{},
+                std::span<const double>{});
+
+            auto result = NormalizedChainSolver::solve(
+                request, workspaces[idx].value(), surface_view);
+
+            if (result.has_value()) {
+                surfaces[idx] = surface_view;
+            } else {
+                failed_count++;
+            }
+        }
     }
 
-    // Extract prices using shared logic
-    extract_batch_results_to_4d(batch_result, prices_4d, grid, grid.K_ref);
+    if (failed_count > 0) {
+        return std::unexpected("Failed to solve " + std::to_string(failed_count) +
+                         " out of " + std::to_string(batch_size) + " normalized PDEs");
+    }
+
+    // Extract prices by interpolating each surface
+    const size_t slice_stride = Nv * Nr;
+    for (size_t k = 0; k < Nv; ++k) {
+        for (size_t l = 0; l < Nr; ++l) {
+            size_t idx = k + l * Nv;
+            const auto& surface = surfaces[idx];
+            if (!surface.has_value()) {
+                continue;  // Leave zeros for failed solves
+            }
+
+            // For each (moneyness, maturity) query
+            for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
+                for (size_t t_idx = 0; t_idx < Nt; ++t_idx) {
+                    double x = log_moneyness[m_idx];
+                    double tau = grid.maturity[t_idx];
+
+                    // Interpolate normalized value u(x, τ)
+                    double u_norm = surface->interpolate(x, tau);
+
+                    // Denormalize: V = K_ref × u
+                    size_t table_idx = (m_idx * Nt + t_idx) * slice_stride + idx;
+                    prices_4d[table_idx] = grid.K_ref * u_norm;
+                }
+            }
+        }
+    }
 
     return {};
 }
@@ -303,7 +380,8 @@ bool PriceTableSolverFactory::is_normalized_solver_eligible(
 std::expected<std::unique_ptr<IPriceTableSolver>, std::string>
 PriceTableSolverFactory::create(
     const OptionSolverGrid& config,
-    std::span<const double> moneyness)
+    std::span<const double> moneyness,
+    bool force_batch)
 {
     // Step 1: Validate configuration
     auto validation = validate_config(config);
@@ -312,7 +390,7 @@ PriceTableSolverFactory::create(
     }
 
     // Step 2: Check eligibility for normalized solver (fast path)
-    if (is_normalized_solver_eligible(config, moneyness)) {
+    if (!force_batch && is_normalized_solver_eligible(config, moneyness)) {
         return std::make_unique<NormalizedPriceTableSolver>(config);
     }
 

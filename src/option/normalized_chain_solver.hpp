@@ -8,11 +8,13 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/math/cubic_spline_solver.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <span>
 #include <memory>
 #include <vector>
+#include <optional>
 
 namespace mango {
 
@@ -50,6 +52,7 @@ struct NormalizedSolveRequest {
  * View of normalized solution surface u(x,τ).
  *
  * Provides interpolation interface for querying u at arbitrary (x,τ).
+ * Uses separable cubic spline interpolation for C² smoothness and accurate Greeks.
  * Caller scales results: V = K·u
  */
 class NormalizedSurfaceView {
@@ -63,8 +66,19 @@ public:
         , values_(values)
     {}
 
-    /// Interpolate u(x,τ) using bilinear interpolation
+    /// Interpolate u(x,τ) using separable cubic spline interpolation
+    ///
+    /// Provides C² continuity for smooth derivatives (required for Greeks).
+    /// Uses natural boundary conditions (f''=0 at endpoints).
+    /// Automatically builds cache on first call.
     double interpolate(double x, double tau) const;
+
+    /// Build cached interpolation structure (called once after surface is populated)
+    ///
+    /// Constructs 2D cubic spline for the entire surface.
+    /// Must be called before interpolate() is used.
+    /// @return Error message on failure, nullopt on success
+    std::optional<std::string> build_cache();
 
     /// Access raw data (for testing)
     std::span<const double> x_grid() const { return x_grid_; }
@@ -75,6 +89,7 @@ private:
     std::span<const double> x_grid_;
     std::span<const double> tau_grid_;
     std::span<const double> values_;
+    mutable CubicSpline2D<double> spline2d_;  ///< 2D cubic spline interpolator
 };
 
 /**

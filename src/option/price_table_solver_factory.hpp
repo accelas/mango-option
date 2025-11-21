@@ -87,16 +87,18 @@ public:
      *
      * This method:
      * 1. Validates the grid configuration
-     * 2. Checks if normalized chain solver is eligible
+     * 2. Checks if normalized chain solver is eligible (if not disabled)
      * 3. Creates either NormalizedChainSolver or BatchSolver
      *
      * @param config Grid configuration (validated)
      * @param moneyness Moneyness grid (used for eligibility check)
+     * @param force_batch If true, always use batch solver (for testing)
      * @return Solver instance or validation error
      */
     static std::expected<std::unique_ptr<IPriceTableSolver>, std::string> create(
         const OptionSolverGrid& config,
-        std::span<const double> moneyness);
+        std::span<const double> moneyness,
+        bool force_batch = false);
 
 private:
     /**
