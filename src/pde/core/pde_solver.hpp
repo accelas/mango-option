@@ -84,8 +84,7 @@ public:
     PDESolver(std::shared_ptr<Grid<double>> grid,
               PDEWorkspace workspace,
               std::optional<ObstacleCallback> obstacle = std::nullopt)
-        : grid_with_solution_(grid)  // Copy shared_ptr (not move - shared ownership)
-        , grid_(grid->x())  // Span to persistent grid data
+        : grid_(grid)  // Copy shared_ptr (not move - shared ownership)
         , config_{}  // Default-initialized
         , obstacle_(std::move(obstacle))
         , n_(grid->n_space())
@@ -101,16 +100,16 @@ public:
     /// @param ic Initial condition function: ic(x, u)
     template<typename IC>
     void initialize(IC&& ic) {
-        auto u_current = grid_with_solution_->solution();
-        ic(grid_, u_current);
+        auto u_current = grid_->solution();
+        ic(grid_->x(), u_current);
 
         // Apply constraints at t=0 (boundary before obstacle, consistent with Newton iteration)
-        double t = grid_with_solution_->time().t_start();
+        double t = grid_->time().t_start();
         apply_boundary_conditions(u_current, t);
         apply_obstacle(t, u_current);
 
         // Copy initial condition to u_prev for first iteration
-        auto u_prev = grid_with_solution_->solution_prev();
+        auto u_prev = grid_->solution_prev();
         std::copy(u_current.begin(), u_current.end(), u_prev.begin());
     }
 
@@ -118,12 +117,12 @@ public:
     ///
     /// @return expected success or solver error diagnostic
     std::expected<void, SolverError> solve() {
-        const auto& time = grid_with_solution_->time();
+        const auto& time = grid_->time();
         double t = time.t_start();
         const double dt = time.dt();
 
-        auto u_current = grid_with_solution_->solution();
-        auto u_prev = grid_with_solution_->solution_prev();
+        auto u_current = grid_->solution();
+        auto u_prev = grid_->solution_prev();
 
         for (size_t step = 0; step < time.n_steps(); ++step) {
             double t_old = t;
@@ -152,13 +151,13 @@ public:
             process_temporal_events(t_old, t_next, step, u_current);
         }
 
-        // Final solution is already in grid_with_solution_->solution()
+        // Final solution is already in grid_->solution()
         return {};
     }
 
     /// Get current solution
     std::span<const double> solution() const {
-        return grid_with_solution_->solution();
+        return grid_->solution();
     }
 
     /// Check if obstacle condition is present
@@ -196,10 +195,7 @@ protected:
 
 private:
     // Grid with solution storage (persistent, outlives solver)
-    std::shared_ptr<Grid<double>> grid_with_solution_;
-
-    // Grid data (for backward compatibility, points to grid_with_solution_->x())
-    std::span<const double> grid_;
+    std::shared_ptr<Grid<double>> grid_;
 
     // Configuration
     TRBDF2Config config_;
@@ -242,7 +238,7 @@ private:
             }
 
             // Event is in (t_old, t_new] - apply it
-            event.callback(event.time, grid_, u_current);
+            event.callback(event.time, grid_->x(), u_current);
 
             // CRITICAL FIX (Issue #98): Re-apply obstacle and boundary conditions
             // after event to maintain consistency. Dividend jumps interpolate
@@ -271,7 +267,7 @@ private:
         if (!obstacle_) return;
 
         auto psi = workspace_.psi();
-        (*obstacle_)(t, grid_, psi);
+        (*obstacle_)(t, grid_->x(), psi);
 
         // Project: u[i] = max(u[i], psi[i])
         for (size_t i = 0; i < u.size(); ++i) {
@@ -290,13 +286,13 @@ private:
         const auto& right_bc = derived().right_boundary();
 
         // Left boundary
-        double x_left = grid_[0];
+        double x_left = grid_->x()[0];
         double dx_left = (n_ > 1) ? dx_span[0] : 1.0;
         double u_interior_left = (n_ > 1) ? u[1] : 0.0;
         left_bc.apply(u[0], x_left, t, dx_left, u_interior_left, 0.0, bc::BoundarySide::Left);
 
         // Right boundary
-        double x_right = grid_[n_ - 1];
+        double x_right = grid_->x()[n_ - 1];
         double dx_right = (n_ > 1) ? dx_span[n_ - 2] : 1.0;
         double u_interior_right = (n_ > 1) ? u[n_ - 2] : 0.0;
         right_bc.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
@@ -312,7 +308,7 @@ private:
     void apply_operator_with_blocking(double t,
                                       std::span<const double> u,
                                       std::span<double> Lu) {
-        const size_t n = grid_.size();
+        const size_t n = grid_->x().size();
 
         // Get spatial operator from derived class via CRTP (use const auto& to avoid copies!)
         const auto& spatial_op = derived().spatial_operator();
@@ -559,10 +555,10 @@ private:
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
 
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
-            rhs_with_bc[0] = left_bc.value(t, grid_[0]);
+            rhs_with_bc[0] = left_bc.value(t, grid_->x()[0]);
         }
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
-            rhs_with_bc[n_-1] = right_bc.value(t, grid_[n_-1]);
+            rhs_with_bc[n_-1] = right_bc.value(t, grid_->x()[n_-1]);
         }
 
         // Get obstacle function
@@ -573,7 +569,7 @@ private:
         auto psi = workspace_.psi();
 
         // Evaluate obstacle constraint ψ(x,t) at current time
-        (*obstacle_)(t, grid_, psi);
+        (*obstacle_)(t, grid_->x(), psi);
 
         // ═══════════════════════════════════════════════════════════════════════
         // CRITICAL FIX #2: Lock Deep Exercise Region to Prevent Diffusion Lift
@@ -808,14 +804,14 @@ private:
         // Left boundary
         using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
-            double g = left_bc.value(t, grid_[0]);
+            double g = left_bc.value(t, grid_->x()[0]);
             residual[0] = u[0] - g;  // u - g (we want u = g, so F = u - g = 0)
         }
 
         // Right boundary
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
-            double g = right_bc.value(t, grid_[n_ - 1]);
+            double g = right_bc.value(t, grid_->x()[n_ - 1]);
             residual[n_ - 1] = u[n_ - 1] - g;  // u - g
         }
     }
