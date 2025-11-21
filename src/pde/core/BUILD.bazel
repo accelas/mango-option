@@ -55,7 +55,6 @@ cc_library(
 cc_library(
     name = "pde_workspace",
     hdrs = ["pde_workspace.hpp"],
-    deps = [":grid"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )

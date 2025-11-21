@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <memory>
+#include <memory_resource>
 
 namespace mango {
 
@@ -116,8 +117,11 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    // Create PDEWorkspace
-    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec_result.value(), std::pmr::get_default_resource());
+    // Allocate workspace buffer (local, temporary)
+    size_t n = grid_spec_result.value().n_points();
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+
+    auto pde_workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
@@ -129,7 +133,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve
     try {
-        AmericanOptionSolver solver(option_params, pde_workspace_result.value().workspace);
+        AmericanOptionSolver solver(option_params, pde_workspace_result.value());
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 

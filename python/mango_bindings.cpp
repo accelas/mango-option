@@ -185,14 +185,18 @@ PYBIND11_MODULE(mango_iv, m) {
                 throw py::value_error(
                     "Failed to create grid: " + grid_spec_result.error());
             }
-            auto workspace_result =
-                mango::PDEWorkspaceOwned::create(grid_spec_result.value(), std::pmr::get_default_resource());
+
+            // Allocate workspace buffer (local, temporary)
+            size_t n = grid_spec_result.value().n_points();
+            std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+
+            auto workspace_result = mango::PDEWorkspace::from_buffer(buffer, n);
             if (!workspace_result) {
                 throw py::value_error(
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            mango::AmericanOptionSolver solver(params, workspace_result.value().workspace);
+            mango::AmericanOptionSolver solver(params, workspace_result.value());
             auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();

@@ -74,12 +74,17 @@ std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
     }
     workspace.grid_ = grid_result.value();
 
-    // Create PDEWorkspaceOwned (owns buffer + workspace)
-    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec_result.value(), std::pmr::get_default_resource());
+    // Allocate PMR buffer for workspace (reused across solves)
+    size_t n = request.n_space;
+    size_t buffer_size = PDEWorkspace::required_size(n);
+    workspace.pde_buffer_ = std::pmr::vector<double>(buffer_size, std::pmr::get_default_resource());
+
+    // Create workspace spans from buffer
+    auto pde_workspace_result = PDEWorkspace::from_buffer(workspace.pde_buffer_, n);
     if (!pde_workspace_result.has_value()) {
         return std::unexpected("Failed to create PDEWorkspace: " + pde_workspace_result.error());
     }
-    workspace.owned_workspace_ = std::make_unique<PDEWorkspaceOwned>(std::move(pde_workspace_result.value()));
+    workspace.pde_workspace_ = pde_workspace_result.value();
 
     // Allocate x grid
     workspace.x_grid_.resize(request.n_space);

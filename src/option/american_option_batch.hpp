@@ -138,8 +138,12 @@ public:
             std::pmr::unsynchronized_pool_resource thread_pool;
 
             // Per-thread workspace (only for shared grid strategy)
-            // Store owned workspace to keep buffer alive
-            std::optional<PDEWorkspaceOwned> thread_owned_workspace;
+            // Holds buffer + workspace for reuse
+            struct WorkspaceHolder {
+                std::pmr::vector<double> buffer;
+                PDEWorkspace workspace;
+            };
+            std::optional<WorkspaceHolder> thread_workspace_holder;
             std::shared_ptr<Grid<double>> thread_grid;
 
             if (use_shared_grid) {
@@ -151,27 +155,29 @@ public:
                 if (grid_result.has_value()) {
                     thread_grid = grid_result.value();
 
-                    // Create PDEWorkspaceOwned from grid specification (buffer + workspace)
-                    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec, &thread_pool);
-                    if (pde_workspace_result.has_value()) {
-                        thread_owned_workspace = std::move(pde_workspace_result.value());
+                    // Allocate buffer and create workspace
+                    size_t n = grid_spec.n_points();
+                    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &thread_pool);
+                    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+                    if (workspace_result.has_value()) {
+                        thread_workspace_holder = WorkspaceHolder{std::move(buffer), workspace_result.value()};
                     }
                 }
-                // If creation failed, thread_owned_workspace remains nullopt and we'll fail in loop
+                // If creation failed, thread_workspace_holder remains nullopt and we'll fail in loop
             }
 
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
                 // Get or create workspace for this iteration
                 std::shared_ptr<Grid<double>> grid;
-                std::optional<PDEWorkspaceOwned> owned_workspace;
+                std::optional<WorkspaceHolder> workspace_holder;
                 PDEWorkspace* pde_workspace = nullptr;
 
                 if (use_shared_grid) {
                     // Shared grid: reuse thread workspace
                     grid = thread_grid;
-                    if (thread_owned_workspace.has_value()) {
-                        pde_workspace = &thread_owned_workspace->workspace;
+                    if (thread_workspace_holder.has_value()) {
+                        pde_workspace = &thread_workspace_holder->workspace;
                     }
                 } else {
                     // Per-option grid: create workspace for this option
@@ -183,11 +189,13 @@ public:
                     if (grid_result.has_value()) {
                         grid = grid_result.value();
 
-                        // Create PDEWorkspaceOwned from grid specification
-                        auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec, &thread_pool);
-                        if (pde_workspace_result.has_value()) {
-                            owned_workspace = std::move(pde_workspace_result.value());
-                            pde_workspace = &owned_workspace->workspace;
+                        // Allocate buffer and create workspace
+                        size_t n = grid_spec.n_points();
+                        std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &thread_pool);
+                        auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+                        if (workspace_result.has_value()) {
+                            workspace_holder = WorkspaceHolder{std::move(buffer), workspace_result.value()};
+                            pde_workspace = &workspace_holder->workspace;
                         }
                     }
                 }
@@ -248,6 +256,9 @@ private:
 /// Convenience API that automatically determines optimal grid parameters
 /// based on option characteristics, eliminating need for manual grid specification.
 ///
+/// Note: Allocates temporary workspace buffer (discarded after solve).
+/// For reusable workspaces, caller should manage buffer and use PDEWorkspace directly.
+///
 /// @param params Option parameters
 /// @return Expected containing result on success, error on failure
 inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
@@ -256,18 +267,23 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     // Estimate grid for this option
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
-    // Create PDEWorkspaceOwned with estimated grid
-    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec, std::pmr::get_default_resource());
-    if (!pde_workspace_result.has_value()) {
+    // Allocate workspace buffer (local, temporary)
+    size_t n = grid_spec.n_points();
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+
+    // Create workspace spans from buffer
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+    if (!workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Failed to create PDEWorkspace: " + pde_workspace_result.error(),
+            .message = "Failed to create PDEWorkspace: " + workspace_result.error(),
             .iterations = 0
         });
     }
 
     // Create and solve using PDEWorkspace API
-    AmericanOptionSolver solver(params, pde_workspace_result.value().workspace);
+    // Buffer stays alive during solve(), result contains Grid with solution
+    AmericanOptionSolver solver(params, workspace_result.value());
     return solver.solve();
 }
 
@@ -377,7 +393,8 @@ private:
 
     friend class NormalizedChainSolver;
 
-    std::unique_ptr<PDEWorkspaceOwned> owned_workspace_;  // Owns buffer + workspace
+    std::pmr::vector<double> pde_buffer_;        // Owns workspace buffer
+    PDEWorkspace pde_workspace_;                 // Spans into pde_buffer_
     std::shared_ptr<Grid<double>> grid_;
     std::vector<double> x_grid_;
     std::vector<double> tau_grid_;
@@ -385,8 +402,8 @@ private:
 
 public:
     // Accessor for workspace (after create() succeeds)
-    PDEWorkspace& workspace() { return owned_workspace_->workspace; }
-    const PDEWorkspace& workspace() const { return owned_workspace_->workspace; }
+    PDEWorkspace& workspace() { return pde_workspace_; }
+    const PDEWorkspace& workspace() const { return pde_workspace_; }
 };
 
 /**
