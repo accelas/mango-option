@@ -86,8 +86,8 @@ public:
     std::span<const double> snapshot_times() const;  // Times corresponding to each snapshot (after snapping)
 
     // For PDESolver (internal use only)
-    bool should_record(size_t time_step_idx) const;  // Check if time step should be recorded
-    void record(size_t time_step_idx, std::span<const double> sol);  // Record spatial solution
+    bool should_record(size_t state_idx) const;  // Check if state should be recorded
+    void record(size_t state_idx, std::span<const T> sol);  // Record spatial solution
 
 private:
     std::vector<size_t> snapshot_indices_;  // Sorted time step indices to record
@@ -132,15 +132,17 @@ std::expected<std::vector<size_t>, std::string> convert_times_to_indices(
                 "Snapshot time {} out of range [0, {}]", t, t_max));
         }
 
-        // Convert to nearest time step (snap to grid)
+        // Convert to nearest state index (snap to grid)
         // Use floor + 0.5 to round to nearest, not llround (which can overshoot)
+        // State indices are in range [0, n_steps], not [0, n_steps-1]
         double step_exact = t / dt;
-        size_t step_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
+        size_t state_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
 
-        // Clamp to valid range (handles floating point rounding at boundaries)
-        step_idx = std::min(step_idx, n_steps - 1);
+        // Clamp to valid state range (handles floating point rounding at boundaries)
+        // n_steps is valid (final state after n_steps time steps)
+        state_idx = std::min(state_idx, n_steps);
 
-        indices.push_back(step_idx);
+        indices.push_back(state_idx);
     }
 
     // Sort and deduplicate
@@ -248,6 +250,14 @@ AmericanOptionSolver::solve() {
     }
 
     auto grid = grid_result.value();
+
+    // Initialize dx in workspace from grid spatial points
+    // This is required because PDESolver boundary conditions use dx
+    auto dx_span = workspace_.dx();
+    auto grid_points = grid->x();
+    for (size_t i = 0; i < grid_points.size() - 1; ++i) {
+        dx_span[i] = grid_points[i + 1] - grid_points[i];
+    }
 
     // Create PDESolver with Grid + Workspace
     // PDESolver is created fresh each solve, takes Grid by shared_ptr
@@ -405,9 +415,14 @@ size_t n_space = grid_spec.n_points();
 // Allocate workspace buffer (reusable)
 std::pmr::synchronized_pool_resource pool;
 std::pmr::vector<double> buffer(PDEWorkspace::required_size(n_space), 0.0, &pool);
+
+// NOTE: Workspace dx will be initialized by AmericanOptionSolver::solve()
+// from the Grid spatial points. We use from_buffer() here and let the
+// solver populate dx, avoiding the need to know grid structure in advance.
 auto workspace = PDEWorkspace::from_buffer(buffer, n_space).value();
 
 // Solve (no snapshots)
+// The solver will initialize workspace.dx() from grid->x() before solving
 AmericanOptionSolver solver(params, workspace);
 auto result = solver.solve();
 
@@ -462,11 +477,13 @@ for (const auto& params : option_batch) {
     size_t n_space = grid_spec.n_points();
 
     // Create workspace spans for this grid size
+    // dx will be initialized by solver from Grid spatial points
     auto workspace = PDEWorkspace::from_buffer(buffer, n_space).value();
 
     AmericanOptionSolver solver(params, workspace);
     auto result = solver.solve();
     // Each solve creates fresh Grid, reuses workspace buffer
+    // Solver initializes dx from grid->x() before PDE solve
 }
 ```
 
@@ -486,6 +503,24 @@ if (workspace_.size() != grid_spec.n_points()) {
 ```
 
 This prevents silent out-of-bounds writes if a caller reuses a workspace sized for a different grid.
+
+**Workspace dx Initialization:**
+
+The workspace `dx` array is initialized by `AmericanOptionSolver::solve()` from the Grid's spatial points:
+
+```cpp
+// In AmericanOptionSolver::solve(), after Grid creation:
+auto dx_span = workspace_.dx();
+auto grid_points = grid->x();
+for (size_t i = 0; i < grid_points.size() - 1; ++i) {
+    dx_span[i] = grid_points[i + 1] - grid_points[i];
+}
+```
+
+**Why not use `from_buffer_and_grid()`?**
+- Caller doesn't know grid structure at workspace creation time (Grid is created inside solve())
+- Using `from_buffer()` + solver initialization avoids duplicate grid construction
+- This pattern separates workspace memory allocation (caller's concern) from grid-specific initialization (solver's concern)
 
 ## Migration Path
 
@@ -597,6 +632,11 @@ The benefits outweigh the costs, and the new API is more honest about ownership 
 **Question:** How to prevent out-of-bounds writes if workspace size doesn't match grid size?
 
 **Answer:** AmericanOptionSolver validates `workspace_.size() == grid_spec.n_points()` at start of `solve()` and returns `SolverError` on mismatch. This catches reuse errors early before PDESolver iterations.
+
+### 11. Workspace dx Initialization
+**Question:** Should caller initialize dx using `from_buffer_and_grid()` or should solver initialize it?
+
+**Answer:** Solver initializes dx from `grid->x()` after Grid creation. Caller uses `from_buffer()` because they don't know the grid structure at workspace allocation time (Grid is created inside `solve()`). This separates concerns: caller manages memory allocation, solver handles grid-specific initialization.
 
 ## Open Questions
 
