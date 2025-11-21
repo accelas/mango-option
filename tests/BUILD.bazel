@@ -68,22 +68,21 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
-# DISABLED: Uses old PDESolver API (needs refactoring for Grid-based constructor)
-# cc_test(
-#     name = "pde_solver_test",
-#     srcs = ["pde_solver_test.cc"],
-#     deps = [
-#         "//src/pde/core:pde_solver",
-#         "//src/pde/core:boundary_conditions",
-#         "//src/math:root_finding",
-#         "//src/pde/operators:operator_factory",
-#         "//src/pde/operators:laplacian_pde",
-#         "//src/pde/core:pde_workspace",
-#         "@googletest//:gtest",
-#         "@googletest//:gtest_main",
-#     ],
-#     copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
-# )
+cc_test(
+    name = "pde_solver_test",
+    srcs = ["pde_solver_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:laplacian_pde",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
+)
 
 cc_test(
     name = "time_domain_test",
@@ -146,20 +145,21 @@ cc_test(
 #     copts = ["-std=c++23", "-fopenmp-simd"],
 # )
 
-# DISABLED: Uses old PDESolver API (needs refactoring for Grid-based constructor)
-# cc_test(
-#     name = "obstacle_test",
-#     size = "small",
-#     srcs = ["obstacle_test.cc"],
-#     deps = [
-#         "//src/pde/core:pde_solver",
-#         "//src/pde/operators:laplacian_pde",
-#         "//src/pde/operators:operator_factory",
-#         "//src/pde/core:boundary_conditions",
-#         "@googletest//:gtest_main",
-#     ],
-#     copts = ["-std=c++23", "-fopenmp-simd"],
-# )
+cc_test(
+    name = "obstacle_test",
+    size = "small",
+    srcs = ["obstacle_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:grid",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/core:boundary_conditions",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-fopenmp-simd"],
+)
 
 cc_test(
     name = "grid_spacing_test",
