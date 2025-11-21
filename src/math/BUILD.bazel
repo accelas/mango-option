@@ -64,3 +64,19 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "bspline_nd_separable",
+    hdrs = ["bspline_nd_separable.hpp"],
+    deps = [
+        ":bspline_collocation",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
+    visibility = ["//visibility:public"],
+)

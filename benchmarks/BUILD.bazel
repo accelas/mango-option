@@ -237,6 +237,26 @@ cc_binary(
 )
 
 cc_binary(
+    name = "bspline_fitter_hardcoded_vs_template",
+    srcs = ["bspline_fitter_hardcoded_vs_template.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "cubic_spline_template_vs_hardcoded",
     srcs = ["cubic_spline_template_vs_hardcoded.cc"],
     copts = [
