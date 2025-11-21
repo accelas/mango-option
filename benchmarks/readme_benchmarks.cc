@@ -9,6 +9,7 @@
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <iomanip>
 #include <memory>
 #include <stdexcept>
@@ -181,9 +182,6 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
 // ============================================================================
 
 static void BM_README_AmericanSingle(benchmark::State& state) {
-    const size_t n_space = static_cast<size_t>(state.range(0));
-    const size_t n_time = static_cast<size_t>(state.range(1));
-
     AmericanOptionParams params(
         100.0,  // spot
         100.0,  // strike
@@ -194,16 +192,11 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         0.20    // volatility
     );
 
-    constexpr double x_min = -3.0;
-    constexpr double x_max = 3.0;
-
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
-    if (!grid_spec.has_value()) {
-        throw std::runtime_error("Failed to create grid: " + grid_spec.error());
-    }
+    // Use automatic grid estimation
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
-    size_t n = grid_spec.value().n_points();
+    size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
 
@@ -230,19 +223,11 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         run_once();
     }
 
-    state.counters["n_space"] = static_cast<double>(n_space);
+    state.counters["n_space"] = static_cast<double>(n);
     state.counters["n_time"] = static_cast<double>(n_time);
-    if (n_space == 101) {
-        state.SetLabel("American (single, 101x1k grid)");
-    } else if (n_space == 501) {
-        state.SetLabel("American (single, 501x5k grid)");
-    } else {
-        state.SetLabel("American (single)");
-    }
+    state.SetLabel(std::format("American (single, {}x{})", n, n_time));
 }
 BENCHMARK(BM_README_AmericanSingle)
-    ->Args({101, 1000})
-    ->Args({501, 5000})
     ->MinTime(kMinBenchmarkTimeSec);
 
 static void BM_README_AmericanBatch64(benchmark::State& state) {
