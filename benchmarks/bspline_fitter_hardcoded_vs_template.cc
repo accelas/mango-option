@@ -62,20 +62,21 @@ struct TestData {
 
 } // anonymous namespace
 
-// Benchmark current hardcoded implementation
+// Benchmark current generic template implementation
 static void BM_Fitter4D_Hardcoded_Small(benchmark::State& state) {
     TestData data(7, 4, 4, 4);
 
     for (auto _ : state) {
-        auto fitter_result = mango::BSplineFitter4D::create(
-            data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid);
+        auto fitter_result = mango::BSplineNDSeparable<double, 4>::create(
+            std::array<std::vector<double>, 4>{
+                data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid});
 
         if (!fitter_result.has_value()) {
             state.SkipWithError("Failed to create fitter");
             return;
         }
 
-        auto result = fitter_result.value().fit(data.values);
+        auto result = fitter_result.value().fit(data.values, mango::BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
         if (!result.success) {
             state.SkipWithError("Fitting failed");
@@ -93,15 +94,16 @@ static void BM_Fitter4D_Hardcoded_Medium(benchmark::State& state) {
     TestData data(20, 15, 10, 8);
 
     for (auto _ : state) {
-        auto fitter_result = mango::BSplineFitter4D::create(
-            data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid);
+        auto fitter_result = mango::BSplineNDSeparable<double, 4>::create(
+            std::array<std::vector<double>, 4>{
+                data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid});
 
         if (!fitter_result.has_value()) {
             state.SkipWithError("Failed to create fitter");
             return;
         }
 
-        auto result = fitter_result.value().fit(data.values);
+        auto result = fitter_result.value().fit(data.values, mango::BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
         if (!result.success) {
             state.SkipWithError("Fitting failed");
@@ -119,15 +121,16 @@ static void BM_Fitter4D_Hardcoded_Large(benchmark::State& state) {
     TestData data(50, 30, 20, 10);
 
     for (auto _ : state) {
-        auto fitter_result = mango::BSplineFitter4D::create(
-            data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid);
+        auto fitter_result = mango::BSplineNDSeparable<double, 4>::create(
+            std::array<std::vector<double>, 4>{
+                data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid});
 
         if (!fitter_result.has_value()) {
             state.SkipWithError("Failed to create fitter");
             return;
         }
 
-        auto result = fitter_result.value().fit(data.values);
+        auto result = fitter_result.value().fit(data.values, mango::BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
         if (!result.success) {
             state.SkipWithError("Fitting failed");

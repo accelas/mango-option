@@ -86,17 +86,18 @@ const AnalyticSurfaceFixture& GetSurface() {
         }
 
         // Fit B-spline using factory method
-        auto fitter_result = BSplineFitter4D::create(
-            fixture_ptr->m_grid,
-            fixture_ptr->tau_grid,
-            fixture_ptr->sigma_grid,
-            fixture_ptr->rate_grid);
+        auto fitter_result = BSplineNDSeparable<double, 4>::create(
+            std::array<std::vector<double>, 4>{
+                fixture_ptr->m_grid,
+                fixture_ptr->tau_grid,
+                fixture_ptr->sigma_grid,
+                fixture_ptr->rate_grid});
 
         if (!fitter_result.has_value()) {
             throw std::runtime_error("Failed to create B-spline fitter: " + fitter_result.error());
         }
 
-        auto fit_result = fitter_result.value().fit(prices);
+        auto fit_result = fitter_result.value().fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         if (!fit_result.success) {
             throw std::runtime_error("Failed to fit B-spline surface: " + fit_result.error_message);
         }
