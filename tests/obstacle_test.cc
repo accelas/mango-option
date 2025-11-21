@@ -135,9 +135,9 @@ TEST(ObstacleTest, DiffusionWithLowerBound) {
     auto spacing = std::make_shared<GridSpacing<double>>(grid->spacing());
     auto spatial_op = operators::create_spatial_operator(std::move(pde), spacing);
 
-    // Dirichlet BCs: u(0,t) = 0, u(1,t) = 0
-    DirichletBC left_bc{[](double, double) { return 0.0; }};
-    DirichletBC right_bc{[](double, double) { return 0.0; }};
+    // Dirichlet BCs: u(0,t) = 0.2, u(1,t) = 0.2 (compatible with obstacle)
+    DirichletBC left_bc{[](double, double) { return 0.2; }};
+    DirichletBC right_bc{[](double, double) { return 0.2; }};
 
     // Obstacle: u ≥ 0.2 everywhere
     auto obstacle_func = [](double, std::span<const double>, std::span<double> psi) {
