@@ -26,7 +26,7 @@ int main() {
     }
 
     std::pmr::synchronized_pool_resource pool;
-    auto workspace_result = PDEWorkspace::create(grid_spec.value(), &pool);
+    auto workspace_result = PDEWorkspaceOwned::create(grid_spec.value(), &pool);
 
     if (!workspace_result.has_value()) {
         std::cerr << "Workspace creation failed: " << workspace_result.error() << "\n";
@@ -34,7 +34,7 @@ int main() {
     }
 
     // Create solver with PDEWorkspace
-    AmericanOptionSolver solver(params, workspace_result.value());
+    AmericanOptionSolver solver(params, workspace_result.value().workspace);
 
     std::cout << "=== Deep ITM Put Test (Projected Thomas - Reformulated) ===\n";
     std::cout << "S=" << params.spot << " K=" << params.strike << " T=" << params.maturity << "\n";

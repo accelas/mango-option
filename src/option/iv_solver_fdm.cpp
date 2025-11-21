@@ -117,7 +117,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 
     // Create PDEWorkspace
-    auto pde_workspace_result = PDEWorkspace::create(grid_spec_result.value(), std::pmr::get_default_resource());
+    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec_result.value(), std::pmr::get_default_resource());
     if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
@@ -129,7 +129,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve
     try {
-        AmericanOptionSolver solver(option_params, pde_workspace_result.value());
+        AmericanOptionSolver solver(option_params, pde_workspace_result.value().workspace);
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 

@@ -138,49 +138,56 @@ public:
             std::pmr::unsynchronized_pool_resource thread_pool;
 
             // Per-thread workspace (only for shared grid strategy)
-            std::shared_ptr<PDEWorkspace> thread_pde_workspace;
+            // Store owned workspace to keep buffer alive
+            std::optional<PDEWorkspaceOwned> thread_owned_workspace;
             std::shared_ptr<Grid<double>> thread_grid;
 
             if (use_shared_grid) {
                 auto [grid_spec, n_time] = shared_grid.value();
+                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, n_time);  // Temp time domain for batch
 
                 // Create Grid with solution storage
-                auto grid_result = Grid<double>::create_with_solution(grid_spec, n_time);
+                auto grid_result = Grid<double>::create(grid_spec, time_domain);
                 if (grid_result.has_value()) {
-                    thread_grid = std::make_shared<Grid<double>>(std::move(grid_result.value()));
+                    thread_grid = grid_result.value();
 
-                    // Create PDEWorkspace from grid specification
-                    auto pde_workspace_result = PDEWorkspace::create(grid_spec, &thread_pool);
+                    // Create PDEWorkspaceOwned from grid specification (buffer + workspace)
+                    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec, &thread_pool);
                     if (pde_workspace_result.has_value()) {
-                        thread_pde_workspace = std::make_shared<PDEWorkspace>(std::move(pde_workspace_result.value()));
+                        thread_owned_workspace = std::move(pde_workspace_result.value());
                     }
                 }
-                // If creation failed, thread_pde_workspace remains null and we'll fail in loop
+                // If creation failed, thread_owned_workspace remains nullopt and we'll fail in loop
             }
 
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
                 // Get or create workspace for this iteration
                 std::shared_ptr<Grid<double>> grid;
-                std::shared_ptr<PDEWorkspace> pde_workspace;
+                std::optional<PDEWorkspaceOwned> owned_workspace;
+                PDEWorkspace* pde_workspace = nullptr;
 
                 if (use_shared_grid) {
                     // Shared grid: reuse thread workspace
                     grid = thread_grid;
-                    pde_workspace = thread_pde_workspace;
+                    if (thread_owned_workspace.has_value()) {
+                        pde_workspace = &thread_owned_workspace->workspace;
+                    }
                 } else {
                     // Per-option grid: create workspace for this option
                     auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
+                    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params[i].maturity, n_time);
 
                     // Create Grid with solution storage
-                    auto grid_result = Grid<double>::create_with_solution(grid_spec, n_time);
+                    auto grid_result = Grid<double>::create(grid_spec, time_domain);
                     if (grid_result.has_value()) {
-                        grid = std::make_shared<Grid<double>>(std::move(grid_result.value()));
+                        grid = grid_result.value();
 
-                        // Create PDEWorkspace from grid specification
-                        auto pde_workspace_result = PDEWorkspace::create(grid_spec, &thread_pool);
+                        // Create PDEWorkspaceOwned from grid specification
+                        auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec, &thread_pool);
                         if (pde_workspace_result.has_value()) {
-                            pde_workspace = std::make_shared<PDEWorkspace>(std::move(pde_workspace_result.value()));
+                            owned_workspace = std::move(pde_workspace_result.value());
+                            pde_workspace = &owned_workspace->workspace;
                         }
                     }
                 }
@@ -249,8 +256,8 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     // Estimate grid for this option
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
-    // Create PDEWorkspace with estimated grid
-    auto pde_workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+    // Create PDEWorkspaceOwned with estimated grid
+    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec, std::pmr::get_default_resource());
     if (!pde_workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
@@ -260,7 +267,7 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     }
 
     // Create and solve using PDEWorkspace API
-    AmericanOptionSolver solver(params, pde_workspace_result.value());
+    AmericanOptionSolver solver(params, pde_workspace_result.value().workspace);
     return solver.solve();
 }
 
@@ -370,11 +377,16 @@ private:
 
     friend class NormalizedChainSolver;
 
-    std::shared_ptr<PDEWorkspace> pde_workspace_;
+    std::unique_ptr<PDEWorkspaceOwned> owned_workspace_;  // Owns buffer + workspace
     std::shared_ptr<Grid<double>> grid_;
     std::vector<double> x_grid_;
     std::vector<double> tau_grid_;
     std::vector<double> values_;  // u(x,τ) [row-major: Nx × Ntau]
+
+public:
+    // Accessor for workspace (after create() succeeds)
+    PDEWorkspace& workspace() { return owned_workspace_->workspace; }
+    const PDEWorkspace& workspace() const { return owned_workspace_->workspace; }
 };
 
 /**

@@ -67,18 +67,19 @@ std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
     }
 
     // Create Grid with solution storage
-    auto grid_result = Grid<double>::create_with_solution(grid_spec_result.value(), request.n_time);
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, request.T_max, request.n_time);
+    auto grid_result = Grid<double>::create(grid_spec_result.value(), time_domain);
     if (!grid_result.has_value()) {
         return std::unexpected("Failed to create Grid: " + grid_result.error());
     }
-    workspace.grid_ = std::make_shared<Grid<double>>(std::move(grid_result.value()));
+    workspace.grid_ = grid_result.value();
 
-    // Create PDEWorkspace
-    auto pde_workspace_result = PDEWorkspace::create(grid_spec_result.value(), std::pmr::get_default_resource());
+    // Create PDEWorkspaceOwned (owns buffer + workspace)
+    auto pde_workspace_result = PDEWorkspaceOwned::create(grid_spec_result.value(), std::pmr::get_default_resource());
     if (!pde_workspace_result.has_value()) {
         return std::unexpected("Failed to create PDEWorkspace: " + pde_workspace_result.error());
     }
-    workspace.pde_workspace_ = std::make_shared<PDEWorkspace>(std::move(pde_workspace_result.value()));
+    workspace.owned_workspace_ = std::make_unique<PDEWorkspaceOwned>(std::move(pde_workspace_result.value()));
 
     // Allocate x grid
     workspace.x_grid_.resize(request.n_space);
@@ -145,7 +146,7 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     params.discrete_dividends = {};  // Normalized solver requires no discrete dividends
 
     // Create solver using PDEWorkspace API
-    AmericanOptionSolver solver(params, *workspace.pde_workspace_);
+    AmericanOptionSolver solver(params, workspace.workspace());
 
     // Precompute step indices for each maturity
     double dt = request.T_max / request.n_time;

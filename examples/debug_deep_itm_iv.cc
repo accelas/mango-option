@@ -60,14 +60,14 @@ int main() {
     }
 
         std::pmr::synchronized_pool_resource pool;
-        auto workspace = PDEWorkspace::create(grid_spec.value(), &pool);
+        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), &pool);
 
         if (!workspace.has_value()) {
             std::cerr << "Workspace creation failed\n";
             return 1;
         }
 
-        AmericanOptionSolver solver(params, workspace.value());
+        AmericanOptionSolver solver(params, workspace.value().workspace);
         auto result = solver.solve();
 
         if (result.has_value()) {

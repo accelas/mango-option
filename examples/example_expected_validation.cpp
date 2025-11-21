@@ -31,14 +31,13 @@ int main() {
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
         constexpr size_t n_space = 101;
-        constexpr size_t n_time = 1000;
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
         if (!grid_spec.has_value()) {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -46,7 +45,7 @@ int main() {
 
         // Using constructor with exception-based validation
         try {
-            AmericanOptionSolver solver(valid_params, workspace.value());
+            AmericanOptionSolver solver(valid_params, workspace.value().workspace);
             std::cout << "   ✓ Validation passed! Solver created successfully.\n";
 
             // Solve the option
@@ -78,21 +77,20 @@ int main() {
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
         constexpr size_t n_space = 101;
-        constexpr size_t n_time = 1000;
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
         if (!grid_spec.has_value()) {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
         }
 
         try {
-            AmericanOptionSolver solver(invalid_params, workspace.value());
+            AmericanOptionSolver solver(invalid_params, workspace.value().workspace);
             std::cout << "   ✓ Validation passed!\n";
         } catch (const std::exception& e) {
             std::cout << "   ✗ Validation failed: " << e.what() << "\n";
@@ -116,15 +114,11 @@ int main() {
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
         constexpr size_t n_space = 5;  // Too small!
-        constexpr size_t n_time = 1000;
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
-        std::expected<PDEWorkspace, std::string> workspace;
-        if (grid_spec.has_value()) {
-            workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
-        } else {
-            workspace = std::unexpected(grid_spec.error());
-        }
+        auto workspace = grid_spec.has_value()
+            ? PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource())
+            : std::expected<PDEWorkspaceOwned, std::string>(std::unexpected(grid_spec.error()));
 
         if (workspace.has_value()) {
             std::cout << "   ✓ Workspace created (unexpected)!\n";
@@ -150,21 +144,20 @@ int main() {
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
         constexpr size_t n_space = 101;
-        constexpr size_t n_time = 1000;
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
         if (!grid_spec.has_value()) {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
         }
 
         try {
-            AmericanOptionSolver solver(invalid_params, workspace.value());
+            AmericanOptionSolver solver(invalid_params, workspace.value().workspace);
             std::cout << "   ✓ Validation passed!\n";
         } catch (const std::exception& e) {
             std::cout << "   ✗ Validation failed: " << e.what() << "\n";
@@ -181,14 +174,13 @@ int main() {
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
         constexpr size_t n_space = 101;
-        constexpr size_t n_time = 1000;
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
         if (!grid_spec.has_value()) {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
@@ -205,7 +197,7 @@ int main() {
         );
 
         try {
-            AmericanOptionSolver solver1(params1, workspace.value());
+            AmericanOptionSolver solver1(params1, workspace.value().workspace);
             std::cout << "   ✓ First solver created with shared workspace.\n";
         } catch (const std::exception& e) {
             std::cout << "   ✗ Validation failed: " << e.what() << "\n";
@@ -229,20 +221,19 @@ int main() {
         constexpr double x_min = -3.0;
         constexpr double x_max = 3.0;
         constexpr size_t n_space = 101;
-        constexpr size_t n_time = 1000;
 
         auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
         if (!grid_spec.has_value()) {
             std::cout << "   ✗ Failed to create grid: " << grid_spec.error() << "\n\n";
             return 1;
         }
-        auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+        auto workspace = PDEWorkspaceOwned::create(grid_spec.value(), std::pmr::get_default_resource());
         if (!workspace) {
             std::cout << "   ✗ Failed to create workspace: " << workspace.error() << "\n\n";
             return 1;
         }
 
-        AmericanOptionSolver solver(valid_params, workspace.value());
+        AmericanOptionSolver solver(valid_params, workspace.value().workspace);
         auto solution = solver.solve();
         if (solution.has_value()) {
             std::cout << "   ✓ Option solved successfully.\n";

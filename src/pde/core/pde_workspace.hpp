@@ -5,6 +5,8 @@
 #include <string>
 #include <format>
 #include <algorithm>
+#include <memory_resource>
+#include "src/pde/core/grid.hpp"
 
 namespace mango {
 
@@ -221,6 +223,55 @@ private:
     std::span<double> reserved1_;
     std::span<double> reserved2_;
     std::span<double> reserved3_;
+};
+
+/**
+ * PDEWorkspaceOwned: Convenience wrapper that owns buffer + workspace
+ *
+ * Provides RAII semantics for temporary PDE workspace allocation.
+ * Automatically allocates buffer of correct size and creates workspace spans.
+ */
+struct PDEWorkspaceOwned {
+    std::vector<double> buffer;
+    PDEWorkspace workspace;
+
+    /// Constructor (private, use create() factory)
+    PDEWorkspaceOwned(std::vector<double>&& buf, PDEWorkspace ws)
+        : buffer(std::move(buf)), workspace(ws) {}
+
+    /// Factory method: creates buffer and workspace from grid spec
+    static std::expected<PDEWorkspaceOwned, std::string>
+    create(const GridSpec<double>& grid_spec, std::pmr::memory_resource* memory = nullptr) {
+        // Use default resource if not provided
+        if (memory == nullptr) {
+            memory = std::pmr::get_default_resource();
+        }
+
+        size_t n = grid_spec.n_points();
+        size_t buffer_size = PDEWorkspace::required_size(n);
+
+        // Allocate buffer using PMR
+        std::pmr::vector<double> pmr_buffer(buffer_size, memory);
+
+        // Move to owned buffer
+        std::vector<double> owned_buffer(pmr_buffer.begin(), pmr_buffer.end());
+
+        // Now create workspace from the owned buffer
+        auto workspace_result = PDEWorkspace::from_buffer(owned_buffer, n);
+        if (!workspace_result.has_value()) {
+            return std::unexpected(workspace_result.error());
+        }
+
+        return PDEWorkspaceOwned(std::move(owned_buffer), workspace_result.value());
+    }
+
+    // No copy (expensive)
+    PDEWorkspaceOwned(const PDEWorkspaceOwned&) = delete;
+    PDEWorkspaceOwned& operator=(const PDEWorkspaceOwned&) = delete;
+
+    // Move OK
+    PDEWorkspaceOwned(PDEWorkspaceOwned&&) = default;
+    PDEWorkspaceOwned& operator=(PDEWorkspaceOwned&&) = default;
 };
 
 }  // namespace mango

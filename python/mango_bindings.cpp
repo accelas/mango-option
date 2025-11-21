@@ -8,7 +8,7 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/support/memory/solver_memory_arena.hpp"
 
 namespace py = pybind11;
@@ -186,13 +186,13 @@ PYBIND11_MODULE(mango_iv, m) {
                     "Failed to create grid: " + grid_spec_result.error());
             }
             auto workspace_result =
-                mango::AmericanSolverWorkspace::create(grid_spec_result.value(), n_time, std::pmr::get_default_resource());
+                mango::PDEWorkspaceOwned::create(grid_spec_result.value(), std::pmr::get_default_resource());
             if (!workspace_result) {
                 throw py::value_error(
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            mango::AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+            mango::AmericanOptionSolver solver(params, workspace_result.value().workspace);
             auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();
