@@ -106,18 +106,6 @@ cc_library(
 )
 
 cc_library(
-    name = "batch_iv_solver",
-    hdrs = ["batch_iv_solver.hpp"],
-    deps = [
-        ":iv_solver_fdm",
-        ":iv_types",
-        ":option_spec",
-    ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "iv_solver_interpolated",
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],

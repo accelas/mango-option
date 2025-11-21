@@ -253,32 +253,16 @@ struct PriceTable4DResult {
 
 ### 1. FDM Batch IV Solver
 
-**File:** `/home/kai/work/iv_calc/src/option/iv_solver.hpp` (lines 144-211)
+**File:** `/home/kai/work/iv_calc/src/option/iv_solver_fdm.hpp`
 
-#### BatchIVSolver Class
+#### IVSolverFDM Batch API
 
 ```cpp
-class BatchIVSolver {
+class IVSolverFDM : public IVSolverBase {
 public:
-    static std::vector<IVResult> solve_batch(
-        std::span<const IVParams> params,
-        const IVConfig& config)
-    {
-        std::vector<IVResult> results(params.size());
-        
-        MANGO_PRAGMA_PARALLEL_FOR
-        for (size_t i = 0; i < params.size(); ++i) {
-            IVSolver solver(params[i], config);
-            results[i] = solver.solve();
-        }
-        
-        return results;
-    }
-
-    // Vector overload
-    static std::vector<IVResult> solve_batch(
-        const std::vector<IVParams>& params,
-        const IVConfig& config);
+    // Batch solving with OpenMP parallelization
+    void solve_batch_impl(std::span<const IVQuery> queries,
+                         std::span<IVResult> results);
 };
 ```
 
@@ -290,13 +274,18 @@ public:
 #### Usage Pattern
 
 ```cpp
-std::vector<IVParams> batch = { ... };
-IVConfig config;  // Shared configuration
+#include "src/option/iv_solver_fdm.hpp"
 
-auto results = solve_implied_vol_batch(batch, config);
+std::vector<IVQuery> queries = { ... };
+IVSolverFDMConfig config;  // Shared configuration
 
-// Or explicitly use BatchIVSolver
-auto results = BatchIVSolver::solve_batch(batch, config);
+IVSolverFDM solver(config);
+std::vector<IVResult> results(queries.size());
+auto status = solver.solve_batch(queries, results);
+
+if (!status) {
+    std::cerr << "Batch solve failed: " << status.error() << "\n";
+}
 ```
 
 #### Key Characteristics
@@ -447,7 +436,7 @@ OR (for single options):
 
 | Component | Pattern | Thread Safety |
 |-----------|---------|----------------|
-| BatchIVSolver | Simple parallel loop | Each thread independent |
+| IVSolverFDM::solve_batch | Simple parallel loop | Each thread independent |
 | BatchAmericanOption | Per-thread workspace | Validates params once upfront |
 | PriceTable4DBuilder | OpenMP reduction | Parallel slice collection |
 
@@ -528,6 +517,6 @@ The codebase provides **three complementary IV solving approaches:**
 
 1. **FDM (IVSolver):** Ground truth, ~143ms per IV, suitable for single calculations
 2. **Interpolation (IVSolverInterpolated):** Fast, ~20µs per IV, requires pre-computed table
-3. **Batch (BatchIVSolver + BatchAmericanOption):** Parallelizes with OpenMP, per-thread workspace reuse
+3. **Batch (IVSolverFDM::solve_batch + BatchAmericanOption):** Parallelizes with OpenMP, per-thread workspace reuse
 
 The **American option solver** shows a more sophisticated batch pattern with per-thread workspace reuse that could inform improvements to batch IV solving.
