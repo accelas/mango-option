@@ -320,34 +320,11 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
 )
 
-
 cc_test(
-    name = "unified_memory_resource_test",
-    srcs = ["memory/unified_memory_resource_test.cc"],
+    name = "cpu_diagnostics_test",
+    srcs = ["cpu/cpu_diagnostics_test.cc"],
     deps = [
-        "//src/support/memory:unified_memory_resource",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "feature_detection_test",
-    srcs = ["cpu/feature_detection_test.cc"],
-    deps = [
-        "//src/support/cpu:feature_detection",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
-    name = "centered_difference_simd_test",
-    srcs = ["operators/centered_difference_simd_test.cc"],
-    deps = [
-        "//src/pde/operators:centered_difference_simd_backend",
-        "//src/pde/operators:centered_difference_scalar",
-        "//src/pde/core:grid",
+        "//src/support/cpu:cpu_diagnostics",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -364,6 +341,17 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
+cc_test(
+    name = "target_clones_test",
+    srcs = ["operators/target_clones_test.cc"],
+    deps = [
+        "//src/pde/operators:centered_difference_scalar",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-fopenmp-simd"],
+)
+
 # Test suites defined for convenience
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
@@ -374,7 +362,7 @@ cc_test(
     copts = ["-std=c++23"],
     deps = [
         "//src/pde/core:pde_solver",
-        "//src/support/cpu:feature_detection",
+        "//src/support/cpu:cpu_diagnostics",
         "@googletest//:gtest_main",
     ],
     tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
@@ -496,17 +484,6 @@ cc_test(
     size = "medium",
     timeout = "moderate",
 )
-
-cc_test(
-    name = "solver_memory_arena_test",
-    srcs = ["memory/solver_memory_arena_test.cc"],
-    deps = [
-        "//src/support/memory:solver_memory_arena",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
 
 cc_test(
     name = "quantlib_accuracy_test",

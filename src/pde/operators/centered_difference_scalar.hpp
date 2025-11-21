@@ -22,6 +22,7 @@ public:
     {}
 
     // Uniform grid second derivative
+    [[gnu::target_clones("default", "avx2", "avx512f")]]
     void compute_second_derivative_uniform(
         std::span<const T> u, std::span<T> d2u_dx2,
         size_t start, size_t end) const
@@ -36,6 +37,7 @@ public:
     }
 
     // Uniform grid first derivative
+    [[gnu::target_clones("default", "avx2", "avx512f")]]
     void compute_first_derivative_uniform(
         std::span<const T> u, std::span<T> du_dx,
         size_t start, size_t end) const
@@ -49,6 +51,7 @@ public:
     }
 
     // Non-uniform grid second derivative - USES PRECOMPUTED ARRAYS
+    [[gnu::target_clones("default", "avx2", "avx512f")]]
     void compute_second_derivative_non_uniform(
         std::span<const T> u, std::span<T> d2u_dx2,
         size_t start, size_t end) const
@@ -70,6 +73,7 @@ public:
     }
 
     // Non-uniform grid first derivative - USES PRECOMPUTED ARRAYS
+    [[gnu::target_clones("default", "avx2", "avx512f")]]
     void compute_first_derivative_non_uniform(
         std::span<const T> u, std::span<T> du_dx,
         size_t start, size_t end) const
