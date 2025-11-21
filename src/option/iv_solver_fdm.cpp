@@ -1,3 +1,7 @@
+// Suppress deprecation warnings for internal AmericanSolverWorkspace usage
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/math/root_finding.hpp"
 #include "src/option/american_option.hpp"
@@ -237,3 +241,5 @@ void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
 }
 
 } // namespace mango
+
+#pragma GCC diagnostic pop
