@@ -4,7 +4,6 @@
 #include "src/bspline/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/normalized_chain_solver.hpp"
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <benchmark/benchmark.h>
