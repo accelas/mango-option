@@ -160,6 +160,9 @@ inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
 /**
  * Workspace for American option solving with PMR-based memory allocation.
  *
+ * @deprecated Use PDEWorkspace directly instead. This class will be removed in a future release.
+ *             See docs/migration/american-option-api-migration.md for migration guide.
+ *
  * Provides unified workspace for American option pricing with:
  * - Grid for grid + solution storage
  * - PDEWorkspace allocated from provided memory resource
@@ -186,7 +189,7 @@ inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
  * Thread safety: **NOT thread-safe for concurrent solving**.
  * Use BatchAmericanOptionSolver for parallel option pricing.
  */
-class AmericanSolverWorkspace {
+class [[deprecated("Use PDEWorkspace directly. See docs/migration/american-option-api-migration.md")]] AmericanSolverWorkspace {
 public:
     /**
      * Factory method creates workspace from GridSpec.

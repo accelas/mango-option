@@ -2,6 +2,10 @@
 #include "src/pde/core/time_domain.hpp"
 #include <memory_resource>
 
+// Suppress deprecation warnings for the implementation of the deprecated class
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 namespace mango {
 
 std::expected<std::shared_ptr<AmericanSolverWorkspace>, std::string>
@@ -61,3 +65,5 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
 }
 
 }  // namespace mango
+
+#pragma GCC diagnostic pop

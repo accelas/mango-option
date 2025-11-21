@@ -3,6 +3,10 @@
 #include "src/pde/core/grid.hpp"
 #include <memory_resource>
 
+// Suppress deprecation warnings - this test file tests the deprecated class
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 namespace mango {
 namespace {
 
@@ -71,3 +75,5 @@ TEST(AmericanSolverWorkspaceTest, ZeroTimeStepsReturnsError) {
 
 }  // namespace
 }  // namespace mango
+
+#pragma GCC diagnostic pop
