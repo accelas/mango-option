@@ -201,7 +201,13 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     if (!grid_spec.has_value()) {
         throw std::runtime_error("Failed to create grid: " + grid_spec.error());
     }
-    auto workspace = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.value().n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace) {
         throw std::runtime_error("Failed to create workspace: " + workspace.error());
     }
@@ -212,7 +218,8 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {

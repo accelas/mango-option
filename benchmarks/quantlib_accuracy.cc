@@ -121,11 +121,17 @@ static void compare_scenario(
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, n_time] = estimate_grid_for_option(mango_params);
-    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
     }
-    auto workspace = std::move(workspace_result.value());
+    auto workspace = workspace_result.value();
 
     AmericanOptionSolver solver(mango_params, workspace);
     auto mango_result_expected = solver.solve();
@@ -250,11 +256,17 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
-    auto workspace = std::move(workspace_result.value());
+    auto workspace = workspace_result.value();
 
     AmericanOptionSolver solver(params, workspace);
     auto mango_result_expected = solver.solve();
@@ -302,11 +314,17 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
-    auto workspace = std::move(workspace_result.value());
+    auto workspace = workspace_result.value();
 
     AmericanOptionSolver solver(params, workspace);
     auto mango_result_expected = solver.solve();
@@ -610,11 +628,17 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
-    auto workspace = std::move(workspace_result.value());
+    auto workspace = workspace_result.value();
 
     AmericanOptionSolver solver(params, workspace);
     auto result = solver.solve();
@@ -676,11 +700,17 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         throw std::runtime_error("Failed to create workspace");
     }
-    auto workspace = std::move(workspace_result.value());
+    auto workspace = workspace_result.value();
 
     AmericanOptionSolver solver(params, workspace);
     auto result = solver.solve();
