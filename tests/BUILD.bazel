@@ -29,6 +29,16 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_snapshot_test",
+    srcs = ["grid_snapshot_test.cc"],
+    deps = [
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
     name = "pde_workspace_test",
     srcs = ["pde_workspace_test.cc"],
     deps = [
