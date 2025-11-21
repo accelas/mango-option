@@ -1,3 +1,7 @@
+// Suppress deprecation warnings for test code using AmericanSolverWorkspace
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 
@@ -246,3 +250,5 @@ TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
 
 }  // namespace
 }  // namespace mango
+
+#pragma GCC diagnostic pop

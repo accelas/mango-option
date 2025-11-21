@@ -3,6 +3,10 @@
  * @brief Implementation of batch and normalized chain solvers
  */
 
+// Suppress deprecation warnings for internal AmericanSolverWorkspace usage
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "src/option/american_option_batch.hpp"
 #include "common/ivcalc_trace.h"
 #include <cmath>
@@ -278,3 +282,5 @@ std::expected<void, std::string> NormalizedChainSolver::check_eligibility(
 }
 
 }  // namespace mango
+
+#pragma GCC diagnostic pop
