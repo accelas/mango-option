@@ -3,6 +3,22 @@
 **Date:** 2025-11-20
 **Status:** Design Complete, Ready for Implementation
 
+## Important Note
+
+This is a **design document** describing the **target architecture** after refactoring. The APIs described here (Grid snapshot system, AmericanOptionResult wrapper, PDEWorkspace-based solver) **do not yet exist** in the codebase. This document specifies what needs to be built during implementation.
+
+**Current codebase state:**
+- Grid has no snapshot support (only basic solution storage)
+- AmericanSolverWorkspace exists and owns Grid (violates reusability principle)
+- AmericanOptionResult is a struct with duplicate storage
+- PDESolver doesn't have snapshot recording hooks
+
+**This design proposes:**
+- Adding snapshot support to Grid (new API)
+- Removing AmericanSolverWorkspace (breaking change)
+- Refactoring AmericanOptionResult to wrapper class (breaking change)
+- Adding snapshot recording to PDESolver (enhancement)
+
 ## Motivation
 
 The current `AmericanOptionResult` duplicates storage and logic that belongs in the generic PDE framework. This refactoring addresses four goals:
@@ -289,6 +305,9 @@ AmericanOptionSolver::solve() {
         pde_solver.initialize(AmericanPutSolver::payoff);
 
         // Register discrete dividend events (if any)
+        // NOTE: Discrete dividends are NOT fully implemented yet
+        // The callbacks are registered but contain placeholder code
+        // Full implementation requires cubic spline interpolation infrastructure
         for (const auto& dividend : params_.discrete_dividends) {
             pde_solver.add_temporal_event(dividend.time,
                 [div_amount = dividend.amount, K = params_.strike](
@@ -302,8 +321,9 @@ AmericanOptionSolver::solve() {
                         double S = K * std::exp(x[i]);
                         double S_ex = std::max(S - div_amount, 0.0);
                         double x_ex = std::log(S_ex / K);
-                        // TODO: Interpolate u from x_ex to x[i] (cubic spline)
-                        // For now, simplified: u[i] remains unchanged (placeholder)
+                        // TODO: Implement cubic spline interpolation from x_ex to x[i]
+                        // Then re-apply boundary and obstacle conditions
+                        // PLACEHOLDER: u[i] unchanged (incorrect, dividends not working)
                     }
                 });
         }
@@ -321,6 +341,7 @@ AmericanOptionSolver::solve() {
         pde_solver.initialize(AmericanCallSolver::payoff);
 
         // Register discrete dividend events (if any)
+        // NOTE: Same placeholder as put solver - dividends not fully working
         for (const auto& dividend : params_.discrete_dividends) {
             pde_solver.add_temporal_event(dividend.time,
                 [div_amount = dividend.amount, K = params_.strike](
@@ -331,8 +352,8 @@ AmericanOptionSolver::solve() {
                         double S = K * std::exp(x[i]);
                         double S_ex = std::max(S - div_amount, 0.0);
                         double x_ex = std::log(S_ex / K);
-                        // TODO: Interpolate u from x_ex to x[i] (cubic spline)
-                        // For now, simplified: u[i] remains unchanged (placeholder)
+                        // TODO: Same as put - needs interpolation implementation
+                        // PLACEHOLDER: u[i] unchanged (incorrect)
                     }
                 });
         }
@@ -723,10 +744,22 @@ State indices represent PDE solution states at discrete times, with state 0 bein
 
 **Answer:** Solver initializes dx from `grid->x()` after Grid creation. Caller uses `from_buffer()` because they don't know the grid structure at workspace allocation time (Grid is created inside `solve()`). This separates concerns: caller manages memory allocation, solver handles grid-specific initialization.
 
-## Open Questions
+## Open Issues
 
-### 1. Serialization/Export
+### 1. Discrete Dividend Implementation
+**Status:** Design shows event registration, but transformation is placeholder
+
+The design shows how to register discrete dividends as temporal events, but the actual solution transformation is incomplete. Full implementation requires:
+- Cubic spline interpolation from shifted log-moneyness grid
+- Re-application of boundary conditions after interpolation
+- Re-application of obstacle conditions after interpolation
+
+Current placeholder leaves solution unchanged, making dividends non-functional.
+
+**Decision needed:** Either implement full dividend support in this refactoring or document as out-of-scope and remove dividend event registration code.
+
+### 2. Serialization/Export
 Should Grid provide serialization hooks for saving/loading snapshot data? Defer to future work if needed.
 
-### 2. Partial Snapshots
+### 3. Partial Snapshots
 Should we support strided/partial spatial snapshots to reduce memory? Current design records full `n_space` per snapshot. Defer to future work if memory becomes an issue.
