@@ -49,7 +49,7 @@ private:
 TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     // Create grid specification
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 51).value();
-    TimeDomain time(0.0, 1.0, 100);
+    auto time = TimeDomain::from_n_steps(0.0, 1.0, 100);
 
     // Create Grid
     auto grid_result = Grid<double>::create(grid_spec, time);
@@ -113,7 +113,7 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
 TEST(ObstacleTest, DiffusionWithLowerBound) {
     // Test diffusion with lower obstacle bound
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 51).value();
-    TimeDomain time(0.0, 0.1, 100);
+    auto time = TimeDomain::from_n_steps(0.0, 0.1, 100);
 
     auto grid_result = Grid<double>::create(grid_spec, time);
     ASSERT_TRUE(grid_result.has_value());

@@ -68,24 +68,21 @@ cc_test(
     copts = ["-std=c++23"],
 )
 
-# TEMPORARILY DISABLED: Numerical accuracy issues under investigation
-# Test compiles and runs but solution values too small (~1000x smaller than expected)
-# Likely issue with time stepping or workspace setup
-# cc_test(
-#     name = "pde_solver_test",
-#     srcs = ["pde_solver_test.cc"],
-#     deps = [
-#         "//src/pde/core:pde_solver",
-#         "//src/pde/core:boundary_conditions",
-#         "//src/pde/operators:operator_factory",
-#         "//src/pde/operators:laplacian_pde",
-#         "//src/pde/core:pde_workspace",
-#         "//src/pde/core:grid",
-#         "@googletest//:gtest",
-#         "@googletest//:gtest_main",
-#     ],
-#     copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
-# )
+cc_test(
+    name = "pde_solver_test",
+    srcs = ["pde_solver_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:laplacian_pde",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
+)
 
 cc_test(
     name = "time_domain_test",

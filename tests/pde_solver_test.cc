@@ -52,8 +52,8 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Create grid specification
     auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 51).value();
 
-    // Create time domain
-    mango::TimeDomain time(0.0, 0.1, 100);  // 100 time steps
+    // Create time domain (from_n_steps: NOT direct constructor with dt!)
+    auto time = mango::TimeDomain::from_n_steps(0.0, 0.1, 100);  // 100 time steps
 
     // Create Grid with solution storage
     auto grid_result = mango::Grid<double>::create(grid_spec, time);
@@ -91,6 +91,11 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Create solver
     auto solver = TestPDESolver(grid, workspace, left_bc, right_bc, heat_op);
 
+    // Increase Newton iterations for tests without analytical Jacobian
+    mango::TRBDF2Config config;
+    config.max_iter = 100;
+    solver.set_config(config);
+
     // Initialize with IC
     solver.initialize(ic);
 
@@ -125,7 +130,7 @@ TEST(PDESolverTest, HeatEquationNeumannBC) {
     auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 51).value();
 
     // Create time domain
-    mango::TimeDomain time(0.0, 0.1, 100);
+    auto time = mango::TimeDomain::from_n_steps(0.0, 0.1, 100);
 
     // Create Grid
     auto grid_result = mango::Grid<double>::create(grid_spec, time);
@@ -163,6 +168,11 @@ TEST(PDESolverTest, HeatEquationNeumannBC) {
     // Create solver
     auto solver = TestPDESolver(grid, workspace, left_bc, right_bc, heat_op);
 
+    // Increase Newton iterations for tests without analytical Jacobian
+    mango::TRBDF2Config config;
+    config.max_iter = 100;
+    solver.set_config(config);
+
     // Initialize and solve
     solver.initialize(ic);
     auto status = solver.solve();
@@ -189,7 +199,7 @@ TEST(PDESolverTest, SteadyStateConvergence) {
     const double D = 0.1;
 
     auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 51).value();
-    mango::TimeDomain time(0.0, 1.0, 1000);  // Long time for steady state
+    auto time = mango::TimeDomain::from_n_steps(0.0, 1.0, 1000);  // Long time for steady state
 
     auto grid_result = mango::Grid<double>::create(grid_spec, time);
     ASSERT_TRUE(grid_result.has_value());
@@ -220,6 +230,12 @@ TEST(PDESolverTest, SteadyStateConvergence) {
     };
 
     auto solver = TestPDESolver(grid, workspace, left_bc, right_bc, spatial_op);
+
+    // Increase Newton iterations for tests without analytical Jacobian
+    mango::TRBDF2Config config;
+    config.max_iter = 100;
+    solver.set_config(config);
+
     solver.initialize(ic);
     auto status = solver.solve();
     ASSERT_TRUE(status.has_value());
