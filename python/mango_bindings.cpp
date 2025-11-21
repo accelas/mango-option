@@ -129,7 +129,7 @@ PYBIND11_MODULE(mango_iv, m) {
 
             // Allocate workspace buffer (local, temporary)
             size_t n = grid_spec_result.value().n_points();
-            std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+            std::vector<double> buffer(mango::PDEWorkspace::required_size(n));
 
             auto workspace_result = mango::PDEWorkspace::from_buffer(buffer, n);
             if (!workspace_result) {
