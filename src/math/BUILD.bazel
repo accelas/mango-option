@@ -64,3 +64,13 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "bspline_nd",
+    hdrs = ["bspline_nd.hpp"],
+    deps = [
+        ":bspline_basis",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)

@@ -523,3 +523,15 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "bspline_nd_test",
+    size = "small",
+    srcs = ["bspline_nd_test.cc"],
+    deps = [
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
