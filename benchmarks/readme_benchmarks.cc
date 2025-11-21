@@ -230,6 +230,64 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
 BENCHMARK(BM_README_AmericanSingle)
     ->MinTime(kMinBenchmarkTimeSec);
 
+static void BM_README_AmericanSequential(benchmark::State& state) {
+    const size_t batch_size = static_cast<size_t>(state.range(0));
+
+    std::vector<AmericanOptionParams> batch;
+    batch.reserve(batch_size);
+
+    for (size_t i = 0; i < batch_size; ++i) {
+        double strike = 90.0 + i * 0.5;
+        batch.push_back(AmericanOptionParams(
+            100.0,  // spot
+            strike, // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.20    // volatility
+        ));
+    }
+
+    auto run_once = [&]() {
+        // Sequential processing - no batch API
+        for (const auto& params : batch) {
+            auto [grid_spec, n_time] = estimate_grid_for_option(params);
+            size_t n = grid_spec.n_points();
+            std::pmr::synchronized_pool_resource pool;
+            std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+            auto workspace = PDEWorkspace::from_buffer(buffer, n);
+            if (!workspace) {
+                throw std::runtime_error("Failed to create workspace");
+            }
+
+            AmericanOptionSolver solver(params, workspace.value());
+            auto result = solver.solve();
+            if (!result) {
+                throw std::runtime_error(result.error().message);
+            }
+            double price = result->value_at(params.spot);
+            benchmark::DoNotOptimize(price);
+        }
+    };
+
+    for (int i = 0; i < kWarmupIterations; ++i) {
+        run_once();
+    }
+
+    for (auto _ : state) {
+        run_once();
+    }
+
+    state.SetItemsProcessed(state.iterations() * batch_size);
+    state.counters["batch"] = static_cast<double>(batch_size);
+    state.SetLabel("American sequential (64 options)");
+}
+BENCHMARK(BM_README_AmericanSequential)
+    ->Arg(64)
+    ->MinTime(kMinBenchmarkTimeSec);
+
 static void BM_README_AmericanBatch64(benchmark::State& state) {
     const size_t batch_size = static_cast<size_t>(state.range(0));
 
@@ -272,7 +330,7 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     state.SetItemsProcessed(state.iterations() * batch_size);
     state.counters["batch"] = static_cast<double>(batch_size);
-    state.SetLabel("American batch (64 options)");
+    state.SetLabel("American parallel batch (64 options)");
 }
 BENCHMARK(BM_README_AmericanBatch64)
     ->Arg(64)
