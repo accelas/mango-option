@@ -16,10 +16,19 @@ Additionally, the current `AmericanSolverWorkspace` mixes concerns (Grid ownersh
 
 ## Architecture: Three-Layer Separation
 
-### Layer 1: Grid (NOT Shareable)
+### Terminology: "Reusable" vs "Shareable"
+
+**Reusable across solves:** Object can be used for multiple `solve()` calls without recreation
+**Not reusable:** Each `solve()` requires a fresh instance (previous data would be overwritten)
+
+Note: `std::shared_ptr` is used for lifetime management and result ownership, NOT for reuse across solves.
+
+### Layer 1: Grid (NOT Reusable Across Solves)
 **Purpose:** Grid specification + time domain + solution storage + optional snapshots
 
-**Ownership:** Created fresh per solve, returned to user via `AmericanOptionResult`
+**Ownership:** Created fresh per `solve()`, returned to user via `std::shared_ptr` for result lifetime management
+
+**Why not reusable:** Each solve overwrites solution data, so Grid cannot be reused for subsequent solves
 
 **Contents:**
 - `GridSpec<T>` (spatial grid specification)
@@ -29,10 +38,14 @@ Additionally, the current `AmericanSolverWorkspace` mixes concerns (Grid ownersh
 - `std::vector<T>` (solution storage: current + previous)
 - `std::optional<std::vector<T>>` (snapshot storage: optional)
 
-### Layer 2: PDEWorkspace (Shareable)
-**Purpose:** Named spans to caller-managed PMR buffers
+### Layer 2: PDEWorkspace (Reusable Across Solves)
+**Purpose:** Named spans to caller-managed PMR buffers (temporary scratch space)
 
 **Ownership:** Caller allocates PMR buffer, creates PDEWorkspace spans, manages lifetime
+
+**Why reusable:** Just temporary scratch buffers - content doesn't matter between solves, safe to reuse
+
+**Lifetime requirement:** PMR buffer must outlive all `solve()` calls using the workspace
 
 **Contents:** Just spans (no ownership):
 - `dx`, `u_stage`, `rhs`, `lu`, `psi`
@@ -68,38 +81,64 @@ public:
 
     // Query snapshots
     bool has_snapshots() const;
-    std::span<const double> at(size_t time_idx) const;
-    size_t snapshots() const;
+    std::span<const double> at(size_t snapshot_idx) const;  // Returns spatial solution at snapshot
+    size_t num_snapshots() const;  // Number of recorded snapshots
 
-    // For PDESolver (internal)
-    bool should_record(size_t idx) const;
-    void record(size_t idx, std::span<const double> sol);
+    // For PDESolver (internal use only)
+    bool should_record(size_t time_step_idx) const;  // Check if time step should be recorded
+    void record(size_t time_step_idx, std::span<const double> sol);  // Record spatial solution
 
 private:
-    std::vector<size_t> snapshot_indices_;  // Sorted indices
-    std::optional<std::vector<T>> surface_history_;  // num_snapshots × n_space
+    std::vector<size_t> snapshot_indices_;  // Sorted time step indices to record
+    std::optional<std::vector<T>> surface_history_;  // 2D: num_snapshots × n_space (row-major)
+
+    // Helper: Map time step index → snapshot index (or nullopt if not recorded)
+    std::optional<size_t> find_snapshot_index(size_t time_step_idx) const;
 };
 ```
 
-**Time-to-index conversion (matches price table pattern):**
+**Storage layout:**
+
+Snapshots are stored in a flat 1D vector with row-major ordering:
+```
+surface_history_[snapshot_idx * n_space + space_idx] = solution[space_idx]
+```
+
+Example: 3 snapshots, 100 spatial points → 300 element vector
+- Snapshot 0: elements [0, 99]
+- Snapshot 1: elements [100, 199]
+- Snapshot 2: elements [200, 299]
+
+**Time-to-index conversion:**
 
 ```cpp
-std::vector<size_t> convert_times_to_indices(
+std::expected<std::vector<size_t>, std::string> convert_times_to_indices(
     std::span<const double> times,
     const TimeDomain& time_domain)
 {
     const double dt = time_domain.dt();
+    const double t_max = time_domain.t_end();
     const size_t n_steps = time_domain.n_steps();
 
     std::vector<size_t> indices;
-    for (double t : times) {
-        double step_exact = t / dt;
-        long long step_rounded = std::llround(step_exact);
+    indices.reserve(times.size());
 
-        // Clamp to [0, n_steps-1]
-        indices.push_back(std::clamp(
-            static_cast<size_t>(std::max(0LL, step_rounded)),
-            0UL, n_steps - 1));
+    for (double t : times) {
+        // Validate time is in valid range
+        if (t < 0.0 || t > t_max) {
+            return std::unexpected(std::format(
+                "Snapshot time {} out of range [0, {}]", t, t_max));
+        }
+
+        // Convert to nearest time step (snap to grid)
+        // Use floor + 0.5 to round to nearest, not llround (which can overshoot)
+        double step_exact = t / dt;
+        size_t step_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
+
+        // Clamp to valid range (handles floating point rounding at boundaries)
+        step_idx = std::min(step_idx, n_steps - 1);
+
+        indices.push_back(step_idx);
     }
 
     // Sort and deduplicate
@@ -109,6 +148,11 @@ std::vector<size_t> convert_times_to_indices(
     return indices;
 }
 ```
+
+**Key differences from clamping approach:**
+1. **Validates** out-of-range times instead of silently clamping (catches user errors)
+2. **Snaps to nearest** time step using floor(t/dt + 0.5) instead of llround (more predictable)
+3. **Returns expected** to propagate validation errors to caller
 
 **PDESolver integration:**
 
@@ -154,7 +198,7 @@ AmericanOptionSolver::solve() {
     auto [grid_spec, n_time] = estimate_grid_for_option(params_);
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params_.maturity, n_time);
 
-    // Create Grid with optional snapshots (NOT SHARED)
+    // Create Grid with optional snapshots (NOT REUSABLE)
     auto grid_result = Grid<double>::create(grid_spec, time_domain, snapshot_times_);
 
     if (!grid_result.has_value()) {
@@ -164,17 +208,38 @@ AmericanOptionSolver::solve() {
         });
     }
 
-    // Solve PDE (uses workspace buffers, records snapshots in Grid)
-    auto solve_result = pde_solver_->solve();
+    auto grid = grid_result.value();
+
+    // Create PDESolver with Grid + Workspace
+    // PDESolver is created fresh each solve, takes Grid by shared_ptr
+    AmericanPutSolver pde_solver(grid, workspace_);
+
+    // Initialize PDE with payoff condition
+    pde_solver.initialize([](std::span<const double> x, std::span<double> u) {
+        for (size_t i = 0; i < x.size(); ++i) {
+            u[i] = std::max(1.0 - std::exp(x[i]), 0.0);  // Put payoff in log-moneyness
+        }
+    });
+
+    // Solve PDE (modifies Grid in-place, records snapshots if configured)
+    auto solve_result = pde_solver.solve();
 
     if (!solve_result.has_value()) {
         return std::unexpected(solve_result.error());
     }
 
     // Wrap Grid + params → AmericanOptionResult (explicit, no metaprogramming)
-    return AmericanOptionResult(grid_result.value(), params_);
+    return AmericanOptionResult(grid, params_);
 }
 ```
+
+**PDESolver Construction Pattern:**
+
+PDESolver is constructed fresh for each solve, taking:
+1. `std::shared_ptr<Grid>` - Grid to solve on (created above)
+2. `PDEWorkspace` - Temporary workspace buffers (reused from caller)
+
+PDESolver stores a reference/pointer to Grid and modifies it in-place during `solve()`.
 
 ### 3. AmericanOptionResult Wrapper
 
@@ -225,8 +290,14 @@ private:
 **Key methods:**
 - `value()`: Shortcut for `value_at(params_.spot)`
 - `value_at(spot)`: Interpolates to arbitrary spot, denormalizes using `params_.strike`
-- Greeks: Use existing `CenteredDifference` infrastructure
-- `at_time(idx)`: Returns snapshot at time index (if enabled)
+- Greeks: Use existing `CenteredDifference` infrastructure (lazy-computed, mutable cache)
+- `at_time(idx)`: Returns snapshot at snapshot index (if enabled)
+
+**Thread Safety:**
+- **AmericanOptionResult is NOT thread-safe for concurrent reads** due to mutable Greeks cache
+- Safe usage: Compute Greeks once in single thread, then read-only access is safe
+- Concurrent solves: Each thread gets its own AmericanOptionResult (Grid is per-solve)
+- Alternative: Eager Greeks computation in constructor (no cache, fully thread-safe reads)
 
 ### 4. AmericanSolverWorkspace Removal
 
@@ -397,6 +468,47 @@ for (const auto& params : option_batch) {
 
 The benefits outweigh the costs, and the new API is more honest about ownership and lifetime management.
 
+## Resolved Design Questions
+
+### 1. Snapshot Indexing
+**Question:** Is `record(idx)` parameter a time step or snapshot sequence index?
+
+**Answer:** `record(time_step_idx)` takes time step index. Grid internally maps to snapshot sequence index using `find_snapshot_index()`. Clear separation between:
+- Time step index: 0 to n_steps-1 (PDE loop counter)
+- Snapshot index: 0 to num_snapshots-1 (storage array index)
+
+### 2. Interpolation and Boundary Handling
+**Question:** How are boundaries handled in `value_at()` and Greeks?
+
+**Answer:**
+- `value_at(spot)` converts spot → log-moneyness → interpolates using cubic spline
+- Boundary clamping: If spot outside grid domain, clamp to boundary value
+- Greeks use `CenteredDifference` with grid boundaries (no extrapolation)
+
+### 3. Grid Estimation Error Handling
+**Question:** How are failures in `estimate_grid_for_option()` handled?
+
+**Answer:** Function always succeeds (clamps to min/max grid sizes). Extreme params result in boundary grids (min_spatial_points or max_spatial_points), which may be suboptimal but are valid.
+
+### 4. Out-of-Range Snapshot Times
+**Question:** Should times beyond maturity or negative be rejected?
+
+**Answer:** Yes - `convert_times_to_indices()` validates and returns error for out-of-range times instead of silently clamping. This catches user mistakes early.
+
+### 5. Non-Uniform Time Steps
+**Question:** Does time-to-index conversion work with non-uniform `TimeDomain`?
+
+**Answer:** Current design assumes uniform dt. If non-uniform time steps are needed, `TimeDomain` would need to expose the schedule, and conversion would search the schedule instead of using `t/dt`. Document this assumption.
+
+### 6. Greeks Thread Safety Decision
+**Question:** Should AmericanOptionResult be thread-safe?
+
+**Answer:** No - documented as NOT thread-safe for concurrent reads due to lazy Greeks cache. Each solve gets its own result. If thread-safe reads are needed later, can add eager Greeks computation option.
+
 ## Open Questions
 
-None - design is complete and approved.
+### 1. Serialization/Export
+Should Grid provide serialization hooks for saving/loading snapshot data? Defer to future work if needed.
+
+### 2. Partial Snapshots
+Should we support strided/partial spatial snapshots to reduce memory? Current design records full `n_space` per snapshot. Defer to future work if memory becomes an issue.
