@@ -232,52 +232,96 @@ if (!spacing.is_uniform()) {
 
 ### SIMD Vectorization
 
-Two backends for centered difference operators:
-1. **ScalarBackend**: `#pragma omp simd` for compiler auto-vectorization
-2. **SimdBackend**: `std::experimental::simd` with `[[gnu::target_clones("default","avx2","avx512f")]]`
-   - 3-6× speedup on large grids
-   - Automatic ISA selection at runtime
+The library uses a unified **OpenMP SIMD + `[[gnu::target_clones]]`** approach for all vectorized finite difference operators. This strategy provides:
 
-Cox-de Boor B-spline basis evaluation also uses SIMD (4-wide cubic basis functions).
+- **Simpler codebase**: Single vectorization approach (no dual backends)
+- **Better performance**: OpenMP SIMD wins 75% of benchmark cases
+- **Portable fat binaries**: Single binary runs optimally on any x86-64 CPU (SSE2 to AVX-512)
+- **Zero-overhead dispatch**: GNU IFUNC resolver provides direct ISA selection after first call
+- **Compiler portability**: Works with GCC 14+, Clang 19+
 
-### CenteredDifference: Automatic ISA Selection
+**Why OpenMP SIMD over explicit SIMD:**
 
-The `CenteredDifference` stencil operator automatically selects the optimal backend based on CPU capabilities:
+Benchmarks showed OpenMP SIMD (`#pragma omp simd`) outperforms explicit SIMD (`std::experimental::simd`) in 75% of test cases (9/12), often by substantial margins (15-45% faster). Explicit SIMD was removed due to:
+- Lower performance in most cases
+- Higher code complexity (explicit copy_from/copy_to operations)
+- Portability issues (incompatible with Clang + libc++)
+- Maintenance burden (dual codepath)
 
-**Mode Enum:**
-- **Mode::Auto** (default): Runtime CPU detection + OS XSAVE check chooses Scalar or SIMD
-- **Mode::Scalar**: Force scalar backend (for testing/debugging)
-- **Mode::Simd**: Force SIMD backend (for testing/benchmarking)
+**How target_clones generates fat binaries:**
 
-**Production Usage:**
+The `[[gnu::target_clones("default","avx2","avx512f")]]` attribute instructs the compiler to generate three ISA-specific versions of each function:
+- `.default` version: SSE2 baseline (2-wide SIMD, runs on any x86-64 CPU)
+- `.avx2` version: 4-wide SIMD for Haswell+ CPUs
+- `.avx512f` version: 8-wide SIMD for Skylake-X+ CPUs
+- `.resolver` function: CPUID-based runtime selection using GNU IFUNC
+
+First call executes resolver (~150-500ns overhead), subsequent calls are direct jumps (zero overhead).
+
+**Performance characteristics:**
+- AVX2: 2.8× speedup vs SSE2 baseline
+- AVX-512: 4.2× speedup vs SSE2 baseline
+- First-call overhead: < 0.001% of typical PDE workload
+- Memory-bound on large grids (expect ~2-3× vs theoretical 4×)
+
+**For detailed technical documentation, see [docs/architecture/vectorization-strategy.md](docs/architecture/vectorization-strategy.md)**
+
+Cox-de Boor B-spline basis evaluation also uses OpenMP SIMD (4-wide cubic basis functions).
+
+### CenteredDifference: Simplified API
+
+The `CenteredDifference` stencil operator provides a simple, direct interface to vectorized finite difference computations:
+
+**Basic Usage:**
 ```cpp
-// Always use Mode::Auto in production code
-auto spacing = GridSpacing<double>(grid);
-auto stencil = CenteredDifference(spacing);  // Auto-selects optimal backend
+#include "src/pde/operators/centered_difference_facade.hpp"
+
+// Create from grid spacing
+auto spacing = GridSpacing<double>::create(workspace->grid(), workspace->dx()).value();
+auto stencil = CenteredDifference<double>(spacing);
+
+// Compute derivatives (automatically uses optimal ISA)
+stencil.compute_second_derivative(u, d2u_dx2, 1, n-1);
+stencil.compute_first_derivative(u, du_dx, 1, n-1);
 ```
 
-**Test Usage:**
-```cpp
-// Tests can force specific backends for regression testing
-auto scalar = CenteredDifference(spacing, CenteredDifference::Mode::Scalar);
-auto simd = CenteredDifference(spacing, CenteredDifference::Mode::Simd);
+**No Mode enum, no virtual dispatch:**
+- Previous architecture had `Mode::Auto`, `Mode::Scalar`, `Mode::Simd` (removed)
+- New architecture: direct calls to `ScalarBackend` (zero overhead)
+- ISA selection handled automatically by `target_clones` (no manual dispatch)
 
-// Compare results
-scalar.compute_second_derivative(u, d2u_scalar, 1, n-1);
-simd.compute_second_derivative(u, d2u_simd, 1, n-1);
-EXPECT_NEAR(d2u_scalar[i], d2u_simd[i], 1e-14);  // Allow FP rounding
+**Implementation:**
+```cpp
+template<std::floating_point T = double>
+class CenteredDifference {
+public:
+    explicit CenteredDifference(const GridSpacing<T>& spacing)
+        : backend_(spacing) {}
+
+    void compute_second_derivative(...) const {
+        backend_.compute_second_derivative(...);  // Direct call, no virtual dispatch
+    }
+
+private:
+    ScalarBackend<T> backend_;  // Owned by value, copyable
+};
 ```
 
-**Performance Characteristics:**
-- Virtual dispatch overhead: ~5-10ns per call
-- Negligible vs computation cost (~5,000ns for 100-point grid)
-- Both backends use precomputed arrays on non-uniform grids
-- SIMD backend: 3-6x speedup via explicit vectorization
+**Benefits:**
+- Zero virtual dispatch overhead (direct function calls)
+- Simpler API (one constructor, no mode parameter)
+- Value semantics (copyable, movable)
+- Compiler can inline across facade
 
 **Architecture:**
-- Façade + Backend pattern (similar to strategy pattern)
-- ScalarBackend: `#pragma omp simd` for compiler auto-vectorization
-- SimdBackend: `std::experimental::simd` + `[[gnu::target_clones]]` for multi-ISA
+```
+CenteredDifference (Facade)
+    ├── ScalarBackend (OpenMP SIMD)
+    │   ├── .default (SSE2, 2-wide)
+    │   ├── .avx2 (4-wide)
+    │   └── .avx512f (8-wide)
+    │       └── .resolver (IFUNC dispatch)
+```
 
 ### B-Spline Interpolation
 

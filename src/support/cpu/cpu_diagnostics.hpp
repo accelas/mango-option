@@ -2,12 +2,11 @@
 
 #include <cpuid.h>
 #include <string>
-#include <iostream>
 #include <immintrin.h>
 
 namespace mango::cpu {
 
-/// CPU feature flags detected at runtime
+/// CPU feature flags detected at runtime (diagnostic only)
 struct CPUFeatures {
     bool has_sse2 = false;
     bool has_avx2 = false;
@@ -16,27 +15,11 @@ struct CPUFeatures {
 };
 
 /**
- * ISA target enum for dispatch
- *
- * NOTE: This is DIAGNOSTIC ONLY. Actual dispatch happens via
- * [[gnu::target_clones]] IFUNC resolution at link time.
- */
-enum class ISATarget {
-    DEFAULT,   // SSE2 baseline
-    AVX2,      // Haswell+ (2013+)
-    AVX512F    // Skylake-X+ (2017+)
-};
-
-/**
  * Check if OS has enabled xsave for AVX/AVX-512 state
  *
- * AVX/AVX-512 require OS support for YMM/ZMM register state.
- * Without this check, CPUID may report AVX support but executing
- * AVX instructions will SIGILL.
- *
- * SAFETY: __attribute__((target("xsave"))) ensures compiler generates
- * code compatible with xsave-enabled CPUs. The OSXSAVE check before
- * _xgetbv() ensures the CPU actually supports the instruction.
+ * CRITICAL: AVX/AVX-512 require OS support for YMM/ZMM register state.
+ * Without OSXSAVE check, executing AVX instructions will SIGILL even if
+ * CPUID reports support.
  */
 __attribute__((target("xsave")))
 inline bool check_os_avx_support() {
@@ -47,15 +30,11 @@ inline bool check_os_avx_support() {
         return false;
     }
 
-    // CRITICAL: Must check OSXSAVE before calling _xgetbv()
-    // Without OSXSAVE, _xgetbv() will cause SIGILL
     if ((ecx & bit_OSXSAVE) == 0) {
-        return false;  // OS hasn't enabled xsave
+        return false;
     }
 
-    // SAFE: OSXSAVE confirmed, _xgetbv() is now safe to call
     // Check XCR0 register via XGETBV
-    // XCR0[1] = SSE state, XCR0[2] = YMM state
     unsigned long long xcr0 = _xgetbv(0);
 
     // AVX requires SSE (bit 1) and YMM (bit 2)
@@ -67,6 +46,10 @@ inline bool check_os_avx_support() {
 /// Check if OS has enabled AVX-512 state
 __attribute__((target("xsave")))
 inline bool check_os_avx512_support() {
+    if (!check_os_avx_support()) {
+        return false;
+    }
+
     unsigned long long xcr0 = _xgetbv(0);
     // AVX-512 requires SSE, YMM, and ZMM state (bits 5, 6, 7)
     constexpr unsigned long long AVX512_MASK = (1ULL << 1) | (1ULL << 2) |
@@ -75,10 +58,10 @@ inline bool check_os_avx512_support() {
 }
 
 /**
- * Detect CPU features once at program startup
+ * Detect CPU features for diagnostic purposes
  *
- * Uses CPUID instruction to query supported ISA extensions,
- * with OS support validation via XGETBV.
+ * NOTE: Do NOT use this for dispatch. Use [[gnu::target_clones]]
+ * which provides zero-overhead IFUNC resolution.
  */
 inline CPUFeatures detect_cpu_features() {
     CPUFeatures features;
@@ -98,12 +81,6 @@ inline CPUFeatures detect_cpu_features() {
     // Check for AVX2 (requires OS support)
     if (os_avx_support && __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) {
         features.has_avx2 = (ebx & bit_AVX2) != 0;
-
-        // Emit diagnostic if FMA is missing (AVX2 CPUs typically have it)
-        // (No-op in production builds - use USDT tracing if needed)
-        if (features.has_avx2 && !features.has_fma) {
-            // Debug diagnostic would go here
-        }
     }
 
     // Check for AVX-512 (requires OS support)
@@ -115,34 +92,19 @@ inline CPUFeatures detect_cpu_features() {
 }
 
 /**
- * Select best ISA target for current CPU
- *
- * Called once at solver construction, result cached in solver.
- *
- * NOTE: This is DIAGNOSTIC ONLY for logging/stats. The actual kernel
- * dispatch happens automatically via [[gnu::target_clones]] IFUNC
- * resolution at runtime. This function merely reports what the IFUNC
- * resolver will choose.
+ * Get human-readable description of CPU features (for logging)
  */
-inline ISATarget select_isa_target() {
+inline std::string describe_cpu_features() {
     static const CPUFeatures features = detect_cpu_features();
 
     if (features.has_avx512f) {
-        return ISATarget::AVX512F;
+        return "AVX512F+FMA (8-wide SIMD)";
     } else if (features.has_avx2 && features.has_fma) {
-        return ISATarget::AVX2;
+        return "AVX2+FMA (4-wide SIMD)";
+    } else if (features.has_sse2) {
+        return "SSE2 (2-wide SIMD)";
     } else {
-        return ISATarget::DEFAULT;
-    }
-}
-
-/// Get human-readable ISA target name (for logging/diagnostics)
-inline std::string isa_target_name(ISATarget target) {
-    switch (target) {
-        case ISATarget::DEFAULT: return "SSE2";
-        case ISATarget::AVX2: return "AVX2+FMA";
-        case ISATarget::AVX512F: return "AVX512F";
-        default: return "UNKNOWN";
+        return "UNKNOWN";
     }
 }
 

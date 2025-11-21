@@ -42,15 +42,11 @@ cc_library(
         "//src/pde/core:grid",
         "//src/support:parallel",
     ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "centered_difference_simd_backend",
-    hdrs = ["centered_difference_simd_backend.hpp"],
-    deps = ["//src/pde/core:grid"],
-    copts = ["-std=c++23"],
+    copts = [
+        "-std=c++23",
+        "-march=x86-64",  # Baseline ISA for portability
+        "-fopenmp-simd",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -59,9 +55,8 @@ cc_library(
     hdrs = ["centered_difference_facade.hpp"],
     deps = [
         ":centered_difference_scalar",
-        ":centered_difference_simd_backend",
         "//src/pde/core:grid",
-        "//src/support/cpu:feature_detection",
+        "//src/support/cpu:cpu_diagnostics",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],

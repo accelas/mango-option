@@ -193,3 +193,24 @@ cc_binary(
     ],
     tags = ["benchmark", "manual"],
 )
+
+cc_binary(
+    name = "openmp_simd_benchmark",
+    srcs = ["openmp_simd_benchmark.cc"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp-simd",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/pde/core:grid",
+        "//src/pde/operators:centered_difference_scalar",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)

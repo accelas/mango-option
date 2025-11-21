@@ -26,3 +26,7 @@ accuracy_test_table.bin
 
 # Conan artifacts
 conan_deps/
+
+# Experiment binaries (OpenMP SIMD refactoring)
+test_clang_target_clones
+example_fat_binary_demo
