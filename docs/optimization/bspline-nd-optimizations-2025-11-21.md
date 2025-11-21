@@ -39,9 +39,9 @@ Result fit(const std::vector<T>& values, const Config& config = {}) {
 
 **Impact:** Eliminates 300K element copy (2.4 MB) for users who call with `std::move()`.
 
-### 2. OpenMP SIMD for Slice Extraction/Write-back
+### 2. SIMD Vectorization for Slice Extraction/Write-back
 
-**Location:** `bspline_nd_separable.hpp:374-400`
+**Location:** `bspline_nd_separable.hpp:375-401`
 
 **Before:**
 ```cpp
@@ -58,24 +58,31 @@ for (size_t i = 0; i < n_axis; ++i) {
 
 **After:**
 ```cpp
-// Extract slice (SIMD-optimized)
-#pragma omp simd
+// Extract slice (SIMD-optimized with portability layer)
+MANGO_PRAGMA_SIMD
 for (size_t i = 0; i < n_axis; ++i) {
     slice_buffer[i] = coeffs[base_offset + i * stride];
 }
 
-// Write back (SIMD-optimized)
-#pragma omp simd
+// Write back (SIMD-optimized with portability layer)
+MANGO_PRAGMA_SIMD
 for (size_t i = 0; i < n_axis; ++i) {
     coeffs[base_offset + i * stride] = coeffs_buffer[i];
 }
 ```
 
-**Impact:** Up to 2× speedup for unit-stride slices (limited by memory bandwidth for large strides).
+**Implementation:** Uses `MANGO_PRAGMA_SIMD` from `src/support/parallel.hpp` for portability:
+- Expands to `#pragma omp simd` when compiled with `-fopenmp`
+- Expands to nothing when compiled without OpenMP support
+- Enables graceful compilation on platforms without OpenMP
+
+**Impact:** Up to 2× speedup for unit-stride slices when OpenMP is available (limited by memory bandwidth for large strides).
 
 ### 3. NaN/Inf Validation Attempt
 
-**Attempted optimization with OpenMP SIMD but reverted** because early returns are not allowed in OpenMP SIMD regions. Sequential validation remains as-is.
+**Attempted optimization with SIMD but reverted** because early returns are not allowed in SIMD regions. Sequential validation remains as-is.
+
+**Note:** Line 186 comment updated from "Can't use OpenMP SIMD" to "Can't use SIMD" to reflect general SIMD constraint, not OpenMP-specific.
 
 ## Benchmark Results
 
@@ -127,10 +134,11 @@ To achieve meaningful speedup (>5%), optimize the banded LU solver:
 
 ## Files Modified
 
-- `src/math/bspline_nd_separable.hpp`: Added move overload, OpenMP SIMD pragmas
-- `src/math/BUILD.bazel`: Added `-fopenmp` compiler flag
+- `src/math/bspline_nd_separable.hpp`: Added move overload, SIMD pragmas via portability layer
+- `src/math/BUILD.bazel`: Added `parallel.hpp` dependency, kept `-fopenmp` for optimization
 - `benchmarks/bspline_nd_optimization_bench.cc`: Comprehensive baseline benchmarks
 - `benchmarks/bspline_move_semantics_demo.cc`: Move vs copy comparison
+- `tests/BUILD.bazel`: Added `-fopenmp` to 7 test targets for SIMD optimization
 
 ## Benchmark Commands
 
