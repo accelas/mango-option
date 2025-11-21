@@ -42,7 +42,11 @@ cc_library(
         "//src/pde/core:grid",
         "//src/support:parallel",
     ],
-    copts = ["-std=c++23"],
+    copts = [
+        "-std=c++23",
+        "-march=x86-64",  # Baseline ISA for portability
+        "-fopenmp-simd",
+    ],
     visibility = ["//visibility:public"],
 )
 
