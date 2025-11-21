@@ -39,9 +39,7 @@ private:
 
 } // anonymous namespace
 
-// DISABLED: Newton convergence issue after PMR/API refactoring (issue #TBD)
-// Requires investigation of why FD Jacobian stopped working correctly
-TEST(PDESolverTest, DISABLED_HeatEquationDirichletBC) {
+TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Heat equation: du/dt = D·d²u/dx² with D = 0.1
     // Domain: x ∈ [0, 1], t ∈ [0, 0.1]
     // BC: u(0,t) = 0, u(1,t) = 0
@@ -187,9 +185,7 @@ TEST(PDESolverTest, DISABLED_HeatEquationNeumannBC) {
     }
 }
 
-// DISABLED: Newton convergence issue after PMR/API refactoring (issue #TBD)
-// Requires investigation of why FD Jacobian stopped working correctly
-TEST(PDESolverTest, DISABLED_SteadyStateConvergence) {
+TEST(PDESolverTest, SteadyStateConvergence) {
     // Test convergence to steady state: du/dt = D·d²u/dx²
     // With Dirichlet BC: u(0,t) = 0, u(1,t) = 1
     // Steady state: u(x) = x (linear profile)

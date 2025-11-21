@@ -858,22 +858,22 @@ private:
         for (size_t i = 1; i < n_ - 1; ++i) {
             // Diagonal: ∂F/∂u_i = 1 - coeff_dt·∂L_i/∂u_i
             workspace_.u_stage()[i] = u[i] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
-            double dLi_dui = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
 
             // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
             workspace_.u_stage()[i - 1] = u[i - 1] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
-            double dLi_duim1 = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            double dLi_duim1 = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             workspace_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
             workspace_.u_stage()[i - 1] = u[i - 1];
 
             // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
             workspace_.u_stage()[i + 1] = u[i + 1] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
-            double dLi_duip1 = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            double dLi_duip1 = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             workspace_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
             workspace_.u_stage()[i + 1] = u[i + 1];
         }
@@ -895,14 +895,14 @@ private:
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             workspace_.u_stage()[0] = u[0] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
-            double dL0_du0 = (workspace_.rhs()[0] - workspace_.lu()[0]) / eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            double dL0_du0 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
             workspace_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
             workspace_.u_stage()[0] = u[0];
 
             workspace_.u_stage()[1] = u[1] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
-            double dL0_du1 = (workspace_.rhs()[0] - workspace_.lu()[0]) / eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            double dL0_du1 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
             workspace_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
             workspace_.u_stage()[1] = u[1];
         }
@@ -915,8 +915,8 @@ private:
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
             workspace_.u_stage()[i] = u[i] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
-            double dLi_dui = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
         }
