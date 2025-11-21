@@ -1,4 +1,4 @@
-#include "src/pde/core/grid_spacing_data.hpp"
+#include "src/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(UniformSpacingTest, ConstructionAndAccessors) {
