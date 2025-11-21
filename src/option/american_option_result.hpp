@@ -50,7 +50,7 @@ public:
     AmericanOptionResult& operator=(AmericanOptionResult&&) = default;
 
     // Backward compatibility: converged field (always true if object exists)
-    const bool converged = true;
+    bool converged = true;
 
     // Pricing parameter accessors
     double spot() const { return params_.spot; }

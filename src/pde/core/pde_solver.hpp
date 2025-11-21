@@ -3,7 +3,7 @@
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/pde_workspace.hpp"
-#include "src/support/cpu/feature_detection.hpp"
+#include "src/support/cpu/cpu_diagnostics.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/core/time_domain.hpp"
@@ -93,7 +93,6 @@ public:
         , config_{}  // Default-initialized
         , n_(grid->n_space())
         , workspace_(workspace)
-        , isa_target_(cpu::select_isa_target())
     {
         // Grid owns solution storage, workspace provides temporary buffers
         // No allocation needed in constructor
@@ -219,9 +218,6 @@ private:
 
     // Workspace spans (caller-managed PMR buffers)
     PDEWorkspace workspace_;
-
-    // ISA target for diagnostic logging
-    cpu::ISATarget isa_target_;
 
     // Temporal event system
     std::vector<TemporalEvent> events_;

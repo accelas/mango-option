@@ -161,10 +161,9 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
 
     // Create workspaces outside parallel region
     size_t workspace_failed = 0;
-    namespace views = std::views;
-    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
-                                                 views::iota(size_t{0}, Nr))) {
-        size_t idx = k + l * Nv;
+    for (size_t k = 0; k < Nv; ++k) {
+        for (size_t l = 0; l < Nr; ++l) {
+            size_t idx = k + l * Nv;
 
         NormalizedSolveRequest request;
         request.sigma = grid.volatility[k];
@@ -188,7 +187,8 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
         } else {
             ++workspace_failed;
         }
-    }
+        }  // end l loop
+    }  // end k loop
 
     // Parallel solve for each (σ, r) combination
     size_t failed_count = workspace_failed;
@@ -302,10 +302,9 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
     std::vector<AmericanOptionParams> batch_params;
     batch_params.reserve(batch_size);
 
-    namespace views = std::views;
-    for (auto [k, l] : views::cartesian_product(views::iota(size_t{0}, Nv),
-                                                 views::iota(size_t{0}, Nr))) {
-        AmericanOptionParams params;
+    for (size_t k = 0; k < Nv; ++k) {
+        for (size_t l = 0; l < Nr; ++l) {
+            AmericanOptionParams params;
         params.spot = grid.K_ref;
         params.strike = grid.K_ref;
         params.maturity = T_max;
@@ -315,7 +314,8 @@ std::expected<void, std::string> BatchPriceTableSolver::solve(
         params.volatility = grid.volatility[k];
         params.discrete_dividends = {};
         batch_params.push_back(params);
-    }
+        }  // end l loop
+    }  // end k loop
 
     // Use BatchAmericanOptionSolver with shared grid (use_shared_grid=true)
     // Grid is automatically computed, surfaces are collected

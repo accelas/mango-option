@@ -1,5 +1,5 @@
 #include "src/pde/core/pde_solver.hpp"
-#include "src/support/cpu/feature_detection.hpp"
+#include "src/support/cpu/cpu_diagnostics.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>
@@ -9,11 +9,9 @@ TEST(PDESolverSIMDBenchmark, PerformanceComparison) {
     ASSERT_TRUE(grid_result.has_value());
     auto grid = grid_result.value().generate();
 
-    auto isa = mango::cpu::select_isa_target();
-    std::cout << "Running on ISA: " << mango::cpu::isa_target_name(isa) << "\n";
+    auto features = mango::cpu::detect_cpu_features();
+    std::cout << "CPU: " << mango::cpu::describe_cpu_features() << "\n";
 
-    // Benchmark will be expanded with actual timing once SIMD operators integrated
-    EXPECT_TRUE(isa == mango::cpu::ISATarget::DEFAULT ||
-                isa == mango::cpu::ISATarget::AVX2 ||
-                isa == mango::cpu::ISATarget::AVX512F);
+    // Verify CPU detection works
+    EXPECT_TRUE(features.has_sse2);  // x86-64 baseline
 }

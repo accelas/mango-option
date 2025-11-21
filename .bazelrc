@@ -11,3 +11,16 @@ build --copt=-Werror
 
 # Arrow persistence feature (enabled by default)
 build --define=enable_arrow=true
+
+# Use GCC compiler (default)
+# Clang investigation results:
+#   - Clang + libc++: Blocked by system library ABI incompatibility
+#   - Clang + libstdc++: Blocked by C++23 symbol inlining issues
+# GCC 14.2 + libstdc++ works perfectly and supports all C++23 features we need
+# build --action_env=CC=gcc
+# build --action_env=CXX=g++
+
+# Use baseline x86-64 ISA for portable binaries
+# target_clones generates ISA-specific versions automatically
+build --copt=-march=x86-64
+build --copt=-mtune=generic
