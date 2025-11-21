@@ -1,6 +1,13 @@
-cc_binary(
-    name = "test_mdspan",
-    srcs = ["test_mdspan.cpp"],
-    deps = ["@mdspan//:mdspan"],
-    copts = ["-std=c++23"],
+# Root BUILD file
+
+# Config flag to enable Apache Arrow support (requires Conan build)
+# Usage:
+#   bazel build --config=arrow //...  (enables Arrow)
+#   bazel build //...                 (disables Arrow, default)
+config_setting(
+    name = "enable_arrow",
+    define_values = {
+        "enable_arrow": "true",
+    },
+    visibility = ["//visibility:public"],
 )
