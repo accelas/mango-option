@@ -7,7 +7,7 @@
  * on challenging matrices designed to stress the numerical algorithms.
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>

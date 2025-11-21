@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <vector>
 #include <cmath>
 

@@ -282,7 +282,7 @@ cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
@@ -303,7 +303,7 @@ cc_test(
     name = "bspline_fitter_4d_test",
     srcs = ["bspline_fitter_4d_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
@@ -407,7 +407,7 @@ cc_test(
     name = "bspline_4d_end_to_end_performance_test",
     srcs = ["bspline_4d_end_to_end_performance_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -426,7 +426,7 @@ cc_test(
     ],
     deps = [
         "//src/option:bspline_price_table",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -456,7 +456,7 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -466,7 +466,7 @@ cc_test(
     name = "bspline_workspace_test",
     srcs = ["bspline_workspace_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],
@@ -477,7 +477,7 @@ cc_test(
     name = "bspline_condition_number_stress_test",
     srcs = ["bspline_condition_number_stress_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23"],

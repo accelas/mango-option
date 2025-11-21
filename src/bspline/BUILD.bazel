@@ -1,17 +1,1 @@
-cc_library(
-    name = "bspline_fitter_4d",
-    hdrs = ["bspline_fitter_4d.hpp"],
-    deps = [
-        "//src/math:bspline_basis",
-        "//src/math:bspline_nd_separable",
-        "//src/support:error_types",
-    ],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-    ],
-    visibility = ["//visibility:public"],
-)
+# B-spline library targets have been moved to //src/math

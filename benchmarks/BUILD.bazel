@@ -33,7 +33,7 @@ cc_binary(
         "//src/option:iv_solver_fdm",
         "//src/option:option_spec",
         "//src/option:bspline_price_table",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "//src/option:iv_solver_interpolated",
         "@google_benchmark//:benchmark",
     ],
@@ -64,7 +64,7 @@ cc_binary(
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
         "//src/option:bspline_price_table",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -135,7 +135,7 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
     ],
     tags = ["benchmark", "manual"],
 )
@@ -160,7 +160,7 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/option:bspline_price_table",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -188,7 +188,7 @@ cc_binary(
         "//src/option:price_table_4d_builder",
         "//src/option:iv_solver_interpolated",
         "//src/option:bspline_price_table",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -249,7 +249,7 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],

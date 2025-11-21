@@ -101,7 +101,7 @@ cc_library(
     deps = [
         ":price_table_solver_factory",
         ":bspline_price_table",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         ":price_table_workspace",
         "//src/pde/core:trbdf2_config",
         "//src/math:root_finding",

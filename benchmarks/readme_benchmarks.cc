@@ -1,7 +1,7 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/bspline_price_table.hpp"
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
