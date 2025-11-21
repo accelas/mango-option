@@ -17,12 +17,8 @@
 
 namespace mango {
 
-/// Floating point concept for template constraints
-template<typename T>
-concept FloatingPoint = std::floating_point<T>;
-
 /// Result type for Thomas solver
-template<FloatingPoint T>
+template<std::floating_point T>
 struct ThomasResult {
     bool success;
     std::optional<std::string_view> error;
@@ -50,7 +46,7 @@ struct ThomasResult {
 };
 
 /// Configuration for Thomas solver
-template<FloatingPoint T>
+template<std::floating_point T>
 struct ThomasConfig {
     /// Tolerance for singularity detection
     T singularity_tol = static_cast<T>(1e-15);
@@ -84,7 +80,7 @@ struct ThomasConfig {
 /// @param workspace Temporary storage, size 2n
 /// @param config Solver configuration
 /// @return Result indicating success/failure with error message
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] constexpr ThomasResult<T> solve_thomas(
     std::span<const T> lower,
     std::span<const T> diag,
@@ -212,7 +208,7 @@ template<FloatingPoint T>
 /// @param solution Output solution, size n
 /// @param config Solver configuration
 /// @return Result indicating success/failure
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] inline ThomasResult<T> solve_thomas_alloc(
     std::span<const T> lower,
     std::span<const T> diag,
@@ -237,7 +233,7 @@ template<FloatingPoint T>
 ///   for (auto& rhs : many_rhs_vectors) {
 ///       solve_thomas(lower, diag, upper, rhs, solution, ws.get());
 ///   }
-template<FloatingPoint T>
+template<std::floating_point T>
 class ThomasWorkspace {
 public:
     explicit ThomasWorkspace(size_t n) : workspace_(2 * n), n_(n) {}
@@ -319,7 +315,7 @@ private:
 /// @param workspace Temporary storage, size ≥ 2n (for c', d' arrays)
 /// @param config Optional solver configuration (tolerances, max iterations)
 /// @return ThomasResult with success/failure status and diagnostics
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] constexpr ThomasResult<T> solve_thomas_projected(
     std::span<const T> lower,
     std::span<const T> diag,
@@ -432,7 +428,7 @@ template<FloatingPoint T>
 /// @param solution Output solution, size n
 /// @param config Solver configuration
 /// @return Result indicating success/failure
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] inline ThomasResult<T> solve_thomas_projected_alloc(
     std::span<const T> lower,
     std::span<const T> diag,

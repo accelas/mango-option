@@ -50,7 +50,7 @@ namespace mango {
 ///
 /// @tparam T Floating point type (float, double, long double)
 /// @tparam N Number of dimensions (N ≥ 1)
-template<FloatingPoint T, size_t N>
+template<std::floating_point T, size_t N>
     requires (N >= 1)
 class CubicSplineND {
 public:
@@ -294,7 +294,7 @@ private:
 ///
 /// @tparam T Floating point type
 /// @tparam N Number of dimensions
-template<FloatingPoint T, size_t N>
+template<std::floating_point T, size_t N>
     requires (N >= 1)
 struct CubicSplineNDWorkspace {
     std::vector<T> slice_buffer;    ///< Buffer for extracting 1D slices
@@ -324,15 +324,15 @@ struct CubicSplineNDWorkspace {
 // ============================================================================
 
 /// 3D cubic spline interpolator
-template<FloatingPoint T>
+template<std::floating_point T>
 using CubicSpline3D = CubicSplineND<T, 3>;
 
 /// 4D cubic spline interpolator
-template<FloatingPoint T>
+template<std::floating_point T>
 using CubicSpline4D = CubicSplineND<T, 4>;
 
 /// 5D cubic spline interpolator
-template<FloatingPoint T>
+template<std::floating_point T>
 using CubicSpline5D = CubicSplineND<T, 5>;
 
 }  // namespace mango

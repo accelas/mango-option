@@ -37,7 +37,7 @@
 namespace mango {
 
 /// Result of 1D B-spline collocation fitting
-template<FloatingPoint T>
+template<std::floating_point T>
 struct BSplineCollocationResult {
     std::vector<T> coefficients;   ///< Fitted control points (empty on failure)
     bool success;                   ///< Fit succeeded
@@ -76,7 +76,7 @@ struct BSplineCollocationResult {
 };
 
 /// Configuration for B-spline collocation solver
-template<FloatingPoint T>
+template<std::floating_point T>
 struct BSplineCollocationConfig {
     T tolerance = T{1e-9};  ///< Maximum allowed residual
 };
@@ -96,7 +96,7 @@ struct BSplineCollocationConfig {
 /// Space: O(n) for banded storage
 ///
 /// @tparam T Floating point type (float, double, long double)
-template<FloatingPoint T>
+template<std::floating_point T>
 class BSplineCollocation1D {
 public:
     /// Factory method to create BSplineCollocation1D instance

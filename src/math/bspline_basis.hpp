@@ -28,10 +28,6 @@
 
 namespace mango {
 
-/// Floating point concept for template constraints
-template<typename T>
-concept FloatingPoint = std::floating_point<T>;
-
 /// Create clamped knot vector for cubic B-splines (std::vector overload)
 ///
 /// For n data points, creates n+4 knots with repeated endpoints:
@@ -46,7 +42,7 @@ concept FloatingPoint = std::floating_point<T>;
 /// @tparam T Floating point type
 /// @param x Data grid points (must be sorted)
 /// @return Clamped knot vector (size = n + 4)
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] std::vector<T> clamped_knots_cubic(const std::vector<T>& x) {
     const int n = static_cast<int>(x.size());
     std::vector<T> t(n + 4);
@@ -100,7 +96,7 @@ template<FloatingPoint T>
 /// @tparam T Floating point type
 /// @param x Data grid points as span (must be sorted)
 /// @return Clamped knot vector (size = n + 4)
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] std::vector<T> clamped_knots_cubic(std::span<const T> x) {
     // Convert span to vector and call vector overload
     return clamped_knots_cubic(std::vector<T>(x.begin(), x.end()));
@@ -119,7 +115,7 @@ template<FloatingPoint T>
 /// @param t Knot vector (clamped, size = n + 4 for cubic)
 /// @param x Query point
 /// @return Knot span index i ∈ [3, n-1]
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] int find_span_cubic(const std::vector<T>& t, T x) noexcept {
     constexpr int DEGREE = 3;
     const int n_ctrl = static_cast<int>(t.size()) - DEGREE - 1;
@@ -163,7 +159,7 @@ template<FloatingPoint T>
 /// @param i Knot span index (from find_span_cubic)
 /// @param x Evaluation point
 /// @param N Output: 4 basis function values N[0..3]
-template<FloatingPoint T>
+template<std::floating_point T>
 void cubic_basis_nonuniform(
     const std::vector<T>& t,
     int i,
@@ -259,7 +255,7 @@ void cubic_basis_nonuniform(
 /// @param i Knot span index
 /// @param x Evaluation point
 /// @param dN Output: 4 basis function derivatives dN[0..3]
-template<FloatingPoint T>
+template<std::floating_point T>
 void cubic_basis_derivative_nonuniform(
     const std::vector<T>& t,
     int i,
@@ -342,7 +338,7 @@ void cubic_basis_derivative_nonuniform(
 /// @param xmin Minimum value
 /// @param xmax Maximum value
 /// @return Clamped value
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] inline T clamp_query(T x, T xmin, T xmax) noexcept {
     if (x <= xmin) return xmin;
     if (x >= xmax) {

@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include "src/math/bspline_basis.hpp"  // For FloatingPoint concept
 #include <span>
 #include <vector>
 #include <concepts>
@@ -28,7 +27,7 @@
 namespace mango {
 
 /// Result type for banded matrix operations
-template<FloatingPoint T>
+template<std::floating_point T>
 struct BandedResult {
     bool success;
     std::optional<std::string_view> error;
@@ -66,7 +65,7 @@ struct BandedResult {
 /// - Finite difference Jacobians (bandwidth = 3 for centered differences)
 ///
 /// @tparam T Floating point type (float, double, long double)
-template<FloatingPoint T>
+template<std::floating_point T>
 class BandedMatrix {
 public:
     /// Construct banded matrix with fixed bandwidth
@@ -152,7 +151,7 @@ private:
 ///   if (result.ok()) {
 ///       solve_banded(ws, b, x);
 ///   }
-template<FloatingPoint T>
+template<std::floating_point T>
 class BandedLUWorkspace {
 public:
     /// Construct workspace for n×n banded matrix
@@ -213,18 +212,18 @@ private:
     std::vector<lapack_int> pivot_indices_; ///< Pivot indices from DGBTRF
 
     // Friend declarations for solver functions
-    template<FloatingPoint U>
+    template<std::floating_point U>
     friend BandedResult<U> factorize_banded(
         const BandedMatrix<U>& A,
         BandedLUWorkspace<U>& workspace) noexcept;
 
-    template<FloatingPoint U>
+    template<std::floating_point U>
     friend BandedResult<U> solve_banded(
         const BandedLUWorkspace<U>& workspace,
         std::span<const U> b,
         std::span<U> x) noexcept;
 
-    template<FloatingPoint U>
+    template<std::floating_point U>
     friend U estimate_banded_condition(
         const BandedLUWorkspace<U>& workspace,
         U norm_A) noexcept;
@@ -242,7 +241,7 @@ private:
 /// @param A Banded matrix to factorize
 /// @param workspace Workspace for LU factors (modified in-place)
 /// @return Result indicating success/failure
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] BandedResult<T> factorize_banded(
     const BandedMatrix<T>& A,
     BandedLUWorkspace<T>& workspace) noexcept
@@ -336,7 +335,7 @@ template<FloatingPoint T>
 /// @param b Right-hand side vector
 /// @param x Solution vector (output, can alias b for in-place solve)
 /// @return Result indicating success/failure
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] BandedResult<T> solve_banded(
     const BandedLUWorkspace<T>& workspace,
     std::span<const T> b,
@@ -386,7 +385,7 @@ template<FloatingPoint T>
 /// @param workspace Workspace with LU factorization
 /// @param norm_A 1-norm of original matrix ||A||₁
 /// @return Condition number estimate (∞ if ill-conditioned)
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] T estimate_banded_condition(
     const BandedLUWorkspace<T>& workspace,
     T norm_A) noexcept
@@ -421,7 +420,7 @@ template<FloatingPoint T>
 /// @tparam T Floating point type
 /// @param A Banded matrix
 /// @return 1-norm ||A||₁
-template<FloatingPoint T>
+template<std::floating_point T>
 [[nodiscard]] T banded_norm1(const BandedMatrix<T>& A) noexcept {
     const size_t n = A.size();
     std::vector<T> col_sums(n, T{0});
