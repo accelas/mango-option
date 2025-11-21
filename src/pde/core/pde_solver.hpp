@@ -1,6 +1,7 @@
 #pragma once
 
 #include "src/pde/core/grid.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/support/cpu/feature_detection.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
@@ -29,12 +30,18 @@ concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, Ja
     { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
 };
 
+/// Concept to detect if derived class provides obstacle condition
+template<typename Derived>
+concept HasObstacle = requires(const Derived& d, double t, std::span<const double> x, std::span<double> psi) {
+    { d.obstacle(t, x, psi) } -> std::same_as<void>;
+};
+
 // Temporal event callback signature
 using TemporalEventCallback = std::function<void(double t,
                                                   std::span<const double> x,
                                                   std::span<double> u)>;
 
-// Obstacle callback signature
+// Obstacle callback signature (legacy - used for std::function obstacle callbacks)
 using ObstacleCallback = std::function<void(double t,
                                              std::span<const double> x,
                                              std::span<double> psi)>;
@@ -59,81 +66,37 @@ struct TemporalEvent {
 /// - Stage 2: BDF2 from t_n to t_n+1
 /// where γ = 2 - √2 for L-stability
 ///
-/// Uses CRTP to obtain boundary conditions and spatial operator from
-/// derived class, eliminating redundant constructor parameters.
+/// Uses CRTP to obtain boundary conditions, spatial operator, and obstacle
+/// from derived class, eliminating redundant constructor parameters.
 ///
 /// Derived classes must implement:
 /// - left_boundary() - Returns left boundary condition object
 /// - right_boundary() - Returns right boundary condition object
 /// - spatial_operator() - Returns spatial operator object
+/// - obstacle(t, x, psi) - Optional: computes obstacle constraint (if HasObstacle<Derived>)
 ///
 /// @tparam Derived The derived solver class
 template<typename Derived>
 class PDESolver {
 public:
-    /// Constructor (CRTP version)
+    /// Constructor (New design: Grid + Workspace separation)
     ///
-    /// @param grid Spatial grid (x coordinates)
-    /// @param time Time domain configuration
-    /// @param obstacle Optional obstacle condition ψ(x,t) for u ≥ ψ constraint
-    /// @param external_workspace Optional external workspace for memory reuse
-    /// @param output_buffer Optional buffer for collecting all time steps (size: (n_time+1)*n_space)
-    ///                      Layout: [u_old_initial][step0][step1]...[step(n_time-1)]
-    ///                      After step i, u_old points to step(i-1) (perfect cache locality!)
-    ///                      If provided, solver writes directly to buffer (zero-copy)
-    ///                      If not provided, solver uses internal workspace
+    /// @param grid Grid with solution storage (outlives solver, passed by shared_ptr)
+    /// @param workspace Named spans to caller-managed PMR buffers
     ///
-    /// Note: Boundary conditions and spatial operator are obtained from derived class
-    ///       via CRTP calls, not passed as constructor arguments
+    /// Note: Boundary conditions, spatial operator, and obstacle are obtained from
+    ///       derived class via CRTP calls, not passed as constructor arguments
     /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
-    PDESolver(std::span<const double> grid,
-              const TimeDomain& time,
-              std::optional<ObstacleCallback> obstacle = std::nullopt,
-              PDEWorkspace* external_workspace = nullptr,
-              std::span<double> output_buffer = {})
-        : grid_(grid)
-        , time_(time)
+    PDESolver(std::shared_ptr<Grid<double>> grid,
+              PDEWorkspace workspace)
+        : grid_(grid)  // Copy shared_ptr (not move - shared ownership)
         , config_{}  // Default-initialized
-        , obstacle_(std::move(obstacle))
-        , n_(grid.size())
-        , workspace_owner_(nullptr)
-        , workspace_(nullptr)
-        , rhs_(n_)
-        , jacobian_lower_(n_ - 1)
-        , jacobian_diag_(n_)
-        , jacobian_upper_(n_ - 1)
-        , residual_(n_)
-        , delta_u_(n_)
-        , newton_u_old_(n_)
-        , tridiag_workspace_(2 * n_)
+        , n_(grid->n_space())
+        , workspace_(workspace)
         , isa_target_(cpu::select_isa_target())
     {
-        // Acquire workspace (either external or create owned)
-        acquire_workspace(grid, external_workspace);
-
-        // Setup solution storage
-        if (!output_buffer.empty()) {
-            // External buffer provided - use it directly (zero-copy)
-            // Buffer layout: [step0][step1]...[step(n_time-1)][u_old_scratch]
-            // Verify size
-            size_t expected_size = (time.n_steps() + 1) * n_;
-            if (output_buffer.size() < expected_size) {
-                throw std::invalid_argument("Output buffer too small: need " +
-                    std::to_string(expected_size) + " but got " + std::to_string(output_buffer.size()));
-            }
-
-            // u_current_ points to step 0 (where initial condition will be written)
-            // u_old_ points to scratch space at the end
-            u_current_ = output_buffer.subspan(0, n_);
-            u_old_ = output_buffer.subspan(time.n_steps() * n_, n_);
-            output_buffer_ = output_buffer;
-        } else {
-            // No external buffer - use internal storage
-            solution_storage_.resize(2 * n_);
-            u_current_ = std::span{solution_storage_}.subspan(0, n_);
-            u_old_ = std::span{solution_storage_}.subspan(n_, n_);
-            output_buffer_ = {};
-        }
+        // Grid owns solution storage, workspace provides temporary buffers
+        // No allocation needed in constructor
     }
 
     /// Initialize with initial condition
@@ -141,46 +104,46 @@ public:
     /// @param ic Initial condition function: ic(x, u)
     template<typename IC>
     void initialize(IC&& ic) {
-        ic(grid_, std::span{u_current_});
+        auto u_current = grid_->solution();
+        ic(grid_->x(), u_current);
 
         // Apply constraints at t=0 (boundary before obstacle, consistent with Newton iteration)
-        double t = time_.t_start();
-        apply_boundary_conditions(std::span{u_current_}, t);
-        apply_obstacle(t, std::span{u_current_});
+        double t = grid_->time().t_start();
+        apply_boundary_conditions(u_current, t);
+        apply_obstacle(t, u_current);
 
-        // CRITICAL: When using external buffer, u_old_ is not automatically updated
-        // Copy initial condition to u_old_ so first iteration has valid "previous" state
-        if (!output_buffer_.empty()) {
-            std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
-        }
+        // Copy initial condition to u_prev for first iteration
+        auto u_prev = grid_->solution_prev();
+        std::copy(u_current.begin(), u_current.end(), u_prev.begin());
     }
 
     /// Solve PDE from t_start to t_end
     ///
     /// @return expected success or solver error diagnostic
     std::expected<void, SolverError> solve() {
-        double t = time_.t_start();
-        const double dt = time_.dt();
+        const auto& time = grid_->time();
+        double t = time.t_start();
+        const double dt = time.dt();
 
-        for (size_t step = 0; step < time_.n_steps(); ++step) {
+        auto u_current = grid_->solution();
+        auto u_prev = grid_->solution_prev();
+
+        for (size_t step = 0; step < time.n_steps(); ++step) {
             double t_old = t;
 
-            // For internal storage only: copy u_current to u_old
-            // For external buffer: u_old already points to previous slice (no copy!)
-            if (output_buffer_.empty()) {
-                std::copy(u_current_.begin(), u_current_.end(), u_old_.begin());
-            }
+            // Copy u_current to u_prev for next iteration
+            std::copy(u_current.begin(), u_current.end(), u_prev.begin());
 
             // Stage 1: Trapezoidal rule to t_n + γ·dt
             double t_stage1 = t + config_.gamma * dt;
-            auto stage1_ok = solve_stage1(t, t_stage1, dt);
+            auto stage1_ok = solve_stage1(t, t_stage1, dt, u_current, u_prev);
             if (!stage1_ok) {
                 return std::unexpected(stage1_ok.error());
             }
 
             // Stage 2: BDF2 from t_n to t_n+1
             double t_next = t + dt;
-            auto stage2_ok = solve_stage2(t_stage1, t_next, dt);
+            auto stage2_ok = solve_stage2(t_stage1, t_next, dt, u_current, u_prev);
             if (!stage2_ok) {
                 return std::unexpected(stage2_ok.error());
             }
@@ -189,29 +152,21 @@ public:
             t = t_next;
 
             // Process temporal events AFTER completing the step
-            process_temporal_events(t_old, t_next, step);
-
-            // Advance pointers for next iteration (external buffer only)
-            if (!output_buffer_.empty() && step + 1 < time_.n_steps()) {
-                // Current slice becomes old for next iteration (perfect cache locality!)
-                u_old_ = u_current_;
-                // Advance to next slice: buffer layout is [step0][step1]...[step(n_time-1)][scratch]
-                // After step i, we're at step i+1, which is at offset (step+1)*n
-                u_current_ = output_buffer_.subspan((step + 1) * n_, n_);
-            }
+            process_temporal_events(t_old, t_next, step, u_current);
         }
 
+        // Final solution is already in grid_->solution()
         return {};
     }
 
     /// Get current solution
     std::span<const double> solution() const {
-        return std::span{u_current_};
+        return grid_->solution();
     }
 
-    /// Check if obstacle condition is present
-    bool has_obstacle() const {
-        return obstacle_.has_value();
+    /// Check if obstacle condition is present (compile-time concept check)
+    static constexpr bool has_obstacle() {
+        return HasObstacle<Derived>;
     }
 
     /// Set TR-BDF2 configuration
@@ -243,49 +198,17 @@ protected:
     const Derived& derived() const { return static_cast<const Derived&>(*this); }
 
 private:
-    // Grid and configuration
-    std::span<const double> grid_;
-    TimeDomain time_;
+    // Grid with solution storage (persistent, outlives solver)
+    std::shared_ptr<Grid<double>> grid_;
+
+    // Configuration
     TRBDF2Config config_;
-    std::optional<ObstacleCallback> obstacle_;
 
     // Grid size
     size_t n_;
 
-    // Output buffer control
-    std::span<double> output_buffer_;  // External buffer if provided
-
-    // Workspace for cache blocking
-    std::shared_ptr<PDEWorkspace> workspace_owner_;
-    PDEWorkspace* workspace_;
-
-    // Solution storage (spans point into either output_buffer_ or solution_storage_)
-    std::vector<double> solution_storage_;  // Backing storage when no external buffer
-    std::span<double> u_current_;           // u^{n+1} or u^{n+γ}
-    std::span<double> u_old_;               // u^n
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // PDESolver INTERNAL working arrays (NOT duplicates of workspace arrays!)
-    // ═══════════════════════════════════════════════════════════════════════
-    // These std::vector arrays are PDESolver's PRIMARY working memory for:
-    //   - TR-BDF2 stage computations (rhs_)
-    //   - Newton iteration (jacobian_*, residual_, delta_u_, newton_u_old_)
-    //   - Tridiagonal solver (tridiag_workspace_)
-    //
-    // PDEWorkspace arrays serve a DIFFERENT purpose (batch/external sharing).
-    // DO NOT remove these arrays thinking they are "duplicates"!
-    // ═══════════════════════════════════════════════════════════════════════
-    std::vector<double> rhs_;                 // n: RHS vector for TR-BDF2 stages
-
-    // Newton iteration working arrays
-    std::vector<double> jacobian_lower_;      // n-1: Jacobian lower diagonal
-    std::vector<double> jacobian_diag_;       // n: Jacobian main diagonal
-    std::vector<double> jacobian_upper_;      // n-1: Jacobian upper diagonal
-    std::vector<double> residual_;            // n: Newton residual F(u)
-    std::vector<double> delta_u_;             // n: Newton correction δu
-    std::vector<double> newton_u_old_;        // n: Previous Newton iterate
-    std::vector<double> tridiag_workspace_;   // 2n: Thomas algorithm workspace
-
+    // Workspace spans (caller-managed PMR buffers)
+    PDEWorkspace workspace_;
 
     // ISA target for diagnostic logging
     cpu::ISATarget isa_target_;
@@ -293,29 +216,6 @@ private:
     // Temporal event system
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
-
-    PDEWorkspace& acquire_workspace(std::span<const double> grid, PDEWorkspace* external_workspace) {
-        if (external_workspace) {
-            workspace_ = external_workspace;
-            return *workspace_;
-        }
-        // Create GridSpec - assume uniform spacing
-        double x_min = grid.front();
-        double x_max = grid.back();
-        auto grid_spec = GridSpec<double>::uniform(x_min, x_max, grid.size());
-        if (!grid_spec.has_value()) {
-            throw std::runtime_error("Failed to create grid spec");
-        }
-
-        // Use default memory resource for internal workspace
-        auto ws_result = PDEWorkspace::create(grid_spec.value(), std::pmr::get_default_resource());
-        if (!ws_result.has_value()) {
-            throw std::runtime_error("Failed to create workspace: " + ws_result.error());
-        }
-        workspace_owner_ = ws_result.value();
-        workspace_ = workspace_owner_.get();
-        return *workspace_;
-    }
 
     /// Process temporal events in time interval (t_old, t_new]
     ///
@@ -326,7 +226,8 @@ private:
     /// CRITICAL: After each event, obstacle and boundary conditions
     /// must be re-applied to maintain consistency. Dividend jumps
     /// interpolate the solution, which can violate constraints.
-    void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step) {
+    void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step,
+                                  std::span<double> u_current) {
         while (next_event_idx_ < events_.size()) {
             const auto& event = events_[next_event_idx_];
 
@@ -340,7 +241,7 @@ private:
             }
 
             // Event is in (t_old, t_new] - apply it
-            event.callback(event.time, grid_, std::span{u_current_});
+            event.callback(event.time, grid_->x(), u_current);
 
             // CRITICAL FIX (Issue #98): Re-apply obstacle and boundary conditions
             // after event to maintain consistency. Dividend jumps interpolate
@@ -351,8 +252,8 @@ private:
             // Without this, American puts with discrete dividends produce
             // values exceeding theoretical bounds (e.g., value > strike).
             // Apply boundary before obstacle (consistent with Newton iteration)
-            apply_boundary_conditions(std::span{u_current_}, event.time);
-            apply_obstacle(event.time, std::span{u_current_});
+            apply_boundary_conditions(u_current, event.time);
+            apply_obstacle(event.time, u_current);
 
             next_event_idx_++;
         }
@@ -365,36 +266,39 @@ private:
     ///
     /// This is called AFTER each Newton update to enforce variational
     /// inequality constraints (e.g., American option early exercise).
+    ///
+    /// Uses CRTP with concept check - only calls derived().obstacle() if
+    /// Derived class satisfies HasObstacle<Derived> concept.
     void apply_obstacle(double t, std::span<double> u) {
-        if (!obstacle_) return;
+        if constexpr (HasObstacle<Derived>) {
+            auto psi = workspace_.psi();
+            derived().obstacle(t, grid_->x(), psi);
 
-        auto psi = workspace_->psi();
-        (*obstacle_)(t, grid_, psi);
-
-        // Project: u[i] = max(u[i], psi[i])
-        for (size_t i = 0; i < u.size(); ++i) {
-            if (u[i] < psi[i]) {
-                u[i] = psi[i];
+            // Project: u[i] = max(u[i], psi[i])
+            for (size_t i = 0; i < u.size(); ++i) {
+                if (u[i] < psi[i]) {
+                    u[i] = psi[i];
+                }
             }
         }
     }
 
     /// Apply boundary conditions (CRTP version)
     void apply_boundary_conditions(std::span<double> u, double t) {
-        auto dx_span = workspace_->dx();
+        auto dx_span = workspace_.dx();
 
         // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
 
         // Left boundary
-        double x_left = grid_[0];
+        double x_left = grid_->x()[0];
         double dx_left = (n_ > 1) ? dx_span[0] : 1.0;
         double u_interior_left = (n_ > 1) ? u[1] : 0.0;
         left_bc.apply(u[0], x_left, t, dx_left, u_interior_left, 0.0, bc::BoundarySide::Left);
 
         // Right boundary
-        double x_right = grid_[n_ - 1];
+        double x_right = grid_->x()[n_ - 1];
         double dx_right = (n_ > 1) ? dx_span[n_ - 2] : 1.0;
         double u_interior_right = (n_ > 1) ? u[n_ - 2] : 0.0;
         right_bc.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
@@ -410,7 +314,7 @@ private:
     void apply_operator_with_blocking(double t,
                                       std::span<const double> u,
                                       std::span<double> Lu) {
-        const size_t n = grid_.size();
+        const size_t n = grid_->x().size();
 
         // Get spatial operator from derived class via CRTP (use const auto& to avoid copies!)
         const auto& spatial_op = derived().spatial_operator();
@@ -427,25 +331,26 @@ private:
     /// u^{n+γ} = u^n + (γ·dt/2) · [L(u^n) + L(u^{n+γ})]
     ///
     /// Solved via Newton-Raphson iteration
-    std::expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt) {
+    std::expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt,
+                                                   std::span<double> u_current,
+                                                   std::span<const double> u_prev) {
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
-        apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_->lu());
+        apply_operator_with_blocking(t_n, u_prev, workspace_.lu());
 
         // RHS = u^n + w1·L(u^n)
         // Use FMA for SAXPY-style loop
+        auto rhs = workspace_.rhs();
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(w1, workspace_->lu()[i], u_old_[i]);
+            rhs[i] = std::fma(w1, workspace_.lu()[i], u_prev[i]);
         }
 
         // Initial guess: u* = u^n
-        std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
+        std::copy(u_prev.begin(), u_prev.end(), u_current.begin());
 
         // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
-        auto result = solve_implicit_stage_dispatch(t_stage, w1,
-                                                    std::span{u_current_},
-                                                    std::span{rhs_});
+        auto result = solve_implicit_stage_dispatch(t_stage, w1, u_current, rhs);
 
         if (!result.converged) {
             SolverError error{
@@ -470,7 +375,9 @@ private:
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via Newton-Raphson iteration
-    std::expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
+    std::expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt,
+                                                   std::span<double> u_current,
+                                                   std::span<const double> u_prev) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
         const double two_minus_gamma = 2.0 - gamma;
@@ -481,19 +388,18 @@ private:
         const double beta = -(one_minus_gamma * one_minus_gamma) / denom;  // Coefficient for u^n
         const double w2 = config_.stage2_weight(dt);  // (1-γ)·dt/(2-γ)
 
-        // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
-        // Use FMA: alpha*u_current[i] + beta*u_old[i]
+        // RHS = alpha·u^{n+γ} + beta·u^n (u_current currently holds u^{n+γ})
+        // Use FMA: alpha*u_current[i] + beta*u_prev[i]
+        auto rhs = workspace_.rhs();
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(alpha, u_current_[i], beta * u_old_[i]);
+            rhs[i] = std::fma(alpha, u_current[i], beta * u_prev[i]);
         }
 
-        // Initial guess: u^{n+1} = u* (already in u_current_)
-        // (No need to copy, u_current_ already has u^{n+γ})
+        // Initial guess: u^{n+1} = u* (already in u_current)
+        // (No need to copy, u_current already has u^{n+γ})
 
         // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
-        auto result = solve_implicit_stage_dispatch(t_next, w2,
-                                                    std::span{u_current_},
-                                                    std::span{rhs_});
+        auto result = solve_implicit_stage_dispatch(t_next, w2, u_current, rhs);
 
         if (!result.converged) {
             SolverError error{
@@ -555,7 +461,7 @@ private:
     NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
                                                std::span<double> u,
                                                std::span<const double> rhs) {
-        if (obstacle_) {
+        if constexpr (HasObstacle<Derived>) {
             return solve_implicit_stage_projected(t, coeff_dt, u, rhs);
         } else {
             return solve_implicit_stage(t, coeff_dt, u, rhs);
@@ -655,21 +561,19 @@ private:
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
 
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
-            rhs_with_bc[0] = left_bc.value(t, grid_[0]);
+            rhs_with_bc[0] = left_bc.value(t, grid_->x()[0]);
         }
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
-            rhs_with_bc[n_-1] = right_bc.value(t, grid_[n_-1]);
+            rhs_with_bc[n_-1] = right_bc.value(t, grid_->x()[n_-1]);
         }
 
-        // Get obstacle function
-        if (!obstacle_) {
-            return {false, 0, std::numeric_limits<double>::infinity(),
-                   "Projected Thomas called without obstacle function"};
-        }
-        auto psi = workspace_->psi();
+        // Get obstacle constraint via CRTP
+        // Note: This method is only called when HasObstacle<Derived> is true,
+        // so we can safely call derived().obstacle()
+        auto psi = workspace_.psi();
 
         // Evaluate obstacle constraint ψ(x,t) at current time
-        (*obstacle_)(t, grid_, psi);
+        derived().obstacle(t, grid_->x(), psi);
 
         // ═══════════════════════════════════════════════════════════════════════
         // CRITICAL FIX #2: Lock Deep Exercise Region to Prevent Diffusion Lift
@@ -725,9 +629,9 @@ private:
                 // Convert row i to Dirichlet constraint: u[i] = ψ[i]
                 // Jacobian row: [0, 1, 0] (identity row)
                 // RHS: ψ[i] (intrinsic value)
-                if (i > 0) jacobian_lower_[i-1] = 0.0;  // Zero lower diagonal
-                jacobian_diag_[i] = 1.0;                 // Set diagonal to 1
-                if (i < n_ - 1) jacobian_upper_[i] = 0.0; // Zero upper diagonal
+                if (i > 0) workspace_.jacobian_lower()[i-1] = 0.0;  // Zero lower diagonal
+                workspace_.jacobian_diag()[i] = 1.0;                 // Set diagonal to 1
+                if (i < n_ - 1) workspace_.jacobian_upper()[i] = 0.0; // Zero upper diagonal
                 rhs_with_bc[i] = psi[i];                 // RHS = intrinsic value
             }
         }
@@ -757,13 +661,13 @@ private:
         //   Newton would solve: J·δu = -F, then u ← u + δu
         //   Projected Thomas solves: A·u = rhs directly (u is the solution)
         auto result = solve_thomas_projected<double>(
-            jacobian_lower_,
-            jacobian_diag_,
-            jacobian_upper_,
+            workspace_.jacobian_lower(),
+            workspace_.jacobian_diag(),
+            workspace_.jacobian_upper(),
             rhs_with_bc,  // Corrected RHS (FIX #1 and #2 applied)
             psi,          // Obstacle constraint ψ(x,t)
             u,            // OUTPUT: solution u (not correction δu)
-            tridiag_workspace_
+            workspace_.tridiag_workspace()
         );
 
         if (!result.ok()) {
@@ -801,34 +705,34 @@ private:
         build_jacobian(t, coeff_dt, u, eps);
 
         // Copy initial guess
-        std::copy(u.begin(), u.end(), newton_u_old_.begin());
+        std::copy(u.begin(), u.end(), workspace_.newton_u_old().begin());
 
         // Newton iteration
         for (size_t iter = 0; iter < config_.max_iter; ++iter) {
             // Evaluate L(u)
-            apply_operator_with_blocking(t, u, workspace_->lu());
+            apply_operator_with_blocking(t, u, workspace_.lu());
 
             // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
-            compute_residual(u, coeff_dt, workspace_->lu(), rhs,
-                           residual_);
+            compute_residual(u, coeff_dt, workspace_.lu(), rhs,
+                           workspace_.residual());
 
             // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
-            apply_bc_to_residual(residual_, u, t);
+            apply_bc_to_residual(workspace_.residual(), u, t);
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu
             // Negate residual for RHS
             for (size_t i = 0; i < n_; ++i) {
-                residual_[i] = -residual_[i];
+                workspace_.residual()[i] = -workspace_.residual()[i];
             }
 
             // Solve J·δu = -F(u) using Thomas algorithm
             auto result = solve_thomas<double>(
-                jacobian_lower_,
-                jacobian_diag_,
-                jacobian_upper_,
-                residual_,
-                delta_u_,
-                tridiag_workspace_
+                workspace_.jacobian_lower(),
+                workspace_.jacobian_diag(),
+                workspace_.jacobian_upper(),
+                workspace_.residual(),
+                workspace_.delta_u(),
+                workspace_.tridiag_workspace()
             );
 
             if (!result.ok()) {
@@ -838,7 +742,7 @@ private:
 
             // Update: u ← u + δu
             for (size_t i = 0; i < n_; ++i) {
-                u[i] += delta_u_[i];
+                u[i] += workspace_.delta_u()[i];
             }
 
             // Apply boundary conditions BEFORE obstacle projection
@@ -850,18 +754,18 @@ private:
             apply_obstacle(t, u);
 
             // Check convergence via step delta
-            double error = compute_step_delta_error(u, newton_u_old_);
+            double error = compute_step_delta_error(u, workspace_.newton_u_old());
 
             if (error < config_.tolerance) {
                 return {true, iter + 1, error, std::nullopt};
             }
 
             // Prepare for next iteration
-            std::copy(u.begin(), u.end(), newton_u_old_.begin());
+            std::copy(u.begin(), u.end(), workspace_.newton_u_old().begin());
         }
 
         return {false, config_.max_iter,
-               compute_step_delta_error(u, newton_u_old_),
+               compute_step_delta_error(u, workspace_.newton_u_old()),
                "Max iterations reached"};
     }
 
@@ -904,14 +808,14 @@ private:
         // Left boundary
         using LeftBCType = std::remove_cvref_t<decltype(left_bc)>;
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
-            double g = left_bc.value(t, grid_[0]);
+            double g = left_bc.value(t, grid_->x()[0]);
             residual[0] = u[0] - g;  // u - g (we want u = g, so F = u - g = 0)
         }
 
         // Right boundary
         using RightBCType = std::remove_cvref_t<decltype(right_bc)>;
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
-            double g = right_bc.value(t, grid_[n_ - 1]);
+            double g = right_bc.value(t, grid_->x()[n_ - 1]);
             residual[n_ - 1] = u[n_ - 1] - g;  // u - g
         }
     }
@@ -925,9 +829,9 @@ private:
         // Dispatch to analytical or finite-difference Jacobian
         if constexpr (HasAnalyticalJacobian<SpatialOpType>) {
             // Analytical Jacobian (O(n) - fast path)
-            JacobianView jac(jacobian_lower_,
-                           jacobian_diag_,
-                           jacobian_upper_);
+            JacobianView jac(workspace_.jacobian_lower(),
+                           workspace_.jacobian_diag(),
+                           workspace_.jacobian_upper());
             spatial_op.assemble_jacobian(coeff_dt, jac);
         } else {
             // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
@@ -945,33 +849,33 @@ private:
     void build_jacobian_finite_difference(double t, double coeff_dt,
                                           std::span<const double> u, double eps) {
         // Initialize u_perturb and compute baseline L(u)
-        std::copy(u.begin(), u.end(), workspace_->u_stage().begin());
-        apply_operator_with_blocking(t, u, workspace_->lu());
+        std::copy(u.begin(), u.end(), workspace_.u_stage().begin());
+        apply_operator_with_blocking(t, u, workspace_.lu());
 
         // Interior points: tridiagonal structure via finite differences
         // J = ∂F/∂u where F(u) = u - rhs - coeff_dt·L(u)
         // So ∂F/∂u = I - coeff_dt·∂L/∂u
         for (size_t i = 1; i < n_ - 1; ++i) {
             // Diagonal: ∂F/∂u_i = 1 - coeff_dt·∂L_i/∂u_i
-            workspace_->u_stage()[i] = u[i] + eps;
-            apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
-            double dLi_dui = (workspace_->rhs()[i] - workspace_->lu()[i]) / eps;
-            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
-            workspace_->u_stage()[i] = u[i];
+            workspace_.u_stage()[i] = u[i] + eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
+            double dLi_dui = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
+            workspace_.u_stage()[i] = u[i];
 
             // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
-            workspace_->u_stage()[i - 1] = u[i - 1] + eps;
-            apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
-            double dLi_duim1 = (workspace_->rhs()[i] - workspace_->lu()[i]) / eps;
-            jacobian_lower_[i - 1] = -coeff_dt * dLi_duim1;
-            workspace_->u_stage()[i - 1] = u[i - 1];
+            workspace_.u_stage()[i - 1] = u[i - 1] + eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
+            double dLi_duim1 = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            workspace_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
+            workspace_.u_stage()[i - 1] = u[i - 1];
 
             // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
-            workspace_->u_stage()[i + 1] = u[i + 1] + eps;
-            apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
-            double dLi_duip1 = (workspace_->rhs()[i] - workspace_->lu()[i]) / eps;
-            jacobian_upper_[i] = -coeff_dt * dLi_duip1;
-            workspace_->u_stage()[i + 1] = u[i + 1];
+            workspace_.u_stage()[i + 1] = u[i + 1] + eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
+            double dLi_duip1 = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            workspace_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
+            workspace_.u_stage()[i + 1] = u[i + 1];
         }
     }
 
@@ -986,35 +890,35 @@ private:
         // Left boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
-            jacobian_diag_[0] = 1.0;
-            jacobian_upper_[0] = 0.0;
+            workspace_.jacobian_diag()[0] = 1.0;
+            workspace_.jacobian_upper()[0] = 0.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
-            workspace_->u_stage()[0] = u[0] + eps;
-            apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
-            double dL0_du0 = (workspace_->rhs()[0] - workspace_->lu()[0]) / eps;
-            jacobian_diag_[0] = 1.0 - coeff_dt * dL0_du0;
-            workspace_->u_stage()[0] = u[0];
+            workspace_.u_stage()[0] = u[0] + eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
+            double dL0_du0 = (workspace_.rhs()[0] - workspace_.lu()[0]) / eps;
+            workspace_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
+            workspace_.u_stage()[0] = u[0];
 
-            workspace_->u_stage()[1] = u[1] + eps;
-            apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
-            double dL0_du1 = (workspace_->rhs()[0] - workspace_->lu()[0]) / eps;
-            jacobian_upper_[0] = -coeff_dt * dL0_du1;
-            workspace_->u_stage()[1] = u[1];
+            workspace_.u_stage()[1] = u[1] + eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
+            double dL0_du1 = (workspace_.rhs()[0] - workspace_.lu()[0]) / eps;
+            workspace_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
+            workspace_.u_stage()[1] = u[1];
         }
 
         // Right boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
-            jacobian_diag_[n_ - 1] = 1.0;
+            workspace_.jacobian_diag()[n_ - 1] = 1.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
-            workspace_->u_stage()[i] = u[i] + eps;
-            apply_operator_with_blocking(t, workspace_->u_stage(), workspace_->rhs());
-            double dLi_dui = (workspace_->rhs()[i] - workspace_->lu()[i]) / eps;
-            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
-            workspace_->u_stage()[i] = u[i];
+            workspace_.u_stage()[i] = u[i] + eps;
+            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
+            double dLi_dui = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
+            workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
+            workspace_.u_stage()[i] = u[i];
         }
     }
 

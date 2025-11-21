@@ -9,7 +9,7 @@
 #include <expected>
 #include <variant>
 #include "src/support/error_types.hpp"
-#include "src/pde/core/grid_spacing_data.hpp"
+#include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 
@@ -232,32 +232,106 @@ GridBuffer<T> GridSpec<T>::generate() const {
     return GridBuffer<T>(std::move(points));
 }
 
-/**
- * GridHolder: Helper to initialize grid before derived classes
- *
- * This class is designed for use as a base class when you need to
- * initialize grid data before initializing other base classes that
- * depend on the grid. It uses the base-from-member idiom.
- *
- * Example usage:
- * ```cpp
- * class MyWorkspace : private GridHolder, public PDEWorkspace {
- *     MyWorkspace(double x_min, double x_max, size_t n_space, size_t n_time)
- *         : GridHolder(x_min, x_max, n_space)  // Initialize grid first
- *         , PDEWorkspace(grid_view_, n_time)   // Then use grid_view_
- *     {}
- * };
- * ```
- */
-class GridHolder {
-protected:
-    GridBuffer<double> grid_buffer_;
-    GridView<double> grid_view_;
+/// Uniform grid spacing data (minimal storage: 4 values)
+///
+/// For uniform grids, spacing is constant everywhere.
+/// Memory: 32 bytes (3 doubles + 1 size_t)
+template<typename T = double>
+struct UniformSpacing {
+    T dx;           ///< Grid spacing
+    T dx_inv;       ///< 1/dx (precomputed for performance)
+    T dx_inv_sq;    ///< 1/dx² (precomputed for performance)
+    size_t n;       ///< Number of grid points
 
-    GridHolder(double x_min, double x_max, size_t n_space)
-        : grid_buffer_(GridSpec<>::uniform(x_min, x_max, n_space).value().generate())
-        , grid_view_(grid_buffer_.span())
+    /// Construct from spacing and grid size
+    ///
+    /// @param spacing Grid spacing (dx)
+    /// @param size Number of grid points
+    UniformSpacing(T spacing, size_t size)
+        : dx(spacing)
+        , dx_inv(T(1) / spacing)
+        , dx_inv_sq(dx_inv * dx_inv)
+        , n(size)
     {}
+};
+
+/// Non-uniform grid spacing data (precomputed weight arrays)
+///
+/// For non-uniform grids, precomputes all spacing-dependent values
+/// needed for finite difference operators.
+///
+/// Memory layout: [dx_left_inv | dx_right_inv | dx_center_inv | w_left | w_right]
+/// Each section has size (n-2) for interior points
+///
+/// Memory: ~40 bytes overhead + 5×(n-2)×sizeof(T)
+///         For n=100, double: ~4 KB
+template<typename T = double>
+struct NonUniformSpacing {
+    size_t n;  ///< Number of grid points
+
+    /// Precomputed arrays (single contiguous buffer)
+    /// Layout: [dx_left_inv | dx_right_inv | dx_center_inv | w_left | w_right]
+    std::vector<T> precomputed;
+
+    /// Construct from non-uniform grid points
+    ///
+    /// @param x Grid points (must be sorted, size >= 3)
+    explicit NonUniformSpacing(std::span<const T> x)
+        : n(x.size())
+    {
+        const size_t interior = n - 2;
+        precomputed.resize(5 * interior);
+
+        // Precompute all spacing arrays for interior points i=1..n-2
+        for (size_t i = 1; i <= n - 2; ++i) {
+            const T dx_left = x[i] - x[i-1];
+            const T dx_right = x[i+1] - x[i];
+            const T dx_center = T(0.5) * (dx_left + dx_right);
+
+            const size_t idx = i - 1;  // Index into arrays (0-based)
+
+            precomputed[idx] = T(1) / dx_left;
+            precomputed[interior + idx] = T(1) / dx_right;
+            precomputed[2 * interior + idx] = T(1) / dx_center;
+            precomputed[3 * interior + idx] = dx_right / (dx_left + dx_right);
+            precomputed[4 * interior + idx] = dx_left / (dx_left + dx_right);
+        }
+    }
+
+    /// Get inverse left spacing for each interior point
+    /// Returns: 1/(x[i] - x[i-1]) for i=1..n-2
+    std::span<const T> dx_left_inv() const {
+        const size_t interior = n - 2;
+        return {precomputed.data(), interior};
+    }
+
+    /// Get inverse right spacing for each interior point
+    /// Returns: 1/(x[i+1] - x[i]) for i=1..n-2
+    std::span<const T> dx_right_inv() const {
+        const size_t interior = n - 2;
+        return {precomputed.data() + interior, interior};
+    }
+
+    /// Get inverse center spacing for each interior point
+    /// Returns: 2/(dx_left + dx_right) for i=1..n-2
+    std::span<const T> dx_center_inv() const {
+        const size_t interior = n - 2;
+        return {precomputed.data() + 2 * interior, interior};
+    }
+
+    /// Get left weight for weighted first derivative
+    /// Returns: dx_right/(dx_left + dx_right) for i=1..n-2
+    std::span<const T> w_left() const {
+        const size_t interior = n - 2;
+        return {precomputed.data() + 3 * interior, interior};
+    }
+
+    /// Get right weight for weighted first derivative
+    /// Returns: dx_left/(dx_left + dx_right) for i=1..n-2
+    std::span<const T> w_right() const {
+        const size_t interior = n - 2;
+        return {precomputed.data() + 4 * interior, interior};
+    }
 };
 
 /**
@@ -377,6 +451,109 @@ private:
 
     GridView<T> grid_;
     SpacingVariant spacing_;
+};
+
+// ============================================================================
+// Grid: Main grid class with solution storage
+// ============================================================================
+
+/// Grid with persistent solution storage and metadata
+/// Outlives PDESolver, passed via shared_ptr for lifetime management
+template<typename T = double>
+class Grid {
+public:
+    /// Create grid with solution storage
+    /// @param grid_spec Grid specification (uniform, sinh, etc)
+    /// @param time_domain Time domain information
+    /// @return Grid instance or error message
+    static std::expected<std::shared_ptr<Grid<T>>, std::string>
+    create(const GridSpec<T>& grid_spec, const TimeDomain& time_domain) {
+        // Generate grid buffer
+        auto grid_buffer = grid_spec.generate();
+        auto grid_view = grid_buffer.view();
+
+        // Create GridSpacing
+        auto spacing = GridSpacing<T>(grid_view);
+
+        size_t n = grid_view.size();
+
+        // Allocate solution storage (2 × n for current + previous)
+        std::vector<T> solution(2 * n);
+
+        // Create instance (private constructor, so use new)
+        auto grid = std::shared_ptr<Grid<T>>(
+            new Grid<T>(
+                std::move(grid_buffer),
+                std::move(spacing),
+                time_domain,
+                std::move(solution)
+            )
+        );
+
+        return grid;
+    }
+
+    // Accessors
+
+    /// Spatial grid points (read-only)
+    std::span<const T> x() const {
+        return grid_buffer_.span();
+    }
+
+    /// Grid spacing object (reference, safe since Grid outlives solver)
+    const GridSpacing<T>& spacing() const {
+        return spacing_;
+    }
+
+    /// Time domain information
+    const TimeDomain& time() const {
+        return time_;
+    }
+
+    /// Current solution (last time step)
+    std::span<T> solution() {
+        return std::span{solution_.data(), n_space()};
+    }
+
+    std::span<const T> solution() const {
+        return std::span{solution_.data(), n_space()};
+    }
+
+    /// Previous solution (second-to-last time step)
+    std::span<T> solution_prev() {
+        return std::span{solution_.data() + n_space(), n_space()};
+    }
+
+    std::span<const T> solution_prev() const {
+        return std::span{solution_.data() + n_space(), n_space()};
+    }
+
+    /// Number of spatial points
+    size_t n_space() const {
+        return grid_buffer_.size();
+    }
+
+    /// Time step size
+    double dt() const {
+        return time_.dt();
+    }
+
+private:
+    // Private constructor (use factory method)
+    Grid(GridBuffer<T>&& grid_buffer,
+         GridSpacing<T>&& spacing,
+         const TimeDomain& time,
+         std::vector<T>&& solution)
+        : grid_buffer_(std::move(grid_buffer))
+        , spacing_(std::move(spacing))
+        , time_(time)
+        , solution_(std::move(solution))
+    {}
+
+    GridBuffer<T> grid_buffer_;     // Spatial grid points
+    GridSpacing<T> spacing_;        // Grid spacing (uniform or non-uniform)
+    TimeDomain time_;               // Time domain metadata
+    std::vector<T> solution_;       // [u_current | u_prev] (2 × n_space)
 };
 
 } // namespace mango

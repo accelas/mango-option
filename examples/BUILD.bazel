@@ -1,18 +1,19 @@
-cc_binary(
-    name = "example_newton_solver",
-    srcs = ["example_newton_solver.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:boundary_conditions",
-        "//src/pde/operators:laplacian_pde",
-        "//src/pde/operators:operator_factory",
-        "//src/math:root_finding",
-        "//src/pde/core:grid",
-        "//src/pde/core:time_domain",
-    ],
-    copts = ["-std=c++23"],
-)
+# DISABLED: Uses old PDEWorkspace::create() API
+# cc_binary(
+#     name = "example_newton_solver",
+#     srcs = ["example_newton_solver.cc"],
+#     deps = [
+#         "//src/pde/core:pde_solver",
+#         "//src/pde/core:pde_workspace",
+#         "//src/pde/core:boundary_conditions",
+#         "//src/pde/operators:laplacian_pde",
+#         "//src/pde/operators:operator_factory",
+#         "//src/math:root_finding",
+#         "//src/pde/core:grid",
+#         "//src/pde/core:time_domain",
+#     ],
+#     copts = ["-std=c++23"],
+# )
 
 cc_binary(
     name = "example_expected_validation",
