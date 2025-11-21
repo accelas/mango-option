@@ -14,7 +14,7 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/normalized_chain_solver.hpp"
+#include "src/option/american_option_batch.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
 #include <iomanip>

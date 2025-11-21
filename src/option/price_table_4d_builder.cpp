@@ -167,13 +167,14 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     auto solver = std::move(solver_result.value());
 
     // Solve using the selected strategy
-    auto solve_result = solver->solve(
-        prices_4d,
-        std::span{moneyness_},
-        std::span{maturity_},
-        std::span{volatility_},
-        std::span{rate_},
-        K_ref_);
+    PriceTableGrid grid{
+        .moneyness = std::span{moneyness_},
+        .maturity = std::span{maturity_},
+        .volatility = std::span{volatility_},
+        .rate = std::span{rate_},
+        .K_ref = K_ref_
+    };
+    auto solve_result = solver->solve(prices_4d, grid);
 
     if (!solve_result) {
         return std::unexpected(solve_result.error());
