@@ -509,17 +509,6 @@ cc_test(
 
 
 cc_test(
-    name = "american_solver_workspace_test",
-    srcs = ["american_solver_workspace_test.cc"],
-    deps = [
-        "//src/option:american_solver_workspace",
-        "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "quantlib_accuracy_test",
     srcs = ["quantlib_accuracy_test.cc"],
     deps = [

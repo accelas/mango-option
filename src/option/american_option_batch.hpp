@@ -8,17 +8,12 @@
 #ifndef MANGO_AMERICAN_OPTION_BATCH_HPP
 #define MANGO_AMERICAN_OPTION_BATCH_HPP
 
-// Suppress deprecation warnings for internal AmericanSolverWorkspace usage
-// The batch solver still uses AmericanSolverWorkspace internally for efficiency
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
-#include "src/pde/core/grid.hpp"
 #include <vector>
 #include <expected>
 #include <span>
@@ -143,33 +138,54 @@ public:
             std::pmr::unsynchronized_pool_resource thread_pool;
 
             // Per-thread workspace (only for shared grid strategy)
-            std::shared_ptr<AmericanSolverWorkspace> thread_workspace;
+            std::shared_ptr<PDEWorkspace> thread_pde_workspace;
+            std::shared_ptr<Grid<double>> thread_grid;
+
             if (use_shared_grid) {
                 auto [grid_spec, n_time] = shared_grid.value();
-                auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
-                if (workspace_result.has_value()) {
-                    thread_workspace = workspace_result.value();
+
+                // Create Grid with solution storage
+                auto grid_result = Grid<double>::create_with_solution(grid_spec, n_time);
+                if (grid_result.has_value()) {
+                    thread_grid = std::make_shared<Grid<double>>(std::move(grid_result.value()));
+
+                    // Create PDEWorkspace from grid specification
+                    auto pde_workspace_result = PDEWorkspace::create(grid_spec, &thread_pool);
+                    if (pde_workspace_result.has_value()) {
+                        thread_pde_workspace = std::make_shared<PDEWorkspace>(std::move(pde_workspace_result.value()));
+                    }
                 }
-                // If creation failed, thread_workspace remains null and we'll fail in loop
+                // If creation failed, thread_pde_workspace remains null and we'll fail in loop
             }
 
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
                 // Get or create workspace for this iteration
-                std::shared_ptr<AmericanSolverWorkspace> workspace;
+                std::shared_ptr<Grid<double>> grid;
+                std::shared_ptr<PDEWorkspace> pde_workspace;
+
                 if (use_shared_grid) {
                     // Shared grid: reuse thread workspace
-                    workspace = thread_workspace;
+                    grid = thread_grid;
+                    pde_workspace = thread_pde_workspace;
                 } else {
                     // Per-option grid: create workspace for this option
                     auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
-                    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
-                    if (workspace_result.has_value()) {
-                        workspace = workspace_result.value();
+
+                    // Create Grid with solution storage
+                    auto grid_result = Grid<double>::create_with_solution(grid_spec, n_time);
+                    if (grid_result.has_value()) {
+                        grid = std::make_shared<Grid<double>>(std::move(grid_result.value()));
+
+                        // Create PDEWorkspace from grid specification
+                        auto pde_workspace_result = PDEWorkspace::create(grid_spec, &thread_pool);
+                        if (pde_workspace_result.has_value()) {
+                            pde_workspace = std::make_shared<PDEWorkspace>(std::move(pde_workspace_result.value()));
+                        }
                     }
                 }
 
-                if (!workspace) {
+                if (!grid || !pde_workspace) {
                     // Workspace creation failed (either shared or per-option)
                     results[i] = std::unexpected(SolverError{
                         .code = SolverErrorCode::InvalidConfiguration,
@@ -181,8 +197,8 @@ public:
                     continue;
                 }
 
-                // Create solver using new PDEWorkspace API
-                AmericanOptionSolver solver(params[i], workspace->workspace_spans());
+                // Create solver using PDEWorkspace API
+                AmericanOptionSolver solver(params[i], *pde_workspace);
 
                 // Invoke setup callback if provided
                 if (setup) {
@@ -233,19 +249,18 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     // Estimate grid for this option
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
-    // Create workspace with estimated grid
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec, n_time, std::pmr::get_default_resource());
-    if (!workspace_result.has_value()) {
+    // Create PDEWorkspace with estimated grid
+    auto pde_workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
+    if (!pde_workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Failed to create workspace: " + workspace_result.error(),
+            .message = "Failed to create PDEWorkspace: " + pde_workspace_result.error(),
             .iterations = 0
         });
     }
 
-    // Create and solve using new PDEWorkspace API
-    AmericanOptionSolver solver(params, workspace_result.value()->workspace_spans());
+    // Create and solve using PDEWorkspace API
+    AmericanOptionSolver solver(params, pde_workspace_result.value());
     return solver.solve();
 }
 
@@ -355,7 +370,8 @@ private:
 
     friend class NormalizedChainSolver;
 
-    std::shared_ptr<AmericanSolverWorkspace> pde_workspace_;
+    std::shared_ptr<PDEWorkspace> pde_workspace_;
+    std::shared_ptr<Grid<double>> grid_;
     std::vector<double> x_grid_;
     std::vector<double> tau_grid_;
     std::vector<double> values_;  // u(x,τ) [row-major: Nx × Ntau]
@@ -429,8 +445,6 @@ public:
         const NormalizedSolveRequest& request,
         std::span<const double> moneyness_grid);
 };
-
-#pragma GCC diagnostic pop
 
 }  // namespace mango
 

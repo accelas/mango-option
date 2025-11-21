@@ -14,6 +14,50 @@
 
 namespace mango {
 
+// Inline implementation of grid estimation (moved from american_solver_workspace.hpp)
+namespace {
+    inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option_internal(
+        const PricingParams& params,
+        double n_sigma = 5.0,
+        double alpha = 2.0,
+        double tol = 1e-2,
+        double c_t = 0.75,
+        size_t min_spatial_points = 100,
+        size_t max_spatial_points = 1200,
+        size_t max_time_steps = 5000)
+    {
+        // Domain bounds (centered on current moneyness)
+        double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
+        double x0 = std::log(params.spot / params.strike);
+
+        double x_min = x0 - n_sigma * sigma_sqrt_T;
+        double x_max = x0 + n_sigma * sigma_sqrt_T;
+
+        // Spatial resolution
+        double dx_target = params.volatility * std::sqrt(tol);
+        size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
+        Nx = std::clamp(Nx, min_spatial_points, max_spatial_points);
+
+        if (Nx % 2 == 0) Nx++;
+
+        // Temporal resolution
+        double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
+        double dx_min = dx_avg * std::exp(-alpha);
+
+        double dt = c_t * dx_min;
+        size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
+        Nt = std::min(Nt, max_time_steps);
+
+        auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, alpha);
+        return {grid_spec.value(), Nt};
+    }
+}
+
+// Public interface maintains name compatibility
+inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(const PricingParams& params) {
+    return estimate_grid_for_option_internal(params);
+}
+
 // Constructor with PDEWorkspace
 AmericanOptionSolver::AmericanOptionSolver(
     const PricingParams& params,

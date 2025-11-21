@@ -1,11 +1,8 @@
-// Suppress deprecation warnings for internal AmericanSolverWorkspace usage
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/math/root_finding.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/support/parallel.hpp"
 #include "common/ivcalc_trace.h"
 #include <cmath>
@@ -120,13 +117,13 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 
     std::pmr::synchronized_pool_resource pool;
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec_result.value(), config_.grid_n_time, &pool);
 
-    if (!workspace_result) {
+    // Create PDEWorkspace
+    auto pde_workspace_result = PDEWorkspace::create(grid_spec_result.value(), &pool);
+    if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Invalid workspace configuration: " + workspace_result.error(),
+            .message = "Invalid PDEWorkspace configuration: " + pde_workspace_result.error(),
             .iterations = 0
         };
         return std::numeric_limits<double>::quiet_NaN();
@@ -134,8 +131,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve
     try {
-        auto workspace = workspace_result.value();
-        AmericanOptionSolver solver(option_params, workspace->workspace_spans());
+        AmericanOptionSolver solver(option_params, pde_workspace_result.value());
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 
@@ -241,5 +237,3 @@ void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
 }
 
 } // namespace mango
-
-#pragma GCC diagnostic pop

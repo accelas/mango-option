@@ -3,10 +3,6 @@
  * @brief Implementation of batch and normalized chain solvers
  */
 
-// Suppress deprecation warnings for internal AmericanSolverWorkspace usage
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
 #include "src/option/american_option_batch.hpp"
 #include "common/ivcalc_trace.h"
 #include <cmath>
@@ -64,18 +60,25 @@ std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
 
     NormalizedWorkspace workspace;
 
-    // Create PDE workspace
+    // Create grid specification
     auto grid_spec_result = GridSpec<double>::uniform(request.x_min, request.x_max, request.n_space);
     if (!grid_spec_result.has_value()) {
         return std::unexpected("Invalid grid specification: " + grid_spec_result.error());
     }
 
-    auto pde_workspace = AmericanSolverWorkspace::create(
-        grid_spec_result.value(), request.n_time, std::pmr::get_default_resource());
-    if (!pde_workspace) {
-        return std::unexpected("Failed to create PDE workspace: " + pde_workspace.error());
+    // Create Grid with solution storage
+    auto grid_result = Grid<double>::create_with_solution(grid_spec_result.value(), request.n_time);
+    if (!grid_result.has_value()) {
+        return std::unexpected("Failed to create Grid: " + grid_result.error());
     }
-    workspace.pde_workspace_ = std::move(pde_workspace.value());
+    workspace.grid_ = std::make_shared<Grid<double>>(std::move(grid_result.value()));
+
+    // Create PDEWorkspace
+    auto pde_workspace_result = PDEWorkspace::create(grid_spec_result.value(), std::pmr::get_default_resource());
+    if (!pde_workspace_result.has_value()) {
+        return std::unexpected("Failed to create PDEWorkspace: " + pde_workspace_result.error());
+    }
+    workspace.pde_workspace_ = std::make_shared<PDEWorkspace>(std::move(pde_workspace_result.value()));
 
     // Allocate x grid
     workspace.x_grid_.resize(request.n_space);
@@ -141,8 +144,8 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     params.volatility = request.sigma;
     params.discrete_dividends = {};  // Normalized solver requires no discrete dividends
 
-    // Create solver using new PDEWorkspace API
-    AmericanOptionSolver solver(params, workspace.pde_workspace_->workspace_spans());
+    // Create solver using PDEWorkspace API
+    AmericanOptionSolver solver(params, *workspace.pde_workspace_);
 
     // Precompute step indices for each maturity
     double dt = request.T_max / request.n_time;
@@ -282,5 +285,3 @@ std::expected<void, std::string> NormalizedChainSolver::check_eligibility(
 }
 
 }  // namespace mango
-
-#pragma GCC diagnostic pop

@@ -1,7 +1,3 @@
-// Suppress deprecation warnings for test code using AmericanSolverWorkspace
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 
@@ -18,13 +14,6 @@ class AmericanOptionPricingTest : public ::testing::Test {
 protected:
     void SetUp() override {
         pool_ = std::make_unique<std::pmr::synchronized_pool_resource>();
-        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
-        ASSERT_TRUE(grid_spec.has_value());
-
-        auto workspace_result = AmericanSolverWorkspace::create(
-            grid_spec.value(), 2000, pool_.get());
-        ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
-        workspace_ = workspace_result.value();
     }
 
     [[nodiscard]] AmericanOptionResult Solve(const AmericanOptionParams& params) const {
@@ -42,28 +31,7 @@ protected:
         return std::move(result.value());
     }
 
-    static AmericanOptionResult SolveWithWorkspace(
-        const AmericanOptionParams& params,
-        const std::shared_ptr<AmericanSolverWorkspace>& workspace)
-    {
-        AmericanOptionSolver solver(params, workspace->workspace_spans());
-        auto solve_result = solver.solve();
-        if (!solve_result) {
-            const auto& error = solve_result.error();
-            ADD_FAILURE() << "Solver failed: " << error.message
-                          << " (code=" << static_cast<int>(error.code)
-                          << ", iterations=" << error.iterations << ")";
-            // Cannot return empty AmericanOptionResult (not default constructible)
-            // Throw to abort test
-            throw std::runtime_error("Solver failed");
-        }
-
-        // Move result (AmericanOptionResult is not copyable)
-        return std::move(solve_result.value());
-    }
-
     std::unique_ptr<std::pmr::synchronized_pool_resource> pool_;
-    std::shared_ptr<AmericanSolverWorkspace> workspace_;
 };
 
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
@@ -250,5 +218,3 @@ TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
 
 }  // namespace
 }  // namespace mango
-
-#pragma GCC diagnostic pop
