@@ -288,6 +288,26 @@ AmericanOptionSolver::solve() {
         // Initialize with put payoff: max(1 - e^x, 0)
         pde_solver.initialize(AmericanPutSolver::payoff);
 
+        // Register discrete dividend events (if any)
+        for (const auto& dividend : params_.discrete_dividends) {
+            pde_solver.add_temporal_event(dividend.time,
+                [div_amount = dividend.amount, K = params_.strike](
+                    double /*t*/, std::span<const double> x, std::span<double> u) {
+                    // Adjust solution for discrete dividend: S → S - D
+                    // In log-moneyness: x = ln(S/K) → x' = ln((S-D)/K)
+                    // V(S-D) ≈ V(S) - D * ∂V/∂S (linear approximation)
+                    // More accurate: interpolate solution from x to x - ln(1 - D/S)
+                    #pragma omp simd
+                    for (size_t i = 0; i < x.size(); ++i) {
+                        double S = K * std::exp(x[i]);
+                        double S_ex = std::max(S - div_amount, 0.0);
+                        double x_ex = std::log(S_ex / K);
+                        // TODO: Interpolate u from x_ex to x[i] (cubic spline)
+                        // For now, simplified: u[i] remains unchanged (placeholder)
+                    }
+                });
+        }
+
         // Solve PDE (modifies Grid in-place, records snapshots if configured)
         auto solve_result = pde_solver.solve();
 
@@ -299,6 +319,23 @@ AmericanOptionSolver::solve() {
 
         // Initialize with call payoff: max(e^x - 1, 0)
         pde_solver.initialize(AmericanCallSolver::payoff);
+
+        // Register discrete dividend events (if any)
+        for (const auto& dividend : params_.discrete_dividends) {
+            pde_solver.add_temporal_event(dividend.time,
+                [div_amount = dividend.amount, K = params_.strike](
+                    double /*t*/, std::span<const double> x, std::span<double> u) {
+                    // Adjust solution for discrete dividend: S → S - D
+                    #pragma omp simd
+                    for (size_t i = 0; i < x.size(); ++i) {
+                        double S = K * std::exp(x[i]);
+                        double S_ex = std::max(S - div_amount, 0.0);
+                        double x_ex = std::log(S_ex / K);
+                        // TODO: Interpolate u from x_ex to x[i] (cubic spline)
+                        // For now, simplified: u[i] remains unchanged (placeholder)
+                    }
+                });
+        }
 
         // Solve PDE (modifies Grid in-place, records snapshots if configured)
         auto solve_result = pde_solver.solve();
@@ -417,18 +454,23 @@ auto result = solver.solve();  // Creates fresh Grid
 
 ### 5. PDESolver Return Type
 
-**Change PDESolver to return Grid via std::expected:**
+**PDESolver returns expected<void, SolverError> (not Grid):**
 
 ```cpp
 class PDESolver {
 public:
     // OLD: bool solve()
-    // NEW: returns Grid or error
+    // NEW: returns void on success, error on failure
     std::expected<void, SolverError> solve();
 };
 ```
 
-Note: PDESolver modifies Grid in-place (Grid passed to constructor), so it returns `void` on success. The Grid is already owned by the caller.
+**Key point:** PDESolver modifies Grid **in-place** (Grid passed to constructor via shared_ptr), so it returns `void` on success rather than returning the Grid. The Grid is already owned by the caller and can be accessed directly after `solve()` completes.
+
+This design:
+- Avoids unnecessary Grid copies or moves
+- Makes mutation explicit (Grid is modified during solve)
+- Follows std::expected<void, E> pattern for operations with side effects
 
 ## Usage Examples
 
