@@ -57,3 +57,48 @@ TEST(GridSnapshotTest, OutOfRangeTimeRejected) {
     EXPECT_FALSE(grid_result.has_value());
     EXPECT_TRUE(grid_result.error().find("out of range") != std::string::npos);
 }
+
+TEST(GridSnapshotTest, RecordAndRetrieve) {
+    auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 11).value();
+    auto time_domain = mango::TimeDomain::from_n_steps(0.0, 1.0, 10);
+    std::vector<double> snapshot_times = {0.0, 0.5, 1.0};
+
+    auto grid = mango::Grid<double>::create(grid_spec, time_domain, snapshot_times).value();
+
+    // Record snapshots at different states
+    std::vector<double> state0(11, 1.0);  // All 1.0
+    std::vector<double> state5(11, 2.0);  // All 2.0
+    std::vector<double> state10(11, 3.0); // All 3.0
+
+    EXPECT_TRUE(grid->should_record(0));
+    grid->record(0, state0);
+
+    EXPECT_TRUE(grid->should_record(5));
+    grid->record(5, state5);
+
+    EXPECT_TRUE(grid->should_record(10));
+    grid->record(10, state10);
+
+    // Retrieve and verify
+    auto snap0 = grid->at(0);
+    EXPECT_EQ(snap0.size(), 11);
+    EXPECT_DOUBLE_EQ(snap0[0], 1.0);
+
+    auto snap1 = grid->at(1);
+    EXPECT_DOUBLE_EQ(snap1[0], 2.0);
+
+    auto snap2 = grid->at(2);
+    EXPECT_DOUBLE_EQ(snap2[0], 3.0);
+}
+
+TEST(GridSnapshotTest, ShouldRecordOnlyRequestedStates) {
+    auto grid_spec = mango::GridSpec<double>::uniform(0.0, 1.0, 11).value();
+    auto time_domain = mango::TimeDomain::from_n_steps(0.0, 1.0, 10);
+    std::vector<double> snapshot_times = {0.5};  // Only middle
+
+    auto grid = mango::Grid<double>::create(grid_spec, time_domain, snapshot_times).value();
+
+    EXPECT_FALSE(grid->should_record(0));
+    EXPECT_TRUE(grid->should_record(5));
+    EXPECT_FALSE(grid->should_record(10));
+}

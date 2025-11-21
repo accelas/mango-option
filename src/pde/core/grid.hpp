@@ -645,6 +645,23 @@ public:
         return snapshot_times_;
     }
 
+    // Recording API (for PDESolver)
+    bool should_record(size_t state_idx) const {
+        return find_snapshot_index(state_idx).has_value();
+    }
+
+    void record(size_t state_idx, std::span<const T> solution) {
+        auto snap_idx = find_snapshot_index(state_idx);
+        if (!snap_idx.has_value() || !surface_history_.has_value()) {
+            return;  // Silently ignore if not a snapshot state
+        }
+
+        // Copy solution to snapshot storage
+        size_t offset = snap_idx.value() * n_space();
+        std::copy(solution.begin(), solution.end(),
+                  surface_history_->begin() + offset);
+    }
+
 private:
     // Private constructor (use factory method)
     Grid(GridBuffer<T>&& grid_buffer,
