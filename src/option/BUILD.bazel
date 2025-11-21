@@ -1,18 +1,4 @@
 cc_library(
-    name = "american_solver_workspace",
-    srcs = ["american_solver_workspace.cpp"],
-    hdrs = ["american_solver_workspace.hpp"],
-    deps = [
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:grid",
-        "//src/pde/core:time_domain",
-        ":option_spec",
-    ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
@@ -21,7 +7,8 @@ cc_library(
         "//src/pde/core:time_domain",
         "//src/pde/operators:operator_factory",
         "//src/pde/operators:black_scholes_pde",
-        ":american_solver_workspace",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
         ":option_spec",
         "//src/support:error_types",
     ],
@@ -37,9 +24,12 @@ cc_library(
         "//src/support:parallel",
         "//src/pde/operators:black_scholes_pde",
         ":american_pde_solver",
-        ":american_solver_workspace",
+        ":american_option_result",
         ":option_spec",
         "//src/support:error_types",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
     ],
     copts = [
         "-std=c++23",
@@ -55,12 +45,26 @@ cc_library(
 )
 
 cc_library(
+    name = "american_option_result",
+    srcs = ["american_option_result.cpp"],
+    hdrs = ["american_option_result.hpp"],
+    deps = [
+        "//src/pde/core:grid",
+        "//src/pde/operators:centered_difference_facade",
+        ":option_spec",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_option_batch",
     srcs = ["american_option_batch.cpp"],
     hdrs = ["american_option_batch.hpp"],
     deps = [
         ":american_option",
-        ":american_solver_workspace",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
         "//common:ivcalc_trace_hdr",
         "//src/math:cubic_spline_solver",
         "//src/support:error_types",
@@ -166,7 +170,8 @@ cc_library(
         ":iv_types",
         "//src/math:root_finding",
         ":american_option",
-        ":american_solver_workspace",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
         "//src/support:parallel",
         "//common:ivcalc_trace_hdr",
         "//src/support:error_types",
@@ -192,7 +197,8 @@ cc_library(
         ":option_spec",
         ":american_option",
         ":american_option_batch",
-        ":american_solver_workspace",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
         "//src/math:cubic_spline_solver",
         "//src/support:error_types",
         "//src/support:parallel",

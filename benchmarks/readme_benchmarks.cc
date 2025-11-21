@@ -9,6 +9,7 @@
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <iomanip>
 #include <memory>
 #include <stdexcept>
@@ -181,9 +182,6 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
 // ============================================================================
 
 static void BM_README_AmericanSingle(benchmark::State& state) {
-    const size_t n_space = static_cast<size_t>(state.range(0));
-    const size_t n_time = static_cast<size_t>(state.range(1));
-
     AmericanOptionParams params(
         100.0,  // spot
         100.0,  // strike
@@ -194,28 +192,27 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         0.20    // volatility
     );
 
-    constexpr double x_min = -3.0;
-    constexpr double x_max = 3.0;
+    // Use automatic grid estimation
+    auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
-    auto grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space);
-    if (!grid_spec.has_value()) {
-        throw std::runtime_error("Failed to create grid: " + grid_spec.error());
-    }
-    auto workspace = AmericanSolverWorkspace::create(grid_spec.value(), n_time, std::pmr::get_default_resource());
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace) {
         throw std::runtime_error("Failed to create workspace: " + workspace.error());
     }
 
     auto run_once = [&]() {
-        auto solver = AmericanOptionSolver::create(params, workspace.value());
-        if (!solver) {
-            throw std::runtime_error("Failed to create solver: " + solver.error());
-        }
-        auto result = solver.value().solve();
+        AmericanOptionSolver solver(params, workspace.value());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
@@ -226,19 +223,69 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         run_once();
     }
 
-    state.counters["n_space"] = static_cast<double>(n_space);
+    state.counters["n_space"] = static_cast<double>(n);
     state.counters["n_time"] = static_cast<double>(n_time);
-    if (n_space == 101) {
-        state.SetLabel("American (single, 101x1k grid)");
-    } else if (n_space == 501) {
-        state.SetLabel("American (single, 501x5k grid)");
-    } else {
-        state.SetLabel("American (single)");
-    }
+    state.SetLabel(std::format("American (single, {}x{})", n, n_time));
 }
 BENCHMARK(BM_README_AmericanSingle)
-    ->Args({101, 1000})
-    ->Args({501, 5000})
+    ->MinTime(kMinBenchmarkTimeSec);
+
+static void BM_README_AmericanSequential(benchmark::State& state) {
+    const size_t batch_size = static_cast<size_t>(state.range(0));
+
+    std::vector<AmericanOptionParams> batch;
+    batch.reserve(batch_size);
+
+    for (size_t i = 0; i < batch_size; ++i) {
+        double strike = 90.0 + i * 0.5;
+        batch.push_back(AmericanOptionParams(
+            100.0,  // spot
+            strike, // strike
+            1.0,    // maturity
+            0.05,   // rate
+            0.02,   // dividend_yield
+            OptionType::PUT,
+            0.20    // volatility
+        ));
+    }
+
+    auto run_once = [&]() {
+        // Sequential processing - no batch API
+        for (const auto& params : batch) {
+            auto [grid_spec, n_time] = estimate_grid_for_option(params);
+            size_t n = grid_spec.n_points();
+            std::pmr::synchronized_pool_resource pool;
+            std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+            auto workspace = PDEWorkspace::from_buffer(buffer, n);
+            if (!workspace) {
+                throw std::runtime_error("Failed to create workspace");
+            }
+
+            AmericanOptionSolver solver(params, workspace.value());
+            auto result = solver.solve();
+            if (!result) {
+                throw std::runtime_error(result.error().message);
+            }
+            double price = result->value_at(params.spot);
+            benchmark::DoNotOptimize(price);
+        }
+    };
+
+    for (int i = 0; i < kWarmupIterations; ++i) {
+        run_once();
+    }
+
+    for (auto _ : state) {
+        run_once();
+    }
+
+    state.SetItemsProcessed(state.iterations() * batch_size);
+    state.counters["batch"] = static_cast<double>(batch_size);
+    state.SetLabel("American sequential (64 options)");
+}
+BENCHMARK(BM_README_AmericanSequential)
+    ->Arg(64)
     ->MinTime(kMinBenchmarkTimeSec);
 
 static void BM_README_AmericanBatch64(benchmark::State& state) {
@@ -263,8 +310,8 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
     BatchAmericanOptionSolver solver;
 
     auto run_once = [&]() {
-        // Use shared grid for batch processing (more efficient for homogeneous batches)
-        auto batch_result = solver.solve_batch(batch, true);  // use_shared_grid=true
+        // Use per-option grids with OpenMP parallelization
+        auto batch_result = solver.solve_batch(batch, false);  // use_shared_grid=false (per-option grids)
         for (const auto& res : batch_result.results) {
             if (!res) {
                 throw std::runtime_error(res.error().message);
@@ -283,7 +330,7 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     state.SetItemsProcessed(state.iterations() * batch_size);
     state.counters["batch"] = static_cast<double>(batch_size);
-    state.SetLabel("American batch (64 options)");
+    state.SetLabel("American parallel batch (64 options)");
 }
 BENCHMARK(BM_README_AmericanBatch64)
     ->Arg(64)
@@ -430,8 +477,11 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
     double spot = 100.0;
 
     for (auto _ : state) {
+        // Allocate buffer for PDEWorkspace
+        std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
+
         // Create workspace
-        auto workspace_result = NormalizedWorkspace::create(request);
+        auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
         if (!workspace_result) continue;
         auto workspace = std::move(workspace_result.value());
         auto surface = workspace.surface_view();

@@ -9,11 +9,11 @@
 #define MANGO_AMERICAN_OPTION_BATCH_HPP
 
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
-#include "src/pde/core/grid.hpp"
 #include <vector>
 #include <expected>
 #include <span>
@@ -113,7 +113,17 @@ public:
             return BatchAmericanOptionResult{.results = {}, .failed_count = 0};
         }
 
-        std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
+        // Pre-allocate results vector with sentinel errors (parallel access requires pre-sized vector)
+        // Since AmericanOptionResult is not copyable, we construct each element in-place
+        std::vector<std::expected<AmericanOptionResult, SolverError>> results;
+        results.reserve(params.size());
+        for (size_t i = 0; i < params.size(); ++i) {
+            results.emplace_back(std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Not yet computed",
+                .iterations = 0
+            }));
+        }
         size_t failed_count = 0;
 
         // Precompute shared grid if needed
@@ -127,34 +137,67 @@ public:
             // Per-thread pool for cheap workspace reuse
             std::pmr::unsynchronized_pool_resource thread_pool;
 
-            // Per-thread workspace (only for shared grid strategy)
-            std::shared_ptr<AmericanSolverWorkspace> thread_workspace;
+            // Per-thread shared grid (only for shared grid strategy)
+            std::shared_ptr<Grid<double>> thread_grid;
+            std::pmr::vector<double> thread_buffer(&thread_pool);
+            size_t thread_n_space = 0;  // Number of spatial points for shared grid
+
             if (use_shared_grid) {
                 auto [grid_spec, n_time] = shared_grid.value();
-                auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
-                if (workspace_result.has_value()) {
-                    thread_workspace = workspace_result.value();
+                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, n_time);  // Temp time domain for batch
+
+                // Create Grid with solution storage
+                auto grid_result = Grid<double>::create(grid_spec, time_domain);
+                if (grid_result.has_value()) {
+                    thread_grid = grid_result.value();
+
+                    // Allocate buffer for shared workspace
+                    thread_n_space = grid_spec.n_points();
+                    thread_buffer.resize(PDEWorkspace::required_size(thread_n_space));
                 }
-                // If creation failed, thread_workspace remains null and we'll fail in loop
+                // If creation failed, thread_grid remains null and we'll fail in loop
             }
 
             MANGO_PRAGMA_FOR
             for (size_t i = 0; i < params.size(); ++i) {
-                // Get or create workspace for this iteration
-                std::shared_ptr<AmericanSolverWorkspace> workspace;
+                // Get or create grid and workspace for this iteration
+                std::shared_ptr<Grid<double>> grid;
+                std::pmr::vector<double> buffer(&thread_pool);
+                PDEWorkspace* workspace_ptr = nullptr;
+                std::optional<PDEWorkspace> workspace_storage;
+
                 if (use_shared_grid) {
-                    // Shared grid: reuse thread workspace
-                    workspace = thread_workspace;
+                    // Shared grid: reuse thread grid and buffer
+                    grid = thread_grid;
+                    if (grid && !thread_buffer.empty()) {
+                        auto workspace_result = PDEWorkspace::from_buffer(thread_buffer, thread_n_space);
+                        if (workspace_result.has_value()) {
+                            workspace_storage = workspace_result.value();
+                            workspace_ptr = &workspace_storage.value();
+                        }
+                    }
                 } else {
                     // Per-option grid: create workspace for this option
                     auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
-                    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, &thread_pool);
-                    if (workspace_result.has_value()) {
-                        workspace = workspace_result.value();
+                    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params[i].maturity, n_time);
+
+                    // Create Grid with solution storage
+                    auto grid_result = Grid<double>::create(grid_spec, time_domain);
+                    if (grid_result.has_value()) {
+                        grid = grid_result.value();
+
+                        // Allocate buffer and create workspace
+                        size_t n = grid_spec.n_points();
+                        buffer.resize(PDEWorkspace::required_size(n));
+                        auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
+                        if (workspace_result.has_value()) {
+                            workspace_storage = workspace_result.value();
+                            workspace_ptr = &workspace_storage.value();
+                        }
                     }
                 }
 
-                if (!workspace) {
+                if (!grid || !workspace_ptr) {
                     // Workspace creation failed (either shared or per-option)
                     results[i] = std::unexpected(SolverError{
                         .code = SolverErrorCode::InvalidConfiguration,
@@ -166,26 +209,19 @@ public:
                     continue;
                 }
 
-                // Create solver
-                auto solver_result = AmericanOptionSolver::create(params[i], workspace);
-                if (!solver_result.has_value()) {
-                    results[i] = std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        .message = solver_result.error(),
-                        .iterations = 0
-                    });
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                    continue;
-                }
+                // Create solver using PDEWorkspace API
+                AmericanOptionSolver solver(params[i], *workspace_ptr);
 
                 // Invoke setup callback if provided
                 if (setup) {
-                    setup(i, solver_result.value());
+                    setup(i, solver);
                 }
 
-                // Solve
-                results[i] = solver_result.value().solve();
+                // Solve (use placement new to avoid copy/move assignment issues)
+                auto solve_result = solver.solve();
+                results[i].~expected();  // Destroy sentinel value
+                new (&results[i]) std::expected<AmericanOptionResult, SolverError>(std::move(solve_result));
+
                 if (!results[i].has_value()) {
                     MANGO_PRAGMA_ATOMIC
                     ++failed_count;
@@ -217,6 +253,9 @@ private:
 /// Convenience API that automatically determines optimal grid parameters
 /// based on option characteristics, eliminating need for manual grid specification.
 ///
+/// Note: Allocates temporary workspace buffer (discarded after solve).
+/// For reusable workspaces, caller should manage buffer and use PDEWorkspace directly.
+///
 /// @param params Option parameters
 /// @return Expected containing result on success, error on failure
 inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
@@ -225,28 +264,24 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     // Estimate grid for this option
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
 
-    // Create workspace with estimated grid
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec, n_time, std::pmr::get_default_resource());
+    // Allocate workspace buffer (local, temporary)
+    size_t n = grid_spec.n_points();
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+
+    // Create workspace spans from buffer
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Failed to create workspace: " + workspace_result.error(),
+            .message = "Failed to create PDEWorkspace: " + workspace_result.error(),
             .iterations = 0
         });
     }
 
-    // Create and solve
-    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-    if (!solver_result.has_value()) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = solver_result.error(),
-            .iterations = 0
-        });
-    }
-
-    return solver_result.value().solve();
+    // Create and solve using PDEWorkspace API
+    // Buffer stays alive during solve(), result contains Grid with solution
+    AmericanOptionSolver solver(params, workspace_result.value());
+    return solver.solve();
 }
 
 // ============================================================================
@@ -336,8 +371,11 @@ private:
 class NormalizedWorkspace {
 public:
     /// Create workspace for given request parameters
+    /// Caller must provide PMR buffer for PDEWorkspace (use PDEWorkspace::required_size)
     static std::expected<NormalizedWorkspace, std::string> create(
-        const NormalizedSolveRequest& request);
+        const NormalizedSolveRequest& request,
+        std::span<double> pde_buffer,
+        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
     /// Get view of solution surface (after solve completes)
     NormalizedSurfaceView surface_view();
@@ -355,10 +393,16 @@ private:
 
     friend class NormalizedChainSolver;
 
-    std::shared_ptr<AmericanSolverWorkspace> pde_workspace_;
+    PDEWorkspace pde_workspace_;                // Non-owning spans (caller provides buffer)
+    std::shared_ptr<Grid<double>> grid_;
     std::vector<double> x_grid_;
     std::vector<double> tau_grid_;
     std::vector<double> values_;  // u(x,τ) [row-major: Nx × Ntau]
+
+public:
+    // Accessor for workspace (after create() succeeds)
+    PDEWorkspace& workspace() { return pde_workspace_; }
+    const PDEWorkspace& workspace() const { return pde_workspace_; }
 };
 
 /**

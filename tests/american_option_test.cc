@@ -14,54 +14,27 @@ class AmericanOptionPricingTest : public ::testing::Test {
 protected:
     void SetUp() override {
         pool_ = std::make_unique<std::pmr::synchronized_pool_resource>();
-        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
-        ASSERT_TRUE(grid_spec.has_value());
-
-        auto workspace_result = AmericanSolverWorkspace::create(
-            grid_spec.value(), 2000, pool_.get());
-        ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
-        workspace_ = workspace_result.value();
     }
 
     [[nodiscard]] AmericanOptionResult Solve(const AmericanOptionParams& params) const {
-        return SolveWithWorkspace(params, workspace_);
-    }
-
-    static AmericanOptionResult SolveWithWorkspace(
-        const AmericanOptionParams& params,
-        const std::shared_ptr<AmericanSolverWorkspace>& workspace)
-    {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            ADD_FAILURE() << "Failed to create solver: " << solver_result.error();
-            return {};
-        }
-
-        auto solve_result = solver_result.value().solve();
-        if (!solve_result) {
-            const auto& error = solve_result.error();
+        // Use convenience function that creates appropriately-sized workspace
+        auto result = solve_american_option_auto(params);
+        if (!result) {
+            const auto& error = result.error();
             ADD_FAILURE() << "Solver failed: " << error.message
                           << " (code=" << static_cast<int>(error.code)
                           << ", iterations=" << error.iterations << ")";
-            return {};
+            // Cannot return empty AmericanOptionResult (not default constructible)
+            // Throw to abort test
+            throw std::runtime_error("Solver failed");
         }
-
-        return solve_result.value();
+        return std::move(result.value());
     }
 
     std::unique_ptr<std::pmr::synchronized_pool_resource> pool_;
-    std::shared_ptr<AmericanSolverWorkspace> workspace_;
 };
 
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
-    ASSERT_TRUE(grid_spec.has_value());
-
-    auto workspace = AmericanSolverWorkspace::create(
-        grid_spec.value(), 2000, &pool);
-    ASSERT_TRUE(workspace.has_value());
-
     AmericanOptionParams params(
         100.0,  // spot
         110.0,  // strike
@@ -72,10 +45,8 @@ TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
         0.25    // volatility
     );
 
-    auto solver_result = AmericanOptionSolver::create(params, workspace.value());
-    ASSERT_TRUE(solver_result.has_value());
-
-    auto result = solver_result.value().solve();
+    // Use convenience function that automatically sizes the workspace
+    auto result = solve_american_option_auto(params);
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->converged);
 }
@@ -198,12 +169,6 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
 TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
     // Deep ITM put test - verifies active set method locks nodes to payoff
     // Fixed by implementing proper complementarity enforcement in Newton solver
-    std::pmr::synchronized_pool_resource pool;
-    auto grid_spec = GridSpec<double>::sinh_spaced(-7.0, 2.0, 301, 2.0);
-    ASSERT_TRUE(grid_spec.has_value());
-    auto custom_workspace = AmericanSolverWorkspace::create(grid_spec.value(), 1500, &pool);
-    ASSERT_TRUE(custom_workspace.has_value()) << custom_workspace.error();
-
     AmericanOptionParams params(
         0.25,   // spot deep ITM
         100.0,  // strike
@@ -214,7 +179,10 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
         0.2     // volatility
     );
 
-    AmericanOptionResult result = SolveWithWorkspace(params, custom_workspace.value());
+    // Use convenience function - it will automatically size the grid appropriately
+    auto result_exp = solve_american_option_auto(params);
+    ASSERT_TRUE(result_exp.has_value()) << result_exp.error().message;
+    AmericanOptionResult result = std::move(result_exp.value());
     ASSERT_TRUE(result.converged);
 
     const double intrinsic = params.strike - params.spot;

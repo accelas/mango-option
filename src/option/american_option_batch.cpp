@@ -50,7 +50,9 @@ std::expected<void, std::string> NormalizedSolveRequest::validate() const {
 }
 
 std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
-    const NormalizedSolveRequest& request)
+    const NormalizedSolveRequest& request,
+    std::span<double> pde_buffer,
+    [[maybe_unused]] std::pmr::memory_resource* resource)
 {
     // Validate request
     auto validation = request.validate();
@@ -60,18 +62,34 @@ std::expected<NormalizedWorkspace, std::string> NormalizedWorkspace::create(
 
     NormalizedWorkspace workspace;
 
-    // Create PDE workspace
+    // Create grid specification
     auto grid_spec_result = GridSpec<double>::uniform(request.x_min, request.x_max, request.n_space);
     if (!grid_spec_result.has_value()) {
         return std::unexpected("Invalid grid specification: " + grid_spec_result.error());
     }
 
-    auto pde_workspace = AmericanSolverWorkspace::create(
-        grid_spec_result.value(), request.n_time, std::pmr::get_default_resource());
-    if (!pde_workspace) {
-        return std::unexpected("Failed to create PDE workspace: " + pde_workspace.error());
+    // Create Grid with solution storage
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, request.T_max, request.n_time);
+    auto grid_result = Grid<double>::create(grid_spec_result.value(), time_domain);
+    if (!grid_result.has_value()) {
+        return std::unexpected("Failed to create Grid: " + grid_result.error());
     }
-    workspace.pde_workspace_ = std::move(pde_workspace.value());
+    workspace.grid_ = grid_result.value();
+
+    // Create workspace spans from caller-provided buffer
+    size_t n = request.n_space;
+    size_t required = PDEWorkspace::required_size(n);
+    if (pde_buffer.size() < required) {
+        return std::unexpected(std::format(
+            "PDEWorkspace buffer too small: {} < {} required",
+            pde_buffer.size(), required));
+    }
+
+    auto pde_workspace_result = PDEWorkspace::from_buffer(pde_buffer, n);
+    if (!pde_workspace_result.has_value()) {
+        return std::unexpected("Failed to create PDEWorkspace: " + pde_workspace_result.error());
+    }
+    workspace.pde_workspace_ = pde_workspace_result.value();
 
     // Allocate x grid
     workspace.x_grid_.resize(request.n_space);
@@ -137,16 +155,8 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
     params.volatility = request.sigma;
     params.discrete_dividends = {};  // Normalized solver requires no discrete dividends
 
-    // Create solver (surface is always collected for at_time() access)
-    auto solver_result = AmericanOptionSolver::create(params, workspace.pde_workspace_);
-    if (!solver_result) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Failed to create solver: " + solver_result.error(),
-            .iterations = 0
-        });
-    }
-    auto solver = std::move(solver_result.value());
+    // Create solver using PDEWorkspace API
+    AmericanOptionSolver solver(params, workspace.workspace());
 
     // Precompute step indices for each maturity
     double dt = request.T_max / request.n_time;
@@ -166,7 +176,7 @@ std::expected<void, SolverError> NormalizedChainSolver::solve(
         }
     }
 
-    // Solve PDE (surface collected to surface_buffer)
+    // Solve PDE
     auto solve_result = solver.solve();
     if (!solve_result) {
         return std::unexpected(solve_result.error());

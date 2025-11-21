@@ -63,13 +63,13 @@ int main() {
 
     // Create PMR workspace
     std::pmr::synchronized_pool_resource pool;
-    auto workspace_result = mango::PDEWorkspace::create(
+    auto workspace_result = mango::PDEWorkspaceOwned::create(
         grid_spec_result.value(), &pool);
     if (!workspace_result.has_value()) {
         std::cerr << "Failed to create workspace: " << workspace_result.error() << "\n";
         return 1;
     }
-    auto workspace = workspace_result.value();
+    auto workspace = workspace_result.value().workspace;
 
     mango::TimeDomain time(0.0, 0.1, 0.001);
 

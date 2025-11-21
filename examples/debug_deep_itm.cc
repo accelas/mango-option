@@ -1,6 +1,8 @@
 #include "src/option/american_option.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <iostream>
 #include <iomanip>
+#include <memory_resource>
 
 int main() {
     using namespace mango;
@@ -23,25 +25,19 @@ int main() {
         return 1;
     }
 
-    auto workspace_result = AmericanSolverWorkspace::create(
-        grid_spec.value(),
-        1500,
-        std::pmr::get_default_resource()
-    );
+    // Allocate workspace buffer (local, temporary)
+    std::pmr::synchronized_pool_resource pool;
+    size_t n = grid_spec.value().n_points();
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
 
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result.has_value()) {
-        std::cerr << "Workspace creation failed: " << workspace_result.error() << "\n";
+        std::cerr << "Workspace creation failed: " + workspace_result.error() << "\n";
         return 1;
     }
-    auto workspace = workspace_result.value();
 
-    // Create solver with Projected Thomas
-    auto solver_result = AmericanOptionSolver::create(params, workspace);
-    if (!solver_result.has_value()) {
-        std::cerr << "Solver creation failed: " << solver_result.error() << "\n";
-        return 1;
-    }
-    auto solver = std::move(solver_result.value());
+    // Create solver with PDEWorkspace
+    AmericanOptionSolver solver(params, workspace_result.value());
 
     std::cout << "=== Deep ITM Put Test (Projected Thomas - Reformulated) ===\n";
     std::cout << "S=" << params.spot << " K=" << params.strike << " T=" << params.maturity << "\n";
