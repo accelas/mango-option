@@ -11,7 +11,7 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/bspline/bspline_4d.hpp"
 #include "src/bspline/bspline_fitter_4d.hpp"
 #include "src/option/iv_solver_fdm.hpp"
@@ -146,7 +146,13 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -154,16 +160,13 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace);
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("ATM Put, T=1Y, σ=0.20");
@@ -182,7 +185,13 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -190,16 +199,13 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace);
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("OTM Put, T=3M, σ=0.30");
@@ -218,7 +224,13 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -226,16 +238,13 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace);
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("ITM Put, T=2Y, σ=0.25");
@@ -259,7 +268,13 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -267,16 +282,13 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace);
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("Call with 3 discrete dividends");
@@ -400,7 +412,13 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -412,18 +430,15 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
 
     for (auto _ : state) {
         auto start = std::chrono::high_resolution_clock::now();
-        auto solver_result = AmericanOptionSolver::create(params, workspace);
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace);
+        auto result = solver.solve();
         auto end = std::chrono::high_resolution_clock::now();
 
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
         total_time_ns += std::chrono::duration<double, std::nano>(end - start).count();
         iterations++;
     }
@@ -467,7 +482,13 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     }
 
     auto [grid_spec, n_time] = compute_global_grid_for_batch(batch);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
@@ -479,12 +500,8 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-            if (!solver_result) {
-                state.SkipWithError(solver_result.error().c_str());
-                return;
-            }
-            results.push_back(solver_result.value().solve());
+            AmericanOptionSolver solver(params, workspace_result.value());
+            results.push_back(solver.solve());
         }
 
         for (const auto& res : results) {

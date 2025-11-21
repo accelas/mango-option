@@ -29,6 +29,16 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_snapshot_test",
+    srcs = ["grid_snapshot_test.cc"],
+    deps = [
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
     name = "pde_workspace_test",
     srcs = ["pde_workspace_test.cc"],
     deps = [
@@ -71,6 +81,22 @@ cc_test(
 cc_test(
     name = "pde_solver_test",
     srcs = ["pde_solver_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:laplacian_pde",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
+)
+
+cc_test(
+    name = "pde_solver_snapshot_test",
+    srcs = ["pde_solver_snapshot_test.cc"],
     deps = [
         "//src/pde/core:pde_solver",
         "//src/pde/core:pde_workspace",
@@ -201,6 +227,18 @@ cc_test(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "american_option_result_test",
+    size = "small",
+    srcs = ["american_option_result_test.cc"],
+    deps = [
+        "//src/option:american_option_result",
+        "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -471,17 +509,6 @@ cc_test(
 
 
 cc_test(
-    name = "american_solver_workspace_test",
-    srcs = ["american_solver_workspace_test.cc"],
-    deps = [
-        "//src/option:american_solver_workspace",
-        "//src/pde/core:grid",
-        "@googletest//:gtest_main",
-    ],
-    copts = ["-std=c++23"],
-)
-
-cc_test(
     name = "quantlib_accuracy_test",
     srcs = ["quantlib_accuracy_test.cc"],
     deps = [
@@ -493,4 +520,18 @@ cc_test(
     size = "medium",
     timeout = "moderate",
     tags = ["manual"],  # Disabled: Greeks accuracy needs improvement for non-uniform grids
+)
+
+cc_test(
+    name = "american_option_new_api_test",
+    size = "small",
+    srcs = ["american_option_new_api_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_result",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
 )

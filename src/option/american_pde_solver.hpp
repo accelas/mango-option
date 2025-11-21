@@ -14,9 +14,10 @@
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/core/time_domain.hpp"
+#include "src/pde/core/pde_workspace.hpp"
+#include "src/pde/core/grid.hpp"
 #include "src/pde/operators/operator_factory.hpp"
 #include "src/pde/operators/black_scholes_pde.hpp"
-#include "src/option/american_solver_workspace.hpp"
 #include "src/option/option_spec.hpp"
 #include "src/support/error_types.hpp"
 #include <expected>

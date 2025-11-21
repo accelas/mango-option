@@ -128,6 +128,11 @@ public:
         auto u_current = grid_->solution();
         auto u_prev = grid_->solution_prev();
 
+        // Record initial condition if requested
+        if (grid_->should_record(0)) {
+            grid_->record(0, u_current);
+        }
+
         for (size_t step = 0; step < time.n_steps(); ++step) {
             double t_old = t;
 
@@ -153,6 +158,11 @@ public:
 
             // Process temporal events AFTER completing the step
             process_temporal_events(t_old, t_next, step, u_current);
+
+            // Record snapshot AFTER events
+            if (grid_->should_record(step + 1)) {
+                grid_->record(step + 1, u_current);
+            }
         }
 
         // Final solution is already in grid_->solution()

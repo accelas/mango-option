@@ -13,7 +13,7 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <memory_resource>
 #include <stdexcept>
@@ -91,23 +91,26 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("mango-iv");
@@ -148,23 +151,26 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("mango-iv");
@@ -205,23 +211,26 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("mango-iv");
@@ -264,23 +273,26 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     );
 
     auto [grid_spec, n_time] = estimate_grid_for_option(params);
-    auto workspace_result = AmericanSolverWorkspace::create(grid_spec, n_time, std::pmr::get_default_resource());
+
+    // Allocate buffer for workspace
+    size_t n = grid_spec.n_points();
+    std::pmr::synchronized_pool_resource pool;
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
+
+    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     if (!workspace_result) {
         state.SkipWithError(workspace_result.error().c_str());
         return;
     }
 
     for (auto _ : state) {
-        auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-        if (!solver_result) {
-            state.SkipWithError(solver_result.error().c_str());
-            return;
-        }
-        auto result = solver_result.value().solve();
+        AmericanOptionSolver solver(params, workspace_result.value());
+        auto result = solver.solve();
         if (!result) {
             throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(*result);
+        double price = result->value_at(params.spot);
+        benchmark::DoNotOptimize(price);
     }
 
     state.SetLabel("mango " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));

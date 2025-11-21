@@ -8,7 +8,7 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include "src/support/memory/solver_memory_arena.hpp"
 
 namespace py = pybind11;
@@ -106,25 +106,14 @@ PYBIND11_MODULE(mango_iv, m) {
 
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
-        .def(py::init<>())
-        .def_readwrite("surface_2d", &mango::AmericanOptionResult::surface_2d)
-        .def_readwrite("n_space", &mango::AmericanOptionResult::n_space)
-        .def_readwrite("n_time", &mango::AmericanOptionResult::n_time)
-        .def_readwrite("x_min", &mango::AmericanOptionResult::x_min)
-        .def_readwrite("x_max", &mango::AmericanOptionResult::x_max)
-        .def_readwrite("strike", &mango::AmericanOptionResult::strike)
-        .def_readwrite("converged", &mango::AmericanOptionResult::converged)
         .def("value_at", &mango::AmericanOptionResult::value_at, py::arg("spot"),
              "Interpolate to get option value at specific spot price")
-        .def("at_time", &mango::AmericanOptionResult::at_time, py::arg("time_idx"),
-             "Get solution at specific time step");
-
-    // AmericanOptionGreeks structure
-    py::class_<mango::AmericanOptionGreeks>(m, "AmericanOptionGreeks")
-        .def(py::init<>())
-        .def_readwrite("delta", &mango::AmericanOptionGreeks::delta)
-        .def_readwrite("gamma", &mango::AmericanOptionGreeks::gamma)
-        .def_readwrite("theta", &mango::AmericanOptionGreeks::theta);
+        .def("delta", &mango::AmericanOptionResult::delta,
+             "Compute delta (∂V/∂S) at spot price")
+        .def("gamma", &mango::AmericanOptionResult::gamma,
+             "Compute gamma (∂²V/∂S²) at spot price")
+        .def("theta", &mango::AmericanOptionResult::theta,
+             "Compute theta (∂V/∂t) at spot price");
 
     // SolverMemoryArenaStats structure
     py::class_<mango::memory::SolverMemoryArenaStats>(m, "SolverMemoryArenaStats")
@@ -190,34 +179,32 @@ PYBIND11_MODULE(mango_iv, m) {
            double x_min,
            double x_max,
            size_t n_space,
-           size_t n_time) {
+           [[maybe_unused]] size_t n_time) {
             auto grid_spec_result = mango::GridSpec<double>::uniform(x_min, x_max, n_space);
             if (!grid_spec_result.has_value()) {
                 throw py::value_error(
                     "Failed to create grid: " + grid_spec_result.error());
             }
-            auto workspace_result =
-                mango::AmericanSolverWorkspace::create(grid_spec_result.value(), n_time, std::pmr::get_default_resource());
+
+            // Allocate workspace buffer (local, temporary)
+            size_t n = grid_spec_result.value().n_points();
+            std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+
+            auto workspace_result = mango::PDEWorkspace::from_buffer(buffer, n);
             if (!workspace_result) {
                 throw py::value_error(
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            auto solver_result = mango::AmericanOptionSolver::create(
-                params, workspace_result.value());
-            if (!solver_result) {
-                throw py::value_error(
-                    "Failed to create solver: " + solver_result.error());
-            }
-
-            auto solve_result = solver_result.value().solve();
+            mango::AmericanOptionSolver solver(params, workspace_result.value());
+            auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();
                 throw py::value_error(
                     "American option solve failed: " + error.message);
             }
 
-            return solve_result.value();
+            return std::move(solve_result.value());
         },
         py::arg("params"),
         py::arg("x_min") = -3.0,

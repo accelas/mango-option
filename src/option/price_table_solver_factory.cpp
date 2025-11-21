@@ -6,7 +6,6 @@
 #include "src/option/price_table_solver_factory.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/american_solver_workspace.hpp"
 #include "src/support/parallel.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include <ranges>
@@ -37,7 +36,7 @@ void extract_batch_results_to_4d(
     size_t n_time = 0;
     for (const auto& result_expected : batch_result.results) {
         if (result_expected.has_value() && result_expected->converged) {
-            n_time = result_expected->n_time;
+            n_time = result_expected->grid()->num_snapshots();
             break;
         }
     }
@@ -73,12 +72,11 @@ void extract_batch_results_to_4d(
         }
         const auto& result = result_expected.value();
 
-        // Build spatial grid for this result (uniform grid)
-        std::vector<double> x_grid(result.n_space);
-        const double dx = (result.x_max - result.x_min) / (result.n_space - 1);
-        for (size_t i = 0; i < result.n_space; ++i) {
-            x_grid[i] = result.x_min + i * dx;
-        }
+        // Extract grid from result
+        auto result_grid = result.grid();
+        auto x_grid = result_grid->x();  // Span of spatial grid points
+        const size_t n_space = x_grid.size();
+        const double x_min = x_grid.front();
 
         // For each maturity time step
         for (size_t j = 0; j < grid.maturity.size(); ++j) {
@@ -96,7 +94,7 @@ void extract_batch_results_to_4d(
                 // Fall back to boundary values if spline build fails
                 for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
                     const double x = log_moneyness[m_idx];
-                    double V_norm = (x <= result.x_min) ? spatial_solution[0] : spatial_solution[result.n_space - 1];
+                    double V_norm = (x <= x_min) ? spatial_solution[0] : spatial_solution[n_space - 1];
                     size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
                     prices_4d[table_idx] = K_ref * V_norm;
                 }
@@ -155,9 +153,10 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
         log_moneyness[i] = std::log(grid.moneyness[i]);
     }
 
-    // Pre-allocate workspaces and surfaces for all (σ, r) combinations
+    // Pre-allocate workspaces, buffers, and surfaces for all (σ, r) combinations
     const size_t batch_size = Nv * Nr;
     std::vector<std::optional<NormalizedWorkspace>> workspaces(batch_size);
+    std::vector<std::pmr::vector<double>> workspace_buffers(batch_size);
     std::vector<std::optional<NormalizedSurfaceView>> surfaces(batch_size);
 
     // Create workspaces outside parallel region
@@ -179,7 +178,11 @@ std::expected<void, std::string> NormalizedPriceTableSolver::solve(
         request.T_max = T_max;
         request.tau_snapshots = grid.maturity;
 
-        auto ws_result = NormalizedWorkspace::create(request);
+        // Allocate buffer for PDEWorkspace
+        size_t required_size = PDEWorkspace::required_size(config_.n_space);
+        workspace_buffers[idx].resize(required_size);
+
+        auto ws_result = NormalizedWorkspace::create(request, workspace_buffers[idx]);
         if (ws_result.has_value()) {
             workspaces[idx] = std::move(ws_result.value());
         } else {

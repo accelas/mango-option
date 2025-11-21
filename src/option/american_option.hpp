@@ -12,13 +12,15 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
-#include "src/option/american_solver_workspace.hpp"
+#include "src/option/american_option_result.hpp"
 #include "src/option/option_spec.hpp"  // For OptionType enum
+#include "src/pde/core/pde_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
 #include <cmath>
 #include <functional>
+#include <optional>
 
 namespace mango {
 
@@ -28,62 +30,118 @@ namespace mango {
  */
 using AmericanOptionParams = PricingParams;
 
+/**
+ * Grid estimation accuracy parameters.
+ *
+ * Controls spatial/temporal resolution tradeoffs for American option PDE solver.
+ */
+struct GridAccuracyParams {
+    /// Domain half-width in units of σ√T (default: 5.0 covers ±5 std devs)
+    double n_sigma = 5.0;
+
+    /// Sinh clustering strength (default: 2.0 concentrates points near strike)
+    double alpha = 2.0;
+
+    /// Target spatial truncation error (default: 1e-2 for ~1e-3 price accuracy)
+    /// - 1e-2: Fast mode (~100-150 points, ~5ms per option)
+    /// - 1e-3: Medium accuracy (~300-400 points, ~50ms per option)
+    /// - 1e-6: High accuracy mode (~1200 points, ~300ms per option)
+    double tol = 1e-2;
+
+    /// CFL safety factor for time step (default: 0.75)
+    double c_t = 0.75;
+
+    /// Minimum spatial grid points (default: 100)
+    size_t min_spatial_points = 100;
+
+    /// Maximum spatial grid points (default: 1200)
+    size_t max_spatial_points = 1200;
+
+    /// Maximum time steps (default: 5000)
+    size_t max_time_steps = 5000;
+};
 
 /**
- * Solver result containing solution surface (interpolate on-demand for specific prices).
+ * Estimate grid specification from option parameters.
+ *
+ * Automatically determines appropriate spatial/temporal discretization
+ * based on option characteristics (volatility, maturity, moneyness).
+ *
+ * @param params Option pricing parameters
+ * @param accuracy Grid accuracy parameters (optional)
+ * @return Tuple of (GridSpec, n_time_steps)
  */
-struct AmericanOptionResult {
-    double value;                      ///< Option value at current spot (dollars)
-    std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
-    std::vector<double> x_grid;        ///< Spatial grid points (log-moneyness coordinates)
-    std::vector<double> surface_2d;   ///< Full spatiotemporal surface V/K [time][space] (optional, for at_time())
-    size_t n_space;                    ///< Number of spatial grid points
-    size_t n_time;                     ///< Number of time steps
-    double x_min;                      ///< Minimum log-moneyness
-    double x_max;                      ///< Maximum log-moneyness
-    double strike;                     ///< Strike price K (for denormalization)
-    bool converged;                    ///< Solver convergence status
+inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
+    const PricingParams& params,
+    const GridAccuracyParams& accuracy = GridAccuracyParams{})
+{
+    // Domain bounds (centered on current moneyness)
+    double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
+    double x0 = std::log(params.spot / params.strike);
 
-    /// Default constructor
-    AmericanOptionResult()
-        : value(0.0), solution(), x_grid(), surface_2d(), n_space(0), n_time(0),
-          x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
+    double x_min = x0 - accuracy.n_sigma * sigma_sqrt_T;
+    double x_max = x0 + accuracy.n_sigma * sigma_sqrt_T;
 
-    /**
-     * Interpolate to get option value at specific spot price (at final time).
-     *
-     * @param spot Spot price S
-     * @return Option value in dollars (denormalized)
-     */
-    double value_at(double spot) const;
+    // Spatial resolution (target truncation error)
+    double dx_target = params.volatility * std::sqrt(accuracy.tol);
+    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
+    Nx = std::clamp(Nx, accuracy.min_spatial_points, accuracy.max_spatial_points);
 
-    /**
-     * Get solution at specific time step.
-     *
-     * @param time_idx Time step index (0 = maturity, n_time-1 = present)
-     * @return Span of spatial solution at that time
-     */
-    std::span<const double> at_time(size_t time_idx) const {
-        if (surface_2d.empty() || time_idx >= n_time) {
-            return {};
-        }
-        return std::span<const double>{surface_2d.data() + time_idx * n_space, n_space};
+    // Ensure odd number of points (for centered stencils)
+    if (Nx % 2 == 0) Nx++;
+
+    // Temporal resolution (coupled to smallest spatial spacing)
+    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
+    double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
+    double dx_min = dx_avg * std::exp(-accuracy.alpha);  // Sinh clustering factor
+
+    double dt = accuracy.c_t * dx_min;
+    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
+    Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound for stability
+
+    // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
+    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
+    return {grid_spec.value(), Nt};
+}
+
+/**
+ * Compute global grid for batch processing.
+ *
+ * Takes union of individual grid requirements to create a single
+ * grid suitable for all options in the batch.
+ *
+ * @param params Span of option parameters for the batch
+ * @param accuracy Grid accuracy parameters (optional)
+ * @return Tuple of (GridSpec, n_time_steps) covering all options
+ */
+inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
+    std::span<const PricingParams> params,
+    const GridAccuracyParams& accuracy = GridAccuracyParams{})
+{
+    if (params.empty()) {
+        // Return minimal valid sinh grid for empty batch
+        auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, accuracy.alpha);
+        return {grid_spec.value(), 100};
     }
-};
 
-/**
- * Option Greeks (sensitivities).
- * Computed on-demand via AmericanOptionSolver::compute_greeks().
- */
-struct AmericanOptionGreeks {
-    double delta;    ///< ∂V/∂S (first derivative wrt spot)
-    double gamma;    ///< ∂²V/∂S² (second derivative wrt spot)
-    double theta;    ///< ∂V/∂t (time decay)
+    double global_x_min = std::numeric_limits<double>::max();
+    double global_x_max = std::numeric_limits<double>::lowest();
+    size_t global_Nx = 0;
+    size_t global_Nt = 0;
 
-    /// Default constructor
-    AmericanOptionGreeks()
-        : delta(0.0), gamma(0.0), theta(0.0) {}
-};
+    // Estimate grid for each option and take union/maximum
+    for (const auto& p : params) {
+        auto [grid_spec, Nt] = estimate_grid_for_option(p, accuracy);
+        global_x_min = std::min(global_x_min, grid_spec.x_min());
+        global_x_max = std::max(global_x_max, grid_spec.x_max());
+        global_Nx = std::max(global_Nx, grid_spec.n_points());
+        global_Nt = std::max(global_Nt, Nt);
+    }
+
+    // Create sinh-spaced grid with same concentration parameter
+    auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
+    return {grid_spec.value(), global_Nt};
+}
 
 /**
  * American option pricing solver using finite difference method.
@@ -95,92 +153,40 @@ struct AmericanOptionGreeks {
 class AmericanOptionSolver {
 public:
     /**
-     * Constructor with workspace.
+     * Direct PDEWorkspace constructor.
      *
-     * This constructor enables efficient batch solving by reusing
-     * grid allocations across multiple solver instances. Use when
-     * solving many options with same grid but different coefficients.
+     * This constructor takes PDEWorkspace directly, enabling flexible
+     * memory management. The solver creates Grid internally and returns
+     * the AmericanOptionResult wrapper.
      *
-     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
-     * to ensure proper lifetime management.
-     *
-     * @param params Option pricing parameters (including discrete dividends)
-     * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @param params Option pricing parameters
+     * @param workspace PDEWorkspace with pre-allocated buffers
+     * @param snapshot_times Optional times to record solution snapshots
      */
-    AmericanOptionSolver(const AmericanOptionParams& params,
-                        std::shared_ptr<AmericanSolverWorkspace> workspace);
-
-    /**
-     * Factory method with expected-based validation.
-     *
-     * Creates an AmericanOptionSolver with validation returning std::expected<void, std::string>.
-     * This provides a non-throwing alternative to the constructor.
-     *
-     * IMPORTANT: The workspace must outlive the solver. Use std::shared_ptr
-     * to ensure proper lifetime management.
-     *
-     * @param params Option pricing parameters (including discrete dividends)
-     * @param workspace Shared workspace with grid configuration and pre-allocated storage
-     * @return Expected containing solver on success, error message on failure
-     */
-    static std::expected<AmericanOptionSolver, std::string> create(
-        const AmericanOptionParams& params,
-        std::shared_ptr<AmericanSolverWorkspace> workspace);
+    AmericanOptionSolver(const PricingParams& params,
+                        PDEWorkspace workspace,
+                        std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     /**
      * Solve for option value.
      *
-     * Always stores final solution for value_at(). If output_buffer was provided
-     * at construction, collects full spatiotemporal surface enabling at_time().
+     * Returns AmericanOptionResult wrapper containing Grid and PricingParams.
+     * If snapshot_times were provided at construction, the Grid will contain
+     * recorded solution snapshots.
      *
-     * @return Result containing option value (compute Greeks separately via compute_greeks())
+     * @return Result wrapper with value(), Greeks, and snapshot access
      */
     std::expected<AmericanOptionResult, SolverError> solve();
 
-    /**
-     * Compute Greeks (sensitivities) for the current solution.
-     *
-     * Must be called after solve() has succeeded. Computes delta, gamma, and theta
-     * based on the current solution state.
-     *
-     * @return Greeks on success, error if solve() hasn't been called yet
-     */
-    std::expected<AmericanOptionGreeks, SolverError> compute_greeks() const;
-
-    /**
-     * Get the full solution surface (for debugging/analysis).
-     *
-     * @return Vector of option values across the spatial grid
-     */
-    std::vector<double> get_solution() const;
-
 private:
     // Parameters
-    AmericanOptionParams params_;
+    PricingParams params_;
 
-    // Workspace (contains grid configuration and pre-allocated storage)
-    // Uses shared_ptr to keep workspace alive for the solver's lifetime
-    std::shared_ptr<AmericanSolverWorkspace> workspace_;
+    // PDEWorkspace (owns spans to external buffer)
+    PDEWorkspace workspace_;
 
-    // Solution state
-    std::vector<double> solution_;
-    bool solved_ = false;
-
-    // Lazy-initialized operator for Greeks calculation
-    mutable std::unique_ptr<GridSpacing<double>> grid_spacing_;
-    mutable std::unique_ptr<operators::CenteredDifference<double>> diff_op_;
-
-    // Helper methods
-    double compute_delta() const;
-    double compute_gamma() const;
-    double compute_theta() const;
-    double interpolate_solution(double x_target, std::span<const double> x_grid) const;
-
-    // Helper to find grid index for log-moneyness value
-    size_t find_grid_index(double log_moneyness) const;
-
-    // Lazy initialization for diff operator
-    const operators::CenteredDifference<double>& get_diff_operator() const;
+    // Snapshot times for Grid creation
+    std::vector<double> snapshot_times_;
 };
 
 }  // namespace mango

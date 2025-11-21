@@ -8,6 +8,9 @@
 #include <stdexcept>
 #include <expected>
 #include <variant>
+#include <optional>
+#include <algorithm>
+#include <format>
 #include "src/support/error_types.hpp"
 #include "src/pde/core/time_domain.hpp"
 
@@ -457,6 +460,71 @@ private:
 // Grid: Main grid class with solution storage
 // ============================================================================
 
+namespace {
+
+/// Convert snapshot times to state indices with validation and deduplication
+///
+/// @param times Requested snapshot times (may be off-grid)
+/// @param time_domain Time domain specification
+/// @return Pair of (sorted unique state indices, snapped times) or error
+inline std::expected<std::pair<std::vector<size_t>, std::vector<double>>, std::string>
+convert_times_to_indices(std::span<const double> times,
+                         const TimeDomain& time_domain) {
+    const double t_start = time_domain.t_start();
+    const double t_end = time_domain.t_end();
+    const size_t n_steps = time_domain.n_steps();
+    const double dt = time_domain.dt();
+
+    // Validate preconditions
+    if (n_steps == 0) {
+        return std::unexpected("TimeDomain has zero time steps");
+    }
+    if (dt <= 0.0) {
+        return std::unexpected(std::format(
+            "Invalid TimeDomain: dt={}", dt));
+    }
+
+    std::vector<size_t> indices;
+    std::vector<double> snapped_times;
+    indices.reserve(times.size());
+    snapped_times.reserve(times.size());
+
+    for (double t : times) {
+        // Validate range
+        if (t < t_start || t > t_end) {
+            return std::unexpected(std::format(
+                "Snapshot time {} out of range [{}, {}]", t, t_start, t_end));
+        }
+
+        // Convert to nearest state index
+        double step_exact = (t - t_start) / dt;
+        size_t state_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
+        state_idx = std::min(state_idx, n_steps);  // Clamp to n_steps
+
+        indices.push_back(state_idx);
+        snapped_times.push_back(t_start + state_idx * dt);
+    }
+
+    // Sort and deduplicate
+    std::vector<std::pair<size_t, double>> paired;
+    for (size_t i = 0; i < indices.size(); ++i) {
+        paired.push_back({indices[i], snapped_times[i]});
+    }
+    std::sort(paired.begin(), paired.end());
+    paired.erase(std::unique(paired.begin(), paired.end()), paired.end());
+
+    indices.clear();
+    snapped_times.clear();
+    for (const auto& [idx, time] : paired) {
+        indices.push_back(idx);
+        snapped_times.push_back(time);
+    }
+
+    return std::make_pair(indices, snapped_times);
+}
+
+}  // namespace
+
 /// Grid with persistent solution storage and metadata
 /// Outlives PDESolver, passed via shared_ptr for lifetime management
 template<typename T = double>
@@ -465,9 +533,11 @@ public:
     /// Create grid with solution storage
     /// @param grid_spec Grid specification (uniform, sinh, etc)
     /// @param time_domain Time domain information
+    /// @param snapshot_times Optional times to record snapshots
     /// @return Grid instance or error message
     static std::expected<std::shared_ptr<Grid<T>>, std::string>
-    create(const GridSpec<T>& grid_spec, const TimeDomain& time_domain) {
+    create(const GridSpec<T>& grid_spec, const TimeDomain& time_domain,
+           std::span<const double> snapshot_times = {}) {
         // Generate grid buffer
         auto grid_buffer = grid_spec.generate();
         auto grid_view = grid_buffer.view();
@@ -489,6 +559,22 @@ public:
                 std::move(solution)
             )
         );
+
+        // If snapshot times provided, convert to indices and initialize storage
+        if (!snapshot_times.empty()) {
+            auto conversion = convert_times_to_indices(snapshot_times, time_domain);
+            if (!conversion.has_value()) {
+                return std::unexpected(conversion.error());
+            }
+
+            auto [indices, times] = conversion.value();
+            grid->snapshot_indices_ = std::move(indices);
+            grid->snapshot_times_ = std::move(times);
+
+            // Allocate snapshot storage
+            size_t total_size = grid->snapshot_indices_.size() * n;
+            grid->surface_history_ = std::vector<T>(total_size);
+        }
 
         return grid;
     }
@@ -538,6 +624,44 @@ public:
         return time_.dt();
     }
 
+    // Snapshot query API
+    bool has_snapshots() const {
+        return surface_history_.has_value();
+    }
+
+    size_t num_snapshots() const {
+        return snapshot_indices_.size();
+    }
+
+    std::span<const T> at(size_t snapshot_idx) const {
+        if (!surface_history_.has_value() || snapshot_idx >= num_snapshots()) {
+            return {};
+        }
+        size_t offset = snapshot_idx * n_space();
+        return std::span<const T>(surface_history_->data() + offset, n_space());
+    }
+
+    std::span<const double> snapshot_times() const {
+        return snapshot_times_;
+    }
+
+    // Recording API (for PDESolver)
+    bool should_record(size_t state_idx) const {
+        return find_snapshot_index(state_idx).has_value();
+    }
+
+    void record(size_t state_idx, std::span<const T> solution) {
+        auto snap_idx = find_snapshot_index(state_idx);
+        if (!snap_idx.has_value() || !surface_history_.has_value()) {
+            return;  // Silently ignore if not a snapshot state
+        }
+
+        // Copy solution to snapshot storage
+        size_t offset = snap_idx.value() * n_space();
+        std::copy(solution.begin(), solution.end(),
+                  surface_history_->begin() + offset);
+    }
+
 private:
     // Private constructor (use factory method)
     Grid(GridBuffer<T>&& grid_buffer,
@@ -550,10 +674,26 @@ private:
         , solution_(std::move(solution))
     {}
 
+    // Helper: Find snapshot index for state index
+    std::optional<size_t> find_snapshot_index(size_t state_idx) const {
+        auto it = std::lower_bound(snapshot_indices_.begin(),
+                                   snapshot_indices_.end(),
+                                   state_idx);
+        if (it != snapshot_indices_.end() && *it == state_idx) {
+            return std::distance(snapshot_indices_.begin(), it);
+        }
+        return std::nullopt;
+    }
+
     GridBuffer<T> grid_buffer_;     // Spatial grid points
     GridSpacing<T> spacing_;        // Grid spacing (uniform or non-uniform)
     TimeDomain time_;               // Time domain metadata
     std::vector<T> solution_;       // [u_current | u_prev] (2 × n_space)
+
+    // Snapshot storage
+    std::vector<size_t> snapshot_indices_;       // State indices to record
+    std::vector<double> snapshot_times_;         // Actual times (after snapping)
+    std::optional<std::vector<T>> surface_history_;  // Snapshots (row-major)
 };
 
 } // namespace mango
