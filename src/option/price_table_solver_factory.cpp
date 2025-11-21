@@ -4,7 +4,6 @@
  */
 
 #include "src/option/price_table_solver_factory.hpp"
-#include "src/option/normalized_chain_solver.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/american_solver_workspace.hpp"

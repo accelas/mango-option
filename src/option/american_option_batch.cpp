@@ -1,14 +1,18 @@
 /**
- * @file normalized_chain_solver.cpp
- * @brief Implementation of normalized chain solver
+ * @file american_option_batch.cpp
+ * @brief Implementation of batch and normalized chain solvers
  */
 
-#include "src/option/normalized_chain_solver.hpp"
+#include "src/option/american_option_batch.hpp"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
 
 namespace mango {
+
+// ============================================================================
+// Normalized Solver Implementations
+// ============================================================================
 
 std::expected<void, std::string> NormalizedSolveRequest::validate() const {
     if (sigma <= 0.0) {
