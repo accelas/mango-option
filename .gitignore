@@ -19,6 +19,7 @@ Thumbs.db
 # Test artifacts
 *_temp.bin
 test_*.bin
+test_output.log
 accuracy_test_table.bin
 .cache/
 .bazel_cache/
