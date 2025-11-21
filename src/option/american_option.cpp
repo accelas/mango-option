@@ -6,17 +6,41 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_pde_solver.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/pde/core/grid.hpp"
+#include "src/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <format>
 
 namespace mango {
 
+// NEW API: Constructor with PDEWorkspace
+AmericanOptionSolver::AmericanOptionSolver(
+    const PricingParams& params,
+    PDEWorkspace workspace,
+    std::optional<std::span<const double>> snapshot_times)
+    : params_(params)
+    , workspace_(workspace)
+{
+    // Store snapshot times if provided
+    if (snapshot_times.has_value()) {
+        snapshot_times_.assign(snapshot_times->begin(), snapshot_times->end());
+    }
+
+    // Validate parameters
+    auto validation = validate_pricing_params(params_);
+    if (!validation) {
+        throw std::invalid_argument(validation.error());
+    }
+}
+
+// OLD API: Constructor with AmericanSolverWorkspace (DEPRECATED)
 AmericanOptionSolver::AmericanOptionSolver(
     const AmericanOptionParams& params,
     std::shared_ptr<AmericanSolverWorkspace> workspace)
     : params_(params)
-    , workspace_(std::move(workspace))
+    , legacy_workspace_(std::move(workspace))
 {
     // Validate parameters using unified validation
     auto validation = validate_pricing_params(params_);
@@ -25,7 +49,7 @@ AmericanOptionSolver::AmericanOptionSolver(
     }
 
     // Validate workspace is not null
-    if (!workspace_) {
+    if (!legacy_workspace_) {
         throw std::invalid_argument("Workspace cannot be null");
     }
 }
@@ -47,7 +71,11 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
     return validate_pricing_params(params)
         .and_then([&]() -> std::expected<AmericanOptionSolver, std::string> {
             try {
+                // Suppress deprecation warning - this is the legacy factory method
+                #pragma GCC diagnostic push
+                #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
                 return AmericanOptionSolver(params, workspace);
+                #pragma GCC diagnostic pop
             } catch (const std::exception& e) {
                 return std::unexpected(std::string("Failed to create solver: ") + e.what());
             }
@@ -59,65 +87,108 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // Create appropriate solver based on option type using new API
-    AmericanSolverVariant solver = [&]() -> AmericanSolverVariant {
-        switch (params_.type) {
-            case OptionType::CALL:
-                return AmericanCallSolver(params_,
-                                         workspace_->grid_with_solution(),
-                                         workspace_->workspace_spans());
-            case OptionType::PUT:
-                return AmericanPutSolver(params_,
-                                        workspace_->grid_with_solution(),
-                                        workspace_->workspace_spans());
-            default:
-                throw std::runtime_error("Unknown option type");
+    // Branch based on which API was used
+    if (using_new_api()) {
+        // NEW API: Create Grid, initialize dx, solve PDE, return wrapper
+
+        // Estimate grid configuration from params
+        auto [grid_spec, n_time] = estimate_grid_for_option(params_);
+        TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params_.maturity, n_time);
+
+        // Validate workspace size matches estimated grid
+        if (workspace_->size() != grid_spec.n_points()) {
+            return std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = std::format(
+                    "Workspace size mismatch: workspace has {} points, grid needs {}",
+                    workspace_->size(), grid_spec.n_points()),
+                .iterations = 0
+            });
         }
-    }();
 
-    // Initialize with payoff at maturity (t=0 in PDE time)
-    std::visit([&](auto& s) {
-        using SolverType = std::decay_t<decltype(s)>;
-        s.initialize(SolverType::payoff);
-    }, solver);
+        // Create Grid with optional snapshots
+        auto grid_result = Grid<double>::create(
+            grid_spec, time_domain,
+            snapshot_times_.empty() ? std::span<const double>() : std::span<const double>(snapshot_times_));
 
-    // Solve using variant dispatch (static, zero-cost)
-    auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
-    if (!solve_result) {
-        return std::unexpected(solve_result.error());
+        if (!grid_result.has_value()) {
+            return std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = std::format("Failed to create Grid: {}", grid_result.error()),
+                .iterations = 0
+            });
+        }
+        auto grid = grid_result.value();
+
+        // Initialize dx in workspace from grid spacing
+        auto dx_span = workspace_->dx();
+        auto grid_points = grid->x();
+        for (size_t i = 0; i < grid_points.size() - 1; ++i) {
+            dx_span[i] = grid_points[i + 1] - grid_points[i];
+        }
+
+        // Create appropriate PDE solver (put vs call)
+        std::expected<void, SolverError> solve_result;
+
+        if (params_.type == OptionType::PUT) {
+            AmericanPutSolver pde_solver(params_, grid, workspace_.value());
+            pde_solver.initialize(AmericanPutSolver::payoff);
+            solve_result = pde_solver.solve();
+        } else {
+            AmericanCallSolver pde_solver(params_, grid, workspace_.value());
+            pde_solver.initialize(AmericanCallSolver::payoff);
+            solve_result = pde_solver.solve();
+        }
+
+        if (!solve_result.has_value()) {
+            return std::unexpected(solve_result.error());
+        }
+
+        // Return NEW wrapper (Grid + PricingParams)
+        return AmericanOptionResult(grid, params_);
+
+    } else {
+        // OLD API: Use legacy workspace
+
+        // Create appropriate solver based on option type using legacy API
+        AmericanSolverVariant solver = [&]() -> AmericanSolverVariant {
+            switch (params_.type) {
+                case OptionType::CALL:
+                    return AmericanCallSolver(params_,
+                                             legacy_workspace_->grid_with_solution(),
+                                             legacy_workspace_->workspace_spans());
+                case OptionType::PUT:
+                    return AmericanPutSolver(params_,
+                                            legacy_workspace_->grid_with_solution(),
+                                            legacy_workspace_->workspace_spans());
+                default:
+                    throw std::runtime_error("Unknown option type");
+            }
+        }();
+
+        // Initialize with payoff at maturity (t=0 in PDE time)
+        std::visit([&](auto& s) {
+            using SolverType = std::decay_t<decltype(s)>;
+            s.initialize(SolverType::payoff);
+        }, solver);
+
+        // Solve using variant dispatch (static, zero-cost)
+        auto solve_result = std::visit([](auto& s) { return s.solve(); }, solver);
+        if (!solve_result) {
+            return std::unexpected(solve_result.error());
+        }
+
+        // Extract solution for legacy API
+        std::visit([&](auto& s) {
+            auto solution_view = s.solution();
+            solution_.assign(solution_view.begin(), solution_view.end());
+        }, solver);
+
+        solved_ = true;
+
+        // Return NEW wrapper (convert from legacy workspace)
+        return AmericanOptionResult(legacy_workspace_->grid_with_solution(), params_);
     }
-
-    // Extract solution and grid info from solver
-    AmericanOptionResult result;
-    result.converged = true;
-
-    std::visit([&](auto& s) {
-        auto solution_view = s.solution();
-        solution_.assign(solution_view.begin(), solution_view.end());
-        result.solution.assign(solution_view.begin(), solution_view.end());
-
-        // Store grid information (including actual grid points)
-        result.n_space = s.n_space();
-        result.n_time = s.n_time();
-        result.x_min = workspace_->x_min();
-        result.x_max = workspace_->x_max();
-        result.strike = params_.strike;
-
-        // Store actual grid points for interpolation
-        auto grid = workspace_->grid_with_solution()->x();
-        result.x_grid.assign(grid.begin(), grid.end());
-
-        // Compute value at current spot using actual grid
-        double current_moneyness = std::log(params_.spot / params_.strike);
-        double normalized_value = interpolate_solution(current_moneyness, grid);
-        result.value = normalized_value * params_.strike;  // Denormalize
-
-        // Note: surface_2d is no longer populated (new design only stores final solution)
-        // For time-dependent data, users should implement custom surface collection
-    }, solver);
-
-    solved_ = true;
-    return result;
 }
 
 std::expected<AmericanOptionGreeks, SolverError> AmericanOptionSolver::compute_greeks() const {
@@ -137,7 +208,7 @@ std::expected<AmericanOptionGreeks, SolverError> AmericanOptionSolver::compute_g
     return greeks;
 }
 
-double AmericanOptionResult::value_at(double spot) const {
+double AmericanOptionResultLegacy::value_at(double spot) const {
     // Convert spot to log-moneyness
     double x_target = std::log(spot / strike);
 
@@ -198,7 +269,7 @@ std::vector<double> AmericanOptionSolver::get_solution() const {
 
 size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
     const size_t n = solution_.size();
-    auto grid = workspace_->grid_with_solution()->x();
+    auto grid = legacy_workspace_->grid_with_solution()->x();
 
     // Binary search for closest grid point
     size_t i = 0;
@@ -216,9 +287,9 @@ size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
 const operators::CenteredDifference<double>&
 AmericanOptionSolver::get_diff_operator() const {
     if (!diff_op_) {
-        // Create and store GridSpacing from Grid's grid (NEW API)
+        // Create and store GridSpacing from Grid's grid (LEGACY API)
         // Must store GridSpacing to avoid dangling reference in CenteredDifference
-        auto grid_view = GridView<double>(workspace_->grid_with_solution()->x());
+        auto grid_view = GridView<double>(legacy_workspace_->grid_with_solution()->x());
         grid_spacing_ = std::make_unique<GridSpacing<double>>(grid_view);
         diff_op_ = std::make_unique<operators::CenteredDifference<double>>(
             *grid_spacing_);

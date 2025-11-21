@@ -38,8 +38,12 @@ cc_library(
         "//src/pde/operators:black_scholes_pde",
         ":american_pde_solver",
         ":american_solver_workspace",
+        ":american_option_result",  # NEW: Added for wrapper result class
         ":option_spec",
         "//src/support:error_types",
+        "//src/pde/core:pde_workspace",  # NEW: Added for PDEWorkspace
+        "//src/pde/core:grid",  # NEW: Added for Grid creation
+        "//src/pde/core:time_domain",  # NEW: Added for TimeDomain
     ],
     copts = [
         "-std=c++23",

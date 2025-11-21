@@ -113,7 +113,17 @@ public:
             return BatchAmericanOptionResult{.results = {}, .failed_count = 0};
         }
 
-        std::vector<std::expected<AmericanOptionResult, SolverError>> results(params.size());
+        // Pre-allocate results vector with sentinel errors (parallel access requires pre-sized vector)
+        // Since AmericanOptionResult is not copyable, we construct each element in-place
+        std::vector<std::expected<AmericanOptionResult, SolverError>> results;
+        results.reserve(params.size());
+        for (size_t i = 0; i < params.size(); ++i) {
+            results.emplace_back(std::unexpected(SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Not yet computed",
+                .iterations = 0
+            }));
+        }
         size_t failed_count = 0;
 
         // Precompute shared grid if needed
@@ -184,8 +194,11 @@ public:
                     setup(i, solver_result.value());
                 }
 
-                // Solve
-                results[i] = solver_result.value().solve();
+                // Solve (use placement new to avoid copy/move assignment issues)
+                auto solve_result = solver_result.value().solve();
+                results[i].~expected();  // Destroy sentinel value
+                new (&results[i]) std::expected<AmericanOptionResult, SolverError>(std::move(solve_result));
+
                 if (!results[i].has_value()) {
                     MANGO_PRAGMA_ATOMIC
                     ++failed_count;

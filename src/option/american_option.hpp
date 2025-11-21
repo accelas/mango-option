@@ -13,12 +13,15 @@
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include "src/option/american_solver_workspace.hpp"
+#include "src/option/american_option_result.hpp"  // NEW: Wrapper result class
 #include "src/option/option_spec.hpp"  // For OptionType enum
+#include "src/pde/core/pde_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <stdexcept>
 #include <cmath>
 #include <functional>
+#include <optional>
 
 namespace mango {
 
@@ -30,9 +33,14 @@ using AmericanOptionParams = PricingParams;
 
 
 /**
- * Solver result containing solution surface (interpolate on-demand for specific prices).
+ * @brief Legacy solver result struct (DEPRECATED)
+ * @deprecated Use AmericanOptionResult wrapper class from american_option_result.hpp
+ *
+ * This struct is kept for backward compatibility but will be removed in a future release.
+ * New code should use the AmericanOptionResult wrapper class which provides a cleaner API.
  */
-struct AmericanOptionResult {
+struct [[deprecated("Use AmericanOptionResult wrapper class from american_option_result.hpp")]]
+AmericanOptionResultLegacy {
     double value;                      ///< Option value at current spot (dollars)
     std::vector<double> solution;      ///< Final spatial solution V/K (always present, for value_at())
     std::vector<double> x_grid;        ///< Spatial grid points (log-moneyness coordinates)
@@ -45,7 +53,7 @@ struct AmericanOptionResult {
     bool converged;                    ///< Solver convergence status
 
     /// Default constructor
-    AmericanOptionResult()
+    AmericanOptionResultLegacy()
         : value(0.0), solution(), x_grid(), surface_2d(), n_space(0), n_time(0),
           x_min(0.0), x_max(0.0), strike(1.0), converged(false) {}
 
@@ -95,7 +103,22 @@ struct AmericanOptionGreeks {
 class AmericanOptionSolver {
 public:
     /**
-     * Constructor with workspace.
+     * NEW: Direct PDEWorkspace constructor (target API).
+     *
+     * This constructor takes PDEWorkspace directly, enabling more flexible
+     * memory management. The solver creates Grid internally and returns
+     * the new AmericanOptionResult wrapper.
+     *
+     * @param params Option pricing parameters
+     * @param workspace PDEWorkspace with pre-allocated buffers
+     * @param snapshot_times Optional times to record solution snapshots
+     */
+    AmericanOptionSolver(const PricingParams& params,
+                        PDEWorkspace workspace,
+                        std::optional<std::span<const double>> snapshot_times = std::nullopt);
+
+    /**
+     * OLD: Constructor with workspace (DEPRECATED).
      *
      * This constructor enables efficient batch solving by reusing
      * grid allocations across multiple solver instances. Use when
@@ -106,7 +129,9 @@ public:
      *
      * @param params Option pricing parameters (including discrete dividends)
      * @param workspace Shared workspace with grid configuration and pre-allocated storage
+     * @deprecated Use PDEWorkspace directly instead of AmericanSolverWorkspace
      */
+    [[deprecated("Use PDEWorkspace directly instead of AmericanSolverWorkspace")]]
     AmericanOptionSolver(const AmericanOptionParams& params,
                         std::shared_ptr<AmericanSolverWorkspace> workspace);
 
@@ -130,47 +155,57 @@ public:
     /**
      * Solve for option value.
      *
-     * Always stores final solution for value_at(). If output_buffer was provided
-     * at construction, collects full spatiotemporal surface enabling at_time().
+     * Returns new AmericanOptionResult wrapper containing Grid and PricingParams.
+     * If snapshot_times were provided at construction, the Grid will contain
+     * recorded solution snapshots.
      *
-     * @return Result containing option value (compute Greeks separately via compute_greeks())
+     * @return Result wrapper with value(), Greeks, and snapshot access
      */
     std::expected<AmericanOptionResult, SolverError> solve();
 
     /**
-     * Compute Greeks (sensitivities) for the current solution.
+     * Compute Greeks (sensitivities) for the current solution (LEGACY).
      *
      * Must be called after solve() has succeeded. Computes delta, gamma, and theta
      * based on the current solution state.
      *
      * @return Greeks on success, error if solve() hasn't been called yet
+     * @deprecated Use AmericanOptionResult::delta(), gamma(), theta() instead
      */
+    [[deprecated("Use AmericanOptionResult::delta(), gamma(), theta() instead")]]
     std::expected<AmericanOptionGreeks, SolverError> compute_greeks() const;
 
     /**
-     * Get the full solution surface (for debugging/analysis).
+     * Get the full solution surface (for debugging/analysis) (LEGACY).
      *
      * @return Vector of option values across the spatial grid
+     * @deprecated Access grid via AmericanOptionResult::grid() instead
      */
+    [[deprecated("Access grid via AmericanOptionResult::grid() instead")]]
     std::vector<double> get_solution() const;
 
 private:
     // Parameters
-    AmericanOptionParams params_;
+    PricingParams params_;
 
-    // Workspace (contains grid configuration and pre-allocated storage)
-    // Uses shared_ptr to keep workspace alive for the solver's lifetime
-    std::shared_ptr<AmericanSolverWorkspace> workspace_;
+    // NEW API: PDEWorkspace (owns spans to external buffer)
+    std::optional<PDEWorkspace> workspace_;
 
-    // Solution state
+    // NEW API: Snapshot times for Grid creation
+    std::vector<double> snapshot_times_;
+
+    // OLD API: AmericanSolverWorkspace (owns Grid + PMR buffer)
+    std::shared_ptr<AmericanSolverWorkspace> legacy_workspace_;
+
+    // OLD API: Solution state
     std::vector<double> solution_;
     bool solved_ = false;
 
-    // Lazy-initialized operator for Greeks calculation
+    // OLD API: Lazy-initialized operator for Greeks calculation
     mutable std::unique_ptr<GridSpacing<double>> grid_spacing_;
     mutable std::unique_ptr<operators::CenteredDifference<double>> diff_op_;
 
-    // Helper methods
+    // Helper methods (legacy)
     double compute_delta() const;
     double compute_gamma() const;
     double compute_theta() const;
@@ -181,6 +216,9 @@ private:
 
     // Lazy initialization for diff operator
     const operators::CenteredDifference<double>& get_diff_operator() const;
+
+    // Helper to determine which API was used
+    bool using_new_api() const { return workspace_.has_value(); }
 };
 
 }  // namespace mango

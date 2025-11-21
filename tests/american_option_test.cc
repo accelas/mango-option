@@ -34,7 +34,9 @@ protected:
         auto solver_result = AmericanOptionSolver::create(params, workspace);
         if (!solver_result) {
             ADD_FAILURE() << "Failed to create solver: " << solver_result.error();
-            return {};
+            // Cannot return empty AmericanOptionResult (not default constructible)
+            // Throw to abort test
+            throw std::runtime_error("Failed to create solver");
         }
 
         auto solve_result = solver_result.value().solve();
@@ -43,10 +45,13 @@ protected:
             ADD_FAILURE() << "Solver failed: " << error.message
                           << " (code=" << static_cast<int>(error.code)
                           << ", iterations=" << error.iterations << ")";
-            return {};
+            // Cannot return empty AmericanOptionResult (not default constructible)
+            // Throw to abort test
+            throw std::runtime_error("Solver failed");
         }
 
-        return solve_result.value();
+        // Move result (AmericanOptionResult is not copyable)
+        return std::move(solve_result.value());
     }
 
     std::unique_ptr<std::pmr::synchronized_pool_resource> pool_;

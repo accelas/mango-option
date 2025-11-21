@@ -532,3 +532,17 @@ cc_test(
     timeout = "moderate",
     tags = ["manual"],  # Disabled: Greeks accuracy needs improvement for non-uniform grids
 )
+
+cc_test(
+    name = "american_option_new_api_test",
+    size = "small",
+    srcs = ["american_option_new_api_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_result",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
