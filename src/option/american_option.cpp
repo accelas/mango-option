@@ -59,17 +59,17 @@ std::expected<AmericanOptionSolver, std::string> AmericanOptionSolver::create(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // Allocate surface buffer
-    const size_t surface_size = (workspace_->n_time() + 1) * workspace_->n_space();
-    std::vector<double> surface_buffer(surface_size);
-
-    // Create appropriate solver based on option type
+    // Create appropriate solver based on option type using new API
     AmericanSolverVariant solver = [&]() -> AmericanSolverVariant {
         switch (params_.type) {
             case OptionType::CALL:
-                return AmericanCallSolver(params_, workspace_, surface_buffer);
+                return AmericanCallSolver(params_,
+                                         workspace_->grid_with_solution(),
+                                         workspace_->workspace_spans());
             case OptionType::PUT:
-                return AmericanPutSolver(params_, workspace_, surface_buffer);
+                return AmericanPutSolver(params_,
+                                        workspace_->grid_with_solution(),
+                                        workspace_->workspace_spans());
             default:
                 throw std::runtime_error("Unknown option type");
         }
@@ -99,12 +99,12 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         // Store grid information (including actual grid points)
         result.n_space = s.n_space();
         result.n_time = s.n_time();
-        result.x_min = s.x_min();
-        result.x_max = s.x_max();
+        result.x_min = workspace_->x_min();
+        result.x_max = workspace_->x_max();
         result.strike = params_.strike;
 
         // Store actual grid points for interpolation
-        auto grid = workspace_->grid();
+        auto grid = workspace_->grid_with_solution()->x();
         result.x_grid.assign(grid.begin(), grid.end());
 
         // Compute value at current spot using actual grid
@@ -112,10 +112,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         double normalized_value = interpolate_solution(current_moneyness, grid);
         result.value = normalized_value * params_.strike;  // Denormalize
 
-        // Store full surface (exclude final scratch slice used for u_old)
-        const size_t n_elems = s.n_space() * s.n_time();
-        result.surface_2d.assign(surface_buffer.begin(),
-                                 surface_buffer.begin() + n_elems);
+        // Note: surface_2d is no longer populated (new design only stores final solution)
+        // For time-dependent data, users should implement custom surface collection
     }, solver);
 
     solved_ = true;
@@ -200,7 +198,7 @@ std::vector<double> AmericanOptionSolver::get_solution() const {
 
 size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
     const size_t n = solution_.size();
-    auto grid = workspace_->grid();
+    auto grid = workspace_->grid_with_solution()->x();
 
     // Binary search for closest grid point
     size_t i = 0;
@@ -218,8 +216,11 @@ size_t AmericanOptionSolver::find_grid_index(double log_moneyness) const {
 const operators::CenteredDifference<double>&
 AmericanOptionSolver::get_diff_operator() const {
     if (!diff_op_) {
+        // Create GridSpacing from GridWithSolution's grid (NEW API)
+        auto grid_view = GridView<double>(workspace_->grid_with_solution()->x());
+        auto grid_spacing = GridSpacing<double>(grid_view);
         diff_op_ = std::make_unique<operators::CenteredDifference<double>>(
-            workspace_->grid_spacing());
+            grid_spacing);
     }
     return *diff_op_;
 }

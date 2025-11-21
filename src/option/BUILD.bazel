@@ -3,8 +3,10 @@ cc_library(
     srcs = ["american_solver_workspace.cpp"],
     hdrs = ["american_solver_workspace.hpp"],
     deps = [
-        "//src/pde/core:pde_workspace",
+        "//src/pde/core:pde_workspace_spans",
         "//src/pde/core:grid",
+        "//src/pde/core:grid_with_solution",
+        "//src/pde/core:time_domain",
         ":option_spec",
     ],
     copts = ["-std=c++23"],

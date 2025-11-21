@@ -149,7 +149,7 @@ public:
             t = t_next;
 
             // Process temporal events AFTER completing the step
-            process_temporal_events(t_old, t_next, step);
+            process_temporal_events(t_old, t_next, step, u_current);
         }
 
         // Final solution is already in grid_with_solution_->solution()
@@ -227,7 +227,8 @@ private:
     /// CRITICAL: After each event, obstacle and boundary conditions
     /// must be re-applied to maintain consistency. Dividend jumps
     /// interpolate the solution, which can violate constraints.
-    void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step) {
+    void process_temporal_events(double t_old, double t_new, [[maybe_unused]] size_t step,
+                                  std::span<double> u_current) {
         while (next_event_idx_ < events_.size()) {
             const auto& event = events_[next_event_idx_];
 
@@ -241,7 +242,7 @@ private:
             }
 
             // Event is in (t_old, t_new] - apply it
-            event.callback(event.time, grid_, std::span{u_current_});
+            event.callback(event.time, grid_, u_current);
 
             // CRITICAL FIX (Issue #98): Re-apply obstacle and boundary conditions
             // after event to maintain consistency. Dividend jumps interpolate
@@ -252,8 +253,8 @@ private:
             // Without this, American puts with discrete dividends produce
             // values exceeding theoretical bounds (e.g., value > strike).
             // Apply boundary before obstacle (consistent with Newton iteration)
-            apply_boundary_conditions(std::span{u_current_}, event.time);
-            apply_obstacle(event.time, std::span{u_current_});
+            apply_boundary_conditions(u_current, event.time);
+            apply_obstacle(event.time, u_current);
 
             next_event_idx_++;
         }
@@ -328,25 +329,26 @@ private:
     /// u^{n+γ} = u^n + (γ·dt/2) · [L(u^n) + L(u^{n+γ})]
     ///
     /// Solved via Newton-Raphson iteration
-    std::expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt) {
+    std::expected<void, SolverError> solve_stage1(double t_n, double t_stage, double dt,
+                                                   std::span<double> u_current,
+                                                   std::span<const double> u_prev) {
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
-        apply_operator_with_blocking(t_n, std::span{u_old_}, workspace_.lu());
+        apply_operator_with_blocking(t_n, u_prev, workspace_.lu());
 
         // RHS = u^n + w1·L(u^n)
         // Use FMA for SAXPY-style loop
+        auto rhs = workspace_.rhs();
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(w1, workspace_.lu()[i], u_old_[i]);
+            rhs[i] = std::fma(w1, workspace_.lu()[i], u_prev[i]);
         }
 
         // Initial guess: u* = u^n
-        std::copy(u_old_.begin(), u_old_.end(), u_current_.begin());
+        std::copy(u_prev.begin(), u_prev.end(), u_current.begin());
 
         // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
-        auto result = solve_implicit_stage_dispatch(t_stage, w1,
-                                                    std::span{u_current_},
-                                                    std::span{rhs_});
+        auto result = solve_implicit_stage_dispatch(t_stage, w1, u_current, rhs);
 
         if (!result.converged) {
             SolverError error{
@@ -371,7 +373,9 @@ private:
     /// u^{n+1} - [(1-γ)·dt/(2-γ)]·L(u^{n+1}) = [1/(γ(2-γ))]·u^{n+γ} - [(1-γ)²/(γ(2-γ))]·u^n
     ///
     /// Solved via Newton-Raphson iteration
-    std::expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt) {
+    std::expected<void, SolverError> solve_stage2([[maybe_unused]] double t_stage, double t_next, double dt,
+                                                   std::span<double> u_current,
+                                                   std::span<const double> u_prev) {
         const double gamma = config_.gamma;
         const double one_minus_gamma = 1.0 - gamma;
         const double two_minus_gamma = 2.0 - gamma;
@@ -382,19 +386,18 @@ private:
         const double beta = -(one_minus_gamma * one_minus_gamma) / denom;  // Coefficient for u^n
         const double w2 = config_.stage2_weight(dt);  // (1-γ)·dt/(2-γ)
 
-        // RHS = alpha·u^{n+γ} + beta·u^n (u_current_ currently holds u^{n+γ})
-        // Use FMA: alpha*u_current[i] + beta*u_old[i]
+        // RHS = alpha·u^{n+γ} + beta·u^n (u_current currently holds u^{n+γ})
+        // Use FMA: alpha*u_current[i] + beta*u_prev[i]
+        auto rhs = workspace_.rhs();
         for (size_t i = 0; i < n_; ++i) {
-            rhs_[i] = std::fma(alpha, u_current_[i], beta * u_old_[i]);
+            rhs[i] = std::fma(alpha, u_current[i], beta * u_prev[i]);
         }
 
-        // Initial guess: u^{n+1} = u* (already in u_current_)
-        // (No need to copy, u_current_ already has u^{n+γ})
+        // Initial guess: u^{n+1} = u* (already in u_current)
+        // (No need to copy, u_current already has u^{n+γ})
 
         // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
-        auto result = solve_implicit_stage_dispatch(t_next, w2,
-                                                    std::span{u_current_},
-                                                    std::span{rhs_});
+        auto result = solve_implicit_stage_dispatch(t_next, w2, u_current, rhs);
 
         if (!result.converged) {
             SolverError error{
@@ -626,9 +629,9 @@ private:
                 // Convert row i to Dirichlet constraint: u[i] = ψ[i]
                 // Jacobian row: [0, 1, 0] (identity row)
                 // RHS: ψ[i] (intrinsic value)
-                if (i > 0) jacobian_lower_[i-1] = 0.0;  // Zero lower diagonal
-                jacobian_diag_[i] = 1.0;                 // Set diagonal to 1
-                if (i < n_ - 1) jacobian_upper_[i] = 0.0; // Zero upper diagonal
+                if (i > 0) workspace_.jacobian_lower()[i-1] = 0.0;  // Zero lower diagonal
+                workspace_.jacobian_diag()[i] = 1.0;                 // Set diagonal to 1
+                if (i < n_ - 1) workspace_.jacobian_upper()[i] = 0.0; // Zero upper diagonal
                 rhs_with_bc[i] = psi[i];                 // RHS = intrinsic value
             }
         }
@@ -658,13 +661,13 @@ private:
         //   Newton would solve: J·δu = -F, then u ← u + δu
         //   Projected Thomas solves: A·u = rhs directly (u is the solution)
         auto result = solve_thomas_projected<double>(
-            jacobian_lower_,
-            jacobian_diag_,
-            jacobian_upper_,
+            workspace_.jacobian_lower(),
+            workspace_.jacobian_diag(),
+            workspace_.jacobian_upper(),
             rhs_with_bc,  // Corrected RHS (FIX #1 and #2 applied)
             psi,          // Obstacle constraint ψ(x,t)
             u,            // OUTPUT: solution u (not correction δu)
-            tridiag_workspace_
+            workspace_.tridiag_workspace()
         );
 
         if (!result.ok()) {
@@ -702,7 +705,7 @@ private:
         build_jacobian(t, coeff_dt, u, eps);
 
         // Copy initial guess
-        std::copy(u.begin(), u.end(), newton_u_old_.begin());
+        std::copy(u.begin(), u.end(), workspace_.newton_u_old().begin());
 
         // Newton iteration
         for (size_t iter = 0; iter < config_.max_iter; ++iter) {
@@ -711,25 +714,25 @@ private:
 
             // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
             compute_residual(u, coeff_dt, workspace_.lu(), rhs,
-                           residual_);
+                           workspace_.residual());
 
             // CRITICAL FIX: Pass u explicitly to avoid reading stale workspace
-            apply_bc_to_residual(residual_, u, t);
+            apply_bc_to_residual(workspace_.residual(), u, t);
 
             // Newton method: Solve J·δu = -F(u), then update u ← u + δu
             // Negate residual for RHS
             for (size_t i = 0; i < n_; ++i) {
-                residual_[i] = -residual_[i];
+                workspace_.residual()[i] = -workspace_.residual()[i];
             }
 
             // Solve J·δu = -F(u) using Thomas algorithm
             auto result = solve_thomas<double>(
-                jacobian_lower_,
-                jacobian_diag_,
-                jacobian_upper_,
-                residual_,
-                delta_u_,
-                tridiag_workspace_
+                workspace_.jacobian_lower(),
+                workspace_.jacobian_diag(),
+                workspace_.jacobian_upper(),
+                workspace_.residual(),
+                workspace_.delta_u(),
+                workspace_.tridiag_workspace()
             );
 
             if (!result.ok()) {
@@ -739,7 +742,7 @@ private:
 
             // Update: u ← u + δu
             for (size_t i = 0; i < n_; ++i) {
-                u[i] += delta_u_[i];
+                u[i] += workspace_.delta_u()[i];
             }
 
             // Apply boundary conditions BEFORE obstacle projection
@@ -751,18 +754,18 @@ private:
             apply_obstacle(t, u);
 
             // Check convergence via step delta
-            double error = compute_step_delta_error(u, newton_u_old_);
+            double error = compute_step_delta_error(u, workspace_.newton_u_old());
 
             if (error < config_.tolerance) {
                 return {true, iter + 1, error, std::nullopt};
             }
 
             // Prepare for next iteration
-            std::copy(u.begin(), u.end(), newton_u_old_.begin());
+            std::copy(u.begin(), u.end(), workspace_.newton_u_old().begin());
         }
 
         return {false, config_.max_iter,
-               compute_step_delta_error(u, newton_u_old_),
+               compute_step_delta_error(u, workspace_.newton_u_old()),
                "Max iterations reached"};
     }
 
@@ -826,9 +829,9 @@ private:
         // Dispatch to analytical or finite-difference Jacobian
         if constexpr (HasAnalyticalJacobian<SpatialOpType>) {
             // Analytical Jacobian (O(n) - fast path)
-            JacobianView jac(jacobian_lower_,
-                           jacobian_diag_,
-                           jacobian_upper_);
+            JacobianView jac(workspace_.jacobian_lower(),
+                           workspace_.jacobian_diag(),
+                           workspace_.jacobian_upper());
             spatial_op.assemble_jacobian(coeff_dt, jac);
         } else {
             // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
@@ -857,21 +860,21 @@ private:
             workspace_.u_stage()[i] = u[i] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
             double dLi_dui = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
-            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
+            workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
 
             // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
             workspace_.u_stage()[i - 1] = u[i - 1] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
             double dLi_duim1 = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
-            jacobian_lower_[i - 1] = -coeff_dt * dLi_duim1;
+            workspace_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
             workspace_.u_stage()[i - 1] = u[i - 1];
 
             // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
             workspace_.u_stage()[i + 1] = u[i + 1] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
             double dLi_duip1 = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
-            jacobian_upper_[i] = -coeff_dt * dLi_duip1;
+            workspace_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
             workspace_.u_stage()[i + 1] = u[i + 1];
         }
     }
@@ -887,34 +890,34 @@ private:
         // Left boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
-            jacobian_diag_[0] = 1.0;
-            jacobian_upper_[0] = 0.0;
+            workspace_.jacobian_diag()[0] = 1.0;
+            workspace_.jacobian_upper()[0] = 0.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             workspace_.u_stage()[0] = u[0] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
             double dL0_du0 = (workspace_.rhs()[0] - workspace_.lu()[0]) / eps;
-            jacobian_diag_[0] = 1.0 - coeff_dt * dL0_du0;
+            workspace_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
             workspace_.u_stage()[0] = u[0];
 
             workspace_.u_stage()[1] = u[1] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
             double dL0_du1 = (workspace_.rhs()[0] - workspace_.lu()[0]) / eps;
-            jacobian_upper_[0] = -coeff_dt * dL0_du1;
+            workspace_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
             workspace_.u_stage()[1] = u[1];
         }
 
         // Right boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
-            jacobian_diag_[n_ - 1] = 1.0;
+            workspace_.jacobian_diag()[n_ - 1] = 1.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
             workspace_.u_stage()[i] = u[i] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.rhs());
             double dLi_dui = (workspace_.rhs()[i] - workspace_.lu()[i]) / eps;
-            jacobian_diag_[i] = 1.0 - coeff_dt * dLi_dui;
+            workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
         }
     }

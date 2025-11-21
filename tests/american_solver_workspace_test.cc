@@ -21,10 +21,13 @@ TEST(AmericanSolverWorkspaceTest, CreateWithGridSpec) {
     EXPECT_EQ(ws->n_space(), 201);
     EXPECT_EQ(ws->n_time(), 1000);
 
-    // Check we can access PDEWorkspace
-    auto pde_ws = ws->pde_workspace();
-    ASSERT_NE(pde_ws, nullptr);
-    EXPECT_EQ(pde_ws->logical_size(), 201);
+    // Check we can access new API components
+    auto grid_sol = ws->grid_with_solution();
+    ASSERT_NE(grid_sol, nullptr);
+    EXPECT_EQ(grid_sol->n_space(), 201);
+
+    auto spans = ws->workspace_spans();
+    EXPECT_EQ(spans.u_stage().size(), 201);
 }
 
 TEST(AmericanSolverWorkspaceTest, GridSpacingAvailable) {
@@ -36,7 +39,9 @@ TEST(AmericanSolverWorkspaceTest, GridSpacingAvailable) {
         grid_spec.value(), 1000, &pool);
     ASSERT_TRUE(workspace.has_value());
 
-    auto spacing = workspace.value()->grid_spacing();
+    // Create GridSpacing from GridWithSolution (NEW API)
+    auto grid_view = GridView<double>(workspace.value()->grid_with_solution()->x());
+    auto spacing = GridSpacing<double>(grid_view);
     EXPECT_TRUE(spacing.is_uniform());
     EXPECT_NEAR(spacing.spacing(), 0.01, 1e-10);
 }
