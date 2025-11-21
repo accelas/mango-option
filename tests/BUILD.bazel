@@ -233,6 +233,18 @@ cc_test(
 )
 
 cc_test(
+    name = "american_option_result_test",
+    size = "small",
+    srcs = ["american_option_result_test.cc"],
+    deps = [
+        "//src/option:american_option_result",
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
     name = "real_option_data_test",
     srcs = ["real_option_data_test.cc"],
     deps = [
