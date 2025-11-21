@@ -12,7 +12,8 @@ build --copt=-Werror
 # Arrow persistence feature (enabled by default)
 build --define=enable_arrow=true
 
-# Use GCC compiler (default)
+# Use GCC compiler (Clang migration blocked by libc++ ABI issues)
+# See: Task 9 investigation notes for details
 # build --action_env=CC=gcc
 # build --action_env=CXX=g++
 

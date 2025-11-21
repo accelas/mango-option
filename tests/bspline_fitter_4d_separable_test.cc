@@ -17,8 +17,6 @@ using namespace mango;
 
 namespace {
 
-constexpr double kTolerance = 1e-10;
-
 /// Helper: Create linearly spaced grid
 std::vector<double> linspace(double start, double end, int n) {
     std::vector<double> result(n);

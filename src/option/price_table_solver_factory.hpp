@@ -7,6 +7,7 @@
 
 #include "src/option/option_spec.hpp"
 #include <expected>
+#include <span>
 #include <string>
 #include <vector>
 #include <memory>
