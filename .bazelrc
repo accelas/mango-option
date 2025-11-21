@@ -7,15 +7,11 @@ test --color=yes
 test --test_output=errors
 
 # Treat warnings as errors
-# Temporarily disabled for Clang experiment
-# build --copt=-Werror
+build --copt=-Werror
 
 # Arrow persistence feature (enabled by default)
 build --define=enable_arrow=true
 
-# Use Clang compiler
-build --action_env=CC=clang
-build --action_env=CXX=clang++
-
-# Allow Clang vectorization warnings (not actual errors)
-build --copt=-Wno-error=pass-failed
+# Use GCC compiler (default)
+# build --action_env=CC=gcc
+# build --action_env=CXX=g++
