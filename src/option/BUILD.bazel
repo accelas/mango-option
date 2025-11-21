@@ -61,6 +61,7 @@ cc_library(
     deps = [
         ":american_option",
         ":american_solver_workspace",
+        "//common:ivcalc_trace_hdr",
         "//src/math:cubic_spline_solver",
         "//src/support:error_types",
         "//src/support:parallel",

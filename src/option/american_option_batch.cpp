@@ -4,6 +4,7 @@
  */
 
 #include "src/option/american_option_batch.hpp"
+#include "common/ivcalc_trace.h"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
@@ -107,6 +108,10 @@ double NormalizedSurfaceView::interpolate(double x, double tau) const {
         // Note: This modifies mutable state, safe for const method
         auto error = const_cast<NormalizedSurfaceView*>(this)->build_cache();
         if (error.has_value()) {
+            // Log cache build failure via USDT tracing
+            MANGO_TRACE_RUNTIME_ERROR(MODULE_NORMALIZED_CHAIN,
+                                     static_cast<int>(x_grid_.size()),
+                                     static_cast<int>(tau_grid_.size()));
             // Fallback to boundary values if cache build fails
             return 0.0;
         }
