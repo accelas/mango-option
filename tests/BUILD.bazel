@@ -95,6 +95,22 @@ cc_test(
 )
 
 cc_test(
+    name = "pde_solver_snapshot_test",
+    srcs = ["pde_solver_snapshot_test.cc"],
+    deps = [
+        "//src/pde/core:pde_solver",
+        "//src/pde/core:pde_workspace",
+        "//src/pde/core:grid",
+        "//src/pde/core:boundary_conditions",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/operators:laplacian_pde",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
+)
+
+cc_test(
     name = "time_domain_test",
     srcs = ["time_domain_test.cc"],
     deps = [
