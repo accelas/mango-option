@@ -25,13 +25,13 @@ AmericanSolverWorkspace::create(const GridSpec<double>& grid_spec,
     auto grid_buffer = grid_spec.generate();
     size_t n = grid_buffer.size();
 
-    // Create TimeDomain for GridWithSolution
+    // Create TimeDomain for Grid
     // For American options, we solve backward from maturity (t_start=0) to present (t_end=maturity)
     // The time domain represents backward time τ = T - t, with actual maturity in years
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, maturity, n_time);
 
-    // Create GridWithSolution (Grid + solution storage)
-    auto grid_with_sol = GridWithSolution<double>::create(grid_spec, time_domain);
+    // Create Grid (Grid + solution storage)
+    auto grid_with_sol = Grid<double>::create(grid_spec, time_domain);
     if (!grid_with_sol.has_value()) {
         return std::unexpected(grid_with_sol.error());
     }

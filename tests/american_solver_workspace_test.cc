@@ -39,7 +39,7 @@ TEST(AmericanSolverWorkspaceTest, GridSpacingAvailable) {
         grid_spec.value(), 1000, &pool);
     ASSERT_TRUE(workspace.has_value());
 
-    // Create GridSpacing from GridWithSolution (NEW API)
+    // Create GridSpacing from Grid (NEW API)
     auto grid_view = GridView<double>(workspace.value()->grid_with_solution()->x());
     auto spacing = GridSpacing<double>(grid_view);
     EXPECT_TRUE(spacing.is_uniform());

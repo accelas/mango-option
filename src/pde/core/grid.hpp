@@ -455,8 +455,4 @@ private:
     std::vector<T> solution_;       // [u_current | u_prev] (2 × n_space)
 };
 
-// Backward compatibility alias (deprecated)
-template<typename T = double>
-using GridWithSolution = Grid<T>;
-
 } // namespace mango

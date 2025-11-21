@@ -4,7 +4,7 @@
 namespace mango {
 namespace {
 
-TEST(GridWithSolutionTest, CreateUniformGrid) {
+TEST(GridTest, CreateUniformGrid) {
     // Create uniform grid specification
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
     ASSERT_TRUE(grid_spec.has_value());
@@ -12,8 +12,8 @@ TEST(GridWithSolutionTest, CreateUniformGrid) {
     // Create time domain
     TimeDomain time = TimeDomain::from_n_steps(0.0, 1.0, 1000);
 
-    // Create GridWithSolution
-    auto grid_result = GridWithSolution<double>::create(grid_spec.value(), time);
+    // Create Grid
+    auto grid_result = Grid<double>::create(grid_spec.value(), time);
     ASSERT_TRUE(grid_result.has_value());
 
     auto grid = grid_result.value();
@@ -44,14 +44,14 @@ TEST(GridWithSolutionTest, CreateUniformGrid) {
     EXPECT_DOUBLE_EQ(solution_prev[0], 84.0);
 }
 
-TEST(GridWithSolutionTest, CreateNonUniformGrid) {
+TEST(GridTest, CreateNonUniformGrid) {
     // Create sinh-spaced grid
     auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
     ASSERT_TRUE(grid_spec.has_value());
 
     TimeDomain time = TimeDomain::from_n_steps(0.0, 2.0, 500);
 
-    auto grid_result = GridWithSolution<double>::create(grid_spec.value(), time);
+    auto grid_result = Grid<double>::create(grid_spec.value(), time);
     ASSERT_TRUE(grid_result.has_value());
 
     auto grid = grid_result.value();
@@ -66,13 +66,13 @@ TEST(GridWithSolutionTest, CreateNonUniformGrid) {
     EXPECT_FALSE(spacing.is_uniform());
 }
 
-TEST(GridWithSolutionTest, GridSpacingReference) {
+TEST(GridTest, GridSpacingReference) {
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
     ASSERT_TRUE(grid_spec.has_value());
 
     TimeDomain time = TimeDomain::from_n_steps(0.0, 1.0, 1000);
 
-    auto grid_result = GridWithSolution<double>::create(grid_spec.value(), time);
+    auto grid_result = Grid<double>::create(grid_spec.value(), time);
     ASSERT_TRUE(grid_result.has_value());
 
     auto grid = grid_result.value();
@@ -83,13 +83,13 @@ TEST(GridWithSolutionTest, GridSpacingReference) {
     EXPECT_DOUBLE_EQ(spacing_ref.spacing(), 0.01);
 }
 
-TEST(GridWithSolutionTest, SolutionBufferModification) {
+TEST(GridTest, SolutionBufferModification) {
     auto grid_spec = GridSpec<double>::uniform(0.0, 1.0, 101);
     ASSERT_TRUE(grid_spec.has_value());
 
     TimeDomain time = TimeDomain::from_n_steps(0.0, 1.0, 1000);
 
-    auto grid_result = GridWithSolution<double>::create(grid_spec.value(), time);
+    auto grid_result = Grid<double>::create(grid_spec.value(), time);
     ASSERT_TRUE(grid_result.has_value());
 
     auto grid = grid_result.value();
@@ -104,8 +104,8 @@ TEST(GridWithSolutionTest, SolutionBufferModification) {
     }
 
     // Read back and verify
-    auto solution_const = static_cast<const GridWithSolution<double>*>(grid.get())->solution();
-    auto solution_prev_const = static_cast<const GridWithSolution<double>*>(grid.get())->solution_prev();
+    auto solution_const = static_cast<const Grid<double>*>(grid.get())->solution();
+    auto solution_prev_const = static_cast<const Grid<double>*>(grid.get())->solution_prev();
 
     for (size_t i = 0; i < solution_const.size(); ++i) {
         EXPECT_DOUBLE_EQ(solution_const[i], static_cast<double>(i));

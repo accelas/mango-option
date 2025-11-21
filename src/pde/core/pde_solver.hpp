@@ -81,7 +81,7 @@ public:
     /// Note: Boundary conditions and spatial operator are obtained from derived class
     ///       via CRTP calls, not passed as constructor arguments
     /// Note: TR-BDF2 configuration uses defaults initially, can be changed via set_config()
-    PDESolver(std::shared_ptr<GridWithSolution<double>> grid,
+    PDESolver(std::shared_ptr<Grid<double>> grid,
               PDEWorkspaceSpans workspace,
               std::optional<ObstacleCallback> obstacle = std::nullopt)
         : grid_with_solution_(grid)  // Copy shared_ptr (not move - shared ownership)
@@ -196,7 +196,7 @@ protected:
 
 private:
     // Grid with solution storage (persistent, outlives solver)
-    std::shared_ptr<GridWithSolution<double>> grid_with_solution_;
+    std::shared_ptr<Grid<double>> grid_with_solution_;
 
     // Grid data (for backward compatibility, points to grid_with_solution_->x())
     std::span<const double> grid_;

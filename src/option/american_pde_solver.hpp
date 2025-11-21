@@ -48,7 +48,7 @@ using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver
 class AmericanPutSolver : public PDESolver<AmericanPutSolver> {
 public:
     AmericanPutSolver(const PricingParams& params,
-                     std::shared_ptr<GridWithSolution<double>> grid,
+                     std::shared_ptr<Grid<double>> grid,
                      PDEWorkspaceSpans workspace)
         : PDESolver<AmericanPutSolver>(
               grid,
@@ -123,7 +123,7 @@ private:
     }
 
     PricingParams params_;
-    std::shared_ptr<GridWithSolution<double>> grid_with_solution_;
+    std::shared_ptr<Grid<double>> grid_with_solution_;
 
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
@@ -142,7 +142,7 @@ private:
 class AmericanCallSolver : public PDESolver<AmericanCallSolver> {
 public:
     AmericanCallSolver(const PricingParams& params,
-                      std::shared_ptr<GridWithSolution<double>> grid,
+                      std::shared_ptr<Grid<double>> grid,
                       PDEWorkspaceSpans workspace)
         : PDESolver<AmericanCallSolver>(
               grid,
@@ -220,7 +220,7 @@ private:
     }
 
     PricingParams params_;
-    std::shared_ptr<GridWithSolution<double>> grid_with_solution_;
+    std::shared_ptr<Grid<double>> grid_with_solution_;
 
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
