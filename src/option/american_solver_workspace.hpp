@@ -203,19 +203,19 @@ public:
            double maturity = 1.0);
 
     // New API: Grid + PDEWorkspace
-    std::shared_ptr<Grid<double>> grid_with_solution() const { return grid_with_solution_; }
+    std::shared_ptr<Grid<double>> grid_with_solution() const { return grid_; }
     PDEWorkspace workspace_spans() const { return workspace_spans_; }
 
-    size_t n_space() const { return grid_with_solution_->n_space(); }
-    size_t n_time() const { return grid_with_solution_->time().n_steps(); }
+    size_t n_space() const { return grid_->n_space(); }
+    size_t n_time() const { return grid_->time().n_steps(); }
 
     double x_min() const {
-        auto g = grid_with_solution_->x();
+        auto g = grid_->x();
         return g.empty() ? 0.0 : g[0];
     }
 
     double x_max() const {
-        auto g = grid_with_solution_->x();
+        auto g = grid_->x();
         return g.empty() ? 0.0 : g[g.size() - 1];
     }
 
@@ -223,12 +223,12 @@ private:
     AmericanSolverWorkspace(std::shared_ptr<Grid<double>> grid_sol,
                            std::pmr::vector<double>&& pmr_buffer,
                            PDEWorkspace workspace_spans)
-        : grid_with_solution_(std::move(grid_sol))
+        : grid_(std::move(grid_sol))
         , pmr_buffer_(std::move(pmr_buffer))
         , workspace_spans_(workspace_spans)
     {}
 
-    std::shared_ptr<Grid<double>> grid_with_solution_;
+    std::shared_ptr<Grid<double>> grid_;
     std::pmr::vector<double> pmr_buffer_;  // Contiguous PMR buffer for workspace
     PDEWorkspace workspace_spans_;     // Spans into pmr_buffer_
 };
