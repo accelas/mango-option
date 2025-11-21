@@ -3,6 +3,7 @@ cc_library(
     hdrs = ["grid.hpp"],
     deps = [
         ":grid_spacing_data",
+        ":time_domain",
         "//src/support:error_types",
     ],
     copts = [
