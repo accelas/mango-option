@@ -5,7 +5,7 @@
 #include <string>
 #include <format>
 #include <algorithm>
-#include "src/pde/core/jacobian_view.hpp"
+#include "src/math/jacobian_view.hpp"
 
 namespace mango {
 

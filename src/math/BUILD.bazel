@@ -15,9 +15,21 @@ cc_library(
 )
 
 cc_library(
+    name = "jacobian_view",
+    hdrs = ["jacobian_view.hpp"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "thomas_solver",
     hdrs = ["thomas_solver.hpp"],
-    deps = ["//src/pde/core:jacobian_view"],
+    deps = [":jacobian_view"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )

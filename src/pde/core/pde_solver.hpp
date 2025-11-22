@@ -9,7 +9,7 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
 #include "src/math/thomas_solver.hpp"
-#include "src/pde/core/jacobian_view.hpp"
+#include "src/math/jacobian_view.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <memory>

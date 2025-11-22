@@ -2,7 +2,7 @@
 
 #include "src/pde/core/grid.hpp"
 #include "centered_difference_facade.hpp"
-#include "src/pde/core/jacobian_view.hpp"
+#include "src/math/jacobian_view.hpp"
 #include <span>
 #include <memory>
 #include <concepts>

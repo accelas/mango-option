@@ -18,7 +18,7 @@ cc_library(
     deps = [
         ":centered_difference_facade",
         "//src/pde/core:grid",
-        "//src/pde/core:jacobian_view",
+        "//src/math:jacobian_view",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
