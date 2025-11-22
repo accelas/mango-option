@@ -12,8 +12,8 @@
 
 #include "src/option/american_option.hpp"
 #include "src/pde/core/pde_workspace.hpp"
-#include "src/bspline/bspline_4d.hpp"
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/option/bspline_price_table.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/price_table_4d_builder.hpp"
@@ -91,17 +91,18 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             }
         }
 
-        auto fitter_result = BSplineFitter4D::create(
-            fixture_ptr->m_grid,
-            fixture_ptr->tau_grid,
-            fixture_ptr->sigma_grid,
-            fixture_ptr->rate_grid);
+        auto fitter_result = BSplineNDSeparable<double, 4>::create(
+            std::array<std::vector<double>, 4>{
+                fixture_ptr->m_grid,
+                fixture_ptr->tau_grid,
+                fixture_ptr->sigma_grid,
+                fixture_ptr->rate_grid});
 
-        if (!fitter_result) {
+        if (!fitter_result.has_value()) {
             throw std::runtime_error("Failed to create BSpline fitter: " + fitter_result.error());
         }
 
-        auto fit_result = fitter_result->fit(prices);
+        auto fit_result = fitter_result->fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         if (!fit_result.success) {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
         }

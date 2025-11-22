@@ -3,8 +3,8 @@
  * @brief Unit tests for 1D B-spline collocation solver
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
-#include "src/bspline/bspline_4d.hpp"  // For evaluation
+#include "src/math/bspline_collocation.hpp"
+#include "src/option/bspline_price_table.hpp"  // For evaluation
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
@@ -76,7 +76,7 @@ TEST_F(BSplineCollocation1DTest, ConstantFunction) {
     auto grid = uniform_grid(0.0, 1.0, 10);
     auto values = evaluate(grid, [](double) { return 5.0; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -97,7 +97,7 @@ TEST_F(BSplineCollocation1DTest, LinearFunction) {
     auto grid = uniform_grid(0.0, 1.0, 10);
     auto values = evaluate(grid, [](double x) { return 2.0 * x + 3.0; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -118,7 +118,7 @@ TEST_F(BSplineCollocation1DTest, QuadraticFunction) {
     auto grid = uniform_grid(0.0, 1.0, 10);
     auto values = evaluate(grid, [](double x) { return x * x - 2.0 * x + 1.0; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -139,7 +139,7 @@ TEST_F(BSplineCollocation1DTest, CubicFunction) {
     auto grid = uniform_grid(0.0, 1.0, 10);
     auto values = evaluate(grid, [](double x) { return x * x * x - x + 2.0; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -160,7 +160,7 @@ TEST_F(BSplineCollocation1DTest, ExponentialFunction) {
     auto grid = uniform_grid(0.0, 1.0, 20);  // More points for smooth approximation
     auto values = evaluate(grid, [](double x) { return std::exp(x); });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -182,7 +182,7 @@ TEST_F(BSplineCollocation1DTest, SinFunction) {
     auto grid = uniform_grid(0.0, M_PI, 30);
     auto values = evaluate(grid, [](double x) { return std::sin(x); });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -209,7 +209,7 @@ TEST_F(BSplineCollocation1DTest, NonUniformGrid) {
 
     auto values = evaluate(grid, [](double x) { return std::log(x); });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -230,7 +230,7 @@ TEST_F(BSplineCollocation1DTest, ConditionNumberEstimate) {
     auto grid = uniform_grid(0.0, 1.0, 10);
     auto values = evaluate(grid, [](double x) { return x * x; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -248,7 +248,7 @@ TEST_F(BSplineCollocation1DTest, MinimumGridSize) {
     auto grid = uniform_grid(0.0, 1.0, 4);
     auto values = evaluate(grid, [](double x) { return x * x; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -262,7 +262,7 @@ TEST_F(BSplineCollocation1DTest, MinimumGridSize) {
 TEST_F(BSplineCollocation1DTest, FailOnSmallGrid) {
     std::vector<double> grid = {0.0, 0.5, 1.0};  // Only 3 points
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("≥4 points"), std::string::npos);
@@ -272,7 +272,7 @@ TEST_F(BSplineCollocation1DTest, FailOnSmallGrid) {
 TEST_F(BSplineCollocation1DTest, FailOnUnsortedGrid) {
     std::vector<double> grid = {0.0, 1.0, 0.5, 0.75};  // Unsorted
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("sorted"), std::string::npos);
@@ -283,7 +283,7 @@ TEST_F(BSplineCollocation1DTest, FailOnSizeMismatch) {
     auto grid = uniform_grid(0.0, 1.0, 10);
     std::vector<double> values(8);  // Wrong size
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -298,7 +298,7 @@ TEST_F(BSplineCollocation1DTest, FailOnDuplicatePoints) {
     std::vector<double> grid = {0.0, 0.5, 0.5, 1.0};  // Duplicate at 0.5
     std::vector<double> values = {1.0, 2.0, 2.0, 3.0};
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("too close together"), std::string::npos);
@@ -309,7 +309,7 @@ TEST_F(BSplineCollocation1DTest, IllConditionedNearDuplicates) {
     std::vector<double> grid = {0.0, 0.1, 0.1 + 1e-14, 0.5, 1.0};
     auto values = evaluate(grid, [](double x) { return x; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -329,7 +329,7 @@ TEST_F(BSplineCollocation1DTest, FailOnNaNInput) {
     auto values = evaluate(grid, [](double x) { return x; });
     values[5] = std::numeric_limits<double>::quiet_NaN();
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -345,7 +345,7 @@ TEST_F(BSplineCollocation1DTest, FailOnInfInput) {
     auto values = evaluate(grid, [](double x) { return x; });
     values[3] = std::numeric_limits<double>::infinity();
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -367,7 +367,7 @@ TEST_F(BSplineCollocation1DTest, ExtremelyClustered) {
 
     auto values = evaluate(grid, [](double x) { return x; });
 
-    auto solver_result = BSplineCollocation1D::create(grid);
+    auto solver_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -385,7 +385,7 @@ TEST_F(BSplineCollocation1DTest, ExtremelyClustered) {
 TEST_F(BSplineCollocation1DTest, FailOnZeroWidthGrid) {
     std::vector<double> grid = {1.0, 1.0, 1.0, 1.0};  // All same value
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     // This will be caught by the "too close together" check since spacing = 0
@@ -396,7 +396,7 @@ TEST_F(BSplineCollocation1DTest, FailOnZeroWidthGrid) {
 TEST_F(BSplineCollocation1DTest, FactoryValidGrid) {
     auto grid = uniform_grid(0.0, 1.0, 10);
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_NO_THROW({
@@ -411,7 +411,7 @@ TEST_F(BSplineCollocation1DTest, FactoryValidGrid) {
 TEST_F(BSplineCollocation1DTest, FactoryFailOnSmallGrid) {
     std::vector<double> grid = {0.0, 0.5, 1.0};  // Only 3 points
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("≥4 points"), std::string::npos);
@@ -421,7 +421,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnSmallGrid) {
 TEST_F(BSplineCollocation1DTest, FactoryFailOnUnsortedGrid) {
     std::vector<double> grid = {0.0, 1.0, 0.5, 0.75};  // Unsorted
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("sorted"), std::string::npos);
@@ -431,7 +431,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnUnsortedGrid) {
 TEST_F(BSplineCollocation1DTest, FactoryFailOnDuplicatePoints) {
     std::vector<double> grid = {0.0, 0.5, 0.5, 1.0};  // Duplicate at 0.5
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("too close together"), std::string::npos);
@@ -441,7 +441,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnDuplicatePoints) {
 TEST_F(BSplineCollocation1DTest, FactoryFailOnZeroWidthGrid) {
     std::vector<double> grid = {1.0, 1.0, 1.0, 1.0};  // All same value
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     // This will be caught by the "too close together" check since spacing = 0
@@ -452,7 +452,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnZeroWidthGrid) {
 TEST_F(BSplineCollocation1DTest, FactoryFailOnNearlyDuplicatePoints) {
     std::vector<double> grid = {0.0, 0.5, 0.5 + 1e-15, 1.0};  // Nearly duplicate
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("too close together"), std::string::npos);
@@ -462,7 +462,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnNearlyDuplicatePoints) {
 TEST_F(BSplineCollocation1DTest, FactoryMinimumGridSize) {
     auto grid = uniform_grid(0.0, 1.0, 4);  // Minimum 4 points
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_TRUE(result.has_value());
     auto& solver = result.value();
@@ -475,7 +475,7 @@ TEST_F(BSplineCollocation1DTest, FactoryMinimumGridSize) {
 TEST_F(BSplineCollocation1DTest, FactoryLargeGrid) {
     auto grid = uniform_grid(0.0, 1.0, 200);  // Large but reasonable grid
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_TRUE(result.has_value());
     auto& solver = result.value();
@@ -493,7 +493,7 @@ TEST_F(BSplineCollocation1DTest, FactoryNonUniformGrid) {
         grid.push_back(std::exp(t * std::log(10.0)));  // [1, 10] log-spaced
     }
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_TRUE(result.has_value());
     auto& solver = result.value();
@@ -506,7 +506,7 @@ TEST_F(BSplineCollocation1DTest, FactoryNonUniformGrid) {
 TEST_F(BSplineCollocation1DTest, FactoryMoveSemantics) {
     auto grid = uniform_grid(0.0, 1.0, 10);
 
-    auto result = BSplineCollocation1D::create(std::move(grid));
+    auto result = BSplineCollocation1D<double>::create(std::move(grid));
 
     ASSERT_TRUE(result.has_value());
     // The grid should have been moved, not copied
@@ -517,7 +517,7 @@ TEST_F(BSplineCollocation1DTest, FactoryMoveSemantics) {
 TEST_F(BSplineCollocation1DTest, FactoryErrorMessageDetail) {
     std::vector<double> grid = {0.0, 1.0};  // Only 2 points
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     auto error = result.error();
@@ -529,7 +529,7 @@ TEST_F(BSplineCollocation1DTest, FactoryErrorMessageDetail) {
 TEST_F(BSplineCollocation1DTest, FactoryUnsortedErrorMessage) {
     std::vector<double> grid = {0.0, 1.0, 0.5, 0.75};  // Unsorted (4 points)
 
-    auto result = BSplineCollocation1D::create(grid);
+    auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
     auto error = result.error();

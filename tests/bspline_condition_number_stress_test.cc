@@ -7,7 +7,7 @@
  * on challenging matrices designed to stress the numerical algorithms.
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
@@ -101,10 +101,10 @@ TEST_F(BSplineConditionNumberStressTest, WellConditionedMatrix) {
     auto grid = create_uniform_grid(20);
     auto values = generate_smooth_values(grid);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value()) << "Failed to create fitter";
 
-    auto fit_result = fitter_result.value().fit(values, 1e-6);
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
     EXPECT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
 
     // Well-conditioned matrix should have low condition number
@@ -121,10 +121,10 @@ TEST_F(BSplineConditionNumberStressTest, ClusteredGrid) {
     auto grid = create_clustered_grid(20, 8.0);
     auto values = generate_smooth_values(grid);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto fit_result = fitter_result.value().fit(values, 1e-6);
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
     // May or may not succeed depending on conditioning
     if (fit_result.success) {
@@ -142,10 +142,10 @@ TEST_F(BSplineConditionNumberStressTest, NearSingularMatrix) {
     auto grid = create_near_singular_grid(20);
     auto values = generate_smooth_values(grid);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto fit_result = fitter_result.value().fit(values, 1e-6);
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
     // This grid is somewhat ill-conditioned but not catastrophic
     if (fit_result.success) {
@@ -164,10 +164,10 @@ TEST_F(BSplineConditionNumberStressTest, PerturbedGrid) {
     auto grid = create_perturbed_grid(20, 0.005);
     auto values = generate_noisy_values(grid, 0.001);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto fit_result = fitter_result.value().fit(values, 1e-4);  // Relaxed tolerance for noisy data
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-4});  // Relaxed tolerance for noisy data
     EXPECT_TRUE(fit_result.success) << "Perturbed grid should still succeed";
 
     // Moderate condition number expected
@@ -183,11 +183,11 @@ TEST_F(BSplineConditionNumberStressTest, LargeSystem) {
     auto grid = create_uniform_grid(200);  // 200 points
     auto values = generate_smooth_values(grid);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value());
 
     auto start = std::chrono::high_resolution_clock::now();
-    auto fit_result = fitter_result.value().fit(values, 1e-3);  // Relaxed tolerance for large system
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-3});  // Relaxed tolerance for large system
     auto end = std::chrono::high_resolution_clock::now();
     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
@@ -218,10 +218,10 @@ TEST_F(BSplineConditionNumberStressTest, MultipleResolutions) {
         auto grid = create_uniform_grid(n);
         auto values = generate_smooth_values(grid);
 
-        auto fitter_result = BSplineCollocation1D::create(grid);
+        auto fitter_result = BSplineCollocation1D<double>::create(grid);
         ASSERT_TRUE(fitter_result.has_value());
 
-        auto fit_result = fitter_result.value().fit(values, 1e-6);
+        auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
         EXPECT_TRUE(fit_result.success) << "Resolution n=" << n << " should succeed";
 
         condition_numbers.push_back(fit_result.condition_estimate);
@@ -247,10 +247,10 @@ TEST_F(BSplineConditionNumberStressTest, ConditionNumberSanityChecks) {
     auto grid = create_uniform_grid(20);
     auto values = generate_smooth_values(grid);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto fit_result = fitter_result.value().fit(values, 1e-6);
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
     EXPECT_TRUE(fit_result.success);
 
     double cond = fit_result.condition_estimate;
@@ -267,10 +267,10 @@ TEST_F(BSplineConditionNumberStressTest, ZeroDataValues) {
     auto grid = create_uniform_grid(20);
     std::vector<double> values(grid.size(), 0.0);
 
-    auto fitter_result = BSplineCollocation1D::create(grid);
+    auto fitter_result = BSplineCollocation1D<double>::create(grid);
     ASSERT_TRUE(fitter_result.has_value());
 
-    auto fit_result = fitter_result.value().fit(values, 1e-6);
+    auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
     // Should succeed (zero function is representable)
     EXPECT_TRUE(fit_result.success) << "Zero data should be fittable";

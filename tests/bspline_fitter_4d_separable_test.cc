@@ -7,11 +7,15 @@
  * - Separable function fitting
  * - Error handling for invalid grids
  * - Integration with evaluation
+ *
+ * Note: Now tests BSplineNDSeparable<double, 4> directly instead of
+ *       the old hardcoded BSplineNDSeparable<double, 4> class.
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <array>
 
 using namespace mango;
 
@@ -44,14 +48,14 @@ struct TestFunctions {
 // Factory Pattern Tests
 // ============================================================================
 
-TEST(BSplineFitter4DSeparableTest, FactoryCreation) {
+TEST(BSplineNDSeparableTest, FactoryCreation) {
     auto m = linspace(0.8, 1.2, 10);
     auto t = linspace(0.1, 2.0, 8);
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
     // Factory creation should succeed
-    auto result = BSplineFitter4DSeparable::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_TRUE(result.has_value());
 
     // Verify the object was created
@@ -60,36 +64,36 @@ TEST(BSplineFitter4DSeparableTest, FactoryCreation) {
     }
 }
 
-TEST(BSplineFitter4DSeparableTest, FactoryCreationWithSmallGrids) {
+TEST(BSplineNDSeparableTest, FactoryCreationWithSmallGrids) {
     auto m = linspace(0.8, 1.2, 4);  // Minimum size
     auto t = linspace(0.1, 2.0, 4);
     auto v = linspace(0.1, 0.5, 4);
     auto r = linspace(0.0, 0.1, 4);
 
     // Factory creation should succeed with minimum grid sizes
-    auto result = BSplineFitter4DSeparable::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_TRUE(result.has_value());
 }
 
-TEST(BSplineFitter4DSeparableTest, FactoryCreationFailure) {
+TEST(BSplineNDSeparableTest, FactoryCreationFailure) {
     auto m_small = linspace(0.8, 1.2, 3);  // Too few points!
     auto t = linspace(0.1, 2.0, 8);
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto result = BSplineFitter4DSeparable::create(m_small, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_small, t, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
     EXPECT_TRUE(result.error().find("≥4 points") != std::string::npos);
 }
 
-TEST(BSplineFitter4DSeparableTest, FactoryCreationFailureMultipleSmallGrids) {
+TEST(BSplineNDSeparableTest, FactoryCreationFailureMultipleSmallGrids) {
     auto m_small = linspace(0.8, 1.2, 3);  // Too few points!
     auto t_small = linspace(0.1, 2.0, 2);  // Too few points!
     auto v_small = linspace(0.1, 0.5, 1);  // Too few points!
     auto r_small = linspace(0.0, 0.1, 0);  // Empty!
 
-    auto result = BSplineFitter4DSeparable::create(m_small, t_small, v_small, r_small);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_small, t_small, v_small, r_small});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
 }
@@ -98,7 +102,7 @@ TEST(BSplineFitter4DSeparableTest, FactoryCreationFailureMultipleSmallGrids) {
 // Function Fitting Tests
 // ============================================================================
 
-TEST(BSplineFitter4DSeparableTest, ConstantFunction) {
+TEST(BSplineNDSeparableTest, ConstantFunction) {
     auto m_grid = linspace(0.8, 1.2, 8);
     auto t_grid = linspace(0.1, 2.0, 6);
     auto v_grid = linspace(0.1, 0.5, 5);
@@ -124,24 +128,24 @@ TEST(BSplineFitter4DSeparableTest, ConstantFunction) {
     }
 
     // Create fitter using factory pattern
-    auto fitter_result = BSplineFitter4DSeparable::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value());
     auto& fitter = fitter_result.value();
 
     // Fit coefficients
-    auto result = fitter.fit(values, 1e-3);
+    auto result = fitter.fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     EXPECT_TRUE(result.success) << "Error: " << result.error_message;
     EXPECT_EQ(result.coefficients.size(), values.size());
 
     // Check diagnostic information
-    EXPECT_GE(result.failed_slices_axis0, 0UL);
-    EXPECT_GE(result.failed_slices_axis1, 0UL);
-    EXPECT_GE(result.failed_slices_axis2, 0UL);
-    EXPECT_GE(result.failed_slices_axis3, 0UL);
+    EXPECT_GE(result.failed_slices[0], 0UL);
+    EXPECT_GE(result.failed_slices[1], 0UL);
+    EXPECT_GE(result.failed_slices[2], 0UL);
+    EXPECT_GE(result.failed_slices[3], 0UL);
 }
 
-TEST(BSplineFitter4DSeparableTest, SeparableFunction) {
+TEST(BSplineNDSeparableTest, SeparableFunction) {
     auto m_grid = linspace(0.8, 1.2, 10);
     auto t_grid = linspace(0.1, 2.0, 10);
     auto v_grid = linspace(0.1, 0.5, 8);
@@ -167,12 +171,12 @@ TEST(BSplineFitter4DSeparableTest, SeparableFunction) {
     }
 
     // Create fitter using factory pattern
-    auto fitter_result = BSplineFitter4DSeparable::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value());
     auto& fitter = fitter_result.value();
 
     // Fit coefficients with relaxed tolerance
-    auto result = fitter.fit(values, 1e-3);
+    auto result = fitter.fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     EXPECT_TRUE(result.success) << "Error: " << result.error_message;
     EXPECT_EQ(result.coefficients.size(), values.size());
@@ -182,13 +186,13 @@ TEST(BSplineFitter4DSeparableTest, SeparableFunction) {
 // Error Handling Tests
 // ============================================================================
 
-TEST(BSplineFitter4DSeparableTest, WrongValueSize) {
+TEST(BSplineNDSeparableTest, WrongValueSize) {
     auto m = linspace(0.8, 1.2, 10);
     auto t = linspace(0.1, 2.0, 8);
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto fitter_result = BSplineFitter4DSeparable::create(m, t, v, r);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     ASSERT_TRUE(fitter_result.has_value());
     auto& fitter = fitter_result.value();
 

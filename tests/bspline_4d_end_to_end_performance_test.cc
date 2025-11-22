@@ -12,7 +12,7 @@
  * - Expected speedup: Based on micro-benchmark results (42× for 1D solver)
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <chrono>
@@ -106,21 +106,24 @@ TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridAccuracyAndPerformance) {
               << values.size() << " points\n";
 
     // Create fitter
-    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{moneyness, maturity, volatility, rate});
     ASSERT_TRUE(fitter_result.has_value()) << "Fitter creation failed: " << fitter_result.error();
 
     auto start = std::chrono::high_resolution_clock::now();
-    auto fit_result = fitter_result.value().fit(values, 1e-6);
+    auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
     auto end = std::chrono::high_resolution_clock::now();
 
     ASSERT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
 
+    double max_residual = *std::max_element(
+        fit_result.max_residual_per_axis.begin(), fit_result.max_residual_per_axis.end());
+
     auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     std::cout << "  Fitting time: " << duration_us << " µs (" << (duration_us / 1000.0) << " ms)\n";
-    std::cout << "  Max residual: " << fit_result.max_residual << "\n";
+    std::cout << "  Max residual: " << max_residual << "\n";
 
     // Verify fitting quality
-    EXPECT_LT(fit_result.max_residual, 1e-5);
+    EXPECT_LT(max_residual, 1e-5);
 
     // Verify reasonable performance (should complete in reasonable time)
     // Based on observed performance: ~6000ms for 300K points with banded solver
@@ -154,21 +157,24 @@ TEST_F(BSpline4DEndToEndPerformanceTest, MultipleGridSizesAccuracy) {
         std::cout << "\n" << config.name << " (" << values.size() << " points):\n";
 
         // Create fitter and fit
-        auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+        auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{moneyness, maturity, volatility, rate});
         ASSERT_TRUE(fitter_result.has_value());
 
         auto start = std::chrono::high_resolution_clock::now();
-        auto fit_result = fitter_result.value().fit(values, 1e-6);
+        auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         auto end = std::chrono::high_resolution_clock::now();
 
         ASSERT_TRUE(fit_result.success) << "Fit failed for " << config.name;
 
+        double max_residual = *std::max_element(
+            fit_result.max_residual_per_axis.begin(), fit_result.max_residual_per_axis.end());
+
         auto duration_ms = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
         std::cout << "  Fitting time: " << duration_ms << " ms\n";
-        std::cout << "  Max residual: " << fit_result.max_residual << "\n";
+        std::cout << "  Max residual: " << max_residual << "\n";
 
         // Verify accuracy
-        EXPECT_LT(fit_result.max_residual, 1e-5)
+        EXPECT_LT(max_residual, 1e-5)
             << "Residual too large for " << config.name;
 
         // Verify reasonable performance
@@ -192,7 +198,7 @@ TEST_F(BSpline4DEndToEndPerformanceTest, PerformanceRegression) {
 
     std::cout << "\nPerformance regression test (20×15×10×8 = " << values.size() << " points):\n";
 
-    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{moneyness, maturity, volatility, rate});
     ASSERT_TRUE(fitter_result.has_value());
 
     // Run multiple times to get stable measurement
@@ -201,7 +207,7 @@ TEST_F(BSpline4DEndToEndPerformanceTest, PerformanceRegression) {
 
     for (int run = 0; run < num_runs; ++run) {
         auto start = std::chrono::high_resolution_clock::now();
-        auto fit_result = fitter_result.value().fit(values, 1e-6);
+        auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         auto end = std::chrono::high_resolution_clock::now();
 
         ASSERT_TRUE(fit_result.success);
@@ -240,14 +246,14 @@ TEST_F(BSpline4DEndToEndPerformanceTest, SIMDSpeedupRegression) {
 
     auto values = generate_test_values(moneyness, maturity, volatility, rate);
 
-    auto fitter_result = BSplineFitter4D::create(moneyness, maturity, volatility, rate);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{moneyness, maturity, volatility, rate});
     ASSERT_TRUE(fitter_result.has_value());
 
     // Run 5 times for stable measurement
     std::vector<double> times_us;
     for (int run = 0; run < 5; ++run) {
         auto start = std::chrono::high_resolution_clock::now();
-        auto fit_result = fitter_result.value().fit(values, 1e-6);
+        auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         auto end = std::chrono::high_resolution_clock::now();
 
         ASSERT_TRUE(fit_result.success);

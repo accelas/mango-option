@@ -282,8 +282,8 @@ cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
-        "//src/bspline:bspline_4d",
+        "//src/math:bspline_nd_separable",
+        "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -293,7 +293,7 @@ cc_test(
     name = "bspline_4d_test",
     srcs = ["bspline_4d_test.cc"],
     deps = [
-        "//src/bspline:bspline_4d",
+        "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
@@ -303,21 +303,23 @@ cc_test(
     name = "bspline_fitter_4d_test",
     srcs = ["bspline_fitter_4d_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
-        "//src/bspline:bspline_4d",
+        "//src/math:bspline_nd_separable",
+        "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    linkopts = ["-fopenmp"],
 )
 
 cc_test(
     name = "bspline_fitter_4d_separable_test",
     srcs = ["bspline_fitter_4d_separable_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    linkopts = ["-fopenmp"],
 )
 
 cc_test(
@@ -407,10 +409,11 @@ cc_test(
     name = "bspline_4d_end_to_end_performance_test",
     srcs = ["bspline_4d_end_to_end_performance_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"],
     size = "large",
     timeout = "moderate",
 )
@@ -423,10 +426,12 @@ cc_test(
         "-Wall",
         "-Wextra",
         "-march=native",
+        "-fopenmp",
     ],
+    linkopts = ["-fopenmp"],
     deps = [
-        "//src/bspline:bspline_4d",
-        "//src/bspline:bspline_fitter_4d",
+        "//src/option:bspline_price_table",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -456,20 +461,22 @@ cc_test(
     name = "bspline_banded_solver_test",
     srcs = ["bspline_banded_solver_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"], 
 )
 
 cc_test(
     name = "bspline_workspace_test",
     srcs = ["bspline_workspace_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"], 
     size = "small",
 )
 
@@ -477,10 +484,11 @@ cc_test(
     name = "bspline_condition_number_stress_test",
     srcs = ["bspline_condition_number_stress_test.cc"],
     deps = [
-        "//src/bspline:bspline_fitter_4d",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+    copts = ["-std=c++23", "-fopenmp"],
+    linkopts = ["-fopenmp"], 
     size = "medium",
     timeout = "moderate",
 )
@@ -508,6 +516,18 @@ cc_test(
         "//src/option:american_option_result",
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "bspline_nd_test",
+    size = "small",
+    srcs = ["bspline_nd_test.cc"],
+    deps = [
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
         "@googletest//:gtest_main",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
