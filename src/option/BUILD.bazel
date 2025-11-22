@@ -117,7 +117,9 @@ cc_library(
     srcs = ["price_table_4d_builder.cpp"],
     hdrs = ["price_table_4d_builder.hpp"],
     deps = [
-        ":price_table_solver_factory",
+        ":american_option_batch",
+        ":price_table_grid",
+        ":price_table_extraction",
         ":bspline_price_table",
         "//src/math:bspline_nd_separable",
         ":price_table_workspace",
@@ -226,6 +228,8 @@ cc_library(
         ":option_spec",
         ":american_option",
         ":american_option_batch",
+        ":price_table_grid",
+        ":price_table_extraction",
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
         "//src/math:cubic_spline_solver",
@@ -251,6 +255,26 @@ cc_library(
         "//src/math:bspline_basis",
         "//src/support:crc64",
         "//third_party/arrow",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_grid",
+    hdrs = ["price_table_grid.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_extraction",
+    srcs = ["price_table_extraction.cpp"],
+    hdrs = ["price_table_extraction.hpp"],
+    deps = [
+        ":american_option_batch",
+        ":price_table_grid",
+        "//src/math:cubic_spline_solver",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
