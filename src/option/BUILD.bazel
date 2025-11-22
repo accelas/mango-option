@@ -84,6 +84,24 @@ cc_library(
 )
 
 cc_library(
+    name = "batch_bracketing",
+    srcs = ["batch_bracketing.cpp"],
+    hdrs = ["batch_bracketing.hpp"],
+    deps = [
+        ":option_spec",
+        ":american_option",
+        "//src/pde/core:grid",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "bspline_price_table",
     hdrs = ["bspline_price_table.hpp"],
     deps = [
