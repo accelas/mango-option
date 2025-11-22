@@ -372,17 +372,6 @@ cc_test(
 
 # DISABLED: Failing tests (needs investigation)
 # cc_test(
-#     name = "normalized_chain_solver_test",
-#     srcs = ["normalized_chain_solver_test.cc"],
-#     deps = [
-#         "//src/option:normalized_chain_solver",
-#         "@googletest//:gtest_main",
-#     ],
-#     copts = ["-std=c++23"],
-# )
-
-# DISABLED: Failing tests (needs investigation)
-# cc_test(
 #     name = "price_table_4d_integration_test",
 #     srcs = ["price_table_4d_integration_test.cc"],
 #     deps = [
