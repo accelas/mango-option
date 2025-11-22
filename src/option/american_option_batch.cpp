@@ -586,9 +586,79 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
     std::span<const AmericanOptionParams> params,
     SetupCallback setup)
 {
-    // TODO: Implement true normalization
-    // For now, fall back to regular batch solving
-    return solve_regular_batch(params, /*use_shared_grid=*/true, setup);
+    // Group by PDE parameters: (σ, r, q, type, maturity)
+    auto pde_groups = group_by_pde_parameters(params);
+
+    // Process each PDE parameter group
+    std::vector<std::expected<AmericanOptionResult, SolverError>> results;
+    results.reserve(params.size());
+    for (size_t i = 0; i < params.size(); ++i) {
+        results.emplace_back(std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .message = "Not yet computed",
+            .iterations = 0
+        }));
+    }
+    size_t failed_count = 0;
+
+    for (const auto& group : pde_groups) {
+        // Solve normalized PDE once for this group (S=K=1)
+        AmericanOptionParams normalized_params(
+            1.0,                // spot (normalized)
+            1.0,                // strike (normalized)
+            group.maturity,     // maturity
+            group.rate,         // rate
+            group.dividend,     // dividend_yield
+            group.option_type,  // type
+            group.sigma         // volatility
+        );
+
+        // Solve with shared grid to get full surface
+        auto solve_result = solve_regular_batch(
+            std::span{&normalized_params, 1},
+            /*use_shared_grid=*/true,
+            setup);
+
+        if (!solve_result.results[0].has_value()) {
+            // Mark all options in this group as failed
+            for (size_t idx : group.option_indices) {
+                results[idx] = std::unexpected(solve_result.results[0].error());
+                ++failed_count;
+            }
+            continue;
+        }
+
+        // Extract normalized surface u(x,τ)
+        const auto& normalized_result = solve_result.results[0].value();
+        auto grid = normalized_result.grid();
+        auto x_grid = grid->x();
+
+        // Get today's option value (last time step)
+        size_t final_step = grid->num_snapshots() - 1;
+        auto spatial_solution = normalized_result.at_time(final_step);
+
+        // For each option in this group, create result with actual params
+        // The AmericanOptionResult will interpolate using the normalized grid
+        // (uses linear interpolation internally)
+        for (size_t idx : group.option_indices) {
+            const auto& option = params[idx];
+
+            // Create result wrapper with actual option params
+            // Grid still contains normalized solution (S=K=1)
+            // AmericanOptionResult::value_at() will handle interpolation
+            AmericanOptionResult scaled_result(grid, option);
+
+            // Move result into results vector (using placement new)
+            results[idx].~expected();
+            new (&results[idx]) std::expected<AmericanOptionResult, SolverError>(
+                std::move(scaled_result));
+        }
+    }
+
+    return BatchAmericanOptionResult{
+        .results = std::move(results),
+        .failed_count = failed_count
+    };
 }
 
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
