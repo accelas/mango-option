@@ -105,15 +105,15 @@ TEST_F(BSplineConditionNumberStressTest, WellConditionedMatrix) {
     ASSERT_TRUE(fitter_result.has_value()) << "Failed to create fitter";
 
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
-    EXPECT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
+    EXPECT_TRUE(fit_result.has_value()) << "Fit failed: " << fit_result.error();
 
     // Well-conditioned matrix should have low condition number
-    EXPECT_LT(fit_result.condition_estimate, 1e6)
+    EXPECT_LT(fit_result->condition_estimate, 1e6)
         << "Condition number should be low for well-conditioned problem";
-    EXPECT_GT(fit_result.condition_estimate, 1.0)
+    EXPECT_GT(fit_result->condition_estimate, 1.0)
         << "Condition number should be >= 1";
 
-    std::cout << "Well-conditioned matrix: cond = " << fit_result.condition_estimate << "\n";
+    std::cout << "Well-conditioned matrix: cond = " << fit_result->condition_estimate << "\n";
 }
 
 TEST_F(BSplineConditionNumberStressTest, ClusteredGrid) {
@@ -127,13 +127,13 @@ TEST_F(BSplineConditionNumberStressTest, ClusteredGrid) {
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
     // May or may not succeed depending on conditioning
-    if (fit_result.success) {
+    if (fit_result.has_value()) {
         // If it succeeds, condition number should be elevated
-        EXPECT_GT(fit_result.condition_estimate, 1e3)
+        EXPECT_GT(fit_result->condition_estimate, 1e3)
             << "Clustered grid should have higher condition number";
-        std::cout << "Clustered grid (succeeded): cond = " << fit_result.condition_estimate << "\n";
+        std::cout << "Clustered grid (succeeded): cond = " << fit_result->condition_estimate << "\n";
     } else {
-        std::cout << "Clustered grid (failed): " << fit_result.error_message << "\n";
+        std::cout << "Clustered grid (failed): " << fit_result.error() << "\n";
     }
 }
 
@@ -148,14 +148,14 @@ TEST_F(BSplineConditionNumberStressTest, NearSingularMatrix) {
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
     // This grid is somewhat ill-conditioned but not catastrophic
-    if (fit_result.success) {
-        EXPECT_GT(fit_result.condition_estimate, 10.0)
+    if (fit_result.has_value()) {
+        EXPECT_GT(fit_result->condition_estimate, 10.0)
             << "Non-uniform spacing should elevate condition number";
-        EXPECT_LT(fit_result.condition_estimate, 1e6)
+        EXPECT_LT(fit_result->condition_estimate, 1e6)
             << "Should still be solvable";
-        std::cout << "Dense/sparse spacing: cond = " << fit_result.condition_estimate << "\n";
+        std::cout << "Dense/sparse spacing: cond = " << fit_result->condition_estimate << "\n";
     } else {
-        std::cout << "Dense/sparse spacing (failed): " << fit_result.error_message << "\n";
+        std::cout << "Dense/sparse spacing (failed): " << fit_result.error() << "\n";
     }
 }
 
@@ -168,13 +168,13 @@ TEST_F(BSplineConditionNumberStressTest, PerturbedGrid) {
     ASSERT_TRUE(fitter_result.has_value());
 
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-4});  // Relaxed tolerance for noisy data
-    EXPECT_TRUE(fit_result.success) << "Perturbed grid should still succeed";
+    EXPECT_TRUE(fit_result.has_value()) << "Perturbed grid should still succeed";
 
     // Moderate condition number expected
-    EXPECT_LT(fit_result.condition_estimate, 1e8)
+    EXPECT_LT(fit_result->condition_estimate, 1e8)
         << "Condition number should not be excessive for mild perturbations";
 
-    std::cout << "Perturbed grid: cond = " << fit_result.condition_estimate << "\n";
+    std::cout << "Perturbed grid: cond = " << fit_result->condition_estimate << "\n";
 }
 
 TEST_F(BSplineConditionNumberStressTest, LargeSystem) {
@@ -192,16 +192,16 @@ TEST_F(BSplineConditionNumberStressTest, LargeSystem) {
     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
     // Large B-spline systems can have very high condition numbers (known property)
-    if (fit_result.success) {
-        std::cout << "Large system (n=200): cond = " << fit_result.condition_estimate
+    if (fit_result.has_value()) {
+        std::cout << "Large system (n=200): cond = " << fit_result->condition_estimate
                   << ", time = " << duration_ms << " ms\n";
 
         // Verify condition number is finite and positive
-        EXPECT_FALSE(std::isnan(fit_result.condition_estimate));
-        EXPECT_FALSE(std::isinf(fit_result.condition_estimate));
-        EXPECT_GT(fit_result.condition_estimate, 1.0);
+        EXPECT_FALSE(std::isnan(fit_result->condition_estimate));
+        EXPECT_FALSE(std::isinf(fit_result->condition_estimate));
+        EXPECT_GT(fit_result->condition_estimate, 1.0);
     } else {
-        std::cout << "Large system (failed): " << fit_result.error_message << "\n";
+        std::cout << "Large system (failed): " << fit_result.error() << "\n";
     }
 
     // With dgbcon, this should be fast (no n^2 solver calls!)
@@ -222,10 +222,10 @@ TEST_F(BSplineConditionNumberStressTest, MultipleResolutions) {
         ASSERT_TRUE(fitter_result.has_value());
 
         auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
-        EXPECT_TRUE(fit_result.success) << "Resolution n=" << n << " should succeed";
+        EXPECT_TRUE(fit_result.has_value()) << "Resolution n=" << n << " should succeed";
 
-        condition_numbers.push_back(fit_result.condition_estimate);
-        std::cout << "Resolution n=" << n << ": cond = " << fit_result.condition_estimate << "\n";
+        condition_numbers.push_back(fit_result->condition_estimate);
+        std::cout << "Resolution n=" << n << ": cond = " << fit_result->condition_estimate << "\n";
     }
 
     // Verify condition numbers are increasing
@@ -251,9 +251,9 @@ TEST_F(BSplineConditionNumberStressTest, ConditionNumberSanityChecks) {
     ASSERT_TRUE(fitter_result.has_value());
 
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
-    EXPECT_TRUE(fit_result.success);
+    EXPECT_TRUE(fit_result.has_value());
 
-    double cond = fit_result.condition_estimate;
+    double cond = fit_result->condition_estimate;
 
     // Sanity checks
     EXPECT_FALSE(std::isnan(cond)) << "Condition number should not be NaN";
@@ -273,8 +273,8 @@ TEST_F(BSplineConditionNumberStressTest, ZeroDataValues) {
     auto fit_result = fitter_result.value().fit(values, {.tolerance = 1e-6});
 
     // Should succeed (zero function is representable)
-    EXPECT_TRUE(fit_result.success) << "Zero data should be fittable";
-    EXPECT_LT(fit_result.max_residual, 1e-10) << "Zero data should have near-zero residual";
+    EXPECT_TRUE(fit_result.has_value()) << "Zero data should be fittable";
+    EXPECT_LT(fit_result->max_residual, 1e-10) << "Zero data should have near-zero residual";
 
-    std::cout << "Zero data: cond = " << fit_result.condition_estimate << "\n";
+    std::cout << "Zero data: cond = " << fit_result->condition_estimate << "\n";
 }

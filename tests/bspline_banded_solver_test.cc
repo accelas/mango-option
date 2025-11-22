@@ -189,9 +189,9 @@ TEST_F(BandedSolverTest, CollocationAccuracy) {
     // Fit quadratic function
     auto fit_result = solver.fit(y_, mango::BSplineCollocationConfig<double>{.tolerance = 1e-9});
 
-    EXPECT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
-    EXPECT_LT(fit_result.max_residual, 1e-6) << "Residual too large";
-    EXPECT_EQ(fit_result.coefficients.size(), n_);
+    EXPECT_TRUE(fit_result.has_value()) << "Fit failed: " << fit_result.error();
+    EXPECT_LT(fit_result->max_residual, 1e-6) << "Residual too large";
+    EXPECT_EQ(fit_result->coefficients.size(), n_);
 }
 
 TEST_F(BandedSolverTest, BandedSolverAccuracyQuadratic) {
@@ -206,18 +206,18 @@ TEST_F(BandedSolverTest, BandedSolverAccuracyQuadratic) {
 
     // Fit quadratic function y = x²
     auto fit_result = solver.fit(y_, mango::BSplineCollocationConfig<double>{.tolerance = 1e-9});
-    ASSERT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
+    ASSERT_TRUE(fit_result.has_value()) << "Fit failed: " << fit_result.error();
 
     // For a quadratic function fit with cubic B-splines, residuals should be extremely small
     // (machine precision level, not just 1e-6)
-    EXPECT_LT(fit_result.max_residual, 1e-10)
+    EXPECT_LT(fit_result->max_residual, 1e-10)
         << "Residual too large for quadratic function fit with cubic B-splines";
 
     // Verify we got coefficients
-    ASSERT_EQ(fit_result.coefficients.size(), n_);
+    ASSERT_EQ(fit_result->coefficients.size(), n_);
 
     // Verify condition number is reasonable (well-conditioned)
-    EXPECT_LT(fit_result.condition_estimate, 1e6)
+    EXPECT_LT(fit_result->condition_estimate, 1e6)
         << "System is poorly conditioned";
 }
 
@@ -258,8 +258,8 @@ TEST_F(BandedSolverTest, DetectsSingularMatrixDegenerateValues) {
 
     // Either the fit succeeds (all-zero solution is valid for all-zero input)
     // or it fails with a clear error message
-    if (!fit_result.success) {
-        EXPECT_FALSE(fit_result.error_message.empty())
+    if (!fit_result.has_value()) {
+        EXPECT_FALSE(fit_result.error().empty())
             << "Failed fit should provide error message";
     }
 }

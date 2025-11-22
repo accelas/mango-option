@@ -351,16 +351,16 @@ private:
             std::span<T>{coeffs_buffer},
             BSplineCollocationConfig<T>{.tolerance = tolerance});
 
-        if (!fit_result.success) {
+        if (!fit_result.has_value()) {
             ++failed_count;
             throw std::runtime_error(
                 "Fitting failed on axis " + std::to_string(Axis) +
-                ": " + fit_result.error_message);
+                ": " + fit_result.error());
         }
 
         // Update statistics
-        max_residual = std::max(max_residual, fit_result.max_residual);
-        max_condition = std::max(max_condition, fit_result.condition_estimate);
+        max_residual = std::max(max_residual, fit_result->max_residual);
+        max_condition = std::max(max_condition, fit_result->condition_estimate);
 
         // Write coefficients back (SIMD-optimized)
         MANGO_PRAGMA_SIMD

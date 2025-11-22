@@ -36,43 +36,12 @@
 
 namespace mango {
 
-/// Result of 1D B-spline collocation fitting
+/// Successful result of 1D B-spline collocation fitting
 template<std::floating_point T>
 struct BSplineCollocationResult {
-    std::vector<T> coefficients;   ///< Fitted control points (empty on failure)
-    bool success;                   ///< Fit succeeded
-    std::string error_message;      ///< Error description if failed
+    std::vector<T> coefficients;   ///< Fitted control points
     T max_residual;                 ///< Max |B*c - f|
     T condition_estimate;           ///< Rough condition number estimate
-
-    /// Implicit conversion to bool for easy checking
-    [[nodiscard]] explicit operator bool() const noexcept { return success; }
-
-    /// Create success result
-    [[nodiscard]] static BSplineCollocationResult ok_result(
-        std::vector<T> coeffs,
-        T residual,
-        T condition)
-    {
-        return {
-            .coefficients = std::move(coeffs),
-            .success = true,
-            .error_message = "",
-            .max_residual = residual,
-            .condition_estimate = condition
-        };
-    }
-
-    /// Create error result
-    [[nodiscard]] static BSplineCollocationResult error_result(std::string msg) {
-        return {
-            .coefficients = {},
-            .success = false,
-            .error_message = std::move(msg),
-            .max_residual = T{0},
-            .condition_estimate = std::numeric_limits<T>::infinity()
-        };
-    }
 };
 
 /// Configuration for B-spline collocation solver
@@ -147,24 +116,22 @@ public:
     /// @param values Function values at grid points (size n)
     /// @param config Solver configuration
     /// @return Fit result with coefficients and diagnostics
-    [[nodiscard]] BSplineCollocationResult<T> fit(
+    [[nodiscard]] std::expected<BSplineCollocationResult<T>, std::string> fit(
         const std::vector<T>& values,
         const BSplineCollocationConfig<T>& config = {})
     {
-        using Result = BSplineCollocationResult<T>;
-
         if (values.size() != n_) {
-            return Result::error_result("Value array size mismatch");
+            return std::unexpected("Value array size mismatch");
         }
 
         // Validate input values for NaN/Inf
         for (size_t i = 0; i < n_; ++i) {
             if (std::isnan(values[i])) {
-                return Result::error_result(
+                return std::unexpected(
                     "Input values contain NaN at index " + std::to_string(i));
             }
             if (std::isinf(values[i])) {
-                return Result::error_result(
+                return std::unexpected(
                     "Input values contain infinite value at index " + std::to_string(i));
             }
         }
@@ -188,7 +155,7 @@ public:
         BandedLUWorkspace<T> workspace(n_, 4);
         auto factor_result = factorize_banded(A, workspace);
         if (!factor_result.ok()) {
-            return Result::error_result(
+            return std::unexpected(
                 "Failed to factorize collocation system: " +
                 std::string(factor_result.message()));
         }
@@ -197,7 +164,7 @@ public:
         std::vector<T> coeffs(n_);
         auto solve_result = solve_banded(workspace, std::span<const T>(values), std::span<T>(coeffs));
         if (!solve_result.ok()) {
-            return Result::error_result(
+            return std::unexpected(
                 "Failed to solve collocation system: " +
                 std::string(solve_result.message()));
         }
@@ -207,7 +174,7 @@ public:
 
         // Check residual tolerance
         if (max_residual > config.tolerance) {
-            return Result::error_result(
+            return std::unexpected(
                 "Residual " + std::to_string(max_residual) +
                 " exceeds tolerance " + std::to_string(config.tolerance));
         }
@@ -216,7 +183,11 @@ public:
         const T norm_A = compute_matrix_norm1();
         const T cond_est = estimate_banded_condition(workspace, norm_A);
 
-        return Result::ok_result(std::move(coeffs), max_residual, cond_est);
+        return BSplineCollocationResult<T>{
+            .coefficients = std::move(coeffs),
+            .max_residual = max_residual,
+            .condition_estimate = cond_est
+        };
     }
 
     /// Fit with external coefficient buffer (zero-allocation variant)
@@ -225,28 +196,26 @@ public:
     /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
     /// @param config Solver configuration
     /// @return Fit result WITHOUT coefficients vector (uses coeffs_out)
-    [[nodiscard]] BSplineCollocationResult<T> fit_with_buffer(
+    [[nodiscard]] std::expected<BSplineCollocationResult<T>, std::string> fit_with_buffer(
         std::span<const T> values,
         std::span<T> coeffs_out,
         const BSplineCollocationConfig<T>& config = {})
     {
-        using Result = BSplineCollocationResult<T>;
-
         if (values.size() != n_) {
-            return Result::error_result("Value array size mismatch");
+            return std::unexpected("Value array size mismatch");
         }
         if (coeffs_out.size() != n_) {
-            return Result::error_result("Coefficients buffer size mismatch");
+            return std::unexpected("Coefficients buffer size mismatch");
         }
 
         // Validate input values
         for (size_t i = 0; i < n_; ++i) {
             if (std::isnan(values[i])) {
-                return Result::error_result(
+                return std::unexpected(
                     "Input values contain NaN at index " + std::to_string(i));
             }
             if (std::isinf(values[i])) {
-                return Result::error_result(
+                return std::unexpected(
                     "Input values contain infinite value at index " + std::to_string(i));
             }
         }
@@ -270,13 +239,13 @@ public:
         BandedLUWorkspace<T> workspace(n_, 4);
         auto factor_result = factorize_banded(A, workspace);
         if (!factor_result.ok()) {
-            return Result::error_result(
+            return std::unexpected(
                 "Factorization failed: " + std::string(factor_result.message()));
         }
 
         auto solve_result = solve_banded(workspace, values, coeffs_out);
         if (!solve_result.ok()) {
-            return Result::error_result(
+            return std::unexpected(
                 "Solve failed: " + std::string(solve_result.message()));
         }
 
@@ -284,7 +253,7 @@ public:
         const T max_residual = compute_residual_from_span(coeffs_out, values);
 
         if (max_residual > config.tolerance) {
-            return Result::error_result(
+            return std::unexpected(
                 "Residual " + std::to_string(max_residual) +
                 " exceeds tolerance " + std::to_string(config.tolerance));
         }
@@ -294,10 +263,8 @@ public:
         const T cond_est = estimate_banded_condition(workspace, norm_A);
 
         // Return result without copying coefficients
-        return {
+        return BSplineCollocationResult<T>{
             .coefficients = {},
-            .success = true,
-            .error_message = "",
             .max_residual = max_residual,
             .condition_estimate = cond_est
         };
