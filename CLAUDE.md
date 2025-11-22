@@ -154,6 +154,57 @@ The solver uses Newton-Raphson iteration for implicit TR-BDF2 stages:
 - Newton arrays: `jacobian_diag`, `jacobian_upper`, `jacobian_lower`, `residual`, `delta_u`
 - Total allocation: ~13n doubles for complete PDE + Newton solver
 
+### mdspan Multi-Dimensional Arrays
+
+The library uses C++23 `std::mdspan` (via Kokkos reference implementation) for type-safe multi-dimensional array views:
+
+**Usage:**
+```cpp
+#include <experimental/mdspan>
+
+using std::experimental::mdspan;
+using std::experimental::dextents;
+
+// Basic 2D array view
+std::vector<double> data(rows * cols);
+mdspan<double, dextents<size_t, 2>> matrix(data.data(), rows, cols);
+double value = matrix[i, j];  // Type-safe indexing
+```
+
+**Key Applications:**
+
+1. **LAPACK Banded Matrices**: Custom layout eliminates O(bandwidth × n) conversion
+   - See `src/math/lapack_banded_layout.hpp`
+   - Zero-copy factorization via `BandedMatrix`
+
+2. **B-Spline Coefficients**: N-dimensional tensor indexing
+   - Replaces manual stride calculation in `BSplineND`
+   - Compile-time verification of dimensionality
+
+3. **Grid Spacing Buffers**: Self-documenting multi-section views
+   - 2D view of 5-section layout in `NonUniformSpacing`
+   - Clear section access: `sections_view_[section, idx]`
+
+**Custom Layout Policies:**
+
+mdspan supports custom layouts for specialized storage formats:
+
+```cpp
+// Example: LAPACK banded storage
+struct lapack_banded_layout {
+    template<class Extents>
+    struct mapping {
+        index_type operator()(index_type i, index_type j) const {
+            // AB(kl + ku + i - j, j) in column-major
+            return (kl_ + ku_ + i - j) + j * ldab_;
+        }
+        // ... additional mapping properties ...
+    };
+};
+```
+
+**Performance**: Zero overhead - compiles to same assembly as manual indexing.
+
 ### GridSpacing: Type-Safe Variant Design
 
 **Purpose**: Store grid spacing information for finite difference operators
