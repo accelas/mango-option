@@ -21,14 +21,28 @@ struct IVSolverFDMConfig {
     /// Root-finding configuration (Brent's method parameters)
     RootFindingConfig root_config;
 
-    /// Number of spatial grid points for PDE solver
+    /// Use manual grid specification instead of auto-estimation
+    ///
+    /// When false (default): Automatically estimate optimal grid based on option parameters
+    /// When true: Use grid_n_space, grid_n_time, grid_x_min, grid_x_max, grid_alpha exactly
+    ///
+    /// **Advanced usage only** (for benchmarks or custom grid control)
+    bool use_manual_grid = false;
+
+    /// Number of spatial grid points (used when use_manual_grid = true)
     size_t grid_n_space = 101;
 
-    /// Number of time steps for PDE solver
+    /// Number of time steps (used when use_manual_grid = true)
     size_t grid_n_time = 1000;
 
-    /// Maximum spot price for grid (S_max)
-    double grid_s_max = 200.0;
+    /// Minimum log-moneyness (used when use_manual_grid = true)
+    double grid_x_min = -3.0;
+
+    /// Maximum log-moneyness (used when use_manual_grid = true)
+    double grid_x_max = 3.0;
+
+    /// Sinh clustering parameter (used when use_manual_grid = true)
+    double grid_alpha = 2.0;
 };
 
 /// FDM-based Implied Volatility Solver for American Options
