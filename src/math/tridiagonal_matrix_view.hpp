@@ -5,20 +5,25 @@
 
 namespace mango {
 
-/// View into tridiagonal Jacobian storage
+/// View into tridiagonal matrix storage
 ///
 /// Provides safe access to lower, diagonal, and upper bands of a
 /// tridiagonal matrix stored in three separate arrays.
 ///
 /// Memory layout:
-/// - lower[i] represents J[i+1,i] (i = 0..n-2)
-/// - diag[i] represents J[i,i] (i = 0..n-1)
-/// - upper[i] represents J[i,i+1] (i = 0..n-1)
-class JacobianView {
+/// - lower[i] represents A[i+1,i] (i = 0..n-2)
+/// - diag[i] represents A[i,i] (i = 0..n-1)
+/// - upper[i] represents A[i,i+1] (i = 0..n-1)
+///
+/// Commonly used for:
+/// - Jacobian matrices in PDE solvers
+/// - Coefficient matrices in Thomas algorithm
+/// - Finite difference discretizations
+class TridiagonalMatrixView {
 public:
-    JacobianView(std::span<double> lower,
-                 std::span<double> diag,
-                 std::span<double> upper)
+    TridiagonalMatrixView(std::span<double> lower,
+                          std::span<double> diag,
+                          std::span<double> upper)
         : lower_(lower)
         , diag_(diag)
         , upper_(upper)
@@ -30,19 +35,19 @@ public:
         // Note: upper[n-1] is unused but present for alignment
     }
 
-    /// Access lower diagonal: J[i+1,i]
+    /// Access lower diagonal: A[i+1,i]
     std::span<double> lower() { return lower_; }
     std::span<const double> lower() const { return lower_; }
 
-    /// Access main diagonal: J[i,i]
+    /// Access main diagonal: A[i,i]
     std::span<double> diag() { return diag_; }
     std::span<const double> diag() const { return diag_; }
 
-    /// Access upper diagonal: J[i,i+1]
+    /// Access upper diagonal: A[i,i+1]
     std::span<double> upper() { return upper_; }
     std::span<const double> upper() const { return upper_; }
 
-    /// Grid size
+    /// Matrix size (number of rows/columns)
     size_t size() const { return diag_.size(); }
 
 private:

@@ -2,7 +2,7 @@
 
 #include "src/pde/core/grid.hpp"
 #include "centered_difference_facade.hpp"
-#include "src/math/jacobian_view.hpp"
+#include "src/math/tridiagonal_matrix_view.hpp"
 #include <span>
 #include <memory>
 #include <concepts>
@@ -124,9 +124,9 @@ public:
     /// Available only for PDEs satisfying HasJacobianCoefficients concept.
     ///
     /// @param coeff_dt TR-BDF2 weight coefficient
-    /// @param jac Jacobian view to populate
+    /// @param jac Tridiagonal matrix view to populate
     void assemble_jacobian([[maybe_unused]] double coeff_dt,
-                          JacobianView& jac) const
+                          TridiagonalMatrixView& jac) const
         requires HasJacobianCoefficients<PDE>
     {
         // Get PDE coefficients

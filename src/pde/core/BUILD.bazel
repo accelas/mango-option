@@ -43,7 +43,7 @@ cc_library(
 cc_library(
     name = "pde_workspace",
     hdrs = ["pde_workspace.hpp"],
-    deps = ["//src/math:jacobian_view"],
+    deps = ["//src/math:tridiagonal_matrix_view"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
@@ -61,7 +61,7 @@ cc_library(
         ":trbdf2_config",
         "//src/math:thomas_solver",
         "//src/math:root_finding",
-        "//src/math:jacobian_view",
+        "//src/math:tridiagonal_matrix_view",
         "//src/support:error_types",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],

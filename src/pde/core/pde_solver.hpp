@@ -9,7 +9,7 @@
 #include "src/pde/core/time_domain.hpp"
 #include "src/pde/core/trbdf2_config.hpp"
 #include "src/math/thomas_solver.hpp"
-#include "src/math/jacobian_view.hpp"
+#include "src/math/tridiagonal_matrix_view.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <memory>
@@ -26,7 +26,7 @@ namespace mango {
 
 /// Concept to detect spatial operators with analytical Jacobian capability
 template<typename SpatialOp>
-concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, JacobianView jac) {
+concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, TridiagonalMatrixView jac) {
     { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
 };
 
@@ -850,7 +850,7 @@ private:
     /// Used when spatial operator doesn't provide analytical Jacobian.
     void build_jacobian_finite_difference(double t, double coeff_dt,
                                           std::span<const double> u, double eps,
-                                          JacobianView jac) {
+                                          TridiagonalMatrixView jac) {
         // Initialize u_perturb and compute baseline L(u)
         std::copy(u.begin(), u.end(), workspace_.u_stage().begin());
         apply_operator_with_blocking(t, u, workspace_.lu());
@@ -884,7 +884,7 @@ private:
 
     void build_jacobian_boundaries(double t, double coeff_dt,
                                    std::span<const double> u, double eps,
-                                   JacobianView jac) {
+                                   TridiagonalMatrixView jac) {
         // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
