@@ -96,6 +96,15 @@ public:
         return grid_accuracy_;
     }
 
+    /// Disable normalized chain optimization (for benchmarking/debugging)
+    void set_use_normalized(bool enable) {
+        use_normalized_ = enable;
+    }
+
+    bool use_normalized() const {
+        return use_normalized_;
+    }
+
     /// Solve a batch of American options
     ///
     /// @param params Vector of option parameters
@@ -302,6 +311,13 @@ public:
 
 private:
     GridAccuracyParams grid_accuracy_;  ///< Grid accuracy parameters for automatic estimation
+
+    // Normalized chain solver eligibility constants
+    static constexpr double MAX_WIDTH = 5.8;       ///< Convergence limit (log-units)
+    static constexpr double MAX_DX = 0.05;         ///< Von Neumann stability
+    static constexpr double MIN_MARGIN_ABS = 0.35; ///< 6-cell ghost zone minimum
+
+    bool use_normalized_ = true;  ///< Enable normalized chain optimization
 };
 
 /// Solve a single American option with automatic grid determination
