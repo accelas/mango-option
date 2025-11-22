@@ -26,20 +26,27 @@ std::expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& quer
         return common_validation;
     }
 
-    // FDM-specific validation: grid parameters
-    if (config_.grid_n_space == 0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
-        return std::unexpected(std::string("Grid n_space must be positive"));
-    }
+    // FDM-specific validation: grid parameters (only when manual mode enabled)
+    if (config_.use_manual_grid) {
+        if (config_.grid_n_space == 0) {
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
+            return std::unexpected(std::string("Manual grid: n_space must be positive"));
+        }
 
-    if (config_.grid_n_time == 0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
-        return std::unexpected(std::string("Grid n_time must be positive"));
-    }
+        if (config_.grid_n_time == 0) {
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
+            return std::unexpected(std::string("Manual grid: n_time must be positive"));
+        }
 
-    if (config_.grid_s_max <= 0.0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 8, config_.grid_s_max, 0.0);
-        return std::unexpected(std::string("Grid s_max must be positive"));
+        if (config_.grid_x_min >= config_.grid_x_max) {
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
+            return std::unexpected(std::string("Manual grid: x_min must be < x_max"));
+        }
+
+        if (config_.grid_alpha < 0.0) {
+            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
+            return std::unexpected(std::string("Manual grid: alpha must be non-negative"));
+        }
     }
 
     return {};
@@ -89,8 +96,37 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     option_params.dividend_yield = query.dividend_yield;
     option_params.type = query.type;
 
-    // Use automatic grid estimation (same as AmericanOptionSolver does internally)
-    auto [grid_spec, n_time] = estimate_grid_for_option(option_params);
+    // Choose grid: manual override or automatic estimation
+    auto dummy_grid = GridSpec<double>::uniform(0.0, 1.0, 10);
+    GridSpec<double> grid_spec = dummy_grid.value();  // Dummy init, will be replaced
+
+    if (config_.use_manual_grid) {
+        // Advanced mode: Use manually specified grid (for benchmarks)
+        auto grid_result = GridSpec<double>::sinh_spaced(
+            config_.grid_x_min,
+            config_.grid_x_max,
+            config_.grid_n_space,
+            config_.grid_alpha
+        );
+        if (!grid_result.has_value()) {
+            last_solver_error_ = SolverError{
+                .code = SolverErrorCode::InvalidConfiguration,
+                .message = "Invalid manual grid: " + grid_result.error(),
+                .iterations = 0
+            };
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        grid_spec = grid_result.value();
+        // Note: config_.grid_n_time is not used here as AmericanOptionSolver
+        // determines time stepping internally based on grid and params
+    } else {
+        // Default mode: Use automatic grid estimation
+        auto [auto_grid, auto_nt] = estimate_grid_for_option(option_params);
+        grid_spec = auto_grid;
+        // Note: auto_nt (n_time) is not used as AmericanOptionSolver
+        // handles time stepping internally
+        (void)auto_nt;  // Suppress unused warning
+    }
 
     // Allocate workspace buffer (local, temporary)
     size_t n = grid_spec.n_points();

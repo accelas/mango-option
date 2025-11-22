@@ -354,8 +354,13 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
+    // Enable manual grid mode for benchmarking (bypass auto-estimation)
+    config.use_manual_grid = true;
     config.grid_n_space = n_space;
     config.grid_n_time = n_time;
+    config.grid_x_min = -3.0;
+    config.grid_x_max = 3.0;
+    config.grid_alpha = 2.0;
 
     IVSolverFDM solver(config);
     auto run_once = [&]() {

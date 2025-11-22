@@ -498,6 +498,7 @@ cc_test(
     srcs = ["quantlib_accuracy_test.cc"],
     deps = [
         "//src/option:american_option",
+        "//src/option:iv_solver_fdm",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -505,6 +506,26 @@ cc_test(
     size = "medium",
     timeout = "moderate",
     tags = ["manual"],  # Disabled: Greeks accuracy needs improvement for non-uniform grids
+)
+
+cc_test(
+    name = "quantlib_accuracy_batch_test",
+    srcs = [
+        "quantlib_accuracy_batch_test.cc",
+        "quantlib_validation_framework.hpp",
+    ],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver_interpolated",
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    linkopts = ["-lQuantLib"],
+    copts = ["-std=c++23"],
+    size = "large",
+    timeout = "long",
+    tags = ["manual"],  # Manual due to long build time for price table
 )
 
 cc_test(

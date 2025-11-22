@@ -24,9 +24,12 @@ int main() {
             .tolerance = 1e-6,
             .brent_tol_abs = 1e-6
         },
+        .use_manual_grid = true,
         .grid_n_space = 101,
         .grid_n_time = 1000,
-        .grid_s_max = 200.0
+        .grid_x_min = -3.0,
+        .grid_x_max = 3.0,
+        .grid_alpha = 2.0
     };
 
     std::cout << "=== Deep ITM Put IV Test ===\n";
