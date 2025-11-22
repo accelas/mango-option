@@ -194,14 +194,14 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
 
     auto fit_result = fitter_result.value().fit(prices_4d, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
-    if (!fit_result.success) {
-        return std::unexpected("B-spline fitting failed: " + fit_result.error_message);
+    if (!fit_result.has_value()) {
+        return std::unexpected("B-spline fitting failed: " + fit_result.error());
     }
 
     // Create workspace with all data
     auto workspace_result = PriceTableWorkspace::create(
         moneyness_, maturity_, volatility_, rate_,
-        fit_result.coefficients,
+        fit_result->coefficients,
         K_ref_, dividend_yield);
 
     if (!workspace_result.has_value()) {
@@ -215,28 +215,28 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
 
     // Populate fitting statistics from result
     BSplineFittingStats fitting_stats{
-        .max_residual_axis0 = fit_result.max_residual_per_axis[0],
-        .max_residual_axis1 = fit_result.max_residual_per_axis[1],
-        .max_residual_axis2 = fit_result.max_residual_per_axis[2],
-        .max_residual_axis3 = fit_result.max_residual_per_axis[3],
+        .max_residual_axis0 = fit_result->max_residual_per_axis[0],
+        .max_residual_axis1 = fit_result->max_residual_per_axis[1],
+        .max_residual_axis2 = fit_result->max_residual_per_axis[2],
+        .max_residual_axis3 = fit_result->max_residual_per_axis[3],
         .max_residual_overall = *std::max_element(
-            fit_result.max_residual_per_axis.begin(),
-            fit_result.max_residual_per_axis.end()),
-        .condition_axis0 = fit_result.condition_per_axis[0],
-        .condition_axis1 = fit_result.condition_per_axis[1],
-        .condition_axis2 = fit_result.condition_per_axis[2],
-        .condition_axis3 = fit_result.condition_per_axis[3],
+            fit_result->max_residual_per_axis.begin(),
+            fit_result->max_residual_per_axis.end()),
+        .condition_axis0 = fit_result->condition_per_axis[0],
+        .condition_axis1 = fit_result->condition_per_axis[1],
+        .condition_axis2 = fit_result->condition_per_axis[2],
+        .condition_axis3 = fit_result->condition_per_axis[3],
         .condition_max = *std::max_element(
-            fit_result.condition_per_axis.begin(),
-            fit_result.condition_per_axis.end()),
-        .failed_slices_axis0 = fit_result.failed_slices[0],
-        .failed_slices_axis1 = fit_result.failed_slices[1],
-        .failed_slices_axis2 = fit_result.failed_slices[2],
-        .failed_slices_axis3 = fit_result.failed_slices[3],
-        .failed_slices_total = fit_result.failed_slices[0] +
-                               fit_result.failed_slices[1] +
-                               fit_result.failed_slices[2] +
-                               fit_result.failed_slices[3]
+            fit_result->condition_per_axis.begin(),
+            fit_result->condition_per_axis.end()),
+        .failed_slices_axis0 = fit_result->failed_slices[0],
+        .failed_slices_axis1 = fit_result->failed_slices[1],
+        .failed_slices_axis2 = fit_result->failed_slices[2],
+        .failed_slices_axis3 = fit_result->failed_slices[3],
+        .failed_slices_total = fit_result->failed_slices[0] +
+                               fit_result->failed_slices[1] +
+                               fit_result->failed_slices[2] +
+                               fit_result->failed_slices[3]
     };
 
     return PriceTable4DResult{

@@ -40,52 +40,15 @@
 
 namespace mango {
 
-/// Result of N-dimensional separable B-spline fitting
+/// Successful result of N-dimensional separable B-spline fitting
 ///
-/// Contains fitted coefficients, per-axis diagnostics, and error information.
+/// Contains fitted coefficients and per-axis diagnostics.
 template<std::floating_point T, size_t N>
 struct BSplineNDSeparableResult {
     std::vector<T> coefficients;              ///< Fitted coefficients (N₀×N₁×...×Nₙ₋₁)
-    bool success;                              ///< Fit succeeded
-    std::string error_message;                 ///< Error description if failed
-
     std::array<T, N> max_residual_per_axis;    ///< Max residual for each axis
     std::array<T, N> condition_per_axis;       ///< Condition estimate for each axis
-    std::array<size_t, N> failed_slices;       ///< Failed 1D fits per axis
-
-    /// Implicit conversion to bool for easy checking
-    [[nodiscard]] explicit operator bool() const noexcept { return success; }
-
-    /// Create success result
-    [[nodiscard]] static BSplineNDSeparableResult ok_result(
-        std::vector<T> coeffs,
-        std::array<T, N> residuals,
-        std::array<T, N> conditions)
-    {
-        return {
-            .coefficients = std::move(coeffs),
-            .success = true,
-            .error_message = "",
-            .max_residual_per_axis = residuals,
-            .condition_per_axis = conditions,
-            .failed_slices = {}
-        };
-    }
-
-    /// Create error result
-    [[nodiscard]] static BSplineNDSeparableResult error_result(std::string msg) {
-        std::array<T, N> inf_array;
-        inf_array.fill(std::numeric_limits<T>::infinity());
-
-        return {
-            .coefficients = {},
-            .success = false,
-            .error_message = std::move(msg),
-            .max_residual_per_axis = {},
-            .condition_per_axis = inf_array,
-            .failed_slices = {}
-        };
-    }
+    std::array<size_t, N> failed_slices;       ///< Failed 1D fits per axis (all zeros on success)
 };
 
 /// Configuration for N-dimensional separable fitting
@@ -116,7 +79,7 @@ template<std::floating_point T, size_t N>
     requires (N >= 1)
 class BSplineNDSeparable {
 public:
-    using Result = BSplineNDSeparableResult<T, N>;
+    using Result = std::expected<BSplineNDSeparableResult<T, N>, std::string>;
     using Config = BSplineNDSeparableConfig<T>;
 
     /// Factory method to create N-dimensional fitter with validation
@@ -176,7 +139,7 @@ public:
         }
 
         if (values.size() != expected_size) {
-            return Result::error_result(
+            return std::unexpected(
                 "Value array size mismatch: expected " +
                 std::to_string(expected_size) + ", got " +
                 std::to_string(values.size()));
@@ -186,11 +149,11 @@ public:
         // Note: Can't use SIMD with early return, so check sequentially
         for (size_t i = 0; i < values.size(); ++i) {
             if (std::isnan(values[i])) {
-                return Result::error_result(
+                return std::unexpected(
                     "Input values contain NaN at index " + std::to_string(i));
             }
             if (std::isinf(values[i])) {
-                return Result::error_result(
+                return std::unexpected(
                     "Input values contain infinite value at index " + std::to_string(i));
             }
         }
@@ -207,10 +170,15 @@ public:
         try {
             fit_all_axes<N-1>(coeffs, config.tolerance, max_residuals, conditions, failed);
         } catch (const std::exception& e) {
-            return Result::error_result(std::string(e.what()));
+            return std::unexpected(std::string(e.what()));
         }
 
-        return Result::ok_result(std::move(coeffs), max_residuals, conditions);
+        return BSplineNDSeparableResult<T, N>{
+            .coefficients = std::move(coeffs),
+            .max_residual_per_axis = max_residuals,
+            .condition_per_axis = conditions,
+            .failed_slices = failed
+        };
     }
 
     /// Get grid dimensions

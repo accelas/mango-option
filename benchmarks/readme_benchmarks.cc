@@ -98,8 +98,8 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         auto& fitter = fitter_result.value();
 
         auto fit_result = fitter.fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
-        if (!fit_result.success) {
-            throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error_message);
+        if (!fit_result.has_value()) {
+            throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error());
         }
 
         auto workspace_result = PriceTableWorkspace::create(
@@ -107,7 +107,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
             fixture_ptr->rate_grid,
-            fit_result.coefficients,
+            fit_result->coefficients,
             fixture_ptr->K_ref,
             0.0);  // dividend_yield = 0
 

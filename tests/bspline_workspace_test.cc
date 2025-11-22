@@ -41,21 +41,21 @@ TEST_F(BSplineWorkspaceTest, WorkspaceGivesIdenticalResults) {
     ASSERT_TRUE(fitter1_result.has_value());
     auto result_workspace = fitter1_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
-    EXPECT_TRUE(result_workspace.success) << "Workspace path failed: "
-                                          << result_workspace.error_message;
-    EXPECT_EQ(result_workspace.coefficients.size(), n_total_);
+    EXPECT_TRUE(result_workspace.has_value()) << "Workspace path failed: "
+                                          << result_workspace.error();
+    EXPECT_EQ(result_workspace->coefficients.size(), n_total_);
 
     // Check residuals
-    EXPECT_LT(result_workspace.max_residual_per_axis[0], 1e-6);
-    EXPECT_LT(result_workspace.max_residual_per_axis[1], 1e-6);
-    EXPECT_LT(result_workspace.max_residual_per_axis[2], 1e-6);
-    EXPECT_LT(result_workspace.max_residual_per_axis[3], 1e-6);
+    EXPECT_LT(result_workspace->max_residual_per_axis[0], 1e-6);
+    EXPECT_LT(result_workspace->max_residual_per_axis[1], 1e-6);
+    EXPECT_LT(result_workspace->max_residual_per_axis[2], 1e-6);
+    EXPECT_LT(result_workspace->max_residual_per_axis[3], 1e-6);
 
     // Check no failed slices
-    EXPECT_EQ(result_workspace.failed_slices[0], 0);
-    EXPECT_EQ(result_workspace.failed_slices[1], 0);
-    EXPECT_EQ(result_workspace.failed_slices[2], 0);
-    EXPECT_EQ(result_workspace.failed_slices[3], 0);
+    EXPECT_EQ(result_workspace->failed_slices[0], 0);
+    EXPECT_EQ(result_workspace->failed_slices[1], 0);
+    EXPECT_EQ(result_workspace->failed_slices[2], 0);
+    EXPECT_EQ(result_workspace->failed_slices[3], 0);
 }
 
 TEST_F(BSplineWorkspaceTest, HandlesLargestAxisCorrectly) {
@@ -66,13 +66,13 @@ TEST_F(BSplineWorkspaceTest, HandlesLargestAxisCorrectly) {
     ASSERT_TRUE(fitter_result.has_value());
 
     auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
-    EXPECT_TRUE(result.success);
+    EXPECT_TRUE(result.has_value());
 
     // For constant function, residuals should be near zero
-    EXPECT_LT(result.max_residual_per_axis[0], 1e-9);
-    EXPECT_LT(result.max_residual_per_axis[1], 1e-9);
-    EXPECT_LT(result.max_residual_per_axis[2], 1e-9);
-    EXPECT_LT(result.max_residual_per_axis[3], 1e-9);
+    EXPECT_LT(result->max_residual_per_axis[0], 1e-9);
+    EXPECT_LT(result->max_residual_per_axis[1], 1e-9);
+    EXPECT_LT(result->max_residual_per_axis[2], 1e-9);
+    EXPECT_LT(result->max_residual_per_axis[3], 1e-9);
 }
 
 TEST_F(BSplineWorkspaceTest, WorksWithRealisticGrid) {
@@ -107,11 +107,11 @@ TEST_F(BSplineWorkspaceTest, WorksWithRealisticGrid) {
     ASSERT_TRUE(fitter_result.has_value());
 
     auto result = fitter_result.value().fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});  // Relaxed tolerance
-    EXPECT_TRUE(result.success);
+    EXPECT_TRUE(result.has_value());
 
     // All axes should converge
-    EXPECT_EQ(result.failed_slices[0], 0);
-    EXPECT_EQ(result.failed_slices[1], 0);
-    EXPECT_EQ(result.failed_slices[2], 0);
-    EXPECT_EQ(result.failed_slices[3], 0);
+    EXPECT_EQ(result->failed_slices[0], 0);
+    EXPECT_EQ(result->failed_slices[1], 0);
+    EXPECT_EQ(result->failed_slices[2], 0);
+    EXPECT_EQ(result->failed_slices[3], 0);
 }

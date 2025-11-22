@@ -113,10 +113,10 @@ TEST_F(BSpline4DEndToEndPerformanceTest, RealisticGridAccuracyAndPerformance) {
     auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
     auto end = std::chrono::high_resolution_clock::now();
 
-    ASSERT_TRUE(fit_result.success) << "Fit failed: " << fit_result.error_message;
+    ASSERT_TRUE(fit_result.has_value()) << "Fit failed: " << fit_result.error();
 
     double max_residual = *std::max_element(
-        fit_result.max_residual_per_axis.begin(), fit_result.max_residual_per_axis.end());
+        fit_result->max_residual_per_axis.begin(), fit_result->max_residual_per_axis.end());
 
     auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
     std::cout << "  Fitting time: " << duration_us << " µs (" << (duration_us / 1000.0) << " ms)\n";
@@ -164,10 +164,10 @@ TEST_F(BSpline4DEndToEndPerformanceTest, MultipleGridSizesAccuracy) {
         auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         auto end = std::chrono::high_resolution_clock::now();
 
-        ASSERT_TRUE(fit_result.success) << "Fit failed for " << config.name;
+        ASSERT_TRUE(fit_result.has_value()) << "Fit failed for " << config.name;
 
         double max_residual = *std::max_element(
-            fit_result.max_residual_per_axis.begin(), fit_result.max_residual_per_axis.end());
+            fit_result->max_residual_per_axis.begin(), fit_result->max_residual_per_axis.end());
 
         auto duration_ms = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
         std::cout << "  Fitting time: " << duration_ms << " ms\n";
@@ -210,7 +210,7 @@ TEST_F(BSpline4DEndToEndPerformanceTest, PerformanceRegression) {
         auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         auto end = std::chrono::high_resolution_clock::now();
 
-        ASSERT_TRUE(fit_result.success);
+        ASSERT_TRUE(fit_result.has_value());
 
         auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         times_us.push_back(duration_us);
@@ -256,7 +256,7 @@ TEST_F(BSpline4DEndToEndPerformanceTest, SIMDSpeedupRegression) {
         auto fit_result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         auto end = std::chrono::high_resolution_clock::now();
 
-        ASSERT_TRUE(fit_result.success);
+        ASSERT_TRUE(fit_result.has_value());
         times_us.push_back(
             std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
