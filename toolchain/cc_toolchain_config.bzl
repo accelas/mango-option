@@ -26,7 +26,7 @@ def _impl(ctx):
         tool_path(name = "llvm-cov", path = "/bin/false"),  # Not used
     ]
 
-    # C++23 standard feature
+    # C++23 standard feature with mdspan bracket operator
     cxx23_feature = feature(
         name = "cxx23",
         enabled = True,
@@ -39,7 +39,10 @@ def _impl(ctx):
                 ],
                 flag_groups = [
                     flag_group(
-                        flags = ["-std=c++23"],
+                        flags = [
+                            "-std=c++23",
+                            "-DMDSPAN_USE_BRACKET_OPERATOR=1",
+                        ],
                     ),
                 ],
             ),
