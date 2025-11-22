@@ -90,6 +90,7 @@ cc_library(
     hdrs = ["bspline_nd.hpp"],
     deps = [
         ":bspline_basis",
+        "@mdspan//:mdspan",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
