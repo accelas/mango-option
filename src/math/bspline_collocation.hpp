@@ -24,6 +24,7 @@
 
 #include "src/math/banded_matrix_solver.hpp"
 #include "src/math/bspline_basis.hpp"
+#include "src/support/parallel.hpp"
 #include <expected>
 #include <span>
 #include <vector>
