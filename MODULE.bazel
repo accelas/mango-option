@@ -4,6 +4,10 @@ bazel_dep(name = "googletest", version = "1.14.0")
 bazel_dep(name = "google_benchmark", version = "1.9.4")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "rules_python", version = "0.34.0")
+bazel_dep(name = "platforms", version = "0.0.11")
+
+# Register C++ toolchain with C++23 support
+register_toolchains("//toolchain:cc_toolchain_for_k8")
 
 # Python configuration - allow running as root for CI/Docker environments
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")

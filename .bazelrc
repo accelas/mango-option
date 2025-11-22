@@ -20,13 +20,7 @@ build --define=enable_arrow=true
 # build --action_env=CC=gcc
 # build --action_env=CXX=g++
 
-# C++23 standard (required for mdspan, std::expected, etc.)
-build --action_env=BAZEL_CXXOPTS="-std=c++23"
-build --cxxopt=-std=c++23
-build --host_cxxopt=-std=c++23
-build --conlyopt=-std=c11
-
-# Use baseline x86-64 ISA for portable binaries
-# target_clones generates ISA-specific versions automatically
-build --copt=-march=x86-64
-build --copt=-mtune=generic
+# C++ toolchain configuration
+# All C++ flags (std, warnings, ISA) are configured in //toolchain:cc_toolchain_config.bzl
+# To use the custom toolchain: --extra_toolchains=//toolchain:cc_toolchain_for_k8
+# Or it's registered by default in MODULE.bazel
