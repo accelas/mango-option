@@ -14,6 +14,7 @@
 #include <optional>
 #include <string_view>
 #include <limits>
+#include "src/math/tridiagonal_matrix_view.hpp"
 
 namespace mango {
 
@@ -442,6 +443,56 @@ template<std::floating_point T>
     std::vector<T> workspace(2 * n);
     return solve_thomas_projected(lower, diag, upper, rhs, psi, solution,
                                   std::span{workspace}, config);
+}
+
+// ============================================================================
+// TridiagonalMatrixView Overloads (Convenience API)
+// ============================================================================
+//
+// These overloads accept TridiagonalMatrixView instead of three separate spans,
+// providing better type safety and clearer intent. They simply forward
+// to the span-based implementations.
+
+/// Thomas solver accepting TridiagonalMatrixView (convenience overload)
+///
+/// @param matrix Tridiagonal matrix view containing lower, diag, upper bands
+/// @param rhs Right-hand side vector
+/// @param solution Output solution vector
+/// @param workspace Temporary storage (2n)
+/// @param config Solver configuration
+/// @return Result indicating success/failure
+template<std::floating_point T>
+[[nodiscard]] constexpr ThomasResult<T> solve_thomas(
+    const TridiagonalMatrixView& matrix,
+    std::span<const T> rhs,
+    std::span<T> solution,
+    std::span<T> workspace,
+    const ThomasConfig<T>& config = {}) noexcept
+{
+    return solve_thomas(matrix.lower(), matrix.diag(), matrix.upper(),
+                       rhs, solution, workspace, config);
+}
+
+/// Projected Thomas solver accepting TridiagonalMatrixView (convenience overload)
+///
+/// @param matrix Tridiagonal matrix view containing lower, diag, upper bands
+/// @param rhs Right-hand side vector
+/// @param psi Obstacle constraint vector
+/// @param solution Output solution vector
+/// @param workspace Temporary storage (2n)
+/// @param config Solver configuration
+/// @return Result indicating success/failure
+template<std::floating_point T>
+[[nodiscard]] constexpr ThomasResult<T> solve_thomas_projected(
+    const TridiagonalMatrixView& matrix,
+    std::span<const T> rhs,
+    std::span<const T> psi,
+    std::span<T> solution,
+    std::span<T> workspace,
+    const ThomasConfig<T>& config = {}) noexcept
+{
+    return solve_thomas_projected(matrix.lower(), matrix.diag(), matrix.upper(),
+                                  rhs, psi, solution, workspace, config);
 }
 
 }  // namespace mango

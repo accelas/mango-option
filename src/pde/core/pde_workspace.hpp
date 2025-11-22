@@ -5,6 +5,7 @@
 #include <string>
 #include <format>
 #include <algorithm>
+#include "src/math/tridiagonal_matrix_view.hpp"
 
 namespace mango {
 
@@ -200,6 +201,14 @@ struct PDEWorkspace {
 
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
+
+    /// Get TridiagonalMatrixView providing unified access to tridiagonal Jacobian
+    ///
+    /// This is the preferred way to access the Jacobian matrix. It provides
+    /// type safety and clearer intent than accessing the three arrays separately.
+    TridiagonalMatrixView jacobian() {
+        return TridiagonalMatrixView(jacobian_lower(), jacobian_diag(), jacobian_upper());
+    }
 
     size_t size() const { return n_; }
 

@@ -27,18 +27,6 @@ cc_library(
 )
 
 cc_library(
-    name = "jacobian_view",
-    hdrs = ["jacobian_view.hpp"],
-    copts = [
-        "-std=c++23",
-        "-Wall",
-        "-Wextra",
-        "-O3",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "time_domain",
     hdrs = ["time_domain.hpp"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
@@ -55,6 +43,7 @@ cc_library(
 cc_library(
     name = "pde_workspace",
     hdrs = ["pde_workspace.hpp"],
+    deps = ["//src/math:tridiagonal_matrix_view"],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
     visibility = ["//visibility:public"],
 )
@@ -72,7 +61,7 @@ cc_library(
         ":trbdf2_config",
         "//src/math:thomas_solver",
         "//src/math:root_finding",
-        ":jacobian_view",
+        "//src/math:tridiagonal_matrix_view",
         "//src/support:error_types",
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
