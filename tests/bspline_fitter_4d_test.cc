@@ -261,12 +261,12 @@ TEST(BSplineFitter4DTest, ConstantFunction) {
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
     auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    ASSERT_TRUE(result.success) << "Error: " << result.error_message;
-    EXPECT_EQ(result.coefficients.size(), values.size());
+    ASSERT_TRUE(result.has_value()) << "Error: " << result.error();
+    EXPECT_EQ(result->coefficients.size(), values.size());
 
     // Create workspace for evaluator
     auto workspace_result = PriceTableWorkspace::create(
-        m_grid, t_grid, v_grid, r_grid, result.coefficients, 100.0, 0.0);
+        m_grid, t_grid, v_grid, r_grid, result->coefficients, 100.0, 0.0);
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator and test at random points
@@ -326,11 +326,11 @@ TEST(BSplineFitter4DTest, SeparableFunction) {
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
     auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    ASSERT_TRUE(result.success) << "Error: " << result.error_message;
+    ASSERT_TRUE(result.has_value()) << "Error: " << result.error();
 
     // Create workspace for evaluator
     auto workspace_result = PriceTableWorkspace::create(
-        m_grid, t_grid, v_grid, r_grid, result.coefficients, 100.0, 0.0);
+        m_grid, t_grid, v_grid, r_grid, result->coefficients, 100.0, 0.0);
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator
@@ -417,11 +417,11 @@ TEST(BSplineFitter4DTest, PolynomialFunction) {
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
     auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    ASSERT_TRUE(result.success) << "Error: " << result.error_message;
+    ASSERT_TRUE(result.has_value()) << "Error: " << result.error();
 
     // Polynomial functions should be well-approximated by cubic B-splines
     double max_residual = *std::max_element(
-        result.max_residual_per_axis.begin(), result.max_residual_per_axis.end());
+        result->max_residual_per_axis.begin(), result->max_residual_per_axis.end());
     EXPECT_LT(max_residual, 0.5)
         << "Large residual for polynomial: " << max_residual;
 }
@@ -460,11 +460,11 @@ TEST(BSplineFitter4DTest, SmoothFunction) {
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
     auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    ASSERT_TRUE(result.success) << "Error: " << result.error_message;
+    ASSERT_TRUE(result.has_value()) << "Error: " << result.error();
 
     // Create workspace for evaluator
     auto workspace_result = PriceTableWorkspace::create(
-        m_grid, t_grid, v_grid, r_grid, result.coefficients, 100.0, 0.0);
+        m_grid, t_grid, v_grid, r_grid, result->coefficients, 100.0, 0.0);
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator
@@ -512,8 +512,8 @@ TEST(BSplineFitter4DTest, WrongValueSize) {
 
     auto result = fitter.fit(values_wrong_size);
 
-    EXPECT_FALSE(result.success);
-    EXPECT_FALSE(result.error_message.empty());
+    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.error().empty());
 }
 
 // ============================================================================
@@ -553,14 +553,14 @@ TEST(BSplineFitter4DTest, EndToEndWorkflow) {
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
     auto fit_result = fitter_result.value().fit(option_prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    ASSERT_TRUE(fit_result.success);
+    ASSERT_TRUE(fit_result.has_value());
     double max_residual = *std::max_element(
-        fit_result.max_residual_per_axis.begin(), fit_result.max_residual_per_axis.end());
+        fit_result->max_residual_per_axis.begin(), fit_result->max_residual_per_axis.end());
     std::cout << "Fit max residual: " << max_residual << "\n";
 
     // Step 4: Create workspace for evaluator
     auto workspace_result = PriceTableWorkspace::create(
-        m_grid, t_grid, v_grid, r_grid, fit_result.coefficients, 100.0, 0.0);
+        m_grid, t_grid, v_grid, r_grid, fit_result->coefficients, 100.0, 0.0);
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator

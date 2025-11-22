@@ -78,12 +78,12 @@ static void BM_Fitter4D_Hardcoded_Small(benchmark::State& state) {
 
         auto result = fitter_result.value().fit(data.values, mango::BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
-        if (!result.success) {
+        if (!result.has_value()) {
             state.SkipWithError("Fitting failed");
             return;
         }
 
-        benchmark::DoNotOptimize(result.coefficients);
+        benchmark::DoNotOptimize(result->coefficients);
         benchmark::ClobberMemory();
     }
 
@@ -105,12 +105,12 @@ static void BM_Fitter4D_Hardcoded_Medium(benchmark::State& state) {
 
         auto result = fitter_result.value().fit(data.values, mango::BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
-        if (!result.success) {
+        if (!result.has_value()) {
             state.SkipWithError("Fitting failed");
             return;
         }
 
-        benchmark::DoNotOptimize(result.coefficients);
+        benchmark::DoNotOptimize(result->coefficients);
         benchmark::ClobberMemory();
     }
 
@@ -132,12 +132,12 @@ static void BM_Fitter4D_Hardcoded_Large(benchmark::State& state) {
 
         auto result = fitter_result.value().fit(data.values, mango::BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
 
-        if (!result.success) {
+        if (!result.has_value()) {
             state.SkipWithError("Fitting failed");
             return;
         }
 
-        benchmark::DoNotOptimize(result.coefficients);
+        benchmark::DoNotOptimize(result->coefficients);
         benchmark::ClobberMemory();
     }
 

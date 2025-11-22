@@ -135,14 +135,14 @@ TEST(BSplineNDSeparableTest, ConstantFunction) {
     // Fit coefficients
     auto result = fitter.fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    EXPECT_TRUE(result.success) << "Error: " << result.error_message;
-    EXPECT_EQ(result.coefficients.size(), values.size());
+    EXPECT_TRUE(result.has_value()) << "Error: " << result.error();
+    EXPECT_EQ(result->coefficients.size(), values.size());
 
     // Check diagnostic information
-    EXPECT_GE(result.failed_slices[0], 0UL);
-    EXPECT_GE(result.failed_slices[1], 0UL);
-    EXPECT_GE(result.failed_slices[2], 0UL);
-    EXPECT_GE(result.failed_slices[3], 0UL);
+    EXPECT_GE(result->failed_slices[0], 0UL);
+    EXPECT_GE(result->failed_slices[1], 0UL);
+    EXPECT_GE(result->failed_slices[2], 0UL);
+    EXPECT_GE(result->failed_slices[3], 0UL);
 }
 
 TEST(BSplineNDSeparableTest, SeparableFunction) {
@@ -178,8 +178,8 @@ TEST(BSplineNDSeparableTest, SeparableFunction) {
     // Fit coefficients with relaxed tolerance
     auto result = fitter.fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
-    EXPECT_TRUE(result.success) << "Error: " << result.error_message;
-    EXPECT_EQ(result.coefficients.size(), values.size());
+    EXPECT_TRUE(result.has_value()) << "Error: " << result.error();
+    EXPECT_EQ(result->coefficients.size(), values.size());
 }
 
 // ============================================================================
@@ -200,7 +200,7 @@ TEST(BSplineNDSeparableTest, WrongValueSize) {
 
     auto result = fitter.fit(values_wrong_size);
 
-    EXPECT_FALSE(result.success);
-    EXPECT_FALSE(result.error_message.empty());
-    EXPECT_TRUE(result.error_message.find("size mismatch") != std::string::npos);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_FALSE(result.error().empty());
+    EXPECT_TRUE(result.error().find("size mismatch") != std::string::npos);
 }

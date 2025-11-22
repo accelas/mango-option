@@ -82,12 +82,12 @@ TEST_F(BSplineCollocation1DTest, ConstantFunction) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);
 
     // Verify fitted spline reproduces constant
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double) { return 5.0; });
     EXPECT_LT(error, 1e-9);
 }
@@ -103,12 +103,12 @@ TEST_F(BSplineCollocation1DTest, LinearFunction) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);
 
     // Verify fitted spline reproduces linear function
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double x) { return 2.0 * x + 3.0; });
     EXPECT_LT(error, 1e-9);
 }
@@ -124,12 +124,12 @@ TEST_F(BSplineCollocation1DTest, QuadraticFunction) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);
 
     // Verify fitted spline reproduces quadratic
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double x) { return x * x - 2.0 * x + 1.0; });
     EXPECT_LT(error, 1e-9);
 }
@@ -145,12 +145,12 @@ TEST_F(BSplineCollocation1DTest, CubicFunction) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);
 
     // Verify fitted spline reproduces cubic
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double x) { return x * x * x - x + 2.0; });
     EXPECT_LT(error, 1e-9);
 }
@@ -166,13 +166,13 @@ TEST_F(BSplineCollocation1DTest, ExponentialFunction) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);  // Grid point residuals should be tiny
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);  // Grid point residuals should be tiny
 
     // Verify fitted spline approximates exp(x)
     // Error should be small (cubic spline approximation quality)
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double x) { return std::exp(x); });
     EXPECT_LT(error, 1e-4);  // Reasonable approximation error for 20 points
 }
@@ -188,12 +188,12 @@ TEST_F(BSplineCollocation1DTest, SinFunction) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);
 
     // Verify approximation quality
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double x) { return std::sin(x); });
     EXPECT_LT(error, 1e-3);  // Good approximation with 30 points
 }
@@ -215,12 +215,12 @@ TEST_F(BSplineCollocation1DTest, NonUniformGrid) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success) << result.error_message;
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    EXPECT_LT(result->max_residual, 1e-9);
 
     // Verify fitted spline approximates log(x)
     auto knots = clamped_knots_cubic(grid);
-    double error = max_error(grid, knots, result.coefficients,
+    double error = max_error(grid, knots, result->coefficients,
                             [](double x) { return std::log(x); });
     EXPECT_LT(error, 1e-4);
 }
@@ -236,11 +236,11 @@ TEST_F(BSplineCollocation1DTest, ConditionNumberEstimate) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success);
+    ASSERT_TRUE(result.has_value());
 
     // Condition number should be reasonable for uniform grid
-    EXPECT_LT(result.condition_estimate, 100.0);
-    EXPECT_GT(result.condition_estimate, 1.0);
+    EXPECT_LT(result->condition_estimate, 100.0);
+    EXPECT_GT(result->condition_estimate, 1.0);
 }
 
 // Test 9: Minimum grid size (n=4)
@@ -254,8 +254,8 @@ TEST_F(BSplineCollocation1DTest, MinimumGridSize) {
 
     auto result = solver.fit(values);
 
-    ASSERT_TRUE(result.success);
-    EXPECT_LT(result.max_residual, 1e-9);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_LT(result->max_residual, 1e-9);
 }
 
 // Test 10: Fail on too-small grid
@@ -289,8 +289,8 @@ TEST_F(BSplineCollocation1DTest, FailOnSizeMismatch) {
 
     auto result = solver.fit(values);
 
-    EXPECT_FALSE(result.success);
-    EXPECT_NE(result.error_message.find("mismatch"), std::string::npos);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("mismatch"), std::string::npos);
 }
 
 // Test 13: Duplicate grid points
@@ -316,10 +316,10 @@ TEST_F(BSplineCollocation1DTest, IllConditionedNearDuplicates) {
     auto result = solver.fit(values);
 
     // Should either fail or have extremely high condition number
-    if (result.success) {
-        EXPECT_GT(result.condition_estimate, 1e10);
+    if (result.has_value()) {
+        EXPECT_GT(result->condition_estimate, 1e10);
     } else {
-        EXPECT_NE(result.error_message.find("singular"), std::string::npos);
+        EXPECT_NE(result.error().find("singular"), std::string::npos);
     }
 }
 
@@ -335,8 +335,8 @@ TEST_F(BSplineCollocation1DTest, FailOnNaNInput) {
 
     auto result = solver.fit(values);
 
-    EXPECT_FALSE(result.success);
-    EXPECT_NE(result.error_message.find("NaN"), std::string::npos);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("NaN"), std::string::npos);
 }
 
 // Test 16: Infinity in input values
@@ -351,8 +351,8 @@ TEST_F(BSplineCollocation1DTest, FailOnInfInput) {
 
     auto result = solver.fit(values);
 
-    EXPECT_FALSE(result.success);
-    EXPECT_NE(result.error_message.find("infinite"), std::string::npos);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("infinite"), std::string::npos);
 }
 
 // Test 17: Extremely ill-conditioned system (clustering at boundaries)
@@ -374,10 +374,10 @@ TEST_F(BSplineCollocation1DTest, ExtremelyClustered) {
     auto result = solver.fit(values);
 
     // Should either fail or have astronomical condition number
-    if (result.success) {
-        EXPECT_GT(result.condition_estimate, 1e12);
+    if (result.has_value()) {
+        EXPECT_GT(result->condition_estimate, 1e12);
     } else {
-        EXPECT_NE(result.error_message.find("singular"), std::string::npos);
+        EXPECT_NE(result.error().find("singular"), std::string::npos);
     }
 }
 
@@ -403,7 +403,7 @@ TEST_F(BSplineCollocation1DTest, FactoryValidGrid) {
         auto& solver = result.value();
         auto values = evaluate(grid, [](double x) { return x * x; });
         auto fit_result = solver.fit(values);
-        EXPECT_TRUE(fit_result.success);
+        EXPECT_TRUE(fit_result.has_value());
     });
 }
 
@@ -468,7 +468,7 @@ TEST_F(BSplineCollocation1DTest, FactoryMinimumGridSize) {
     auto& solver = result.value();
     auto values = evaluate(grid, [](double x) { return x * x; });
     auto fit_result = solver.fit(values);
-    EXPECT_TRUE(fit_result.success);
+    EXPECT_TRUE(fit_result.has_value());
 }
 
 // Test 26: Factory pattern - large grid
@@ -481,7 +481,7 @@ TEST_F(BSplineCollocation1DTest, FactoryLargeGrid) {
     auto& solver = result.value();
     auto values = evaluate(grid, [](double x) { return std::sin(5*x); });  // Lower frequency for stability
     auto fit_result = solver.fit(values);
-    EXPECT_TRUE(fit_result.success);
+    EXPECT_TRUE(fit_result.has_value());
 }
 
 // Test 27: Factory pattern - non-uniform grid
@@ -499,7 +499,7 @@ TEST_F(BSplineCollocation1DTest, FactoryNonUniformGrid) {
     auto& solver = result.value();
     auto values = evaluate(grid, [](double x) { return std::log(x); });
     auto fit_result = solver.fit(values);
-    EXPECT_TRUE(fit_result.success);
+    EXPECT_TRUE(fit_result.has_value());
 }
 
 // Test 28: Factory pattern - move semantics

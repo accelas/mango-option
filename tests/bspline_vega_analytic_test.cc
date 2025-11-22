@@ -67,12 +67,12 @@ std::unique_ptr<BSpline4D> fit_test_surface() {
     EXPECT_TRUE(fitter_result.has_value());
 
     auto fit_result = fitter_result.value().fit(prices);
-    EXPECT_TRUE(fit_result.success);
+    EXPECT_TRUE(fit_result.has_value());
 
     // Create workspace for BSpline4D
     auto workspace_result = PriceTableWorkspace::create(
         m_grid, tau_grid, sigma_grid, rate_grid,
-        fit_result.coefficients,
+        fit_result->coefficients,
         K_ref, 0.0);  // dividend_yield = 0
     EXPECT_TRUE(workspace_result.has_value());
 
