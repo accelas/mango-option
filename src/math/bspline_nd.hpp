@@ -192,6 +192,19 @@ private:
         coeffs_view_ = create_coeffs_view(coeffs_.data(), dims_);
     }
 
+    /// Access N-dimensional coefficient array via mdspan
+    ///
+    /// Uses variadic template expansion to convert std::array to mdspan subscript.
+    template<size_t... Is>
+    static T access_coeffs_impl(const CoeffMdspan& view, const std::array<int, N>& indices,
+                                std::index_sequence<Is...>) {
+        return view[indices[Is]...];  // Expands to view[indices[0], indices[1], ...]
+    }
+
+    static T access_coeffs(const CoeffMdspan& view, const std::array<int, N>& indices) {
+        return access_coeffs_impl(view, indices, std::make_index_sequence<N>{});
+    }
+
     /// Recursive tensor-product evaluation
     ///
     /// Evaluates N-dimensional tensor product using compile-time recursion.
@@ -224,10 +237,9 @@ private:
             const T weight = weights[Dim][offset];
 
             if constexpr (Dim == N - 1) {
-                // Base case: innermost dimension
-                // Compute flat index and accumulate with FMA
-                const size_t flat_idx = compute_flat_index(indices);
-                sum = std::fma(coeffs_[flat_idx], weight, sum);
+                // Base case: use mdspan multi-dimensional indexing
+                const T coeff = access_coeffs(coeffs_view_, indices);
+                sum = std::fma(coeff, weight, sum);
             } else {
                 // Recursive case: descend to next dimension
                 const T nested_sum = eval_tensor_product<Dim + 1>(spans, weights, indices);
@@ -247,27 +259,6 @@ private:
     static CoeffMdspan create_view_impl(T* data, const Shape& dims,
                                         std::index_sequence<Is...>) {
         return CoeffMdspan(data, dims[Is]...);
-    }
-
-    /// Compute flat index from N-dimensional index (row-major order)
-    ///
-    /// Converts multi-dimensional index to flat array index.
-    /// Example for 3D: idx = i*dim1*dim2 + j*dim2 + k
-    ///
-    /// @param indices Multi-dimensional index
-    /// @return Flat index into coefficient array
-    size_t compute_flat_index(const std::array<int, N>& indices) const noexcept {
-        size_t idx = 0;
-        size_t stride = 1;
-
-        // Compute index in row-major order (last dimension varies fastest)
-        for (size_t dim = N; dim > 0; --dim) {
-            const size_t d = dim - 1;
-            idx += static_cast<size_t>(indices[d]) * stride;
-            stride *= dims_[d];
-        }
-
-        return idx;
     }
 };
 
