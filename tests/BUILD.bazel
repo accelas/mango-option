@@ -573,3 +573,14 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "banded_matrix_mdspan_test",
+    srcs = ["banded_matrix_mdspan_test.cc"],
+    deps = [
+        "//src/math:banded_matrix_solver",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
