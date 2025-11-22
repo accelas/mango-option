@@ -563,3 +563,13 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "lapack_banded_layout_test",
+    srcs = ["lapack_banded_layout_test.cc"],
+    deps = [
+        "//src/math:lapack_banded_layout",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

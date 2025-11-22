@@ -1,4 +1,12 @@
 cc_library(
+    name = "lapack_banded_layout",
+    hdrs = ["lapack_banded_layout.hpp"],
+    deps = ["@mdspan//:mdspan"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
     deps = [
