@@ -323,6 +323,11 @@ private:
     bool is_normalized_eligible(
         std::span<const AmericanOptionParams> params,
         bool use_shared_grid) const;
+
+    /// Trace why normalized path wasn't used
+    void trace_ineligibility_reason(
+        std::span<const AmericanOptionParams> params,
+        bool use_shared_grid) const;
 };
 
 /// Solve a single American option with automatic grid determination

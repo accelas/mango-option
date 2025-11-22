@@ -382,4 +382,123 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
     return true;
 }
 
+void BatchAmericanOptionSolver::trace_ineligibility_reason(
+    std::span<const AmericanOptionParams> params,
+    bool use_shared_grid) const
+{
+    // Check forced disable first
+    if (!use_normalized_) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::FORCED_DISABLE), 0);
+        return;
+    }
+
+    // Check shared grid requirement
+    if (!use_shared_grid) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::SHARED_GRID_DISABLED), 0);
+        return;
+    }
+
+    // Check empty batch
+    if (params.empty()) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::EMPTY_BATCH), 0);
+        return;
+    }
+
+    const auto& first = params[0];
+
+    // Check option type consistency
+    for (size_t i = 1; i < params.size(); ++i) {
+        if (params[i].type != first.type) {
+            MANGO_TRACE_NORMALIZED_INELIGIBLE(
+                static_cast<int>(NormalizedIneligibilityReason::MISMATCHED_OPTION_TYPE),
+                static_cast<int>(params[i].type));
+            return;
+        }
+    }
+
+    // Check maturity consistency
+    for (size_t i = 1; i < params.size(); ++i) {
+        if (std::abs(params[i].maturity - first.maturity) > 1e-10) {
+            MANGO_TRACE_NORMALIZED_INELIGIBLE(
+                static_cast<int>(NormalizedIneligibilityReason::MISMATCHED_MATURITY),
+                params[i].maturity);
+            return;
+        }
+    }
+
+    // Check discrete dividends
+    for (const auto& p : params) {
+        if (!p.discrete_dividends.empty()) {
+            MANGO_TRACE_NORMALIZED_INELIGIBLE(
+                static_cast<int>(NormalizedIneligibilityReason::DISCRETE_DIVIDENDS),
+                p.discrete_dividends.size());
+            return;
+        }
+    }
+
+    // Check spot and strike validity
+    for (const auto& p : params) {
+        if (p.spot <= 0.0 || p.strike <= 0.0) {
+            MANGO_TRACE_NORMALIZED_INELIGIBLE(
+                static_cast<int>(NormalizedIneligibilityReason::INVALID_SPOT_OR_STRIKE),
+                p.spot <= 0.0 ? p.spot : p.strike);
+            return;
+        }
+    }
+
+    // Check grid constraints
+    auto [grid_spec, n_time] = estimate_grid_for_option(first, grid_accuracy_);
+    double x_min = grid_spec.x_min();
+    double x_max = grid_spec.x_max();
+    size_t n_space = grid_spec.n_points();
+
+    // Check grid spacing (Von Neumann stability)
+    double dx = (x_max - x_min) / (n_space - 1);
+    if (dx > MAX_DX) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::GRID_SPACING_TOO_LARGE), dx);
+        return;
+    }
+
+    // Check domain width (convergence constraint)
+    double width = x_max - x_min;
+    if (width > MAX_WIDTH) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::DOMAIN_TOO_WIDE), width);
+        return;
+    }
+
+    // Check margins based on moneyness range
+    std::vector<double> moneyness_values;
+    moneyness_values.reserve(params.size());
+    for (const auto& p : params) {
+        moneyness_values.push_back(p.spot / p.strike);
+    }
+
+    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_values);
+    double x_min_data = std::log(*m_min_it);
+    double x_max_data = std::log(*m_max_it);
+
+    double margin_left = x_min_data - x_min;
+    double margin_right = x_max - x_max_data;
+    double min_margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
+
+    if (margin_left < min_margin) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::INSUFFICIENT_LEFT_MARGIN),
+            margin_left);
+        return;
+    }
+
+    if (margin_right < min_margin) {
+        MANGO_TRACE_NORMALIZED_INELIGIBLE(
+            static_cast<int>(NormalizedIneligibilityReason::INSUFFICIENT_RIGHT_MARGIN),
+            margin_right);
+        return;
+    }
+}
+
 }  // namespace mango
