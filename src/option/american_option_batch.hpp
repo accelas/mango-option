@@ -143,6 +143,11 @@ private:
     /// Group options by PDE parameters for normalized solving
     std::vector<PDEParameterGroup> group_by_pde_parameters(
         std::span<const AmericanOptionParams> params) const;
+
+    /// Fast path: normalized chain solving with PDE grouping
+    BatchAmericanOptionResult solve_normalized_chain(
+        std::span<const AmericanOptionParams> params,
+        SetupCallback setup);
 };
 
 /// Solve a single American option with automatic grid determination

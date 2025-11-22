@@ -560,6 +560,15 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     return solve_regular_batch(std::span{params}, use_shared_grid, setup);
 }
 
+BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
+    std::span<const AmericanOptionParams> params,
+    SetupCallback setup)
+{
+    // TODO: Implement true normalization
+    // For now, fall back to regular batch solving
+    return solve_regular_batch(params, /*use_shared_grid=*/true, setup);
+}
+
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     std::span<const AmericanOptionParams> params,
     bool use_shared_grid,
