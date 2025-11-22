@@ -552,6 +552,28 @@ std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameter
     return groups;
 }
 
+BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
+    std::span<const AmericanOptionParams> params,
+    bool use_shared_grid,
+    SetupCallback setup)
+{
+    // Ensure grid_accuracy_ is initialized
+    if (grid_accuracy_.tol == 0.0) {
+        grid_accuracy_ = GridAccuracyParams{};
+    }
+
+    // Automatic routing based on eligibility
+    if (use_normalized_ && is_normalized_eligible(params, use_shared_grid)) {
+        MANGO_TRACE_NORMALIZED_SELECTED(params.size());
+        return solve_normalized_chain(params, setup);
+    } else {
+        if (use_normalized_ && !is_normalized_eligible(params, use_shared_grid)) {
+            trace_ineligibility_reason(params, use_shared_grid);
+        }
+        return solve_regular_batch(params, use_shared_grid, setup);
+    }
+}
+
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     const std::vector<AmericanOptionParams>& params,
     bool use_shared_grid,
