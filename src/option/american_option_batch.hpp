@@ -132,15 +132,38 @@ public:
             shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
         }
 
+        // Precompute workspace size outside parallel region
+        size_t workspace_size_elements = 0;
+        size_t shared_n_space = 0;
+
+        if (use_shared_grid) {
+            auto [grid_spec, n_time] = shared_grid.value();
+            shared_n_space = grid_spec.n_points();
+            workspace_size_elements = PDEWorkspace::required_size(shared_n_space);
+        } else {
+            // For per-option grids, estimate max workspace size across all options
+            for (const auto& p : params) {
+                auto [grid_spec, n_time] = estimate_grid_for_option(p, grid_accuracy_);
+                size_t n = grid_spec.n_points();
+                workspace_size_elements = std::max(workspace_size_elements, PDEWorkspace::required_size(n));
+            }
+        }
+
+        // Convert to bytes for monotonic_buffer_resource
+        const size_t workspace_size_bytes = workspace_size_elements * sizeof(double);
+
         MANGO_PRAGMA_PARALLEL
         {
-            // Per-thread pool for cheap workspace reuse
-            std::pmr::unsynchronized_pool_resource thread_pool;
+            // Per-thread monotonic buffer sized for workspace reuse
+            // Using monotonic_buffer_resource instead of unsynchronized_pool for:
+            // - Predictable allocation (no fragmentation)
+            // - Faster allocation (bump pointer)
+            // - Zero overhead release() (just resets offset)
+            std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes);
 
             // Per-thread shared grid (only for shared grid strategy)
             std::shared_ptr<Grid<double>> thread_grid;
             std::pmr::vector<double> thread_buffer(&thread_pool);
-            size_t thread_n_space = 0;  // Number of spatial points for shared grid
 
             if (use_shared_grid) {
                 auto [grid_spec, n_time] = shared_grid.value();
@@ -151,14 +174,15 @@ public:
                 if (grid_result.has_value()) {
                     thread_grid = grid_result.value();
 
-                    // Allocate buffer for shared workspace
-                    thread_n_space = grid_spec.n_points();
-                    thread_buffer.resize(PDEWorkspace::required_size(thread_n_space));
+                    // Allocate buffer for shared workspace (in elements, not bytes)
+                    thread_buffer.resize(workspace_size_elements);
                 }
                 // If creation failed, thread_grid remains null and we'll fail in loop
             }
 
-            MANGO_PRAGMA_FOR
+            // Use static scheduling to avoid false sharing on results vector
+            // Each thread gets a contiguous block of iterations
+            MANGO_PRAGMA_FOR_STATIC
             for (size_t i = 0; i < params.size(); ++i) {
                 // Get or create grid and workspace for this iteration
                 std::shared_ptr<Grid<double>> grid;
@@ -170,7 +194,7 @@ public:
                     // Shared grid: reuse thread grid and buffer
                     grid = thread_grid;
                     if (grid && !thread_buffer.empty()) {
-                        auto workspace_result = PDEWorkspace::from_buffer(thread_buffer, thread_n_space);
+                        auto workspace_result = PDEWorkspace::from_buffer(thread_buffer, shared_n_space);
                         if (workspace_result.has_value()) {
                             workspace_storage = workspace_result.value();
                             workspace_ptr = &workspace_storage.value();
@@ -197,16 +221,40 @@ public:
                     }
                 }
 
+                // Fallback to heap if PMR pool allocation failed
                 if (!grid || !workspace_ptr) {
-                    // Workspace creation failed (either shared or per-option)
-                    results[i] = std::unexpected(SolverError{
-                        .code = SolverErrorCode::InvalidConfiguration,
-                        .message = "Failed to create workspace",
-                        .iterations = 0
-                    });
-                    MANGO_PRAGMA_ATOMIC
-                    ++failed_count;
-                    continue;
+                    // Try allocating from default resource (heap) as fallback
+                    std::pmr::vector<double> heap_buffer(std::pmr::get_default_resource());
+
+                    if (!use_shared_grid) {
+                        auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
+                        TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params[i].maturity, n_time);
+
+                        auto grid_result = Grid<double>::create(grid_spec, time_domain);
+                        if (grid_result.has_value()) {
+                            grid = grid_result.value();
+
+                            size_t n = grid_spec.n_points();
+                            heap_buffer.resize(PDEWorkspace::required_size(n));
+                            auto workspace_result = PDEWorkspace::from_buffer(heap_buffer, n);
+                            if (workspace_result.has_value()) {
+                                workspace_storage = workspace_result.value();
+                                workspace_ptr = &workspace_storage.value();
+                            }
+                        }
+                    }
+
+                    // If still failed after heap fallback, report error
+                    if (!grid || !workspace_ptr) {
+                        results[i] = std::unexpected(SolverError{
+                            .code = SolverErrorCode::InvalidConfiguration,
+                            .message = "Failed to create workspace (pool and heap fallback failed)",
+                            .iterations = 0
+                        });
+                        MANGO_PRAGMA_ATOMIC
+                        ++failed_count;
+                        continue;
+                    }
                 }
 
                 // Create solver using PDEWorkspace API
@@ -225,6 +273,14 @@ public:
                 if (!results[i].has_value()) {
                     MANGO_PRAGMA_ATOMIC
                     ++failed_count;
+                }
+
+                // Release monotonic buffer for next iteration (per-option grid only)
+                // For shared grid, thread_buffer stays alive across all iterations
+                // For per-option grid, release() resets the allocation offset,
+                // allowing efficient reuse across loop iterations
+                if (!use_shared_grid) {
+                    thread_pool.release();
                 }
             }
         }
