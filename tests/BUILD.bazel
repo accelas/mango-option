@@ -597,10 +597,12 @@ cc_test(
 )
 
 cc_test(
-    name = "banded_matrix_mdspan_test",
-    srcs = ["banded_matrix_mdspan_test.cc"],
+    name = "mdspan_integration_e2e_test",
+    srcs = ["mdspan_integration_e2e_test.cc"],
     deps = [
         "//src/math:banded_matrix_solver",
+        "//src/math:bspline_nd",
+        "//src/pde/core:grid",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
