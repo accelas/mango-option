@@ -144,7 +144,19 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve
     try {
-        AmericanOptionSolver solver(option_params, pde_workspace_result.value());
+        // Pass custom grid if manual mode is enabled
+        std::optional<GridSpec<double>> custom_grid_opt = std::nullopt;
+        std::optional<size_t> custom_n_time_opt = std::nullopt;
+
+        if (config_.use_manual_grid) {
+            custom_grid_opt = grid_spec;
+            custom_n_time_opt = config_.grid_n_time;
+        }
+
+        AmericanOptionSolver solver(option_params, pde_workspace_result.value(),
+                                    std::nullopt,  // snapshot_times
+                                    custom_grid_opt,
+                                    custom_n_time_opt);
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 
