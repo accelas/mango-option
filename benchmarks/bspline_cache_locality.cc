@@ -101,7 +101,7 @@ public:
                     }
                     auto result = solver_m_->fit(slice_m, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t i = 0; i < Nm_; ++i) {
-                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[i];
+                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result->coefficients[i];
                     }
                 }
             }
@@ -116,7 +116,7 @@ public:
                     }
                     auto result = solver_t_->fit(slice_t, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t j = 0; j < Nt_; ++j) {
-                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[j];
+                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result->coefficients[j];
                     }
                 }
             }
@@ -131,7 +131,7 @@ public:
                     }
                     auto result = solver_v_->fit(slice_v, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t k = 0; k < Nv_; ++k) {
-                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[k];
+                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result->coefficients[k];
                     }
                 }
             }
@@ -146,7 +146,7 @@ public:
                     }
                     auto result = solver_r_->fit(slice_r, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t l = 0; l < Nr_; ++l) {
-                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[l];
+                        coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result->coefficients[l];
                     }
                 }
             }
