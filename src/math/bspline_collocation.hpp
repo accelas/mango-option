@@ -140,9 +140,13 @@ public:
         // Build collocation matrix
         build_collocation_matrix();
 
-        // Create banded matrix with LAPACK format (kl=0, ku=3 for cubic B-splines)
-        BandedMatrix<T> A(n_, 0, 3);
+        // Create banded matrix with bandwidth=4 for cubic B-splines
+        BandedMatrix<T> A(n_, 4);
         for (size_t i = 0; i < n_; ++i) {
+            // Set the starting column for this row's band
+            A.set_col_start(i, static_cast<size_t>(band_col_start_[i]));
+
+            // Fill the 4 non-zero entries for this row
             for (size_t k = 0; k < 4; ++k) {
                 const int col = band_col_start_[i] + static_cast<int>(k);
                 if (col >= 0 && col < static_cast<int>(n_)) {
@@ -152,7 +156,7 @@ public:
         }
 
         // Factorize banded system
-        BandedLUWorkspace<T> workspace(n_, 0, 3);
+        BandedLUWorkspace<T> workspace(n_, 4);
         auto factor_result = factorize_banded(A, workspace);
         if (!factor_result.ok()) {
             return std::unexpected(
@@ -223,9 +227,13 @@ public:
         // Build collocation matrix
         build_collocation_matrix();
 
-        // Create banded matrix with LAPACK format (kl=0, ku=3 for cubic B-splines)
-        BandedMatrix<T> A(n_, 0, 3);
+        // Create banded matrix with bandwidth=4 for cubic B-splines
+        BandedMatrix<T> A(n_, 4);
         for (size_t i = 0; i < n_; ++i) {
+            // Set the starting column for this row's band
+            A.set_col_start(i, static_cast<size_t>(band_col_start_[i]));
+
+            // Fill the 4 non-zero entries for this row
             for (size_t k = 0; k < 4; ++k) {
                 const int col = band_col_start_[i] + static_cast<int>(k);
                 if (col >= 0 && col < static_cast<int>(n_)) {
@@ -235,7 +243,7 @@ public:
         }
 
         // Factorize and solve
-        BandedLUWorkspace<T> workspace(n_, 0, 3);
+        BandedLUWorkspace<T> workspace(n_, 4);
         auto factor_result = factorize_banded(A, workspace);
         if (!factor_result.ok()) {
             return std::unexpected(

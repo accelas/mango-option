@@ -59,17 +59,23 @@ TEST_F(BandedSolverTest, DenseSolverBaseline) {
 
 TEST_F(BandedSolverTest, BandedStorageStructure) {
     // Test that banded matrix uses LAPACK banded storage
-    // For kl=1, ku=2: ldab = 2*1 + 2 + 1 = 5, so storage is 5×n
+    // For bandwidth=3: kl=ku=2, ldab = 2*2 + 2 + 1 = 7
 
-    mango::BandedMatrix<double> mat(n_, 1, 2);
+    mango::BandedMatrix<double> mat(n_, 3);
 
     // Verify LAPACK compact storage: ldab × n entries, not n²
-    EXPECT_EQ(mat.kl(), 1);
-    EXPECT_EQ(mat.ku(), 2);
-    EXPECT_EQ(mat.ldab(), 5);  // 2*kl + ku + 1
+    EXPECT_EQ(mat.bandwidth(), 3);
+    EXPECT_EQ(mat.kl(), 2);  // bandwidth - 1
+    EXPECT_EQ(mat.ku(), 2);  // bandwidth - 1
+    EXPECT_EQ(mat.ldab(), 7);  // 2*kl + ku + 1
 
-    // Test accessor for simple 3×3 tridiagonal case (kl=1, ku=1)
-    mango::BandedMatrix<double> small(3, 1, 1);
+    // Test accessor for simple 3×3 tridiagonal case (bandwidth=3)
+    mango::BandedMatrix<double> small(3, 3);
+
+    // Set col_start for each row (tridiagonal structure)
+    small.set_col_start(0, 0);
+    small.set_col_start(1, 0);
+    small.set_col_start(2, 0);
 
     // Set diagonal entries
     small(0, 0) = 1.0;
@@ -88,10 +94,15 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
     //     [0 -1  2]         [1]
     // Solution: x = [1, 1, 1]
 
-    // Tridiagonal matrix: kl=1, ku=1
-    mango::BandedMatrix<double> A(3, 1, 1);
+    // Tridiagonal matrix: bandwidth=3 (main diagonal + 1 above + 1 below)
+    mango::BandedMatrix<double> A(3, 3);
     std::vector<double> b = {1.0, 0.0, 1.0};
     std::vector<double> x(3);
+
+    // Set col_start for each row
+    A.set_col_start(0, 0);
+    A.set_col_start(1, 0);
+    A.set_col_start(2, 0);
 
     // Build tridiagonal matrix
     A(0, 0) = 2.0; A(0, 1) = -1.0;
@@ -99,7 +110,7 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
     A(2, 1) = -1.0; A(2, 2) = 2.0;
 
     // Solve using modern interface with workspace
-    mango::BandedLUWorkspace<double> workspace(3, 1, 1);
+    mango::BandedLUWorkspace<double> workspace(3, 3);
     auto factor_result = mango::factorize_banded(A, workspace);
     ASSERT_TRUE(factor_result.ok()) << "Factorization failed: " << factor_result.message();
 
@@ -114,10 +125,15 @@ TEST_F(BandedSolverTest, BandedLUSolveSimple) {
 TEST_F(BandedSolverTest, BandedLUSolveLarger) {
     // Test on larger system (n=10) with random RHS
     const size_t n = 10;
-    // Tridiagonal matrix: kl=1, ku=1
-    mango::BandedMatrix<double> A(n, 1, 1);
+    // Tridiagonal matrix: bandwidth=3
+    mango::BandedMatrix<double> A(n, 3);
     std::vector<double> b(n);
     std::vector<double> x(n);
+
+    // Set col_start for each row (tridiagonal: starts at max(0, i-1))
+    for (size_t i = 0; i < n; ++i) {
+        A.set_col_start(i, (i > 0) ? (i - 1) : 0);
+    }
 
     // Build symmetric positive-definite tridiagonal matrix
     for (size_t i = 0; i < n; ++i) {
@@ -138,7 +154,7 @@ TEST_F(BandedSolverTest, BandedLUSolveLarger) {
     }
 
     // Solve using modern interface with workspace
-    mango::BandedLUWorkspace<double> workspace(n, 1, 1);
+    mango::BandedLUWorkspace<double> workspace(n, 3);
     auto factor_result = mango::factorize_banded(A, workspace);
     ASSERT_TRUE(factor_result.ok()) << "Factorization failed: " << factor_result.message();
 

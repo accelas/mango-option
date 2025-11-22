@@ -62,9 +62,13 @@ struct BandedResult {
 /// Uses mdspan with custom lapack_banded_layout for zero-copy LAPACK interop.
 /// Matrix elements stored directly in LAPACK column-major banded format.
 ///
+/// Supports variable band structure per row via set_col_start(), which is
+/// required for cubic B-spline collocation matrices where the band position
+/// shifts per row.
+///
 /// Common use cases:
-/// - Cubic B-spline collocation matrices (kl=1, ku=2 or kl=2, ku=1)
-/// - Finite difference Jacobians (kl=1, ku=1 for tridiagonal)
+/// - Cubic B-spline collocation matrices (bandwidth=4, variable col_start per row)
+/// - Finite difference Jacobians (bandwidth=3 for centered differences)
 ///
 /// @tparam T Floating point type (float, double, long double)
 template<std::floating_point T>
@@ -74,32 +78,56 @@ public:
     using layout_type = lapack_banded_layout;
     using mdspan_type = std::experimental::mdspan<T, extents_type, layout_type>;
 
-    /// Construct banded matrix with LAPACK-compatible storage
+    /// Construct banded matrix with fixed bandwidth and variable band position per row
     ///
     /// @param n Matrix dimension (n × n)
-    /// @param kl Number of sub-diagonals
-    /// @param ku Number of super-diagonals
-    explicit BandedMatrix(size_t n, size_t kl, size_t ku)
+    /// @param bandwidth Maximum non-zero entries per row
+    explicit BandedMatrix(size_t n, size_t bandwidth)
         : n_(n)
-        , kl_(static_cast<lapack_int>(kl))
-        , ku_(static_cast<lapack_int>(ku))
-        , ldab_(2 * kl_ + ku_ + 1)
+        , bandwidth_(bandwidth)
+        , kl_max_(static_cast<lapack_int>(bandwidth - 1))
+        , ku_max_(static_cast<lapack_int>(bandwidth - 1))
+        , ldab_(2 * kl_max_ + ku_max_ + 1)
         , data_(static_cast<size_t>(ldab_) * n, T{0})
-        , view_(data_.data(), typename layout_type::template mapping<extents_type>(extents_type{n, n}, kl_, ku_))
+        , view_(data_.data(), typename layout_type::template mapping<extents_type>(extents_type{n, n}, kl_max_, ku_max_))
+        , col_start_(n, 0)
     {
-        assert(kl >= 0 && ku >= 0);
-        assert(n > 0);
+        assert(bandwidth > 0 && "Bandwidth must be positive");
+        assert(n > 0 && "Matrix dimension must be positive");
     }
 
-    /// Type-safe 2D indexing via mdspan
+    /// Access band entry A(row, col) for modification
     ///
-    /// Automatically uses LAPACK banded layout.
+    /// @pre col must be in [col_start(row), col_start(row) + bandwidth)
     T& operator()(size_t i, size_t j) {
+        assert(i < n_ && "Row index out of bounds");
+        assert(j >= col_start_[i] && j < std::min(col_start_[i] + bandwidth_, n_) &&
+               "Column outside band storage");
         return view_[i, j];
     }
 
+    /// Access band entry A(row, col) for read-only
     T operator()(size_t i, size_t j) const {
+        assert(i < n_ && "Row index out of bounds");
+        assert(j >= col_start_[i] && j < std::min(col_start_[i] + bandwidth_, n_) &&
+               "Column outside band storage");
         return view_[i, j];
+    }
+
+    /// Get starting column index for row's band
+    [[nodiscard]] size_t col_start(size_t row) const noexcept {
+        assert(row < n_);
+        return col_start_[row];
+    }
+
+    /// Set starting column index for row's band
+    ///
+    /// This allows variable band structure per row, which is needed for
+    /// cubic B-spline collocation matrices.
+    void set_col_start(size_t row, size_t col) noexcept {
+        assert(row < n_);
+        assert(col < n_);
+        col_start_[row] = col;
     }
 
     /// Zero-copy LAPACK interface
@@ -111,22 +139,27 @@ public:
     /// Get matrix dimension
     size_t size() const noexcept { return n_; }
 
-    /// Get number of sub-diagonals
-    lapack_int kl() const noexcept { return kl_; }
+    /// Get bandwidth
+    size_t bandwidth() const noexcept { return bandwidth_; }
 
-    /// Get number of super-diagonals
-    lapack_int ku() const noexcept { return ku_; }
+    /// Get number of sub-diagonals (max possible for LAPACK)
+    lapack_int kl() const noexcept { return kl_max_; }
+
+    /// Get number of super-diagonals (max possible for LAPACK)
+    lapack_int ku() const noexcept { return ku_max_; }
 
     /// Get leading dimension for LAPACK
     lapack_int ldab() const noexcept { return ldab_; }
 
 private:
-    size_t n_;                 ///< Matrix dimension
-    lapack_int kl_;            ///< Sub-diagonals
-    lapack_int ku_;            ///< Super-diagonals
-    lapack_int ldab_;          ///< Leading dimension (2*kl + ku + 1)
-    std::vector<T> data_;      ///< LAPACK column-major banded storage
-    mdspan_type view_;         ///< Type-safe 2D view
+    size_t n_;                       ///< Matrix dimension
+    size_t bandwidth_;               ///< Non-zero entries per row
+    lapack_int kl_max_;              ///< Max sub-diagonals (bandwidth-1)
+    lapack_int ku_max_;              ///< Max super-diagonals (bandwidth-1)
+    lapack_int ldab_;                ///< Leading dimension (2*kl_max + ku_max + 1)
+    std::vector<T> data_;            ///< LAPACK column-major banded storage
+    mdspan_type view_;               ///< Type-safe 2D view
+    std::vector<size_t> col_start_;  ///< Starting column for each row's band
 };
 
 /// RAII workspace for banded LU factorization
@@ -146,17 +179,19 @@ public:
     /// Construct workspace for n×n banded matrix
     ///
     /// @param n Matrix dimension
-    /// @param kl Number of sub-diagonals
-    /// @param ku Number of super-diagonals
-    explicit BandedLUWorkspace(size_t n, size_t kl, size_t ku)
+    /// @param bandwidth Maximum bandwidth (non-zero entries per row)
+    explicit BandedLUWorkspace(size_t n, size_t bandwidth = 4)
         : n_(n)
-        , kl_(static_cast<lapack_int>(kl))
-        , ku_(static_cast<lapack_int>(ku))
-        , ldab_(2 * kl_ + ku_ + 1)
+        , bandwidth_(bandwidth)
+        , kl_(0)
+        , ku_(0)
+        , ldab_(0)
         , factored_(false)
     {
-        // Pre-allocate LAPACK storage
-        lapack_storage_.reserve(static_cast<size_t>(ldab_) * n);
+        // Pre-allocate maximum possible LAPACK storage
+        // Actual size determined during factorization
+        const lapack_int max_ldab = static_cast<lapack_int>(2 * bandwidth + bandwidth + 1);
+        lapack_storage_.reserve(static_cast<size_t>(max_ldab) * n);
         pivot_indices_.reserve(n);
     }
 
@@ -177,21 +212,21 @@ public:
     }
 
     /// Resize workspace for different matrix size
-    void resize(size_t new_n, size_t new_kl, size_t new_ku) {
+    void resize(size_t new_n, size_t new_bandwidth = 4) {
         n_ = new_n;
-        kl_ = static_cast<lapack_int>(new_kl);
-        ku_ = static_cast<lapack_int>(new_ku);
-        ldab_ = 2 * kl_ + ku_ + 1;
+        bandwidth_ = new_bandwidth;
         reset();
 
-        lapack_storage_.reserve(static_cast<size_t>(ldab_) * n_);
+        const lapack_int max_ldab = static_cast<lapack_int>(2 * bandwidth_ + bandwidth_ + 1);
+        lapack_storage_.reserve(static_cast<size_t>(max_ldab) * n_);
         pivot_indices_.reserve(n_);
     }
 
 private:
     size_t n_;                          ///< Matrix dimension
-    lapack_int kl_;                     ///< Sub-diagonals
-    lapack_int ku_;                     ///< Super-diagonals
+    size_t bandwidth_;                  ///< Maximum bandwidth
+    lapack_int kl_;                     ///< Sub-diagonals (set during factorization)
+    lapack_int ku_;                     ///< Super-diagonals (set during factorization)
     lapack_int ldab_;                   ///< Leading dimension for LAPACK storage
     bool factored_;                     ///< True if factorization computed
 
