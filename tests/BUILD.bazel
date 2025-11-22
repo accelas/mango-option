@@ -553,3 +553,23 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "normalized_chain_accuracy_test",
+    srcs = [
+        "normalized_chain_accuracy_test.cc",
+        "quantlib_validation_framework.hpp",
+    ],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver_interpolated",
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    linkopts = ["-lQuantLib"],
+    copts = ["-std=c++23"],
+    size = "large",
+    timeout = "long",
+)
