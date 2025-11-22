@@ -208,6 +208,16 @@ cc_test(
 )
 
 cc_test(
+    name = "grid_spacing_mdspan_test",
+    srcs = ["grid_spacing_mdspan_test.cc"],
+    deps = [
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
     name = "american_option_solver_test",
     size = "small",
     srcs = ["american_option_solver_test.cc"],

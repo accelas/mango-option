@@ -4,6 +4,7 @@ cc_library(
     deps = [
         ":time_domain",
         "//src/support:error_types",
+        "@mdspan//:mdspan",
     ],
     copts = [
         "-std=c++23",
