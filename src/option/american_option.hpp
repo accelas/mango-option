@@ -162,10 +162,14 @@ public:
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
      * @param snapshot_times Optional times to record solution snapshots
+     * @param custom_grid Optional custom grid specification (bypasses auto-estimation)
+     * @param custom_n_time Optional custom time steps (used with custom_grid)
      */
     AmericanOptionSolver(const PricingParams& params,
                         PDEWorkspace workspace,
-                        std::optional<std::span<const double>> snapshot_times = std::nullopt);
+                        std::optional<std::span<const double>> snapshot_times = std::nullopt,
+                        std::optional<GridSpec<double>> custom_grid = std::nullopt,
+                        std::optional<size_t> custom_n_time = std::nullopt);
 
     /**
      * Solve for option value.
@@ -187,6 +191,10 @@ private:
 
     // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
+
+    // Optional custom grid configuration (bypasses auto-estimation)
+    std::optional<GridSpec<double>> custom_grid_;
+    std::optional<size_t> custom_n_time_;
 };
 
 }  // namespace mango
