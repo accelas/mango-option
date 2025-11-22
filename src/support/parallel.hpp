@@ -26,6 +26,7 @@
     #define MANGO_PRAGMA_PARALLEL_FOR                   // SYCL will use parallel_for with nd_range
     #define MANGO_PRAGMA_PARALLEL                       // SYCL parallel region
     #define MANGO_PRAGMA_FOR                            // SYCL single loop inside parallel region
+    #define MANGO_PRAGMA_FOR_STATIC                     // SYCL static scheduling
     #define MANGO_PRAGMA_FOR_COLLAPSE2                  // SYCL nested parallel loops
     #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC          // SYCL nested parallel loops with scheduling
     #define MANGO_PRAGMA_ATOMIC                         // SYCL atomic operations
@@ -36,6 +37,7 @@
     #define MANGO_PRAGMA_PARALLEL_FOR                   _Pragma("omp parallel for")
     #define MANGO_PRAGMA_PARALLEL                       _Pragma("omp parallel")
     #define MANGO_PRAGMA_FOR                            _Pragma("omp for")
+    #define MANGO_PRAGMA_FOR_STATIC                     _Pragma("omp for schedule(static)")
     #define MANGO_PRAGMA_FOR_COLLAPSE2                  _Pragma("omp for collapse(2)")
     #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC          _Pragma("omp for collapse(2) schedule(dynamic, 1)")
     #define MANGO_PRAGMA_ATOMIC                         _Pragma("omp atomic")
@@ -45,6 +47,7 @@
     #define MANGO_PRAGMA_PARALLEL_FOR
     #define MANGO_PRAGMA_PARALLEL
     #define MANGO_PRAGMA_FOR
+    #define MANGO_PRAGMA_FOR_STATIC
     #define MANGO_PRAGMA_FOR_COLLAPSE2
     #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC
     #define MANGO_PRAGMA_ATOMIC
@@ -69,6 +72,7 @@
  * - MANGO_PRAGMA_PARALLEL_FOR: Parallelize single loop
  * - MANGO_PRAGMA_PARALLEL: Start parallel region (use with FOR or FOR_COLLAPSE2)
  * - MANGO_PRAGMA_FOR: Single loop inside parallel region
+ * - MANGO_PRAGMA_FOR_STATIC: Single loop with static scheduling (avoid false sharing)
  * - MANGO_PRAGMA_FOR_COLLAPSE2: Collapse 2 nested loops (inside parallel region)
  * - MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC: Collapse 2 loops with dynamic scheduling
  * - MANGO_PRAGMA_ATOMIC: Atomic operation (increment, etc.)
