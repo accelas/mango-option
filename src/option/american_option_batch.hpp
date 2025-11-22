@@ -25,6 +25,9 @@
 
 namespace mango {
 
+// Forward declaration for PDE parameter grouping
+struct PDEParameterGroup;
+
 /**
  * Batch solver result containing individual results and aggregate statistics.
  */
@@ -328,6 +331,10 @@ private:
     void trace_ineligibility_reason(
         std::span<const AmericanOptionParams> params,
         bool use_shared_grid) const;
+
+    /// Group options by PDE parameters for normalized solving
+    std::vector<PDEParameterGroup> group_by_pde_parameters(
+        std::span<const AmericanOptionParams> params) const;
 };
 
 /// Solve a single American option with automatic grid determination

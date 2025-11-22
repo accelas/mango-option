@@ -11,6 +11,16 @@
 
 namespace mango {
 
+/// Group of options sharing same PDE parameters
+struct PDEParameterGroup {
+    double sigma;
+    double rate;
+    double dividend;
+    OptionType option_type;
+    double maturity;
+    std::vector<size_t> option_indices;  ///< Indices into original params array
+};
+
 // ============================================================================
 // Normalized Solver Implementations
 // ============================================================================
@@ -499,6 +509,47 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
             margin_right);
         return;
     }
+}
+
+std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameters(
+    std::span<const AmericanOptionParams> params) const
+{
+    std::vector<PDEParameterGroup> groups;
+    constexpr double TOL = 1e-10;
+
+    for (size_t i = 0; i < params.size(); ++i) {
+        const auto& p = params[i];
+
+        // Find existing group with matching PDE parameters
+        bool found = false;
+        for (auto& group : groups) {
+            if (std::abs(group.sigma - p.volatility) < TOL &&
+                std::abs(group.rate - p.rate) < TOL &&
+                std::abs(group.dividend - p.dividend_yield) < TOL &&
+                std::abs(group.maturity - p.maturity) < TOL &&
+                group.option_type == p.type)
+            {
+                group.option_indices.push_back(i);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            // Create new group
+            PDEParameterGroup new_group{
+                .sigma = p.volatility,
+                .rate = p.rate,
+                .dividend = p.dividend_yield,
+                .option_type = p.type,
+                .maturity = p.maturity,
+                .option_indices = {i}
+            };
+            groups.push_back(new_group);
+        }
+    }
+
+    return groups;
 }
 
 }  // namespace mango
