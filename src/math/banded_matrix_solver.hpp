@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "src/support/parallel.hpp"
 #include <span>
 #include <vector>
 #include <concepts>
@@ -429,6 +430,7 @@ template<std::floating_point T>
         const size_t col_start = A.col_start(i);
         const size_t col_end = std::min(col_start + A.bandwidth(), n);
 
+        MANGO_PRAGMA_SIMD
         for (size_t j = col_start; j < col_end; ++j) {
             col_sums[j] += std::abs(A(i, j));
         }

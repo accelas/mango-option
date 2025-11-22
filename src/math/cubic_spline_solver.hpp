@@ -8,6 +8,7 @@
 #pragma once
 
 #include "src/math/thomas_solver.hpp"
+#include "src/support/parallel.hpp"
 #include <span>
 #include <vector>
 #include <optional>
@@ -104,6 +105,7 @@ public:
 
         // Compute interval widths (h[i] = x[i+1] - x[i])
         h_.resize(n_intervals);
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_intervals; ++i) {
             h_[i] = x[i+1] - x[i];
         }
@@ -305,6 +307,7 @@ private:
         }
 
         // Copy interior second derivatives to full array
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < m; ++i) {
             c_[i + 1] = c_interior[i];
         }
@@ -316,6 +319,7 @@ private:
     void compute_coefficients(std::span<const T> h) {
         const size_t n_intervals = x_.size() - 1;
 
+        MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < n_intervals; ++i) {
             // For interval [x[i], x[i+1]]:
             // S[i](x) = a[i] + b[i]·Δx + c[i]·Δx² + d[i]·Δx³
@@ -401,6 +405,7 @@ public:
         for (size_t j = 0; j < ny; ++j) {
             // Extract z-values for this y-slice: z(x_i, y_j)
             std::vector<T> z_slice(nx);
+            MANGO_PRAGMA_SIMD
             for (size_t i = 0; i < nx; ++i) {
                 z_slice[i] = z[i * ny + j];
             }

@@ -24,7 +24,10 @@ cc_library(
 cc_library(
     name = "cubic_spline_solver",
     hdrs = ["cubic_spline_solver.hpp"],
-    deps = [":thomas_solver"],
+    deps = [
+        ":thomas_solver",
+        "//src/support:parallel",
+    ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
@@ -39,6 +42,7 @@ cc_library(
 cc_library(
     name = "banded_matrix_solver",
     hdrs = ["banded_matrix_solver.hpp"],
+    deps = ["//src/support:parallel"],
     linkopts = ["-llapacke"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
@@ -50,6 +54,7 @@ cc_library(
     deps = [
         ":banded_matrix_solver",
         ":bspline_basis",
+        "//src/support:parallel",
     ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
