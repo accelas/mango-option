@@ -15,8 +15,21 @@ cc_library(
 )
 
 cc_library(
+    name = "tridiagonal_matrix_view",
+    hdrs = ["tridiagonal_matrix_view.hpp"],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "thomas_solver",
     hdrs = ["thomas_solver.hpp"],
+    deps = [":tridiagonal_matrix_view"],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
