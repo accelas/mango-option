@@ -10,8 +10,8 @@
  * - Residual quality
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
-#include "src/bspline/bspline_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
+#include "src/option/bspline_price_table.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
@@ -69,7 +69,7 @@ TEST(BSplineFitter4DTest, Construction) {
     auto r = linspace(0.0, 0.1, 5);
 
     // Construction using factory pattern should succeed
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     ASSERT_TRUE(result.has_value()) << "Factory creation failed: " << result.error();
 
     auto& fitter = result.value();
@@ -91,7 +91,7 @@ TEST(BSplineFitter4DTest, FactoryCreateSuccess) {
     auto r = linspace(0.0, 0.1, 5);
 
     // Factory creation should succeed
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     ASSERT_TRUE(result.has_value()) << "Factory creation failed: " << result.error();
 
     auto& fitter = result.value();
@@ -108,7 +108,7 @@ TEST(BSplineFitter4DTest, FactoryCreateTooFewPoints) {
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
     EXPECT_TRUE(result.error().find("≥4 points") != std::string::npos)
@@ -121,7 +121,7 @@ TEST(BSplineFitter4DTest, FactoryCreateTooFewPointsOtherAxes) {
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
 }
@@ -135,7 +135,7 @@ TEST(BSplineFitter4DTest, FactoryCreateUnsortedGrid) {
     // Reverse one grid to make it unsorted
     std::reverse(t.begin(), t.end());
 
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
     EXPECT_TRUE(result.error().find("sorted") != std::string::npos)
@@ -148,12 +148,12 @@ TEST(BSplineFitter4DTest, FactoryCreateMultipleErrors) {
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
-    // Should mention failing axes
-    EXPECT_TRUE(result.error().find("axis0") != std::string::npos ||
-                result.error().find("axis1") != std::string::npos);
+    // Should mention failing axes (generic template uses "axis 0", "axis 1", etc.)
+    EXPECT_TRUE(result.error().find("axis 0") != std::string::npos ||
+                result.error().find("axis 1") != std::string::npos);
 }
 
 TEST(BSplineFitter4DTest, FactoryCreateExactlyFourPoints) {
@@ -162,7 +162,7 @@ TEST(BSplineFitter4DTest, FactoryCreateExactlyFourPoints) {
     auto v = linspace(0.1, 0.5, 4);
     auto r = linspace(0.0, 0.1, 4);
 
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     ASSERT_TRUE(result.has_value()) << "Should succeed with exactly 4 points: " << result.error();
 
     auto& fitter = result.value();
@@ -179,7 +179,7 @@ TEST(BSplineFitter4DTest, FactoryCreateLargeGrids) {
     auto v = linspace(0.1, 0.5, 20);
     auto r = linspace(0.0, 0.1, 10);
 
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     ASSERT_TRUE(result.has_value()) << "Should succeed with large grids: " << result.error();
 
     auto& fitter = result.value();
@@ -196,7 +196,7 @@ TEST(BSplineFitter4DTest, FactoryCreateWithEmptyGrids) {
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto result = BSplineFitter4D::create(empty, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{empty, t, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_FALSE(result.error().empty());
     EXPECT_TRUE(result.error().find("≥4 points") != std::string::npos);
@@ -209,7 +209,7 @@ TEST(BSplineFitter4DTest, InvalidConstruction) {
     auto r = linspace(0.0, 0.1, 5);
 
     // Old constructor should be removed - test factory instead
-    auto result = BSplineFitter4D::create(m_small, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_small, t, v, r});
     EXPECT_FALSE(result.has_value());
 }
 
@@ -223,7 +223,7 @@ TEST(BSplineFitter4DTest, UnsortedGrid) {
     std::reverse(t.begin(), t.end());
 
     // Old constructor should be removed - test factory instead
-    auto result = BSplineFitter4D::create(m, t, v, r);
+    auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     EXPECT_FALSE(result.has_value());
 }
 
@@ -257,9 +257,9 @@ TEST(BSplineFitter4DTest, ConstantFunction) {
     }
 
     // Fit coefficients with relaxed tolerance using factory pattern
-    auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
-    auto result = fitter_result.value().fit(values, 1e-3);
+    auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
     EXPECT_EQ(result.coefficients.size(), values.size());
@@ -322,9 +322,9 @@ TEST(BSplineFitter4DTest, SeparableFunction) {
     }
 
     // Fit coefficients with relaxed tolerance using factory pattern
-    auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
-    auto result = fitter_result.value().fit(values, 1e-3);
+    auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
@@ -413,15 +413,17 @@ TEST(BSplineFitter4DTest, PolynomialFunction) {
     }
 
     // Fit coefficients with relaxed tolerance using factory pattern
-    auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
-    auto result = fitter_result.value().fit(values, 1e-3);
+    auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
     // Polynomial functions should be well-approximated by cubic B-splines
-    EXPECT_LT(result.max_residual, 0.5)
-        << "Large residual for polynomial: " << result.max_residual;
+    double max_residual = *std::max_element(
+        result.max_residual_per_axis.begin(), result.max_residual_per_axis.end());
+    EXPECT_LT(max_residual, 0.5)
+        << "Large residual for polynomial: " << max_residual;
 }
 
 // ============================================================================
@@ -454,9 +456,9 @@ TEST(BSplineFitter4DTest, SmoothFunction) {
     }
 
     // Fit coefficients with relaxed tolerance using factory pattern
-    auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
-    auto result = fitter_result.value().fit(values, 1e-3);
+    auto result = fitter_result.value().fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     ASSERT_TRUE(result.success) << "Error: " << result.error_message;
 
@@ -502,7 +504,7 @@ TEST(BSplineFitter4DTest, WrongValueSize) {
     auto v = linspace(0.1, 0.5, 6);
     auto r = linspace(0.0, 0.1, 5);
 
-    auto fitter_result = BSplineFitter4D::create(m, t, v, r);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m, t, v, r});
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
     auto& fitter = fitter_result.value();
 
@@ -547,12 +549,14 @@ TEST(BSplineFitter4DTest, EndToEndWorkflow) {
     }
 
     // Step 3: Fit B-spline coefficients with relaxed tolerance using factory pattern
-    auto fitter_result = BSplineFitter4D::create(m_grid, t_grid, v_grid, r_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
     ASSERT_TRUE(fitter_result.has_value()) << "Factory creation failed: " << fitter_result.error();
-    auto fit_result = fitter_result.value().fit(option_prices, 1e-3);
+    auto fit_result = fitter_result.value().fit(option_prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-3});
 
     ASSERT_TRUE(fit_result.success);
-    std::cout << "Fit max residual: " << fit_result.max_residual << "\n";
+    double max_residual = *std::max_element(
+        fit_result.max_residual_per_axis.begin(), fit_result.max_residual_per_axis.end());
+    std::cout << "Fit max residual: " << max_residual << "\n";
 
     // Step 4: Create workspace for evaluator
     auto workspace_result = PriceTableWorkspace::create(

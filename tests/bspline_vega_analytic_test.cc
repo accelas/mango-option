@@ -3,8 +3,8 @@
  * @brief Test analytic B-spline vega derivative against finite difference
  */
 
-#include "src/bspline/bspline_4d.hpp"
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/option/bspline_price_table.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
@@ -63,7 +63,7 @@ std::unique_ptr<BSpline4D> fit_test_surface() {
     }
 
     // Fit B-spline
-    auto fitter_result = BSplineFitter4D::create(m_grid, tau_grid, sigma_grid, rate_grid);
+    auto fitter_result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_grid, tau_grid, sigma_grid, rate_grid});
     EXPECT_TRUE(fitter_result.has_value());
 
     auto fit_result = fitter_result.value().fit(prices);

@@ -12,7 +12,7 @@
  * - Speedup: Hardware-dependent, typically 1.5-3x for large grids
  */
 
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -69,10 +69,10 @@ public:
         , Nm_(m_grid.size()), Nt_(t_grid.size()), Nv_(v_grid.size()), Nr_(r_grid.size())
     {
         // Create 1D solvers for each axis using factory method
-        auto m_result = BSplineCollocation1D::create(m_grid_);
-        auto t_result = BSplineCollocation1D::create(t_grid_);
-        auto v_result = BSplineCollocation1D::create(v_grid_);
-        auto r_result = BSplineCollocation1D::create(r_grid_);
+        auto m_result = BSplineCollocation1D<double>::create(m_grid_);
+        auto t_result = BSplineCollocation1D<double>::create(t_grid_);
+        auto v_result = BSplineCollocation1D<double>::create(v_grid_);
+        auto r_result = BSplineCollocation1D<double>::create(r_grid_);
 
         // Since this is a benchmark and grids are assumed valid, we throw on failure
         if (!m_result.has_value() || !t_result.has_value() ||
@@ -80,10 +80,10 @@ public:
             throw std::runtime_error("Failed to create BSplineCollocation1D solvers in benchmark");
         }
 
-        solver_m_ = std::make_unique<BSplineCollocation1D>(std::move(m_result.value()));
-        solver_t_ = std::make_unique<BSplineCollocation1D>(std::move(t_result.value()));
-        solver_v_ = std::make_unique<BSplineCollocation1D>(std::move(v_result.value()));
-        solver_r_ = std::make_unique<BSplineCollocation1D>(std::move(r_result.value()));
+        solver_m_ = std::make_unique<BSplineCollocation1D<double>>(std::move(m_result.value()));
+        solver_t_ = std::make_unique<BSplineCollocation1D<double>>(std::move(t_result.value()));
+        solver_v_ = std::make_unique<BSplineCollocation1D<double>>(std::move(v_result.value()));
+        solver_r_ = std::make_unique<BSplineCollocation1D<double>>(std::move(r_result.value()));
     }
 
     std::vector<double> fit(const std::vector<double>& values, double tolerance = 1e-6) {
@@ -99,7 +99,7 @@ public:
                     for (size_t i = 0; i < Nm_; ++i) {
                         slice_m[i] = coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l];
                     }
-                    auto result = solver_m_->fit(slice_m, tolerance);
+                    auto result = solver_m_->fit(slice_m, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t i = 0; i < Nm_; ++i) {
                         coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[i];
                     }
@@ -114,7 +114,7 @@ public:
                     for (size_t j = 0; j < Nt_; ++j) {
                         slice_t[j] = coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l];
                     }
-                    auto result = solver_t_->fit(slice_t, tolerance);
+                    auto result = solver_t_->fit(slice_t, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t j = 0; j < Nt_; ++j) {
                         coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[j];
                     }
@@ -129,7 +129,7 @@ public:
                     for (size_t k = 0; k < Nv_; ++k) {
                         slice_v[k] = coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l];
                     }
-                    auto result = solver_v_->fit(slice_v, tolerance);
+                    auto result = solver_v_->fit(slice_v, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t k = 0; k < Nv_; ++k) {
                         coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[k];
                     }
@@ -144,7 +144,7 @@ public:
                     for (size_t l = 0; l < Nr_; ++l) {
                         slice_r[l] = coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l];
                     }
-                    auto result = solver_r_->fit(slice_r, tolerance);
+                    auto result = solver_r_->fit(slice_r, BSplineCollocationConfig<double>{.tolerance = tolerance});
                     for (size_t l = 0; l < Nr_; ++l) {
                         coeffs[((i * Nt_ + j) * Nv_ + k) * Nr_ + l] = result.coefficients[l];
                     }
@@ -158,7 +158,7 @@ public:
 private:
     std::vector<double> m_grid_, t_grid_, v_grid_, r_grid_;
     size_t Nm_, Nt_, Nv_, Nr_;
-    std::unique_ptr<BSplineCollocation1D> solver_m_, solver_t_, solver_v_, solver_r_;
+    std::unique_ptr<BSplineCollocation1D<double>> solver_m_, solver_t_, solver_v_, solver_r_;
 };
 
 int main() {
@@ -225,14 +225,15 @@ int main() {
         }, 5);
 
         // Benchmark NEW order (r → σ → τ → m)
-        auto fitter_new_result = BSplineFitter4DSeparable::create(m_grid, t_grid, v_grid, r_grid);
-        if (!fitter_new_result) {
+        auto fitter_new_result = BSplineNDSeparable<double, 4>::create(
+            std::array<std::vector<double>, 4>{m_grid, t_grid, v_grid, r_grid});
+        if (!fitter_new_result.has_value()) {
             std::cerr << "Failed to create fitter: " << fitter_new_result.error() << std::endl;
             return 1;
         }
         auto& fitter_new = fitter_new_result.value();
         auto new_time = benchmark([&]() {
-            auto result = fitter_new.fit(values, 1e-6);
+            auto result = fitter_new.fit(values, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         }, 5);
 
         std::cout << "  OLD order (m → τ → σ → r): " << std::fixed << std::setprecision(2)

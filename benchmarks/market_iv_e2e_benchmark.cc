@@ -47,7 +47,7 @@
 
 #include "src/option/price_table_4d_builder.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/bspline/bspline_fitter_4d.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
 #include <vector>

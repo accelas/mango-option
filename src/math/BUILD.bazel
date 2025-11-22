@@ -28,3 +28,58 @@ cc_library(
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "bspline_basis",
+    hdrs = ["bspline_basis.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "banded_matrix_solver",
+    hdrs = ["banded_matrix_solver.hpp"],
+    linkopts = ["-llapacke"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_collocation",
+    hdrs = ["bspline_collocation.hpp"],
+    deps = [
+        ":banded_matrix_solver",
+        ":bspline_basis",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_nd",
+    hdrs = ["bspline_nd.hpp"],
+    deps = [
+        ":bspline_basis",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "bspline_nd_separable",
+    hdrs = ["bspline_nd_separable.hpp"],
+    deps = [
+        ":bspline_collocation",
+        "//src/support:parallel",
+    ],
+    copts = [
+        "-std=c++23",
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    visibility = ["//visibility:public"],
+)

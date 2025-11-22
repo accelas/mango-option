@@ -19,7 +19,7 @@
 namespace mango {
 
 /// Cubic spline interpolation result
-template<FloatingPoint T>
+template<std::floating_point T>
 struct SplineEvalResult {
     T value;
     bool success;
@@ -35,7 +35,7 @@ enum class SplineBoundary {
 };
 
 /// Configuration for cubic spline construction
-template<FloatingPoint T>
+template<std::floating_point T>
 struct CubicSplineConfig {
     SplineBoundary boundary_type = SplineBoundary::NATURAL;
     T left_derivative = 0;    ///< For CLAMPED boundary at left
@@ -57,7 +57,7 @@ struct CubicSplineConfig {
 /// Memory layout: struct-of-arrays for cache efficiency
 ///
 /// @tparam T Floating point type (float, double, long double)
-template<FloatingPoint T>
+template<std::floating_point T>
 class CubicSpline {
 public:
     /// Default constructor (empty spline)
@@ -362,7 +362,7 @@ private:
 /// This provides C² continuity in both dimensions with natural boundary conditions.
 ///
 /// @tparam T Floating point type (float, double, long double)
-template<FloatingPoint T>
+template<std::floating_point T>
 class CubicSpline2D {
 public:
     /// Default constructor (empty spline)
