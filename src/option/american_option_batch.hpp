@@ -318,6 +318,11 @@ private:
     static constexpr double MIN_MARGIN_ABS = 0.35; ///< 6-cell ghost zone minimum
 
     bool use_normalized_ = true;  ///< Enable normalized chain optimization
+
+    /// Check if batch qualifies for normalized solving
+    bool is_normalized_eligible(
+        std::span<const AmericanOptionParams> params,
+        bool use_shared_grid) const;
 };
 
 /// Solve a single American option with automatic grid determination

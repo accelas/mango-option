@@ -295,4 +295,91 @@ std::expected<void, std::string> NormalizedChainSolver::check_eligibility(
     return {};
 }
 
+bool BatchAmericanOptionSolver::is_normalized_eligible(
+    std::span<const AmericanOptionParams> params,
+    bool use_shared_grid) const
+{
+    // 1. Requires shared grid mode
+    if (!use_shared_grid) {
+        return false;
+    }
+
+    if (params.empty()) {
+        return false;
+    }
+
+    const auto& first = params[0];
+
+    // 2. All options must have consistent option type
+    for (size_t i = 1; i < params.size(); ++i) {
+        if (params[i].type != first.type) {
+            return false;
+        }
+    }
+
+    // 3. All options must have same maturity
+    for (size_t i = 1; i < params.size(); ++i) {
+        if (std::abs(params[i].maturity - first.maturity) > 1e-10) {
+            return false;
+        }
+    }
+
+    // 4. No discrete dividends
+    for (const auto& p : params) {
+        if (!p.discrete_dividends.empty()) {
+            return false;
+        }
+    }
+
+    // 5. Validate spot and strike are positive
+    for (const auto& p : params) {
+        if (p.spot <= 0.0 || p.strike <= 0.0) {
+            return false;
+        }
+    }
+
+    // 6. Grid constraints (dx, width, margins)
+    auto [grid_spec, n_time] = estimate_grid_for_option(first, grid_accuracy_);
+    double x_min = grid_spec.x_min();
+    double x_max = grid_spec.x_max();
+    size_t n_space = grid_spec.n_points();
+
+    // Check grid spacing (Von Neumann stability)
+    double dx = (x_max - x_min) / (n_space - 1);
+    if (dx > MAX_DX) {
+        return false;
+    }
+
+    // Check domain width (convergence constraint)
+    double width = x_max - x_min;
+    if (width > MAX_WIDTH) {
+        return false;
+    }
+
+    // Check margins based on moneyness range
+    std::vector<double> moneyness_values;
+    moneyness_values.reserve(params.size());
+    for (const auto& p : params) {
+        double m = p.spot / p.strike;
+        moneyness_values.push_back(m);
+    }
+
+    auto [m_min_it, m_max_it] = std::ranges::minmax_element(moneyness_values);
+    double m_min = *m_min_it;
+    double m_max = *m_max_it;
+
+    double x_min_data = std::log(m_min);
+    double x_max_data = std::log(m_max);
+
+    double margin_left = x_min_data - x_min;
+    double margin_right = x_max - x_max_data;
+    double min_margin = std::max(MIN_MARGIN_ABS, 6.0 * dx);
+
+    if (margin_left < min_margin || margin_right < min_margin) {
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace mango
