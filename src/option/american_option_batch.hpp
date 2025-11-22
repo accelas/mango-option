@@ -108,6 +108,29 @@ public:
         return use_normalized_;
     }
 
+    /// Solve a batch of American options with automatic routing
+    ///
+    /// Automatically routes to normalized chain solver when eligible
+    /// (varying strikes, same maturity, no discrete dividends).
+    ///
+    /// @param params Vector of option parameters
+    /// @param use_shared_grid If true, all options share one global grid
+    /// @param setup Optional callback invoked after solver creation
+    /// @return Batch result with individual results and failure count
+    BatchAmericanOptionResult solve_batch(
+        std::span<const AmericanOptionParams> params,
+        bool use_shared_grid = false,
+        SetupCallback setup = nullptr);
+
+    /// Solve a batch of American options (vector overload)
+    BatchAmericanOptionResult solve_batch(
+        const std::vector<AmericanOptionParams>& params,
+        bool use_shared_grid = false,
+        SetupCallback setup = nullptr)
+    {
+        return solve_batch(std::span{params}, use_shared_grid, setup);
+    }
+
 private:
     GridAccuracyParams grid_accuracy_;  ///< Grid accuracy parameters for automatic estimation
 
