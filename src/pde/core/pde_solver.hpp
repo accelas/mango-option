@@ -635,9 +635,10 @@ private:
                 // Convert row i to Dirichlet constraint: u[i] = ψ[i]
                 // Jacobian row: [0, 1, 0] (identity row)
                 // RHS: ψ[i] (intrinsic value)
-                if (i > 0) workspace_.jacobian_lower()[i-1] = 0.0;  // Zero lower diagonal
-                workspace_.jacobian_diag()[i] = 1.0;                 // Set diagonal to 1
-                if (i < n_ - 1) workspace_.jacobian_upper()[i] = 0.0; // Zero upper diagonal
+                auto jac = workspace_.jacobian();
+                if (i > 0) jac.lower()[i-1] = 0.0;  // Zero lower diagonal
+                jac.diag()[i] = 1.0;                 // Set diagonal to 1
+                if (i < n_ - 1) jac.upper()[i] = 0.0; // Zero upper diagonal
                 rhs_with_bc[i] = psi[i];                 // RHS = intrinsic value
             }
         }
@@ -667,9 +668,7 @@ private:
         //   Newton would solve: J·δu = -F, then u ← u + δu
         //   Projected Thomas solves: A·u = rhs directly (u is the solution)
         auto result = solve_thomas_projected<double>(
-            workspace_.jacobian_lower(),
-            workspace_.jacobian_diag(),
-            workspace_.jacobian_upper(),
+            workspace_.jacobian(),
             rhs_with_bc,  // Corrected RHS (FIX #1 and #2 applied)
             psi,          // Obstacle constraint ψ(x,t)
             u,            // OUTPUT: solution u (not correction δu)
@@ -733,9 +732,7 @@ private:
 
             // Solve J·δu = -F(u) using Thomas algorithm
             auto result = solve_thomas<double>(
-                workspace_.jacobian_lower(),
-                workspace_.jacobian_diag(),
-                workspace_.jacobian_upper(),
+                workspace_.jacobian(),
                 workspace_.residual(),
                 workspace_.delta_u(),
                 workspace_.tridiag_workspace()
@@ -832,20 +829,19 @@ private:
         const auto& spatial_op = derived().spatial_operator();
         using SpatialOpType = std::remove_cvref_t<decltype(spatial_op)>;
 
+        auto jac = workspace_.jacobian();
+
         // Dispatch to analytical or finite-difference Jacobian
         if constexpr (HasAnalyticalJacobian<SpatialOpType>) {
             // Analytical Jacobian (O(n) - fast path)
-            JacobianView jac(workspace_.jacobian_lower(),
-                           workspace_.jacobian_diag(),
-                           workspace_.jacobian_upper());
             spatial_op.assemble_jacobian(coeff_dt, jac);
         } else {
             // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
-            build_jacobian_finite_difference(t, coeff_dt, u, eps);
+            build_jacobian_finite_difference(t, coeff_dt, u, eps, jac);
         }
 
         // Boundary rows (same for both methods)
-        build_jacobian_boundaries(t, coeff_dt, u, eps);
+        build_jacobian_boundaries(t, coeff_dt, u, eps, jac);
     }
 
     /// Finite-difference Jacobian (fallback for unsupported operators)
@@ -853,7 +849,8 @@ private:
     /// This is the original O(n²) implementation using finite differences.
     /// Used when spatial operator doesn't provide analytical Jacobian.
     void build_jacobian_finite_difference(double t, double coeff_dt,
-                                          std::span<const double> u, double eps) {
+                                          std::span<const double> u, double eps,
+                                          JacobianView jac) {
         // Initialize u_perturb and compute baseline L(u)
         std::copy(u.begin(), u.end(), workspace_.u_stage().begin());
         apply_operator_with_blocking(t, u, workspace_.lu());
@@ -866,27 +863,28 @@ private:
             workspace_.u_stage()[i] = u[i] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
-            workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
+            jac.diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
 
             // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
             workspace_.u_stage()[i - 1] = u[i - 1] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_duim1 = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
-            workspace_.jacobian_lower()[i - 1] = -coeff_dt * dLi_duim1;
+            jac.lower()[i - 1] = -coeff_dt * dLi_duim1;
             workspace_.u_stage()[i - 1] = u[i - 1];
 
             // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
             workspace_.u_stage()[i + 1] = u[i + 1] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_duip1 = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
-            workspace_.jacobian_upper()[i] = -coeff_dt * dLi_duip1;
+            jac.upper()[i] = -coeff_dt * dLi_duip1;
             workspace_.u_stage()[i + 1] = u[i + 1];
         }
     }
 
     void build_jacobian_boundaries(double t, double coeff_dt,
-                                   std::span<const double> u, double eps) {
+                                   std::span<const double> u, double eps,
+                                   JacobianView jac) {
         // Get BCs from derived class via CRTP (use const auto& to avoid copies!)
         const auto& left_bc = derived().left_boundary();
         const auto& right_bc = derived().right_boundary();
@@ -896,34 +894,34 @@ private:
         // Left boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
-            workspace_.jacobian_diag()[0] = 1.0;
-            workspace_.jacobian_upper()[0] = 0.0;
+            jac.diag()[0] = 1.0;
+            jac.upper()[0] = 0.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             workspace_.u_stage()[0] = u[0] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
             double dL0_du0 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
-            workspace_.jacobian_diag()[0] = 1.0 - coeff_dt * dL0_du0;
+            jac.diag()[0] = 1.0 - coeff_dt * dL0_du0;
             workspace_.u_stage()[0] = u[0];
 
             workspace_.u_stage()[1] = u[1] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
             double dL0_du1 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
-            workspace_.jacobian_upper()[0] = -coeff_dt * dL0_du1;
+            jac.upper()[0] = -coeff_dt * dL0_du1;
             workspace_.u_stage()[1] = u[1];
         }
 
         // Right boundary
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             // For Dirichlet: F(u) = u - g, so ∂F/∂u = 1
-            workspace_.jacobian_diag()[n_ - 1] = 1.0;
+            jac.diag()[n_ - 1] = 1.0;
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
             workspace_.u_stage()[i] = u[i] + eps;
             apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
-            workspace_.jacobian_diag()[i] = 1.0 - coeff_dt * dLi_dui;
+            jac.diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
         }
     }

@@ -14,6 +14,7 @@
 #include <optional>
 #include <string_view>
 #include <limits>
+#include "src/pde/core/jacobian_view.hpp"
 
 namespace mango {
 
@@ -442,6 +443,56 @@ template<std::floating_point T>
     std::vector<T> workspace(2 * n);
     return solve_thomas_projected(lower, diag, upper, rhs, psi, solution,
                                   std::span{workspace}, config);
+}
+
+// ============================================================================
+// JacobianView Overloads (Convenience API)
+// ============================================================================
+//
+// These overloads accept JacobianView instead of three separate spans,
+// providing better type safety and clearer intent. They simply forward
+// to the span-based implementations.
+
+/// Thomas solver accepting JacobianView (convenience overload)
+///
+/// @param jac Jacobian view containing lower, diag, upper bands
+/// @param rhs Right-hand side vector
+/// @param solution Output solution vector
+/// @param workspace Temporary storage (2n)
+/// @param config Solver configuration
+/// @return Result indicating success/failure
+template<std::floating_point T>
+[[nodiscard]] constexpr ThomasResult<T> solve_thomas(
+    const JacobianView& jac,
+    std::span<const T> rhs,
+    std::span<T> solution,
+    std::span<T> workspace,
+    const ThomasConfig<T>& config = {}) noexcept
+{
+    return solve_thomas(jac.lower(), jac.diag(), jac.upper(),
+                       rhs, solution, workspace, config);
+}
+
+/// Projected Thomas solver accepting JacobianView (convenience overload)
+///
+/// @param jac Jacobian view containing lower, diag, upper bands
+/// @param rhs Right-hand side vector
+/// @param psi Obstacle constraint vector
+/// @param solution Output solution vector
+/// @param workspace Temporary storage (2n)
+/// @param config Solver configuration
+/// @return Result indicating success/failure
+template<std::floating_point T>
+[[nodiscard]] constexpr ThomasResult<T> solve_thomas_projected(
+    const JacobianView& jac,
+    std::span<const T> rhs,
+    std::span<const T> psi,
+    std::span<T> solution,
+    std::span<T> workspace,
+    const ThomasConfig<T>& config = {}) noexcept
+{
+    return solve_thomas_projected(jac.lower(), jac.diag(), jac.upper(),
+                                  rhs, psi, solution, workspace, config);
 }
 
 }  // namespace mango
