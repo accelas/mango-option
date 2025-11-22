@@ -553,3 +553,14 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "american_option_batch_test",
+    size = "small",
+    srcs = ["american_option_batch_test.cc"],
+    deps = [
+        "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
