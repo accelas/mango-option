@@ -1,0 +1,64 @@
+name: Cleanup Stale Caches
+
+# Run monthly on the 1st at 00:00 UTC
+# Also allow manual triggering
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Monthly: midnight on the 1st day of each month
+  workflow_dispatch:  # Allow manual trigger from Actions tab
+
+permissions:
+  actions: write  # Required to delete caches
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Delete all caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Fetching list of all caches..."
+
+          # Get all cache IDs (handle pagination if needed)
+          cache_ids=$(gh cache list --limit 100 --json id --jq '.[].id')
+
+          if [ -z "$cache_ids" ]; then
+            echo "No caches found to delete."
+            exit 0
+          fi
+
+          total=$(echo "$cache_ids" | wc -l)
+          echo "Found $total caches to delete"
+          echo ""
+
+          count=0
+          echo "$cache_ids" | while IFS= read -r cache_id; do
+            count=$((count + 1))
+            echo "[$count/$total] Deleting cache ID: $cache_id"
+
+            if gh cache delete "$cache_id" 2>&1 | grep -q "deleted"; then
+              echo "  ✓ Deleted successfully"
+            else
+              echo "  ⚠ Failed or already deleted"
+            fi
+          done
+
+          echo ""
+          echo "✓ Cache cleanup complete!"
+
+          # Show remaining caches (should be empty or newly created)
+          echo ""
+          echo "Remaining caches after cleanup:"
+          gh cache list --limit 10 || echo "No caches remaining"
+
+      - name: Summary
+        run: |
+          echo "### Cache Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Scheduled run: Monthly (1st of each month at 00:00 UTC)" >> $GITHUB_STEP_SUMMARY
+          echo "- All stale Bazel build caches have been removed" >> $GITHUB_STEP_SUMMARY
+          echo "- Fresh caches will be created on next CI runs" >> $GITHUB_STEP_SUMMARY
