@@ -220,31 +220,6 @@ cc_library(
 )
 
 
-cc_library(
-    name = "price_table_solver_factory",
-    srcs = ["price_table_solver_factory.cpp"],
-    hdrs = ["price_table_solver_factory.hpp"],
-    deps = [
-        ":option_spec",
-        ":american_option",
-        ":american_option_batch",
-        ":price_table_grid",
-        ":price_table_extraction",
-        "//src/pde/core:pde_workspace",
-        "//src/pde/core:grid",
-        "//src/math:cubic_spline_solver",
-        "//src/support:error_types",
-        "//src/support:parallel",
-    ],
-    copts = [
-        "-std=c++23",
-        "-fopenmp",
-        "-O3",
-        "-march=native",
-    ],
-    linkopts = ["-fopenmp"],
-    visibility = ["//visibility:public"],
-)
 
 cc_library(
     name = "price_table_workspace",
