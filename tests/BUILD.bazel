@@ -553,3 +553,13 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "mdspan_integration_test",
+    srcs = ["mdspan_integration_test.cc"],
+    deps = [
+        "@mdspan//:mdspan",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
