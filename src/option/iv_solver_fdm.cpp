@@ -17,39 +17,58 @@ IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
     // Constructor - just stores configuration
 }
 
-std::expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) const {
-    // Use common validation for option spec, market price, and arbitrage checks
-    auto common_validation = validate_iv_query(query);
-    if (!common_validation) {
-        // Trace validation error
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 3, 0.0, 0.0);
-        return common_validation;
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_grid_params() const {
+    // Only validate when manual grid mode is enabled
+    if (!config_.use_manual_grid) {
+        return std::monostate{};
     }
 
-    // FDM-specific validation: grid parameters (only when manual mode enabled)
-    if (config_.use_manual_grid) {
-        if (config_.grid_n_space == 0) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
-            return std::unexpected(std::string("Manual grid: n_space must be positive"));
-        }
-
-        if (config_.grid_n_time == 0) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
-            return std::unexpected(std::string("Manual grid: n_time must be positive"));
-        }
-
-        if (config_.grid_x_min >= config_.grid_x_max) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
-            return std::unexpected(std::string("Manual grid: x_min must be < x_max"));
-        }
-
-        if (config_.grid_alpha < 0.0) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
-            return std::unexpected(std::string("Manual grid: alpha must be non-negative"));
-        }
+    if (config_.grid_n_space == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: n_space must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
     }
 
-    return {};
+    if (config_.grid_n_time == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: n_time must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    if (config_.grid_x_min >= config_.grid_x_max) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: x_min must be < x_max",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    if (config_.grid_alpha < 0.0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: alpha must be non-negative",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    return std::monostate{};
 }
 
 double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
@@ -301,9 +320,10 @@ IVSolverFDM::validate_arbitrage_bounds(const IVQuery& query) const {
 }
 
 std::expected<std::monostate, IVError>
-IVSolverFDM::validate_query_monadic(const IVQuery& query) const {
+IVSolverFDM::validate_query(const IVQuery& query) const {
     return validate_positive_parameters(query)
-        .and_then([this, &query](auto) { return validate_arbitrage_bounds(query); });
+        .and_then([this, &query](auto) { return validate_arbitrage_bounds(query); })
+        .and_then([this](auto) { return validate_grid_params(); });
 }
 
 std::expected<IVSuccess, IVError>
@@ -371,7 +391,7 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
 
 std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) {
     // C++23 monadic validation pipeline: validate → solve
-    return validate_query_monadic(query)
+    return validate_query(query)
         .and_then([this, &query](auto) { return solve_brent(query); });
 }
 
