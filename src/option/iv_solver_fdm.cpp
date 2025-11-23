@@ -4,7 +4,7 @@
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/support/parallel.hpp"
-#include "common/ivcalc_trace.h"
+#include "src/support/ivcalc_trace.h"
 #include <cmath>
 #include <algorithm>
 #include <memory>

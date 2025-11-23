@@ -4,7 +4,7 @@
  */
 
 #include "src/option/american_option_batch.hpp"
-#include "common/ivcalc_trace.h"
+#include "src/support/ivcalc_trace.h"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
