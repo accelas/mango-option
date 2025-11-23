@@ -97,6 +97,34 @@ struct InterpolationError {
         : code(code), message(message), details(details) {}
 };
 
+/// IV solver error categories
+enum class IVErrorCode {
+    // Validation errors
+    NegativeSpot,
+    NegativeStrike,
+    NegativeMaturity,
+    NegativeMarketPrice,
+    ArbitrageViolation,
+    InvalidGridConfig,
+
+    // Convergence errors
+    MaxIterationsExceeded,
+    BracketingFailed,
+    NumericalInstability,
+
+    // Solver errors
+    PDESolveFailed
+};
+
+/// Detailed IV solver error with diagnostics
+struct IVError {
+    IVErrorCode code;
+    std::string message;
+    size_t iterations = 0;           ///< Iterations before failure
+    double final_error = 0.0;        ///< Residual at failure
+    std::optional<double> last_vol;  ///< Last volatility candidate tried
+};
+
 /// Combined error type that can hold any of our specific error types
 using ErrorVariant = std::variant<
     ValidationError,
