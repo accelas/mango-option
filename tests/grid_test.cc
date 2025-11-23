@@ -350,3 +350,189 @@ TEST(GridSpacingTest, MultiSinhGridSpacingCreation) {
     EXPECT_EQ(dx_left.size(), 49);  // n - 2 interior points
     EXPECT_EQ(dx_right.size(), 49);
 }
+
+// Task 8: Auto-merge tests
+
+TEST(GridSpecTest, MultiSinhAutoMergesNearClusters) {
+    // Two clusters symmetrically placed around center with alpha=2.5
+    // Domain: [-3.0, 3.0], center = 0.0
+    // Clusters at x=-0.05 and x=0.05
+    // alpha_avg = 2.5, threshold = 0.3/2.5 = 0.12
+    // delta_x = 0.1 < 0.12, so they should merge at center 0.0
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -0.05, .alpha = 2.5, .weight = 1.0},
+        {.center_x = 0.05, .alpha = 2.5, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    // After merging, should have single cluster
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 1);
+
+    // Merged cluster should be at domain center (weighted average)
+    // (1.0 * -0.05 + 1.0 * 0.05) / 2.0 = 0.0
+    EXPECT_NEAR(final_clusters[0].center_x, 0.0, 1e-10);
+
+    // Merged alpha should be weighted average
+    // (1.0 * 2.5 + 1.0 * 2.5) / 2.0 = 2.5
+    EXPECT_NEAR(final_clusters[0].alpha, 2.5, 1e-10);
+
+    // Merged weight should be sum
+    EXPECT_NEAR(final_clusters[0].weight, 2.0, 1e-10);
+}
+
+TEST(GridSpecTest, MultiSinhAutoMergesUnequalWeights) {
+    // Test weighted averaging with unequal weights
+    // Place clusters symmetrically so they merge at center
+    // Domain: [-3.0, 3.0], center = 0.0
+    // For weighted average to be 0.0: w1*x1 + w2*x2 = 0
+    // Using weights 3.0 and 1.0: 3.0*x1 + 1.0*x2 = 0
+    // Choose x1 = -0.025, x2 = 0.075 -> 3*(-0.025) + 1*(0.075) = 0
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -0.025, .alpha = 2.0, .weight = 3.0},
+        {.center_x = 0.075, .alpha = 4.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    // Should merge (alpha_avg = 2.5, threshold = 0.12, delta_x = 0.1 < 0.12)
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 1);
+
+    // Weighted center: (3.0 * -0.025 + 1.0 * 0.075) / 4.0 = 0.0
+    EXPECT_NEAR(final_clusters[0].center_x, 0.0, 1e-10);
+
+    // Weighted alpha: (3.0 * 2.0 + 1.0 * 4.0) / 4.0 = 2.5
+    EXPECT_NEAR(final_clusters[0].alpha, 2.5, 1e-10);
+
+    // Total weight: 3.0 + 1.0 = 4.0
+    EXPECT_NEAR(final_clusters[0].weight, 4.0, 1e-10);
+}
+
+TEST(GridSpecTest, MultiSinhDoesNotMergeDistantClusters) {
+    // Two clusters far apart should not merge
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -1.0, .alpha = 2.0, .weight = 1.0},
+        {.center_x = 1.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    // Should remain as two clusters (delta_x = 2.0, threshold = 0.15)
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 2);
+}
+
+TEST(GridSpecTest, MultiSinhThreeClustersPartialMerge) {
+    // Three clusters where only two are close
+    // Cluster 0 and 1 should merge, cluster 2 stays separate
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 2.5, .weight = 1.0},
+        {.center_x = 0.1, .alpha = 2.5, .weight = 1.0},
+        {.center_x = 2.0, .alpha = 2.5, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    // Should have two clusters after merge (0+1 merged, 2 stays)
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 2);
+
+    // First cluster should be merged at center 0.05
+    EXPECT_NEAR(final_clusters[0].center_x, 0.05, 1e-10);
+    EXPECT_NEAR(final_clusters[0].weight, 2.0, 1e-10);
+
+    // Second cluster should remain at 2.0
+    EXPECT_NEAR(final_clusters[1].center_x, 2.0, 1e-10);
+    EXPECT_NEAR(final_clusters[1].weight, 1.0, 1e-10);
+}
+
+TEST(GridSpecTest, MultiSinhChainMerge) {
+    // Test chain merging with closer spacing, centered at domain midpoint
+    // Domain: [-3.0, 3.0], center = 0.0
+    // Place three clusters symmetrically so they merge at center
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -0.05, .alpha = 3.0, .weight = 1.0},
+        {.center_x = 0.0, .alpha = 3.0, .weight = 1.0},
+        {.center_x = 0.05, .alpha = 3.0, .weight = 1.0}
+    };
+
+    // alpha_avg = 3.0, threshold = 0.1
+    // -0.05 to 0.0: delta = 0.05 < 0.1 (merge) -> merged at -0.025
+    // -0.025 to 0.05: delta = 0.075 < 0.1 (merge) -> merged at 0.0
+    // All three should eventually merge into one at center
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 1);
+
+    // Final center should be at equal-weight average: (-0.05 + 0.0 + 0.05) / 3 = 0.0
+    EXPECT_NEAR(final_clusters[0].center_x, 0.0, 1e-10);
+    EXPECT_NEAR(final_clusters[0].weight, 3.0, 1e-10);
+}
+
+TEST(GridSpecTest, MultiSinhOffCenterMergeRejected) {
+    // Test Bug 2 fix: Two close clusters both away from domain center
+    // Domain: [-3.0, 3.0], center = 0.0
+    // Clusters at x=1.0 and x=1.05 (close enough to merge)
+    // After merge, single cluster at ~x=1.025 (off-center)
+    // Should be rejected with "single cluster must be centered" error
+
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 1.0, .alpha = 3.0, .weight = 1.0},
+        {.center_x = 1.05, .alpha = 3.0, .weight = 1.0}
+    };
+
+    // alpha_avg = 3.0, threshold = 0.3/3.0 = 0.1
+    // delta_x = 0.05 < 0.1, so clusters WILL merge
+    // Merged center = (1.0 + 1.05) / 2 = 1.025 (off-center from domain center 0.0)
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+
+    // Should fail with "centered cluster" error
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("centered cluster"), std::string::npos);
+}
+
+TEST(GridSpecTest, MultiSinhBypassAutoMerge) {
+    // Test bypassing automatic cluster merging
+    // Two clusters close together (x=0.0 and x=0.1) would normally merge
+    // Domain: [-3.0, 3.0]
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 3.0, .weight = 1.0},
+        {.center_x = 0.1, .alpha = 3.0, .weight = 1.0}
+    };
+
+    // alpha_avg = 3.0, threshold = 0.3/3.0 = 0.1
+    // delta_x = 0.1 <= 0.1, so clusters would normally merge
+    // With auto_merge = false, they should remain separate
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters, false);
+    ASSERT_TRUE(result.has_value());
+
+    // Should have TWO clusters (not merged)
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 2);
+
+    // Verify original centers preserved
+    EXPECT_NEAR(final_clusters[0].center_x, 0.0, 1e-10);
+    EXPECT_NEAR(final_clusters[1].center_x, 0.1, 1e-10);
+
+    // Verify grid generation still works (produces valid monotonic grid)
+    auto grid = result.value().generate();
+    EXPECT_EQ(grid.size(), 51);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[50], 3.0);
+
+    // Check strict monotonicity
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Grid must be strictly monotonic at index " << i;
+    }
+}

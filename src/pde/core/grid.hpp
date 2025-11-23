@@ -93,7 +93,8 @@ public:
 
     static std::expected<GridSpec, std::string> multi_sinh_spaced(
         T x_min, T x_max, size_t n_points,
-        std::vector<MultiSinhCluster<T>> clusters) {
+        std::vector<MultiSinhCluster<T>> clusters,
+        bool auto_merge = true) {
 
         if (n_points < 2) {
             return std::unexpected<std::string>("Grid must have at least 2 points");
@@ -122,8 +123,13 @@ public:
             }
         }
 
-        // For single-cluster multi-sinh (Task 5), only centered clusters supported
-        // Multi-cluster algorithm is not yet implemented
+        // Merge nearby clusters to prevent wasted resolution (unless bypassed)
+        if (auto_merge) {
+            merge_nearby_clusters(clusters);
+        }
+
+        // CRITICAL: Check single-cluster centered requirement AFTER merging
+        // This catches cases where two off-center clusters merge into one off-center cluster
         if (clusters.size() == 1) {
             const T domain_center = (x_min + x_max) / T(2.0);
             const T tol = T(1e-10);
@@ -155,6 +161,56 @@ private:
         : type_(type), x_min_(x_min), x_max_(x_max),
           n_points_(n_points), concentration_(concentration),
           clusters_(std::move(clusters)) {}
+
+    /// Merge nearby clusters to prevent wasted resolution
+    ///
+    /// When clusters are too close (Δx < 0.3/α_avg), merges them to avoid
+    /// overlapping concentration regions that waste grid resolution.
+    ///
+    /// @param clusters Input cluster list (will be modified in-place)
+    static void merge_nearby_clusters(std::vector<MultiSinhCluster<T>>& clusters) {
+        if (clusters.size() <= 1) {
+            return;  // Nothing to merge
+        }
+
+        // Keep merging until no more merges are possible
+        bool merged = true;
+        while (merged) {
+            merged = false;
+
+            // Scan all pairs, restart after each merge (avoids iterator invalidation)
+            for (size_t i = 0; i < clusters.size() && !merged; ++i) {
+                for (size_t j = i + 1; j < clusters.size() && !merged; ++j) {
+                    const T delta_x = std::abs(clusters[i].center_x - clusters[j].center_x);
+                    const T alpha_avg = (clusters[i].alpha + clusters[j].alpha) / T(2.0);
+                    const T threshold = T(0.3) / alpha_avg;
+
+                    // Use slightly permissive comparison to handle floating point edge cases
+                    const T epsilon = T(1e-10);
+                    if (delta_x <= threshold + epsilon) {
+                        // Merge clusters i and j into a new cluster
+                        const T total_weight = clusters[i].weight + clusters[j].weight;
+                        const T w_i = clusters[i].weight / total_weight;
+                        const T w_j = clusters[j].weight / total_weight;
+
+                        MultiSinhCluster<T> merged_cluster{
+                            .center_x = w_i * clusters[i].center_x + w_j * clusters[j].center_x,
+                            .alpha = w_i * clusters[i].alpha + w_j * clusters[j].alpha,
+                            .weight = total_weight
+                        };
+
+                        // Replace cluster i with merged result, remove cluster j
+                        clusters[i] = merged_cluster;
+                        clusters.erase(clusters.begin() + j);
+
+                        // Set flag and break to restart outer loop (avoids iterator invalidation)
+                        merged = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     /// Enforce strict monotonicity in grid points
     ///
@@ -351,7 +407,7 @@ GridBuffer<T> GridSpec<T>::generate() const {
 
         case Type::MultiSinhSpaced: {
             // Handle single cluster as special case (most common)
-            // NOTE: Single-cluster algorithm only supports centered clusters (validated in factory)
+            // Note: Single clusters may be off-center after auto-merging
             if (clusters_.size() == 1) {
                 const auto& cluster = clusters_[0];
                 const T c = cluster.alpha;

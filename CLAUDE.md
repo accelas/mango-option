@@ -331,6 +331,10 @@ The multi-sinh implementation automatically enforces:
   - Merged alpha: weighted average by cluster weights
   - Merged weight: sum of both weights
   - Example: Clusters at x=0.0 and x=0.1 with α=2.5 are automatically merged (threshold ≈ 0.12)
+  - **Bypass option**: Pass `auto_merge = false` to disable merging (e.g., for testing):
+    ```cpp
+    auto spec = GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 201, clusters, false);
+    ```
 - **Strict monotonicity**: x[i+1] > x[i] for all i (iterative smoothing if needed)
 - **Minimum spacing**: Prevents dx → 0 to avoid conditioning issues
 - **Exact boundaries**: x[0] = x_min and x[n-1] = x_max (clamped endpoints)
