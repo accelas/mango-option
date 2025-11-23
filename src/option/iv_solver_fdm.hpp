@@ -157,7 +157,7 @@ public:
     /// - InvalidGridConfig: FDM grid parameters invalid (manual mode only)
     ///
     /// @note Uses monadic validation: params → arbitrage → grid → Brent solving
-    std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query);
+    std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query) const;
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
@@ -167,7 +167,7 @@ public:
     ///
     /// @param queries Input queries (as vector for convenience)
     /// @return BatchIVResult with individual results and failure count
-    BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries);
+    BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries) const;
 
 private:
     IVSolverFDMConfig config_;

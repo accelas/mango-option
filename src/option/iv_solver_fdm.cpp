@@ -410,13 +410,13 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
     };
 }
 
-std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) {
+std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) const {
     // C++23 monadic validation pipeline: validate → solve
     return validate_query(query)
         .and_then([this, &query](auto) { return solve_brent(query); });
 }
 
-BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries) {
+BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries) const {
     std::vector<std::expected<IVSuccess, IVError>> results;
     results.reserve(queries.size());
 
