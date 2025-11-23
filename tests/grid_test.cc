@@ -164,4 +164,50 @@ TEST(GridSpecTest, MultiSinhSingleClusterGeneration) {
     EXPECT_DOUBLE_EQ(grid[0], -3.0);
     EXPECT_DOUBLE_EQ(grid[10], 3.0);
     EXPECT_NEAR(grid[5], 0.0, 1e-10);  // Center should be near 0.0
+
+    // Check strict monotonicity (critical for finite difference operators)
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Grid must be strictly monotonic at index " << i;
+    }
+}
+
+TEST(GridSpecTest, MultiSinhSingleClusterMatchesSinhSpaced) {
+    // Single-cluster multi-sinh centered at domain midpoint should match regular sinh_spaced
+    const double x_min = -3.0;
+    const double x_max = 3.0;
+    const double center = (x_min + x_max) / 2.0;  // 0.0
+    const size_t n = 21;
+    const double alpha = 2.5;
+
+    // Generate multi-sinh grid with single cluster at center
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = center, .alpha = alpha, .weight = 1.0}
+    };
+    auto multi_result = mango::GridSpec<>::multi_sinh_spaced(x_min, x_max, n, clusters);
+    ASSERT_TRUE(multi_result.has_value());
+    auto multi_grid = multi_result.value().generate();
+
+    // Generate regular sinh_spaced grid (always centers at midpoint)
+    auto sinh_result = mango::GridSpec<>::sinh_spaced(x_min, x_max, n, alpha);
+    ASSERT_TRUE(sinh_result.has_value());
+    auto sinh_grid = sinh_result.value().generate();
+
+    // Grids should match exactly
+    ASSERT_EQ(multi_grid.size(), sinh_grid.size());
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_NEAR(multi_grid[i], sinh_grid[i], 1e-14)
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(GridSpecTest, MultiSinhRejectsSingleOffCenterCluster) {
+    // Test that single-cluster multi-sinh rejects off-center clusters
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 1.0, .alpha = 2.0, .weight = 1.0}  // Off-center (domain center is 0.0)
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 11, clusters);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("centered cluster"), std::string::npos);
 }

@@ -122,6 +122,18 @@ public:
             }
         }
 
+        // For single-cluster multi-sinh (Task 5), only centered clusters supported
+        // Multi-cluster algorithm is not yet implemented
+        if (clusters.size() == 1) {
+            const T domain_center = (x_min + x_max) / T(2.0);
+            const T tol = T(1e-10);
+            if (std::abs(clusters[0].center_x - domain_center) > tol) {
+                return std::unexpected<std::string>(
+                    std::format("Single-cluster multi-sinh requires centered cluster (center must be {}, got {})",
+                               domain_center, clusters[0].center_x));
+            }
+        }
+
         return GridSpec(Type::MultiSinhSpaced, x_min, x_max, n_points,
                         T(1.0), std::move(clusters));
     }
@@ -285,6 +297,7 @@ GridBuffer<T> GridSpec<T>::generate() const {
 
         case Type::MultiSinhSpaced: {
             // Handle single cluster as special case (most common)
+            // NOTE: Single-cluster algorithm only supports centered clusters (validated in factory)
             if (clusters_.size() == 1) {
                 const auto& cluster = clusters_[0];
                 const T c = cluster.alpha;
@@ -292,20 +305,21 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const T range = x_max_ - x_min_;
                 const T sinh_half_c = std::sinh(c / T(2.0));
 
+                // Use eta-based transform (same as SinhSpaced) for guaranteed monotonicity
+                // For centered clusters: eta_center = 0.5, so transform simplifies to standard sinh spacing
+                const T eta_center = (center - x_min_) / range;  // Normalized center position
+
                 for (size_t i = 0; i < n_points_; ++i) {
-                    // Map uniform parameter u ∈ [-1, 1] to grid via sinh
-                    const T u = T(-1.0) + T(2.0) * static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-                    const T sinh_term = std::sinh(c * u) / sinh_half_c;
+                    // Map i to eta ∈ [0, 1]
+                    const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+
+                    // Apply sinh transform centered at eta_center
+                    const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
                     const T normalized = (T(1.0) + sinh_term) / T(2.0);
 
-                    // Transform to [x_min, x_max] centered at cluster.center_x
-                    const T offset_x = center - (x_min_ + x_max_) / T(2.0);
-                    points.push_back(x_min_ + range * normalized + offset_x);
+                    // Scale to [x_min, x_max] - naturally stays in bounds
+                    points.push_back(x_min_ + range * normalized);
                 }
-
-                // Clamp endpoints to ensure exact x_min/x_max
-                points[0] = x_min_;
-                points[n_points_ - 1] = x_max_;
             } else {
                 // TODO: Handle multiple clusters (Task 6)
                 throw std::runtime_error("Multi-cluster generation not yet implemented");
