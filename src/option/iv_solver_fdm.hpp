@@ -8,6 +8,7 @@
 #include "src/option/iv_solver_base.hpp"
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_types.hpp"
+#include "src/option/iv_result.hpp"
 #include "src/math/root_finding.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -117,8 +118,8 @@ public:
     /// American option's theoretical price match the market price.
     ///
     /// @param query Option specification and market price
-    /// @return IVResult with convergence status and implied volatility
-    IVResult solve_impl(const IVQuery& query);
+    /// @return std::expected<IVSuccess, IVError> with convergence result or error
+    std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query);
 
     /// Solve for implied volatility (batch with OpenMP)
     ///

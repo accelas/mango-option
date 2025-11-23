@@ -206,6 +206,7 @@ cc_library(
         ":iv_solver_base",
         ":option_spec",
         ":iv_types",
+        ":iv_result",
         "//src/math:root_finding",
         ":american_option",
         "//src/pde/core:pde_workspace",
