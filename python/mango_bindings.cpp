@@ -63,34 +63,66 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("grid_x_max", &mango::IVSolverFDMConfig::grid_x_max)
         .def_readwrite("grid_alpha", &mango::IVSolverFDMConfig::grid_alpha);
 
-    // IVResult structure
-    py::class_<mango::IVResult>(m, "IVResult")
+    // IVSuccess structure (std::expected success type)
+    py::class_<mango::IVSuccess>(m, "IVSuccess")
         .def(py::init<>())
-        .def_readwrite("converged", &mango::IVResult::converged)
-        .def_readwrite("iterations", &mango::IVResult::iterations)
-        .def_readwrite("implied_vol", &mango::IVResult::implied_vol)
-        .def_readwrite("final_error", &mango::IVResult::final_error)
-        .def_readwrite("failure_reason", &mango::IVResult::failure_reason)
-        .def_readwrite("vega", &mango::IVResult::vega)
-        .def("__repr__", [](const mango::IVResult& r) {
-            std::string repr = "<IVResult converged=" + std::to_string(r.converged);
-            if (r.converged) {
-                repr += " iv=" + std::to_string(r.implied_vol) +
+        .def_readwrite("implied_vol", &mango::IVSuccess::implied_vol)
+        .def_readwrite("iterations", &mango::IVSuccess::iterations)
+        .def_readwrite("final_error", &mango::IVSuccess::final_error)
+        .def_readwrite("vega", &mango::IVSuccess::vega)
+        .def("__repr__", [](const mango::IVSuccess& r) {
+            std::string repr = "<IVSuccess iv=" + std::to_string(r.implied_vol) +
                        " iters=" + std::to_string(r.iterations) +
                        " error=" + std::to_string(r.final_error);
-            } else if (r.failure_reason.has_value()) {
-                repr += " reason='" + *r.failure_reason + "'";
+            if (r.vega.has_value()) {
+                repr += " vega=" + std::to_string(*r.vega);
             }
             return repr + ">";
         });
 
-    // IVSolver class (now using FDM solver)
+    // IVError structure (std::expected error type)
+    py::class_<mango::IVError>(m, "IVError")
+        .def(py::init<>())
+        .def_readwrite("code", &mango::IVError::code)
+        .def_readwrite("message", &mango::IVError::message)
+        .def_readwrite("iterations", &mango::IVError::iterations)
+        .def_readwrite("final_error", &mango::IVError::final_error)
+        .def_readwrite("last_vol", &mango::IVError::last_vol)
+        .def("__repr__", [](const mango::IVError& e) {
+            std::string repr = "<IVError code=" + std::to_string(static_cast<int>(e.code)) +
+                       " message='" + e.message + "'";
+            if (e.last_vol.has_value()) {
+                repr += " last_vol=" + std::to_string(*e.last_vol);
+            }
+            return repr + ">";
+        });
+
+    // IVErrorCode enum
+    py::enum_<mango::IVErrorCode>(m, "IVErrorCode")
+        .value("NegativeSpot", mango::IVErrorCode::NegativeSpot)
+        .value("NegativeStrike", mango::IVErrorCode::NegativeStrike)
+        .value("NegativeMaturity", mango::IVErrorCode::NegativeMaturity)
+        .value("NegativeMarketPrice", mango::IVErrorCode::NegativeMarketPrice)
+        .value("ArbitrageViolation", mango::IVErrorCode::ArbitrageViolation)
+        .value("MaxIterationsExceeded", mango::IVErrorCode::MaxIterationsExceeded)
+        .value("BracketingFailed", mango::IVErrorCode::BracketingFailed)
+        .value("InvalidGridConfig", mango::IVErrorCode::InvalidGridConfig)
+        .export_values();
+
+    // IVSolver class (now using FDM solver with std::expected)
     py::class_<mango::IVSolverFDM>(m, "IVSolverFDM")
         .def(py::init<const mango::IVSolverFDMConfig&>(),
              py::arg("config"))
-        .def("solve", &mango::IVSolverFDM::solve_impl,
-             py::arg("query"),
-             "Solve for implied volatility");
+        .def("solve_impl", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
+            auto result = solver.solve_impl(query);
+            if (result.has_value()) {
+                return py::make_tuple(true, result.value(), mango::IVError{});
+            } else {
+                return py::make_tuple(false, mango::IVSuccess{}, result.error());
+            }
+        },
+        py::arg("query"),
+        "Solve for implied volatility. Returns (success: bool, result: IVSuccess, error: IVError)");
 
     // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 

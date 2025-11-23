@@ -415,35 +415,4 @@ BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries)
     };
 }
 
-// Using IVResult for backward compatibility - this function is deprecated
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-IVResult IVSolverFDM::solve_legacy(const IVQuery& query) {
-    auto result = solve_impl(query);
-
-    if (result.has_value()) {
-        // Success: convert IVSuccess to IVResult
-        return IVResult{
-            .converged = true,
-            .iterations = result->iterations,
-            .implied_vol = result->implied_vol,
-            .final_error = result->final_error,
-            .failure_reason = std::nullopt,
-            .vega = result->vega
-        };
-    } else {
-        // Failure: convert IVError to IVResult
-        const IVError& error = result.error();
-        return IVResult{
-            .converged = false,
-            .iterations = error.iterations,
-            .implied_vol = error.last_vol.value_or(0.0),  // Use last vol if available
-            .final_error = error.final_error,
-            .failure_reason = error.message,
-            .vega = std::nullopt
-        };
-    }
-}
-#pragma GCC diagnostic pop
-
 } // namespace mango
