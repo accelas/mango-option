@@ -44,6 +44,19 @@ cc_library(
 )
 
 cc_library(
+    name = "price_table_builder",
+    srcs = ["price_table_builder.cpp"],
+    hdrs = ["price_table_builder.hpp"],
+    deps = [
+        ":price_table_config",
+        ":price_table_axes",
+        ":price_table_surface",
+        ":american_option",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
