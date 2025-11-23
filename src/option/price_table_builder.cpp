@@ -122,9 +122,22 @@ PriceTableBuilder<N>::solve_batch(
         result.failed_count = batch.size();
         return result;
     } else {
-        // Configure solver with default grid accuracy
-        // The batch solver will use auto-estimation for grid sizing
         BatchAmericanOptionSolver solver;
+
+        // Apply grid configuration from PriceTableConfig
+        GridAccuracyParams accuracy;
+
+        // Set spatial grid bounds (allow estimation within range)
+        accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t(100));
+        accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
+        accuracy.max_time_steps = config_.n_time;
+
+        // Extract alpha parameter for sinh-spaced grids
+        if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
+            accuracy.alpha = config_.grid_estimator.concentration();
+        }
+
+        solver.set_grid_accuracy(accuracy);
 
         // Register maturity grid as snapshot times
         // This enables extract_tensor to access surfaces at each maturity point
@@ -221,10 +234,13 @@ PriceTableBuilder<N>::extract_tensor(
                     continue;
                 }
 
-                // Evaluate spline at each moneyness point
+                // Evaluate spline at each moneyness point and scale by K_ref
+                // PDE solves are normalized (Spot=Strike=K_ref), so V_normalized
+                // needs to be scaled back to actual prices: V_actual = K_ref * V_norm
+                const double K_ref = config_.K_ref;
                 for (size_t i = 0; i < Nm; ++i) {
-                    double price = spline.eval(log_moneyness[i]);
-                    tensor.view[i, j, σ_idx, r_idx] = price;
+                    double normalized_price = spline.eval(log_moneyness[i]);
+                    tensor.view[i, j, σ_idx, r_idx] = K_ref * normalized_price;
                 }
             }
         }
