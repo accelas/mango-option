@@ -3,6 +3,7 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/math/bspline_basis.hpp"
+#include <experimental/mdspan>
 #include <vector>
 #include <span>
 #include <string>
@@ -61,6 +62,19 @@ public:
 
     /// Coefficient accessor (4D tensor in row-major layout)
     std::span<const double> coefficients() const { return coefficients_; }
+
+    /// Type-safe 4D coefficient accessor via mdspan
+    ///
+    /// Provides multi-dimensional indexing: coeffs_view[m_idx, tau_idx, sigma_idx, r_idx]
+    /// Layout: [moneyness, maturity, volatility, rate] in row-major order
+    ///
+    /// @return mdspan view of 4D coefficient tensor
+    [[nodiscard]] auto coefficients_view() const {
+        using std::experimental::mdspan;
+        using std::experimental::dextents;
+        const auto [Nm, Nt, Nv, Nr] = dimensions();
+        return mdspan<const double, dextents<size_t, 4>>(coefficients_.data(), Nm, Nt, Nv, Nr);
+    }
 
     /// Metadata accessors
     double K_ref() const { return K_ref_; }

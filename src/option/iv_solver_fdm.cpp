@@ -417,17 +417,32 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
 }
 
 BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries) const {
-    std::vector<std::expected<IVSuccess, IVError>> results;
-    results.reserve(queries.size());
-
+    std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
 
-    for (const auto& query : queries) {
-        auto result = solve_impl(query);
-        if (!result.has_value()) {
-            ++failed_count;
+    // Parallelization threshold: IV solves are expensive (multiple PDE solves),
+    // so only parallelize for batches large enough to overcome parallel overhead
+    constexpr size_t PARALLEL_THRESHOLD = 4;
+
+    if (queries.size() < PARALLEL_THRESHOLD) {
+        // Serial path for tiny batches (avoid parallel tax)
+        for (size_t i = 0; i < queries.size(); ++i) {
+            results[i] = solve_impl(queries[i]);
+            if (!results[i].has_value()) {
+                ++failed_count;
+            }
         }
-        results.push_back(std::move(result));
+    } else {
+        // Parallel path: each IV solve is independent (different PDE workspaces)
+        // Mirrors IVSolverInterpolated::solve_batch_impl pattern
+        MANGO_PRAGMA_PARALLEL_FOR
+        for (size_t i = 0; i < queries.size(); ++i) {
+            results[i] = solve_impl(queries[i]);
+            if (!results[i].has_value()) {
+                MANGO_PRAGMA_ATOMIC
+                ++failed_count;
+            }
+        }
     }
 
     return BatchIVResult{
