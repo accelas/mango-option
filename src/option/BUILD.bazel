@@ -144,17 +144,28 @@ cc_library(
 )
 
 cc_library(
+    name = "iv_result",
+    hdrs = ["iv_result.hpp"],
+    deps = [
+        "//src/support:error_types",
+    ],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "iv_solver_interpolated",
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],
     deps = [
         ":bspline_price_table",
         ":american_option",
-        ":iv_types",
+        ":iv_result",
         ":price_table_4d_builder",
         ":option_spec",
-        ":iv_solver_base",
+        "//src/math:root_finding",
         "//src/support:parallel",
+        "//src/support:error_types",
     ],
     copts = [
         "-std=c++23",
@@ -180,25 +191,12 @@ cc_library(
 )
 
 cc_library(
-    name = "iv_solver_base",
-    hdrs = ["iv_solver_base.hpp"],
-    deps = [
-        ":option_spec",
-        ":iv_types",
-        "//src/support:error_types",
-    ],
-    copts = ["-std=c++23"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "iv_solver_fdm",
     srcs = ["iv_solver_fdm.cpp"],
     hdrs = ["iv_solver_fdm.hpp"],
     deps = [
-        ":iv_solver_base",
         ":option_spec",
-        ":iv_types",
+        ":iv_result",
         "//src/math:root_finding",
         ":american_option",
         "//src/pde/core:pde_workspace",

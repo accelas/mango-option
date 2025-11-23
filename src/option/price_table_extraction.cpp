@@ -31,6 +31,16 @@ void extract_batch_results_to_4d(
         }
     }
 
+    // Guard against missing snapshots (would cause divide-by-zero)
+    if (n_time == 0) {
+        // This indicates snapshots were not registered during solver setup.
+        // Price table extraction requires snapshot_times to be set via SetupCallback.
+        throw std::runtime_error(
+            "extract_batch_results_to_4d: No snapshots recorded. "
+            "Price table construction requires snapshot_times to be registered "
+            "via SetupCallback (call solver.set_snapshot_times() before solve).");
+    }
+
     // Precompute step indices for each maturity
     const double dt = T_max / n_time;
     std::vector<size_t> step_indices(Nt);

@@ -301,7 +301,7 @@ BENCHMARK(BM_AmericanCall_WithDividends);
 // ============================================================================
 
 static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
-    IVQuery query{100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 6.0};
+    IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 6.0);
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
@@ -312,7 +312,7 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve(query);
+        auto result = solver.solve_impl(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -321,7 +321,7 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
 BENCHMARK(BM_ImpliedVol_ATM_Put);
 
 static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
-    IVQuery query{110.0, 100.0, 0.25, 0.05, 0.0, OptionType::PUT, 0.80};
+    IVQuery query(110.0, 100.0, 0.25, 0.05, 0.0, OptionType::PUT, 0.80);
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
@@ -332,7 +332,7 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve(query);
+        auto result = solver.solve_impl(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -341,7 +341,7 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
 BENCHMARK(BM_ImpliedVol_OTM_Put);
 
 static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
-    IVQuery query{90.0, 100.0, 2.0, 0.05, 0.0, OptionType::PUT, 15.0};
+    IVQuery query(90.0, 100.0, 2.0, 0.05, 0.0, OptionType::PUT, 15.0);
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
@@ -352,7 +352,7 @@ static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve(query);
+        auto result = solver.solve_impl(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -383,14 +383,15 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     constexpr double rate = 0.05;
     constexpr double sigma_true = 0.20;
 
-    IVQuery query{spot, strike, maturity, rate, 0.0, OptionType::PUT, analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)};
+    IVQuery query(spot, strike, maturity, rate, 0.0, OptionType::PUT,
+                  analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT));
 
     for (auto _ : state) {
-        auto result = solver.solve(query);
-        if (!result.converged) {
-            throw std::runtime_error(result.failure_reason.value_or("Fast IV solver failed"));
+        auto result = solver.solve_impl(query);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(result.implied_vol);
+        benchmark::DoNotOptimize(result->implied_vol);
     }
 
     state.SetLabel("B-spline IV (table-based)");
@@ -530,15 +531,7 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double market_price = 5.0 + i * 0.1;  // Different prices
-        batch.push_back(IVQuery{
-            100.0,  // spot
-            100.0,  // strike
-            1.0,    // maturity
-            0.05,   // rate
-            0.0,    // dividend_yield
-            OptionType::PUT,
-            market_price
-        });
+        batch.push_back(IVQuery(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, market_price));
     }
 
     IVSolverFDMConfig config;
@@ -549,12 +542,12 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
 
     IVSolverFDM solver(config);
     for (auto _ : state) {
-        std::vector<IVResult> results;
+        std::vector<std::expected<IVSuccess, IVError>> results;
         results.reserve(batch_size);
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            results.push_back(solver.solve(params));
+            results.push_back(solver.solve_impl(params));
         }
 
         benchmark::DoNotOptimize(results);

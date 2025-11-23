@@ -872,39 +872,39 @@ The IV solver finds the volatility parameter that makes the American option's th
 ### Basic Usage
 
 ```cpp
-#include "src/cpp/iv_solver.hpp"
+#include "src/option/iv_solver_fdm.hpp"
 
 // Setup option parameters
-mango::IVParams params{
-    .spot_price = 100.0,
+mango::OptionSpec spec{
+    .spot = 100.0,
     .strike = 100.0,
-    .time_to_maturity = 1.0,
-    .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = false  // American put
+    .maturity = 1.0,
+    .rate = 0.05,
+    .dividend_yield = 0.02,
+    .type = OptionType::PUT
 };
 
+mango::IVQuery query{.option = spec, .market_price = 10.45};
+
 // Configure solver (optional - uses defaults if not specified)
-mango::IVConfig config{
+mango::IVSolverFDMConfig config{
     .root_config = mango::RootFindingConfig{
         .max_iter = 100,
         .tolerance = 1e-6
-    },
-    .grid_n_space = 101,
-    .grid_n_time = 1000,
-    .grid_s_max = 200.0
+    }
 };
 
 // Solve for implied volatility
-mango::IVSolver solver(params, config);
-mango::IVResult result = solver.solve();
+mango::FDMIVSolver solver(config);
+auto result = solver.solve_impl(query);
 
-if (result.converged) {
-    std::cout << "Implied Volatility: " << result.implied_vol << "\n";
-    std::cout << "Iterations: " << result.iterations << "\n";
-    std::cout << "Final Error: " << result.final_error << "\n";
+if (result.has_value()) {
+    std::cout << "Implied Volatility: " << result->implied_vol << "\n";
+    std::cout << "Iterations: " << result->iterations << "\n";
+    std::cout << "Final Error: " << result->final_error << "\n";
 } else {
-    std::cerr << "Failed to converge: " << *result.failure_reason << "\n";
+    std::cerr << "Error [" << static_cast<int>(result.error().code) << "]: "
+              << result.error().message << "\n";
 }
 ```
 
@@ -919,13 +919,16 @@ mango::RootFindingConfig root_config{
 };
 ```
 
-**Grid Configuration:**
+**Solver Configuration:**
 ```cpp
-mango::IVConfig config{
+mango::IVSolverFDMConfig config{
     .root_config = root_config,
-    .grid_n_space = 101,       // Spatial grid points
-    .grid_n_time = 1000,       // Time steps
-    .grid_s_max = 200.0        // Maximum spot price
+    .use_manual_grid = false,  // Use auto-estimation (default)
+    .grid_n_space = 101,       // Manual mode: spatial grid points
+    .grid_n_time = 1000,       // Manual mode: time steps
+    .grid_x_min = -3.0,        // Manual mode: minimum log-moneyness
+    .grid_x_max = 3.0,         // Manual mode: maximum log-moneyness
+    .grid_alpha = 2.0          // Manual mode: sinh clustering parameter
 };
 ```
 
@@ -1000,42 +1003,82 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
 - `validation_error`: Input validation failures (error_code, param_value)
 - `convergence_failed`: Non-convergence diagnostics (iterations, final_error)
 
-### Error Handling
+### Error Handling with std::expected
 
+The IV solver uses C++23 `std::expected` for type-safe error handling:
+
+**Error Codes:**
+- `IVErrorCode::NegativeSpot` - Spot price must be positive
+- `IVErrorCode::NegativeStrike` - Strike price must be positive
+- `IVErrorCode::NegativeMaturity` - Time to maturity must be positive
+- `IVErrorCode::NegativeMarketPrice` - Market price must be positive
+- `IVErrorCode::ArbitrageViolation` - Price violates arbitrage bounds
+- `IVErrorCode::MaxIterationsExceeded` - Solver did not converge
+- `IVErrorCode::BracketingFailed` - Root not bracketed
+- `IVErrorCode::InvalidGridConfig` - Invalid FDM grid parameters
+
+**Example error handling:**
 ```cpp
-IVResult result = solver.solve();
+auto result = solver.solve_impl(query);
 
-if (!result.converged) {
-    // Check failure reason
-    if (result.failure_reason.has_value()) {
-        std::cerr << "Error: " << *result.failure_reason << "\n";
-    }
+if (!result.has_value()) {
+    const auto& error = result.error();
 
-    // Check if it was a convergence issue vs validation error
-    if (result.iterations >= config.root_config.max_iter) {
-        std::cerr << "Reached max iterations without converging\n";
+    switch (error.code) {
+        case IVErrorCode::NegativeSpot:
+            std::cerr << "Invalid spot price\n";
+            break;
+        case IVErrorCode::MaxIterationsExceeded:
+            std::cerr << "Failed to converge after " << error.iterations << " iterations\n";
+            std::cerr << "Final error: " << error.final_error << "\n";
+            if (error.last_vol) {
+                std::cerr << "Last volatility tried: " << *error.last_vol << "\n";
+            }
+            break;
+        case IVErrorCode::ArbitrageViolation:
+            std::cerr << "Arbitrage violation: " << error.message << "\n";
+            break;
+        default:
+            std::cerr << "Error: " << error.message << "\n";
     }
 }
 ```
 
 ### Example: Batch Processing
 
+**Using batch API:**
+```cpp
+std::vector<IVQuery> queries = {...};
+FDMIVSolver solver(config);
+auto batch = solver.solve_batch_impl(queries);
+
+std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
+std::cout << "Failed: " << batch.failed_count << "\n";
+
+for (size_t i = 0; i < batch.results.size(); ++i) {
+    if (batch.results[i].has_value()) {
+        std::cout << "Query " << i << ": σ = " << batch.results[i]->implied_vol << "\n";
+    } else {
+        std::cerr << "Query " << i << " failed: " << batch.results[i].error().message << "\n";
+    }
+}
+```
+
+**Manual loop (for legacy code):**
 ```cpp
 // Process multiple options
-std::vector<IVParams> option_params = load_market_data();
-std::vector<IVResult> results;
+std::vector<IVQuery> queries = load_market_data();
+std::vector<std::expected<IVSuccess, IVError>> results;
 
-for (const auto& params : option_params) {
-    mango::IVSolver solver(params, config);
-    results.push_back(solver.solve());
+FDMIVSolver solver(config);
+for (const auto& query : queries) {
+    results.push_back(solver.solve_impl(query));
 }
 
 // Report statistics
 size_t converged = 0;
-double total_time = 0.0;
-
 for (const auto& result : results) {
-    if (result.converged) {
+    if (result.has_value()) {
         converged++;
     }
 }
@@ -1248,20 +1291,25 @@ if (result.has_value()) {
 ```cpp
 #include "src/option/iv_solver_fdm.hpp"
 
-mango::IVParams params{
-    .spot_price = 100.0,
+mango::OptionSpec spec{
+    .spot = 100.0,
     .strike = 100.0,
-    .time_to_maturity = 1.0,
-    .risk_free_rate = 0.05,
-    .market_price = 10.45,
-    .is_call = false
+    .maturity = 1.0,
+    .rate = 0.05,
+    .dividend_yield = 0.02,
+    .type = OptionType::PUT
 };
 
-mango::FDMIVSolver solver(params, mango::IVConfig{});
-mango::IVResult result = solver.solve();
+mango::IVQuery query{.option = spec, .market_price = 10.45};
 
-if (result.converged) {
-    std::cout << "Implied Vol: " << result.implied_vol << "\n";
+mango::FDMIVSolver solver(mango::IVSolverFDMConfig{});
+auto result = solver.solve_impl(query);
+
+if (result.has_value()) {
+    std::cout << "Implied Vol: " << result->implied_vol << "\n";
+    std::cout << "Iterations: " << result->iterations << "\n";
+} else {
+    std::cerr << "Error: " << result.error().message << "\n";
 }
 ```
 

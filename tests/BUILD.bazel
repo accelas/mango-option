@@ -154,6 +154,18 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
+cc_test(
+    name = "iv_solver_expected_test",
+    srcs = ["iv_solver_expected_test.cc"],
+    deps = [
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_result",
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
 # DISABLED: Pre-existing failure (solution[25] == 0 instead of 2.0)
 # cc_test(
 #     name = "temporal_event_test",
@@ -606,5 +618,70 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_test(
+    name = "normalized_solver_regression_test",
+    size = "small",
+    srcs = ["normalized_solver_regression_test.cc"],
+    deps = [
+        "//src/option:american_option_batch",
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
+    name = "normalized_chain_accuracy_test",
+    srcs = [
+        "normalized_chain_accuracy_test.cc",
+        "quantlib_validation_framework.hpp",
+    ],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver_interpolated",
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    linkopts = ["-lQuantLib"],
+    copts = ["-std=c++23"],
+    size = "large",
+    timeout = "long",
+)
+
+cc_test(
+    name = "iv_error_types_test",
+    srcs = ["iv_error_types_test.cc"],
+    deps = [
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "iv_result_test",
+    srcs = ["iv_result_test.cc"],
+    deps = [
+        "//src/option:iv_result",
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "iv_solver_integration_test",
+    srcs = ["iv_solver_integration_test.cc"],
+    deps = [
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_result",
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+>>>>>>> origin/main
