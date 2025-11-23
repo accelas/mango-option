@@ -23,6 +23,42 @@ namespace {
 constexpr int kWarmupIterations = 5;
 constexpr double kMinBenchmarkTimeSec = 2.0;
 
+// ============================================================================
+// Golden Values (QuantLib FDM with 200 space × 2000 time grid)
+// ============================================================================
+// These values provide accuracy validation for README benchmarks
+// Tolerance: 0.1% relative error or $0.01 absolute error
+
+// BM_README_AmericanSingle: ATM 1yr put (S=100, K=100, T=1.0, r=0.05, q=0.02, σ=0.20)
+constexpr double GOLDEN_AMERICAN_SINGLE = 6.65996306;
+
+// BM_README_AmericanBatch64 / Sequential: First 5 strikes (K = 90.0 + i*0.5, T=1.0)
+// Used for validation sanity check (full batch has 64 strikes)
+constexpr double GOLDEN_BATCH_SAMPLE[5] = {
+    2.82114033,  // K=90.0
+    3.62668720,  // K=90.5
+    4.47960317,  // K=91.0
+    5.37850090,  // K=91.5
+    6.32175050   // K=92.0
+};
+
+// Validation tolerance
+constexpr double GOLDEN_REL_TOL = 0.001;  // 0.1%
+constexpr double GOLDEN_ABS_TOL = 0.01;   // $0.01
+
+inline void validate_price(const char* benchmark_name, double computed, double expected) {
+    double abs_error = std::abs(computed - expected);
+    double rel_error = abs_error / expected;
+
+    if (abs_error > GOLDEN_ABS_TOL && rel_error > GOLDEN_REL_TOL) {
+        throw std::runtime_error(std::format(
+            "{}: Price validation failed! Expected={:.6f}, Computed={:.6f}, "
+            "AbsErr={:.6f} (tol={:.2f}), RelErr={:.3f}% (tol={:.1f}%)",
+            benchmark_name, expected, computed, abs_error, GOLDEN_ABS_TOL,
+            rel_error * 100.0, GOLDEN_REL_TOL * 100.0));
+    }
+}
+
 double analytic_bs_price(double S, double K, double tau, double sigma, double r, OptionType type) {
     if (tau <= 0.0) {
         return (type == OptionType::CALL) ? std::max(S - K, 0.0) : std::max(K - S, 0.0);
@@ -157,12 +193,11 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     };
 
     auto run_once = [&]() {
-        auto result = solver.solve(query);
-        if (!result.converged) {
-            throw std::runtime_error(
-                result.failure_reason.value_or("Fast IV solver failed"));
+        auto result = solver.solve_impl(query);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(result.implied_vol);
+        benchmark::DoNotOptimize(result->implied_vol);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
@@ -214,11 +249,17 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
+        return price;
     };
 
+    // Warmup iterations
     for (int i = 0; i < kWarmupIterations; ++i) {
         run_once();
     }
+
+    // Validate accuracy against QuantLib golden value
+    double validation_price = run_once();
+    validate_price("BM_README_AmericanSingle", validation_price, GOLDEN_AMERICAN_SINGLE);
 
     for (auto _ : state) {
         run_once();
@@ -250,9 +291,11 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
         ));
     }
 
-    auto run_once = [&]() {
+    auto run_once = [&]() -> double {
+        double first_price = 0.0;
         // Sequential processing - no batch API
-        for (const auto& params : batch) {
+        for (size_t idx = 0; idx < batch.size(); ++idx) {
+            const auto& params = batch[idx];
             auto [grid_spec, n_time] = estimate_grid_for_option(params);
             size_t n = grid_spec.n_points();
             std::pmr::synchronized_pool_resource pool;
@@ -270,12 +313,22 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
             }
             double price = result->value_at(params.spot);
             benchmark::DoNotOptimize(price);
+
+            // Capture first price for validation
+            if (idx == 0) {
+                first_price = price;
+            }
         }
+        return first_price;
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
         run_once();
     }
+
+    // Validate first strike as sanity check
+    double validation_price = run_once();
+    validate_price("BM_README_AmericanSequential[K=90.0]", validation_price, GOLDEN_BATCH_SAMPLE[0]);
 
     for (auto _ : state) {
         run_once();
@@ -310,20 +363,31 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     BatchAmericanOptionSolver solver;
 
-    auto run_once = [&]() {
+    auto run_once = [&]() -> double {
         // Use per-option grids with OpenMP parallelization
         auto batch_result = solver.solve_batch(batch, false);  // use_shared_grid=false (per-option grids)
-        for (const auto& res : batch_result.results) {
+        double first_price = 0.0;
+        for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
+            const auto& res = batch_result.results[idx];
             if (!res) {
                 throw std::runtime_error(res.error().message);
             }
+            // Capture first price for validation
+            if (idx == 0) {
+                first_price = res->value();
+            }
         }
         benchmark::DoNotOptimize(batch_result);
+        return first_price;
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
         run_once();
     }
+
+    // Validate first strike as sanity check
+    double validation_price = run_once();
+    validate_price("BM_README_AmericanBatch64[K=90.0]", validation_price, GOLDEN_BATCH_SAMPLE[0]);
 
     for (auto _ : state) {
         run_once();
@@ -364,12 +428,11 @@ static void BM_README_IV_FDM(benchmark::State& state) {
 
     IVSolverFDM solver(config);
     auto run_once = [&]() {
-        auto result = solver.solve(query);
-        if (!result.converged) {
-            throw std::runtime_error(
-                result.failure_reason.value_or("FDM IV solver failed"));
+        auto result = solver.solve_impl(query);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(result.implied_vol);
+        benchmark::DoNotOptimize(result->implied_vol);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
