@@ -1,6 +1,32 @@
 /**
  * @file iv_solver_fdm.hpp
- * @brief FDM-based implied volatility solver
+ * @brief FDM-based implied volatility solver with std::expected error handling
+ *
+ * The FDMIVSolver uses finite difference methods (FDM) to price American options
+ * and Brent's root-finding method to solve for implied volatility.
+ *
+ * API (C++23):
+ * - solve_impl() → std::expected<IVSuccess, IVError>
+ * - solve_batch_impl() → BatchIVResult
+ * - solve_legacy() → IVResult (deprecated)
+ *
+ * Error Handling:
+ * - Type-safe error codes via IVErrorCode enum
+ * - Detailed diagnostics (iterations, final_error, last_vol)
+ * - Monadic validation chains with .and_then()
+ *
+ * Example:
+ * @code
+ * IVQuery query{...};
+ * FDMIVSolver solver(config);
+ * auto result = solver.solve_impl(query);
+ *
+ * if (result.has_value()) {
+ *     std::cout << "IV: " << result->implied_vol << "\n";
+ * } else {
+ *     std::cerr << "Error: " << result.error().message << "\n";
+ * }
+ * @endcode
  */
 
 #pragma once
@@ -118,7 +144,18 @@ public:
     /// American option's theoretical price match the market price.
     ///
     /// @param query Option specification and market price
-    /// @return std::expected<IVSuccess, IVError> with convergence result or error
+    /// @return std::expected<IVSuccess, IVError>
+    ///         - Success: IVSuccess with implied_vol, iterations, final_error, vega (optional)
+    ///         - Failure: IVError with error code, message, and diagnostics
+    ///
+    /// Error codes:
+    /// - NegativeSpot, NegativeStrike, NegativeMaturity, NegativeMarketPrice: Validation errors
+    /// - ArbitrageViolation: Price violates arbitrage bounds or intrinsic value
+    /// - MaxIterationsExceeded: Brent solver did not converge
+    /// - BracketingFailed: Root not bracketed by initial bounds
+    /// - InvalidGridConfig: FDM grid parameters invalid (manual mode only)
+    ///
+    /// @note Uses monadic validation: params → arbitrage → grid → Brent solving
     std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query);
 
     /// Solve for implied volatility (batch with OpenMP)
