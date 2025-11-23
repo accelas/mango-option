@@ -281,11 +281,11 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
                 obs.market_price
             };
 
-            auto result = iv_solver.solve(query);
+            auto result = iv_solver.solve_impl(query);
 
-            if (result.converged) {
+            if (result.has_value()) {
                 converged++;
-                total_error += std::abs(result.implied_vol - obs.true_vol);
+                total_error += std::abs(result->implied_vol - obs.true_vol);
             }
         }
 
@@ -344,7 +344,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         size_t converged = 0;
         for (const auto& obs : observations) {
             IVQuery query{obs.spot, obs.strike, obs.maturity, obs.rate, 0.0, obs.type, obs.market_price};
-            if (iv_solver.solve(query).converged) {
+            if (iv_solver.solve_impl(query).has_value()) {
                 converged++;
             }
         }
