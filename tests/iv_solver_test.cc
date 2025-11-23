@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include "src/option/iv_solver_fdm.hpp"
 #include <cmath>
 
@@ -45,13 +46,13 @@ TEST_F(IVSolverTest, ConstructionSucceeds) {
 TEST_F(IVSolverTest, ATMPutIVCalculation) {
     IVSolverFDM solver(config);
 
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
     // Should converge with real implementation
-    EXPECT_TRUE(result.converged);
-    EXPECT_GT(result.implied_vol, 0.15);
-    EXPECT_LT(result.implied_vol, 0.35);
-    EXPECT_GT(result.iterations, 0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.15);
+    EXPECT_LT(result->implied_vol, 0.35);
+    EXPECT_GT(result->iterations, 0);
 }
 
 // Test 3: Invalid parameters should be caught
@@ -59,10 +60,11 @@ TEST_F(IVSolverTest, InvalidSpotPrice) {
     query.spot = -100.0;  // Invalid
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
+    EXPECT_FALSE(result.error().message.empty());
 }
 
 // Test 4: Invalid strike price
@@ -70,10 +72,11 @@ TEST_F(IVSolverTest, InvalidStrike) {
     query.strike = 0.0;  // Invalid
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NegativeStrike);
+    EXPECT_FALSE(result.error().message.empty());
 }
 
 // Test 5: Invalid time to maturity
@@ -81,10 +84,11 @@ TEST_F(IVSolverTest, InvalidTimeToMaturity) {
     query.maturity = -1.0;  // Invalid
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NegativeMaturity);
+    EXPECT_FALSE(result.error().message.empty());
 }
 
 // Test 6: Invalid market price
@@ -92,10 +96,11 @@ TEST_F(IVSolverTest, InvalidMarketPrice) {
     query.market_price = -5.0;  // Invalid
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::NegativeMarketPrice);
+    EXPECT_FALSE(result.error().message.empty());
 }
 
 // Test 7: ITM put IV calculation
@@ -104,11 +109,11 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
     query.market_price = 15.0;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_TRUE(result.converged);
-    EXPECT_GT(result.implied_vol, 0.0);
-    EXPECT_LT(result.implied_vol, 1.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 1.0);
 }
 
 // Test 8: OTM put IV calculation
@@ -117,11 +122,11 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
     query.market_price = 2.5;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_TRUE(result.converged);
-    EXPECT_GT(result.implied_vol, 0.0);
-    EXPECT_LT(result.implied_vol, 1.0);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 1.0);
 }
 
 // Test 9: Deep ITM put (tests adaptive grid bounds)
@@ -136,12 +141,12 @@ TEST_F(IVSolverTest, DISABLED_DeepITMPutIVCalculation) {
     query.market_price = 51.0;  // UNREALISTIC: Implies only $1 time value
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
     // Should converge with adaptive grid
-    EXPECT_TRUE(result.converged) << "Deep ITM should converge with adaptive grid";
-    EXPECT_GT(result.implied_vol, 0.0);
-    EXPECT_LT(result.implied_vol, 1.0);
+    ASSERT_TRUE(result.has_value()) << "Deep ITM should converge with adaptive grid";
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 1.0);
 }
 
 // Test 10: Deep OTM put (tests adaptive grid bounds)
@@ -152,12 +157,12 @@ TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
     query.market_price = 1.0;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
     // Should converge with adaptive grid
-    EXPECT_TRUE(result.converged) << "Deep OTM should converge with adaptive grid";
-    EXPECT_GT(result.implied_vol, 0.0);
-    EXPECT_LT(result.implied_vol, 1.5);
+    ASSERT_TRUE(result.has_value()) << "Deep OTM should converge with adaptive grid";
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 1.5);
 }
 
 // Test 11: Call option IV calculation
@@ -167,12 +172,12 @@ TEST_F(IVSolverTest, ATMCallIVCalculation) {
     query.market_price = 10.0;  // ATM call price
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_TRUE(result.converged) << "ATM call should converge";
+    ASSERT_TRUE(result.has_value()) << "ATM call should converge";
     // Relaxed lower bound slightly due to minor numerical differences after CRTP refactoring
-    EXPECT_GT(result.implied_vol, 0.14);
-    EXPECT_LT(result.implied_vol, 0.35);
+    EXPECT_GT(result->implied_vol, 0.14);
+    EXPECT_LT(result->implied_vol, 0.35);
 }
 
 // Test 12: Zero grid_n_space validation (manual mode)
@@ -183,11 +188,11 @@ TEST_F(IVSolverTest, InvalidGridNSpace) {
     config.grid_x_max = 3.0;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
-    EXPECT_EQ(result.failure_reason.value(), "Manual grid: n_space must be positive");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_FALSE(result.error().message.empty());
+    EXPECT_THAT(result.error().message, testing::HasSubstr("Manual grid: n_space must be positive"));
 }
 
 // Test 13: Zero grid_n_time validation (manual mode)
@@ -199,11 +204,11 @@ TEST_F(IVSolverTest, InvalidGridNTime) {
     config.grid_x_max = 3.0;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
-    EXPECT_EQ(result.failure_reason.value(), "Manual grid: n_time must be positive");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_FALSE(result.error().message.empty());
+    EXPECT_THAT(result.error().message, testing::HasSubstr("Manual grid: n_time must be positive"));
 }
 
 // Test 14: Invalid manual grid validation (x_min >= x_max)
@@ -214,11 +219,11 @@ TEST_F(IVSolverTest, InvalidManualGrid) {
     config.grid_n_space = 101;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_FALSE(result.converged);
-    EXPECT_TRUE(result.failure_reason.has_value());
-    EXPECT_EQ(result.failure_reason.value(), "Manual grid: x_min must be < x_max");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_FALSE(result.error().message.empty());
+    EXPECT_THAT(result.error().message, testing::HasSubstr("Manual grid: x_min must be < x_max"));
 }
 
 // Test 15: Manual grid with 201 points (verify larger grids work)
@@ -231,12 +236,12 @@ TEST_F(IVSolverTest, DISABLED_ManualGrid201Points) {
     config.grid_alpha = 2.0;
 
     IVSolverFDM solver(config);
-    IVResult result = solver.solve(query);
+    auto result = solver.solve_impl(query);
 
-    EXPECT_TRUE(result.converged) << "Failed: " << result.failure_reason.value_or("unknown");
-    if (result.converged) {
-        EXPECT_GT(result.implied_vol, 0.1);
-        EXPECT_LT(result.implied_vol, 0.5);
-        EXPECT_GT(result.iterations, 0);
+    ASSERT_TRUE(result.has_value()) << "Failed: " << (result.has_value() ? "unknown" : result.error().message);
+    if (result.has_value()) {
+        EXPECT_GT(result->implied_vol, 0.1);
+        EXPECT_LT(result->implied_vol, 0.5);
+        EXPECT_GT(result->iterations, 0);
     }
 }
