@@ -10,6 +10,17 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_axes_test",
+    size = "small",
+    srcs = ["price_table_axes_test.cc"],
+    deps = [
+        "//src/option:price_table_axes",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "grid_test",
     srcs = ["grid_test.cc"],
     deps = [

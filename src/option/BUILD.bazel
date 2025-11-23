@@ -1,4 +1,10 @@
 cc_library(
+    name = "price_table_axes",
+    hdrs = ["price_table_axes.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
