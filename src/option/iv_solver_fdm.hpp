@@ -136,10 +136,6 @@ private:
     IVSolverFDMConfig config_;
     mutable std::optional<SolverError> last_solver_error_;
 
-    /// Validate input parameters
-    /// @return expected success or validation error message
-    std::expected<void, std::string> validate_query(const IVQuery& query) const;
-
     /// Estimate upper bound for volatility search using intrinsic value approximation
     /// @return Upper bound estimate (typically 2.0-3.0 for reasonable markets)
     double estimate_upper_bound(const IVQuery& query) const;
@@ -199,9 +195,13 @@ private:
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_arbitrage_bounds(const IVQuery& query) const;
 
-    /// Validate query (composite of all validation stages)
+    /// Validate grid parameters (FDM-specific, only when manual grid mode enabled)
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_query_monadic(const IVQuery& query) const;
+    std::expected<std::monostate, IVError> validate_grid_params() const;
+
+    /// Validate query (composite of all validation stages: params → arbitrage → grid)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_query(const IVQuery& query) const;
 
     /// Run Brent solver to find implied volatility
     /// @return IVSuccess with implied volatility or IVError on failure
