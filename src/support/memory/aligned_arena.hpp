@@ -46,6 +46,10 @@ private:
     std::vector<std::byte> buffer_;
     size_t align_;
     size_t offset_;
+
+    // Use weak_ptr instead of shared_ptr to prevent circular references.
+    // The arena is owned by external shared_ptr returned from create().
+    // This weak_ptr allows share() to return a shared_ptr without creating cycles.
     std::weak_ptr<AlignedArena> self_;
 };
 

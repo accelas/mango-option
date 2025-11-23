@@ -28,20 +28,20 @@ AlignedArena::create(size_t bytes, size_t align) {
 double* AlignedArena::allocate(size_t count) {
     const size_t bytes = count * sizeof(double);
 
-    // Calculate aligned start from buffer base
-    uintptr_t buffer_addr = reinterpret_cast<uintptr_t>(buffer_.data());
-    uintptr_t aligned_base = (buffer_addr + align_ - 1) & ~(align_ - 1);
-    size_t base_offset = aligned_base - buffer_addr;
+    // Calculate current position in buffer
+    uintptr_t current_addr = reinterpret_cast<uintptr_t>(buffer_.data()) + offset_;
 
-    // Align current offset
-    size_t aligned_offset = base_offset + offset_;
+    // Align the current position to the required boundary
+    uintptr_t aligned_addr = (current_addr + align_ - 1) & ~(align_ - 1);
+    size_t aligned_offset = aligned_addr - reinterpret_cast<uintptr_t>(buffer_.data());
 
+    // Check if we have enough space after alignment
     if (aligned_offset + bytes > buffer_.size()) {
         return nullptr;  // Out of memory
     }
 
     double* ptr = reinterpret_cast<double*>(buffer_.data() + aligned_offset);
-    offset_ += bytes;
+    offset_ = aligned_offset + bytes;  // Update offset to end of allocation
 
     return ptr;
 }
