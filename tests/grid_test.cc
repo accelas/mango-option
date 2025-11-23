@@ -98,6 +98,18 @@ TEST(GridViewTest, UniformGridDetection) {
     EXPECT_FALSE(log_grid.view().is_uniform());
 }
 
+TEST(MultiSinhClusterTest, ClusterConstruction) {
+    mango::MultiSinhCluster cluster{
+        .center_x = 0.0,
+        .alpha = 2.0,
+        .weight = 1.0
+    };
+
+    EXPECT_DOUBLE_EQ(cluster.center_x, 0.0);
+    EXPECT_DOUBLE_EQ(cluster.alpha, 2.0);
+    EXPECT_DOUBLE_EQ(cluster.weight, 1.0);
+}
+
 TEST(GridViewTest, SpanAndDataAccess) {
     std::vector<double> data = {1.0, 2.0, 3.0};
     auto view = mango::GridView<>(std::span<const double>(data));

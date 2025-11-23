@@ -17,6 +17,17 @@
 
 namespace mango {
 
+/// Multi-sinh cluster: specifies a concentration region in composite grids
+///
+/// Used to concentrate grid points at multiple locations (e.g., ATM and deep ITM)
+/// while still using a single shared PDE grid for batch solving.
+template<typename T = double>
+struct MultiSinhCluster {
+    T center_x;   ///< Log-moneyness center for this cluster
+    T alpha;      ///< Concentration strength (must be > 0)
+    T weight;     ///< Relative contribution (must be > 0)
+};
+
 // Forward declarations
 template<typename T = double>
 class GridBuffer;
