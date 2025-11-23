@@ -193,12 +193,11 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     };
 
     auto run_once = [&]() {
-        auto result = solver.solve(query);
-        if (!result.converged) {
-            throw std::runtime_error(
-                result.failure_reason.value_or("Fast IV solver failed"));
+        auto result = solver.solve_impl(query);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(result.implied_vol);
+        benchmark::DoNotOptimize(result->implied_vol);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
@@ -429,12 +428,11 @@ static void BM_README_IV_FDM(benchmark::State& state) {
 
     IVSolverFDM solver(config);
     auto run_once = [&]() {
-        auto result = solver.solve(query);
-        if (!result.converged) {
-            throw std::runtime_error(
-                result.failure_reason.value_or("FDM IV solver failed"));
+        auto result = solver.solve_impl(query);
+        if (!result.has_value()) {
+            throw std::runtime_error(result.error().message);
         }
-        benchmark::DoNotOptimize(result.implied_vol);
+        benchmark::DoNotOptimize(result->implied_vol);
     };
 
     for (int i = 0; i < kWarmupIterations; ++i) {
