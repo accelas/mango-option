@@ -12,8 +12,7 @@ TEST(PriceTableBuilderTest, ConstructFromConfig) {
     SUCCEED();
 }
 
-// REGRESSION TEST: Verify build() returns "not yet implemented" for all dimensions
-// Issue: build() is incomplete, test documents this limitation
+// Integration test: Verify build() creates valid surface
 TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     PriceTableConfig config;
     PriceTableBuilder<4> builder(config);
@@ -24,15 +23,12 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
 
-    // NOTE: build() is a skeleton implementation
-    // Will be completed in Phases 8-10 of price table refactor
-    // For now, verify it returns expected error
+    // Full pipeline should now succeed
     auto result = builder.build(axes);
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "PriceTableBuilder::build() not yet implemented");
+    EXPECT_TRUE(result.has_value()) << "Build failed: " << result.error();
 }
 
-// REGRESSION TEST: build() incomplete for 2D
+// REGRESSION TEST: build() only supports N=4
 TEST(PriceTableBuilderTest, Build2DNotImplemented) {
     PriceTableConfig config;
     PriceTableBuilder<2> builder(config);
@@ -43,10 +39,10 @@ TEST(PriceTableBuilderTest, Build2DNotImplemented) {
 
     auto result = builder.build(axes);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "PriceTableBuilder::build() not yet implemented");
+    EXPECT_EQ(result.error(), "build() only supports N=4");
 }
 
-// REGRESSION TEST: build() incomplete for 3D
+// REGRESSION TEST: build() only supports N=4
 TEST(PriceTableBuilderTest, Build3DNotImplemented) {
     PriceTableConfig config;
     PriceTableBuilder<3> builder(config);
@@ -58,10 +54,10 @@ TEST(PriceTableBuilderTest, Build3DNotImplemented) {
 
     auto result = builder.build(axes);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "PriceTableBuilder::build() not yet implemented");
+    EXPECT_EQ(result.error(), "build() only supports N=4");
 }
 
-// REGRESSION TEST: build() incomplete for 5D
+// REGRESSION TEST: build() only supports N=4
 TEST(PriceTableBuilderTest, Build5DNotImplemented) {
     PriceTableConfig config;
     PriceTableBuilder<5> builder(config);
@@ -75,7 +71,7 @@ TEST(PriceTableBuilderTest, Build5DNotImplemented) {
 
     auto result = builder.build(axes);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "PriceTableBuilder::build() not yet implemented");
+    EXPECT_EQ(result.error(), "build() only supports N=4");
 }
 
 TEST(PriceTableBuilderTest, MakeBatchIteratesVolatilityAndRateOnly) {

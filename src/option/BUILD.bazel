@@ -56,6 +56,7 @@ cc_library(
         ":american_option_batch",
         ":recursion_helpers",
         "//src/math:cubic_spline_solver",
+        "//src/math:bspline_nd_separable",
         "//src/support:aligned_arena",
         "//common:ivcalc_trace_hdr",
     ],

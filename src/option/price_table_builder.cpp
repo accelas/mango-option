@@ -1,6 +1,7 @@
 #include "src/option/price_table_builder.hpp"
 #include "src/option/recursion_helpers.hpp"
 #include "src/math/cubic_spline_solver.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include "src/support/memory/aligned_arena.hpp"
 #include "common/ivcalc_trace.h"
 #include <cmath>
@@ -15,15 +16,52 @@ PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
 template <size_t N>
 std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
 PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
-    // TODO: Implement full pipeline (Phases 8-10)
-    // This skeleton will be completed in subsequent phases:
-    // - Phase 8: Parallel PDE solve batch
-    // - Phase 9: N-dimensional B-spline fitting
-    // - Phase 10: PriceTableSurface construction
-    //
-    // For now, return error to indicate incomplete implementation.
-    // Tests explicitly document this is a skeleton.
-    return std::unexpected("PriceTableBuilder::build() not yet implemented");
+    if constexpr (N != 4) {
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, N, 0);
+        return std::unexpected("build() only supports N=4");
+    }
+
+    // Step 1: Validate axes
+    auto axes_valid = axes.validate();
+    if (!axes_valid.has_value()) {
+        return std::unexpected("Invalid axes: " + axes_valid.error());
+    }
+
+    // Step 2: Generate batch (Nσ × Nr entries)
+    auto batch_params = make_batch(axes);
+    if (batch_params.empty()) {
+        return std::unexpected("make_batch returned empty batch");
+    }
+
+    // Step 3: Solve batch with snapshot registration
+    auto batch_result = solve_batch(batch_params, axes);
+    if (batch_result.failed_count > 0) {
+        return std::unexpected(
+            "solve_batch had " + std::to_string(batch_result.failed_count) +
+            " failures out of " + std::to_string(batch_result.results.size()));
+    }
+
+    // Step 4: Extract tensor via interpolation
+    auto tensor_result = extract_tensor(batch_result, axes);
+    if (!tensor_result.has_value()) {
+        return std::unexpected("extract_tensor failed: " + tensor_result.error());
+    }
+
+    // Step 5: Fit B-spline coefficients
+    auto coeffs_result = fit_coeffs(tensor_result.value(), axes);
+    if (!coeffs_result.has_value()) {
+        return std::unexpected("fit_coeffs failed: " + coeffs_result.error());
+    }
+
+    // Step 6: Create metadata
+    PriceTableMetadata metadata{
+        .K_ref = config_.K_ref,
+        .dividend_yield = config_.dividend_yield,
+        .discrete_dividends = config_.discrete_dividends
+    };
+
+    // Step 7: Build immutable surface
+    return PriceTableSurface<N>::build(axes, std::move(coeffs_result.value()), metadata);
 }
 
 template <size_t N>
@@ -84,23 +122,9 @@ PriceTableBuilder<N>::solve_batch(
         result.failed_count = batch.size();
         return result;
     } else {
-        // Configure solver with grid accuracy from config
+        // Configure solver with default grid accuracy
+        // The batch solver will use auto-estimation for grid sizing
         BatchAmericanOptionSolver solver;
-
-        // Set grid accuracy parameters based on config's grid_estimator
-        GridAccuracyParams accuracy;
-        // Use the grid estimator's bounds and size to configure accuracy
-        // The normalized chain solver will use these parameters
-        accuracy.min_spatial_points = config_.grid_estimator.n_points();
-        accuracy.max_spatial_points = config_.grid_estimator.n_points();
-        accuracy.max_time_steps = config_.n_time;
-
-        // Transfer alpha parameter if grid is sinh-spaced
-        if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-            accuracy.alpha = config_.grid_estimator.concentration();
-        }
-
-        solver.set_grid_accuracy(accuracy);
 
         // Register maturity grid as snapshot times
         // This enables extract_tensor to access surfaces at each maturity point
@@ -208,6 +232,52 @@ PriceTableBuilder<N>::extract_tensor(
 
         return tensor;
     }
+}
+
+template <size_t N>
+std::expected<std::vector<double>, std::string>
+PriceTableBuilder<N>::fit_coeffs(
+    const PriceTensor<N>& tensor,
+    const PriceTableAxes<N>& axes) const
+{
+    if constexpr (N != 4) {
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, N, 0);
+        return std::unexpected(
+            "fit_coeffs only supports N=4 dimensions. Requested N=" +
+            std::to_string(N));
+    }
+
+    // Extract grids for BSplineNDSeparable
+    std::array<std::vector<double>, N> grids;
+    for (size_t i = 0; i < N; ++i) {
+        grids[i] = axes.grids[i];
+    }
+
+    // Create fitter
+    auto fitter_result = BSplineNDSeparable<double, N>::create(std::move(grids));
+    if (!fitter_result.has_value()) {
+        return std::unexpected("Failed to create fitter: " + fitter_result.error());
+    }
+
+    // Extract values from tensor (convert mdspan to vector)
+    size_t total_points = axes.total_points();
+    std::vector<double> values;
+    values.reserve(total_points);
+
+    // Extract in row-major order using for_each_axis_index
+    if constexpr (N == 4) {
+        for_each_axis_index<0>(axes, [&](const std::array<size_t, N>& indices) {
+            values.push_back(tensor.view[indices[0], indices[1], indices[2], indices[3]]);
+        });
+    }
+
+    // Fit B-spline coefficients
+    auto fit_result = fitter_result->fit(values);
+    if (!fit_result.has_value()) {
+        return std::unexpected("B-spline fitting failed: " + fit_result.error());
+    }
+
+    return std::move(fit_result.value().coefficients);
 }
 
 // Explicit instantiations

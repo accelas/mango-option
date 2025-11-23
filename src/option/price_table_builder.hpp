@@ -50,6 +50,13 @@ public:
         return extract_tensor(batch, axes);
     }
 
+    /// For testing: expose fit_coeffs method
+    [[nodiscard]] std::expected<std::vector<double>, std::string> fit_coeffs_for_testing(
+        const PriceTensor<N>& tensor,
+        const PriceTableAxes<N>& axes) const {
+        return fit_coeffs(tensor, axes);
+    }
+
 private:
     /// Generate batch of AmericanOptionParams from axes
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
@@ -63,6 +70,11 @@ private:
     /// Extract PriceTensor from batch results using cubic spline interpolation
     [[nodiscard]] std::expected<PriceTensor<N>, std::string> extract_tensor(
         const BatchAmericanOptionResult& batch,
+        const PriceTableAxes<N>& axes) const;
+
+    /// Fit B-spline coefficients from tensor
+    [[nodiscard]] std::expected<std::vector<double>, std::string> fit_coeffs(
+        const PriceTensor<N>& tensor,
         const PriceTableAxes<N>& axes) const;
 
     PriceTableConfig config_;
