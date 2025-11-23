@@ -366,3 +366,70 @@ TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
     // Error should be small
     EXPECT_LE(result->final_error, 0.01);  // Within 1 cent
 }
+
+// Task 3.2 Batch Solver Tests
+
+TEST(IVSolverFDMExpected, BatchSolveAllSuccess) {
+    // Batch of 3 valid queries
+    std::vector<IVQuery> queries = {
+        IVQuery(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 10.0),
+        IVQuery(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 15.0),
+        IVQuery(100.0, 90.0, 1.0, 0.05, 0.0, OptionType::PUT, 3.0)
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto batch_result = solver.solve_batch_impl(queries);
+
+    EXPECT_TRUE(batch_result.all_succeeded());
+    EXPECT_EQ(batch_result.failed_count, 0);
+    EXPECT_EQ(batch_result.results.size(), 3);
+
+    // Check each result
+    for (size_t i = 0; i < batch_result.results.size(); ++i) {
+        SCOPED_TRACE("Query index: " + std::to_string(i));
+        ASSERT_TRUE(batch_result.results[i].has_value());
+        EXPECT_GT(batch_result.results[i]->implied_vol, 0.0);
+        EXPECT_LT(batch_result.results[i]->implied_vol, 1.0);
+    }
+}
+
+TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
+    // Mix of valid and invalid queries
+    std::vector<IVQuery> queries = {
+        // Valid query
+        IVQuery(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 10.0),
+        // Invalid: negative spot
+        IVQuery(-100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 10.0),
+        // Valid query
+        IVQuery(100.0, 90.0, 1.0, 0.05, 0.0, OptionType::PUT, 3.0)
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto batch_result = solver.solve_batch_impl(queries);
+
+    EXPECT_FALSE(batch_result.all_succeeded());
+    EXPECT_EQ(batch_result.failed_count, 1);
+    EXPECT_EQ(batch_result.results.size(), 3);
+
+    // Check specific results
+    ASSERT_TRUE(batch_result.results[0].has_value());
+
+    ASSERT_FALSE(batch_result.results[1].has_value());
+    EXPECT_EQ(batch_result.results[1].error().code, IVErrorCode::NegativeSpot);
+
+    ASSERT_TRUE(batch_result.results[2].has_value());
+}
+
+TEST(IVSolverFDMExpected, BatchSolveEmptyBatch) {
+    std::vector<IVQuery> queries;  // Empty
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto batch_result = solver.solve_batch_impl(queries);
+
+    EXPECT_TRUE(batch_result.all_succeeded());
+    EXPECT_EQ(batch_result.failed_count, 0);
+    EXPECT_EQ(batch_result.results.size(), 0);
+}

@@ -395,15 +395,24 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         .and_then([this, &query](auto) { return solve_brent(query); });
 }
 
-void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
-                                    std::span<IVResult> results) {
-    // NOTE: This implementation is temporarily disabled as solve_impl now returns
-    // std::expected<IVSuccess, IVError> instead of IVResult.
-    // This will be updated in Task 5.1 (Update batch solver).
-    (void)queries;
-    (void)results;
+BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries) {
+    std::vector<std::expected<IVSuccess, IVError>> results;
+    results.reserve(queries.size());
 
-    // TODO(Task 5.1): Update this to convert std::expected results to IVResult
+    size_t failed_count = 0;
+
+    for (const auto& query : queries) {
+        auto result = solve_impl(query);
+        if (!result.has_value()) {
+            ++failed_count;
+        }
+        results.push_back(std::move(result));
+    }
+
+    return BatchIVResult{
+        .results = std::move(results),
+        .failed_count = failed_count
+    };
 }
 
 } // namespace mango
