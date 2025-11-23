@@ -36,9 +36,8 @@ TEST(GenericRootFindingTest, AutoDispatchBrent) {
     // Automatically uses Brent (no derivative provided)
     auto result = mango::find_root(f, 0.0, 2.0, config);
 
-    ASSERT_TRUE(result.converged);
-    ASSERT_TRUE(result.root.has_value());
-    EXPECT_NEAR(result.root.value(), std::sqrt(2.0), 1e-6);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->root, std::sqrt(2.0), 1e-6);
 }
 
 TEST(GenericRootFindingTest, AutoDispatchNewton) {
@@ -51,12 +50,11 @@ TEST(GenericRootFindingTest, AutoDispatchNewton) {
     // Automatically uses Newton (derivative provided)
     auto result = mango::find_root(f, df, 1.0, 0.0, 2.0, config);
 
-    ASSERT_TRUE(result.converged);
-    ASSERT_TRUE(result.root.has_value());
-    EXPECT_NEAR(result.root.value(), std::sqrt(2.0), 1e-9);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->root, std::sqrt(2.0), 1e-9);
 
     // Newton should converge faster than Brent
-    EXPECT_LT(result.iterations, 10);
+    EXPECT_LT(result->iterations, 10);
 }
 
 TEST(GenericRootFindingTest, ExplicitBrentCall) {
@@ -67,9 +65,9 @@ TEST(GenericRootFindingTest, ExplicitBrentCall) {
     // Explicit Brent call
     auto result = mango::find_root_bracketed(f, 0.0, 2.0, config);
 
-    ASSERT_TRUE(result.converged);
-    ASSERT_TRUE(result.root.has_value());
-    EXPECT_NEAR(result.root.value(), std::sqrt(2.0), 1e-6);
+    ASSERT_TRUE(result.has_value());
+    
+    EXPECT_NEAR(result->root, std::sqrt(2.0), 1e-6);
 }
 
 TEST(GenericRootFindingTest, ExplicitNewtonCall) {
@@ -81,9 +79,9 @@ TEST(GenericRootFindingTest, ExplicitNewtonCall) {
     // Explicit Newton call
     auto result = mango::find_root_bounded(f, df, 1.0, 0.0, 2.0, config);
 
-    ASSERT_TRUE(result.converged);
-    ASSERT_TRUE(result.root.has_value());
-    EXPECT_NEAR(result.root.value(), std::sqrt(2.0), 1e-9);
+    ASSERT_TRUE(result.has_value());
+    
+    EXPECT_NEAR(result->root, std::sqrt(2.0), 1e-9);
 }
 
 TEST(GenericRootFindingTest, ComplexFunctionBrent) {
@@ -96,11 +94,11 @@ TEST(GenericRootFindingTest, ComplexFunctionBrent) {
     // exp(x) - 3x = 0 has root around x ≈ 1.512
     auto result = mango::find_root(f, 1.0, 2.0, config);
 
-    ASSERT_TRUE(result.converged);
-    ASSERT_TRUE(result.root.has_value());
+    ASSERT_TRUE(result.has_value());
+    
 
     // Verify: exp(x) ≈ 3x at root
-    double x = result.root.value();
+    double x = result->root;
     EXPECT_NEAR(std::exp(x), 3.0*x, 1e-5);
 }
 
@@ -114,10 +112,10 @@ TEST(GenericRootFindingTest, ComplexFunctionNewton) {
     // Use Newton (with derivative)
     auto result = mango::find_root(f, df, 1.0, 0.0, 2.0, config);
 
-    ASSERT_TRUE(result.converged);
-    ASSERT_TRUE(result.root.has_value());
+    ASSERT_TRUE(result.has_value());
+    
 
     // Verify: exp(x) ≈ 3x at root
-    double x = result.root.value();
+    double x = result->root;
     EXPECT_NEAR(std::exp(x), 3.0*x, 1e-8);
 }

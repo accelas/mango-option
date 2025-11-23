@@ -144,27 +144,24 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
     auto result = newton_find_root(objective, derivative, sigma0, sigma_min, sigma_max, newton_config);
 
     // Check convergence
-    if (!result.converged) {
+    if (!result.has_value()) {
         return std::unexpected(IVError{
             .code = IVErrorCode::MaxIterationsExceeded,
-            .message = result.failure_reason.value_or("Newton iteration failed to converge"),
-            .iterations = result.iterations,
-            .final_error = result.final_error,
-            .last_vol = result.root
+            .message = result.error().message,
+            .iterations = result.error().iterations,
+            .final_error = result.error().final_error,
+            .last_vol = result.error().last_value
         });
     }
 
     // Compute final vega for the result
-    std::optional<double> final_vega = std::nullopt;
-    if (result.root.has_value()) {
-        final_vega = derivative(result.root.value());
-    }
+    double final_vega = derivative(result->root);
 
     // Return success
     return IVSuccess{
-        .implied_vol = result.root.value(),
-        .iterations = result.iterations,
-        .final_error = result.final_error,
+        .implied_vol = result->root,
+        .iterations = result->iterations,
+        .final_error = result->final_error,
         .vega = final_vega
     };
 }
