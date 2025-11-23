@@ -21,7 +21,6 @@ cc_binary(
     deps = [
         "//src/option:american_option",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_binary(
@@ -29,9 +28,6 @@ cc_binary(
     srcs = ["debug_deep_itm.cc"],
     deps = [
         "//src/option:american_option",
-    ],
-    copts = [
-        "-std=c++23",
     ],
 )
 
@@ -41,8 +37,5 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:iv_solver_fdm",
-    ],
-    copts = [
-        "-std=c++23",
     ],
 )

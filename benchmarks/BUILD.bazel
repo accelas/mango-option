@@ -16,7 +16,6 @@ cc_binary(
     name = "component_performance",
     srcs = ["component_performance.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -44,7 +43,6 @@ cc_binary(
     name = "readme_benchmarks",
     srcs = ["readme_benchmarks.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -74,7 +72,6 @@ cc_binary(
     name = "quantlib_performance",
     srcs = ["quantlib_performance.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -100,7 +97,6 @@ cc_binary(
     name = "quantlib_accuracy",
     srcs = ["quantlib_accuracy.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -127,7 +123,6 @@ cc_binary(
     name = "bspline_cache_locality",
     srcs = ["bspline_cache_locality.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -144,7 +139,6 @@ cc_binary(
     name = "iv_interpolation_profile",
     srcs = ["iv_interpolation_profile.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -170,7 +164,6 @@ cc_binary(
     name = "market_iv_e2e_benchmark",
     srcs = ["market_iv_e2e_benchmark.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -198,7 +191,6 @@ cc_binary(
     name = "openmp_simd_benchmark",
     srcs = ["openmp_simd_benchmark.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -219,7 +211,6 @@ cc_binary(
     name = "bspline_template_vs_hardcoded",
     srcs = ["bspline_template_vs_hardcoded.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -240,7 +231,6 @@ cc_binary(
     name = "bspline_fitter_hardcoded_vs_template",
     srcs = ["bspline_fitter_hardcoded_vs_template.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -259,7 +249,6 @@ cc_binary(
     name = "cubic_spline_template_vs_hardcoded",
     srcs = ["cubic_spline_template_vs_hardcoded.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -279,7 +268,6 @@ cc_binary(
     name = "bspline_nd_optimization_bench",
     srcs = ["bspline_nd_optimization_bench.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -300,7 +288,6 @@ cc_binary(
     name = "bspline_move_semantics_demo",
     srcs = ["bspline_move_semantics_demo.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",

@@ -63,10 +63,10 @@ jobs:
         with:
           path: |
             ~/.cache/bazel
-          key: debian-trixie-bazel-build-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'WORKSPACE', '**/*.bazel', '**/*.bzl') }}
+          key: debian-trixie-bazel-build-v2-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'WORKSPACE', '**/*.bazel', '**/*.bzl') }}
           restore-keys: |
-            debian-trixie-bazel-build-${{ hashFiles('.bazelversion') }}
-            debian-trixie-bazel-build-
+            debian-trixie-bazel-build-v2-${{ hashFiles('.bazelversion') }}
+            debian-trixie-bazel-build-v2-
 
       - name: Build all targets
         run: bazel build //... --build_tag_filters=-benchmark

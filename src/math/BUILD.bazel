@@ -1,11 +1,17 @@
 cc_library(
+    name = "lapack_banded_layout",
+    hdrs = ["lapack_banded_layout.hpp"],
+    deps = ["@mdspan//:mdspan"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
     deps = [
         "//common:ivcalc_trace_hdr",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -18,7 +24,6 @@ cc_library(
     name = "tridiagonal_matrix_view",
     hdrs = ["tridiagonal_matrix_view.hpp"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -30,7 +35,6 @@ cc_library(
     name = "thomas_solver",
     hdrs = ["thomas_solver.hpp"],
     deps = [":tridiagonal_matrix_view"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -41,23 +45,24 @@ cc_library(
         ":thomas_solver",
         "//src/support:parallel",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "bspline_basis",
     hdrs = ["bspline_basis.hpp"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "banded_matrix_solver",
     hdrs = ["banded_matrix_solver.hpp"],
-    deps = ["//src/support:parallel"],
+    deps = [
+        ":lapack_banded_layout",
+        "//src/support:parallel",
+        "@mdspan//:mdspan",
+    ],
     linkopts = ["-llapacke"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -69,7 +74,6 @@ cc_library(
         ":bspline_basis",
         "//src/support:parallel",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -78,8 +82,8 @@ cc_library(
     hdrs = ["bspline_nd.hpp"],
     deps = [
         ":bspline_basis",
+        "@mdspan//:mdspan",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -91,7 +95,6 @@ cc_library(
         "//src/support:parallel",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",

@@ -4,9 +4,9 @@ cc_library(
     deps = [
         ":time_domain",
         "//src/support:error_types",
+        "@mdspan//:mdspan",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -18,7 +18,6 @@ cc_library(
     name = "boundary_conditions",
     hdrs = ["boundary_conditions.hpp"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -29,14 +28,20 @@ cc_library(
 cc_library(
     name = "time_domain",
     hdrs = ["time_domain.hpp"],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "trbdf2_config",
     hdrs = ["trbdf2_config.hpp"],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -44,7 +49,10 @@ cc_library(
     name = "pde_workspace",
     hdrs = ["pde_workspace.hpp"],
     deps = ["//src/math:tridiagonal_matrix_view"],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -64,6 +72,9 @@ cc_library(
         "//src/math:tridiagonal_matrix_view",
         "//src/support:error_types",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
     visibility = ["//visibility:public"],
 )

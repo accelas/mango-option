@@ -12,7 +12,6 @@ cc_library(
         ":option_spec",
         "//src/support:error_types",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -32,14 +31,13 @@ cc_library(
         "//src/pde/core:time_domain",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-Werror",
         "-O3",
-        "-march=native",      # Enable native CPU instructions (AVX-512 on modern CPUs)
-        "-fopenmp-simd",      # Enable OpenMP SIMD pragmas for vectorization
-        "-ftree-vectorize",   # Enable auto-vectorization
+        "-march=native",
+        "-fopenmp-simd",
+        "-ftree-vectorize",
     ],
     visibility = ["//visibility:public"],
 )
@@ -53,7 +51,10 @@ cc_library(
         "//src/pde/operators:centered_difference_facade",
         ":option_spec",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -71,13 +72,12 @@ cc_library(
         "//src/support:parallel",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-Werror",
         "-O3",
         "-march=native",
-        "-fopenmp",           # Enable OpenMP for batch API parallelization
+        "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
@@ -93,7 +93,6 @@ cc_library(
         "//src/pde/core:grid",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -108,7 +107,6 @@ cc_library(
         "//src/math:bspline_nd",
         ":price_table_workspace",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -127,7 +125,6 @@ cc_library(
         "//src/math:root_finding",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -139,7 +136,6 @@ cc_library(
 cc_library(
     name = "iv_types",
     hdrs = ["iv_types.hpp"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -149,7 +145,6 @@ cc_library(
     deps = [
         "//src/support:error_types",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -168,7 +163,6 @@ cc_library(
         "//src/support:error_types",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -186,7 +180,6 @@ cc_library(
     deps = [
         "//src/support:error_types",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -206,7 +199,6 @@ cc_library(
         "//src/support:error_types",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
@@ -229,14 +221,12 @@ cc_library(
         "//src/support:crc64",
         "//third_party/arrow",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "price_table_grid",
     hdrs = ["price_table_grid.hpp"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -249,6 +239,5 @@ cc_library(
         ":price_table_grid",
         "//src/math:cubic_spline_solver",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )

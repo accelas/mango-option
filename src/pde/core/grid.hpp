@@ -11,6 +11,7 @@
 #include <optional>
 #include <algorithm>
 #include <format>
+#include <experimental/mdspan>
 #include "src/support/error_types.hpp"
 #include "src/pde/core/time_domain.hpp"
 
@@ -276,28 +277,41 @@ struct NonUniformSpacing {
     /// Layout: [dx_left_inv | dx_right_inv | dx_center_inv | w_left | w_right]
     std::vector<T> precomputed;
 
+    /// 2D view showing 5-section structure
+    using SectionView = std::experimental::mdspan<
+        T,
+        std::experimental::dextents<size_t, 2>,
+        std::experimental::layout_right
+    >;
+    SectionView sections_view_;  // Shape: (5, interior)
+
     /// Construct from non-uniform grid points
     ///
     /// @param x Grid points (must be sorted, size >= 3)
     explicit NonUniformSpacing(std::span<const T> x)
         : n(x.size())
+        , sections_view_(nullptr, std::experimental::dextents<size_t, 2>{0, 0})
     {
         const size_t interior = n - 2;
         precomputed.resize(5 * interior);
 
-        // Precompute all spacing arrays for interior points i=1..n-2
+        // Create 2D view: 5 sections × interior points
+        sections_view_ = SectionView(precomputed.data(), 5, interior);
+
+        // Fill sections using self-documenting 2D indexing
         for (size_t i = 1; i <= n - 2; ++i) {
             const T dx_left = x[i] - x[i-1];
             const T dx_right = x[i+1] - x[i];
             const T dx_center = T(0.5) * (dx_left + dx_right);
 
-            const size_t idx = i - 1;  // Index into arrays (0-based)
+            const size_t idx = i - 1;
 
-            precomputed[idx] = T(1) / dx_left;
-            precomputed[interior + idx] = T(1) / dx_right;
-            precomputed[2 * interior + idx] = T(1) / dx_center;
-            precomputed[3 * interior + idx] = dx_right / (dx_left + dx_right);
-            precomputed[4 * interior + idx] = dx_left / (dx_left + dx_right);
+            // Clear, self-documenting section assignments:
+            sections_view_[0, idx] = T(1) / dx_left;              // dx_left_inv
+            sections_view_[1, idx] = T(1) / dx_right;             // dx_right_inv
+            sections_view_[2, idx] = T(1) / dx_center;            // dx_center_inv
+            sections_view_[3, idx] = dx_right / (dx_left + dx_right);  // w_left
+            sections_view_[4, idx] = dx_left / (dx_left + dx_right);   // w_right
         }
     }
 
