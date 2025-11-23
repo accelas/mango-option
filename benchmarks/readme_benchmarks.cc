@@ -526,46 +526,37 @@ BENCHMARK(BM_README_PriceTableGreeks)->MinTime(kMinBenchmarkTimeSec);
 
 // Benchmark: NormalizedChainSolver - solve once, price all strikes
 static void BM_README_NormalizedChain(benchmark::State& state) {
-    // Solve once for 5 strikes across 3 maturities
-    std::vector<double> tau_snapshots_vec{0.25, 0.5, 1.0};
-
-    NormalizedSolveRequest request{
-        .sigma = 0.20,
-        .rate = 0.05,
-        .dividend = 0.02,
-        .option_type = OptionType::PUT,
-        .x_min = -2.5,
-        .x_max = 2.5,
-        .n_space = 101,
-        .n_time = 1000,
-        .T_max = 1.0,
-        .tau_snapshots = std::span<const double>(tau_snapshots_vec)
-    };
-
+    // Batch solver with normalized optimization (automatic when eligible)
+    // Solve 5 strikes across 3 maturities using shared grid
     std::vector<double> strikes = {90.0, 95.0, 100.0, 105.0, 110.0};
+    std::vector<double> maturities = {0.25, 0.5, 1.0};
     double spot = 100.0;
 
-    for (auto _ : state) {
-        // Allocate buffer for PDEWorkspace
-        std::pmr::vector<double> pde_buffer(PDEWorkspace::required_size(request.n_space));
-
-        // Create workspace
-        auto workspace_result = NormalizedWorkspace::create(request, pde_buffer);
-        if (!workspace_result) continue;
-        auto workspace = std::move(workspace_result.value());
-        auto surface = workspace.surface_view();
-
-        // Solve PDE once
-        auto solve_result = NormalizedChainSolver::solve(request, workspace, surface);
-        if (!solve_result) continue;
-
-        // Price all 15 options (5 strikes × 3 maturities)
+    // Create option parameters (all puts with same vol/rate/maturity per group)
+    std::vector<AmericanOptionParams> params;
+    for (double tau : maturities) {
         for (double K : strikes) {
-            for (double tau : tau_snapshots_vec) {
-                double x = std::log(spot / K);
-                double u = surface.interpolate(x, tau);
-                double price = K * u;
-                benchmark::DoNotOptimize(price);
+            params.emplace_back(
+                spot,      // spot price
+                K,         // strike
+                tau,       // maturity
+                0.05,      // rate
+                0.02,      // dividend yield
+                OptionType::PUT,
+                0.20       // volatility
+            );
+        }
+    }
+
+    for (auto _ : state) {
+        // Solve batch with shared grid (enables normalized optimization)
+        BatchAmericanOptionSolver solver;
+        auto result = solver.solve_batch(params, true);  // use_shared_grid=true
+
+        // Extract prices (normalized path used automatically if eligible)
+        for (const auto& opt_result : result.results) {
+            if (opt_result.has_value()) {
+                benchmark::DoNotOptimize(opt_result->value());
             }
         }
     }

@@ -1,9 +1,38 @@
 # Normalized Chain Solver: Design and Implementation
 
 **Date:** 2025-01-12
-**Status:** Implemented
+**Status:** ~~Implemented~~ **DEPRECATED**
 **Authors:** Claude Code + User + Codex Review
 **Related PR:** #154
+
+---
+
+## ⚠️ DEPRECATION NOTICE
+
+**This design has been superseded by internal optimization in `BatchAmericanOptionSolver`.**
+
+**Migration:** See [`2025-11-21-normalized-chain-solver-cleanup.md`](2025-11-21-normalized-chain-solver-cleanup.md) for the integrated approach.
+
+**What changed:**
+- The standalone `NormalizedChainSolver` API described in this document has been **removed** (Phase 3, Nov 2025)
+- Normalized solving is now an **internal optimization** within `BatchAmericanOptionSolver`
+- Users get normalized optimization **automatically** when solving option chains with identical (σ, r, q, type, maturity)
+- **No API changes required** - just call `BatchAmericanOptionSolver::solve_batch()` with `use_shared_grid=true`
+
+**Benefits of new approach:**
+- Simpler API (one solver instead of two)
+- Transparent optimization (users don't need to know about normalization)
+- Automatic eligibility checking and routing
+- Reduced code maintenance (~1,500 lines removed across cleanup phases)
+
+**Why this document is preserved:**
+- Documents the mathematical foundation (scale invariance still valid)
+- Explains eligibility criteria (still used internally)
+- Historical reference for the design evolution
+
+**For current usage:** See `CLAUDE.md` and `README.md` for `BatchAmericanOptionSolver` API.
+
+---
 
 ## Executive Summary
 
