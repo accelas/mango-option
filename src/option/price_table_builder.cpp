@@ -1,5 +1,10 @@
 #include "src/option/price_table_builder.hpp"
 #include "src/option/recursion_helpers.hpp"
+#include "src/math/cubic_spline_solver.hpp"
+#include "src/support/memory/aligned_arena.hpp"
+#include "common/ivcalc_trace.h"
+#include <cmath>
+#include <limits>
 
 namespace mango {
 
@@ -103,6 +108,105 @@ PriceTableBuilder<N>::solve_batch(
 
         // Solve batch with shared grid optimization (normalized chain solver)
         return solver.solve_batch(batch, true);  // use_shared_grid = true
+    }
+}
+
+template <size_t N>
+std::expected<PriceTensor<N>, std::string>
+PriceTableBuilder<N>::extract_tensor(
+    const BatchAmericanOptionResult& batch,
+    const PriceTableAxes<N>& axes) const
+{
+    if constexpr (N != 4) {
+        return std::unexpected("extract_tensor only supports N=4");
+    } else {
+        const size_t Nm = axes.grids[0].size();  // moneyness
+        const size_t Nt = axes.grids[1].size();  // maturity
+        const size_t Nσ = axes.grids[2].size();  // volatility
+        const size_t Nr = axes.grids[3].size();  // rate
+
+    // Verify batch size matches (σ, r) grid
+    const size_t expected_batch_size = Nσ * Nr;
+    if (batch.results.size() != expected_batch_size) {
+        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE,
+            batch.results.size(), expected_batch_size);
+        return std::unexpected(
+            "Batch size mismatch: expected " + std::to_string(expected_batch_size) +
+            " results (Nσ × Nr), got " + std::to_string(batch.results.size()));
+    }
+
+    // Create tensor
+    const size_t total_points = Nm * Nt * Nσ * Nr;
+    const size_t tensor_bytes = total_points * sizeof(double);
+    const size_t arena_bytes = tensor_bytes + 64;  // 64-byte alignment padding
+
+    auto arena = memory::AlignedArena::create(arena_bytes);
+    if (!arena.has_value()) {
+        return std::unexpected("Failed to create arena: " + arena.error());
+    }
+
+    std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
+    auto tensor_result = PriceTensor<N>::create(shape, arena.value());
+    if (!tensor_result.has_value()) {
+        return std::unexpected("Failed to create tensor: " + tensor_result.error());
+    }
+
+    auto tensor = tensor_result.value();
+
+    // Precompute log-moneyness for interpolation
+    std::vector<double> log_moneyness(Nm);
+    for (size_t i = 0; i < Nm; ++i) {
+        log_moneyness[i] = std::log(axes.grids[0][i]);
+    }
+
+    // Extract prices from each (σ, r) surface
+    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+            size_t batch_idx = σ_idx * Nr + r_idx;
+            const auto& result_expected = batch.results[batch_idx];
+
+            if (!result_expected.has_value()) {
+                // Fill with NaN for failed solves
+                for (size_t i = 0; i < Nm; ++i) {
+                    for (size_t j = 0; j < Nt; ++j) {
+                        tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                    }
+                }
+                continue;
+            }
+
+            const auto& result = result_expected.value();
+            auto grid = result.grid();
+            auto x_grid = grid->x();  // Spatial grid (log-moneyness)
+
+            // For each maturity snapshot
+            for (size_t j = 0; j < Nt; ++j) {
+                // Get spatial solution at this maturity
+                std::span<const double> spatial_solution = result.at_time(j);
+
+                // Interpolate across moneyness using cubic spline
+                // This resamples the PDE solution onto our moneyness grid
+                CubicSpline<double> spline;
+                auto build_error = spline.build(x_grid, spatial_solution);
+
+                if (build_error.has_value()) {
+                    // Spline fitting failed, fill with NaN
+                    for (size_t i = 0; i < Nm; ++i) {
+                        tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                    }
+                    continue;
+                }
+
+                // Evaluate spline at each moneyness point
+                for (size_t i = 0; i < Nm; ++i) {
+                    double price = spline.eval(log_moneyness[i]);
+                    tensor.view[i, j, σ_idx, r_idx] = price;
+                }
+            }
+        }
+    }
+
+        return tensor;
     }
 }
 

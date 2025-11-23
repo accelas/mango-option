@@ -239,5 +239,45 @@ TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {
     EXPECT_EQ(grid->num_snapshots(), 3);
 }
 
+TEST(PriceTableBuilderTest, ExtractTensorInterpolatesSurfaces) {
+    PriceTableConfig config{
+        .option_type = OptionType::PUT,
+        .K_ref = 100.0,
+        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
+        .n_time = 1000,
+        .dividend_yield = 0.02
+    };
+
+    PriceTableBuilder<4> builder(config);
+
+    PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0, 1.1};      // 3 moneyness points
+    axes.grids[1] = {0.1, 0.5, 1.0};      // 3 maturity points
+    axes.grids[2] = {0.20};               // 1 vol
+    axes.grids[3] = {0.05};               // 1 rate
+
+    auto batch_params = builder.make_batch_for_testing(axes);
+    auto batch_result = builder.solve_batch_for_testing(batch_params, axes);
+    auto tensor_result = builder.extract_tensor_for_testing(batch_result, axes);
+
+    ASSERT_TRUE(tensor_result.has_value());
+    auto tensor = tensor_result.value();
+
+    // Tensor should have full 4D shape: 3×3×1×1 = 9 points
+    EXPECT_EQ(tensor.view.extent(0), 3);  // moneyness
+    EXPECT_EQ(tensor.view.extent(1), 3);  // maturity
+    EXPECT_EQ(tensor.view.extent(2), 1);  // volatility
+    EXPECT_EQ(tensor.view.extent(3), 1);  // rate
+
+    // Verify prices are populated (not NaN or zero)
+    for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = 0; j < 3; ++j) {
+            double price = tensor.view[i, j, 0, 0];
+            EXPECT_TRUE(std::isfinite(price));
+            EXPECT_GT(price, 0.0);
+        }
+    }
+}
+
 } // namespace
 } // namespace mango

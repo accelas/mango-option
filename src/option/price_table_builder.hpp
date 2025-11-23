@@ -3,6 +3,7 @@
 #include "src/option/price_table_config.hpp"
 #include "src/option/price_table_axes.hpp"
 #include "src/option/price_table_surface.hpp"
+#include "src/option/price_tensor.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include <expected>
@@ -42,6 +43,13 @@ public:
         return solve_batch(batch, axes);
     }
 
+    /// For testing: expose extract_tensor method
+    [[nodiscard]] std::expected<PriceTensor<N>, std::string> extract_tensor_for_testing(
+        const BatchAmericanOptionResult& batch,
+        const PriceTableAxes<N>& axes) const {
+        return extract_tensor(batch, axes);
+    }
+
 private:
     /// Generate batch of AmericanOptionParams from axes
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
@@ -50,6 +58,11 @@ private:
     /// Solve batch of options with snapshot registration
     [[nodiscard]] BatchAmericanOptionResult solve_batch(
         const std::vector<AmericanOptionParams>& batch,
+        const PriceTableAxes<N>& axes) const;
+
+    /// Extract PriceTensor from batch results using cubic spline interpolation
+    [[nodiscard]] std::expected<PriceTensor<N>, std::string> extract_tensor(
+        const BatchAmericanOptionResult& batch,
         const PriceTableAxes<N>& axes) const;
 
     PriceTableConfig config_;

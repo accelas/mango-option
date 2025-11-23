@@ -51,9 +51,13 @@ cc_library(
         ":price_table_config",
         ":price_table_axes",
         ":price_table_surface",
+        ":price_tensor",
         ":american_option",
         ":american_option_batch",
         ":recursion_helpers",
+        "//src/math:cubic_spline_solver",
+        "//src/support:aligned_arena",
+        "//common:ivcalc_trace_hdr",
     ],
     visibility = ["//visibility:public"],
 )
