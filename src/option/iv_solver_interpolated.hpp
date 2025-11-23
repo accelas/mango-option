@@ -22,9 +22,11 @@
  *   };
  *   IVQuery query{.option = spec, .market_price = 10.45};
  *
- *   IVResult result = solver->solve(query);
- *   if (result.converged) {
- *       std::cout << "IV: " << result.implied_vol << "\n";
+ *   auto result = solver->solve_impl(query);
+ *   if (result.has_value()) {
+ *       std::cout << "IV: " << result->implied_vol << "\n";
+ *   } else {
+ *       std::cerr << "Error: " << result.error().message << "\n";
  *   }
  *
  * Algorithm:
@@ -43,10 +45,9 @@
 
 #pragma once
 
-#include "src/option/iv_solver_base.hpp"
 #include "src/option/option_spec.hpp"
-#include "src/option/iv_types.hpp"
 #include "src/option/bspline_price_table.hpp"
+#include "src/option/iv_result.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <cmath>
@@ -73,7 +74,7 @@ struct IVSolverInterpolatedConfig {
 /// Solves: Find σ such that Price(m, τ, σ, r) = Market_Price
 ///
 /// Thread-safe: Fully thread-safe for both single and batch queries (immutable spline)
-class IVSolverInterpolated : public IVSolverBase {
+class IVSolverInterpolated {
 public:
     /// Create solver from PriceTableSurface
     ///
@@ -96,34 +97,19 @@ public:
 
     /// Solve for implied volatility (single query)
     ///
-    /// Implementation for IVSolverBase::solve().
     /// Uses Newton-Raphson method with B-spline price interpolation.
     ///
-    /// NOTE: Returns deprecated IVResult for backward compatibility.
-    /// This solver will be migrated to std::expected in a future task.
-    ///
     /// @param query Option specification and market price
-    /// @return IVResult with convergence status and implied volatility
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    IVResult solve_impl(const IVQuery& query) const noexcept;
-#pragma GCC diagnostic pop
+    /// @return Success with IV and diagnostics, or error with details
+    std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query) const noexcept;
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
-    /// Implementation for IVSolverBase::solve_batch().
     /// Trivially parallel since B-spline is immutable and thread-safe.
     ///
-    /// NOTE: Uses deprecated IVResult for backward compatibility.
-    /// This solver will be migrated to std::expected in a future task.
-    ///
-    /// @param queries Input queries
-    /// @param results Output buffer (must match queries.size())
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    void solve_batch_impl(std::span<const IVQuery> queries,
-                         std::span<IVResult> results) const noexcept;
-#pragma GCC diagnostic pop
+    /// @param queries Input queries (as vector for convenience)
+    /// @return BatchIVResult with individual results and failure count
+    BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries) const noexcept;
 
 private:
     /// Private constructor (use create() factory methods)
