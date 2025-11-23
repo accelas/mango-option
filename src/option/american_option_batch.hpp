@@ -77,6 +77,37 @@ struct BatchAmericanOptionResult {
 /// }
 /// ```
 ///
+/// **RECOMMENDED: Price table with snapshots (preserves normalized optimization):**
+/// ```cpp
+/// // Fast path: set_snapshot_times() enables 19,000× normalized chain speedup
+/// std::vector<double> maturities = {0.25, 0.5, 1.0};
+/// BatchAmericanOptionSolver solver;
+/// solver.set_grid_accuracy(accuracy)
+///       .set_snapshot_times(std::span{maturities});  // Fluent API
+///
+/// auto results = solver.solve_batch(batch, true);
+///
+/// // Extract snapshots for price table construction
+/// for (const auto& result : results.results) {
+///     if (result.has_value()) {
+///         auto grid = result.value().grid();
+///         // grid->num_snapshots() == 3
+///         // Use extract_batch_results_to_4d() for interpolation table
+///     }
+/// }
+/// ```
+///
+/// **Alternative: SetupCallback (disables normalized optimization):**
+/// ```cpp
+/// // Use only when per-option customization is required
+/// auto setup = [](size_t idx, AmericanOptionSolver& solver) {
+///     solver.set_snapshot_times(...);  // Per-option snapshots
+///     solver.set_tolerance(...);        // Per-option tolerance
+/// };
+/// auto results = solver.solve_batch(batch, true, setup);
+/// // Note: Falls back to regular batch (no normalized speedup)
+/// ```
+///
 /// Performance:
 /// - Single-threaded: ~72 options/sec (101x1000 grid, tol=1e-3)
 /// - Parallel (32 cores): ~848 options/sec (11.8x speedup)
@@ -89,8 +120,10 @@ public:
 
     /// Set grid accuracy parameters
     /// @param accuracy Grid accuracy parameters controlling size/resolution tradeoff
-    void set_grid_accuracy(const GridAccuracyParams& accuracy) {
+    /// @return Reference to this solver for method chaining
+    BatchAmericanOptionSolver& set_grid_accuracy(const GridAccuracyParams& accuracy) {
         grid_accuracy_ = accuracy;
+        return *this;
     }
 
     /// Get current grid accuracy parameters
@@ -99,8 +132,10 @@ public:
     }
 
     /// Disable normalized chain optimization (for benchmarking/debugging)
-    void set_use_normalized(bool enable) {
+    /// @return Reference to this solver for method chaining
+    BatchAmericanOptionSolver& set_use_normalized(bool enable) {
         use_normalized_ = enable;
+        return *this;
     }
 
     bool use_normalized() const {
@@ -114,13 +149,17 @@ public:
     /// will disable the normalized path (see solve_batch documentation).
     ///
     /// @param times Snapshot times to register for all options
-    void set_snapshot_times(std::span<const double> times) {
+    /// @return Reference to this solver for method chaining
+    BatchAmericanOptionSolver& set_snapshot_times(std::span<const double> times) {
         snapshot_times_.assign(times.begin(), times.end());
+        return *this;
     }
 
     /// Clear snapshot times
-    void clear_snapshot_times() {
+    /// @return Reference to this solver for method chaining
+    BatchAmericanOptionSolver& clear_snapshot_times() {
         snapshot_times_.clear();
+        return *this;
     }
 
     /// Solve a batch of American options with automatic routing
