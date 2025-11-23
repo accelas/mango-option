@@ -4,7 +4,9 @@
  */
 
 #include "src/option/price_table_4d_builder.hpp"
-#include "src/option/price_table_solver_factory.hpp"
+#include "src/option/american_option_batch.hpp"
+#include "src/option/price_table_grid.hpp"
+#include "src/option/price_table_extraction.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -32,21 +34,17 @@ std::expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
         return std::unexpected("Reference strike K_ref must be positive");
     }
 
-    // Verify sorted
-    auto is_sorted = [](const std::vector<double>& v) {
-        return std::is_sorted(v.begin(), v.end());
-    };
-
-    if (!is_sorted(moneyness_)) {
+    // Verify sorted (using C++23 ranges)
+    if (!std::ranges::is_sorted(moneyness_)) {
         return std::unexpected("Moneyness grid must be sorted");
     }
-    if (!is_sorted(maturity_)) {
+    if (!std::ranges::is_sorted(maturity_)) {
         return std::unexpected("Maturity grid must be sorted");
     }
-    if (!is_sorted(volatility_)) {
+    if (!std::ranges::is_sorted(volatility_)) {
         return std::unexpected("Volatility grid must be sorted");
     }
-    if (!is_sorted(rate_)) {
+    if (!std::ranges::is_sorted(rate_)) {
         return std::unexpected("Rate grid must be sorted");
     }
 
@@ -58,17 +56,17 @@ std::expected<void, std::string> PriceTable4DBuilder::validate_grids() const {
         return std::unexpected("Volatility must be positive");
     }
 
-    // Verify moneyness values are positive
+    // Verify moneyness values are positive (using C++23 ranges)
     // CRITICAL: PDE works in log-moneyness x = ln(m), so m must be > 0
     // Moneyness grid should represent S/K_ref ratios, not raw spots
-    for (size_t i = 0; i < moneyness_.size(); ++i) {
-        if (moneyness_[i] <= 0.0) {
-            return std::unexpected(
-                "Moneyness values must be positive (m = S/K_ref > 0). "
-                "Found m[" + std::to_string(i) + "] = " + std::to_string(moneyness_[i]) + ". "
-                "Note: moneyness represents spot ratios S/K_ref, not log-moneyness x = ln(S/K_ref)."
-            );
-        }
+    auto negative_it = std::ranges::find_if(moneyness_, [](double m) { return m <= 0.0; });
+    if (negative_it != moneyness_.end()) {
+        size_t i = std::distance(moneyness_.begin(), negative_it);
+        return std::unexpected(
+            "Moneyness values must be positive (m = S/K_ref > 0). "
+            "Found m[" + std::to_string(i) + "] = " + std::to_string(*negative_it) + ". "
+            "Note: moneyness represents spot ratios S/K_ref, not log-moneyness x = ln(S/K_ref)."
+        );
     }
 
     return {};
@@ -149,24 +147,55 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // Start timer
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Create unified PDE grid configuration
-    OptionSolverGrid config{
-        .option_type = option_type,
-        .x_min = x_min,
-        .x_max = x_max,
-        .n_space = n_space,
-        .n_time = n_time,
-        .dividend_yield = dividend_yield
-    };
+    // Build batch parameters for all (σ, r) combinations using C++23 ranges
+    const size_t batch_size = Nv * Nr;
+    std::vector<AmericanOptionParams> batch_params;
+    batch_params.reserve(batch_size);
 
-    // Create appropriate solver using factory (validates, checks eligibility, routes)
-    auto solver_result = PriceTableSolverFactory::create(config, std::span{moneyness_});
-    if (!solver_result.has_value()) {
-        return std::unexpected(solver_result.error());
+    const double T_max = maturity_.back();
+
+    // Cartesian product of volatility × rate grids
+    for (auto [vol, r] : std::views::cartesian_product(volatility_, rate_)) {
+        batch_params.emplace_back(
+            K_ref_,           // spot
+            K_ref_,           // strike
+            T_max,            // maturity
+            r,                // rate
+            dividend_yield,   // dividend_yield
+            option_type,      // type
+            vol,              // volatility
+            std::vector<std::pair<double, double>>{}  // discrete_dividends
+        );
     }
-    auto solver = std::move(solver_result.value());
 
-    // Solve using the selected strategy
+    // Configure batch solver with explicit grid parameters
+    BatchAmericanOptionSolver batch_solver;
+
+    // Set grid accuracy to achieve desired n_space and n_time
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = n_space;
+    accuracy.max_spatial_points = n_space;
+    accuracy.max_time_steps = n_time;
+    accuracy.alpha = 2.0;  // Keep default sinh clustering
+    // Note: x_min, x_max are validated above but grid bounds are computed automatically
+    // by BatchAmericanOptionSolver based on option parameters
+    batch_solver.set_grid_accuracy(accuracy);
+
+    // Register snapshot times using dedicated API (preserves normalized optimization)
+    // This approach allows price table construction to benefit from normalized chain solver
+    // (~19,000× speedup) while still recording snapshots for extraction
+    batch_solver.set_snapshot_times(std::span{maturity_});
+
+    // Use BatchAmericanOptionSolver with shared grid (use_shared_grid=true)
+    auto batch_result = batch_solver.solve_batch(batch_params, true);
+
+    // Check for failures
+    if (batch_result.failed_count > 0) {
+        return std::unexpected("Failed to solve " + std::to_string(batch_result.failed_count) +
+                         " out of " + std::to_string(batch_size) + " PDEs");
+    }
+
+    // Extract prices using shared helper
     PriceTableGrid grid{
         .moneyness = std::span{moneyness_},
         .maturity = std::span{maturity_},
@@ -174,11 +203,7 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
         .rate = std::span{rate_},
         .K_ref = K_ref_
     };
-    auto solve_result = solver->solve(prices_4d, grid);
-
-    if (!solve_result) {
-        return std::unexpected(solve_result.error());
-    }
+    extract_batch_results_to_4d(batch_result, prices_4d, grid, K_ref_);
 
     // End timer
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -213,22 +238,18 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // Create evaluator for backward compatibility
     auto evaluator = std::make_shared<BSpline4D>(*workspace);
 
-    // Populate fitting statistics from result
+    // Populate fitting statistics from result (using C++23 ranges)
     BSplineFittingStats fitting_stats{
         .max_residual_axis0 = fit_result->max_residual_per_axis[0],
         .max_residual_axis1 = fit_result->max_residual_per_axis[1],
         .max_residual_axis2 = fit_result->max_residual_per_axis[2],
         .max_residual_axis3 = fit_result->max_residual_per_axis[3],
-        .max_residual_overall = *std::max_element(
-            fit_result->max_residual_per_axis.begin(),
-            fit_result->max_residual_per_axis.end()),
+        .max_residual_overall = std::ranges::max(fit_result->max_residual_per_axis),
         .condition_axis0 = fit_result->condition_per_axis[0],
         .condition_axis1 = fit_result->condition_per_axis[1],
         .condition_axis2 = fit_result->condition_per_axis[2],
         .condition_axis3 = fit_result->condition_per_axis[3],
-        .condition_max = *std::max_element(
-            fit_result->condition_per_axis.begin(),
-            fit_result->condition_per_axis.end()),
+        .condition_max = std::ranges::max(fit_result->condition_per_axis),
         .failed_slices_axis0 = fit_result->failed_slices[0],
         .failed_slices_axis1 = fit_result->failed_slices[1],
         .failed_slices_axis2 = fit_result->failed_slices[2],

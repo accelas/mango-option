@@ -60,6 +60,7 @@
 #define MODULE_CUBIC_SPLINE     5
 #define MODULE_VALIDATION       6
 #define MODULE_PRICE_TABLE      7
+#define MODULE_BATCH_SOLVER     8
 
 /**
  * Validation stage identifiers for adaptive refinement tracing
@@ -75,6 +76,23 @@
  * Validation refinement status codes
  */
 #define VALIDATION_NO_REFINEMENT_NUMERIC_LIMITS 1
+
+/**
+ * Ineligibility reason codes for normalized chain solver
+ */
+enum class NormalizedIneligibilityReason {
+    FORCED_DISABLE = 0,            ///< User disabled via set_use_normalized(false)
+    SHARED_GRID_DISABLED = 1,      ///< use_shared_grid = false
+    EMPTY_BATCH = 2,               ///< params.empty()
+    MISMATCHED_OPTION_TYPE = 3,    ///< Mixed calls and puts
+    MISMATCHED_MATURITY = 4,       ///< Options have different maturities
+    DISCRETE_DIVIDENDS = 5,        ///< Options have discrete dividends
+    INVALID_SPOT_OR_STRIKE = 6,    ///< Spot or strike <= 0
+    GRID_SPACING_TOO_LARGE = 7,    ///< dx > MAX_DX
+    DOMAIN_TOO_WIDE = 8,           ///< width > MAX_WIDTH
+    INSUFFICIENT_LEFT_MARGIN = 9,  ///< margin_left < min_margin
+    INSUFFICIENT_RIGHT_MARGIN = 10 ///< margin_right < min_margin
+};
 
 /**
  * ============================================================================
@@ -446,5 +464,28 @@
  */
 #define MANGO_TRACE_SPLINE_ERROR(n_points, min_required) \
     MANGO_TRACE_VALIDATION_ERROR(MODULE_CUBIC_SPLINE, 1, n_points, min_required)
+
+/**
+ * ============================================================================
+ * Module-Specific Probes: Batch Solver
+ * ============================================================================
+ */
+
+/**
+ * Fired when normalized chain solver is selected
+ * @param batch_size: Number of options in the batch
+ */
+#define MANGO_TRACE_NORMALIZED_SELECTED(batch_size) \
+    DTRACE_PROBE2(MANGO_PROVIDER, normalized_selected, \
+                  MODULE_BATCH_SOLVER, batch_size)
+
+/**
+ * Fired when batch is ineligible for normalized solving
+ * @param reason_code: Ineligibility reason (NormalizedIneligibilityReason)
+ * @param param_value: Relevant parameter value
+ */
+#define MANGO_TRACE_NORMALIZED_INELIGIBLE(reason_code, param_value) \
+    DTRACE_PROBE3(MANGO_PROVIDER, normalized_ineligible, \
+                  MODULE_BATCH_SOLVER, reason_code, param_value)
 
 #endif // IVCALC_TRACE_H

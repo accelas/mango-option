@@ -172,6 +172,18 @@ public:
                         std::optional<size_t> custom_n_time = std::nullopt);
 
     /**
+     * Set snapshot times for solution recording.
+     *
+     * Must be called before solve(). Allows setup callbacks to register
+     * snapshots for price table construction.
+     *
+     * @param times Snapshot times (must be in [0, maturity])
+     */
+    void set_snapshot_times(std::span<const double> times) {
+        snapshot_times_.assign(times.begin(), times.end());
+    }
+
+    /**
      * Solve for option value.
      *
      * Returns AmericanOptionResult wrapper containing Grid and PricingParams.

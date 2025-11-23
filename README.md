@@ -240,18 +240,16 @@ See `examples/` for complete working programs.
 |-----------|------|-------|
 | American option (single) | 4.4 ms | 101×1k grid; 105ms for 501×5k grid |
 | American option (batch of 64) | 18 ms | OpenMP parallelization (0.28ms per option wall time) |
-| **American option chain (15 prices)** | **4.5 ms** | **NormalizedChainSolver: one PDE solve, 5 strikes × 3 maturities** |
-| Price table pre-computation | ~2,000 PDEs/sec | Automatic routing: normalized solver or batch API |
+| **American option chain (15 prices)** | **4.5 ms** | **BatchAmericanOptionSolver: automatic normalized optimization, 5 strikes × 3 maturities** |
+| Price table pre-computation | ~2,000 PDEs/sec | Automatic routing: internal normalized optimization when eligible |
 | American IV (FDM-based) | 43–164 ms | Brent's method (101×1k: 43ms, 201×2k: 164ms) |
 | **American IV (B-spline surface)** | **1.6 µs** | **30,000× faster than FDM-based IV** |
 | Price table interpolation | 260 ns | Single 4D cubic B-spline query |
 | Greeks (vega, gamma) | 1.3 µs | Vega and gamma from pre-computed table |
 
-### Batch Processing APIs
+### Batch Processing API
 
-The library provides two complementary approaches for batch American option pricing:
-
-**1. BatchAmericanOptionSolver** - Parallel solving with per-solver configuration
+**BatchAmericanOptionSolver** - Parallel solving with per-solver configuration
 ```cpp
 #include "src/option/american_option_batch.hpp"
 
@@ -274,36 +272,10 @@ auto results = BatchAmericanOptionSolver::solve_batch(
     });
 ```
 
-**2. NormalizedChainSolver** - Scale-invariant solver for option chains
-```cpp
-#include "src/option/normalized_chain_solver.hpp"
-
-// Solve PDE once in dimensionless coordinates
-NormalizedSolveRequest request{
-    .sigma = 0.20, .rate = 0.05, .dividend = 0.02,
-    .option_type = OptionType::PUT,
-    .x_min = -3.0, .x_max = 3.0,
-    .n_space = 101, .n_time = 1000, .T_max = 1.0,
-    .tau_snapshots = {0.25, 0.5, 1.0}
-};
-
-auto workspace = NormalizedWorkspace::create(request).value();
-auto surface = workspace.surface_view();
-NormalizedChainSolver::solve(request, workspace, surface);
-
-// Get prices for ANY (S, K) combination via interpolation
-// Exploits: V(S,K,τ) = K·u(ln(S/K), τ)
-for (auto [S, K, tau] : strike_maturity_pairs) {
-    double x = std::log(S / K);
-    double u = surface.interpolate(x, tau);
-    double price = K * u;  // Scale by strike
-}
-```
-
-**When to use each:**
-- **BatchAmericanOptionSolver**: Different volatilities, rates, or discrete dividends
-- **NormalizedChainSolver**: Same (σ,r,q), multiple strikes (e.g., option chains, price tables)
-- **Automatic routing**: Price tables use normalized solver when eligible, batch API as fallback
+**Batch Solver Features:**
+- **Parallel solving**: Different volatilities, rates, or discrete dividends solved in parallel
+- **Automatic optimization**: Normalized chain solving applied automatically when eligible (same σ,r,q,type,maturity)
+- **Transparent routing**: Price tables benefit from normalized optimization without API changes
 
 ### Validation & Accuracy
 
