@@ -100,17 +100,21 @@ public:
     T x_max() const { return x_max_; }
     size_t n_points() const { return n_points_; }
     T concentration() const { return concentration_; }
+    std::span<const MultiSinhCluster<T>> clusters() const { return clusters_; }
 
 private:
-    GridSpec(Type type, T x_min, T x_max, size_t n_points, T concentration = T(1.0))
+    GridSpec(Type type, T x_min, T x_max, size_t n_points, T concentration = T(1.0),
+             std::vector<MultiSinhCluster<T>> clusters = {})
         : type_(type), x_min_(x_min), x_max_(x_max),
-          n_points_(n_points), concentration_(concentration) {}
+          n_points_(n_points), concentration_(concentration),
+          clusters_(std::move(clusters)) {}
 
     Type type_;
     T x_min_;
     T x_max_;
     size_t n_points_;
     T concentration_;  // Only used for sinh spacing
+    std::vector<MultiSinhCluster<T>> clusters_;  // Empty for non-composite grids
 };
 
 /**

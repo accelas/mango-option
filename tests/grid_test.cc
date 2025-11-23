@@ -127,3 +127,11 @@ TEST(GridSpecTest, MultiSinhTypeExists) {
     Type t = Type::MultiSinhSpaced;
     EXPECT_EQ(t, Type::MultiSinhSpaced);
 }
+
+TEST(GridSpecTest, ClustersStorageAccessor) {
+    auto result = mango::GridSpec<>::uniform(0.0, 1.0, 11);
+    ASSERT_TRUE(result.has_value());
+
+    auto clusters = result.value().clusters();
+    EXPECT_TRUE(clusters.empty());
+}
