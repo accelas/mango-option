@@ -62,5 +62,48 @@ TEST(PriceTableSurfaceTest, RejectInvalidCoefficients) {
     EXPECT_NE(result.error().find("size"), std::string::npos);
 }
 
+// REGRESSION TEST: Verify build() return type includes template parameter <N>
+// Issue caught during review: Missing <N> in return type would cause type mismatch
+// This test ensures the return type is shared_ptr<const PriceTableSurface<N>>, not
+// shared_ptr<const PriceTableSurface> (which would be invalid)
+TEST(PriceTableSurfaceTest, BuildReturnsCorrectTemplateType) {
+    PriceTableAxes<2> axes;
+    axes.grids[0] = {0.8, 0.9, 1.0, 1.1};
+    axes.grids[1] = {0.1, 0.5, 1.0, 1.5};
+
+    std::vector<double> coeffs(16, 1.0);
+    PriceTableMetadata meta{.K_ref = 100.0};
+
+    auto result = PriceTableSurface<2>::build(std::move(axes), std::move(coeffs), meta);
+    ASSERT_TRUE(result.has_value());
+
+    // Compile-time type verification: ensure template parameter is present
+    // This would fail to compile if build() returned shared_ptr<const PriceTableSurface>
+    // without the <N> template parameter
+    std::shared_ptr<const PriceTableSurface<2>> surface = result.value();
+    EXPECT_NE(surface, nullptr);
+
+    // Runtime verification: surface should be usable
+    EXPECT_EQ(surface->axes().grids[0].size(), 4);
+}
+
+// REGRESSION TEST: Verify 3D surface also has correct template type
+TEST(PriceTableSurfaceTest, Build3DReturnsCorrectTemplateType) {
+    PriceTableAxes<3> axes;
+    axes.grids[0] = {0.8, 0.9, 1.0, 1.1};
+    axes.grids[1] = {0.1, 0.5, 1.0, 1.5};
+    axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
+
+    std::vector<double> coeffs(64, 1.0);  // 4*4*4 = 64
+    PriceTableMetadata meta{.K_ref = 100.0};
+
+    auto result = PriceTableSurface<3>::build(std::move(axes), std::move(coeffs), meta);
+    ASSERT_TRUE(result.has_value());
+
+    // Compile-time type verification
+    std::shared_ptr<const PriceTableSurface<3>> surface = result.value();
+    EXPECT_NE(surface, nullptr);
+}
+
 } // namespace
 } // namespace mango

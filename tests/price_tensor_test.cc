@@ -99,5 +99,50 @@ TEST(PriceTensorTest, Create5DTensor) {
     EXPECT_DOUBLE_EQ((tensor.view[1, 2, 3, 4, 5]), 99.0);
 }
 
+// REGRESSION TEST: Verify mdspan dependency compiles correctly
+// Issue: Missing @mdspan//:mdspan dependency in BUILD.bazel would cause compile failure
+TEST(PriceTensorTest, MdspanTypesCompile) {
+    // This test verifies that mdspan types are available and work correctly
+    auto arena = memory::AlignedArena::create(1024).value();
+    auto tensor = PriceTensor<2>::create({3, 4}, arena).value();
+
+    // Verify mdspan types are accessible
+    using MdspanType = decltype(tensor.view);
+    using ElementType = typename MdspanType::element_type;
+
+    // Verify element_type is double
+    static_assert(std::is_same_v<ElementType, double>,
+                  "mdspan element_type must be double");
+
+    // Verify extents work correctly
+    EXPECT_EQ(tensor.view.extent(0), 3);
+    EXPECT_EQ(tensor.view.extent(1), 4);
+
+    // Verify multidimensional indexing works (this would fail to compile without mdspan)
+    tensor.view[0, 0] = 1.0;
+    tensor.view[2, 3] = 12.0;
+    EXPECT_DOUBLE_EQ((tensor.view[0, 0]), 1.0);
+    EXPECT_DOUBLE_EQ((tensor.view[2, 3]), 12.0);
+}
+
+// REGRESSION TEST: Verify mdspan works for higher dimensions
+TEST(PriceTensorTest, Mdspan4DTypesCompile) {
+    auto arena = memory::AlignedArena::create(10000).value();
+    auto tensor = PriceTensor<4>::create({2, 3, 4, 5}, arena).value();
+
+    // Verify 4D indexing compiles and works
+    tensor.view[0, 1, 2, 3] = 42.0;
+    tensor.view[1, 2, 3, 4] = 84.0;
+
+    EXPECT_DOUBLE_EQ((tensor.view[0, 1, 2, 3]), 42.0);
+    EXPECT_DOUBLE_EQ((tensor.view[1, 2, 3, 4]), 84.0);
+
+    // Verify extent accessors
+    EXPECT_EQ(tensor.view.extent(0), 2);
+    EXPECT_EQ(tensor.view.extent(1), 3);
+    EXPECT_EQ(tensor.view.extent(2), 4);
+    EXPECT_EQ(tensor.view.extent(3), 5);
+}
+
 } // namespace
 } // namespace mango
