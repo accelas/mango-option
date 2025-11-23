@@ -300,6 +300,12 @@ IVSolverFDM::validate_arbitrage_bounds(const IVQuery& query) const {
         .and_then([this, &query](auto) { return validate_intrinsic_value(query); });
 }
 
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_query_monadic(const IVQuery& query) const {
+    return validate_positive_parameters(query)
+        .and_then([this, &query](auto) { return validate_arbitrage_bounds(query); });
+}
+
 std::expected<IVSuccess, IVError>
 IVSolverFDM::solve_brent(const IVQuery& query) const {
     // Adaptive bounds logic
@@ -364,14 +370,9 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
 }
 
 std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) {
-    // C++23 monadic validation chain
-    return validate_positive_parameters(query)
-        .and_then([this, &query](auto) {
-            return validate_arbitrage_bounds(query);
-        })
-        .and_then([this, &query](auto) {
-            return solve_brent(query);
-        });
+    // C++23 monadic validation pipeline: validate → solve
+    return validate_query_monadic(query)
+        .and_then([this, &query](auto) { return solve_brent(query); });
 }
 
 void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
