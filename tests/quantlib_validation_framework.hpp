@@ -225,17 +225,16 @@ inline IVValidationResult validate_iv_fdm(
     config.root_config.tolerance = 1e-6;
 
     IVSolverFDM solver(config);
-    auto iv_result = solver.solve(query);
+    auto iv_result = solver.solve_impl(query);
 
-    if (!iv_result.converged) {
+    if (!iv_result.has_value()) {
         validation.passed = false;
-        validation.failure_message = "IV solver failed: " +
-            iv_result.failure_reason.value_or("unknown");
+        validation.failure_message = "IV solver failed: " + iv_result.error().message;
         return validation;
     }
 
-    validation.recovered_vol = iv_result.implied_vol;
-    validation.iterations = iv_result.iterations;
+    validation.recovered_vol = iv_result->implied_vol;
+    validation.iterations = iv_result->iterations;
     validation.abs_error = std::abs(validation.recovered_vol - validation.true_vol);
     validation.rel_error_pct = (validation.abs_error / validation.true_vol) * 100.0;
 
