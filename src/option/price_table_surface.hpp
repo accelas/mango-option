@@ -24,7 +24,7 @@ public:
     /// @param coeffs Flattened B-spline coefficients (row-major)
     /// @param metadata Reference strike, dividends, etc.
     /// @return Shared pointer to surface or error message
-    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurface>, std::string>
+    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
     build(PriceTableAxes<N> axes, std::vector<double> coeffs, PriceTableMetadata metadata);
 
     /// Access axes

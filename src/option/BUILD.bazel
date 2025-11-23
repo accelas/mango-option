@@ -9,7 +9,7 @@ cc_library(
     hdrs = ["price_tensor.hpp"],
     deps = [
         "//src/support:aligned_arena",
-        "@mdspan",
+        "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
 )

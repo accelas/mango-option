@@ -10,14 +10,34 @@ PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
 template <size_t N>
 std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
 PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
-    // TODO: Implement pipeline
+    // TODO: Implement full pipeline (Phases 8-10)
+    // This skeleton will be completed in subsequent phases:
+    // - Phase 8: Parallel PDE solve batch
+    // - Phase 9: N-dimensional B-spline fitting
+    // - Phase 10: PriceTableSurface construction
+    //
+    // For now, return error to indicate incomplete implementation.
+    // Tests explicitly document this is a skeleton.
     return std::unexpected("PriceTableBuilder::build() not yet implemented");
 }
 
 template <size_t N>
 std::vector<AmericanOptionParams>
 PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes, double K_ref) const {
-    if constexpr (N >= 4) {
+    // NOTE: Only 4D is currently supported.
+    // Hard-coded assumption: axes[0]=moneyness, axes[1]=maturity,
+    // axes[2]=volatility, axes[3]=rate.
+    //
+    // For N>4 (e.g., 5D with dividend dimension), this would need:
+    // - Dynamic axis mapping (which axis is dividend?)
+    // - Conditional parameter construction based on N
+    //
+    // For N!=4, this method should not be called. We cannot use static_assert
+    // here because we have explicit instantiations for N=2,3,5, and static_assert
+    // would fail at template instantiation time even if the method is never called.
+    // Instead, document the limitation and return empty for non-4D.
+
+    if constexpr (N == 4) {
         std::vector<AmericanOptionParams> batch;
         batch.reserve(axes.total_points());
 
@@ -48,7 +68,8 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes, double K_ref) co
 
         return batch;
     } else {
-        // For N < 4, return empty batch (should not be called in practice)
+        // For N != 4, return empty batch
+        // This should not be called in practice for production code
         return {};
     }
 }

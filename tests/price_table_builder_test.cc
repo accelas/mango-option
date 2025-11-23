@@ -22,10 +22,12 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     axes.grids[2] = {0.15, 0.20, 0.25, 0.30};
     axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
 
-    // This will fail until we implement the pipeline
-    // For now, just verify it returns an error
+    // NOTE: build() is a skeleton implementation
+    // Will be completed in Phases 8-10 of price table refactor
+    // For now, verify it returns expected error
     auto result = builder.build(axes);
-    EXPECT_FALSE(result.has_value());  // Not implemented yet
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), "PriceTableBuilder::build() not yet implemented");
 }
 
 TEST(PriceTableBuilderTest, MakeBatch4D) {
