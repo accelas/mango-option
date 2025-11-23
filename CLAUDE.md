@@ -335,9 +335,18 @@ The multi-sinh implementation automatically enforces:
     ```cpp
     auto spec = GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 201, clusters, false);
     ```
-- **Strict monotonicity**: x[i+1] > x[i] for all i (iterative smoothing if needed)
+- **No automatic recentering**: Auto-merge preserves the merged weighted-average position
+  - Merged clusters stay at their weighted-average location (merge_nearby_clusters computes this)
+  - Auto-merge only deduplicates overlapping centers, it doesn't recenter them
+  - Example: Two clusters at x=1.0 and x=1.05 merge → stays at weighted average x=1.025
+  - Use case: Deep ITM clusters at x=-0.55 and x=-0.50 merge to x=-0.525, preserving ITM concentration
+- **Strict monotonicity**: x[i+1] > x[i] for all i
+  - Centered single clusters: naturally monotonic (no smoothing needed)
+  - Off-center single clusters: require monotonicity enforcement pass
+  - Multi-cluster configurations: require monotonicity enforcement pass
+  - Enforcement uses iterative smoothing + forward/backward spacing adjustments
 - **Minimum spacing**: Prevents dx → 0 to avoid conditioning issues
-- **Exact boundaries**: x[0] = x_min and x[n-1] = x_max (clamped endpoints)
+- **Exact boundaries**: x[0] = x_min and x[n-1] = x_max (endpoints clamped by monotonicity pass)
 - **Normalized weights**: Prevents bias from unnormalized cluster contributions
 - **Validation**: Checks alpha > 0, weight > 0, center within bounds
 

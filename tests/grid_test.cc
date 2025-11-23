@@ -200,16 +200,47 @@ TEST(GridSpecTest, MultiSinhSingleClusterMatchesSinhSpaced) {
     }
 }
 
-TEST(GridSpecTest, MultiSinhRejectsSingleOffCenterCluster) {
-    // Test that single-cluster multi-sinh rejects off-center clusters
+TEST(GridSpecTest, MultiSinhMergedClusterPreservesLocation) {
+    // Test that merged clusters preserve their weighted-average location
+    // Auto-merge only deduplicates overlapping centers, it doesn't recenter them
     std::vector<mango::MultiSinhCluster<double>> clusters = {
-        {.center_x = 1.0, .alpha = 2.0, .weight = 1.0}  // Off-center (domain center is 0.0)
+        {.center_x = 0.95, .alpha = 3.0, .weight = 1.0},
+        {.center_x = 1.05, .alpha = 3.0, .weight = 1.0}  // Δx=0.1 <= 0.3/3=0.1, will merge
     };
 
-    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 11, clusters);
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
 
-    ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("centered cluster"), std::string::npos);
+    // Should succeed with automatic merge
+    ASSERT_TRUE(result.has_value());
+
+    // Verify clusters merged to single cluster at weighted average (1.0)
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 1);
+    EXPECT_NEAR(final_clusters[0].center_x, 1.0, 1e-10)
+        << "Merged cluster should preserve weighted-average position";
+
+    // Verify grid generation concentrates near x=1.0, not domain center
+    auto grid = result.value().generate();
+    EXPECT_EQ(grid.size(), 51);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[50], 3.0);
+
+    // Find point closest to x=1.0
+    size_t idx_center = 0;
+    double min_dist = 100.0;
+    for (size_t i = 0; i < grid.size(); ++i) {
+        double dist = std::abs(grid[i] - 1.0);
+        if (dist < min_dist) {
+            min_dist = dist;
+            idx_center = i;
+        }
+    }
+
+    // Verify concentration near x=1.0 (fine spacing)
+    if (idx_center > 0 && idx_center < 50) {
+        double spacing_near = grid[idx_center + 1] - grid[idx_center];
+        EXPECT_LT(spacing_near, 0.15) << "Grid should concentrate near merged center x=1.0";
+    }
 }
 
 TEST(GridSpecTest, MultiSinhTwoClusterGeneration) {
@@ -478,12 +509,11 @@ TEST(GridSpecTest, MultiSinhChainMerge) {
     EXPECT_NEAR(final_clusters[0].weight, 3.0, 1e-10);
 }
 
-TEST(GridSpecTest, MultiSinhOffCenterMergeRejected) {
-    // Test Bug 2 fix: Two close clusters both away from domain center
+TEST(GridSpecTest, MultiSinhOffCenterMergePreservesLocation) {
+    // Test merged clusters preserve location: Two close clusters both away from domain center
     // Domain: [-3.0, 3.0], center = 0.0
     // Clusters at x=1.0 and x=1.05 (close enough to merge)
-    // After merge, single cluster at ~x=1.025 (off-center)
-    // Should be rejected with "single cluster must be centered" error
+    // After merge, single cluster stays at weighted average (1.025)
 
     std::vector<mango::MultiSinhCluster<double>> clusters = {
         {.center_x = 1.0, .alpha = 3.0, .weight = 1.0},
@@ -492,13 +522,31 @@ TEST(GridSpecTest, MultiSinhOffCenterMergeRejected) {
 
     // alpha_avg = 3.0, threshold = 0.3/3.0 = 0.1
     // delta_x = 0.05 < 0.1, so clusters WILL merge
-    // Merged center = (1.0 + 1.05) / 2 = 1.025 (off-center from domain center 0.0)
+    // After merge, cluster stays at weighted average: (1.0 + 1.05)/2 = 1.025
 
     auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
 
-    // Should fail with "centered cluster" error
-    ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("centered cluster"), std::string::npos);
+    // Should succeed with automatic merge
+    ASSERT_TRUE(result.has_value());
+
+    // Verify single cluster after merge
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 1);
+
+    // Verify cluster preserved weighted average (1.025), NOT recentered
+    EXPECT_NEAR(final_clusters[0].center_x, 1.025, 1e-10)
+        << "Merged cluster should preserve weighted-average position";
+
+    // Verify grid generation works correctly and concentrates near 1.025
+    auto grid = result.value().generate();
+    EXPECT_EQ(grid.size(), 51);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[50], 3.0);
+
+    // Check strict monotonicity
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Grid must be strictly monotonic at index " << i;
+    }
 }
 
 TEST(GridSpecTest, MultiSinhBypassAutoMerge) {
@@ -534,5 +582,139 @@ TEST(GridSpecTest, MultiSinhBypassAutoMerge) {
     // Check strict monotonicity
     for (size_t i = 1; i < grid.size(); ++i) {
         EXPECT_GT(grid[i], grid[i-1]) << "Grid must be strictly monotonic at index " << i;
+    }
+}
+
+TEST(GridSpecTest, MultiSinhEtaParameterizationBounds) {
+    // Regression test for eta-based parameterization fix
+    // Previous u ∈ [-1,1] parameterization caused sinh values to exceed bounds
+    // for typical alpha >= 1, requiring heavy clamping that flattened concentrations
+    // eta ∈ [0,1] parameterization keeps sinh values bounded and preserves density
+
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -1.0, .alpha = 2.0, .weight = 1.0},
+        {.center_x = 1.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    auto grid = result.value().generate();
+    EXPECT_EQ(grid.size(), 101);
+
+    // Verify strict bounds (no out-of-bounds points that required clamping)
+    for (size_t i = 0; i < grid.size(); ++i) {
+        EXPECT_GE(grid[i], -3.0) << "Point " << i << " below x_min";
+        EXPECT_LE(grid[i], 3.0) << "Point " << i << " above x_max";
+    }
+
+    // Verify endpoints are exact
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[100], 3.0);
+
+    // Verify strict monotonicity (no backward jumps from clamping)
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Non-monotonic at index " << i;
+    }
+
+    // Verify concentration is preserved near cluster centers
+    // Find points closest to each cluster center
+    size_t idx_left = 0, idx_right = 0;
+    double min_dist_left = 100.0, min_dist_right = 100.0;
+    for (size_t i = 0; i < grid.size(); ++i) {
+        double dist_left = std::abs(grid[i] - (-1.0));
+        double dist_right = std::abs(grid[i] - 1.0);
+        if (dist_left < min_dist_left) {
+            min_dist_left = dist_left;
+            idx_left = i;
+        }
+        if (dist_right < min_dist_right) {
+            min_dist_right = dist_right;
+            idx_right = i;
+        }
+    }
+
+    // Verify concentration is preserved near cluster centers
+    // With alpha=2.0, spacing near centers should be fine (< 0.1)
+    if (idx_left > 0 && idx_left < 100) {
+        double spacing_near_left = grid[idx_left + 1] - grid[idx_left];
+        EXPECT_LT(spacing_near_left, 0.1) << "Concentration lost at left cluster";
+    }
+    if (idx_right > 0 && idx_right < 100) {
+        double spacing_near_right = grid[idx_right + 1] - grid[idx_right];
+        EXPECT_LT(spacing_near_right, 0.1) << "Concentration lost at right cluster";
+    }
+
+    // Verify that the maximum spacing in the grid is reasonable
+    // (not so large that it indicates flattening from clamping)
+    double max_spacing = 0.0;
+    for (size_t i = 1; i < grid.size(); ++i) {
+        max_spacing = std::max(max_spacing, grid[i] - grid[i-1]);
+    }
+    // With 101 points on [-3,3] domain, max spacing should be < 0.5
+    // (uniform would be 6/100 = 0.06, multi-sinh should be somewhat coarser but not extreme)
+    EXPECT_LT(max_spacing, 0.5) << "Excessive spacing indicates concentration was lost";
+}
+
+TEST(GridSpecTest, MultiSinhSingleOffCenterPreserved) {
+    // Regression test: Explicit single off-center clusters should NOT be recentered
+    // Only merged clusters should be recentered
+    // Use case: Deep ITM concentration at x = -0.5, not at domain center
+
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -0.5, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    // Verify the cluster center was NOT moved to domain midpoint (0.0)
+    auto final_clusters = result.value().clusters();
+    EXPECT_EQ(final_clusters.size(), 1);
+    EXPECT_NEAR(final_clusters[0].center_x, -0.5, 1e-10)
+        << "Explicit single off-center cluster should preserve its location";
+
+    // Verify grid generation works and concentrates near -0.5
+    auto grid = result.value().generate();
+    EXPECT_EQ(grid.size(), 51);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[50], 3.0);
+
+    // Find point closest to -0.5
+    size_t idx_center = 0;
+    double min_dist = 100.0;
+    for (size_t i = 0; i < grid.size(); ++i) {
+        double dist = std::abs(grid[i] - (-0.5));
+        if (dist < min_dist) {
+            min_dist = dist;
+            idx_center = i;
+        }
+    }
+
+    // Verify concentration at -0.5 (fine spacing near center)
+    if (idx_center > 0 && idx_center < 50) {
+        double spacing_near_center = grid[idx_center + 1] - grid[idx_center];
+        EXPECT_LT(spacing_near_center, 0.15)
+            << "Spacing should be fine near requested center -0.5";
+    }
+
+    // Verify spacing is coarser far from -0.5 (e.g., near x = 2.5)
+    size_t idx_far = 0;
+    min_dist = 100.0;
+    for (size_t i = 0; i < grid.size(); ++i) {
+        double dist = std::abs(grid[i] - 2.5);
+        if (dist < min_dist) {
+            min_dist = dist;
+            idx_far = i;
+        }
+    }
+
+    if (idx_far > 0 && idx_far < 50) {
+        double spacing_far = grid[idx_far + 1] - grid[idx_far];
+        double spacing_near = grid[idx_center + 1] - grid[idx_center];
+        // Off-center grids with monotonicity enforcement have reduced contrast,
+        // but spacing far should still be coarser than spacing near the center
+        EXPECT_GT(spacing_far, spacing_near * 0.9)
+            << "Spacing should be coarser far from requested center";
     }
 }

@@ -342,20 +342,21 @@ case Type::MultiSinhSpaced: {
         const T range = x_max_ - x_min_;
         const T sinh_half_c = std::sinh(c / T(2.0));
 
+        // Use eta-based transform (same as SinhSpaced) for guaranteed monotonicity
+        // For centered clusters: eta_center = 0.5, so transform simplifies to standard sinh spacing
+        const T eta_center = (center - x_min_) / range;  // Normalized center position
+
         for (size_t i = 0; i < n_points_; ++i) {
-            // Map uniform parameter u ∈ [-1, 1] to grid via sinh
-            const T u = T(-1.0) + T(2.0) * static_cast<T>(i) / static_cast<T>(n_points_ - 1);
-            const T sinh_term = std::sinh(c * u) / sinh_half_c;
+            // Map i to eta ∈ [0, 1]
+            const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+
+            // Apply sinh transform centered at eta_center
+            const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
             const T normalized = (T(1.0) + sinh_term) / T(2.0);
 
-            // Transform to [x_min, x_max] centered at cluster.center_x
-            const T offset_x = center - (x_min_ + x_max_) / T(2.0);
-            points.push_back(x_min_ + range * normalized + offset_x);
+            // Scale to [x_min, x_max] - naturally stays in bounds
+            points.push_back(x_min_ + range * normalized);
         }
-
-        // Clamp endpoints to ensure exact x_min/x_max
-        points[0] = x_min_;
-        points[n_points_ - 1] = x_max_;
     } else {
         // TODO: Handle multiple clusters (Task 6)
         throw std::runtime_error("Multi-cluster generation not yet implemented");
@@ -438,9 +439,12 @@ Replace the TODO block in MultiSinhSpaced case with:
         total_weight += cluster.weight;
     }
 
+    const T range = x_max_ - x_min_;
+
     for (size_t i = 0; i < n_points_; ++i) {
-        // Uniform parameter u ∈ [-1, 1]
-        const T u = T(-1.0) + T(2.0) * static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+        // Use eta ∈ [0, 1] parameterization (same as single-cluster)
+        // This keeps sinh values bounded, preventing out-of-bounds points
+        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
 
         // Weighted combination of sinh transforms
         T weighted_x = T(0);
@@ -450,13 +454,15 @@ Replace the TODO block in MultiSinhSpaced case with:
             const T w = cluster.weight / total_weight;
             const T sinh_half_c = std::sinh(c / T(2.0));
 
-            const T sinh_term = std::sinh(c * u) / sinh_half_c;
+            // Compute normalized center position for this cluster
+            const T eta_center = (center - x_min_) / range;
+
+            // Apply sinh transform centered at eta_center (same formula as single-cluster)
+            const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
             const T normalized = (T(1.0) + sinh_term) / T(2.0);
 
-            // Transform centered at this cluster
-            const T range = x_max_ - x_min_;
-            const T offset_x = center - (x_min_ + x_max_) / T(2.0);
-            const T x_i = x_min_ + range * normalized + offset_x;
+            // Transform to [x_min, x_max] - naturally stays in bounds
+            const T x_i = x_min_ + range * normalized;
 
             weighted_x += w * x_i;
         }

@@ -128,17 +128,8 @@ public:
             merge_nearby_clusters(clusters);
         }
 
-        // CRITICAL: Check single-cluster centered requirement AFTER merging
-        // This catches cases where two off-center clusters merge into one off-center cluster
-        if (clusters.size() == 1) {
-            const T domain_center = (x_min + x_max) / T(2.0);
-            const T tol = T(1e-10);
-            if (std::abs(clusters[0].center_x - domain_center) > tol) {
-                return std::unexpected<std::string>(
-                    std::format("Single-cluster multi-sinh requires centered cluster (center must be {}, got {})",
-                               domain_center, clusters[0].center_x));
-            }
-        }
+        // No automatic recentering - preserve the merged weighted-average position
+        // Auto-merge only deduplicates overlapping centers, it doesn't recenter them
 
         return GridSpec(Type::MultiSinhSpaced, x_min, x_max, n_points,
                         T(1.0), std::move(clusters));
@@ -415,20 +406,38 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const T range = x_max_ - x_min_;
                 const T sinh_half_c = std::sinh(c / T(2.0));
 
-                // Use eta-based transform (same as SinhSpaced) for guaranteed monotonicity
-                // For centered clusters: eta_center = 0.5, so transform simplifies to standard sinh spacing
-                const T eta_center = (center - x_min_) / range;  // Normalized center position
+                // Compute normalized center position
+                const T eta_center = (center - x_min_) / range;
 
-                for (size_t i = 0; i < n_points_; ++i) {
-                    // Map i to eta ∈ [0, 1]
-                    const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                // Check if cluster is centered (eta_center ≈ 0.5)
+                const bool is_centered = std::abs(eta_center - T(0.5)) < T(1e-10);
 
-                    // Apply sinh transform centered at eta_center
-                    const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
-                    const T normalized = (T(1.0) + sinh_term) / T(2.0);
+                if (is_centered) {
+                    // Centered cluster: use standard sinh formula (guaranteed in-bounds)
+                    for (size_t i = 0; i < n_points_; ++i) {
+                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                        const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
+                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
+                        points.push_back(x_min_ + range * normalized);
+                    }
+                } else {
+                    // Off-center cluster: use generalized formula + monotonicity enforcement
+                    const T offset = center - (x_min_ + x_max_) / T(2.0);
+                    std::vector<T> raw_points(n_points_);
+                    for (size_t i = 0; i < n_points_; ++i) {
+                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
+                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
+                        raw_points[i] = x_min_ + range * normalized + offset;
+                    }
 
-                    // Scale to [x_min, x_max] - naturally stays in bounds
-                    points.push_back(x_min_ + range * normalized);
+                    // Enforce monotonicity and bounds
+                    enforce_monotonicity(raw_points, x_min_, x_max_);
+
+                    // Transfer to output
+                    for (const auto& x : raw_points) {
+                        points.push_back(x);
+                    }
                 }
             } else {
                 // Multi-cluster: combine weighted sinh transforms
@@ -440,9 +449,11 @@ GridBuffer<T> GridSpec<T>::generate() const {
                     total_weight += cluster.weight;
                 }
 
+                const T range = x_max_ - x_min_;
+
                 for (size_t i = 0; i < n_points_; ++i) {
-                    // Uniform parameter u ∈ [-1, 1]
-                    const T u = T(-1.0) + T(2.0) * static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                    // Map i to eta ∈ [0, 1]
+                    const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
 
                     // Weighted combination of sinh transforms
                     T weighted_x = T(0);
@@ -452,13 +463,16 @@ GridBuffer<T> GridSpec<T>::generate() const {
                         const T w = cluster.weight / total_weight;
                         const T sinh_half_c = std::sinh(c / T(2.0));
 
-                        const T sinh_term = std::sinh(c * u) / sinh_half_c;
+                        // Compute normalized center position for this cluster
+                        const T eta_center = (center - x_min_) / range;
+
+                        // Apply sinh transform centered at eta_center
+                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
                         const T normalized = (T(1.0) + sinh_term) / T(2.0);
 
-                        // Transform centered at this cluster
-                        const T range = x_max_ - x_min_;
-                        const T offset_x = center - (x_min_ + x_max_) / T(2.0);
-                        const T x_i = x_min_ + range * normalized + offset_x;
+                        // Transform to [x_min, x_max] with offset to place peak at center_x
+                        const T offset = center - (x_min_ + x_max_) / T(2.0);
+                        const T x_i = x_min_ + range * normalized + offset;
 
                         weighted_x += w * x_i;
                     }
