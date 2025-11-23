@@ -23,53 +23,46 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
 
 template <size_t N>
 std::vector<AmericanOptionParams>
-PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes, double K_ref) const {
-    // NOTE: Only 4D is currently supported.
-    // Hard-coded assumption: axes[0]=moneyness, axes[1]=maturity,
-    // axes[2]=volatility, axes[3]=rate.
-    //
-    // For N>4 (e.g., 5D with dividend dimension), this would need:
-    // - Dynamic axis mapping (which axis is dividend?)
-    // - Conditional parameter construction based on N
-    //
-    // For N!=4, this method should not be called. We cannot use static_assert
-    // here because we have explicit instantiations for N=2,3,5, and static_assert
-    // would fail at template instantiation time even if the method is never called.
-    // Instead, document the limitation and return empty for non-4D.
-
+PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     if constexpr (N == 4) {
         std::vector<AmericanOptionParams> batch;
-        batch.reserve(axes.total_points());
 
-        // Iterate over all grid point combinations
-        for_each_axis_index<0>(axes, [&](const std::array<size_t, N>& indices) {
-            double m = axes.grids[0][indices[0]];       // moneyness
-            double tau = axes.grids[1][indices[1]];     // maturity
-            double sigma = axes.grids[2][indices[2]];   // volatility
-            double r = axes.grids[3][indices[3]];       // rate
+        // Iterate only over high-cost axes: axes[2] (σ) and axes[3] (r)
+        // This creates Nσ × Nr batch entries, NOT Nm × Nt × Nσ × Nr
+        // Each solve produces a surface over (m, τ) that gets reused
+        const size_t Nσ = axes.grids[2].size();
+        const size_t Nr = axes.grids[3].size();
+        batch.reserve(Nσ * Nr);
 
-            // Convert moneyness to spot: S = m * K_ref
-            double spot = m * K_ref;
+        // Normalized parameters: Spot = Strike = K_ref
+        // Moneyness and maturity are handled via grid interpolation in extract_tensor
+        const double K_ref = config_.K_ref;
 
-            // Use constructor: (spot, strike, maturity, rate, dividend_yield, type, volatility, discrete_dividends)
-            AmericanOptionParams params(
-                spot,
-                K_ref,
-                tau,
-                r,
-                config_.dividend_yield,
-                config_.option_type,
-                sigma,
-                config_.discrete_dividends
-            );
+        for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+            for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+                double sigma = axes.grids[2][σ_idx];
+                double r = axes.grids[3][r_idx];
 
-            batch.push_back(params);
-        });
+                // Normalized solve: Spot = Strike = K_ref
+                // Surface will be interpolated across m and τ in extract_tensor
+                AmericanOptionParams params(
+                    K_ref,                          // spot
+                    K_ref,                          // strike
+                    axes.grids[1].back(),           // maturity (max for this σ,r)
+                    r,                              // rate
+                    config_.dividend_yield,         // dividend_yield
+                    config_.option_type,            // type
+                    sigma,                          // volatility
+                    config_.discrete_dividends      // discrete_dividends
+                );
+
+                batch.push_back(params);
+            }
+        }
 
         return batch;
     } else {
-        // For N != 4, return empty batch
-        // This should not be called in practice for production code
+        // Return empty batch for N≠4
         return {};
     }
 }

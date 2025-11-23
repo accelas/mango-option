@@ -78,9 +78,43 @@ TEST(PriceTableBuilderTest, Build5DNotImplemented) {
     EXPECT_EQ(result.error(), "PriceTableBuilder::build() not yet implemented");
 }
 
+TEST(PriceTableBuilderTest, MakeBatchIteratesVolatilityAndRateOnly) {
+    // Design: make_batch should iterate axes[2] × axes[3] only (vol × rate)
+    // NOT all grid points (would explode PDE count)
+
+    PriceTableConfig config{
+        .option_type = OptionType::PUT,
+        .K_ref = 100.0,
+        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
+        .n_time = 1000,
+        .dividend_yield = 0.02
+    };
+
+    PriceTableBuilder<4> builder(config);
+
+    PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0, 1.1};      // moneyness: 3 points
+    axes.grids[1] = {0.1, 0.5, 1.0};      // maturity: 3 points
+    axes.grids[2] = {0.15, 0.20, 0.25};   // volatility: 3 points
+    axes.grids[3] = {0.02, 0.05};         // rate: 2 points
+
+    // Should create 3 × 2 = 6 batch entries (vol × rate)
+    // NOT 3 × 3 × 3 × 2 = 54 entries (all axes)
+    auto batch = builder.make_batch_for_testing(axes);
+
+    EXPECT_EQ(batch.size(), 6);  // Nσ × Nr
+
+    // Verify all batch entries use normalized params (Spot = Strike = K_ref)
+    for (const auto& params : batch) {
+        EXPECT_DOUBLE_EQ(params.spot, 100.0);
+        EXPECT_DOUBLE_EQ(params.strike, 100.0);
+    }
+}
+
 TEST(PriceTableBuilderTest, MakeBatch4D) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
+        .K_ref = 100.0,
         .dividend_yield = 0.02,
         .discrete_dividends = {{0.25, 1.0}}
     };
@@ -93,15 +127,15 @@ TEST(PriceTableBuilderTest, MakeBatch4D) {
     axes.grids[2] = {0.20};          // volatility: 1 point
     axes.grids[3] = {0.05};          // rate: 1 point
 
-    // Should create 2*2*1*1 = 4 option parameter sets
-    auto batch = builder.make_batch_for_testing(axes, 100.0);
+    // Should create 1 × 1 = 1 option (vol × rate)
+    // NOT 2 × 2 × 1 × 1 = 4 options
+    auto batch = builder.make_batch_for_testing(axes);
+    EXPECT_EQ(batch.size(), 1);  // 1 vol × 1 rate
 
-    EXPECT_EQ(batch.size(), 4);
-
-    // Check first parameter set
-    EXPECT_DOUBLE_EQ(batch[0].spot, 90.0);  // m=0.9, K_ref=100 => S=90
-    EXPECT_DOUBLE_EQ(batch[0].strike, 100.0);
-    EXPECT_DOUBLE_EQ(batch[0].maturity, 0.1);
+    // Check parameter set - should be normalized (Spot = Strike = K_ref)
+    EXPECT_DOUBLE_EQ(batch[0].spot, 100.0);     // Normalized
+    EXPECT_DOUBLE_EQ(batch[0].strike, 100.0);   // K_ref
+    EXPECT_DOUBLE_EQ(batch[0].maturity, 0.5);   // Max maturity
     EXPECT_DOUBLE_EQ(batch[0].volatility, 0.20);
     EXPECT_DOUBLE_EQ(batch[0].rate, 0.05);
     EXPECT_DOUBLE_EQ(batch[0].dividend_yield, 0.02);
@@ -126,7 +160,7 @@ TEST(PriceTableBuilderTest, MakeBatch2DReturnsEmpty) {
     axes.grids[1] = {0.1, 0.5, 1.0};
 
     // Should return empty batch (N != 4)
-    auto batch = builder.make_batch_for_testing(axes, 100.0);
+    auto batch = builder.make_batch_for_testing(axes);
     EXPECT_TRUE(batch.empty());
 }
 
@@ -145,7 +179,7 @@ TEST(PriceTableBuilderTest, MakeBatch3DReturnsEmpty) {
     axes.grids[2] = {0.20, 0.25};
 
     // Should return empty batch (N != 4)
-    auto batch = builder.make_batch_for_testing(axes, 100.0);
+    auto batch = builder.make_batch_for_testing(axes);
     EXPECT_TRUE(batch.empty());
 }
 
@@ -167,7 +201,7 @@ TEST(PriceTableBuilderTest, MakeBatch5DReturnsEmpty) {
 
     // Should return empty batch (N != 4)
     // This documents the 4D-only limitation
-    auto batch = builder.make_batch_for_testing(axes, 100.0);
+    auto batch = builder.make_batch_for_testing(axes);
     EXPECT_TRUE(batch.empty());
 }
 
