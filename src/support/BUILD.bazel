@@ -23,3 +23,9 @@ cc_library(
     hdrs = ["crc64.hpp"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "ivcalc_trace_hdr",
+    hdrs = ["ivcalc_trace.h"],
+    visibility = ["//visibility:public"],
+)

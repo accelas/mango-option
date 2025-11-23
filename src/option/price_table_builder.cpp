@@ -3,7 +3,7 @@
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/support/memory/aligned_arena.hpp"
-#include "common/ivcalc_trace.h"
+#include "src/support/ivcalc_trace.h"
 #include <cmath>
 #include <limits>
 

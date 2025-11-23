@@ -1,6 +1,6 @@
 # mango-iv
 
-**Research-grade numerical library for option pricing and implied volatility calculation**
+Modern C++23 library for American option pricing and implied volatility calculation.
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C++23](https://img.shields.io/badge/C++-23-blue)]() [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
 
@@ -8,21 +8,21 @@
 
 ## What is mango-iv?
 
-**mango-iv** is a modern C++23 library that solves two fundamental problems in quantitative finance:
+**mango-iv** solves two fundamental problems in quantitative finance:
 
-1. **American Option Pricing**: Calculate fair prices using finite-difference PDE solver
-2. **American Option Implied Volatility**: Invert market prices to extract implied volatility
+1. **American Option Pricing** – Finite difference PDE solver with TR-BDF2 time stepping
+2. **Implied Volatility Calculation** – Extract implied volatility from market prices
 
-The library combines **performance**, **flexibility**, and **correctness** with a focus on research and prototyping use cases for American options.
+Designed for research, prototyping, and production use with a focus on **correctness**, **performance**, and **flexibility**.
 
 ### Key Features
 
-- **American Option Pricing** – TR‑BDF2 PDE solver (~22 ms per valuation)
-- **Fast IV via B-splines** – Pre-computed 4D tensor-product cubic B-spline surfaces feed the Newton IV solver (<30 µs per query)
-- **Reference FDM IV** – Brent’s method backed by on-demand PDE solves (~145 ms) for calibration & regression testing
-- **General PDE Toolkit** – Template spatial operators, boundary conditions, and root finding
-- **Adaptive Price Tables** – Non-uniform grid presets with 4‑23× memory reduction
-- **Diagnostics & Performance** – USDT tracing, OpenMP batching, and SIMD-friendly layouts for production monitoring
+- **Fast American Pricing** – 5-20ms per option via PDE solver
+- **Implied Volatility** – FDM-based (143ms) or interpolation-based (12ms)
+- **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries
+- **Modern C++23** – std::expected error handling, PMR memory management, SIMD vectorization
+- **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
+- **Production Ready** – OpenMP batching, USDT tracing, zero-allocation solves
 
 ---
 
@@ -31,16 +31,20 @@ The library combines **performance**, **flexibility**, and **correctness** with 
 ### Prerequisites
 
 - **Bazel** (build system)
-- **GCC 10+** or **Clang 13+** with C++23 support
+- **GCC 14+** or **Clang 19+** with C++23 support
 - **GoogleTest** (automatically fetched by Bazel)
 
 Optional:
-- `systemtap-sdt-dev` (for USDT tracing support)
+- `systemtap-sdt-dev` (for USDT tracing)
 - `libquantlib0-dev` (for QuantLib benchmarks)
 
 ### Build and Test
 
 ```bash
+# Clone repository
+git clone https://github.com/your-org/mango-iv.git
+cd mango-iv
+
 # Build everything
 bazel build //...
 
@@ -48,441 +52,188 @@ bazel build //...
 bazel test //...
 
 # Run examples
-bazel run //examples:example_implied_volatility
-bazel run //examples:example_american_option
-bazel run //examples:example_heat_equation
+bazel run //examples:example_newton_solver
 ```
 
 ---
 
 ## Usage Examples
 
-### Calculate American Option Implied Volatility
+### American Option Pricing
 
 ```cpp
-#include "src/iv_solver.hpp"
+#include "src/option/american_option.hpp"
 
-// Setup option parameters
-mango::IVParams params{
-    .spot_price = 100.0,
+// Option parameters
+mango::PricingParams params{
     .strike = 100.0,
-    .time_to_maturity = 1.0,
-    .risk_free_rate = 0.05,
-    .market_price = 6.08,  // American put price
-    .is_call = false
+    .spot = 100.0,
+    .maturity = 1.0,
+    .volatility = 0.20,
+    .rate = 0.05,
+    .continuous_dividend_yield = 0.02,
+    .type = mango::OptionType::PUT
 };
 
-// Solve for implied volatility
-mango::IVSolver solver(params);
-mango::IVResult result = solver.solve();
+// Auto-estimate grid
+auto [grid_spec, n_time] = mango::estimate_grid_for_option(params);
 
-if (result.converged) {
-    std::cout << "Implied volatility: " << result.implied_vol
-              << " (" << result.implied_vol * 100 << "%)\n";
-    std::cout << "Iterations: " << result.iterations << "\n";
-} else {
-    std::cerr << "Failed: " << *result.failure_reason << "\n";
-}
-```
-
-**Output:**
-```
-Implied volatility: 0.1998 (19.98%)
-Iterations: 5
-```
-
-### Price an American Put Option
-
-```cpp
-#include "src/american_option.hpp"
-
-// Create American option pricer
-mango::AmericanOption pricer(
-    100.0,  // strike
-    0.25,   // volatility
-    0.05,   // risk-free rate
-    1.0,    // time to maturity (years)
-    mango::OptionType::Put
-);
-
-// Price at spot = 100
-double price = pricer.price(100.0);
-
-std::cout << "American put price: $" << price << "\n";
-```
-
-**Output:**
-```
-American put price: $6.0842
-```
-
-### Solve a Custom PDE
-
-```cpp
-#include "src/pde_solver.hpp"
-#include "src/pde/operators/laplacian_pde.hpp"
-#include "src/boundary_conditions.hpp"
-
-// Create spatial grid
-std::vector<double> grid(101);
-for (size_t i = 0; i < grid.size(); ++i) {
-    grid[i] = i / 100.0;  // [0, 1]
-}
-
-// Setup time domain
-mango::TimeDomain time{0.0, 1.0, 0.001};
-
-// Setup boundary conditions (Dirichlet: u = 0 at both ends)
-auto left_bc = mango::DirichletBC(0.0);
-auto right_bc = mango::DirichletBC(0.0);
-
-// Setup spatial operator (Laplacian: D·∂²u/∂x²)
-double diffusion = 0.1;
-auto spatial_op = mango::LaplacianOperator(diffusion);
-
-// Create solver
-mango::TRBDF2Config config;
-mango::RootFindingConfig root_config;
-mango::PDESolver solver(grid, time, config, root_config,
-                        left_bc, right_bc, spatial_op);
-
-// Initialize with custom initial condition
-auto initial_condition = [](std::span<const double> x, std::span<double> u) {
-    for (size_t i = 0; i < x.size(); ++i) {
-        u[i] = std::sin(M_PI * x[i]);
-    }
-};
-solver.initialize(initial_condition);
+// Create workspace
+std::pmr::synchronized_pool_resource pool;
+auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
 
 // Solve
-auto status = solver.solve();
-if (!status) {
-    throw std::runtime_error(status.error().message);
-}
+mango::AmericanOptionSolver solver(params, workspace);
+auto result = solver.solve();
 
-// Access solution after successful solve
-auto solution = solver.solution();
+if (result.has_value()) {
+    std::cout << "Price: " << result->price() << "\n";
+    std::cout << "Delta: " << result->delta() << "\n";
+}
 ```
 
-### Use Grid Presets for Memory-Efficient Price Tables
+### Implied Volatility Calculation
 
-Grid presets provide optimized non-uniform spacing that concentrates grid points where option prices have high curvature (ATM, short maturities):
+```cpp
+#include "src/option/iv_solver_fdm.hpp"
 
-```c
-#include "src/grid_presets.h"
-#include "src/price_table.h"
-
-// Get adaptive balanced preset (15K points, ~7.5× memory reduction)
-GridConfig config = grid_preset_get(
-    GRID_PRESET_ADAPTIVE_BALANCED,
-    0.7, 1.3,      // moneyness range
-    0.027, 2.0,    // maturity range (1 week to 2 years)
-    0.10, 0.80,    // volatility range
-    0.0, 0.10,     // rate range
-    0.0, 0.0);     // no dividend (4D table)
-
-// Generate all grids
-GeneratedGrids grids = grid_generate_all(&config);
-
-// Create price table with adaptive grids
-OptionPriceTable *table = price_table_create_ex(
-    grids.moneyness, grids.n_moneyness,
-    grids.maturity, grids.n_maturity,
-    grids.volatility, grids.n_volatility,
-    grids.rate, grids.n_rate,
-    nullptr, 0,
-    OPTION_PUT, AMERICAN,
-    COORD_RAW, LAYOUT_M_INNER);
-
-// Precompute all prices
-AmericanOptionGrid fdm_grid = {
-    .x_min = -0.7,
-    .x_max = 0.7,
-    .n_points = 101,
-    .dt = 0.001,
-    .n_steps = 2000
+// Option specification
+mango::OptionSpec spec{
+    .spot = 100.0,
+    .strike = 100.0,
+    .maturity = 1.0,
+    .rate = 0.05,
+    .dividend_yield = 0.02,
+    .type = mango::OptionType::PUT
 };
 
-price_table_precompute(table, &fdm_grid);
+// IV query with market price
+mango::IVQuery query{.option = spec, .market_price = 10.45};
 
-// Fast queries via interpolation
-double price = price_table_interpolate_4d(table, 1.05, 0.5, 0.20, 0.05);
+// Solve
+mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
+auto result = solver.solve_impl(query);
 
-price_table_destroy(table);
+if (result.has_value()) {
+    std::cout << "Implied Vol: " << result->implied_vol << "\n";
+    std::cout << "Iterations: " << result->iterations << "\n";
+} else {
+    std::cerr << "Error: " << result.error().message << "\n";
+}
 ```
 
-**Available presets:**
-- `GRID_PRESET_ADAPTIVE_FAST`: ~5K points, rapid prototyping
-- `GRID_PRESET_ADAPTIVE_BALANCED`: ~15K points, production-ready
-- `GRID_PRESET_ADAPTIVE_ACCURATE`: ~30K points, high-accuracy
-
-### Pre-computed B-spline IV Surface
-
-To eliminate repeated PDE solves inside the IV loop, you can build a 4D B-spline surface over `(m, τ, σ, r)` once and reuse it for millions of queries:
-
-```bash
-# Analytic integration test for the full pipeline
-bazel test //tests:price_table_iv_integration_test
-```
-
-The test harness fakes PDE snapshots with Black–Scholes prices, runs `PriceTable4DBuilder`, fits the separable cubic B-spline (`BSplineFitter4D`), and finally recovers the known volatility via `IVSolverInterpolated`. See the consolidated design note in `docs/plans/2025-11-06-bspline-fast-iv-design.md` for architectural details and `docs/bspline_collocation_problem.md` for the 1D solver contract.
-- `GRID_PRESET_UNIFORM`: ~112K points, baseline (no concentration)
-
-See `examples/` for complete working programs.
-
----
-
-## Performance
-
-### Current Performance
-
-| Operation | Time | Notes |
-|-----------|------|-------|
-| American option (single) | 4.4 ms | 101×1k grid; 105ms for 501×5k grid |
-| American option (batch of 64) | 18 ms | OpenMP parallelization (0.28ms per option wall time) |
-| **American option chain (15 prices)** | **4.5 ms** | **BatchAmericanOptionSolver: automatic normalized optimization, 5 strikes × 3 maturities** |
-| Price table pre-computation | ~2,000 PDEs/sec | Automatic routing: internal normalized optimization when eligible |
-| American IV (FDM-based) | 43–164 ms | Brent's method (101×1k: 43ms, 201×2k: 164ms) |
-| **American IV (B-spline surface)** | **1.6 µs** | **30,000× faster than FDM-based IV** |
-| Price table interpolation | 260 ns | Single 4D cubic B-spline query |
-| Greeks (vega, gamma) | 1.3 µs | Vega and gamma from pre-computed table |
-
-### Batch Processing API
-
-**BatchAmericanOptionSolver** - Parallel solving with per-solver configuration
-```cpp
-#include "src/option/american_option_batch.hpp"
-
-std::vector<AmericanOptionParams> batch = { /* 100 options */ };
-
-// Simple batch solve (uses default grid: 101×1000, ±3 log-moneyness)
-auto results = solve_american_options_batch(batch);
-
-// Advanced: custom grid configuration
-auto results = solve_american_options_batch(
-    batch, -3.0, 3.0, 101, 1000);
-
-// Advanced: register snapshots via callback
-std::vector<SnapshotCollector> collectors(batch.size());
-auto results = BatchAmericanOptionSolver::solve_batch(
-    batch,
-    [&](size_t idx, AmericanOptionSolver& solver) {
-        // Configure this solver before solve()
-        solver.register_snapshot(step, time_idx, &collectors[idx]);
-    });
-```
-
-**Batch Solver Features:**
-- **Parallel solving**: Different volatilities, rates, or discrete dividends solved in parallel
-- **Automatic optimization**: Normalized chain solving applied automatically when eligible (same σ,r,q,type,maturity)
-- **Transparent routing**: Price tables benefit from normalized optimization without API changes
-
-### Validation & Accuracy
-
-- **44 test cases** for implied volatility (edge cases, extreme parameters)
-- **42 test cases** for American options (puts, calls, dividends, early exercise)
-- **QuantLib comparison**: 0.5% relative error, 2.1x slower (reasonable for research code)
-- **Interpolation accuracy**: <0.01bp mean error for in-bounds cases with table-based IV
-- **Validation framework**: Reference table validation ~1000× faster than FDM validation
-- **Adaptive refinement**: Achieves <1bp IV error for 95% of validation points
-
----
-
-## Architecture
-
-```
-mango-iv/
-├── src/                           # Core library (C++23)
-│   ├── iv_solver.{hpp,cpp}        # American IV calculation
-│   ├── american_option.hpp        # American option pricing
-│   ├── pde_solver.hpp             # General PDE solver (TR-BDF2)
-│   ├── cubic_spline_solver.hpp    # Cubic spline interpolation
-│   ├── boundary_conditions.hpp    # Boundary condition types
-│   ├── spatial_operators.hpp      # Spatial operator interface
-│   ├── operators/                 # Operator implementations
-│   │   ├── spatial_operator.hpp   # Base operator interface
-│   │   ├── laplacian_pde.hpp      # Laplacian operator
-│   │   ├── black_scholes_pde.hpp  # Black-Scholes operator
-│   │   └── ...                    # Other operators
-│   ├── grid.hpp                   # Grid management
-│   ├── workspace.hpp              # Memory workspace
-│   ├── thomas_solver.hpp          # Tridiagonal solver
-│   ├── newton_workspace.hpp       # Newton solver workspace
-│   ├── root_finding.hpp           # Root-finding utilities
-│   └── ...                        # Other C++23 modules
-│
-├── examples/                      # Demonstration programs
-│   └── example_newton_solver.cc   # Example PDE solving
-│
-├── tests/                         # Comprehensive test suite
-│   ├── iv_solver_test.cc          # IV solver tests
-│   ├── american_option_test.cc    # American option tests
-│   ├── pde_solver_test.cc         # Core PDE solver tests
-│   ├── cubic_spline_test.cc       # Spline tests
-│   ├── boundary_conditions_test.cc # BC tests
-│   ├── spatial_operators_test.cc  # Operator tests
-│   └── ...                        # Additional test suites
-│
-├── docs/                          # Documentation
-│   ├── PROJECT_OVERVIEW.md        # Problem domain & motivation
-│   ├── ARCHITECTURE.md            # Technical deep-dive
-│   └── QUICK_REFERENCE.md         # Developer quick-start
-│
-├── scripts/                       # Utilities
-│   ├── mango-trace               # USDT tracing helper
-│   └── tracing/                   # bpftrace scripts
-│
-├── CLAUDE.md                      # Instructions for Claude Code
-├── TRACING.md                     # USDT tracing guide
-└── MODULE.bazel                   # Build configuration
-```
-
-### Key Design Principles
-
-1. **Modularity** - Clear separation: IV ← American pricing ← PDE solver
-2. **Performance-Conscious** - Template-based zero-cost abstractions, SIMD-friendly, compile-time optimization
-3. **Type Safety** - Strong typing with concepts, compile-time checks, no void* pointers
-4. **Correctness First** - Well-established methods, comprehensive tests, QuantLib validation
-5. **Zero-Overhead Diagnostics** - USDT tracing (no printf in library code)
-6. **Research-Friendly** - Modern C++23, clear code, extensive documentation
-
----
-
-## USDT Tracing
-
-The library includes **zero-overhead tracing** via USDT (User Statically-Defined Tracing) probes:
-
-```bash
-# Monitor all library activity
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_american_option
-
-# Watch convergence behavior
-sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
-
-# Debug failures
-sudo ./scripts/mango-trace monitor ./my_program --preset=debug
-```
-
-Tracing provides:
-- **Zero overhead** when not active (single NOP instruction)
-- **Dynamic control** - enable/disable at runtime without recompiling
-- **Production-safe** - can be left in production code
-
-See [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) for a 5-minute tutorial.
+**For more examples, see [docs/API_GUIDE.md](docs/API_GUIDE.md)**
 
 ---
 
 ## Documentation
 
-- **[PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)** - Problem domain, motivation, use cases
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Detailed technical architecture
-- **[QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** - Developer quick-start guide
-- **[TRACING.md](TRACING.md)** - Comprehensive USDT tracing documentation
-- **[CLAUDE.md](CLAUDE.md)** - Instructions for Claude Code (AI assistant)
+- **[API Guide](docs/API_GUIDE.md)** – Usage examples and patterns
+- **[Architecture](docs/ARCHITECTURE.md)** – Software design and C++23 patterns
+- **[Mathematical Foundations](docs/MATHEMATICAL_FOUNDATIONS.md)** – PDE formulations and numerical methods
+- **[CLAUDE.md](CLAUDE.md)** – Workflow guide for AI assistants
+- **[Tracing Guide](docs/TRACING.md)** – USDT probe documentation
+- **[Build System](docs/BUILD_SYSTEM.md)** – Bazel configuration details
 
 ---
 
-## Who Should Use mango-iv?
+## Performance
 
-### ✅ Good Fit
+### American Option Pricing
 
-- Researchers building new pricing models
-- Students learning computational finance
-- Developers needing flexible option pricing
-- Quants prototyping trading strategies
-- Engineers requiring transparent, well-tested code
+| Configuration | Time/Option | Use Case |
+|---|---|---|
+| Fast (tol=1e-2) | ~5ms | Quick estimates |
+| Standard (tol=1e-3) | ~20ms | Production |
+| High Accuracy (tol=1e-6) | ~80ms | Validation |
 
-### ⚠️ Consider Alternatives
+**Batch processing:** ~0.3ms/option on 32 cores (15× speedup)
 
-- **High-frequency trading**: Use optimized libraries (QuantLib, proprietary solutions)
-- **Production systems**: Consider mature, battle-tested solutions
-- **GPU acceleration needed**: mango-iv is CPU-only (for now)
-- **Exotic options**: Limited support (barriers, Asians not yet implemented)
+### Implied Volatility
 
----
+| Method | Time/IV | Accuracy |
+|---|---|---|
+| FDM-based | ~143ms | Ground truth |
+| Interpolated | ~12ms | <1bp error (95%) |
 
-## Comparison to Other Libraries
+### Price Table Pre-Computation
 
-| Feature | mango-iv | QuantLib | PyQL | Bloomberg API |
-|---------|---------|----------|------|---------------|
-| **Language** | C++23 | C++17 | Python | C++/Python |
-| **License** | Open-source | BSD | BSD | Proprietary |
-| **American options** | ✅ PDE (TR-BDF2) | ✅ Multiple methods | ✅ Via QuantLib | ✅ |
-| **Implied volatility** | ✅ Brent's | ✅ Newton/Brent | ✅ | ✅ |
-| **Custom PDEs** | ✅ Callback-based | ❌ | ❌ | ❌ |
-| **USDT tracing** | ✅ Zero-overhead | ❌ | ❌ | ❌ |
-| **Batch API** | ✅ OpenMP | ❌ | ❌ | ❌ |
-| **Documentation** | ✅ Extensive | ⚠️ Patchy | ⚠️ Limited | ✅ Commercial |
-| **Performance** | 2.1x slower | Baseline | Slow (Python) | Fast (optimized) |
-
-**mango-iv's niche:** Research-grade flexibility with production-conscious design.
+- **Grid size:** 300K points (50×30×20×10)
+- **Pre-compute:** 15-20 min (32 cores)
+- **Query:** ~500ns (price or Greeks)
+- **Speedup:** 43,400× vs FDM
 
 ---
 
-## Roadmap
+## Project Structure
 
-### Current (v0.1)
-- ✅ American option pricing (PDE-based, TR-BDF2)
-- ✅ American option implied volatility (FDM + Brent's method)
-- ✅ USDT tracing system
-- ✅ Comprehensive test suite
-- ✅ QuantLib benchmarks
-- ✅ Cubic spline interpolation (C² continuous, accurate Greeks)
-- ✅ Coordinate transformation support (log-sqrt, log-variance)
+```
+mango-iv/
+├── src/
+│   ├── pde/
+│   │   ├── core/          # Grid, PDESolver, boundary conditions
+│   │   └── operators/     # Spatial operators (Black-Scholes, Laplacian)
+│   ├── option/            # American option pricing, IV solvers, price tables
+│   ├── math/              # Root finding, B-splines, tridiagonal solvers
+│   └── support/           # Memory management, CPU features, utilities
+├── tests/                 # 38 test files with GoogleTest
+├── examples/              # Example programs
+├── benchmarks/            # Performance benchmarks
+└── docs/                  # Documentation
+```
 
-### Near-Term (v0.2-0.3)
-- ✅ Price table pre-computation (43,400× speedup achieved)
-- ✅ Table-based IV calculation (22.5× faster than FDM)
-- ✅ Greeks calculation (vega, gamma via precomputed derivatives)
-- ✅ Adaptive grid refinement (<1bp IV error for 95% of points)
-- ✅ Unified grid architecture (20,000× memcpy reduction)
-- 🚧 Volatility surface calibration
+---
 
-### Future (v1.0+)
-- ⭐ GPU acceleration (CUDA/OpenCL)
-- ⭐ Exotic options (barriers, Asians, lookbacks)
-- ⭐ Monte Carlo simulation
-- ⭐ Stochastic volatility models (Heston, SABR)
-- ⭐ Python bindings
+## Testing
+
+```bash
+# Run all tests
+bazel test //...
+
+# Run specific test suites
+bazel test //tests:pde_solver_test
+bazel test //tests:american_option_test
+bazel test //tests:iv_solver_test
+
+# Run with verbose output
+bazel test //tests:pde_solver_test --test_output=all
+```
+
+**Test coverage:** 38 test files, 13,000+ lines of tests
 
 ---
 
 ## Contributing
 
-Contributions welcome! Areas of interest:
+This is a research project. Contributions welcome!
 
-1. **Performance** - SIMD optimizations, cache-blocking, algorithm improvements
-2. **Features** - Exotic options, new PDE schemes, Monte Carlo methods
-3. **Testing** - More test cases, edge cases, stress tests
-4. **Documentation** - Tutorials, explanations, examples
-5. **Benchmarks** - Comparisons with other libraries
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make changes and add tests
+4. Run tests (`bazel test //...`)
+5. Commit (`git commit -m 'Add amazing feature'`)
+6. Push (`git push origin feature/amazing-feature`)
+7. Create Pull Request
 
-Please follow the commit message guidelines in [CLAUDE.md](CLAUDE.md).
+**See [CLAUDE.md](CLAUDE.md) for detailed workflow guidelines**
 
 ---
 
 ## License
 
-[To be determined]
+TBD (to be determined)
 
 ---
 
-## References
+## Acknowledgments
 
-### Foundational Papers
-- **Black, F., & Scholes, M.** (1973). *The Pricing of Options and Corporate Liabilities*
-- **Merton, R. C.** (1973). *Theory of Rational Option Pricing*
-- **Brent, R. P.** (1973). *Algorithms for Minimization without Derivatives*
-- **Ascher, U. M., Ruuth, S. J., & Wetton, B. T. R.** (1995). *Implicit-Explicit Methods for Time-Dependent PDEs*
-
-### Books
-- **Hull, J.** (2021). *Options, Futures, and Other Derivatives* (10th ed.)
-- **Wilmott, P.** (2006). *Paul Wilmott on Quantitative Finance*
-
-### Software
-- [QuantLib](https://www.quantlib.org/) - C++ library for quantitative finance
-- [PyQL](https://github.com/enthought/pyql) - Python bindings for QuantLib
+- TR-BDF2 scheme: Bank et al. (1985)
+- American options: Wilmott, "Derivatives"
+- B-splines: de Boor, "A Practical Guide to Splines"
+- Finite differences: LeVeque, "Finite Difference Methods"
 
 ---
 
-**For technical details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+## Contact
+
+For questions or feedback, please open an issue on GitHub.

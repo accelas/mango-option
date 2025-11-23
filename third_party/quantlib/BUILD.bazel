@@ -1,0 +1,9 @@
+"""System QuantLib library."""
+
+cc_library(
+    name = "quantlib",
+    hdrs = [],
+    includes = ["/usr/include"],
+    linkopts = ["-lQuantLib"],
+    visibility = ["//visibility:public"],
+)
