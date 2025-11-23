@@ -131,6 +131,16 @@ public:
     /// @return BatchIVResult with individual results and failure count
     BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries);
 
+    /// Legacy API wrapper for backward compatibility
+    ///
+    /// Converts std::expected<IVSuccess, IVError> to legacy IVResult format.
+    /// Use solve_impl() for new code.
+    ///
+    /// @param query Option specification and market price
+    /// @return IVResult with converged flag and optional failure_reason
+    [[deprecated("Use solve_impl() which returns std::expected<IVSuccess, IVError>")]]
+    IVResult solve_legacy(const IVQuery& query);
+
 private:
     IVSolverFDMConfig config_;
     mutable std::optional<SolverError> last_solver_error_;
