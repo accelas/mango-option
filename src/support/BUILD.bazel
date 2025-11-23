@@ -1,4 +1,11 @@
 cc_library(
+    name = "aligned_arena",
+    srcs = ["memory/aligned_arena.cpp"],
+    hdrs = ["memory/aligned_arena.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "parallel",
     hdrs = ["parallel.hpp"],
     visibility = ["//visibility:public"],
