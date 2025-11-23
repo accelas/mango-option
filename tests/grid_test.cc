@@ -323,3 +323,30 @@ TEST(GridSpecTest, MultiSinhAggressiveAlphaHandled) {
         EXPECT_GT(grid[i], grid[i-1]) << "Non-monotonic at index " << i;
     }
 }
+
+TEST(GridSpacingTest, MultiSinhGridSpacingCreation) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -1.0, .alpha = 2.0, .weight = 1.0},
+        {.center_x = 1.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto spec_result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(spec_result.has_value());
+
+    auto grid_buffer = spec_result.value().generate();
+    auto grid_view = grid_buffer.view();
+
+    // Multi-sinh should produce non-uniform spacing
+    EXPECT_FALSE(grid_view.is_uniform());
+
+    // GridSpacing should handle it correctly
+    auto spacing = mango::GridSpacing<double>(grid_view);
+    EXPECT_FALSE(spacing.is_uniform());
+    EXPECT_EQ(spacing.size(), 51);
+
+    // Should have precomputed arrays for non-uniform grid
+    auto dx_left = spacing.dx_left_inv();
+    auto dx_right = spacing.dx_right_inv();
+    EXPECT_EQ(dx_left.size(), 49);  // n - 2 interior points
+    EXPECT_EQ(dx_right.size(), 49);
+}
