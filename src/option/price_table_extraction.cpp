@@ -9,6 +9,8 @@
 #include <experimental/mdspan>
 #include <cmath>
 #include <vector>
+#include <ranges>
+#include <algorithm>
 
 namespace mango {
 
@@ -43,21 +45,18 @@ void extract_batch_results_to_4d(
             "via SetupCallback (call solver.set_snapshot_times() before solve).");
     }
 
-    // Precompute step indices for each maturity
+    // Precompute step indices for each maturity using ranges pipeline
     const double dt = T_max / n_time;
-    std::vector<size_t> step_indices(Nt);
-    for (size_t j = 0; j < Nt; ++j) {
-        double step_exact = grid.maturity[j] / dt - 1.0;
+    auto compute_step_index = [dt, n_time](double maturity) -> size_t {
+        double step_exact = maturity / dt - 1.0;
         long long step_rounded = std::llround(step_exact);
+        if (step_rounded < 0) return 0;
+        if (step_rounded >= static_cast<long long>(n_time)) return n_time - 1;
+        return static_cast<size_t>(step_rounded);
+    };
 
-        if (step_rounded < 0) {
-            step_indices[j] = 0;
-        } else if (step_rounded >= static_cast<long long>(n_time)) {
-            step_indices[j] = n_time - 1;
-        } else {
-            step_indices[j] = static_cast<size_t>(step_rounded);
-        }
-    }
+    auto step_indices_view = grid.maturity | std::views::transform(compute_step_index);
+    std::vector<size_t> step_indices(step_indices_view.begin(), step_indices_view.end());
 
     // Precompute log-moneyness values (vectorizable: simple affine math, no dependencies)
     std::vector<double> log_moneyness(Nm);

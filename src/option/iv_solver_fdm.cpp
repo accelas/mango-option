@@ -420,12 +420,10 @@ BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries)
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
 
-    // Parallelization threshold: IV solves are expensive (multiple PDE solves),
-    // so only parallelize for batches large enough to overcome parallel overhead
-    constexpr size_t PARALLEL_THRESHOLD = 4;
-
-    if (queries.size() < PARALLEL_THRESHOLD) {
-        // Serial path for tiny batches (avoid parallel tax)
+    // Use configured parallelization threshold to balance overhead vs parallelism
+    // IV solves are expensive (multiple PDE solves), but small batches pay parallel tax
+    if (queries.size() < config_.batch_parallel_threshold) {
+        // Serial path for batches below threshold (avoid parallel overhead)
         for (size_t i = 0; i < queries.size(); ++i) {
             results[i] = solve_impl(queries[i]);
             if (!results[i].has_value()) {
