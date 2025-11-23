@@ -94,6 +94,9 @@ std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& q
     return {sigma_min, sigma_max};
 }
 
+// Using IVResult for backward compatibility - will be migrated to std::expected in future task
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
     // Validate input
     auto error = validate_query(query);
@@ -170,5 +173,6 @@ void IVSolverInterpolated::solve_batch_impl(std::span<const IVQuery> queries,
         results[i] = solve_impl(queries[i]);
     }
 }
+#pragma GCC diagnostic pop
 
 } // namespace mango
