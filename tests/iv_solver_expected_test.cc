@@ -29,11 +29,13 @@ TEST(IVSolverFDMExpected, ReturnsExpectedType) {
     // Verify it compiles and returns expected type
     static_assert(std::is_same_v<decltype(result), std::expected<IVSuccess, IVError>>);
 
-    // Verify placeholder implementation returns success
+    // Verify Brent solver returns success with real IV calculation
     EXPECT_TRUE(result.has_value());
     if (result.has_value()) {
-        EXPECT_EQ(result->implied_vol, 0.20);  // Placeholder value
-        EXPECT_EQ(result->iterations, 0);
+        // Brent solver should produce reasonable volatility (not placeholder)
+        EXPECT_GT(result->implied_vol, 0.01);
+        EXPECT_LT(result->implied_vol, 1.0);
+        EXPECT_GT(result->iterations, 0);  // Did actual work
     }
 }
 
@@ -244,4 +246,123 @@ TEST(IVSolverFDMExpected, ValidationZeroStrike) {
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeStrike);
     EXPECT_FALSE(result.error().message.empty());
+}
+
+// Task 2.3 Brent Solver Integration Tests
+
+TEST(IVSolverFDMExpected, SolvesATMPut) {
+    // ATM American put - typical case
+    IVQuery query{
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        10.0    // market_price
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto result = solver.solve_impl(query);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.01);  // Reasonable vol
+    EXPECT_LT(result->implied_vol, 1.0);   // Not too high
+    EXPECT_GT(result->iterations, 0);      // Did some work
+    EXPECT_LT(result->final_error, 1e-4);  // Converged
+}
+
+TEST(IVSolverFDMExpected, SolvesITMPut) {
+    // ITM put - K > S
+    IVQuery query{
+        100.0,  // spot
+        110.0,  // strike (ITM)
+        1.0,
+        0.05,
+        0.0,
+        OptionType::PUT,
+        15.0    // market_price (intrinsic = 10, time value = 5)
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto result = solver.solve_impl(query);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.01);
+    EXPECT_LT(result->implied_vol, 1.0);
+}
+
+TEST(IVSolverFDMExpected, SolvesOTMPut) {
+    // OTM put - K < S
+    IVQuery query{
+        100.0,  // spot
+        90.0,   // strike (OTM)
+        1.0,
+        0.05,
+        0.0,
+        OptionType::PUT,
+        3.0     // market_price (all time value)
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto result = solver.solve_impl(query);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GT(result->implied_vol, 0.01);
+    EXPECT_LT(result->implied_vol, 1.0);
+}
+
+TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
+    // Artificially low max_iter to force failure
+    IVSolverFDMConfig config;
+    config.root_config.max_iter = 2;  // Too few iterations
+
+    IVQuery query{
+        100.0,
+        100.0,
+        1.0,
+        0.05,
+        0.0,
+        OptionType::PUT,
+        10.0
+    };
+
+    IVSolverFDM solver(config);
+    auto result = solver.solve_impl(query);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, IVErrorCode::MaxIterationsExceeded);
+    EXPECT_GT(result.error().iterations, 0);
+}
+
+TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
+    // Test with known market scenario
+    IVQuery query{
+        100.0,
+        100.0,
+        0.5,    // 6 months
+        0.03,
+        0.0,
+        OptionType::PUT,
+        5.0
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto result = solver.solve_impl(query);
+
+    ASSERT_TRUE(result.has_value());
+
+    // Volatility should be in reasonable range
+    EXPECT_GE(result->implied_vol, 0.05);  // At least 5%
+    EXPECT_LE(result->implied_vol, 0.80);  // At most 80%
+
+    // Should converge quickly for well-behaved case
+    EXPECT_LE(result->iterations, 50);
+
+    // Error should be small
+    EXPECT_LE(result->final_error, 0.01);  // Within 1 cent
 }
