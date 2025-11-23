@@ -8,6 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <expected>
 
 namespace mango {
 
@@ -31,27 +32,58 @@ struct RootFindingConfig {
     // Future methods can add parameters here
 };
 
-/// Result from any root-finding method
+/// Success result from root-finding methods
 ///
-/// Provides consistent interface for convergence status,
-/// iteration count, and diagnostic information.
-struct RootFindingResult {
-    /// Convergence status
-    bool converged;
+/// Returned when the root-finding algorithm converges successfully.
+struct RootFindingSuccess {
+    /// The root value (solution where f(x) ≈ 0)
+    double root;
 
     /// Number of iterations performed
     size_t iterations;
 
-    /// Final error measure (method-dependent)
+    /// Final error measure (|f(root)| for scalar methods)
+    double final_error;
+};
+
+/// Error result from root-finding methods
+///
+/// Returned when the root-finding algorithm fails to converge.
+struct RootFindingError {
+    /// Human-readable failure diagnostic message
+    std::string message;
+
+    /// Number of iterations performed before failure
+    size_t iterations;
+
+    /// Final error measure at failure point
     double final_error;
 
-    /// Optional failure diagnostic message
-    std::optional<std::string> failure_reason;
-
-    /// Optional root value (for scalar root-finding methods like Brent)
-    /// Not used by Newton-Raphson (which operates on solution vectors)
-    std::optional<double> root;
+    /// Last value tried before failure (for diagnostics)
+    /// Useful for understanding where the algorithm got stuck
+    std::optional<double> last_value;
 };
+
+/// Result from any root-finding method
+///
+/// Uses std::expected for type-safe error handling without exceptions.
+/// Success case contains the root value and convergence diagnostics.
+/// Error case contains detailed failure information.
+///
+/// **Usage:**
+/// ```cpp
+/// auto result = brent_find_root(f, a, b, config);
+/// if (result.has_value()) {
+///     std::cout << "Root: " << result->root << "\n";
+///     std::cout << "Iterations: " << result->iterations << "\n";
+/// } else {
+///     std::cerr << "Failed: " << result.error().message << "\n";
+///     if (result.error().last_value) {
+///         std::cerr << "Last value: " << *result.error().last_value << "\n";
+///     }
+/// }
+/// ```
+using RootFindingResult = std::expected<RootFindingSuccess, RootFindingError>;
 
 /// Concept for objective functions (scalar functions f: R -> R)
 ///
@@ -112,46 +144,40 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
 
     // Check for NaN/Inf at endpoints (indicates invalid input or function failure)
     if (!std::isfinite(fa) || !std::isfinite(fb)) {
-        return RootFindingResult{
-            .converged = false,
+        return std::unexpected(RootFindingError{
+            .message = "Function returned non-finite value (NaN or Inf)",
             .iterations = 0,
             .final_error = std::numeric_limits<double>::quiet_NaN(),
-            .failure_reason = "Function returned non-finite value (NaN or Inf)",
-            .root = std::nullopt
-        };
+            .last_value = std::nullopt
+        });
     }
 
     // Check if root is bracketed
     if (fa * fb > 0.0) {
-        return RootFindingResult{
-            .converged = false,
+        return std::unexpected(RootFindingError{
+            .message = "Root not bracketed",
             .iterations = 0,
             .final_error = std::min(std::abs(fa), std::abs(fb)),
-            .failure_reason = "Root not bracketed",
-            .root = std::nullopt
-        };
+            .last_value = std::nullopt
+        });
     }
 
     // Check if endpoints are roots
     if (std::abs(fa) < config.brent_tol_abs) {
         MANGO_TRACE_BRENT_COMPLETE(a, 0, 1);
-        return RootFindingResult{
-            .converged = true,
+        return RootFindingSuccess{
+            .root = a,
             .iterations = 0,
-            .final_error = std::abs(fa),
-            .failure_reason = std::nullopt,
-            .root = a
+            .final_error = std::abs(fa)
         };
     }
 
     if (std::abs(fb) < config.brent_tol_abs) {
         MANGO_TRACE_BRENT_COMPLETE(b, 0, 1);
-        return RootFindingResult{
-            .converged = true,
+        return RootFindingSuccess{
+            .root = b,
             .iterations = 0,
-            .final_error = std::abs(fb),
-            .failure_reason = std::nullopt,
-            .root = b
+            .final_error = std::abs(fb)
         };
     }
 
@@ -175,12 +201,10 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
         if (std::abs(fb) < config.brent_tol_abs ||
             std::abs(b - a) < config.brent_tol_abs) {
             MANGO_TRACE_BRENT_COMPLETE(b, iter + 1, 1);
-            return RootFindingResult{
-                .converged = true,
+            return RootFindingSuccess{
+                .root = b,
                 .iterations = iter + 1,
-                .final_error = std::abs(fb),
-                .failure_reason = std::nullopt,
-                .root = b
+                .final_error = std::abs(fb)
             };
         }
 
@@ -229,13 +253,12 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
         // Check for NaN (indicates PDE solver failure or invalid input)
         if (!std::isfinite(fs)) {
             MANGO_TRACE_BRENT_COMPLETE(s, iter + 1, 0);
-            return RootFindingResult{
-                .converged = false,
+            return std::unexpected(RootFindingError{
+                .message = "Function returned non-finite value (NaN or Inf)",
                 .iterations = iter + 1,
                 .final_error = std::numeric_limits<double>::quiet_NaN(),
-                .failure_reason = "Function returned non-finite value (NaN or Inf)",
-                .root = std::nullopt
-            };
+                .last_value = s
+            });
         }
 
         // Update for next iteration
@@ -261,13 +284,12 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
 
     // Max iterations reached
     MANGO_TRACE_BRENT_COMPLETE(b, config.max_iter, 0);
-    return RootFindingResult{
-        .converged = false,
+    return std::unexpected(RootFindingError{
+        .message = "Maximum iterations reached without convergence",
         .iterations = config.max_iter,
         .final_error = std::abs(fb),
-        .failure_reason = "Max iterations reached",
-        .root = b
-    };
+        .last_value = b
+    });
 }
 
 /// Find root using bounded Newton-Raphson method
@@ -320,13 +342,12 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
                                    const RootFindingConfig& config) {
     // Validate bounds
     if (x_min >= x_max) {
-        return RootFindingResult{
-            .converged = false,
+        return std::unexpected(RootFindingError{
+            .message = "Invalid bounds: x_min must be < x_max",
             .iterations = 0,
             .final_error = std::numeric_limits<double>::quiet_NaN(),
-            .failure_reason = "Invalid bounds: x_min must be < x_max",
-            .root = std::nullopt
-        };
+            .last_value = std::nullopt
+        });
     }
 
     // Clamp initial guess to bounds
@@ -339,13 +360,12 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
 
         // Check for non-finite values
         if (!std::isfinite(fx) || !std::isfinite(dfx)) {
-            return RootFindingResult{
-                .converged = false,
+            return std::unexpected(RootFindingError{
+                .message = "Function or derivative returned non-finite value",
                 .iterations = iter + 1,
                 .final_error = std::numeric_limits<double>::quiet_NaN(),
-                .failure_reason = "Function or derivative returned non-finite value",
-                .root = x
-            };
+                .last_value = x
+            });
         }
 
         // Compute absolute error
@@ -353,24 +373,21 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
 
         // Check convergence
         if (error_abs < config.tolerance) {
-            return RootFindingResult{
-                .converged = true,
+            return RootFindingSuccess{
+                .root = x,
                 .iterations = iter + 1,
-                .final_error = error_abs,
-                .failure_reason = std::nullopt,
-                .root = x
+                .final_error = error_abs
             };
         }
 
         // Check for numerical issues (flat derivative)
         if (std::abs(dfx) < 1e-10) {
-            return RootFindingResult{
-                .converged = false,
+            return std::unexpected(RootFindingError{
+                .message = "Derivative too small (flat region)",
                 .iterations = iter + 1,
                 .final_error = error_abs,
-                .failure_reason = "Derivative too small (flat region)",
-                .root = x
-            };
+                .last_value = x
+            });
         }
 
         // Newton step: x_{n+1} = x_n - f(x_n)/f'(x_n)
@@ -382,13 +399,12 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
         // Check if bounds are hit repeatedly (may indicate convergence issues)
         if (x_new < x_min || x_new > x_max) {
             if (iter > 10) {
-                return RootFindingResult{
-                    .converged = false,
+                return std::unexpected(RootFindingError{
+                    .message = "Hit bounds repeatedly without convergence",
                     .iterations = iter + 1,
                     .final_error = error_abs,
-                    .failure_reason = "Hit bounds without convergence",
-                    .root = x_clamped
-                };
+                    .last_value = x_clamped
+                });
             }
         }
 
@@ -397,13 +413,12 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
 
     // Max iterations reached
     const double fx_final = f(x);
-    return RootFindingResult{
-        .converged = false,
+    return std::unexpected(RootFindingError{
+        .message = "Maximum iterations reached without convergence",
         .iterations = config.max_iter,
         .final_error = std::abs(fx_final),
-        .failure_reason = "Maximum iterations reached without convergence",
-        .root = x
-    };
+        .last_value = x
+    });
 }
 
 /// Generic root-finding API that dispatches to appropriate method based on available information
