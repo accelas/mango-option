@@ -553,3 +553,13 @@ cc_test(
     ],
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
+
+cc_test(
+    name = "iv_error_types_test",
+    srcs = ["iv_error_types_test.cc"],
+    deps = [
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
