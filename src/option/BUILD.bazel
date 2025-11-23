@@ -146,6 +146,9 @@ cc_library(
 cc_library(
     name = "iv_result",
     hdrs = ["iv_result.hpp"],
+    deps = [
+        "//src/support:error_types",
+    ],
     copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
