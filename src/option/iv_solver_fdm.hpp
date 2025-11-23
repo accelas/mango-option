@@ -153,6 +153,19 @@ private:
     /// @param volatility Candidate volatility
     /// @return Difference between theoretical and market price
     double objective_function(const IVQuery& query, double volatility) const;
+
+    // C++23 monadic validation helpers
+    /// Validate positive parameters (spot, strike, maturity, market_price)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_positive_parameters(const IVQuery& query) const;
+
+    /// Validate arbitrage bounds (call/put constraints, intrinsic value)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_arbitrage_bounds(const IVQuery& query) const;
+
+    /// Run Brent solver to find implied volatility
+    /// @return IVSuccess with implied volatility or IVError on failure
+    std::expected<IVSuccess, IVError> solve_brent(const IVQuery& query) const;
 };
 
 } // namespace mango
