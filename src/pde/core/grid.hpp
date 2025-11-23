@@ -17,6 +17,17 @@
 
 namespace mango {
 
+/// Multi-sinh cluster: specifies a concentration region in composite grids
+///
+/// Used to concentrate grid points at multiple locations (e.g., ATM and deep ITM)
+/// while still using a single shared PDE grid for batch solving.
+template<typename T = double>
+struct MultiSinhCluster {
+    T center_x;   ///< Log-moneyness center for this cluster
+    T alpha;      ///< Concentration strength (must be > 0)
+    T weight;     ///< Relative contribution (must be > 0)
+};
+
 // Forward declarations
 template<typename T = double>
 class GridBuffer;
@@ -37,9 +48,10 @@ template<typename T>
 class GridSpec {
 public:
     enum class Type {
-        Uniform,      // Equally spaced points
-        LogSpaced,    // Logarithmically spaced
-        SinhSpaced    // Hyperbolic sine spacing (concentrates points at center)
+        Uniform,         // Equally spaced points
+        LogSpaced,       // Logarithmically spaced
+        SinhSpaced,      // Hyperbolic sine spacing (concentrates points at center)
+        MultiSinhSpaced  // Composite multi-sinh (multiple concentration regions)
     };
 
     // Factory methods for common grid types
@@ -79,6 +91,50 @@ public:
         return GridSpec(Type::SinhSpaced, x_min, x_max, n_points, concentration);
     }
 
+    static std::expected<GridSpec, std::string> multi_sinh_spaced(
+        T x_min, T x_max, size_t n_points,
+        std::vector<MultiSinhCluster<T>> clusters,
+        bool auto_merge = true) {
+
+        if (n_points < 2) {
+            return std::unexpected<std::string>("Grid must have at least 2 points");
+        }
+        if (x_min >= x_max) {
+            return std::unexpected<std::string>("x_min must be less than x_max");
+        }
+        if (clusters.empty()) {
+            return std::unexpected<std::string>("MultiSinhSpaced requires at least one cluster");
+        }
+
+        // Validate each cluster
+        for (size_t i = 0; i < clusters.size(); ++i) {
+            if (clusters[i].alpha <= 0) {
+                return std::unexpected<std::string>(
+                    std::format("Cluster {} alpha must be positive", i));
+            }
+            if (clusters[i].weight <= 0) {
+                return std::unexpected<std::string>(
+                    std::format("Cluster {} weight must be positive", i));
+            }
+            if (clusters[i].center_x < x_min || clusters[i].center_x > x_max) {
+                return std::unexpected<std::string>(
+                    std::format("Cluster {} center {} out of range [{}, {}]",
+                               i, clusters[i].center_x, x_min, x_max));
+            }
+        }
+
+        // Merge nearby clusters to prevent wasted resolution (unless bypassed)
+        if (auto_merge) {
+            merge_nearby_clusters(clusters);
+        }
+
+        // No automatic recentering - preserve the merged weighted-average position
+        // Auto-merge only deduplicates overlapping centers, it doesn't recenter them
+
+        return GridSpec(Type::MultiSinhSpaced, x_min, x_max, n_points,
+                        T(1.0), std::move(clusters));
+    }
+
     // Generate the actual grid
     GridBuffer<T> generate() const;
 
@@ -88,17 +144,125 @@ public:
     T x_max() const { return x_max_; }
     size_t n_points() const { return n_points_; }
     T concentration() const { return concentration_; }
+    std::span<const MultiSinhCluster<T>> clusters() const { return clusters_; }
 
 private:
-    GridSpec(Type type, T x_min, T x_max, size_t n_points, T concentration = T(1.0))
+    GridSpec(Type type, T x_min, T x_max, size_t n_points, T concentration = T(1.0),
+             std::vector<MultiSinhCluster<T>> clusters = {})
         : type_(type), x_min_(x_min), x_max_(x_max),
-          n_points_(n_points), concentration_(concentration) {}
+          n_points_(n_points), concentration_(concentration),
+          clusters_(std::move(clusters)) {}
+
+    /// Merge nearby clusters to prevent wasted resolution
+    ///
+    /// When clusters are too close (Δx < 0.3/α_avg), merges them to avoid
+    /// overlapping concentration regions that waste grid resolution.
+    ///
+    /// @param clusters Input cluster list (will be modified in-place)
+    static void merge_nearby_clusters(std::vector<MultiSinhCluster<T>>& clusters) {
+        if (clusters.size() <= 1) {
+            return;  // Nothing to merge
+        }
+
+        // Keep merging until no more merges are possible
+        bool merged = true;
+        while (merged) {
+            merged = false;
+
+            // Scan all pairs, restart after each merge (avoids iterator invalidation)
+            for (size_t i = 0; i < clusters.size() && !merged; ++i) {
+                for (size_t j = i + 1; j < clusters.size() && !merged; ++j) {
+                    const T delta_x = std::abs(clusters[i].center_x - clusters[j].center_x);
+                    const T alpha_avg = (clusters[i].alpha + clusters[j].alpha) / T(2.0);
+                    const T threshold = T(0.3) / alpha_avg;
+
+                    // Use slightly permissive comparison to handle floating point edge cases
+                    const T epsilon = T(1e-10);
+                    if (delta_x <= threshold + epsilon) {
+                        // Merge clusters i and j into a new cluster
+                        const T total_weight = clusters[i].weight + clusters[j].weight;
+                        const T w_i = clusters[i].weight / total_weight;
+                        const T w_j = clusters[j].weight / total_weight;
+
+                        MultiSinhCluster<T> merged_cluster{
+                            .center_x = w_i * clusters[i].center_x + w_j * clusters[j].center_x,
+                            .alpha = w_i * clusters[i].alpha + w_j * clusters[j].alpha,
+                            .weight = total_weight
+                        };
+
+                        // Replace cluster i with merged result, remove cluster j
+                        clusters[i] = merged_cluster;
+                        clusters.erase(clusters.begin() + j);
+
+                        // Set flag and break to restart outer loop (avoids iterator invalidation)
+                        merged = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Enforce strict monotonicity in grid points
+    ///
+    /// Ensures x[i+1] > x[i] for all i, while preserving endpoints.
+    /// Uses iterative smoothing to fix non-monotonic regions.
+    static void enforce_monotonicity(std::vector<T>& points, T x_min, T x_max) {
+        const size_t n = points.size();
+        if (n < 2) return;
+
+        // Clamp endpoints
+        points[0] = x_min;
+        points[n-1] = x_max;
+
+        // Iterative monotonicity enforcement (max 100 passes)
+        for (int pass = 0; pass < 100; ++pass) {
+            bool modified = false;
+
+            for (size_t i = 1; i < n; ++i) {
+                if (points[i] <= points[i-1]) {
+                    // Fix violation: interpolate between neighbors
+                    T right = (i < n-1) ? points[i+1] : x_max;
+                    points[i] = (points[i-1] + right) / T(2.0);
+                    modified = true;
+                }
+            }
+
+            if (!modified) break;
+        }
+
+        // Final pass: ensure minimum spacing (avoid dx → 0)
+        const T min_spacing = (x_max - x_min) / static_cast<T>(n * 100);
+
+        // Clamp endpoints
+        points[0] = x_min;
+        points[n-1] = x_max;
+
+        // Backward pass: ensure no point exceeds the next point minus min_spacing
+        for (size_t i = n - 1; i > 1; --i) {
+            if (points[i-1] >= points[i] - min_spacing) {
+                points[i-1] = points[i] - min_spacing;
+            }
+        }
+
+        // Forward pass: ensure no point is less than previous point plus min_spacing
+        for (size_t i = 1; i < n - 1; ++i) {
+            if (points[i] <= points[i-1] + min_spacing) {
+                points[i] = points[i-1] + min_spacing;
+            }
+        }
+
+        // Final clamp of endpoints
+        points[0] = x_min;
+        points[n-1] = x_max;
+    }
 
     Type type_;
     T x_min_;
     T x_max_;
     size_t n_points_;
     T concentration_;  // Only used for sinh spacing
+    std::vector<MultiSinhCluster<T>> clusters_;  // Empty for non-composite grids
 };
 
 /**
@@ -228,6 +392,99 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
                 const T normalized = (T(1.0) + sinh_term) / T(2.0);
                 points.push_back(x_min_ + (x_max_ - x_min_) * normalized);
+            }
+            break;
+        }
+
+        case Type::MultiSinhSpaced: {
+            // Handle single cluster as special case (most common)
+            // Note: Single clusters may be off-center after auto-merging
+            if (clusters_.size() == 1) {
+                const auto& cluster = clusters_[0];
+                const T c = cluster.alpha;
+                const T center = cluster.center_x;
+                const T range = x_max_ - x_min_;
+                const T sinh_half_c = std::sinh(c / T(2.0));
+
+                // Compute normalized center position
+                const T eta_center = (center - x_min_) / range;
+
+                // Check if cluster is centered (eta_center ≈ 0.5)
+                const bool is_centered = std::abs(eta_center - T(0.5)) < T(1e-10);
+
+                if (is_centered) {
+                    // Centered cluster: use standard sinh formula (guaranteed in-bounds)
+                    for (size_t i = 0; i < n_points_; ++i) {
+                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                        const T sinh_term = std::sinh(c * (eta - T(0.5))) / sinh_half_c;
+                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
+                        points.push_back(x_min_ + range * normalized);
+                    }
+                } else {
+                    // Off-center cluster: use generalized formula + monotonicity enforcement
+                    const T offset = center - (x_min_ + x_max_) / T(2.0);
+                    std::vector<T> raw_points(n_points_);
+                    for (size_t i = 0; i < n_points_; ++i) {
+                        const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
+                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
+                        raw_points[i] = x_min_ + range * normalized + offset;
+                    }
+
+                    // Enforce monotonicity and bounds
+                    enforce_monotonicity(raw_points, x_min_, x_max_);
+
+                    // Transfer to output
+                    for (const auto& x : raw_points) {
+                        points.push_back(x);
+                    }
+                }
+            } else {
+                // Multi-cluster: combine weighted sinh transforms
+                std::vector<T> raw_points(n_points_);
+
+                // Normalize weights
+                T total_weight = T(0);
+                for (const auto& cluster : clusters_) {
+                    total_weight += cluster.weight;
+                }
+
+                const T range = x_max_ - x_min_;
+
+                for (size_t i = 0; i < n_points_; ++i) {
+                    // Map i to eta ∈ [0, 1]
+                    const T eta = static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+
+                    // Weighted combination of sinh transforms
+                    T weighted_x = T(0);
+                    for (const auto& cluster : clusters_) {
+                        const T c = cluster.alpha;
+                        const T center = cluster.center_x;
+                        const T w = cluster.weight / total_weight;
+                        const T sinh_half_c = std::sinh(c / T(2.0));
+
+                        // Compute normalized center position for this cluster
+                        const T eta_center = (center - x_min_) / range;
+
+                        // Apply sinh transform centered at eta_center
+                        const T sinh_term = std::sinh(c * (eta - eta_center)) / sinh_half_c;
+                        const T normalized = (T(1.0) + sinh_term) / T(2.0);
+
+                        // Transform to [x_min, x_max] with offset to place peak at center_x
+                        const T offset = center - (x_min_ + x_max_) / T(2.0);
+                        const T x_i = x_min_ + range * normalized + offset;
+
+                        weighted_x += w * x_i;
+                    }
+
+                    raw_points[i] = weighted_x;
+                }
+
+                // Enforce monotonicity with smoothing pass
+                enforce_monotonicity(raw_points, x_min_, x_max_);
+
+                // Transfer to output
+                points = std::move(raw_points);
             }
             break;
         }
