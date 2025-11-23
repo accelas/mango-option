@@ -28,6 +28,7 @@
 
 #include "src/math/bspline_collocation.hpp"
 #include "src/support/parallel.hpp"
+#include <experimental/mdspan>
 #include <expected>
 #include <span>
 #include <vector>

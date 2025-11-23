@@ -220,6 +220,7 @@ cc_library(
         "//src/math:bspline_basis",
         "//src/support:crc64",
         "//third_party/arrow",
+        "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
 )
@@ -238,6 +239,8 @@ cc_library(
         ":american_option_batch",
         ":price_table_grid",
         "//src/math:cubic_spline_solver",
+        "//src/support:parallel",
+        "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
 )

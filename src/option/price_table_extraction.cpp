@@ -5,6 +5,8 @@
 
 #include "src/option/price_table_extraction.hpp"
 #include "src/math/cubic_spline_solver.hpp"
+#include "src/support/parallel.hpp"
+#include <experimental/mdspan>
 #include <cmath>
 #include <vector>
 
@@ -57,15 +59,27 @@ void extract_batch_results_to_4d(
         }
     }
 
-    // Precompute log-moneyness values
+    // Precompute log-moneyness values (vectorizable: simple affine math, no dependencies)
     std::vector<double> log_moneyness(Nm);
+    MANGO_PRAGMA_SIMD
     for (size_t i = 0; i < Nm; ++i) {
         log_moneyness[i] = std::log(grid.moneyness[i]);
     }
 
+    // Create mdspan view for type-safe 4D indexing
+    // Layout: [moneyness, maturity, volatility, rate] in row-major order
+    using std::experimental::mdspan;
+    using std::experimental::dextents;
+    mdspan<double, dextents<size_t, 4>> prices_view(prices_4d.data(), Nm, Nt, Nv, Nr);
+
     // Extract prices from surfaces for each (σ, r) result
-    const size_t slice_stride = Nv * Nr;
+    // Embarrassingly parallel: each (σ,r) slice writes to unique offset,
+    // spline objects are thread-local, all shared inputs are read-only
+    MANGO_PRAGMA_PARALLEL_FOR
     for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
+        // Decode flat index to (vol_idx, r_idx) from cartesian_product ordering
+        const size_t vol_idx = idx / Nr;
+        const size_t r_idx = idx % Nr;
         const auto& result_expected = batch_result.results[idx];
         if (!result_expected.has_value() || !result_expected->converged) {
             continue;  // Leave zeros for failed solves
@@ -95,8 +109,8 @@ void extract_batch_results_to_4d(
                 for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
                     const double x = log_moneyness[m_idx];
                     double V_norm = (x <= x_min) ? spatial_solution[0] : spatial_solution[n_space - 1];
-                    size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
-                    prices_4d[table_idx] = K_ref * V_norm;
+                    // Type-safe 4D indexing via mdspan
+                    prices_view[m_idx, j, vol_idx, r_idx] = K_ref * V_norm;
                 }
                 continue;
             }
@@ -106,9 +120,8 @@ void extract_batch_results_to_4d(
                 const double x = log_moneyness[m_idx];
                 double V_norm = spline.eval(x);
 
-                // Store denormalized price
-                size_t table_idx = (m_idx * Nt + j) * slice_stride + idx;
-                prices_4d[table_idx] = K_ref * V_norm;
+                // Store denormalized price with type-safe 4D indexing via mdspan
+                prices_view[m_idx, j, vol_idx, r_idx] = K_ref * V_norm;
             }
         }
     }
