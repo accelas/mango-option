@@ -54,8 +54,8 @@ std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
 std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& query) const {
     // Use common validation for option spec, market price, and arbitrage checks
     auto validation = validate_iv_query(query);
-    if (!validation) {
-        return validation.error();
+    if (!validation.has_value()) {
+        return validation.error();  // validation.error() is already a string
     }
 
     return std::nullopt;
@@ -94,21 +94,17 @@ std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& q
     return {sigma_min, sigma_max};
 }
 
-// Using IVResult for backward compatibility - will be migrated to std::expected in future task
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
+std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
     // Validate input
     auto error = validate_query(query);
     if (error.has_value()) {
-        return IVResult{
-            .converged = false,
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeSpot,  // Generic validation error
+            .message = *error,
             .iterations = 0,
-            .implied_vol = 0.0,
             .final_error = 0.0,
-            .failure_reason = *error,
-            .vega = std::nullopt
-        };
+            .last_vol = std::nullopt
+        });
     }
 
     const double moneyness = query.spot / query.strike;
@@ -118,15 +114,14 @@ IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
 
     // Check if query is within surface bounds
     if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
-        return IVResult{
-            .converged = false,
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Query parameters out of surface bounds. "
+                       "Use PDE-based IV solver for out-of-grid queries.",
             .iterations = 0,
-            .implied_vol = 0.0,
             .final_error = 0.0,
-            .failure_reason = "Query parameters out of surface bounds. "
-                              "Use PDE-based IV solver for out-of-grid queries.",
-            .vega = std::nullopt
-        };
+            .last_vol = std::nullopt
+        });
     }
 
     // Define objective function: f(σ) = Price(σ) - Market_Price
@@ -148,31 +143,50 @@ IVResult IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
     const double sigma0 = (sigma_min + sigma_max) / 2.0;  // Initial guess
     auto result = newton_find_root(objective, derivative, sigma0, sigma_min, sigma_max, newton_config);
 
+    // Check convergence
+    if (!result.converged) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::MaxIterationsExceeded,
+            .message = result.failure_reason.value_or("Newton iteration failed to converge"),
+            .iterations = result.iterations,
+            .final_error = result.final_error,
+            .last_vol = result.root
+        });
+    }
+
     // Compute final vega for the result
     std::optional<double> final_vega = std::nullopt;
     if (result.root.has_value()) {
         final_vega = derivative(result.root.value());
     }
 
-    // Convert RootFindingResult to IVResult
-    return IVResult{
-        .converged = result.converged,
+    // Return success
+    return IVSuccess{
+        .implied_vol = result.root.value(),
         .iterations = result.iterations,
-        .implied_vol = result.root.value_or(sigma0),
         .final_error = result.final_error,
-        .failure_reason = result.failure_reason,
         .vega = final_vega
     };
 }
 
-void IVSolverInterpolated::solve_batch_impl(std::span<const IVQuery> queries,
-                                             std::span<IVResult> results) const noexcept {
+BatchIVResult IVSolverInterpolated::solve_batch_impl(const std::vector<IVQuery>& queries) const noexcept {
+    std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
+    size_t failed_count = 0;
+
     // Trivially parallel: B-spline is immutable and thread-safe
     MANGO_PRAGMA_PARALLEL_FOR
     for (size_t i = 0; i < queries.size(); ++i) {
         results[i] = solve_impl(queries[i]);
+        if (!results[i].has_value()) {
+            #pragma omp atomic
+            ++failed_count;
+        }
     }
+
+    return BatchIVResult{
+        .results = std::move(results),
+        .failed_count = failed_count
+    };
 }
-#pragma GCC diagnostic pop
 
 } // namespace mango

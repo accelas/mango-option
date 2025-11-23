@@ -89,16 +89,26 @@ int main() {
     // Now try IV solver
     std::cout << "Testing IV solver:\n";
     IVSolverFDM iv_solver(config);
-    IVResult iv_result = iv_solver.solve(query);
+    auto iv_result = iv_solver.solve_impl(query);
 
-    std::cout << "  Converged: " << (iv_result.converged ? "Yes" : "No") << "\n";
-    std::cout << "  Iterations: " << iv_result.iterations << "\n";
-    std::cout << "  Implied vol: " << iv_result.implied_vol << "\n";
-    std::cout << "  Final error: " << iv_result.final_error << "\n";
-
-    if (iv_result.failure_reason.has_value()) {
-        std::cout << "  Failure reason: " << *iv_result.failure_reason << "\n";
+    if (iv_result.has_value()) {
+        std::cout << "  Converged: Yes\n";
+        std::cout << "  Iterations: " << iv_result->iterations << "\n";
+        std::cout << "  Implied vol: " << iv_result->implied_vol << "\n";
+        std::cout << "  Final error: " << iv_result->final_error << "\n";
+        if (iv_result->vega.has_value()) {
+            std::cout << "  Vega: " << *iv_result->vega << "\n";
+        }
+        return 0;
+    } else {
+        std::cout << "  Converged: No\n";
+        std::cout << "  Error code: " << static_cast<int>(iv_result.error().code) << "\n";
+        std::cout << "  Message: " << iv_result.error().message << "\n";
+        std::cout << "  Iterations: " << iv_result.error().iterations << "\n";
+        std::cout << "  Final error: " << iv_result.error().final_error << "\n";
+        if (iv_result.error().last_vol.has_value()) {
+            std::cout << "  Last vol: " << *iv_result.error().last_vol << "\n";
+        }
+        return 1;
     }
-
-    return iv_result.converged ? 0 : 1;
 }

@@ -8,7 +8,6 @@
  * API (C++23):
  * - solve_impl() → std::expected<IVSuccess, IVError>
  * - solve_batch_impl() → BatchIVResult
- * - solve_legacy() → IVResult (deprecated)
  *
  * Error Handling:
  * - Type-safe error codes via IVErrorCode enum
@@ -31,9 +30,7 @@
 
 #pragma once
 
-#include "src/option/iv_solver_base.hpp"
 #include "src/option/option_spec.hpp"
-#include "src/option/iv_types.hpp"
 #include "src/option/iv_result.hpp"
 #include "src/math/root_finding.hpp"
 #include <expected>
@@ -100,19 +97,25 @@ struct IVSolverFDMConfig {
 /// };
 ///
 /// IVSolverFDM solver(config);
-/// IVResult result = solver.solve(query);
+/// auto result = solver.solve_impl(query);
 ///
-/// if (result.converged) {
-///     std::cout << "IV: " << result.implied_vol << "\n";
+/// if (result.has_value()) {
+///     std::cout << "IV: " << result->implied_vol << "\n";
+/// } else {
+///     std::cerr << "Error: " << result.error().message << "\n";
 /// }
 /// ```
 ///
 /// **Batch Usage:**
 /// ```cpp
 /// std::vector<IVQuery> queries = { ... };
-/// std::vector<IVResult> results(queries.size());
+/// auto batch = solver.solve_batch_impl(queries);
 ///
-/// solver.solve_batch(queries, results);  // Uses OpenMP internally
+/// for (size_t i = 0; i < batch.results.size(); ++i) {
+///     if (batch.results[i].has_value()) {
+///         std::cout << "Query " << i << ": σ = " << batch.results[i]->implied_vol << "\n";
+///     }
+/// }
 /// ```
 ///
 /// **Performance:**
@@ -130,7 +133,7 @@ struct IVSolverFDMConfig {
 /// - algo_complete: IV calculation completes
 /// - validation_error: Input validation failures
 /// - convergence_failed: Non-convergence diagnostics
-class IVSolverFDM : public IVSolverBase {
+class IVSolverFDM {
 public:
     /// Construct solver with configuration
     ///
@@ -138,8 +141,6 @@ public:
     explicit IVSolverFDM(const IVSolverFDMConfig& config);
 
     /// Solve for implied volatility (single query)
-    ///
-    /// Implementation for IVSolverBase::solve().
     /// Uses Brent's method to find the volatility that makes the
     /// American option's theoretical price match the market price.
     ///
@@ -167,19 +168,6 @@ public:
     /// @param queries Input queries (as vector for convenience)
     /// @return BatchIVResult with individual results and failure count
     BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries);
-
-    /// Legacy API wrapper for backward compatibility
-    ///
-    /// Converts std::expected<IVSuccess, IVError> to legacy IVResult format.
-    /// Use solve_impl() for new code.
-    ///
-    /// @param query Option specification and market price
-    /// @return IVResult with converged flag and optional failure_reason
-    [[deprecated("Use solve_impl() which returns std::expected<IVSuccess, IVError>")]]
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    IVResult solve_legacy(const IVQuery& query);
-#pragma GCC diagnostic pop
 
 private:
     IVSolverFDMConfig config_;
