@@ -149,3 +149,19 @@ TEST(GridSpecTest, MultiSinhFactoryBasic) {
     EXPECT_EQ(result.value().n_points(), 101);
     EXPECT_EQ(result.value().clusters().size(), 1);
 }
+
+TEST(GridSpecTest, MultiSinhSingleClusterGeneration) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 11, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    auto grid = result.value().generate();
+
+    EXPECT_EQ(grid.size(), 11);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[10], 3.0);
+    EXPECT_NEAR(grid[5], 0.0, 1e-10);  // Center should be near 0.0
+}

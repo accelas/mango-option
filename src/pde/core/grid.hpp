@@ -284,8 +284,33 @@ GridBuffer<T> GridSpec<T>::generate() const {
         }
 
         case Type::MultiSinhSpaced: {
-            // TODO: Implementation in later task
-            throw std::runtime_error("MultiSinhSpaced grid generation not yet implemented");
+            // Handle single cluster as special case (most common)
+            if (clusters_.size() == 1) {
+                const auto& cluster = clusters_[0];
+                const T c = cluster.alpha;
+                const T center = cluster.center_x;
+                const T range = x_max_ - x_min_;
+                const T sinh_half_c = std::sinh(c / T(2.0));
+
+                for (size_t i = 0; i < n_points_; ++i) {
+                    // Map uniform parameter u ∈ [-1, 1] to grid via sinh
+                    const T u = T(-1.0) + T(2.0) * static_cast<T>(i) / static_cast<T>(n_points_ - 1);
+                    const T sinh_term = std::sinh(c * u) / sinh_half_c;
+                    const T normalized = (T(1.0) + sinh_term) / T(2.0);
+
+                    // Transform to [x_min, x_max] centered at cluster.center_x
+                    const T offset_x = center - (x_min_ + x_max_) / T(2.0);
+                    points.push_back(x_min_ + range * normalized + offset_x);
+                }
+
+                // Clamp endpoints to ensure exact x_min/x_max
+                points[0] = x_min_;
+                points[n_points_ - 1] = x_max_;
+            } else {
+                // TODO: Handle multiple clusters (Task 6)
+                throw std::runtime_error("Multi-cluster generation not yet implemented");
+            }
+            break;
         }
     }
 
