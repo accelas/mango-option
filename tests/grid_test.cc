@@ -232,3 +232,94 @@ TEST(GridSpecTest, MultiSinhTwoClusterGeneration) {
         EXPECT_GT(grid[i], grid[i-1]) << "Grid not monotonic at index " << i;
     }
 }
+
+// Task 7: Validation tests for edge cases
+
+TEST(GridSpecTest, MultiSinhRejectsEmptyClusters) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {};
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("at least one cluster"), std::string::npos);
+}
+
+TEST(GridSpecTest, MultiSinhRejectsNegativeAlpha) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = -2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("alpha must be positive"), std::string::npos);
+}
+
+TEST(GridSpecTest, MultiSinhRejectsNegativeWeight) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 2.0, .weight = -1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("weight must be positive"), std::string::npos);
+}
+
+TEST(GridSpecTest, MultiSinhRejectsCenterOutOfBounds) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 5.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("out of range"), std::string::npos);
+}
+
+TEST(GridSpecTest, MultiSinhThreeClustersMonotonic) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -2.0, .alpha = 1.5, .weight = 1.0},
+        {.center_x = 0.0, .alpha = 2.0, .weight = 1.5},
+        {.center_x = 2.0, .alpha = 1.5, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 51, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    auto grid = result.value().generate();
+
+    EXPECT_EQ(grid.size(), 51);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[50], 3.0);
+
+    // Verify strict monotonicity
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Non-monotonic at index " << i;
+    }
+
+    // Verify minimum spacing
+    double min_dx = std::numeric_limits<double>::max();
+    for (size_t i = 1; i < grid.size(); ++i) {
+        double dx = grid[i] - grid[i-1];
+        min_dx = std::min(min_dx, dx);
+    }
+    EXPECT_GT(min_dx, 0.0) << "Zero spacing detected";
+}
+
+TEST(GridSpecTest, MultiSinhAggressiveAlphaHandled) {
+    // Very aggressive alpha can create near-duplicates
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 10.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    auto grid = result.value().generate();
+
+    // Should still be monotonic despite aggressive concentration
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Non-monotonic at index " << i;
+    }
+}
