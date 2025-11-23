@@ -433,3 +433,120 @@ TEST(IVSolverFDMExpected, BatchSolveEmptyBatch) {
     EXPECT_EQ(batch_result.failed_count, 0);
     EXPECT_EQ(batch_result.results.size(), 0);
 }
+
+// Task 4.1 Legacy Wrapper Tests
+
+TEST(IVSolverFDMLegacy, SuccessConversion) {
+    IVQuery query{
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        10.0    // market_price
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+
+    // Call legacy API (suppress deprecation warning for testing)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto legacy_result = solver.solve_legacy(query);
+    #pragma GCC diagnostic pop
+
+    // Verify success conversion
+    EXPECT_TRUE(legacy_result.converged);
+    EXPECT_GT(legacy_result.implied_vol, 0.0);
+    EXPECT_LT(legacy_result.implied_vol, 1.0);
+    EXPECT_GT(legacy_result.iterations, 0);
+    EXPECT_LT(legacy_result.final_error, 1e-4);
+    EXPECT_FALSE(legacy_result.failure_reason.has_value());
+}
+
+TEST(IVSolverFDMLegacy, FailureConversionNegativeSpot) {
+    IVQuery query{
+        -100.0,  // Invalid: negative spot
+        100.0,
+        1.0,
+        0.05,
+        0.0,
+        OptionType::PUT,
+        10.0
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto legacy_result = solver.solve_legacy(query);
+    #pragma GCC diagnostic pop
+
+    // Verify failure conversion
+    EXPECT_FALSE(legacy_result.converged);
+    ASSERT_TRUE(legacy_result.failure_reason.has_value());
+    EXPECT_FALSE(legacy_result.failure_reason->empty());
+    // Message should mention "positive" for negative spot
+    EXPECT_NE(legacy_result.failure_reason->find("positive"), std::string::npos);
+}
+
+TEST(IVSolverFDMLegacy, FailureConversionArbitrage) {
+    // Call price exceeding spot (arbitrage violation)
+    IVQuery query{
+        100.0,
+        100.0,
+        1.0,
+        0.05,
+        0.0,
+        OptionType::CALL,
+        150.0  // Invalid: call price > spot
+    };
+
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto legacy_result = solver.solve_legacy(query);
+    #pragma GCC diagnostic pop
+
+    EXPECT_FALSE(legacy_result.converged);
+    ASSERT_TRUE(legacy_result.failure_reason.has_value());
+    EXPECT_FALSE(legacy_result.failure_reason->empty());
+    // Message should mention "arbitrage" or "bound"
+    std::string msg = *legacy_result.failure_reason;
+    EXPECT_TRUE(msg.find("arbitrage") != std::string::npos ||
+                msg.find("bound") != std::string::npos ||
+                msg.find("exceed") != std::string::npos);
+}
+
+TEST(IVSolverFDMLegacy, ConvergenceFailureConversion) {
+    // Force convergence failure with artificially low max_iter
+    IVSolverFDMConfig config;
+    config.root_config.max_iter = 2;
+
+    IVQuery query{
+        100.0,
+        100.0,
+        1.0,
+        0.05,
+        0.0,
+        OptionType::PUT,
+        10.0
+    };
+
+    IVSolverFDM solver(config);
+
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto legacy_result = solver.solve_legacy(query);
+    #pragma GCC diagnostic pop
+
+    // Verify convergence failure is converted correctly
+    EXPECT_FALSE(legacy_result.converged);
+    EXPECT_GT(legacy_result.iterations, 0);  // Some iterations happened
+    ASSERT_TRUE(legacy_result.failure_reason.has_value());
+    EXPECT_FALSE(legacy_result.failure_reason->empty());
+}
