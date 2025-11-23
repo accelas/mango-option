@@ -11,8 +11,11 @@
 
 namespace mango {
 
-/// Unified result type for implied volatility solvers (PDE-based and interpolation-based).
-struct IVResult {
+/**
+ * @brief Legacy IV result type (deprecated - use std::expected<IVSuccess, IVError>)
+ * @deprecated Use std::expected<IVSuccess, IVError> instead for type-safe error handling
+ */
+struct [[deprecated("Use std::expected<IVSuccess, IVError> instead of IVResult")]] IVResult {
     bool converged = false;                         ///< Convergence status
     std::size_t iterations = 0;                     ///< Number of iterations performed
     double implied_vol = 0.0;                       ///< Solved implied volatility (if converged)

@@ -415,6 +415,9 @@ BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries)
     };
 }
 
+// Using IVResult for backward compatibility - this function is deprecated
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 IVResult IVSolverFDM::solve_legacy(const IVQuery& query) {
     auto result = solve_impl(query);
 
@@ -441,5 +444,6 @@ IVResult IVSolverFDM::solve_legacy(const IVQuery& query) {
         };
     }
 }
+#pragma GCC diagnostic pop
 
 } // namespace mango

@@ -176,7 +176,10 @@ public:
     /// @param query Option specification and market price
     /// @return IVResult with converged flag and optional failure_reason
     [[deprecated("Use solve_impl() which returns std::expected<IVSuccess, IVError>")]]
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IVResult solve_legacy(const IVQuery& query);
+#pragma GCC diagnostic pop
 
 private:
     IVSolverFDMConfig config_;

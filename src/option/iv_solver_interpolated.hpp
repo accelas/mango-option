@@ -99,19 +99,31 @@ public:
     /// Implementation for IVSolverBase::solve().
     /// Uses Newton-Raphson method with B-spline price interpolation.
     ///
+    /// NOTE: Returns deprecated IVResult for backward compatibility.
+    /// This solver will be migrated to std::expected in a future task.
+    ///
     /// @param query Option specification and market price
     /// @return IVResult with convergence status and implied volatility
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     IVResult solve_impl(const IVQuery& query) const noexcept;
+#pragma GCC diagnostic pop
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
     /// Implementation for IVSolverBase::solve_batch().
     /// Trivially parallel since B-spline is immutable and thread-safe.
     ///
+    /// NOTE: Uses deprecated IVResult for backward compatibility.
+    /// This solver will be migrated to std::expected in a future task.
+    ///
     /// @param queries Input queries
     /// @param results Output buffer (must match queries.size())
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     void solve_batch_impl(std::span<const IVQuery> queries,
                          std::span<IVResult> results) const noexcept;
+#pragma GCC diagnostic pop
 
 private:
     /// Private constructor (use create() factory methods)
