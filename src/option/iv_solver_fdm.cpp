@@ -181,10 +181,8 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 }
 
-std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) {
-    // Task 2.2: Validation error mapping with std::expected
-
-    // Validation: positive spot price
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_positive_parameters(const IVQuery& query) const {
     if (query.spot <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeSpot,
@@ -195,7 +193,6 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Validation: positive strike price
     if (query.strike <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeStrike,
@@ -206,7 +203,6 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Validation: positive time to maturity
     if (query.maturity <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeMaturity,
@@ -217,7 +213,6 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Validation: positive market price
     if (query.market_price <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeMarketPrice,
@@ -228,8 +223,12 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Validation: arbitrage bounds
-    // Call price cannot exceed spot price
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_arbitrage_bounds(const IVQuery& query) const {
+    // Call price cannot exceed spot
     if (query.type == OptionType::CALL && query.market_price > query.spot) {
         return std::unexpected(IVError{
             .code = IVErrorCode::ArbitrageViolation,
@@ -240,7 +239,7 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Put price cannot exceed strike price
+    // Put price cannot exceed strike
     if (query.type == OptionType::PUT && query.market_price > query.strike) {
         return std::unexpected(IVError{
             .code = IVErrorCode::ArbitrageViolation,
@@ -251,7 +250,7 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Validation: market price >= intrinsic value
+    // Market price >= intrinsic value
     double intrinsic = (query.type == OptionType::CALL)
         ? std::max(0.0, query.spot - query.strike)
         : std::max(0.0, query.strike - query.spot);
@@ -266,37 +265,40 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Task 2.3: Brent solver integration for implied volatility calculation
+    return std::monostate{};
+}
 
-    // Compute adaptive volatility bounds based on intrinsic value
+std::expected<IVSuccess, IVError>
+IVSolverFDM::solve_brent(const IVQuery& query) const {
+    // Adaptive bounds logic
+    double intrinsic = (query.type == OptionType::CALL)
+        ? std::max(0.0, query.spot - query.strike)
+        : std::max(0.0, query.strike - query.spot);
+
     double time_value = query.market_price - intrinsic;
     double time_value_ratio = time_value / query.market_price;
 
     double vol_upper;
     if (time_value_ratio > 0.5) {
-        // High time value suggests high volatility
         vol_upper = 3.0;
     } else if (time_value_ratio > 0.2) {
-        // Moderate time value
         vol_upper = 2.0;
     } else {
-        // Low time value, unlikely high volatility
         vol_upper = 1.5;
     }
 
-    double vol_lower = 0.01;  // Minimum realistic volatility
+    double vol_lower = 0.01;
 
-    // Create objective function: |price(vol) - market_price|
+    // Objective function
     auto objective = [this, &query](double vol) -> double {
         return this->objective_function(query, vol);
     };
 
-    // Run Brent's method
+    // Run Brent
     auto brent_result = brent_find_root(objective, vol_lower, vol_upper, config_.root_config);
 
     // Check convergence
     if (!brent_result.converged) {
-        // Determine error type based on failure reason
         IVErrorCode error_code;
         if (brent_result.failure_reason.has_value()) {
             const std::string& reason = brent_result.failure_reason.value();
@@ -305,7 +307,7 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
             } else if (reason.find("not bracketed") != std::string::npos) {
                 error_code = IVErrorCode::BracketingFailed;
             } else {
-                error_code = IVErrorCode::MaxIterationsExceeded;  // Default
+                error_code = IVErrorCode::MaxIterationsExceeded;
             }
         } else {
             error_code = IVErrorCode::MaxIterationsExceeded;
@@ -320,13 +322,24 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Success - extract implied volatility from Brent result
+    // Success
     return IVSuccess{
         .implied_vol = brent_result.root.value(),
         .iterations = brent_result.iterations,
         .final_error = brent_result.final_error,
-        .vega = std::nullopt  // Not computed yet
+        .vega = std::nullopt
     };
+}
+
+std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) {
+    // C++23 monadic validation chain
+    return validate_positive_parameters(query)
+        .and_then([this, &query](auto) {
+            return validate_arbitrage_bounds(query);
+        })
+        .and_then([this, &query](auto) {
+            return solve_brent(query);
+        });
 }
 
 void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
