@@ -154,7 +154,36 @@ private:
     /// @return Difference between theoretical and market price
     double objective_function(const IVQuery& query, double volatility) const;
 
-    // C++23 monadic validation helpers
+    // Atomic validators (C++23 monadic)
+    /// Validate spot price is positive
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_spot_positive(double spot) const;
+
+    /// Validate strike price is positive
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_strike_positive(double strike) const;
+
+    /// Validate time to maturity is positive
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_maturity_positive(double maturity) const;
+
+    /// Validate market price is positive
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_price_positive(double price) const;
+
+    /// Validate call price <= spot price (arbitrage check)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_call_price_bound(double spot, double market_price, bool is_call) const;
+
+    /// Validate put price <= strike price (arbitrage check)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_put_price_bound(double strike, double market_price, bool is_call) const;
+
+    /// Validate market price >= intrinsic value (arbitrage check)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_intrinsic_value(const IVQuery& query) const;
+
+    // Composite validators (C++23 monadic)
     /// Validate positive parameters (spot, strike, maturity, market_price)
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_positive_parameters(const IVQuery& query) const;
