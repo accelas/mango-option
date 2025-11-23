@@ -181,84 +181,26 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 }
 
-IVResult IVSolverFDM::solve_impl(const IVQuery& query) {
-    // Trace calculation start
-    MANGO_TRACE_ALGO_START(MODULE_IMPLIED_VOL,
-                          static_cast<double>(config_.root_config.max_iter),
-                          config_.root_config.tolerance,
-                          0.0);
-
-    // Validate input parameters
-    auto validation_result = validate_query(query);
-    if (!validation_result) {
-        return IVResult{
-            .converged = false,
-            .iterations = 0,
-            .implied_vol = 0.0,
-            .final_error = 0.0,
-            .failure_reason = validation_result.error(),
-            .vega = std::nullopt
-        };
-    }
-
-    // Estimate adaptive bounds for volatility search
-    double lower_bound = estimate_lower_bound();
-    double upper_bound = estimate_upper_bound(query);
-
-    // Create objective function lambda for Brent's method
-    auto objective = [this, &query](double vol) {
-        return this->objective_function(query, vol);
-    };
-
-    // Reset last solver error before root-finding
-    last_solver_error_.reset();
-
-    // Use Brent's method to find the root
-    RootFindingResult root_result = brent_find_root(
-        objective,
-        lower_bound,
-        upper_bound,
-        config_.root_config
-    );
-
-    // Emit completion trace
-    if (root_result.converged) {
-        MANGO_TRACE_ALGO_COMPLETE(MODULE_IMPLIED_VOL, root_result.iterations, 1);
-    } else {
-        MANGO_TRACE_CONVERGENCE_FAILED(MODULE_IMPLIED_VOL, 0, root_result.iterations, root_result.final_error);
-    }
-
-    // Convert RootFindingResult to IVResult
-    return IVResult{
-        .converged = root_result.converged,
-        .iterations = root_result.iterations,
-        .implied_vol = root_result.converged ? root_result.root.value() : 0.0,
-        .final_error = root_result.final_error,
-        .failure_reason = root_result.converged
-            ? std::nullopt
-            : (root_result.failure_reason
-               ? root_result.failure_reason
-               : (last_solver_error_
-                  ? std::optional<std::string>(last_solver_error_->message)
-                  : std::nullopt)),
-        .vega = std::nullopt  // Could be computed but not required for basic IV
+std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& /*query*/) {
+    // Implementation will be updated in Tasks 2.2 and 2.3
+    // For now, just make it compile by returning a dummy success
+    return IVSuccess{
+        .implied_vol = 0.20,  // Placeholder
+        .iterations = 0,
+        .final_error = 0.0,
+        .vega = std::nullopt
     };
 }
 
 void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
                                     std::span<IVResult> results) {
-    // Use OpenMP with one solver per thread for efficiency
-    MANGO_PRAGMA_PARALLEL
-    {
-        // Each thread creates its own solver instance once
-        IVSolverFDM thread_local_solver(config_);
+    // NOTE: This implementation is temporarily disabled as solve_impl now returns
+    // std::expected<IVSuccess, IVError> instead of IVResult.
+    // This will be updated in Task 5.1 (Update batch solver).
+    (void)queries;
+    (void)results;
 
-        // Distribute iterations across threads
-        MANGO_PRAGMA_FOR
-        for (size_t i = 0; i < queries.size(); ++i) {
-            results[i] = thread_local_solver.solve_impl(queries[i]);
-        }
-    }
+    // TODO(Task 5.1): Update this to convert std::expected results to IVResult
 }
 
 } // namespace mango

@@ -154,6 +154,18 @@ cc_test(
     copts = ["-std=c++23", "-Wall", "-Wextra"],
 )
 
+cc_test(
+    name = "iv_solver_expected_test",
+    srcs = ["iv_solver_expected_test.cc"],
+    deps = [
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_result",
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
 # DISABLED: Pre-existing failure (solution[25] == 0 instead of 2.0)
 # cc_test(
 #     name = "temporal_event_test",
