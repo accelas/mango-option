@@ -83,6 +83,15 @@ jobs:
           bazel build //benchmarks:iv_interpolation_profile
           bazel build //benchmarks:market_iv_e2e_benchmark
 
+      - name: Build examples
+        run: |
+          # Build all examples to ensure they compile
+          # (some may be commented out as WIP in BUILD.bazel)
+          bazel build //examples:example_expected_validation
+          bazel build //examples:example_multi_sinh_grid
+          bazel build //examples:debug_deep_itm
+          bazel build //examples:debug_deep_itm_iv
+
       - name: Run test suite
         run: |
           # Run all tests except those tagged as manual
