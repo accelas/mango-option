@@ -88,6 +88,13 @@ PriceTableBuilder<N>::solve_batch(
         // The normalized chain solver will use these parameters
         accuracy.min_spatial_points = config_.grid_estimator.n_points();
         accuracy.max_spatial_points = config_.grid_estimator.n_points();
+        accuracy.max_time_steps = config_.n_time;
+
+        // Transfer alpha parameter if grid is sinh-spaced
+        if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
+            accuracy.alpha = config_.grid_estimator.concentration();
+        }
+
         solver.set_grid_accuracy(accuracy);
 
         // Register maturity grid as snapshot times

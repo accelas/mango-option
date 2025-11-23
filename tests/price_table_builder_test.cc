@@ -231,6 +231,12 @@ TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {
 
     auto grid = batch_result.results[0]->grid();
     EXPECT_GE(grid->num_snapshots(), axes.grids[1].size());
+
+    // Verify grid size matches config (should be 101 points)
+    EXPECT_EQ(grid->n_space(), 101);
+
+    // Verify snapshots match maturity grid values
+    EXPECT_EQ(grid->num_snapshots(), 3);
 }
 
 } // namespace
