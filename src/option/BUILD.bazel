@@ -144,6 +144,13 @@ cc_library(
 )
 
 cc_library(
+    name = "iv_result",
+    hdrs = ["iv_result.hpp"],
+    copts = ["-std=c++23"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "iv_solver_interpolated",
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],

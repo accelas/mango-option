@@ -583,3 +583,13 @@ cc_test(
     ],
     copts = ["-std=c++23"],
 )
+
+cc_test(
+    name = "iv_result_test",
+    srcs = ["iv_result_test.cc"],
+    deps = [
+        "//src/option:iv_result",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23"],
+)
