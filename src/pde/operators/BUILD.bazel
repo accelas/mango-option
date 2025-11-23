@@ -1,14 +1,12 @@
 cc_library(
     name = "laplacian_pde",
     hdrs = ["laplacian_pde.hpp"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "black_scholes_pde",
     hdrs = ["black_scholes_pde.hpp"],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -20,7 +18,6 @@ cc_library(
         "//src/pde/core:grid",
         "//src/math:tridiagonal_matrix_view",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -31,7 +28,6 @@ cc_library(
         ":spatial_operator",
         "//src/pde/core:grid",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )
 
@@ -43,8 +39,7 @@ cc_library(
         "//src/support:parallel",
     ],
     copts = [
-        "-std=c++23",
-        "-march=x86-64",  # Baseline ISA for portability
+        "-march=x86-64",
         "-fopenmp-simd",
     ],
     visibility = ["//visibility:public"],
@@ -58,6 +53,5 @@ cc_library(
         "//src/pde/core:grid",
         "//src/support/cpu:cpu_diagnostics",
     ],
-    copts = ["-std=c++23"],
     visibility = ["//visibility:public"],
 )

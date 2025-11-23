@@ -11,7 +11,6 @@ pybind_extension(
         "//src/support:error_types",
     ],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-O3",
