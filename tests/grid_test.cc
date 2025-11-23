@@ -211,3 +211,24 @@ TEST(GridSpecTest, MultiSinhRejectsSingleOffCenterCluster) {
     ASSERT_FALSE(result.has_value());
     EXPECT_NE(result.error().find("centered cluster"), std::string::npos);
 }
+
+TEST(GridSpecTest, MultiSinhTwoClusterGeneration) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = -1.0, .alpha = 2.0, .weight = 1.0},
+        {.center_x = 1.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 21, clusters);
+    ASSERT_TRUE(result.has_value());
+
+    auto grid = result.value().generate();
+
+    EXPECT_EQ(grid.size(), 21);
+    EXPECT_DOUBLE_EQ(grid[0], -3.0);
+    EXPECT_DOUBLE_EQ(grid[20], 3.0);
+
+    // Check monotonicity
+    for (size_t i = 1; i < grid.size(); ++i) {
+        EXPECT_GT(grid[i], grid[i-1]) << "Grid not monotonic at index " << i;
+    }
+}
