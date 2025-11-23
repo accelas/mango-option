@@ -266,12 +266,66 @@ std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) 
         });
     }
 
-    // Placeholder success (Brent solver will be implemented in Task 2.3)
+    // Task 2.3: Brent solver integration for implied volatility calculation
+
+    // Compute adaptive volatility bounds based on intrinsic value
+    double time_value = query.market_price - intrinsic;
+    double time_value_ratio = time_value / query.market_price;
+
+    double vol_upper;
+    if (time_value_ratio > 0.5) {
+        // High time value suggests high volatility
+        vol_upper = 3.0;
+    } else if (time_value_ratio > 0.2) {
+        // Moderate time value
+        vol_upper = 2.0;
+    } else {
+        // Low time value, unlikely high volatility
+        vol_upper = 1.5;
+    }
+
+    double vol_lower = 0.01;  // Minimum realistic volatility
+
+    // Create objective function: |price(vol) - market_price|
+    auto objective = [this, &query](double vol) -> double {
+        return this->objective_function(query, vol);
+    };
+
+    // Run Brent's method
+    auto brent_result = brent_find_root(objective, vol_lower, vol_upper, config_.root_config);
+
+    // Check convergence
+    if (!brent_result.converged) {
+        // Determine error type based on failure reason
+        IVErrorCode error_code;
+        if (brent_result.failure_reason.has_value()) {
+            const std::string& reason = brent_result.failure_reason.value();
+            if (reason.find("Max iterations") != std::string::npos) {
+                error_code = IVErrorCode::MaxIterationsExceeded;
+            } else if (reason.find("not bracketed") != std::string::npos) {
+                error_code = IVErrorCode::BracketingFailed;
+            } else {
+                error_code = IVErrorCode::MaxIterationsExceeded;  // Default
+            }
+        } else {
+            error_code = IVErrorCode::MaxIterationsExceeded;
+        }
+
+        return std::unexpected(IVError{
+            .code = error_code,
+            .message = brent_result.failure_reason.value_or("Brent solver failed"),
+            .iterations = brent_result.iterations,
+            .final_error = brent_result.final_error,
+            .last_vol = brent_result.root
+        });
+    }
+
+    // Success - extract implied volatility from Brent result
     return IVSuccess{
-        .implied_vol = 0.20,  // Placeholder
-        .iterations = 0,
-        .final_error = 0.0,
-        .vega = std::nullopt
+        .implied_vol = brent_result.root.value(),
+        .iterations = brent_result.iterations,
+        .final_error = brent_result.final_error,
+        .vega = std::nullopt  // Not computed yet
     };
 }
 
