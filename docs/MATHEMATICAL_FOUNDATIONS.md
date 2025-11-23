@@ -250,6 +250,40 @@ N_{i,k}(x) = [(x-t_i)/(t_{i+k}-t_i)]·N_{i,k-1}(x) + [(t_{i+k+1}-x)/(t_{i+k+1}-t
 - Partition of unity (Σ_i N_i(x) = 1)
 - Local control (changing one coefficient affects 4 intervals)
 
+### Clamped Knot Vectors
+
+For n data points x₀...xₙ₋₁, the clamped knot vector has n+4 entries:
+
+```
+t = [x₀, x₀, x₀, x₀, t₁, ..., tₘ, xₙ₋₁, xₙ₋₁, xₙ₋₁, xₙ₋₁]
+```
+
+**Endpoint clamping** (multiplicity p+1 = 4 for cubics):
+- Forces the B-spline curve to interpolate exactly at x₀ and xₙ₋₁
+- Creates boundary conditions: B(x₀) = f₀ and B(xₙ₋₁) = fₙ₋₁
+- Essential for price table interpolation (ensures exact values at grid boundaries)
+
+**Interior knot placement:**
+Interior knots t₁...tₘ are positioned strictly between data sites to satisfy the Schoenberg-Whitney condition (ensures collocation matrix is non-singular):
+
+```cpp
+// Proportional placement with epsilon clamping
+T ratio = (idx + 1) / (n_interior + 1);
+T pos = ratio * n_intervals;
+int low = floor(pos);
+T frac = pos - low;
+T knot = (1 - frac) * x[low] + frac * x[low+1];
+
+// Clamp to interior: avoid coinciding with data sites
+T eps = max(1e-12 * spacing, machine_epsilon);
+knot = clamp(knot, x[low] + eps, x[low+1] - eps);
+```
+
+**Why epsilon clamping matters:**
+- Prevents knot coinciding exactly with data site x_i
+- Avoids singular collocation matrix (repeated knot-data overlap)
+- Maintains numerical stability (machine epsilon relative to spacing)
+
 ### 4D Separable Fitting
 
 Price table uses tensor-product B-splines:
@@ -337,6 +371,81 @@ Solves F(u) = u - dt·α·L(u) - RHS = 0 at each implicit stage:
 - Jacobian: J = I - dt·α·∂L/∂u (tridiagonal for 1D)
 - Linear solve: Thomas algorithm (O(n))
 - Convergence: 3-5 iterations typical
+
+### Projected Thomas Algorithm (Brennan-Schwartz)
+
+For American options, we must solve the Linear Complementarity Problem (LCP):
+
+```
+A·u = d
+u ≥ ψ (obstacle constraint, e.g., payoff)
+(A·u - d)ᵀ·(u - ψ) = 0 (complementarity)
+```
+
+**Key insight:** For tridiagonal systems with M-matrix structure (TR-BDF2 produces this), we can enforce the obstacle constraint DURING backward substitution, achieving single-pass convergence.
+
+**Algorithm:**
+
+1. **Forward elimination** (standard Thomas):
+   ```
+   c'[0] = c[0] / b[0]
+   d'[0] = d[0] / b[0]
+
+   For i = 1 to n-1:
+     denom = b[i] - a[i-1]·c'[i-1]
+     c'[i] = c[i] / denom
+     d'[i] = (d[i] - a[i-1]·d'[i-1]) / denom
+   ```
+
+2. **Projected backward substitution** (KEY DIFFERENCE):
+   ```
+   u[n-1] = max(d'[n-1], ψ[n-1])
+
+   For i = n-2 down to 0:
+     unconstrained = d'[i] - c'[i]·u[i+1]
+     u[i] = max(unconstrained, ψ[i])  // Projection at each step
+   ```
+
+**Why this works:**
+
+The naive "solve then project" approach **violates the tridiagonal coupling**:
+```
+WRONG:
+  1. Solve A·u = d unconstrained
+  2. Project: u[i] = max(u[i], ψ[i])
+  → Result: A·u ≠ d at projected nodes!
+```
+
+Projected Thomas **respects coupling** by projecting during backward substitution:
+- Constraint enforced at EACH STEP, not after
+- For M-matrices (positive diagonal, non-positive off-diagonals), the max(·, ψ) projection is monotone
+- Backward substitution propagates constraints correctly through tridiagonal structure
+- **Provably converges in single pass** for well-posed problems
+
+**Performance:**
+- Time: O(n) (same as standard Thomas)
+- Space: O(n) workspace for c', d' arrays
+- Iterations: **1 (always)** for M-matrices with proper dt
+
+**Deep ITM exercise region locking:**
+
+For nodes deep in-the-money (ψ > 0.95·intrinsic), convert to Dirichlet constraints to prevent diffusion from lifting values above intrinsic:
+
+```cpp
+if (psi[i] > 0.95 && u[i] ≈ psi[i]) {
+    // Lock to intrinsic value
+    jacobian_diag[i] = 1.0;
+    jacobian_lower[i-1] = 0.0;
+    jacobian_upper[i] = 0.0;
+    rhs[i] = psi[i];
+}
+```
+
+This ensures deep ITM American puts price at intrinsic value (99.75) instead of being erroneously lifted by diffusion (115.97).
+
+**References:**
+- Brennan & Schwartz (1977): "The Valuation of American Put Options"
+- Hintermüller & Ito (2006): "A primal-dual active set strategy for general constrained optimization problems"
 
 ---
 
