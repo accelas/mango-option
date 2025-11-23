@@ -140,10 +140,13 @@ public:
         // Build collocation matrix
         build_collocation_matrix();
 
-        // Create banded matrix from internal storage
+        // Create banded matrix with bandwidth=4 for cubic B-splines
         BandedMatrix<T> A(n_, 4);
         for (size_t i = 0; i < n_; ++i) {
-            A.set_col_start(i, band_col_start_[i]);
+            // Set the starting column for this row's band
+            A.set_col_start(i, static_cast<size_t>(band_col_start_[i]));
+
+            // Fill the 4 non-zero entries for this row
             for (size_t k = 0; k < 4; ++k) {
                 const int col = band_col_start_[i] + static_cast<int>(k);
                 if (col >= 0 && col < static_cast<int>(n_)) {
@@ -224,10 +227,13 @@ public:
         // Build collocation matrix
         build_collocation_matrix();
 
-        // Create banded matrix
+        // Create banded matrix with bandwidth=4 for cubic B-splines
         BandedMatrix<T> A(n_, 4);
         for (size_t i = 0; i < n_; ++i) {
-            A.set_col_start(i, band_col_start_[i]);
+            // Set the starting column for this row's band
+            A.set_col_start(i, static_cast<size_t>(band_col_start_[i]));
+
+            // Fill the 4 non-zero entries for this row
             for (size_t k = 0; k < 4; ++k) {
                 const int col = band_col_start_[i] + static_cast<int>(k);
                 if (col >= 0 && col < static_cast<int>(n_)) {

@@ -27,6 +27,7 @@
 #pragma once
 
 #include "src/math/bspline_basis.hpp"
+#include <experimental/mdspan>
 #include <array>
 #include <vector>
 #include <span>
@@ -67,6 +68,10 @@ public:
     using KnotArray = std::array<std::vector<T>, N>;
     using QueryPoint = std::array<T, N>;
     using Shape = std::array<size_t, N>;
+
+    // NEW: mdspan for N-dimensional coefficient array
+    using CoeffExtents = std::experimental::dextents<size_t, N>;
+    using CoeffMdspan = std::experimental::mdspan<T, CoeffExtents, std::experimental::layout_right>;
 
     /// Factory method with validation
     ///
@@ -165,20 +170,39 @@ public:
     }
 
 private:
-    GridArray grids_;   ///< Grid points for each dimension
-    KnotArray knots_;   ///< Knot vectors for each dimension
-    std::vector<T> coeffs_;  ///< Coefficient array (row-major)
-    Shape dims_;        ///< Cached grid dimensions
+    GridArray grids_;        ///< Grid points for each dimension
+    KnotArray knots_;        ///< Knot vectors for each dimension
+    std::vector<T> coeffs_;  ///< Coefficient storage
+    CoeffMdspan coeffs_view_;///< N-dimensional view of coeffs_
+    Shape dims_;             ///< Cached grid dimensions
 
     /// Private constructor (use factory method)
     BSplineND(GridArray grids, KnotArray knots, std::vector<T> coeffs)
         : grids_(std::move(grids))
         , knots_(std::move(knots))
         , coeffs_(std::move(coeffs))
+        , coeffs_view_(nullptr, CoeffExtents{})  // Initialized below
     {
+        // Extract dimensions
         for (size_t i = 0; i < N; ++i) {
             dims_[i] = grids_[i].size();
         }
+
+        // Create mdspan view with proper extents
+        coeffs_view_ = create_coeffs_view(coeffs_.data(), dims_);
+    }
+
+    /// Access N-dimensional coefficient array via mdspan
+    ///
+    /// Uses variadic template expansion to convert std::array to mdspan subscript.
+    template<size_t... Is>
+    static T access_coeffs_impl(const CoeffMdspan& view, const std::array<int, N>& indices,
+                                std::index_sequence<Is...>) {
+        return view[indices[Is]...];  // Expands to view[indices[0], indices[1], ...]
+    }
+
+    static T access_coeffs(const CoeffMdspan& view, const std::array<int, N>& indices) {
+        return access_coeffs_impl(view, indices, std::make_index_sequence<N>{});
     }
 
     /// Recursive tensor-product evaluation
@@ -213,10 +237,9 @@ private:
             const T weight = weights[Dim][offset];
 
             if constexpr (Dim == N - 1) {
-                // Base case: innermost dimension
-                // Compute flat index and accumulate with FMA
-                const size_t flat_idx = compute_flat_index(indices);
-                sum = std::fma(coeffs_[flat_idx], weight, sum);
+                // Base case: use mdspan multi-dimensional indexing
+                const T coeff = access_coeffs(coeffs_view_, indices);
+                sum = std::fma(coeff, weight, sum);
             } else {
                 // Recursive case: descend to next dimension
                 const T nested_sum = eval_tensor_product<Dim + 1>(spans, weights, indices);
@@ -227,25 +250,15 @@ private:
         return sum;
     }
 
-    /// Compute flat index from N-dimensional index (row-major order)
-    ///
-    /// Converts multi-dimensional index to flat array index.
-    /// Example for 3D: idx = i*dim1*dim2 + j*dim2 + k
-    ///
-    /// @param indices Multi-dimensional index
-    /// @return Flat index into coefficient array
-    size_t compute_flat_index(const std::array<int, N>& indices) const noexcept {
-        size_t idx = 0;
-        size_t stride = 1;
+    /// Helper to create mdspan with variadic extents
+    static CoeffMdspan create_coeffs_view(T* data, const Shape& dims) {
+        return create_view_impl(data, dims, std::make_index_sequence<N>{});
+    }
 
-        // Compute index in row-major order (last dimension varies fastest)
-        for (size_t dim = N; dim > 0; --dim) {
-            const size_t d = dim - 1;
-            idx += static_cast<size_t>(indices[d]) * stride;
-            stride *= dims_[d];
-        }
-
-        return idx;
+    template<size_t... Is>
+    static CoeffMdspan create_view_impl(T* data, const Shape& dims,
+                                        std::index_sequence<Is...>) {
+        return CoeffMdspan(data, dims[Is]...);
     }
 };
 

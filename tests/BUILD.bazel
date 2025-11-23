@@ -5,7 +5,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -15,7 +14,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -25,7 +23,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -35,7 +32,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -45,7 +41,6 @@ cc_test(
         "//src/pde/core:pde_workspace",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -55,7 +50,6 @@ cc_test(
         "//src/pde/core:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -65,7 +59,6 @@ cc_test(
         "//src/math:root_finding",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -75,7 +68,6 @@ cc_test(
         "//src/math:root_finding",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -91,7 +83,11 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-fopenmp-simd",
+    ],
 )
 
 cc_test(
@@ -107,7 +103,11 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-fopenmp-simd"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-fopenmp-simd",
+    ],
 )
 
 cc_test(
@@ -118,7 +118,10 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -129,7 +132,10 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -140,7 +146,10 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 
@@ -151,7 +160,10 @@ cc_test(
         "//src/option:iv_solver_fdm",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -163,7 +175,10 @@ cc_test(
         "//src/support:error_types",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 # DISABLED: Pre-existing failure (solution[25] == 0 instead of 2.0)
@@ -196,7 +211,9 @@ cc_test(
         "//src/pde/core:boundary_conditions",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-fopenmp-simd"],
+    copts = [
+        "-fopenmp-simd",
+    ],
 )
 
 cc_test(
@@ -206,7 +223,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -216,7 +232,15 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
+)
+
+cc_test(
+    name = "grid_spacing_mdspan_test",
+    srcs = ["grid_spacing_mdspan_test.cc"],
+    deps = [
+        "//src/pde/core:grid",
+        "@googletest//:gtest_main",
+    ],
 )
 
 cc_test(
@@ -228,7 +252,6 @@ cc_test(
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
     tags = ["manual"],  # Disabled: validation expectations changed with new API
 )
 
@@ -241,7 +264,10 @@ cc_test(
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -253,7 +279,10 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -264,7 +293,6 @@ cc_test(
         "//third_party/arrow",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
     data = ["//data:real_option_chain.arrow"],
     tags = ["manual"],  # Disabled: test data incompatible with post-CRTP solver
 )
@@ -277,7 +305,6 @@ cc_test(
         "//src/math:cubic_spline_solver",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -287,7 +314,6 @@ cc_test(
         "//src/math:cubic_spline_solver",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -298,7 +324,10 @@ cc_test(
         "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -308,7 +337,12 @@ cc_test(
         "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+    ],
 )
 
 cc_test(
@@ -319,7 +353,13 @@ cc_test(
         "//src/option:bspline_price_table",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
     linkopts = ["-fopenmp"],
 )
 
@@ -330,7 +370,13 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra", "-O3", "-march=native", "-fopenmp"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
     linkopts = ["-fopenmp"],
 )
 
@@ -341,7 +387,6 @@ cc_test(
         "//src/support/cpu:cpu_diagnostics",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -352,7 +397,6 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -363,7 +407,9 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-fopenmp-simd"],
+    copts = [
+        "-fopenmp-simd",
+    ],
 )
 
 # Test suites defined for convenience
@@ -373,7 +419,6 @@ cc_test(
 cc_test(
     name = "pde_solver_simd_benchmark",
     srcs = ["pde_solver_simd_benchmark.cc"],
-    copts = ["-std=c++23"],
     deps = [
         "//src/pde/core:pde_solver",
         "//src/support/cpu:cpu_diagnostics",
@@ -413,7 +458,9 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-fopenmp"],
+    copts = [
+        "-fopenmp",
+    ],
     linkopts = ["-fopenmp"],
     size = "large",
     timeout = "moderate",
@@ -423,7 +470,6 @@ cc_test(
     name = "bspline_vega_analytic_test",
     srcs = ["bspline_vega_analytic_test.cc"],
     copts = [
-        "-std=c++23",
         "-Wall",
         "-Wextra",
         "-march=native",
@@ -445,7 +491,6 @@ cc_test(
         "//src/support:crc64",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -455,7 +500,6 @@ cc_test(
         "//src/option:price_table_workspace",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -465,7 +509,9 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-fopenmp"],
+    copts = [
+        "-fopenmp",
+    ],
     linkopts = ["-fopenmp"], 
 )
 
@@ -476,7 +522,9 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-fopenmp"],
+    copts = [
+        "-fopenmp",
+    ],
     linkopts = ["-fopenmp"], 
     size = "small",
 )
@@ -488,7 +536,9 @@ cc_test(
         "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-fopenmp"],
+    copts = [
+        "-fopenmp",
+    ],
     linkopts = ["-fopenmp"], 
     size = "medium",
     timeout = "moderate",
@@ -503,7 +553,6 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
-    copts = ["-std=c++23"],
     size = "medium",
     timeout = "moderate",
     tags = ["manual"],  # Disabled: Greeks accuracy needs improvement for non-uniform grids
@@ -523,7 +572,6 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
-    copts = ["-std=c++23"],
     size = "large",
     timeout = "long",
     tags = ["manual"],  # Manual due to long build time for price table
@@ -540,7 +588,10 @@ cc_test(
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -552,7 +603,25 @@ cc_test(
         "//src/math:bspline_basis",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)
+
+cc_test(
+    name = "bspline_nd_mdspan_test",
+    size = "small",
+    srcs = ["bspline_nd_mdspan_test.cc"],
+    deps = [
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -563,7 +632,42 @@ cc_test(
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)
+
+cc_test(
+    name = "mdspan_integration_test",
+    srcs = ["mdspan_integration_test.cc"],
+    deps = [
+        "@mdspan//:mdspan",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "lapack_banded_layout_test",
+    srcs = ["lapack_banded_layout_test.cc"],
+    deps = [
+        "//src/math:lapack_banded_layout",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "mdspan_integration_e2e_test",
+    srcs = ["mdspan_integration_e2e_test.cc"],
+    deps = [
+        "//src/math:banded_matrix_solver",
+        "//src/math:bspline_nd",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
 )
 
 cc_test(
@@ -575,7 +679,10 @@ cc_test(
         "//src/option:price_table_4d_builder",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
 
 cc_test(
@@ -593,7 +700,6 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
-    copts = ["-std=c++23"],
     size = "large",
     timeout = "long",
 )
@@ -605,7 +711,6 @@ cc_test(
         "//src/support:error_types",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -616,7 +721,6 @@ cc_test(
         "//src/support:error_types",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23"],
 )
 
 cc_test(
@@ -628,5 +732,8 @@ cc_test(
         "//src/support:error_types",
         "@googletest//:gtest_main",
     ],
-    copts = ["-std=c++23", "-Wall", "-Wextra"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
 )
