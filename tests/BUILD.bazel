@@ -44,6 +44,18 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_surface_test",
+    size = "small",
+    srcs = ["price_table_surface_test.cc"],
+    deps = [
+        "//src/option:price_table_surface",
+        "//src/support:aligned_arena",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "grid_test",
     srcs = ["grid_test.cc"],
     deps = [
