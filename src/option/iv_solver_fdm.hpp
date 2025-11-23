@@ -154,32 +154,39 @@ private:
     /// @return Difference between theoretical and market price
     double objective_function(const IVQuery& query, double volatility) const;
 
-    // Atomic validators (C++23 monadic)
+    // Atomic validators (C++23 monadic) - uniform API: all take const IVQuery&
     /// Validate spot price is positive
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_spot_positive(double spot) const;
+    std::expected<std::monostate, IVError> validate_spot_positive(const IVQuery& query) const;
 
     /// Validate strike price is positive
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_strike_positive(double strike) const;
+    std::expected<std::monostate, IVError> validate_strike_positive(const IVQuery& query) const;
 
     /// Validate time to maturity is positive
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_maturity_positive(double maturity) const;
+    std::expected<std::monostate, IVError> validate_maturity_positive(const IVQuery& query) const;
 
     /// Validate market price is positive
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_price_positive(double price) const;
+    std::expected<std::monostate, IVError> validate_price_positive(const IVQuery& query) const;
 
     /// Validate call price <= spot price (arbitrage check)
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_call_price_bound(double spot, double market_price, bool is_call) const;
+    std::expected<std::monostate, IVError> validate_call_price_bound(const IVQuery& query) const;
 
     /// Validate put price <= strike price (arbitrage check)
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_put_price_bound(double strike, double market_price, bool is_call) const;
+    std::expected<std::monostate, IVError> validate_put_price_bound(const IVQuery& query) const;
 
     /// Validate market price >= intrinsic value (arbitrage check)
+    /// @param query Option specification and market price
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_intrinsic_value(const IVQuery& query) const;
 
