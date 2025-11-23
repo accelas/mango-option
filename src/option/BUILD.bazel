@@ -1,4 +1,78 @@
 cc_library(
+    name = "price_table_axes",
+    hdrs = ["price_table_axes.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_tensor",
+    hdrs = ["price_tensor.hpp"],
+    deps = [
+        "//src/support:aligned_arena",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_metadata",
+    hdrs = ["price_table_metadata.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_surface",
+    srcs = ["price_table_surface.cpp"],
+    hdrs = ["price_table_surface.hpp"],
+    deps = [
+        ":price_table_axes",
+        ":price_table_metadata",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_config",
+    hdrs = ["price_table_config.hpp"],
+    deps = [
+        ":american_option",
+        "//src/pde/core:grid",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_builder",
+    srcs = ["price_table_builder.cpp"],
+    hdrs = ["price_table_builder.hpp"],
+    deps = [
+        ":price_table_config",
+        ":price_table_axes",
+        ":price_table_surface",
+        ":price_tensor",
+        ":american_option",
+        ":american_option_batch",
+        ":recursion_helpers",
+        "//src/math:cubic_spline_solver",
+        "//src/math:bspline_nd_separable",
+        "//src/support:aligned_arena",
+        "//common:ivcalc_trace_hdr",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "recursion_helpers",
+    hdrs = ["recursion_helpers.hpp"],
+    deps = [
+        ":price_table_axes",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
