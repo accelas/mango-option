@@ -105,6 +105,7 @@ enum class IVErrorCode {
     NegativeMaturity,
     NegativeMarketPrice,
     ArbitrageViolation,
+    InvalidGridConfig,
 
     // Convergence errors
     MaxIterationsExceeded,
