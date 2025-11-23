@@ -171,6 +171,14 @@ Shares tridiagonal solver with TR-BDF2 to avoid duplication.
 
 **IMPORTANT: Always start new work on a fresh branch**
 
+**Pre-PR Checklist:**
+Before creating a pull request, verify:
+- [ ] All tests pass: `bazel test //...`
+- [ ] All examples compile: `bazel build //examples/...`
+- [ ] All benchmarks compile: `bazel build //benchmarks/...`
+- [ ] Code builds without warnings
+- [ ] Documentation updated if API changed
+
 ```bash
 # 1. Update main
 git checkout main
@@ -181,11 +189,16 @@ git checkout -b feature/descriptive-name
 
 # 3. Make changes and commit
 # ... edit files ...
+
+# 4. Verify builds before committing
 bazel test //...
+bazel build //examples/...
+bazel build //benchmarks/...
+
 git add <files>
 git commit -m "Imperative mood message"
 
-# 4. Push and create PR
+# 5. Push and create PR
 git push -u origin feature/descriptive-name
 gh pr create --title "Brief description" --body "$(cat <<'EOF'
 ## Summary
