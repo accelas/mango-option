@@ -4,7 +4,8 @@ load("@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
      "feature",
      "flag_group",
      "flag_set",
-     "tool_path")
+     "tool_path",
+     "with_feature_set")
 load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
 
 def _impl(ctx):
@@ -45,6 +46,67 @@ def _impl(ctx):
                         ],
                     ),
                 ],
+            ),
+        ],
+    )
+
+    # Enable -fPIC whenever Bazel requests position independent code
+    pic_feature = feature(
+        name = "pic",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                    ACTION_NAMES.cpp_header_parsing,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fPIC"]),
+                ],
+            ),
+        ],
+    )
+
+    supports_pic_feature = feature(
+        name = "supports_pic",
+        enabled = True,
+    )
+
+    dbg_feature = feature(name = "dbg")
+    opt_feature = feature(name = "opt")
+
+    compile_mode_feature = feature(
+        name = "compile_mode_flags",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-O0", "-g"]),
+                ],
+                with_features = [with_feature_set(features = ["dbg"])],
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-O3", "-DNDEBUG"]),
+                ],
+                with_features = [with_feature_set(features = ["opt"])],
             ),
         ],
     )
@@ -138,6 +200,9 @@ def _impl(ctx):
                 actions = [
                     ACTION_NAMES.cpp_link_executable,
                     ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                    ACTION_NAMES.lto_index_for_executable,
+                    ACTION_NAMES.lto_index_for_dynamic_library,
                 ],
                 flag_groups = [
                     flag_group(
@@ -145,6 +210,30 @@ def _impl(ctx):
                             "-lstdc++",
                             "-lm",
                         ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    preprocessor_defines_feature = feature(
+        name = "preprocessor_defines",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["-D%{preprocessor_defines}"],
+                        iterate_over = "preprocessor_defines",
                     ),
                 ],
             ),
@@ -165,10 +254,16 @@ def _impl(ctx):
         features = [
             cxx23_feature,
             c11_feature,
+            pic_feature,
+            supports_pic_feature,
+            dbg_feature,
+            opt_feature,
+            compile_mode_feature,
             warnings_feature,
             werror_feature,
             baseline_isa_feature,
             default_link_flags_feature,
+            preprocessor_defines_feature,
         ],
         cxx_builtin_include_directories = [
             "/usr/include/c++/14",
