@@ -181,9 +181,92 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 }
 
-std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& /*query*/) {
-    // Implementation will be updated in Tasks 2.2 and 2.3
-    // For now, just make it compile by returning a dummy success
+std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) {
+    // Task 2.2: Validation error mapping with std::expected
+
+    // Validation: positive spot price
+    if (query.spot <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeSpot,
+            .message = "Spot price must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Validation: positive strike price
+    if (query.strike <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeStrike,
+            .message = "Strike price must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Validation: positive time to maturity
+    if (query.maturity <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeMaturity,
+            .message = "Time to maturity must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Validation: positive market price
+    if (query.market_price <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeMarketPrice,
+            .message = "Market price must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Validation: arbitrage bounds
+    // Call price cannot exceed spot price
+    if (query.type == OptionType::CALL && query.market_price > query.spot) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::ArbitrageViolation,
+            .message = "Call price cannot exceed spot price (arbitrage)",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Put price cannot exceed strike price
+    if (query.type == OptionType::PUT && query.market_price > query.strike) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::ArbitrageViolation,
+            .message = "Put price cannot exceed strike price (arbitrage)",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Validation: market price >= intrinsic value
+    double intrinsic = (query.type == OptionType::CALL)
+        ? std::max(0.0, query.spot - query.strike)
+        : std::max(0.0, query.strike - query.spot);
+
+    if (query.market_price < intrinsic) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::ArbitrageViolation,
+            .message = "Market price below intrinsic value (arbitrage)",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+
+    // Placeholder success (Brent solver will be implemented in Task 2.3)
     return IVSuccess{
         .implied_vol = 0.20,  // Placeholder
         .iterations = 0,
