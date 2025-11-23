@@ -4,6 +4,7 @@
 #include "src/option/price_table_axes.hpp"
 #include "src/option/price_table_surface.hpp"
 #include "src/option/american_option.hpp"
+#include "src/option/american_option_batch.hpp"
 #include <expected>
 #include <string>
 
@@ -34,9 +35,21 @@ public:
         return make_batch(axes);
     }
 
+    /// For testing: expose solve_batch method
+    [[nodiscard]] BatchAmericanOptionResult solve_batch_for_testing(
+        const std::vector<AmericanOptionParams>& batch,
+        const PriceTableAxes<N>& axes) const {
+        return solve_batch(batch, axes);
+    }
+
 private:
     /// Generate batch of AmericanOptionParams from axes
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
+        const PriceTableAxes<N>& axes) const;
+
+    /// Solve batch of options with snapshot registration
+    [[nodiscard]] BatchAmericanOptionResult solve_batch(
+        const std::vector<AmericanOptionParams>& batch,
         const PriceTableAxes<N>& axes) const;
 
     PriceTableConfig config_;

@@ -67,6 +67,38 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     }
 }
 
+template <size_t N>
+BatchAmericanOptionResult
+PriceTableBuilder<N>::solve_batch(
+    const std::vector<AmericanOptionParams>& batch,
+    const PriceTableAxes<N>& axes) const
+{
+    if constexpr (N != 4) {
+        // Return empty result for N≠4
+        BatchAmericanOptionResult result;
+        result.failed_count = batch.size();
+        return result;
+    } else {
+        // Configure solver with grid accuracy from config
+        BatchAmericanOptionSolver solver;
+
+        // Set grid accuracy parameters based on config's grid_estimator
+        GridAccuracyParams accuracy;
+        // Use the grid estimator's bounds and size to configure accuracy
+        // The normalized chain solver will use these parameters
+        accuracy.min_spatial_points = config_.grid_estimator.n_points();
+        accuracy.max_spatial_points = config_.grid_estimator.n_points();
+        solver.set_grid_accuracy(accuracy);
+
+        // Register maturity grid as snapshot times
+        // This enables extract_tensor to access surfaces at each maturity point
+        solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
+
+        // Solve batch with shared grid optimization (normalized chain solver)
+        return solver.solve_batch(batch, true);  // use_shared_grid = true
+    }
+}
+
 // Explicit instantiations
 template class PriceTableBuilder<2>;
 template class PriceTableBuilder<3>;

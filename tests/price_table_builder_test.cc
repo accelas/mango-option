@@ -205,5 +205,33 @@ TEST(PriceTableBuilderTest, MakeBatch5DReturnsEmpty) {
     EXPECT_TRUE(batch.empty());
 }
 
+TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {
+    PriceTableConfig config{
+        .option_type = OptionType::PUT,
+        .K_ref = 100.0,
+        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
+        .n_time = 1000,
+        .dividend_yield = 0.02
+    };
+
+    PriceTableBuilder<4> builder(config);
+
+    PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0};
+    axes.grids[1] = {0.1, 0.5, 1.0};  // 3 maturity points
+    axes.grids[2] = {0.20};           // 1 vol
+    axes.grids[3] = {0.05};           // 1 rate
+
+    auto batch_params = builder.make_batch_for_testing(axes);
+    auto batch_result = builder.solve_batch_for_testing(batch_params, axes);
+
+    // Verify snapshots were registered (should have 3 snapshots)
+    ASSERT_EQ(batch_result.results.size(), 1);
+    ASSERT_TRUE(batch_result.results[0].has_value());
+
+    auto grid = batch_result.results[0]->grid();
+    EXPECT_GE(grid->num_snapshots(), axes.grids[1].size());
+}
+
 } // namespace
 } // namespace mango
