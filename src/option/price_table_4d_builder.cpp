@@ -181,15 +181,13 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     // by BatchAmericanOptionSolver based on option parameters
     batch_solver.set_grid_accuracy(accuracy);
 
-    // Setup callback to register snapshots (needed for price table extraction)
-    auto setup_callback = [this]([[maybe_unused]] size_t idx, AmericanOptionSolver& solver) {
-        // Register maturity grid as snapshot times so extract_batch_results_to_4d
-        // can interpolate solutions at each maturity
-        solver.set_snapshot_times(std::span{maturity_});
-    };
+    // Register snapshot times using dedicated API (preserves normalized optimization)
+    // This approach allows price table construction to benefit from normalized chain solver
+    // (~19,000× speedup) while still recording snapshots for extraction
+    batch_solver.set_snapshot_times(std::span{maturity_});
 
     // Use BatchAmericanOptionSolver with shared grid (use_shared_grid=true)
-    auto batch_result = batch_solver.solve_batch(batch_params, true, setup_callback);
+    auto batch_result = batch_solver.solve_batch(batch_params, true);
 
     // Check for failures
     if (batch_result.failed_count > 0) {

@@ -538,6 +538,11 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
             // Create solver using PDEWorkspace API
             AmericanOptionSolver solver(params[i], *workspace_ptr);
 
+            // Register snapshot times if configured (preserves normalized optimization)
+            if (!snapshot_times_.empty()) {
+                solver.set_snapshot_times(std::span{snapshot_times_});
+            }
+
             // Invoke setup callback if provided
             if (setup) {
                 setup(i, solver);

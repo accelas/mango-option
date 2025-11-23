@@ -107,14 +107,43 @@ public:
         return use_normalized_;
     }
 
+    /// Set snapshot times for all solvers in the batch
+    ///
+    /// This is the recommended way to register snapshot times when using
+    /// normalized chain optimization. Using SetupCallback to register snapshots
+    /// will disable the normalized path (see solve_batch documentation).
+    ///
+    /// @param times Snapshot times to register for all options
+    void set_snapshot_times(std::span<const double> times) {
+        snapshot_times_.assign(times.begin(), times.end());
+    }
+
+    /// Clear snapshot times
+    void clear_snapshot_times() {
+        snapshot_times_.clear();
+    }
+
     /// Solve a batch of American options with automatic routing
     ///
     /// Automatically routes to normalized chain solver when eligible
     /// (varying strikes, same maturity, no discrete dividends).
     ///
+    /// **Snapshot Registration:**
+    /// Use `set_snapshot_times()` before calling solve_batch() to register
+    /// snapshots for all options. This approach preserves the normalized
+    /// chain optimization.
+    ///
+    /// **SetupCallback Limitation:**
+    /// When a SetupCallback is provided, the normalized path is disabled
+    /// and solve_regular_batch() is used instead. This is because the
+    /// normalized solver creates one PDE for multiple options, making
+    /// per-option callbacks ambiguous. For common configuration needs
+    /// (snapshots, tolerances), use dedicated APIs instead.
+    ///
     /// @param params Vector of option parameters
     /// @param use_shared_grid If true, all options share one global grid
     /// @param setup Optional callback invoked after solver creation
+    ///              (disables normalized path - see documentation above)
     /// @return Batch result with individual results and failure count
     BatchAmericanOptionResult solve_batch(
         std::span<const AmericanOptionParams> params,
@@ -132,6 +161,7 @@ public:
 
 private:
     GridAccuracyParams grid_accuracy_;  ///< Grid accuracy parameters for automatic estimation
+    std::vector<double> snapshot_times_;  ///< Snapshot times for all solvers (preserves normalized optimization)
 
     // Normalized chain solver eligibility constants
     static constexpr double MAX_WIDTH = 5.8;       ///< Convergence limit (log-units)

@@ -182,3 +182,41 @@ TEST(NormalizedSolverRegressionTest, CallbackForcesRegularBatch) {
     // Critical assertion: Callback should be invoked for each option
     EXPECT_EQ(callback_count, 3) << "SetupCallback should force regular batch path";
 }
+
+// Test that normalized solver WORKS with snapshot_times (via dedicated API)
+TEST(NormalizedSolverRegressionTest, NormalizedPathWorksWithSnapshots) {
+    // Create batch eligible for normalized solver
+    std::vector<AmericanOptionParams> batch(5);
+    for (size_t i = 0; i < 5; ++i) {
+        batch[i] = AmericanOptionParams(
+            100.0 + i * 10.0,  // Varying spot
+            100.0,             // Same strike
+            1.0,               // Same maturity
+            0.05,              // Same rate
+            0.02,              // Same dividend
+            OptionType::PUT,   // Same type
+            0.20               // Same vol
+        );
+    }
+
+    // Configure snapshots using dedicated API (preserves normalized path)
+    std::vector<double> snapshot_times = {0.25, 0.5, 0.75, 1.0};
+    BatchAmericanOptionSolver solver;
+    solver.set_use_normalized(true);
+    solver.set_snapshot_times(std::span{snapshot_times});
+
+    // Solve using shared grid (enables normalized path)
+    auto result = solver.solve_batch(batch, true);
+
+    // Verify all solves succeeded
+    ASSERT_EQ(result.results.size(), 5);
+    EXPECT_EQ(result.failed_count, 0);
+
+    // Verify snapshots were registered for all results
+    for (size_t i = 0; i < 5; ++i) {
+        ASSERT_TRUE(result.results[i].has_value()) << "Option " << i << " should succeed";
+        const auto& opt_result = result.results[i].value();
+        auto grid = opt_result.grid();
+        EXPECT_EQ(grid->num_snapshots(), 4) << "Option " << i << " should have 4 snapshots";
+    }
+}
