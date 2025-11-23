@@ -17,13 +17,9 @@ IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
     // Constructor - just stores configuration
 }
 
+// Atomic validators for grid parameters (uniform API)
 std::expected<std::monostate, IVError>
-IVSolverFDM::validate_grid_params() const {
-    // Only validate when manual grid mode is enabled
-    if (!config_.use_manual_grid) {
-        return std::monostate{};
-    }
-
+IVSolverFDM::validate_n_space_positive() const {
     if (config_.grid_n_space == 0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
         return std::unexpected(IVError{
@@ -34,7 +30,11 @@ IVSolverFDM::validate_grid_params() const {
             .last_vol = std::nullopt
         });
     }
+    return std::monostate{};
+}
 
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_n_time_positive() const {
     if (config_.grid_n_time == 0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
         return std::unexpected(IVError{
@@ -45,7 +45,11 @@ IVSolverFDM::validate_grid_params() const {
             .last_vol = std::nullopt
         });
     }
+    return std::monostate{};
+}
 
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_x_bounds() const {
     if (config_.grid_x_min >= config_.grid_x_max) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
         return std::unexpected(IVError{
@@ -56,7 +60,11 @@ IVSolverFDM::validate_grid_params() const {
             .last_vol = std::nullopt
         });
     }
+    return std::monostate{};
+}
 
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_alpha_nonnegative() const {
     if (config_.grid_alpha < 0.0) {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
         return std::unexpected(IVError{
@@ -67,8 +75,21 @@ IVSolverFDM::validate_grid_params() const {
             .last_vol = std::nullopt
         });
     }
-
     return std::monostate{};
+}
+
+// Composite validator for grid parameters (C++23 monadic)
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_grid_params() const {
+    // Only validate when manual grid mode is enabled
+    if (!config_.use_manual_grid) {
+        return std::monostate{};
+    }
+
+    return validate_n_space_positive()
+        .and_then([this](auto) { return validate_n_time_positive(); })
+        .and_then([this](auto) { return validate_x_bounds(); })
+        .and_then([this](auto) { return validate_alpha_nonnegative(); });
 }
 
 double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {

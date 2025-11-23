@@ -223,6 +223,22 @@ private:
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_intrinsic_value(const IVQuery& query) const;
 
+    /// Validate grid n_space is positive (manual grid mode)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_n_space_positive() const;
+
+    /// Validate grid n_time is positive (manual grid mode)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_n_time_positive() const;
+
+    /// Validate grid x_min < x_max (manual grid mode)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_x_bounds() const;
+
+    /// Validate grid alpha >= 0 (manual grid mode)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_alpha_nonnegative() const;
+
     // Composite validators (C++23 monadic)
     /// Validate positive parameters (spot, strike, maturity, market_price)
     /// @return std::monostate on success, IVError on validation failure
