@@ -57,6 +57,15 @@ cc_library(
 )
 
 cc_library(
+    name = "recursion_helpers",
+    hdrs = ["recursion_helpers.hpp"],
+    deps = [
+        ":price_table_axes",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
