@@ -199,6 +199,10 @@ private:
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_arbitrage_bounds(const IVQuery& query) const;
 
+    /// Validate query (composite of all validation stages)
+    /// @return std::monostate on success, IVError on validation failure
+    std::expected<std::monostate, IVError> validate_query_monadic(const IVQuery& query) const;
+
     /// Run Brent solver to find implied volatility
     /// @return IVSuccess with implied volatility or IVError on failure
     std::expected<IVSuccess, IVError> solve_brent(const IVQuery& query) const;
