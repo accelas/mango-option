@@ -45,6 +45,20 @@ struct IVSolverFDMConfig {
     /// Root-finding configuration (Brent's method parameters)
     RootFindingConfig root_config;
 
+    /// Parallelization threshold for batch solving
+    ///
+    /// Batches smaller than this threshold use serial execution to avoid
+    /// parallel overhead. IV solves are expensive (multiple PDE solves),
+    /// so even small batches benefit from parallelization once overhead
+    /// is amortized.
+    ///
+    /// **Tuning guidance:**
+    /// - Default (4): Good balance for most workloads
+    /// - Larger (8-16): For systems with high parallel overhead
+    /// - Smaller (1-2): For systems with low parallel overhead or large batches
+    /// - Set to SIZE_MAX to force serial execution for all batch sizes
+    size_t batch_parallel_threshold = 4;
+
     /// Use manual grid specification instead of auto-estimation
     ///
     /// When false (default): Automatically estimate optimal grid based on option parameters
