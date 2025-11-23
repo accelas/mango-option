@@ -377,35 +377,33 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
     auto brent_result = brent_find_root(objective, vol_lower, vol_upper, config_.root_config);
 
     // Check convergence
-    if (!brent_result.converged) {
+    if (!brent_result.has_value()) {
         IVErrorCode error_code;
-        if (brent_result.failure_reason.has_value()) {
-            const std::string& reason = brent_result.failure_reason.value();
-            if (reason.find("Max iterations") != std::string::npos) {
-                error_code = IVErrorCode::MaxIterationsExceeded;
-            } else if (reason.find("not bracketed") != std::string::npos) {
-                error_code = IVErrorCode::BracketingFailed;
-            } else {
-                error_code = IVErrorCode::MaxIterationsExceeded;
-            }
+        const std::string& reason = brent_result.error().message;
+
+        if (reason.find("Max iterations") != std::string::npos ||
+            reason.find("Maximum iterations") != std::string::npos) {
+            error_code = IVErrorCode::MaxIterationsExceeded;
+        } else if (reason.find("not bracketed") != std::string::npos) {
+            error_code = IVErrorCode::BracketingFailed;
         } else {
             error_code = IVErrorCode::MaxIterationsExceeded;
         }
 
         return std::unexpected(IVError{
             .code = error_code,
-            .message = brent_result.failure_reason.value_or("Brent solver failed"),
-            .iterations = brent_result.iterations,
-            .final_error = brent_result.final_error,
-            .last_vol = brent_result.root
+            .message = brent_result.error().message,
+            .iterations = brent_result.error().iterations,
+            .final_error = brent_result.error().final_error,
+            .last_vol = brent_result.error().last_value
         });
     }
 
     // Success
     return IVSuccess{
-        .implied_vol = brent_result.root.value(),
-        .iterations = brent_result.iterations,
-        .final_error = brent_result.final_error,
+        .implied_vol = brent_result->root,
+        .iterations = brent_result->iterations,
+        .final_error = brent_result->final_error,
         .vega = std::nullopt
     };
 }
