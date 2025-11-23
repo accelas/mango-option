@@ -17,12 +17,12 @@ Designed for research, prototyping, and production use with a focus on **correct
 
 ### Key Features
 
-- **Fast American Pricing** – 5-20ms per option via PDE solver
-- **Implied Volatility** – FDM-based (143ms) or interpolation-based (12ms)
-- **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries
+- **Fast American Pricing** – ~1.3ms per option via PDE solver
+- **Implied Volatility** – FDM-based (~15ms) or interpolation-based (~2.1µs)
+- **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries (~193ns)
 - **Modern C++23** – std::expected error handling, PMR memory management, SIMD vectorization
 - **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
-- **Production Ready** – OpenMP batching, USDT tracing, zero-allocation solves
+- **Production Ready** – OpenMP batching (10× speedup), USDT tracing, zero-allocation solves
 
 ---
 
@@ -141,27 +141,32 @@ if (result.has_value()) {
 
 ### American Option Pricing
 
-| Configuration | Time/Option | Use Case |
-|---|---|---|
-| Fast (tol=1e-2) | ~5ms | Quick estimates |
-| Standard (tol=1e-3) | ~20ms | Production |
-| High Accuracy (tol=1e-6) | ~80ms | Validation |
+| Configuration | Grid | Time/Option | Use Case |
+|---|---|---|---|
+| Standard (auto) | 101×498 | ~1.3ms | Typical case |
+| Custom fine | 201×2k | ~8-10ms | High accuracy |
 
-**Batch processing:** ~0.3ms/option on 32 cores (15× speedup)
+**Batch processing (64 options):**
+- Sequential: ~81ms total (~1.26ms/option)
+- Parallel: ~7.7ms total (~0.12ms/option)
+- **10.4× speedup** with parallelization
 
 ### Implied Volatility
 
 | Method | Time/IV | Accuracy |
 |---|---|---|
-| FDM-based | ~143ms | Ground truth |
-| Interpolated | ~12ms | <1bp error (95%) |
+| FDM-based (101×1k) | ~15ms | Ground truth |
+| FDM-based (201×2k) | ~61ms | High accuracy |
+| Interpolated (B-spline) | ~2.1µs | <1bp error (95%) |
+
+**Speedup:** 7,000× for interpolated vs FDM
 
 ### Price Table Pre-Computation
 
 - **Grid size:** 300K points (50×30×20×10)
 - **Pre-compute:** 15-20 min (32 cores)
-- **Query:** ~500ns (price or Greeks)
-- **Speedup:** 43,400× vs FDM
+- **Query:** ~193ns (price), ~952ns (vega+gamma)
+- **Speedup:** 77,000× vs FDM
 
 ---
 
