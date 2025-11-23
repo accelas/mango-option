@@ -17,39 +17,79 @@ IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
     // Constructor - just stores configuration
 }
 
-std::expected<void, std::string> IVSolverFDM::validate_query(const IVQuery& query) const {
-    // Use common validation for option spec, market price, and arbitrage checks
-    auto common_validation = validate_iv_query(query);
-    if (!common_validation) {
-        // Trace validation error
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 3, 0.0, 0.0);
-        return common_validation;
+// Atomic validators for grid parameters (uniform API)
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_n_space_positive() const {
+    if (config_.grid_n_space == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: n_space must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_n_time_positive() const {
+    if (config_.grid_n_time == 0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: n_time must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_x_bounds() const {
+    if (config_.grid_x_min >= config_.grid_x_max) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: x_min must be < x_max",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_alpha_nonnegative() const {
+    if (config_.grid_alpha < 0.0) {
+        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
+        return std::unexpected(IVError{
+            .code = IVErrorCode::InvalidGridConfig,
+            .message = "Manual grid: alpha must be non-negative",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+// Composite validator for grid parameters (C++23 monadic)
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_grid_params() const {
+    // Only validate when manual grid mode is enabled
+    if (!config_.use_manual_grid) {
+        return std::monostate{};
     }
 
-    // FDM-specific validation: grid parameters (only when manual mode enabled)
-    if (config_.use_manual_grid) {
-        if (config_.grid_n_space == 0) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
-            return std::unexpected(std::string("Manual grid: n_space must be positive"));
-        }
-
-        if (config_.grid_n_time == 0) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
-            return std::unexpected(std::string("Manual grid: n_time must be positive"));
-        }
-
-        if (config_.grid_x_min >= config_.grid_x_max) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
-            return std::unexpected(std::string("Manual grid: x_min must be < x_max"));
-        }
-
-        if (config_.grid_alpha < 0.0) {
-            MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
-            return std::unexpected(std::string("Manual grid: alpha must be non-negative"));
-        }
-    }
-
-    return {};
+    return validate_n_space_positive()
+        .and_then([this](auto) { return validate_n_time_positive(); })
+        .and_then([this](auto) { return validate_x_bounds(); })
+        .and_then([this](auto) { return validate_alpha_nonnegative(); });
 }
 
 double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
@@ -181,84 +221,219 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 }
 
-IVResult IVSolverFDM::solve_impl(const IVQuery& query) {
-    // Trace calculation start
-    MANGO_TRACE_ALGO_START(MODULE_IMPLIED_VOL,
-                          static_cast<double>(config_.root_config.max_iter),
-                          config_.root_config.tolerance,
-                          0.0);
-
-    // Validate input parameters
-    auto validation_result = validate_query(query);
-    if (!validation_result) {
-        return IVResult{
-            .converged = false,
+// Atomic validators (uniform API - all take const IVQuery&)
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_spot_positive(const IVQuery& query) const {
+    if (query.spot <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeSpot,
+            .message = "Spot price must be positive",
             .iterations = 0,
-            .implied_vol = 0.0,
             .final_error = 0.0,
-            .failure_reason = validation_result.error(),
-            .vega = std::nullopt
-        };
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_strike_positive(const IVQuery& query) const {
+    if (query.strike <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeStrike,
+            .message = "Strike price must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_maturity_positive(const IVQuery& query) const {
+    if (query.maturity <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeMaturity,
+            .message = "Time to maturity must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_price_positive(const IVQuery& query) const {
+    if (query.market_price <= 0.0) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::NegativeMarketPrice,
+            .message = "Market price must be positive",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_call_price_bound(const IVQuery& query) const {
+    if (query.type == OptionType::CALL && query.market_price > query.spot) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::ArbitrageViolation,
+            .message = "Call price cannot exceed spot price (arbitrage)",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_put_price_bound(const IVQuery& query) const {
+    if (query.type == OptionType::PUT && query.market_price > query.strike) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::ArbitrageViolation,
+            .message = "Put price cannot exceed strike price (arbitrage)",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_intrinsic_value(const IVQuery& query) const {
+    double intrinsic = (query.type == OptionType::CALL)
+        ? std::max(0.0, query.spot - query.strike)
+        : std::max(0.0, query.strike - query.spot);
+
+    if (query.market_price < intrinsic) {
+        return std::unexpected(IVError{
+            .code = IVErrorCode::ArbitrageViolation,
+            .message = "Market price below intrinsic value (arbitrage)",
+            .iterations = 0,
+            .final_error = 0.0,
+            .last_vol = std::nullopt
+        });
+    }
+    return std::monostate{};
+}
+
+// Composite validators (monadic chains)
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_positive_parameters(const IVQuery& query) const {
+    return validate_spot_positive(query)
+        .and_then([this, &query](auto) { return validate_strike_positive(query); })
+        .and_then([this, &query](auto) { return validate_maturity_positive(query); })
+        .and_then([this, &query](auto) { return validate_price_positive(query); });
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_arbitrage_bounds(const IVQuery& query) const {
+    return validate_call_price_bound(query)
+        .and_then([this, &query](auto) { return validate_put_price_bound(query); })
+        .and_then([this, &query](auto) { return validate_intrinsic_value(query); });
+}
+
+std::expected<std::monostate, IVError>
+IVSolverFDM::validate_query(const IVQuery& query) const {
+    return validate_positive_parameters(query)
+        .and_then([this, &query](auto) { return validate_arbitrage_bounds(query); })
+        .and_then([this](auto) { return validate_grid_params(); });
+}
+
+std::expected<IVSuccess, IVError>
+IVSolverFDM::solve_brent(const IVQuery& query) const {
+    // Adaptive bounds logic
+    double intrinsic = (query.type == OptionType::CALL)
+        ? std::max(0.0, query.spot - query.strike)
+        : std::max(0.0, query.strike - query.spot);
+
+    double time_value = query.market_price - intrinsic;
+    double time_value_ratio = time_value / query.market_price;
+
+    double vol_upper;
+    if (time_value_ratio > 0.5) {
+        vol_upper = 3.0;
+    } else if (time_value_ratio > 0.2) {
+        vol_upper = 2.0;
+    } else {
+        vol_upper = 1.5;
     }
 
-    // Estimate adaptive bounds for volatility search
-    double lower_bound = estimate_lower_bound();
-    double upper_bound = estimate_upper_bound(query);
+    double vol_lower = 0.01;
 
-    // Create objective function lambda for Brent's method
-    auto objective = [this, &query](double vol) {
+    // Objective function
+    auto objective = [this, &query](double vol) -> double {
         return this->objective_function(query, vol);
     };
 
-    // Reset last solver error before root-finding
-    last_solver_error_.reset();
+    // Run Brent
+    auto brent_result = brent_find_root(objective, vol_lower, vol_upper, config_.root_config);
 
-    // Use Brent's method to find the root
-    RootFindingResult root_result = brent_find_root(
-        objective,
-        lower_bound,
-        upper_bound,
-        config_.root_config
-    );
+    // Check convergence
+    if (!brent_result.converged) {
+        IVErrorCode error_code;
+        if (brent_result.failure_reason.has_value()) {
+            const std::string& reason = brent_result.failure_reason.value();
+            if (reason.find("Max iterations") != std::string::npos) {
+                error_code = IVErrorCode::MaxIterationsExceeded;
+            } else if (reason.find("not bracketed") != std::string::npos) {
+                error_code = IVErrorCode::BracketingFailed;
+            } else {
+                error_code = IVErrorCode::MaxIterationsExceeded;
+            }
+        } else {
+            error_code = IVErrorCode::MaxIterationsExceeded;
+        }
 
-    // Emit completion trace
-    if (root_result.converged) {
-        MANGO_TRACE_ALGO_COMPLETE(MODULE_IMPLIED_VOL, root_result.iterations, 1);
-    } else {
-        MANGO_TRACE_CONVERGENCE_FAILED(MODULE_IMPLIED_VOL, 0, root_result.iterations, root_result.final_error);
+        return std::unexpected(IVError{
+            .code = error_code,
+            .message = brent_result.failure_reason.value_or("Brent solver failed"),
+            .iterations = brent_result.iterations,
+            .final_error = brent_result.final_error,
+            .last_vol = brent_result.root
+        });
     }
 
-    // Convert RootFindingResult to IVResult
-    return IVResult{
-        .converged = root_result.converged,
-        .iterations = root_result.iterations,
-        .implied_vol = root_result.converged ? root_result.root.value() : 0.0,
-        .final_error = root_result.final_error,
-        .failure_reason = root_result.converged
-            ? std::nullopt
-            : (root_result.failure_reason
-               ? root_result.failure_reason
-               : (last_solver_error_
-                  ? std::optional<std::string>(last_solver_error_->message)
-                  : std::nullopt)),
-        .vega = std::nullopt  // Could be computed but not required for basic IV
+    // Success
+    return IVSuccess{
+        .implied_vol = brent_result.root.value(),
+        .iterations = brent_result.iterations,
+        .final_error = brent_result.final_error,
+        .vega = std::nullopt
     };
 }
 
-void IVSolverFDM::solve_batch_impl(std::span<const IVQuery> queries,
-                                    std::span<IVResult> results) {
-    // Use OpenMP with one solver per thread for efficiency
-    MANGO_PRAGMA_PARALLEL
-    {
-        // Each thread creates its own solver instance once
-        IVSolverFDM thread_local_solver(config_);
+std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) const {
+    // C++23 monadic validation pipeline: validate → solve
+    return validate_query(query)
+        .and_then([this, &query](auto) { return solve_brent(query); });
+}
 
-        // Distribute iterations across threads
-        MANGO_PRAGMA_FOR
-        for (size_t i = 0; i < queries.size(); ++i) {
-            results[i] = thread_local_solver.solve_impl(queries[i]);
+BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries) const {
+    std::vector<std::expected<IVSuccess, IVError>> results;
+    results.reserve(queries.size());
+
+    size_t failed_count = 0;
+
+    for (const auto& query : queries) {
+        auto result = solve_impl(query);
+        if (!result.has_value()) {
+            ++failed_count;
         }
+        results.push_back(std::move(result));
     }
+
+    return BatchIVResult{
+        .results = std::move(results),
+        .failed_count = failed_count
+    };
 }
 
 } // namespace mango
