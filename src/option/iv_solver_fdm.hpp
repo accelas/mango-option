@@ -123,14 +123,13 @@ public:
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
-    /// Implementation for IVSolverBase::solve_batch().
+    /// Implementation for batch solving with std::expected.
     /// Creates thread-local solver instances in OpenMP parallel region
     /// to ensure thread safety.
     ///
-    /// @param queries Input queries
-    /// @param results Output buffer (must match queries.size())
-    void solve_batch_impl(std::span<const IVQuery> queries,
-                         std::span<IVResult> results);
+    /// @param queries Input queries (as vector for convenience)
+    /// @return BatchIVResult with individual results and failure count
+    BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries);
 
 private:
     IVSolverFDMConfig config_;
