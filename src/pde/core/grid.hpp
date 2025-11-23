@@ -48,9 +48,10 @@ template<typename T>
 class GridSpec {
 public:
     enum class Type {
-        Uniform,      // Equally spaced points
-        LogSpaced,    // Logarithmically spaced
-        SinhSpaced    // Hyperbolic sine spacing (concentrates points at center)
+        Uniform,         // Equally spaced points
+        LogSpaced,       // Logarithmically spaced
+        SinhSpaced,      // Hyperbolic sine spacing (concentrates points at center)
+        MultiSinhSpaced  // Composite multi-sinh (multiple concentration regions)
     };
 
     // Factory methods for common grid types
@@ -241,6 +242,11 @@ GridBuffer<T> GridSpec<T>::generate() const {
                 points.push_back(x_min_ + (x_max_ - x_min_) * normalized);
             }
             break;
+        }
+
+        case Type::MultiSinhSpaced: {
+            // TODO: Implementation in later task
+            throw std::runtime_error("MultiSinhSpaced grid generation not yet implemented");
         }
     }
 

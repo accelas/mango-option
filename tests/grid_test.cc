@@ -121,3 +121,9 @@ TEST(GridViewTest, SpanAndDataAccess) {
     const double* ptr = view.data();
     EXPECT_EQ(ptr[2], 3.0);
 }
+
+TEST(GridSpecTest, MultiSinhTypeExists) {
+    using Type = mango::GridSpec<>::Type;
+    Type t = Type::MultiSinhSpaced;
+    EXPECT_EQ(t, Type::MultiSinhSpaced);
+}
