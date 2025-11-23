@@ -555,6 +555,18 @@ cc_test(
 )
 
 cc_test(
+    name = "normalized_solver_regression_test",
+    size = "small",
+    srcs = ["normalized_solver_regression_test.cc"],
+    deps = [
+        "//src/option:american_option_batch",
+        "//src/option:price_table_4d_builder",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-std=c++23", "-Wall", "-Wextra"],
+)
+
+cc_test(
     name = "normalized_chain_accuracy_test",
     srcs = [
         "normalized_chain_accuracy_test.cc",

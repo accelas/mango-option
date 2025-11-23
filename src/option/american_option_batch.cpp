@@ -278,6 +278,15 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
         grid_accuracy_ = GridAccuracyParams{};
     }
 
+    // Disable normalized path if setup callback is provided
+    // Reason: normalized solver creates one PDE for a group, but callback expects
+    // to be invoked for each original option index. Supporting this would require
+    // creating temporary solvers for all options or tracking index mapping.
+    // For simplicity, fall back to regular batch when callback is needed.
+    if (setup) {
+        return solve_regular_batch(params, use_shared_grid, setup);
+    }
+
     // Automatic routing based on eligibility
     if (use_normalized_ && is_normalized_eligible(params, use_shared_grid)) {
         MANGO_TRACE_NORMALIZED_SELECTED(params.size());
@@ -348,10 +357,6 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
         const auto& normalized_result = solve_result.results[0].value();
         auto grid = normalized_result.grid();
         auto x_grid = grid->x();
-
-        // Get today's option value (last time step)
-        size_t final_step = grid->num_snapshots() - 1;
-        auto spatial_solution = normalized_result.at_time(final_step);
 
         // For each option in this group, create result with actual params
         // The AmericanOptionResult will interpolate using the normalized grid
