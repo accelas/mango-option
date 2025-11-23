@@ -47,20 +47,22 @@ graph TD
 
 ### Three Deployment Paths
 
-**1. FDM-Based Pricing** (Ground truth, ~5-20ms per option)
+**1. FDM-Based Pricing** (Ground truth, ~1.3ms per option)
 - `AmericanOptionSolver` → `PDESolver<CRTP>` → spatial operators
-- Grid auto-estimation via `estimate_grid_for_option()`
+- Grid auto-estimation via `estimate_grid_for_option()` (101×498 typical)
 - Newton iteration for TR-BDF2 implicit stages
 
-**2. FDM-Based IV** (Robust, ~143ms per IV)
+**2. FDM-Based IV** (Robust, ~15ms per IV on 101×1k grid)
 - `IVSolverFDM` → Brent's method → nested `AmericanOptionSolver`
 - Adaptive volatility bounds based on intrinsic value
 - Monadic validation with `std::expected`
+- Higher accuracy: ~61ms per IV on 201×2k grid
 
-**3. Interpolated IV** (Fast, ~12ms per IV)
+**3. Interpolated IV** (Fast, ~2.1µs per IV)
 - `IVSolverInterpolated` → Newton on 4D B-spline surface
 - Pre-computation: ~15-20 minutes for 300K grid
-- Query: ~500ns price, ~12ms IV
+- Query: ~193ns price interpolation, ~2.1µs IV solve
+- **7,000× speedup** over FDM-based IV
 
 ---
 
@@ -391,38 +393,39 @@ public:
 
 | Configuration | Grid | Time/Option | Notes |
 |---|---|---|---|
-| Fast | 101 pts, 500 steps | ~5ms | tol=1e-2, Quick estimates |
-| Standard | 141 pts, 1000 steps | ~20ms | tol=1e-3, Production |
-| High Accuracy | 300 pts, 2000 steps | ~80ms | tol=1e-6, Validation |
+| Standard (auto) | 101 pts, 498 steps | ~1.3ms | Auto-estimated, typical case |
+| Custom fine | 201 pts, 2000 steps | ~8-10ms | High accuracy |
 
 **Auto-Estimation:** `estimate_grid_for_option()` selects grid based on σ, T, moneyness
 
-**Batch Processing:**
-- Serial: ~20ms/option
-- Parallel (32 cores): ~0.3ms/option (15× speedup)
+**Batch Processing (64 options):**
+- Sequential: ~81ms total (~1.26ms/option)
+- Parallel batch: ~7.7ms total (~0.12ms/option)
+- **10.4× speedup** with parallelization
 
 ### Implied Volatility
 
 | Method | Time/IV | Accuracy | Use Case |
 |---|---|---|---|
-| FDM-based | ~143ms | Ground truth | Validation, few queries |
-| Interpolated | ~12ms | <1bp error (95%) | Production, many queries |
+| FDM-based (101×1k) | ~15ms | Ground truth | Validation, moderate queries |
+| FDM-based (201×2k) | ~61ms | High accuracy | Validation, few queries |
+| Interpolated | ~2.1µs | <1bp error (95%) | Production, many queries |
 
-**FDM Breakdown:**
+**FDM Breakdown (101×1k grid):**
 - 5-8 Brent iterations
-- ~21ms per PDE solve
-- Total: 5 × 21ms ≈ 143ms
+- ~2-3ms per PDE solve
+- Total: ~15ms average
 
 **Interpolated Breakdown:**
-- Surface evaluation: ~500ns
-- Newton iteration: 3-5 iterations × 2.4ms
-- Total: ~12ms
+- Surface evaluation: ~193ns (price lookup)
+- Newton on surface: ~2.1µs (IV solve)
+- **7,000× speedup** over FDM-based IV
 
 ### Price Table Pre-Computation
 
 | Grid Size | Pre-Compute Time | Query Time | Speedup |
 |---|---|---|---|
-| 50×30×20×10 (300K) | 15-20 min (32 cores) | ~500ns | 43,400× |
+| 50×30×20×10 (300K) | 15-20 min (32 cores) | ~193ns | 77,000× vs FDM |
 
 **Pre-Computation:**
 - 200 unique (σ, r) pairs
@@ -430,8 +433,8 @@ public:
 - OpenMP parallelization: ~300 options/sec
 
 **Query:**
-- 4D B-spline evaluation
-- Greeks: Same cost as price (~500ns)
+- 4D B-spline evaluation: ~193ns (price)
+- Greeks: ~952ns (vega + gamma)
 
 ### Memory Usage
 
