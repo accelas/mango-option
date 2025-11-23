@@ -60,5 +60,44 @@ TEST(PriceTensorTest, ArenaOutOfMemory) {
     EXPECT_NE(result.error().find("memory"), std::string::npos);
 }
 
+TEST(PriceTensorTest, Create1DTensor) {
+    auto arena = memory::AlignedArena::create(1024).value();
+
+    auto result = PriceTensor<1>::create({10}, arena);
+    ASSERT_TRUE(result.has_value());
+
+    auto tensor = result.value();
+    EXPECT_EQ(tensor.view.extent(0), 10);
+
+    // Test element access
+    tensor.view[5] = 42.0;
+    EXPECT_DOUBLE_EQ((tensor.view[5]), 42.0);
+}
+
+TEST(PriceTensorTest, Create5DTensor) {
+    auto arena = memory::AlignedArena::create(10000).value();
+
+    auto result = PriceTensor<5>::create({2, 3, 4, 5, 6}, arena);
+    ASSERT_TRUE(result.has_value());
+
+    auto tensor = result.value();
+    EXPECT_EQ(tensor.view.extent(0), 2);
+    EXPECT_EQ(tensor.view.extent(1), 3);
+    EXPECT_EQ(tensor.view.extent(2), 4);
+    EXPECT_EQ(tensor.view.extent(3), 5);
+    EXPECT_EQ(tensor.view.extent(4), 6);
+
+    // Total elements = 2*3*4*5*6 = 720
+    size_t total = 1;
+    for (size_t i = 0; i < 5; ++i) {
+        total *= tensor.view.extent(i);
+    }
+    EXPECT_EQ(total, 720);
+
+    // Test element access
+    tensor.view[1, 2, 3, 4, 5] = 99.0;
+    EXPECT_DOUBLE_EQ((tensor.view[1, 2, 3, 4, 5]), 99.0);
+}
+
 } // namespace
 } // namespace mango

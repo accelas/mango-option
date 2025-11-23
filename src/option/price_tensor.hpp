@@ -22,9 +22,16 @@ struct PriceTensor {
 
     /// Create tensor with given shape, allocating from arena
     ///
+    /// Allocated memory is uninitialized. Caller must initialize all elements
+    /// before use. The tensor owns a shared reference to the arena, keeping
+    /// memory alive until all references are destroyed.
+    ///
     /// @param shape Number of elements per dimension
     /// @param arena_ptr Shared pointer to memory arena
-    /// @return PriceTensor or error message
+    /// @return PriceTensor on success, or error message on failure
+    ///         Error conditions:
+    ///         - Insufficient arena capacity for requested size
+    ///         - Arena allocation failure (returns nullptr)
     [[nodiscard]] static std::expected<PriceTensor, std::string>
     create(std::array<size_t, N> shape, std::shared_ptr<memory::AlignedArena> arena_ptr) {
         // Calculate total elements
