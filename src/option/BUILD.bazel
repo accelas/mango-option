@@ -58,7 +58,7 @@ cc_library(
         "//src/math:cubic_spline_solver",
         "//src/math:bspline_nd_separable",
         "//src/support:aligned_arena",
-        "//common:ivcalc_trace_hdr",
+        "//src/support:ivcalc_trace_hdr",
     ],
     visibility = ["//visibility:public"],
 )
@@ -140,7 +140,7 @@ cc_library(
         ":american_option",
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
-        "//common:ivcalc_trace_hdr",
+        "//src/support:ivcalc_trace_hdr",
         "//src/math:cubic_spline_solver",
         "//src/support:error_types",
         "//src/support:parallel",
@@ -269,7 +269,7 @@ cc_library(
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
         "//src/support:parallel",
-        "//common:ivcalc_trace_hdr",
+        "//src/support:ivcalc_trace_hdr",
         "//src/support:error_types",
     ],
     copts = [

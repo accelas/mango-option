@@ -9,7 +9,7 @@ cc_library(
     name = "root_finding",
     hdrs = ["root_finding.hpp"],
     deps = [
-        "//common:ivcalc_trace_hdr",
+        "//src/support:ivcalc_trace_hdr",
     ],
     copts = [
         "-Wall",
