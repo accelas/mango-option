@@ -52,6 +52,7 @@ cc_library(
         ":price_table_axes",
         ":price_table_surface",
         ":american_option",
+        ":recursion_helpers",
     ],
     visibility = ["//visibility:public"],
 )

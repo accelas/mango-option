@@ -28,7 +28,17 @@ public:
     [[nodiscard]] std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
     build(const PriceTableAxes<N>& axes);
 
+    /// For testing: expose make_batch method
+    [[nodiscard]] std::vector<AmericanOptionParams> make_batch_for_testing(
+        const PriceTableAxes<N>& axes, double K_ref) const {
+        return make_batch(axes, K_ref);
+    }
+
 private:
+    /// Generate batch of AmericanOptionParams from axes
+    [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
+        const PriceTableAxes<N>& axes, double K_ref) const;
+
     PriceTableConfig config_;
 };
 
