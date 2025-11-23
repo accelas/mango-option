@@ -21,6 +21,18 @@ cc_test(
 )
 
 cc_test(
+    name = "price_tensor_test",
+    size = "small",
+    srcs = ["price_tensor_test.cc"],
+    deps = [
+        "//src/option:price_tensor",
+        "//src/support:aligned_arena",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "grid_test",
     srcs = ["grid_test.cc"],
     deps = [

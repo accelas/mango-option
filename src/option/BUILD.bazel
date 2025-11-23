@@ -5,6 +5,16 @@ cc_library(
 )
 
 cc_library(
+    name = "price_tensor",
+    hdrs = ["price_tensor.hpp"],
+    deps = [
+        "//src/support:aligned_arena",
+        "@mdspan",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
