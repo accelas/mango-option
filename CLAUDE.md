@@ -205,6 +205,151 @@ struct lapack_banded_layout {
 
 **Performance**: Zero overhead - compiles to same assembly as manual indexing.
 
+### Grid Specification
+
+The library provides flexible grid generation strategies via the `GridSpec<T>` factory API. All grid types return `std::expected<GridSpec, std::string>` for safe construction with validation.
+
+**Available Grid Types:**
+
+1. **Uniform grids**: `GridSpec<>::uniform(x_min, x_max, n_points)`
+   - Equal spacing between all points
+   - Simplest option, good for basic testing
+   - Memory efficient (32 bytes for spacing data)
+
+2. **Log-spaced grids**: `GridSpec<>::log_spaced(x_min, x_max, n_points)`
+   - Logarithmic spacing (geometric progression)
+   - Use when x represents a naturally multiplicative quantity
+
+3. **Sinh-spaced grids**: `GridSpec<>::sinh_spaced(x_min, x_max, n_points, alpha)`
+   - Concentrates points near a single center location
+   - **Recommended for most American option pricing** (ATM concentration)
+   - Alpha controls concentration strength (typical: 1.5-3.0)
+
+4. **Multi-sinh grids**: `GridSpec<>::multi_sinh_spaced(x_min, x_max, n_points, clusters)`
+   - Concentrates points at multiple user-specified locations
+   - For price tables covering multiple strikes with different moneyness
+   - Each cluster specifies: `{center_x, alpha, weight}`
+
+**Basic Usage:**
+
+```cpp
+#include "src/pde/core/grid.hpp"
+
+// Uniform grid (simple case)
+auto uniform_grid = GridSpec<>::uniform(-3.0, 3.0, 101);
+if (!uniform_grid.has_value()) {
+    std::cerr << "Error: " << uniform_grid.error() << "\n";
+    return;
+}
+
+// Sinh-spaced grid (recommended for single strike)
+auto sinh_grid = GridSpec<>::sinh_spaced(-3.0, 3.0, 201, 2.0);  // alpha = 2.0
+auto points = sinh_grid.value().generate();
+
+// Multi-sinh grid (for multiple strikes)
+std::vector<MultiSinhCluster<double>> clusters = {
+    {.center_x = 0.0, .alpha = 2.5, .weight = 2.0},   // ATM (higher weight)
+    {.center_x = -0.2, .alpha = 2.0, .weight = 1.0}   // 20% ITM
+};
+auto multi_sinh = GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 201, clusters);
+```
+
+#### Multi-Sinh Grids
+
+Multi-sinh grids combine weighted hyperbolic sine transforms to concentrate resolution at multiple locations while maintaining a single shared PDE grid. This enables efficient batch solving for instruments with different normalized strikes.
+
+**When to Use Multi-Sinh:**
+
+Only add additional clusters when log-moneyness distance between target strikes exceeds approximately **0.3/α**. For typical α values of 2-3, this corresponds to:
+- **α = 2.0**: Use multi-cluster if Δx ≥ 0.15 (strikes differ by ~16% or more)
+- **α = 2.5**: Use multi-cluster if Δx ≥ 0.12 (strikes differ by ~13% or more)
+- **α = 3.0**: Use multi-cluster if Δx ≥ 0.10 (strikes differ by ~10% or more)
+
+For strikes differing by only a few percent (e.g., K₁=100, K₂=102 → Δx ≈ 0.02), a single cluster suffices. Multi-cluster grids make sense when Δx ≥ 0.18, corresponding to strikes differing by ~20% or more.
+
+**Example use cases:**
+- Price tables requiring accuracy at both ATM (x=0.0) and 20% deep ITM (x=-0.2)
+- Batch solvers mixing instruments with moneyness spanning wide range
+- Scenarios where single-center sinh spacing leaves important regions coarse
+
+**Multi-Sinh Parameters:**
+
+```cpp
+struct MultiSinhCluster<T> {
+    T center_x;   // Log-moneyness center for this cluster
+    T alpha;      // Concentration strength (typical: 1.5-3.0)
+    T weight;     // Relative contribution (higher = more influence)
+};
+```
+
+- **center_x**: Log-moneyness location where you want concentrated resolution
+- **alpha**: Controls how aggressively points cluster (higher = tighter concentration)
+- **weight**: Relative importance of this cluster in the final weighted combination
+
+**Example: Dual Cluster Grid**
+
+```cpp
+#include "src/pde/core/grid.hpp"
+
+// Define two concentration regions
+std::vector<mango::MultiSinhCluster<double>> clusters = {
+    {.center_x = 0.0, .alpha = 2.5, .weight = 2.0},   // ATM (higher weight)
+    {.center_x = -0.2, .alpha = 2.0, .weight = 1.0}   // 20% ITM
+};
+
+// Create grid specification
+auto spec = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 201, clusters);
+if (!spec.has_value()) {
+    std::cerr << "Error: " << spec.error() << "\n";
+    return;
+}
+
+// Generate grid points
+auto grid = spec.value().generate();
+
+// Grid now has fine resolution at both x ≈ 0.0 and x ≈ -0.2
+```
+
+**Example: Triple Cluster Grid**
+
+```cpp
+// Cover deep ITM, ATM, and deep OTM
+std::vector<mango::MultiSinhCluster<double>> clusters = {
+    {.center_x = -1.5, .alpha = 1.8, .weight = 1.0},  // Deep ITM
+    {.center_x = 0.0, .alpha = 2.5, .weight = 2.0},   // ATM (highest weight)
+    {.center_x = 1.5, .alpha = 1.8, .weight = 1.0}    // Deep OTM
+};
+
+auto spec = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 201, clusters);
+```
+
+**Safeguards:**
+
+The multi-sinh implementation automatically enforces:
+- **Strict monotonicity**: x[i+1] > x[i] for all i (iterative smoothing if needed)
+- **Minimum spacing**: Prevents dx → 0 to avoid conditioning issues
+- **Exact boundaries**: x[0] = x_min and x[n-1] = x_max (clamped endpoints)
+- **Normalized weights**: Prevents bias from unnormalized cluster contributions
+- **Validation**: Checks alpha > 0, weight > 0, center within bounds
+
+**Performance:**
+
+Grid generation is O(n × k) where n = points, k = clusters. For typical use cases (k ≤ 3, n ≤ 201), generation takes ~50-100 microseconds, which is negligible compared to PDE solve time (~1-10ms).
+
+**Example Program:**
+
+See `examples/example_multi_sinh_grid.cc` for complete working examples demonstrating:
+- Single cluster (equivalent to `sinh_spaced`)
+- Dual clusters (ATM + deep ITM)
+- Triple clusters (deep ITM + ATM + OTM)
+- Guidance on when NOT to use multi-sinh
+
+Build and run:
+```bash
+bazel build //examples:example_multi_sinh_grid
+./bazel-bin/examples/example_multi_sinh_grid
+```
+
 ### GridSpacing: Type-Safe Variant Design
 
 **Purpose**: Store grid spacing information for finite difference operators

@@ -39,3 +39,11 @@ cc_binary(
         "//src/option:iv_solver_fdm",
     ],
 )
+
+cc_binary(
+    name = "example_multi_sinh_grid",
+    srcs = ["example_multi_sinh_grid.cc"],
+    deps = [
+        "//src/pde/core:grid",
+    ],
+)
