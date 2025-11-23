@@ -135,3 +135,17 @@ TEST(GridSpecTest, ClustersStorageAccessor) {
     auto clusters = result.value().clusters();
     EXPECT_TRUE(clusters.empty());
 }
+
+TEST(GridSpecTest, MultiSinhFactoryBasic) {
+    std::vector<mango::MultiSinhCluster<double>> clusters = {
+        {.center_x = 0.0, .alpha = 2.0, .weight = 1.0}
+    };
+
+    auto result = mango::GridSpec<>::multi_sinh_spaced(
+        -3.0, 3.0, 101, clusters);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value().type(), mango::GridSpec<>::Type::MultiSinhSpaced);
+    EXPECT_EQ(result.value().n_points(), 101);
+    EXPECT_EQ(result.value().clusters().size(), 1);
+}

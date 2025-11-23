@@ -91,6 +91,41 @@ public:
         return GridSpec(Type::SinhSpaced, x_min, x_max, n_points, concentration);
     }
 
+    static std::expected<GridSpec, std::string> multi_sinh_spaced(
+        T x_min, T x_max, size_t n_points,
+        std::vector<MultiSinhCluster<T>> clusters) {
+
+        if (n_points < 2) {
+            return std::unexpected<std::string>("Grid must have at least 2 points");
+        }
+        if (x_min >= x_max) {
+            return std::unexpected<std::string>("x_min must be less than x_max");
+        }
+        if (clusters.empty()) {
+            return std::unexpected<std::string>("MultiSinhSpaced requires at least one cluster");
+        }
+
+        // Validate each cluster
+        for (size_t i = 0; i < clusters.size(); ++i) {
+            if (clusters[i].alpha <= 0) {
+                return std::unexpected<std::string>(
+                    std::format("Cluster {} alpha must be positive", i));
+            }
+            if (clusters[i].weight <= 0) {
+                return std::unexpected<std::string>(
+                    std::format("Cluster {} weight must be positive", i));
+            }
+            if (clusters[i].center_x < x_min || clusters[i].center_x > x_max) {
+                return std::unexpected<std::string>(
+                    std::format("Cluster {} center {} out of range [{}, {}]",
+                               i, clusters[i].center_x, x_min, x_max));
+            }
+        }
+
+        return GridSpec(Type::MultiSinhSpaced, x_min, x_max, n_points,
+                        T(1.0), std::move(clusters));
+    }
+
     // Generate the actual grid
     GridBuffer<T> generate() const;
 
