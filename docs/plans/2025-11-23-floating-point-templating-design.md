@@ -1,8 +1,8 @@
 # Floating-Point Templating Design
 
 **Date:** 2025-11-23
-**Status:** Design Under Revision - Addressing Code Review Feedback
-**Goal:** Template entire codebase on `std::floating_point` concept to support both `float` (fp32) and `double` (fp64)
+**Status:** Design Under Revision - Addressing Second Code Review Feedback
+**Goal:** Template entire codebase to support `float` (fp32) and `double` (fp64), with explicit instantiations only
 
 ## Overview
 
@@ -10,6 +10,8 @@ Convert all numeric types from hardcoded `double` to template parameter `T` cons
 - FP64 (double) for maximum accuracy (current default)
 - FP32 (float) for performance when precision requirements allow
 - Consistent type safety across the entire stack
+
+**Explicit Support Policy:** Only `float` and `double` are explicitly instantiated and supported. `long double` is NOT supported (will cause linker errors).
 
 ## Design Decisions (Revised after Code Review)
 
@@ -94,6 +96,95 @@ struct IVError {
 using IVErrorf = IVError<float>;
 using IVErrord = IVError<double>;
 ```
+
+### Type Consistency Enforcement
+
+**Critical:** Prevent accidental type mixing (e.g., `IVSolverFDM<float>` with `OptionSpec<double>`).
+
+```cpp
+// In each templated class, add static assertions to verify type consistency
+
+template<std::floating_point T = double>
+class IVSolverFDM {
+public:
+    std::expected<IVSuccess<T>, IVError<T>> solve_impl(const IVQuery<T>& query) const {
+        // Static assert to catch type mismatches at compile time
+        static_assert(std::same_as<T, decltype(query.spot)>,
+                      "IVQuery type T must match solver type T");
+        // ... implementation
+    }
+};
+
+// For inheritance hierarchies, add concept checks
+template<std::floating_point T>
+struct IVQuery : OptionSpec<T> {
+    T market_price;
+
+    // Ensure base and derived use same T
+    static_assert(std::same_as<T, decltype(OptionSpec<T>::spot)>,
+                  "IVQuery must use same T as OptionSpec");
+};
+```
+
+**Validation function type safety:**
+```cpp
+// Validation functions must preserve T through the call chain
+template<std::floating_point T = double>
+std::expected<void, ValidationError<T>> validate_iv_query(const IVQuery<T>& query) {
+    // Automatically inherits T from argument, preventing mix-ups
+    if (query.spot <= T{0}) {
+        return std::unexpected(ValidationError<T>{
+            ValidationErrorCode::InvalidSpotPrice,
+            query.spot,  // Preserves exact type T
+            0
+        });
+    }
+    return {};
+}
+```
+
+### Non-Templated Types
+
+**Critical:** Some types remain non-templated to avoid code bloat and ABI issues.
+
+```cpp
+// src/support/error_types.hpp - NOT templated
+enum class SolverErrorCode {
+    GridAllocationFailed,
+    MatrixSingular,
+    TimeStepFailed,
+    // ...
+};
+
+struct SolverError {
+    SolverErrorCode code;
+    std::string message;
+    // No floating-point values stored - remains non-templated
+};
+
+// Enums are never templated
+enum class IVErrorCode {
+    NegativeSpot,
+    NegativeStrike,
+    // ...
+};
+
+enum class ValidationErrorCode {
+    InvalidSpotPrice,
+    InvalidStrike,
+    // ...
+};
+
+enum class OptionType {
+    CALL,
+    PUT
+};
+```
+
+**Rationale:** Error codes, enums, and string-based errors don't depend on floating-point precision. Keeping them non-templated:
+- Reduces binary size (no duplication for float/double)
+- Simplifies ABI (stable across template instantiations)
+- Avoids cascading template requirements in error handling code
 
 ### Validation Layer
 
@@ -197,27 +288,43 @@ inline IVError<T> validation_error_to_iv_error(const ValidationError<T>& ve) {
 namespace mango {
 
 /// Compute default tolerance scaled by machine epsilon
+///
+/// Uses sqrt(epsilon) * scaling_factor as tolerance.
+/// Rationale:
+/// - Float: sqrt(1e-7) ≈ 3.16e-4. For IV solving, this allows ~0.03% relative error
+///   in volatility, which translates to <0.1% option price error (acceptable for float).
+/// - Double: sqrt(1e-16) ≈ 1e-8. Standard high-precision tolerance.
+///
+/// NOT constexpr because std::sqrt is not constexpr until C++26.
 template<std::floating_point T>
-constexpr T default_tolerance() {
+inline T default_tolerance() {
     constexpr T eps = std::numeric_limits<T>::epsilon();
     // sqrt(eps) is commonly used for finite difference tolerances
-    // For float: sqrt(1e-7) ≈ 3e-4
+    // For float: sqrt(1e-7) ≈ 3.16e-4
     // For double: sqrt(1e-16) ≈ 1e-8
-    return std::sqrt(eps) * T{100};  // Conservative scaling
+    return std::sqrt(eps);  // No additional scaling - sqrt(eps) is the standard choice
 }
 
 /// Compute minimum step size for finite differences
+///
+/// Uses 10*sqrt(epsilon) for Brent's method min_step to prevent stagnation.
+/// Rationale:
+/// - Float: 10*sqrt(1e-7) ≈ 3.16e-3 (prevents steps smaller than representable)
+/// - Double: 10*sqrt(1e-16) ≈ 1e-7 (standard for double precision root finding)
+///
+/// NOT constexpr because std::sqrt is not constexpr until C++26.
 template<std::floating_point T>
-constexpr T default_min_step() {
+inline T default_min_step() {
     constexpr T eps = std::numeric_limits<T>::epsilon();
-    // For float: 1e-7 * 100 = 1e-5
-    // For double: 1e-16 * 100 = 1e-14
-    return eps * T{100};
+    // 10*sqrt(eps) prevents underflow while avoiding premature termination
+    // For float: 10*sqrt(1e-7) ≈ 3.16e-3
+    // For double: 10*sqrt(1e-16) ≈ 1e-7
+    return T{10} * std::sqrt(eps);
 }
 
 /// Check if value is effectively zero (within machine precision)
 template<std::floating_point T>
-constexpr bool is_effectively_zero(T value, T tolerance = default_tolerance<T>()) {
+inline bool is_effectively_zero(T value, T tolerance = default_tolerance<T>()) {
     return std::abs(value) < tolerance;
 }
 
@@ -704,18 +811,46 @@ bazel build //examples/...
 bazel build //benchmarks/...
 ```
 
-### Acceptance Criteria (Updated)
+### Acceptance Criteria (Updated After Second Review)
 
-Per the code review feedback, acceptance criteria now include:
+**Compilation:**
+- ✅ All code compiles with `-Wconversion -Wnarrowing` (no literal suffix warnings)
+- ✅ Both float and double explicit instantiations compile without errors
+- ✅ Attempting `long double` instantiation causes **linker error** (verified)
 
-- ✅ All 57 existing tests pass with double (default)
-- ✅ **NEW:** At least 6 runtime float tests (one per phase)
-- ✅ **NEW:** Float instantiation compiles in all templated classes
-- ✅ **NEW:** Tolerances scale correctly (verified via float tests)
-- ✅ Code compiles without warnings
-- ✅ No performance regression for double version
-- ✅ API documentation updated with template examples
-- ✅ **NEW:** Numeric stability differences documented (float vs double)
+**Testing - Double Precision:**
+- ✅ All 57 existing tests pass with double (default, no changes to results)
+- ✅ No performance regression for double version (within 5%)
+
+**Testing - Float Precision (Comprehensive):**
+- ✅ **Minimum 6 runtime float tests** (one per phase, as originally planned)
+- ✅ **NEW:** At least 15 float scenario tests covering:
+  - ATM, ITM (10%, 20%, 30%), OTM (10%, 20%, 30%) strikes
+  - Short (1 week), medium (3 months), long (1 year) maturities
+  - Low vol (10%), medium vol (30%), high vol (100%)
+- ✅ **NEW:** Float vs double determinism tests:
+  - Same inputs → consistent ordering (float IV < double IV or vice versa)
+  - Document expected relative error bounds (e.g., <0.5% for IV)
+- ✅ **NEW:** Float convergence tests:
+  - Verify convergence with `default_tolerance<float>()` (~3.16e-4)
+  - Test that iteration counts don't exceed 2x double iteration count
+  - Verify no stagnation (min_step prevents premature termination)
+
+**Type Safety:**
+- ✅ **NEW:** Static assert tests verify type mismatches caught at compile time:
+  - `IVSolverFDM<float>` with `IVQuery<double>` → compile error
+  - Validation returns `ValidationError<T>` matching input `T`
+- ✅ **NEW:** Cross-type tests explicitly verify conversions fail gracefully
+
+**Binary Size:**
+- ✅ **NEW:** Binary size measured and documented (baseline vs float+double)
+- ✅ **NEW:** Binary size increase <100% (verified via `size` and `bloaty`)
+
+**Documentation:**
+- ✅ API documentation updated with template examples (both float and double)
+- ✅ **NEW:** Numeric stability differences documented with relative error bounds
+- ✅ **NEW:** Literal suffix guidelines added to developer docs
+- ✅ **NEW:** ABI stability policy documented
 
 ## Migration Examples
 
@@ -798,6 +933,156 @@ IVSolverFDM<float> solver(config);
 
 auto result = solver.solve_impl(query);
 ```
+
+## Literal Suffix Guidelines
+
+**Critical:** Prevent implicit conversions and narrowing warnings.
+
+### Rules
+
+1. **Always use type-appropriate literal suffixes:**
+   ```cpp
+   // Good - float
+   float x = 2.0f;
+   float y = std::sqrt(2.0f);
+
+   // Good - double
+   double x = 2.0;
+   double y = std::sqrt(2.0);
+
+   // BAD - creates double temporary, then narrows to float
+   float x = 2.0;  // narrowing warning
+   ```
+
+2. **In template code, use `T{}` initialization:**
+   ```cpp
+   template<std::floating_point T>
+   T compute(T x) {
+       T zero = T{0};        // Correct for any T
+       T two = T{2};         // Correct for any T
+       T pi = T{3.141592653589793};  // Correct for any T
+
+       // DON'T: return 2.0 * x;  // Always creates double
+       return two * x;  // Uses T
+   }
+   ```
+
+3. **For constants, use typed constexpr variables:**
+   ```cpp
+   template<std::floating_point T>
+   struct Constants {
+       static constexpr T pi = T{3.141592653589793};
+       static constexpr T e = T{2.718281828459045};
+       static constexpr T sqrt2 = T{1.414213562373095};
+   };
+
+   // Usage
+   T area = Constants<T>::pi * r * r;
+   ```
+
+4. **Audit checklist for each phase:**
+   - [ ] All numeric literals have appropriate suffixes (`f` for float contexts)
+   - [ ] Template code uses `T{}` initialization
+   - [ ] No bare `2.0`, `0.5`, etc. in template functions
+   - [ ] Compiler runs with `-Wconversion -Wnarrowing` enabled
+
+### Validation
+
+During each phase, compile with:
+```bash
+bazel build --cxxopt=-Wconversion --cxxopt=-Wnarrowing //...
+```
+
+Any warnings indicate missing literal suffixes or implicit conversions.
+
+## ABI and Binary Compatibility
+
+**Critical:** Template instantiations in public headers affect ABI.
+
+### Shared Library Considerations
+
+**Current status:** This library is currently header-only / statically linked. No shared library ABI concerns exist today.
+
+**If shared library support is added later:**
+
+1. **Explicit instantiation exports required:**
+   ```cpp
+   // In libmango.so implementation
+   template class __attribute__((visibility("default"))) IVSolverFDM<float>;
+   template class __attribute__((visibility("default"))) IVSolverFDM<double>;
+   // long double NOT instantiated - will cause linker error if attempted
+   ```
+
+2. **ABI stability guarantees:**
+   - Only `float` and `double` instantiations have ABI stability
+   - Adding member variables to templated classes breaks ABI
+   - Changing default template arguments breaks ABI (old clients compile against old default)
+   - Type alias changes (`using IVSolverFDMf = ...`) do NOT break ABI
+
+3. **Version script for symbol visibility:**
+   ```
+   MANGO_1.0 {
+     global:
+       extern "C++" {
+         mango::IVSolverFDM<float>*;
+         mango::IVSolverFDM<double>*;
+       };
+     local:
+       *;
+   };
+   ```
+
+### Binary Size Analysis
+
+**Expected impact of template instantiation:**
+
+| Component | Baseline (double only) | With float+double | Increase |
+|-----------|------------------------|-------------------|----------|
+| IV Solvers | ~50 KB | ~85 KB | +70% |
+| Price Tables | ~30 KB | ~50 KB | +67% |
+| Root Finding | ~10 KB | ~17 KB | +70% |
+| **Total library** | ~200 KB | ~320 KB | **+60%** |
+
+**Mitigation strategies:**
+1. Explicit instantiation prevents redundant instantiations across TUs
+2. Only float/double supported (long double excluded → linker error)
+3. Small inline functions marked `inline` to allow deduplication
+4. Link-time optimization (LTO) can deduplicate identical instantiations
+
+**Measurement during implementation:**
+```bash
+# After each phase, measure binary size
+size bazel-bin/src/option/libiv_solver.a
+bloaty bazel-bin/src/option/libiv_solver.a  # Detailed breakdown
+```
+
+### Cross-TU Instantiation Safety
+
+**Problem:** If one translation unit instantiates `IVSolverFDM<long double>` and another provides only float/double, linker will fail with undefined symbols.
+
+**Solution:** Provide explicit instantiation declarations in headers to prevent implicit instantiation:
+
+```cpp
+// src/option/iv_solver_fdm.hpp
+template<std::floating_point T = double>
+class IVSolverFDM {
+    // ... definition
+};
+
+// Prevent implicit instantiation - only explicit instantiations in .cpp are allowed
+extern template class IVSolverFDM<float>;
+extern template class IVSolverFDM<double>;
+// Note: NO extern template for long double - will cause linker error if used
+```
+
+```cpp
+// src/option/iv_solver_fdm.cpp
+// Explicit instantiation definitions
+template class IVSolverFDM<float>;
+template class IVSolverFDM<double>;
+```
+
+**Benefit:** Attempting `IVSolverFDM<long double>` anywhere in the codebase will result in a **linker error**, making the "float/double only" policy enforceable at link time.
 
 ## Rationale
 
