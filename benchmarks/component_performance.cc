@@ -457,7 +457,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         state.counters["time_ms"] = avg_time_ms;
     }
 
-    state.SetLabel("Grid: " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
+    state.SetLabel("Grid: " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(time_domain.n_steps()));
 }
 BENCHMARK(BM_AmericanPut_GridResolution)
     ->Args({51, 500})
