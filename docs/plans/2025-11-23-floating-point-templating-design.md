@@ -1,45 +1,75 @@
 # Floating-Point Templating Design
 
 **Date:** 2025-11-23
-**Status:** Design Complete, Ready for Implementation
-**Goal:** Template entire codebase on `std::floating_point` to support both `float` (fp32) and `double` (fp64)
+**Status:** Design Under Revision - Addressing Code Review Feedback
+**Goal:** Template entire codebase on custom floating-point concept to support both `float` (fp32) and `double` (fp64)
 
 ## Overview
 
-Convert all numeric types from hardcoded `double` to template parameter `T` constrained by `std::floating_point`. This enables:
+Convert all numeric types from hardcoded `double` to template parameter `T` constrained by a custom `FloatingPoint` concept. This enables:
 - FP64 (double) for maximum accuracy (current default)
 - FP32 (float) for performance when precision requirements allow
 - Consistent type safety across the entire stack
+- Exclusion of `long double` to avoid diagnostic precision issues
 
-## Design Decisions
+## Design Decisions (Revised after Code Review)
 
 ### Scope
 - **Everything templated** - All structs, solvers, utilities use template parameter `T`
-- **Big bang migration** - Single comprehensive PR, all changes together
+- **Phased migration** - Layer-by-layer implementation with tests after each phase
 - **Bottom-up implementation** - Start with foundation types, work up to solvers
 
 ### Template Parameters
 - **Naming:** Use `T` throughout (standard C++ convention)
-- **No defaults:** Require explicit template arguments everywhere for clarity
-- **No type aliases:** Use full template syntax `IVSolverFDM<double>` (no `IVSolverFDMd` shortcuts)
+- **Default to double:** Use `template<FloatingPoint T = double>` to minimize breaking changes
+- **Provide type aliases:** Add `using IVSolverFDMf = IVSolverFDM<float>; using IVSolverFDMd = IVSolverFDM<double>;` for convenience
+- **Custom concept:** Restrict to `float` and `double` only (exclude `long double`)
 
 ### Type System
 - **All numeric members:** Every floating-point value becomes `T`
 - **Counts stay integral:** `size_t iterations`, `bool converged` unchanged
-- **Errors un-templated:** `IVError`, `ValidationError` remain concrete types (cast `T` to `double` for diagnostics)
+- **Errors templated:** `IVError<T>`, `ValidationError<T>` to preserve full diagnostic precision
+- **Type-specific tolerances:** Scale epsilon values based on `std::numeric_limits<T>::epsilon()`
 
 ### Testing
-- **Double-only initially:** All tests use `<double>` explicitly
-- **Float tests deferred:** Add spot-check float tests in future PR
-- **Acceptance:** All 57 existing tests must pass with `<double>`
+- **Explicit instantiation tests:** Compile-time verification for both `<float>` and `<double>`
+- **Runtime tests for double:** All 57 existing tests pass with `<double>`
+- **Runtime tests for float:** At least one test per major component verifies `<float>` works
+- **Acceptance:** Both precisions compile and core tests pass
+
+### Implementation Strategy
+- **Header-based templates:** Move template implementations to headers (`.ipp` files included at end)
+- **Explicit instantiation units:** Provide `.cpp` files with explicit instantiations for faster compilation
+- **No ADL-breaking wrappers:** Use qualified calls or local `using` declarations for math functions
 
 ## Architecture
+
+### Custom Floating-Point Concept
+
+**New file:** `src/support/floating_point_concept.hpp`
+
+```cpp
+#pragma once
+#include <concepts>
+#include <type_traits>
+
+namespace mango {
+
+/// Custom floating-point concept restricted to float and double
+///
+/// Excludes long double to prevent diagnostic precision issues where
+/// error types store only double but accept long double values.
+template<typename T>
+concept FloatingPoint = std::is_same_v<T, float> || std::is_same_v<T, double>;
+
+} // namespace mango
+```
 
 ### Core Type System
 
 ```cpp
 // Foundation structs (src/option/iv_result.hpp, option_spec.hpp)
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct IVSuccess {
     T implied_vol;
     size_t iterations;
@@ -47,7 +77,11 @@ struct IVSuccess {
     std::optional<T> vega;
 };
 
-template<std::floating_point T>
+// Type aliases for convenience
+using IVSuccessf = IVSuccess<float>;
+using IVSuccessd = IVSuccess<double>;
+
+template<FloatingPoint T = double>
 struct OptionSpec {
     T spot;
     T strike;
@@ -57,104 +91,180 @@ struct OptionSpec {
     OptionType type;
 };
 
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct IVQuery : OptionSpec<T> {
     T market_price;
 };
 
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct PricingParams : OptionSpec<T> {
     T volatility;
 };
 
-// IVError remains un-templated (error codes don't need precision)
+// IVError is now templated to preserve full diagnostic precision
+template<FloatingPoint T = double>
 struct IVError {
     IVErrorCode code;
     size_t iterations = 0;
-    double final_error = 0.0;  // Cast from T when creating
-    std::optional<double> last_vol;
+    T final_error = T{0};
+    std::optional<T> last_vol;
 };
+
+using IVErrorf = IVError<float>;
+using IVErrord = IVError<double>;
 ```
 
 ### Validation Layer
 
 ```cpp
 // Templated validation functions (src/option/option_spec.hpp)
-template<std::floating_point T>
-std::expected<void, ValidationError> validate_option_spec(const OptionSpec<T>& spec);
+template<FloatingPoint T = double>
+std::expected<void, ValidationError<T>> validate_option_spec(const OptionSpec<T>& spec);
 
-template<std::floating_point T>
-std::expected<void, ValidationError> validate_iv_query(const IVQuery<T>& query);
+template<FloatingPoint T = double>
+std::expected<void, ValidationError<T>> validate_iv_query(const IVQuery<T>& query);
 
-template<std::floating_point T>
-std::expected<void, ValidationError> validate_pricing_params(const PricingParams<T>& params);
-
-// Implementation: move to header (inline) or explicit instantiation in .cpp
-template<std::floating_point T>
-std::expected<void, ValidationError> validate_option_spec(const OptionSpec<T>& spec) {
-    if (spec.spot <= T{0} || !std::isfinite(spec.spot)) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidSpotPrice,
-            static_cast<double>(spec.spot)));  // Cast to double for diagnostics
-    }
-    // ... rest of validation
-}
+template<FloatingPoint T = double>
+std::expected<void, ValidationError<T>> validate_pricing_params(const PricingParams<T>& params);
 ```
 
-**ValidationError design:**
-- Keep `ValidationError::value` as `double` (avoids templating entire error system)
-- Cast `T` to `double` when creating validation errors
+**ValidationError is now templated:**
+```cpp
+template<FloatingPoint T = double>
+struct ValidationError {
+    ValidationErrorCode code;
+    T value;  // Preserves exact precision for diagnostics
+    size_t index = 0;
 
-**Implementation location:**
-- Move implementations to header (inline/constexpr) OR
-- Use explicit template instantiation for `float` and `double` in .cpp
+    ValidationError(ValidationErrorCode code, T value = T{0}, size_t index = 0)
+        : code(code), value(value), index(index) {}
+};
+
+using ValidationErrorf = ValidationError<float>;
+using ValidationErrord = ValidationError<double>;
+```
+
+**Implementation location (DECIDED):**
+- **Header-based:** Move implementations to `option_spec.ipp` included at end of `option_spec.hpp`
+- **Explicit instantiation:** Provide `option_spec_instantiations.cpp` with:
+  ```cpp
+  template std::expected<void, ValidationError<float>> validate_option_spec(const OptionSpec<float>&);
+  template std::expected<void, ValidationError<double>> validate_option_spec(const OptionSpec<double>&);
+  ```
+- This gives both fast recompilation (if using precompiled `.cpp`) and correctness (inline available for other types)
 
 ### Math Utilities
 
-**New file:** `src/support/math_utils.hpp`
+**Decision: No custom wrappers - use standard library directly**
+
+After code review, custom math wrappers would:
+- Break ADL (prevent vendor-specific optimizations)
+- Add unnecessary `constexpr` (std::abs not constexpr until C++23)
+- Require extra includes (`<algorithm>` for min/max)
+- Provide no actual value
+
+**Instead:** Use qualified std:: calls directly throughout code:
+```cpp
+// Direct usage - no wrappers needed
+if (!std::isfinite(spec.spot)) { ... }
+T result = std::log(spot);
+T maximum = std::max(a, b);  // Requires <algorithm>
+```
+
+The compiler automatically selects the correct overload (`std::log(float)` vs `std::log(double)`) based on argument type.
+
+**Error Conversion:** Update `validation_error_to_iv_error()` to be templated:
 
 ```cpp
+// src/option/iv_result.hpp
+template<FloatingPoint T = double>
+inline IVError<T> validation_error_to_iv_error(const ValidationError<T>& ve) {
+    IVErrorCode code;
+    switch (ve.code) {
+        case ValidationErrorCode::InvalidSpotPrice:
+            code = IVErrorCode::NegativeSpot;
+            break;
+        case ValidationErrorCode::InvalidStrike:
+            code = IVErrorCode::NegativeStrike;
+            break;
+        // ... other cases
+    }
+
+    return IVError<T>{
+        .code = code,
+        .iterations = 0,
+        .final_error = ve.value,  // Preserves exact T precision
+        .last_vol = std::nullopt
+    };
+}
+```
+
+### Type-Specific Tolerances and Numeric Constants
+
+**Critical Issue:** Hardcoded tolerances like `1e-10` are below float machine epsilon (~1e-7), causing them to collapse to zero in fp32 and disabling regularization.
+
+**Solution:** Provide epsilon-aware helpers and type-specific defaults:
+
+```cpp
+// src/support/numeric_helpers.hpp
 #pragma once
+#include "src/support/floating_point_concept.hpp"
+#include <limits>
 #include <cmath>
-#include <concepts>
 
 namespace mango {
 
-template<std::floating_point T>
-inline constexpr T abs(T x) noexcept { return std::abs(x); }
+/// Compute default tolerance scaled by machine epsilon
+template<FloatingPoint T>
+constexpr T default_tolerance() {
+    constexpr T eps = std::numeric_limits<T>::epsilon();
+    // sqrt(eps) is commonly used for finite difference tolerances
+    // For float: sqrt(1e-7) ≈ 3e-4
+    // For double: sqrt(1e-16) ≈ 1e-8
+    return std::sqrt(eps) * T{100};  // Conservative scaling
+}
 
-template<std::floating_point T>
-inline T log(T x) noexcept { return std::log(x); }
+/// Compute minimum step size for finite differences
+template<FloatingPoint T>
+constexpr T default_min_step() {
+    constexpr T eps = std::numeric_limits<T>::epsilon();
+    // For float: 1e-7 * 100 = 1e-5
+    // For double: 1e-16 * 100 = 1e-14
+    return eps * T{100};
+}
 
-template<std::floating_point T>
-inline T exp(T x) noexcept { return std::exp(x); }
+/// Check if value is effectively zero (within machine precision)
+template<FloatingPoint T>
+constexpr bool is_effectively_zero(T value, T tolerance = default_tolerance<T>()) {
+    return std::abs(value) < tolerance;
+}
 
-template<std::floating_point T>
-inline T sqrt(T x) noexcept { return std::sqrt(x); }
-
-template<std::floating_point T>
-inline bool isfinite(T x) noexcept { return std::isfinite(x); }
-
-template<std::floating_point T>
-inline T max(T a, T b) noexcept { return std::max(a, b); }
-
-template<std::floating_point T>
-inline T min(T a, T b) noexcept { return std::min(a, b); }
-
-} // namespace mango
+}  // namespace mango
 ```
 
-**Usage:** Replace `std::log(spot)` with `mango::log(spot)` throughout codebase.
+**Usage in config structs:**
 
-**Error Conversion:** `validation_error_to_iv_error()` remains un-templated (already converts to un-templated `IVError`).
+```cpp
+// src/math/root_finding.hpp
+template<FloatingPoint T = double>
+struct RootFindingConfig {
+    int max_iter = 100;
+    T tolerance = default_tolerance<T>();     // Type-aware default
+    T min_step = default_min_step<T>();       // Type-aware default
+};
+```
 
-### IV Solvers
+**Updated config defaults for solvers:**
 
 ```cpp
 // src/option/iv_solver_fdm.hpp
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct IVSolverFDMConfig {
-    RootFindingConfig<T> root_config;
+    RootFindingConfig<T> root_config{
+        .max_iter = 100,
+        .tolerance = default_tolerance<T>(),    // ~3e-4 for float, ~1e-8 for double
+        .min_step = default_min_step<T>()       // ~1e-5 for float, ~1e-14 for double
+    };
     size_t batch_parallel_threshold = 4;
     bool use_manual_grid = false;
     size_t grid_n_space = 101;
@@ -164,12 +274,73 @@ struct IVSolverFDMConfig {
     T grid_alpha = T{2.0};
 };
 
-template<std::floating_point T>
+// src/option/iv_solver_interpolated.hpp
+template<FloatingPoint T = double>
+struct IVSolverInterpolatedConfig {
+    int max_iterations = 50;
+    T tolerance = default_tolerance<T>();      // Type-aware default
+    T sigma_min = T{0.01};                     // 1% volatility minimum
+    T sigma_max = T{3.0};                      // 300% volatility maximum
+};
+```
+
+**Grid parameter adjustments for float:**
+
+While spatial grid bounds (`x_min`, `x_max`) are dimensionless and work across precisions, time step selection may need adjustment:
+
+```cpp
+// In estimate_grid_for_option() or similar
+template<FloatingPoint T>
+auto estimate_grid_for_option(const PricingParams<T>& params) {
+    // For float, we may need fewer time steps since we can't resolve
+    // differences smaller than ~1e-7
+    const size_t base_n_time = std::is_same_v<T, float> ? 500 : 1000;
+
+    // Scale based on maturity (standard CFL-like heuristic)
+    const size_t n_time = static_cast<size_t>(
+        base_n_time * std::sqrt(params.maturity)
+    );
+
+    // Grid bounds remain unchanged (dimensionless)
+    return std::pair{grid_spec, n_time};
+}
+```
+
+**Numeric stability validation:**
+
+Add compile-time checks to ensure tolerances are above machine epsilon:
+
+```cpp
+// In RootFindingConfig constructor or validation
+template<FloatingPoint T>
+struct RootFindingConfig {
+    RootFindingConfig() {
+        constexpr T eps = std::numeric_limits<T>::epsilon();
+        static_assert(default_tolerance<T>() > eps * T{10},
+                      "Default tolerance must be well above machine epsilon");
+    }
+
+    // ... members
+};
+```
+
+**Risk Mitigation:**
+
+1. **Validation on construction:** Config structs validate that user-provided tolerances are above `10 * epsilon`
+2. **Documentation:** Add warnings in API docs about tolerance requirements for float
+3. **Testing:** Explicit float tests verify convergence with scaled tolerances
+4. **Diagnostics:** USDT probes report tolerance values for debugging precision issues
+
+### IV Solvers
+
+```cpp
+// src/option/iv_solver_fdm.hpp
+template<FloatingPoint T = double>
 class IVSolverFDM {
 public:
     explicit IVSolverFDM(const IVSolverFDMConfig<T>& config);
 
-    std::expected<IVSuccess<T>, IVError> solve_impl(const IVQuery<T>& query) const;
+    std::expected<IVSuccess<T>, IVError<T>> solve_impl(const IVQuery<T>& query) const;
     BatchIVResult<T> solve_batch_impl(const std::vector<IVQuery<T>>& queries) const;
 
 private:
@@ -182,27 +353,42 @@ private:
     // ... other members
 };
 
+// Type aliases for convenience
+using IVSolverFDMf = IVSolverFDM<float>;
+using IVSolverFDMd = IVSolverFDM<double>;
+
 // src/option/iv_solver_interpolated.hpp
-template<std::floating_point T>
-struct IVSolverInterpolatedConfig {
-    RootFindingConfig<T> newton_config;
-    size_t batch_parallel_threshold = 4;
+template<FloatingPoint T = double>
+class IVSolverInterpolated {
+public:
+    static std::expected<IVSolverInterpolated<T>, ValidationError<T>> create(
+        std::shared_ptr<const BSpline4D<T>> spline,
+        T K_ref,
+        std::pair<T, T> m_range,
+        std::pair<T, T> tau_range,
+        std::pair<T, T> sigma_range,
+        std::pair<T, T> r_range,
+        const IVSolverInterpolatedConfig<T>& config = {});
+
+    std::expected<IVSuccess<T>, IVError<T>> solve_impl(const IVQuery<T>& query) const noexcept;
+    BatchIVResult<T> solve_batch_impl(const std::vector<IVQuery<T>>& queries) const noexcept;
+
+    // ... private members
 };
 
-template<std::floating_point T>
-class IVSolverInterpolated {
-    // ... same templating pattern
-};
+// Type aliases for convenience
+using IVSolverInterpolatedf = IVSolverInterpolated<float>;
+using IVSolverInterpolatedd = IVSolverInterpolated<double>;
 ```
 
 ### Dependent Components
 
 **American Option Solver:**
 ```cpp
-template<std::floating_point T>
+template<FloatingPoint T = double>
 class AmericanOptionSolver {
 public:
-    static std::expected<AmericanOptionSolver<T>, ValidationError>
+    static std::expected<AmericanOptionSolver<T>, ValidationError<T>>
         create(const PricingParams<T>& params,
                PDEWorkspace<T> workspace, ...);
 
@@ -212,7 +398,7 @@ private:
     // ...
 };
 
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct AmericanOptionResult {
     T value_at(T spot) const;
     std::shared_ptr<const SpatialGrid<T>> grid() const;
@@ -222,21 +408,21 @@ struct AmericanOptionResult {
 
 **Root Finding:**
 ```cpp
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct RootFindingConfig {
     size_t max_iter = 100;
-    T tolerance = T{1e-6};
-    T min_step = T{1e-10};
+    T tolerance = default_tolerance<T>();  // Type-aware default
+    T min_step = default_min_step<T>();    // Type-aware default
 };
 
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct RootFindingSuccess {
     T root;
     size_t iterations;
     T final_error;
 };
 
-template<std::floating_point T, typename Func>
+template<FloatingPoint T = double, typename Func>
 std::expected<RootFindingSuccess<T>, RootFindingError>
 brent_find_root(Func&& f, T a, T b, const RootFindingConfig<T>& config);
 ```
@@ -247,7 +433,7 @@ brent_find_root(Func&& f, T a, T b, const RootFindingConfig<T>& config);
 
 ```cpp
 // price_table_grid.hpp
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct PriceTableGrid {
     std::vector<T> moneyness;
     std::vector<T> maturity;
@@ -256,7 +442,7 @@ struct PriceTableGrid {
 };
 
 // price_table_4d_builder.hpp
-template<std::floating_point T>
+template<FloatingPoint T = double>
 class PriceTable4DBuilder {
 public:
     static std::expected<PriceTable4DBuilder<T>, std::string> create(
@@ -274,19 +460,27 @@ private:
     std::vector<T> prices_4d_;
 };
 
+// Type aliases
+using PriceTable4DBuilderf = PriceTable4DBuilder<float>;
+using PriceTable4DBuilderd = PriceTable4DBuilder<double>;
+
 // bspline_price_table.hpp
-template<std::floating_point T>
+template<FloatingPoint T = double>
 class BSpline4D {
 public:
     static std::expected<BSpline4D<T>, std::string> create(
         const PriceTableWorkspace<T>& workspace);
 
     T eval(T m, T tau, T sigma, T r) const;
+
+    // Analytic vega computation
+    void eval_price_and_vega_analytic(T m, T tau, T sigma, T r,
+                                      T& price_out, T& vega_out) const;
 private:
     BSplineND<T, 4> spline_;
 };
 
-template<std::floating_point T>
+template<FloatingPoint T = double>
 struct PriceTableSurface {
     std::shared_ptr<const BSpline4D<T>> spline;
     T K_ref;
@@ -296,97 +490,251 @@ struct PriceTableSurface {
 
 **Note:** All B-spline infrastructure (`BSplineND<T, N>`) already templated - just verify compatibility.
 
-## Implementation Plan
+## Implementation Plan (Phased Migration)
 
-### Phase 1: Foundation (5 files)
-1. `src/support/math_utils.hpp` - Create math wrappers
-2. `src/option/iv_result.hpp` - Template IVSuccess, BatchIVResult
-3. `src/option/option_spec.hpp` - Template OptionSpec, IVQuery, PricingParams
-4. `src/option/option_spec.cpp` - Template validation functions (move to header or explicit instantiation)
-5. `src/support/error_types.hpp` - Review, likely no changes needed
+**Critical:** Each phase MUST compile and pass all tests before proceeding to next phase.
 
-### Phase 2: Math/Grid Layer (3 files)
-6. `src/math/root_finding.hpp` - Template RootFindingConfig, brent_find_root
-7. `src/math/root_finding.cpp` - Move to header or explicit instantiation
-8. Verify `src/pde/core/grid.hpp` and related already work with float
+### Phase 1: Foundation Layer
 
-### Phase 3: American Option (4 files)
-9. `src/option/american_option.hpp` - Template AmericanOptionSolver
-10. `src/option/american_option.cpp` - Template implementations
-11. `src/option/american_option_result.hpp` - Template AmericanOptionResult
-12. `src/option/american_pde_solver.hpp` - Template PDE solver wrappers
+**Files:**
+1. `src/support/floating_point_concept.hpp` (NEW) - Custom `FloatingPoint` concept
+2. `src/support/numeric_helpers.hpp` (NEW) - Type-aware tolerance helpers
+3. `src/support/error_types.hpp` - Template `ValidationError<T>`
+4. `src/option/iv_result.hpp` - Template `IVSuccess<T>`, `IVError<T>`, `BatchIVResult<T>`
+5. `src/option/option_spec.hpp` - Template `OptionSpec<T>`, `IVQuery<T>`, `PricingParams<T>`
+6. `src/option/option_spec.ipp` (NEW) - Template implementations for validation
+7. `src/option/option_spec_instantiations.cpp` (NEW) - Explicit instantiations for float/double
 
-### Phase 4: Price Table System (6 files)
-13. `src/option/price_table_grid.hpp` - Template PriceTableGrid
-14. `src/option/price_table_4d_builder.hpp` - Template builder
-15. `src/option/bspline_price_table.hpp` - Template BSpline4D, PriceTableSurface
-16. `src/option/price_table_extraction.hpp` - Template extraction functions
-17. Verify `src/math/bspline_nd.hpp` works with float
-18. Update workspace/metadata files
+**Changes:**
+- Add `= double` defaults to all templates
+- Create type aliases (`OptionSpecf`, `OptionSpecd`, etc.)
+- Move validation logic to `.ipp` for header-based templates
+- Add explicit instantiations for faster compilation
 
-### Phase 5: IV Solvers (4 files)
-19. `src/option/iv_solver_fdm.hpp` - Template IVSolverFDM
-20. `src/option/iv_solver_fdm.cpp` - Template implementations
-21. `src/option/iv_solver_interpolated.hpp` - Template IVSolverInterpolated
-22. `src/option/iv_solver_interpolated.cpp` - Template implementations
+**Testing:**
+```bash
+bazel test //tests:option_spec_test
+bazel test //tests:iv_result_test
+```
 
-### Phase 6: Tests (all test files)
-23. Update all tests to use explicit `<double>` template arguments
-24. Fix compilation errors
-25. Verify all tests pass
+**Exit Criteria:**
+- ✅ All foundation tests pass
+- ✅ Both `<float>` and `<double>` instantiations compile
+- ✅ No change in test behavior (still using double by default)
+
+---
+
+### Phase 2: Math and Root Finding
+
+**Files:**
+1. `src/math/root_finding.hpp` - Template `RootFindingConfig<T>`, `RootFindingSuccess<T>`
+2. `src/math/root_finding.ipp` (NEW) - Template implementation of `brent_find_root<T>`
+3. `src/math/root_finding_instantiations.cpp` (NEW) - Explicit instantiations
+4. Verify `src/pde/core/grid.hpp` already works with float/double
+
+**Changes:**
+- Use `default_tolerance<T>()` and `default_min_step<T>()` in config defaults
+- Add type aliases (`RootFindingConfigf`, `RootFindingConfigd`)
+
+**Testing:**
+```bash
+bazel test //tests:root_finding_test
+bazel test //tests:pde_solver_test  # Verify PDE layer still works
+```
+
+**Exit Criteria:**
+- ✅ Root finding tests pass
+- ✅ Float instantiation compiles and runs
+- ✅ Tolerances scale correctly (verify `1e-4` for float, `1e-8` for double)
+
+---
+
+### Phase 3: American Option Pricing
+
+**Files:**
+1. `src/option/american_option.hpp` - Template `AmericanOptionSolver<T>`
+2. `src/option/american_option.ipp` (NEW) - Template implementations
+3. `src/option/american_option_result.hpp` - Template `AmericanOptionResult<T>`
+4. `src/option/american_pde_solver.hpp` - Update PDE wrappers
+
+**Changes:**
+- Default `= double` on all classes
+- Type aliases (`AmericanOptionSolverf`, `AmericanOptionSolverd`)
+- Update grid estimation to use type-aware time step counts (500 for float, 1000 for double)
+
+**Testing:**
+```bash
+bazel test //tests:american_option_test
+bazel test //tests:american_option_integration_test
+```
+
+**Exit Criteria:**
+- ✅ All American option tests pass
+- ✅ Float version compiles
+- ✅ Price accuracy within expected tolerances for float
+
+---
+
+### Phase 4: Price Table System
+
+**Files:**
+1. `src/option/price_table_grid.hpp` - Template `PriceTableGrid<T>`
+2. `src/option/price_table_4d_builder.hpp` - Template `PriceTable4DBuilder<T>`
+3. `src/option/bspline_price_table.hpp` - Template `BSpline4D<T>`, `PriceTableSurface<T>`
+4. `src/option/price_table_extraction.hpp` - Template extraction functions
+5. Verify `src/math/bspline_nd.hpp` already works with float/double
+
+**Changes:**
+- Default `= double` on all templates
+- Type aliases (`PriceTable4DBuilderf`, `PriceTable4DBuilderd`)
+- Ensure B-spline knot spacing respects float precision
+
+**Testing:**
+```bash
+bazel test //tests:price_table_test
+bazel test //tests:bspline_price_table_test
+bazel test //tests:price_table_precompute_test
+```
+
+**Exit Criteria:**
+- ✅ Price table tests pass
+- ✅ Float instantiation compiles
+- ✅ Interpolation accuracy acceptable for float
+
+---
+
+### Phase 5: IV Solvers
+
+**Files:**
+1. `src/option/iv_solver_fdm.hpp` - Template `IVSolverFDM<T>`, `IVSolverFDMConfig<T>`
+2. `src/option/iv_solver_fdm.cpp` - Update to use templated types
+3. `src/option/iv_solver_interpolated.hpp` - Template `IVSolverInterpolated<T>`, config
+4. `src/option/iv_solver_interpolated.cpp` - Update to use templated types
+
+**Changes:**
+- Default `= double` on all templates
+- Type aliases (`IVSolverFDMf`, `IVSolverFDMd`, `IVSolverInterpolatedf`, `IVSolverInterpolatedd`)
+- Use `default_tolerance<T>()` in solver configs
+- Update return types to `IVError<T>`, `ValidationError<T>`
+
+**Testing:**
+```bash
+bazel test //tests:iv_solver_test
+bazel test //tests:iv_solver_fdm_test
+bazel test //tests:iv_solver_interpolated_test
+```
+
+**Exit Criteria:**
+- ✅ All IV solver tests pass
+- ✅ Float instantiation compiles
+- ✅ Convergence behavior acceptable for float
+
+---
+
+### Phase 6: Examples and Documentation
+
+**Files:**
+1. Update all examples in `examples/` to show template usage
+2. Update `docs/API_GUIDE.md` with template examples
+3. Update `README.md` with float/double mention
+
+**Changes:**
+- Show both `<float>` and `<double>` usage
+- Document precision/performance trade-offs
+- Add float example to demonstrate lower memory usage
+
+**Testing:**
+```bash
+bazel build //examples/...
+bazel run //examples:example_iv_calculation
+```
+
+**Exit Criteria:**
+- ✅ All examples compile and run
+- ✅ Documentation updated
+- ✅ No user-facing API breaks (defaults work)
 
 ## Testing Strategy
 
-### Test Updates
+### Per-Phase Testing
 
-All existing tests updated to use explicit `<double>` template arguments:
+**Critical:** Each phase includes its own tests. Tests must pass before moving to next phase.
+
+See "Exit Criteria" in each phase of Implementation Plan for specific test commands.
+
+### Explicit Float Instantiation Tests
+
+**Requirement:** At each phase, add at least one explicit `<float>` instantiation test:
 
 ```cpp
-// Before
-IVSolverFDM solver(config);
-IVQuery query{.option = spec, .market_price = 10.45};
+// tests/root_finding_float_test.cc (Phase 2)
+TEST(RootFindingFloatTest, BrentConvergesWithFloatTolerance) {
+    RootFindingConfig<float> config;  // Uses default_tolerance<float>()
 
-// After
-IVSolverFDM<double> solver(config);
-IVQuery<double> query{.option = spec, .market_price = 10.45};
+    auto f = [](float x) { return x * x - 2.0f; };
+    auto result = brent_find_root(f, 0.0f, 2.0f, config);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->root, std::sqrt(2.0f), 1e-4f);  // Float tolerance
+}
+
+// tests/iv_solver_fdm_float_test.cc (Phase 5)
+TEST(IVSolverFDMFloatTest, ATMPutConvergesInFloat) {
+    OptionSpec<float> spec{
+        .spot = 100.0f,
+        .strike = 100.0f,
+        .maturity = 1.0f,
+        .rate = 0.05f,
+        .dividend_yield = 0.02f,
+        .type = OptionType::PUT
+    };
+
+    IVQuery<float> query{.option = spec, .market_price = 10.45f};
+    IVSolverFDM<float> solver(IVSolverFDMConfig<float>{});
+
+    auto result = solver.solve_impl(query);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->implied_vol, 0.20f, 1e-3f);  // Float tolerance
+}
 ```
 
-### Compilation Verification
+**Why:** This ensures templates actually instantiate for float and catches precision issues early.
 
+### Runtime Float Tests (Required)
+
+**Addressing Code Review Issue #1:** Add runtime float tests, not just compilation checks.
+
+Each phase must include:
+1. At least one test that runs with `<float>` instantiation
+2. Verification that convergence occurs with float-appropriate tolerances
+3. Comparison of float vs double results (document expected differences)
+
+### Regression Testing
+
+After each phase:
 ```bash
-# Verify both types compile
-bazel build //src/option:iv_solver_fdm
-bazel build //src/option:iv_solver_interpolated
-
-# Run full test suite with double
+# Full test suite must still pass
 bazel test //...
+
+# Examples must still compile
+bazel build //examples/...
+
+# Benchmarks must still compile
+bazel build //benchmarks/...
 ```
 
-### Future Float Testing (Phase 7, not in this PR)
+### Acceptance Criteria (Updated)
 
-Later, add spot-check tests for float:
-- One basic IV solver test with `<float>`
-- One price table test with `<float>`
-- Verify numerical stability differences are acceptable
+Per the code review feedback, acceptance criteria now include:
 
-### Documentation Updates
-
-Update `docs/API_GUIDE.md` to show template usage:
-
-```cpp
-// FP64 (double) - default for accuracy
-IVSolverFDM<double> solver_fp64(config);
-
-// FP32 (float) - for performance when precision allows
-IVSolverFDM<float> solver_fp32(config);
-```
-
-### Acceptance Criteria
-
-- ✅ All 57 tests pass with `<double>`
+- ✅ All 57 existing tests pass with double (default)
+- ✅ **NEW:** At least 6 runtime float tests (one per phase)
+- ✅ **NEW:** Float instantiation compiles in all templated classes
+- ✅ **NEW:** Tolerances scale correctly (verified via float tests)
 - ✅ Code compiles without warnings
 - ✅ No performance regression for double version
-- ✅ API documentation updated
+- ✅ API documentation updated with template examples
+- ✅ **NEW:** Numeric stability differences documented (float vs double)
 
 ## Migration Examples
 
@@ -508,8 +856,11 @@ auto result = solver.solve_impl(query);
 **Mitigation:** Test with double first, add float tests incrementally, document precision requirements
 
 ### Risk: Breaking existing code
-**Impact:** All code must add explicit template arguments
-**Mitigation:** Big bang migration in single PR, update all call sites together
+**Impact:** Code using unqualified types must add template arguments or rely on defaults
+**Mitigation:**
+- Default template arguments (`= double`) preserve existing behavior
+- Phased migration allows testing after each layer
+- Type aliases (`IVSolverFDMd`) provide explicit opt-in
 
 ### Risk: Increased binary size
 **Impact:** Instantiating templates for both float and double increases binary size
@@ -525,6 +876,8 @@ auto result = solver.solve_impl(query);
 
 ## References
 
-- C++20 `std::floating_point` concept: https://en.cppreference.com/w/cpp/concepts/floating_point
+- C++20 `std::floating_point` concept (for context): https://en.cppreference.com/w/cpp/concepts/floating_point
+- Custom concepts in C++20: https://en.cppreference.com/w/cpp/language/constraints
 - Explicit template instantiation: https://en.cppreference.com/w/cpp/language/template_specialization
 - Mixed-precision computing: https://developer.nvidia.com/blog/mixed-precision-programming-cuda-8/
+- Default template arguments: https://en.cppreference.com/w/cpp/language/template_parameters#Default_template_arguments
