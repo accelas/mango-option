@@ -272,8 +272,8 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     }
 
     state.counters["n_space"] = static_cast<double>(n);
-    state.counters["n_time"] = static_cast<double>(n_time);
-    state.SetLabel(std::format("American (single, {}x{})", n, n_time));
+    state.counters["n_time"] = static_cast<double>(time_domain.n_steps());
+    state.SetLabel(std::format("American (single, {}x{})", n, time_domain.n_steps()));
 }
 BENCHMARK(BM_README_AmericanSingle)
     ->MinTime(kMinBenchmarkTimeSec);
