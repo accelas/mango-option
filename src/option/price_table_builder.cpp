@@ -212,20 +212,11 @@ PriceTableBuilder<N>::solve_batch(
         constexpr double MAX_DX = 0.05;     // Von Neumann stability
 
         // Check if user's grid_spec meets solver constraints
-        const double grid_x_min = config_.grid_estimator.x_min();
-        const double grid_x_max = config_.grid_estimator.x_max();
-        const double grid_width = grid_x_max - grid_x_min;
+        // Note: Domain coverage (PDE grid covers moneyness range) is already
+        // validated in build() at lines 69-85, so we don't re-check here.
+        const double grid_width = config_.grid_estimator.x_max() - config_.grid_estimator.x_min();
 
-        // Issue 1 fix: Verify PDE grid covers price-table moneyness domain
-        // Extraction will interpolate within [x_min_requested, x_max_requested]
-        // so PDE grid must cover that range to avoid extrapolation
-        const double x_min_requested = std::log(axes.grids[0].front());
-        const double x_max_requested = std::log(axes.grids[0].back());
-        const bool covers_domain =
-            (grid_x_min <= x_min_requested) &&
-            (grid_x_max >= x_max_requested);
-
-        // Issue 2 fix: Compute actual max spacing for non-uniform grids
+        // Compute actual max spacing for non-uniform grids
         // Sinh grids concentrate points at center, so max spacing is in wings
         // Using average dx would underestimate and potentially violate Von Neumann
         double max_dx;
@@ -252,7 +243,6 @@ PriceTableBuilder<N>::solve_batch(
         const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
 
         const bool grid_meets_constraints =
-            covers_domain &&
             (grid_width <= MAX_WIDTH) &&
             (max_dx <= MAX_DX) &&
             (grid_width >= min_required_width);
