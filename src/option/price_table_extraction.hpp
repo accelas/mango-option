@@ -20,6 +20,9 @@ namespace mango {
  * @param prices_4d Output array (Nm × Nt × Nv × Nr), must be pre-sized
  * @param grid Grid specification with parameter arrays
  * @param K_ref Reference strike for denormalization
+ *
+ * @pre Batch results must contain recorded snapshots. Snapshots are registered
+ *      via solver.set_snapshot_times() before calling solve().
  */
 void extract_batch_results_to_4d(
     const BatchAmericanOptionResult& batch_result,

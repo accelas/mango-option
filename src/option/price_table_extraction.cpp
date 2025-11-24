@@ -7,6 +7,7 @@
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/support/parallel.hpp"
 #include <experimental/mdspan>
+#include <cassert>
 #include <cmath>
 #include <vector>
 #include <ranges>
@@ -35,15 +36,10 @@ void extract_batch_results_to_4d(
         }
     }
 
-    // Guard against missing snapshots (would cause divide-by-zero)
-    if (n_time == 0) {
-        // This indicates snapshots were not registered during solver setup.
-        // Price table extraction requires snapshot_times to be set via SetupCallback.
-        throw std::runtime_error(
-            "extract_batch_results_to_4d: No snapshots recorded. "
-            "Price table construction requires snapshot_times to be registered "
-            "via SetupCallback (call solver.set_snapshot_times() before solve).");
-    }
+    // Precondition: Snapshots must be registered during solver setup
+    // Price table extraction requires snapshot_times to be set via SetupCallback.
+    // This is a programming error - caller must ensure set_snapshot_times() is called.
+    assert(n_time != 0 && "No snapshots recorded (programming error - call set_snapshot_times before solve)");
 
     // Precompute step indices for each maturity using ranges pipeline
     const double dt = T_max / n_time;
