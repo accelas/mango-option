@@ -115,15 +115,31 @@ double price = surface->value({1.0, 0.25, 0.20, 0.05});
 
 ## Implementation Steps (Phase 1)
 
-### Step 1: Replace AlignedArena with PMR
+### Step 1: Keep AlignedArena (PMR Migration Deferred)
 **Location:** `src/option/price_table_builder.cpp:178-194`
 
-**Problem:** Generic builder uses custom `memory::AlignedArena`, but rest of codebase uses standard PMR allocators
+**Problem:** Generic builder uses custom `memory::AlignedArena`, but rest of codebase uses standard PMR allocators (consistency concern)
 
-**Solution:** Replace with `std::pmr::vector` pattern used elsewhere:
+**Decision: Keep AlignedArena for Phase 1**
 
+**Reason:** Full PMR migration requires solving the buffer ownership problem:
+- `PriceTensor<N>` currently owns a `shared_ptr<memory::AlignedArena>` that keeps the buffer alive
+- Switching to PMR in `extract_tensor()` with local `buffer_guard` creates use-after-free when function returns
+- Proper fix requires updating `PriceTensor` to either:
+  1. Store `std::shared_ptr<void>` with custom deleter for PMR buffer, OR
+  2. Make `AlignedArena` use PMR internally (keeping same API)
+
+**Phase 1 scope:** Zero functional changes, minimize risk
+- Keep existing `AlignedArena` usage (lines 178-194) - already works correctly
+- AlignedArena already provides 64-byte alignment for AVX-512
+- AlignedArena ownership semantics are well-tested
+
+**Phase 2 option:** If PMR consistency is important:
+- Option A: Update `AlignedArena` implementation to use PMR internally (transparent)
+- Option B: Extend `PriceTensor<N>` to accept PMR allocator + migrate extract_tensor
+
+**Current code (keeping as-is):**
 ```cpp
-// BEFORE (lines 178-194):
 const size_t total_points = Nm * Nt * Nσ * Nr;
 const size_t tensor_bytes = total_points * sizeof(double);
 const size_t arena_bytes = tensor_bytes + 64;  // 64-byte alignment padding
@@ -140,51 +156,9 @@ if (!tensor_result.has_value()) {
 }
 
 auto tensor = tensor_result.value();
-
-// AFTER (use PMR with aligned allocation):
-const size_t total_points = Nm * Nt * Nσ * Nr;
-const size_t tensor_bytes = total_points * sizeof(double);
-
-// CRITICAL: Preserve 64-byte alignment for AVX-512
-// Solution: Use aligned_alloc to create backing buffer, wrap in PMR
-constexpr size_t alignment = 64;
-const size_t aligned_bytes = (tensor_bytes + alignment - 1) & ~(alignment - 1);
-
-void* aligned_buffer = std::aligned_alloc(alignment, aligned_bytes);
-if (!aligned_buffer) {
-    return std::unexpected("Failed to allocate aligned buffer");
-}
-
-// RAII cleanup MUST be declared BEFORE objects that use the buffer
-// This ensures buffer is freed AFTER pool and vector are destroyed
-std::unique_ptr<std::byte, decltype(&std::free)> buffer_guard(
-    static_cast<std::byte*>(aligned_buffer),
-    &std::free
-);
-
-// Wrap aligned buffer in PMR resource
-std::pmr::monotonic_buffer_resource pool(buffer_guard.get(), aligned_bytes);
-
-// Construct vector with polymorphic_allocator (not raw pointer)
-std::pmr::polymorphic_allocator<double> alloc{&pool};
-std::pmr::vector<double> tensor_data{alloc};
-tensor_data.resize(total_points, 0.0);
-
-// Wrap in mdspan for N-D access
-using std::experimental::mdspan;
-using std::experimental::dextents;
-mdspan<double, dextents<size_t, N>> tensor(tensor_data.data(), Nm, Nt, Nσ, Nr);
 ```
 
-**Benefits:**
-- ✅ Preserves 64-byte alignment for AVX-512 (critical for performance)
-- ✅ Uses PMR for consistency with codebase patterns
-- ✅ Standard C++17 facilities (aligned_alloc + PMR)
-- ✅ RAII cleanup via unique_ptr
-
-**Impact:** Best of both worlds - aligned allocation + PMR interface
-
-**Alternative:** Keep `AlignedArena` if it already provides PMR-compatible interface
+**Impact:** No changes to Step 1. AlignedArena stays, PMR migration removed from Phase 1 scope.
 
 ### Step 2: Add `PriceTableResult<N>` struct
 **Location:** `src/option/price_table_builder.hpp`
@@ -243,31 +217,48 @@ struct PriceTableResult {
    double elapsed = std::chrono::duration<double>(end_time - start_time).count();
    ```
 
-3. **BSplineFittingStats**: Extract from `BSplineNDSeparable::fit()` return value
+3. **BSplineFittingStats**: Extract from **existing** `BSplineNDSeparableResult`
    ```cpp
-   // Modify BSplineNDSeparable<T, N>::fit() to return new result type
-   // This REPLACES the existing std::expected<std::vector<T>, std::string>
-   struct BSplineFitResult {
-       std::vector<T> coefficients;
-       BSplineFittingStats stats;  // NEW: residuals, condition numbers, failures
-   };
-
-   // Update signature:
-   // BEFORE: std::expected<std::vector<T>, std::string> fit(const std::vector<T>& values)
-   // AFTER:  std::expected<BSplineFitResult<T>, std::string> fit(const std::vector<T>& values)
+   // BSplineNDSeparable already returns BSplineNDSeparableResult with stats
+   // Signature (already exists):
+   // std::expected<BSplineNDSeparableResult<T, N>, std::string> fit(const std::vector<T>& values)
 
    // In build() after fit_coeffs()
    auto fit_result = fitter.fit(tensor_data);
    if (!fit_result.has_value()) {
        return std::unexpected("B-spline fitting failed: " + fit_result.error());
    }
-   std::vector<double> coefficients = std::move(fit_result.value().coefficients);
-   BSplineFittingStats stats = fit_result.value().stats;
+
+   const auto& result = fit_result.value();
+   std::vector<double> coefficients = std::move(result.coefficients);
+
+   // Map BSplineNDSeparableResult arrays to BSplineFittingStats
+   BSplineFittingStats stats;
+   stats.max_residual_axis0 = result.max_residual_per_axis[0];
+   stats.max_residual_axis1 = result.max_residual_per_axis[1];
+   stats.max_residual_axis2 = result.max_residual_per_axis[2];
+   stats.max_residual_axis3 = result.max_residual_per_axis[3];
+   stats.max_residual_overall = *std::max_element(
+       result.max_residual_per_axis.begin(),
+       result.max_residual_per_axis.end()
+   );
+
+   stats.condition_axis0 = result.condition_number_per_axis[0];
+   stats.condition_axis1 = result.condition_number_per_axis[1];
+   stats.condition_axis2 = result.condition_number_per_axis[2];
+   stats.condition_axis3 = result.condition_number_per_axis[3];
+   stats.condition_max = *std::max_element(
+       result.condition_number_per_axis.begin(),
+       result.condition_number_per_axis.end()
+   );
+
+   // Failed slices already tracked in BSplineNDSeparableResult
+   stats.failed_slices_total = result.total_failed_slices;
    ```
 
 **Implementation tasks:**
-- Add `BSplineFitResult` struct to `bspline_nd_separable.hpp`
-- Update `BSplineNDSeparable::fit()` to compute and return stats
+- **No changes to `BSplineNDSeparable`** - already returns diagnostics
+- Map existing `BSplineNDSeparableResult` arrays to `BSplineFittingStats` fields
 - Add timer instrumentation at start/end of `build()`
 - Count PDE solves from batch result size
 
@@ -276,7 +267,31 @@ struct PriceTableResult {
 
 **Problem:** `GridAccuracyParams` only forwards point counts and alpha concentration, but not the critical x_min/x_max spatial domain bounds. The batch solver then calls `estimate_grid_for_option()` which auto-computes bounds per option, ignoring the user's `config.grid_estimator` domain.
 
-**Solution:** Pass the complete `GridSpec` directly through `custom_grid_config` parameter instead of using `GridAccuracyParams`:
+**Solution:** Extend `BatchAmericanOptionSolver` API to accept custom grid specification, then pass complete `GridSpec`:
+
+**Step 3a: Extend BatchAmericanOptionSolver API**
+**Location:** `src/option/american_option_batch.hpp`
+
+Add new parameter to `solve_batch`:
+```cpp
+// Current signature:
+BatchAmericanOptionResult solve_batch(
+    std::span<const AmericanOptionParams> params,
+    bool use_shared_grid = false,
+    SetupCallback setup = nullptr);
+
+// NEW signature (add optional custom_grid parameter):
+BatchAmericanOptionResult solve_batch(
+    std::span<const AmericanOptionParams> params,
+    bool use_shared_grid = false,
+    SetupCallback setup = nullptr,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+```
+
+**Implementation note:** When `custom_grid.has_value()`, bypass `estimate_grid_for_option()` and use provided `GridSpec` + `TimeDomain` directly for shared grid construction.
+
+**Step 3b: Update PriceTableBuilder to use new API**
+**Location:** `src/option/price_table_builder.cpp:131-142`
 
 ```cpp
 // BEFORE (buggy - only forwards point counts):
@@ -285,24 +300,30 @@ accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t
 accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
 accuracy.max_time_steps = config_.n_time;
 solver.set_grid_accuracy(accuracy);
+return solver.solve_batch(batch, true);  // uses GridAccuracyParams
 
 // AFTER (fixed - passes complete GridSpec with domain bounds):
 // Build custom grid config with user's exact GridSpec
 GridSpec<double> user_grid = config_.grid_estimator;
-TimeDomain time_domain{
-    .T_max = axes.grids[1].back(),  // max maturity
-    .n_steps = config_.n_time
-};
+
+// Use TimeDomain factory (no designated initializers)
+auto time_domain = TimeDomain::from_n_steps(
+    0.0,                        // t_start
+    axes.grids[1].back(),       // t_end (max maturity)
+    config_.n_time              // n_steps
+);
 
 // Pass complete grid specification (bypasses auto-estimation)
-std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config =
+std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
     std::make_pair(user_grid, time_domain);
 
 // Solve with custom grid (x_min/x_max preserved)
-return solver.solve_batch(batch, true, custom_grid_config);
+return solver.solve_batch(batch, true, nullptr, custom_grid);
 ```
 
 **Impact:** User's spatial domain [x_min, x_max] from `config.grid_estimator` is now respected exactly, not auto-estimated per option.
+
+**Dependencies:** Step 3a (solver API) must be implemented before Step 3b (builder usage).
 
 ### Step 4: Port Validation Logic
 **Location:** `src/option/price_table_builder.cpp` (in `build()` method)
@@ -379,7 +400,7 @@ if (x_min_requested < x_min || x_max_requested > x_max) {
 
 **Problem:** `OptionChain` is currently defined in `src/option/price_table_4d_builder.hpp:87`, which will be deleted in Step 8. The `from_chain()` factory needs this type.
 
-**Solution:** Extract `OptionChain` to a new shared header before deletion:
+**Solution:** Extract **complete** `OptionChain` to a new shared header before deletion:
 
 ```cpp
 // NEW FILE: src/option/option_chain.hpp
@@ -390,13 +411,21 @@ if (x_min_requested < x_min || x_max_requested > x_max) {
 
 namespace mango {
 
-/// Option chain for building price tables
-/// Extracted from PriceTable4DBuilder for reusability
+/// Market option chain data (from exchanges)
+///
+/// Represents raw option chain data as typically received from market data
+/// feeds or exchanges. Can contain duplicate strikes/maturities (e.g., multiple
+/// options with same parameters but different bid/ask spreads).
+///
+/// Extracted from PriceTable4DBuilder for reusability.
 struct OptionChain {
-    double spot;
-    std::vector<double> strikes;
-    std::vector<double> maturities;
-    std::vector<double> implied_vols;
+    std::string ticker;                  ///< Underlying ticker symbol
+    double spot = 0.0;                   ///< Current underlying price
+    std::vector<double> strikes;         ///< Strike prices (may have duplicates)
+    std::vector<double> maturities;      ///< Times to expiration in years (may have duplicates)
+    std::vector<double> implied_vols;    ///< Market implied volatilities (for grid)
+    std::vector<double> rates;           ///< Risk-free rates (may have duplicates)
+    double dividend_yield = 0.0;         ///< Continuous dividend yield
 };
 
 } // namespace mango
@@ -404,7 +433,7 @@ struct OptionChain {
 
 **Update:** Modify `src/option/price_table_4d_builder.hpp` to include the new header instead of defining OptionChain inline.
 
-**Impact:** OptionChain becomes a shared type, usable by both builders during migration, remains available after deletion.
+**Impact:** OptionChain becomes a shared type with **all fields** preserved (ticker, spot, strikes, maturities, implied_vols, rates, dividend_yield), usable by both builders during migration, remains available after deletion.
 
 ### Step 6: Add Helper Factories
 **Location:** `src/option/price_table_builder.hpp`
