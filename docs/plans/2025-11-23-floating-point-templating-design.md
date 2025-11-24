@@ -27,10 +27,10 @@ Convert all numeric types from hardcoded `double` to template parameter `T` cons
 ### Type System
 - **All numeric members:** Every floating-point value becomes `T`
 - **Counts stay integral:** `size_t iterations`, `bool converged` unchanged
-- **Errors stay double:** `IVError` and `ValidationError` keep `double` for diagnostics (not templated)
+- **Errors templated:** `IVError<T>` and `ValidationError<T>` preserve full diagnostic precision
 - **Type-specific tolerances:** Scale epsilon values based on `std::numeric_limits<T>::epsilon()`
 
-**Rationale for non-templated errors:** Error types store diagnostic values (e.g., `final_error`, `value`) that are displayed to users. Keeping these as `double` provides sufficient precision for diagnostics while naturally discouraging `long double` usage (which would silently truncate in error messages).
+**Rationale for templated errors:** Error types store diagnostic values (e.g., `final_error`, `value`) from computations. Templating them on `T` prevents precision loss when `T` is `long double` or preserves efficiency when `T` is `float`.
 
 ### Testing
 - **Explicit instantiation tests:** Compile-time verification for both `<float>` and `<double>`
@@ -81,13 +81,18 @@ struct PricingParams : OptionSpec<T> {
     T volatility;
 };
 
-// IVError stays as double for diagnostics (not templated)
+// IVError is templated to preserve full diagnostic precision
+template<std::floating_point T = double>
 struct IVError {
     IVErrorCode code;
     size_t iterations = 0;
-    double final_error = 0.0;
-    std::optional<double> last_vol;
+    T final_error = T{0};
+    std::optional<T> last_vol;
 };
+
+// Type aliases for convenience
+using IVErrorf = IVError<float>;
+using IVErrord = IVError<double>;
 ```
 
 ### Validation Layer
@@ -95,25 +100,30 @@ struct IVError {
 ```cpp
 // Templated validation functions (src/option/option_spec.hpp)
 template<std::floating_point T = double>
-std::expected<void, ValidationError> validate_option_spec(const OptionSpec<T>& spec);
+std::expected<void, ValidationError<T>> validate_option_spec(const OptionSpec<T>& spec);
 
 template<std::floating_point T = double>
-std::expected<void, ValidationError> validate_iv_query(const IVQuery<T>& query);
+std::expected<void, ValidationError<T>> validate_iv_query(const IVQuery<T>& query);
 
 template<std::floating_point T = double>
-std::expected<void, ValidationError> validate_pricing_params(const PricingParams<T>& params);
+std::expected<void, ValidationError<T>> validate_pricing_params(const PricingParams<T>& params);
 ```
 
-**ValidationError stays as double for diagnostics (not templated):**
+**ValidationError is templated to preserve full diagnostic precision:**
 ```cpp
+template<std::floating_point T = double>
 struct ValidationError {
     ValidationErrorCode code;
-    double value = 0.0;  // Diagnostic value in double precision
+    T value = T{0};  // Preserves exact precision for diagnostics
     size_t index = 0;
 
-    ValidationError(ValidationErrorCode code, double value = 0.0, size_t index = 0)
+    ValidationError(ValidationErrorCode code, T value = T{0}, size_t index = 0)
         : code(code), value(value), index(index) {}
 };
+
+// Type aliases for convenience
+using ValidationErrorf = ValidationError<float>;
+using ValidationErrord = ValidationError<double>;
 ```
 
 **Implementation location (DECIDED):**
@@ -145,11 +155,12 @@ T maximum = std::max(a, b);  // Requires <algorithm>
 
 The compiler automatically selects the correct overload (`std::log(float)` vs `std::log(double)`) based on argument type.
 
-**Error Conversion:** `validation_error_to_iv_error()` stays non-templated (errors are always double):
+**Error Conversion:** `validation_error_to_iv_error()` is templated:
 
 ```cpp
 // src/option/iv_result.hpp
-inline IVError validation_error_to_iv_error(const ValidationError& ve) {
+template<std::floating_point T = double>
+inline IVError<T> validation_error_to_iv_error(const ValidationError<T>& ve) {
     IVErrorCode code;
     switch (ve.code) {
         case ValidationErrorCode::InvalidSpotPrice:
@@ -161,10 +172,10 @@ inline IVError validation_error_to_iv_error(const ValidationError& ve) {
         // ... other cases
     }
 
-    return IVError{
+    return IVError<T>{
         .code = code,
         .iterations = 0,
-        .final_error = ve.value,  // double precision diagnostic
+        .final_error = ve.value,  // Preserves exact T precision
         .last_vol = std::nullopt
     };
 }
@@ -311,7 +322,7 @@ class IVSolverFDM {
 public:
     explicit IVSolverFDM(const IVSolverFDMConfig<T>& config);
 
-    std::expected<IVSuccess<T>, IVError> solve_impl(const IVQuery<T>& query) const;
+    std::expected<IVSuccess<T>, IVError<T>> solve_impl(const IVQuery<T>& query) const;
     BatchIVResult<T> solve_batch_impl(const std::vector<IVQuery<T>>& queries) const;
 
 private:
@@ -332,7 +343,7 @@ using IVSolverFDMd = IVSolverFDM<double>;
 template<std::floating_point T = double>
 class IVSolverInterpolated {
 public:
-    static std::expected<IVSolverInterpolated<T>, ValidationError> create(
+    static std::expected<IVSolverInterpolated<T>, ValidationError<T>> create(
         std::shared_ptr<const BSpline4D<T>> spline,
         T K_ref,
         std::pair<T, T> m_range,
@@ -341,7 +352,7 @@ public:
         std::pair<T, T> r_range,
         const IVSolverInterpolatedConfig<T>& config = {});
 
-    std::expected<IVSuccess<T>, IVError> solve_impl(const IVQuery<T>& query) const noexcept;
+    std::expected<IVSuccess<T>, IVError<T>> solve_impl(const IVQuery<T>& query) const noexcept;
     BatchIVResult<T> solve_batch_impl(const std::vector<IVQuery<T>>& queries) const noexcept;
 
     // ... private members
@@ -359,7 +370,7 @@ using IVSolverInterpolatedd = IVSolverInterpolated<double>;
 template<std::floating_point T = double>
 class AmericanOptionSolver {
 public:
-    static std::expected<AmericanOptionSolver<T>, ValidationError>
+    static std::expected<AmericanOptionSolver<T>, ValidationError<T>>
         create(const PricingParams<T>& params,
                PDEWorkspace<T> workspace, ...);
 
@@ -469,8 +480,8 @@ struct PriceTableSurface {
 
 **Files:**
 1. `src/support/numeric_helpers.hpp` (NEW) - Type-aware tolerance helpers
-2. `src/support/error_types.hpp` - Keep `ValidationError` as double (NOT templated)
-3. `src/option/iv_result.hpp` - Template `IVSuccess<T>`, `BatchIVResult<T>`, keep `IVError` as double
+2. `src/support/error_types.hpp` - Template `ValidationError<T>` to preserve precision
+3. `src/option/iv_result.hpp` - Template `IVSuccess<T>`, `IVError<T>`, `BatchIVResult<T>`
 4. `src/option/option_spec.hpp` - Template `OptionSpec<T>`, `IVQuery<T>`, `PricingParams<T>`
 5. `src/option/option_spec.ipp` (NEW) - Template implementations for validation
 6. `src/option/option_spec_instantiations.cpp` (NEW) - Explicit instantiations for float/double
