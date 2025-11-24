@@ -24,7 +24,7 @@ IVSolverFDM::validate_n_space_positive() const {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
         return std::unexpected(IVError{
             .code = IVErrorCode::InvalidGridConfig,
-            .message = "Manual grid: n_space must be positive",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -39,7 +39,7 @@ IVSolverFDM::validate_n_time_positive() const {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
         return std::unexpected(IVError{
             .code = IVErrorCode::InvalidGridConfig,
-            .message = "Manual grid: n_time must be positive",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -54,7 +54,7 @@ IVSolverFDM::validate_x_bounds() const {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
         return std::unexpected(IVError{
             .code = IVErrorCode::InvalidGridConfig,
-            .message = "Manual grid: x_min must be < x_max",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -69,7 +69,7 @@ IVSolverFDM::validate_alpha_nonnegative() const {
         MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
         return std::unexpected(IVError{
             .code = IVErrorCode::InvalidGridConfig,
-            .message = "Manual grid: alpha must be non-negative",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -151,7 +151,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         if (!grid_result.has_value()) {
             last_solver_error_ = SolverError{
                 .code = SolverErrorCode::InvalidConfiguration,
-                .message = "Invalid manual grid: " + grid_result.error(),
+                // error code set above + grid_result.error(),
                 .iterations = 0
             };
             return std::numeric_limits<double>::quiet_NaN();
@@ -176,7 +176,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Invalid PDEWorkspace configuration: " + pde_workspace_result.error(),
+            // error code set above + pde_workspace_result.error(),
             .iterations = 0
         };
         return std::numeric_limits<double>::quiet_NaN();
@@ -214,7 +214,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         // If solver throws an exception, capture the error and return NaN
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::Unknown,
-            .message = "AmericanOptionSolver threw during objective evaluation",
+            // error code set above,
             .iterations = 0
         };
         return std::numeric_limits<double>::quiet_NaN();
@@ -227,7 +227,7 @@ IVSolverFDM::validate_spot_positive(const IVQuery& query) const {
     if (query.spot <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeSpot,
-            .message = "Spot price must be positive",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -241,7 +241,7 @@ IVSolverFDM::validate_strike_positive(const IVQuery& query) const {
     if (query.strike <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeStrike,
-            .message = "Strike price must be positive",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -255,7 +255,7 @@ IVSolverFDM::validate_maturity_positive(const IVQuery& query) const {
     if (query.maturity <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeMaturity,
-            .message = "Time to maturity must be positive",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -269,7 +269,7 @@ IVSolverFDM::validate_price_positive(const IVQuery& query) const {
     if (query.market_price <= 0.0) {
         return std::unexpected(IVError{
             .code = IVErrorCode::NegativeMarketPrice,
-            .message = "Market price must be positive",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -283,7 +283,7 @@ IVSolverFDM::validate_call_price_bound(const IVQuery& query) const {
     if (query.type == OptionType::CALL && query.market_price > query.spot) {
         return std::unexpected(IVError{
             .code = IVErrorCode::ArbitrageViolation,
-            .message = "Call price cannot exceed spot price (arbitrage)",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -297,7 +297,7 @@ IVSolverFDM::validate_put_price_bound(const IVQuery& query) const {
     if (query.type == OptionType::PUT && query.market_price > query.strike) {
         return std::unexpected(IVError{
             .code = IVErrorCode::ArbitrageViolation,
-            .message = "Put price cannot exceed strike price (arbitrage)",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -315,7 +315,7 @@ IVSolverFDM::validate_intrinsic_value(const IVQuery& query) const {
     if (query.market_price < intrinsic) {
         return std::unexpected(IVError{
             .code = IVErrorCode::ArbitrageViolation,
-            .message = "Market price below intrinsic value (arbitrage)",
+            // error code set above,
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -376,30 +376,38 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
     // Run Brent
     auto brent_result = brent_find_root(objective, vol_lower, vol_upper, config_.root_config);
 
-    // Check convergence
+    // Transform result: map both success and error types
     if (!brent_result.has_value()) {
+        // Map RootFindingError to IVError
+        const auto& root_error = brent_result.error();
         IVErrorCode error_code;
-        const std::string& reason = brent_result.error().message;
-
-        if (reason.find("Max iterations") != std::string::npos ||
-            reason.find("Maximum iterations") != std::string::npos) {
-            error_code = IVErrorCode::MaxIterationsExceeded;
-        } else if (reason.find("not bracketed") != std::string::npos) {
-            error_code = IVErrorCode::BracketingFailed;
-        } else {
-            error_code = IVErrorCode::MaxIterationsExceeded;
+        switch (root_error.code) {
+            case RootFindingErrorCode::MaxIterationsExceeded:
+                error_code = IVErrorCode::MaxIterationsExceeded;
+                break;
+            case RootFindingErrorCode::InvalidBracket:
+                error_code = IVErrorCode::BracketingFailed;
+                break;
+            case RootFindingErrorCode::NumericalInstability:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+            case RootFindingErrorCode::NoProgress:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+            default:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
         }
 
         return std::unexpected(IVError{
             .code = error_code,
-            .message = brent_result.error().message,
-            .iterations = brent_result.error().iterations,
-            .final_error = brent_result.error().final_error,
-            .last_vol = brent_result.error().last_value
+            .iterations = root_error.iterations,
+            .final_error = root_error.final_error,
+            .last_vol = root_error.last_value
         });
     }
 
-    // Success
+    // Transform RootFindingSuccess to IVSuccess
     return IVSuccess{
         .implied_vol = brent_result->root,
         .iterations = brent_result->iterations,

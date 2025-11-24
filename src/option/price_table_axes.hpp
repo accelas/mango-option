@@ -5,6 +5,7 @@
 #include <string>
 #include <expected>
 #include <algorithm>
+#include "src/support/error_types.hpp"
 
 namespace mango {
 
@@ -30,19 +31,23 @@ struct PriceTableAxes {
 
     /// Validate all grids are non-empty and strictly monotonic
     ///
-    /// @return Empty expected on success, error message on failure
-    [[nodiscard]] std::expected<void, std::string> validate() const {
+    /// @return Empty expected on success, ValidationError on failure
+    [[nodiscard]] std::expected<void, ValidationError> validate() const {
         for (size_t i = 0; i < N; ++i) {
             if (grids[i].empty()) {
-                return std::unexpected("Axis " + std::to_string(i) + " is empty");
+                return std::unexpected(ValidationError(
+                    ValidationErrorCode::InvalidGridSize,
+                    0.0,
+                    i));
             }
 
             // Check strict monotonicity
             for (size_t j = 1; j < grids[i].size(); ++j) {
                 if (grids[i][j] <= grids[i][j-1]) {
-                    return std::unexpected(
-                        "Axis " + std::to_string(i) + " is not strictly monotonic at index " +
-                        std::to_string(j));
+                    return std::unexpected(ValidationError(
+                        ValidationErrorCode::UnsortedGrid,
+                        grids[i][j],
+                        i));
                 }
             }
         }

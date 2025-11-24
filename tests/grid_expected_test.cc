@@ -26,17 +26,17 @@ TEST(GridSpecExpectedTest, UniformValid) {
 TEST(GridSpecExpectedTest, UniformInvalidTooFewPoints) {
     auto result = GridSpec<>::uniform(0.0, 1.0, 1);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "Grid must have at least 2 points");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
 TEST(GridSpecExpectedTest, UniformInvalidMinMax) {
     auto result = GridSpec<>::uniform(1.0, 0.0, 10);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "x_min must be less than x_max");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidBounds);
 
     auto result_equal = GridSpec<>::uniform(1.0, 1.0, 10);
     EXPECT_FALSE(result_equal.has_value());
-    EXPECT_EQ(result_equal.error(), "x_min must be less than x_max");
+    EXPECT_EQ(result_equal.error().code, ValidationErrorCode::InvalidBounds);
 }
 
 // Test log-spaced grid creation with expected pattern
@@ -62,29 +62,29 @@ TEST(GridSpecExpectedTest, LogSpacedValid) {
 TEST(GridSpecExpectedTest, LogSpacedInvalidNonPositiveMin) {
     auto result_zero = GridSpec<>::log_spaced(0.0, 1.0, 10);
     EXPECT_FALSE(result_zero.has_value());
-    EXPECT_EQ(result_zero.error(), "Log-spaced grid requires positive bounds");
+    EXPECT_EQ(result_zero.error().code, ValidationErrorCode::InvalidBounds);
 
     auto result_negative = GridSpec<>::log_spaced(-0.1, 1.0, 10);
     EXPECT_FALSE(result_negative.has_value());
-    EXPECT_EQ(result_negative.error(), "Log-spaced grid requires positive bounds");
+    EXPECT_EQ(result_negative.error().code, ValidationErrorCode::InvalidBounds);
 }
 
 TEST(GridSpecExpectedTest, LogSpacedInvalidNonPositiveMax) {
     auto result = GridSpec<>::log_spaced(1.0, 0.0, 10);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "Log-spaced grid requires positive bounds");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidBounds);
 }
 
 TEST(GridSpecExpectedTest, LogSpacedInvalidMinMax) {
     auto result = GridSpec<>::log_spaced(1.0, 0.5, 10);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "x_min must be less than x_max");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidBounds);
 }
 
 TEST(GridSpecExpectedTest, LogSpacedInvalidTooFewPoints) {
     auto result = GridSpec<>::log_spaced(1.0, 10.0, 1);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "Grid must have at least 2 points");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
 // Test sinh-spaced grid creation with expected pattern
@@ -118,27 +118,27 @@ TEST(GridSpecExpectedTest, SinhSpacedDefaultConcentration) {
 TEST(GridSpecExpectedTest, SinhSpacedInvalidMinMax) {
     auto result = GridSpec<>::sinh_spaced(1.0, 0.0, 10);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "x_min must be less than x_max");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidBounds);
 
     auto result_equal = GridSpec<>::sinh_spaced(1.0, 1.0, 10);
     EXPECT_FALSE(result_equal.has_value());
-    EXPECT_EQ(result_equal.error(), "x_min must be less than x_max");
+    EXPECT_EQ(result_equal.error().code, ValidationErrorCode::InvalidBounds);
 }
 
 TEST(GridSpecExpectedTest, SinhSpacedInvalidTooFewPoints) {
     auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 1);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "Grid must have at least 2 points");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
 TEST(GridSpecExpectedTest, SinhSpacedInvalidConcentration) {
     auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 10, 0.0);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "Concentration parameter must be positive");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSpacing);
 
     auto result_negative = GridSpec<>::sinh_spaced(0.0, 1.0, 10, -1.0);
     EXPECT_FALSE(result_negative.has_value());
-    EXPECT_EQ(result_negative.error(), "Concentration parameter must be positive");
+    EXPECT_EQ(result_negative.error().code, ValidationErrorCode::InvalidGridSpacing);
 }
 
 // Test error handling with multiple validation failures
@@ -146,9 +146,9 @@ TEST(GridSpecExpectedTest, MultipleErrorsUniform) {
     // Both n_points < 2 and x_min >= x_max - should report first error
     auto result = GridSpec<>::uniform(1.0, 0.0, 1);
     EXPECT_FALSE(result.has_value());
-    // Should report the first validation error encountered
-    EXPECT_TRUE(result.error().find("Grid must have at least 2 points") != std::string::npos ||
-                result.error().find("x_min must be less than x_max") != std::string::npos);
+    // Should report validation error (either invalid grid size or invalid bounds)
+    EXPECT_TRUE(result.error().code == ValidationErrorCode::InvalidGridSize ||
+                result.error().code == ValidationErrorCode::InvalidBounds);
 }
 
 TEST(GridSpecExpectedTest, MultipleErrorsLogSpaced) {
@@ -156,8 +156,7 @@ TEST(GridSpecExpectedTest, MultipleErrorsLogSpaced) {
     auto result = GridSpec<>::log_spaced(0.0, 1.0, 1);
     EXPECT_FALSE(result.has_value());
     // Should report the first validation error encountered
-    EXPECT_TRUE(result.error().find("Grid must have at least 2 points") != std::string::npos ||
-                result.error().find("Log-spaced grid requires positive bounds") != std::string::npos);
+    EXPECT_TRUE(result.error().code == ValidationErrorCode::InvalidGridSize || result.error().code == ValidationErrorCode::InvalidBounds);
 }
 
 TEST(GridSpecExpectedTest, MultipleErrorsSinhSpaced) {
@@ -165,8 +164,7 @@ TEST(GridSpecExpectedTest, MultipleErrorsSinhSpaced) {
     auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 1, 0.0);
     EXPECT_FALSE(result.has_value());
     // Should report the first validation error encountered
-    EXPECT_TRUE(result.error().find("Grid must have at least 2 points") != std::string::npos ||
-                result.error().find("Concentration parameter must be positive") != std::string::npos);
+    EXPECT_TRUE(result.error().code == ValidationErrorCode::InvalidGridSize || result.error().code == ValidationErrorCode::InvalidBounds);
 }
 
 // Test backward compatibility - existing tests should still work

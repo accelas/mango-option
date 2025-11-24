@@ -107,7 +107,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -167,7 +167,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -227,7 +227,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -289,7 +289,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace_result.value());
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);

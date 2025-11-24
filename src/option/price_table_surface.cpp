@@ -22,7 +22,12 @@ PriceTableSurface<N>::build(
 {
     // Validate axes
     if (auto valid = axes.validate(); !valid.has_value()) {
-        return std::unexpected(valid.error());
+        // Convert ValidationError to string for legacy API
+        auto err = valid.error();
+        return std::unexpected(
+            "Validation error code " + std::to_string(static_cast<int>(err.code)) +
+            " (value=" + std::to_string(err.value) +
+            ", index=" + std::to_string(err.index) + ")");
     }
 
     // Check coefficient size matches axes

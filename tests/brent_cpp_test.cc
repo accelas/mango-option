@@ -69,8 +69,8 @@ TEST_F(BrentCppTest, RootNotBracketed) {
     auto result = mango::brent_find_root(f, 0.0, 2.0, config);
 
     EXPECT_FALSE(result.has_value());
-    
-    EXPECT_EQ(result.error().message, "Root not bracketed");
+
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::InvalidBracket);
 }
 
 // Test max iterations limit
@@ -83,7 +83,7 @@ TEST_F(BrentCppTest, MaxIterationsReached) {
     // May or may not converge in 2 iterations with such tight tolerance
     if (!result.has_value()) {
         EXPECT_EQ(result.error().iterations, 2);
-        EXPECT_EQ(result.error().message, "Maximum iterations reached without convergence");
+        EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::MaxIterationsExceeded);
     }
 }
 
@@ -112,7 +112,7 @@ TEST_F(BrentCppTest, FunctionReturnsNaN) {
 
     // Should fail with descriptive error, not false convergence
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().message, "Function returned non-finite value (NaN or Inf)");
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::NumericalInstability);
     EXPECT_TRUE(std::isnan(result.error().final_error));
 }
 
@@ -128,8 +128,8 @@ TEST_F(BrentCppTest, FunctionReturnsInf) {
 
     // Should fail with descriptive error
     EXPECT_FALSE(result.has_value());
-    
-    EXPECT_EQ(result.error().message, "Function returned non-finite value (NaN or Inf)");
+
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::NumericalInstability);
 }
 
 int main(int argc, char **argv) {

@@ -100,7 +100,7 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
 
     // Solve (zero PDE, so solution should remain constant at obstacle value)
     auto status = solver.solve();
-    ASSERT_TRUE(status.has_value()) << status.error().message;
+    ASSERT_TRUE(status.has_value()) << status.error();
 
     // Verify final solution still respects obstacle
     auto final_solution = solver.solution();
@@ -154,7 +154,7 @@ TEST(ObstacleTest, DiffusionWithLowerBound) {
     });
 
     auto status = solver.solve();
-    ASSERT_TRUE(status.has_value()) << status.error().message;
+    ASSERT_TRUE(status.has_value()) << status.error();
 
     // Final solution should respect obstacle: u ≥ 0.2 everywhere
     auto final_solution = solver.solution();

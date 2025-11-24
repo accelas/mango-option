@@ -23,7 +23,7 @@
  * if (result.has_value()) {
  *     std::cout << "IV: " << result->implied_vol << "\n";
  * } else {
- *     std::cerr << "Error: " << result.error().message << "\n";
+ *     std::cerr << "Error: " <<  "Error code: " << static_cast<int>(result.error().code) << "\n";
  * }
  * @endcode
  */
@@ -116,7 +116,7 @@ struct IVSolverFDMConfig {
 /// if (result.has_value()) {
 ///     std::cout << "IV: " << result->implied_vol << "\n";
 /// } else {
-///     std::cerr << "Error: " << result.error().message << "\n";
+///     std::cerr << "Error: " <<  "Error code: " << static_cast<int>(result.error().code) << "\n";
 /// }
 /// ```
 ///

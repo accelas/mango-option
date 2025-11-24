@@ -53,9 +53,9 @@ struct OptionSpec {
  * - Finite and reasonable rate/dividend values
  *
  * @param spec Option specification to validate
- * @return void on success, error message on failure
+ * @return void on success, ValidationError on failure
  */
-std::expected<void, std::string> validate_option_spec(const OptionSpec& spec);
+std::expected<void, ValidationError> validate_option_spec(const OptionSpec& spec);
 
 /**
  * @brief IV solver query: option spec + observed market price
@@ -98,9 +98,9 @@ struct IVQuery : OptionSpec {
  * - Arbitrage checks: price <= upper bound, price >= intrinsic value
  *
  * @param query IV query to validate
- * @return void on success, error message on failure
+ * @return void on success, ValidationError on failure
  */
-std::expected<void, std::string> validate_iv_query(const IVQuery& query);
+std::expected<void, ValidationError> validate_iv_query(const IVQuery& query);
 
 /**
  * @brief Option solver grid configuration
@@ -193,8 +193,8 @@ struct PricingParams : OptionSpec {
  * - Valid discrete dividend schedule
  *
  * @param params Pricing parameters to validate
- * @return void on success, error message on failure
+ * @return void on success, ValidationError on failure
  */
-std::expected<void, std::string> validate_pricing_params(const PricingParams& params);
+std::expected<void, ValidationError> validate_pricing_params(const PricingParams& params);
 
 } // namespace mango

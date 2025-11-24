@@ -96,7 +96,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
 
     // Solve
     auto status = solver.solve();
-    ASSERT_TRUE(status.has_value()) << status.error().message;
+    ASSERT_TRUE(status.has_value()) << status.error();
 
     // Verify against analytical solution at t = 0.1
     auto solution = solver.solution();
@@ -170,7 +170,7 @@ TEST(PDESolverTest, DISABLED_HeatEquationNeumannBC) {
     // Initialize and solve
     solver.initialize(ic);
     auto status = solver.solve();
-    ASSERT_TRUE(status.has_value()) << status.error().message;
+    ASSERT_TRUE(status.has_value()) << status.error();
 
     // Verify against analytical solution
     auto solution = solver.solution();

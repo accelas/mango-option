@@ -12,7 +12,7 @@
 
 namespace mango {
 
-std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
+std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
     std::shared_ptr<const BSpline4D> spline,
     double K_ref,
     std::pair<double, double> m_range,
@@ -22,22 +22,28 @@ std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
     const IVSolverInterpolatedConfig& config)
 {
     if (!spline) {
-        return std::unexpected(std::string("BSpline4D pointer is null"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
     }
     if (K_ref <= 0.0) {
-        return std::unexpected(std::string("K_ref must be positive"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidStrike,
+            K_ref));
     }
 
     return IVSolverInterpolated(
         std::move(spline), K_ref, m_range, tau_range, sigma_range, r_range, config);
 }
 
-std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
+std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
     const PriceTableSurface& surface,
     const IVSolverInterpolatedConfig& config)
 {
     if (!surface.valid()) {
-        return std::unexpected(std::string("PriceTableSurface is not initialized (workspace is null)"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
     }
 
     auto spline = std::make_shared<BSpline4D>(*surface.workspace());
@@ -51,11 +57,11 @@ std::expected<IVSolverInterpolated, std::string> IVSolverInterpolated::create(
         config);
 }
 
-std::optional<std::string> IVSolverInterpolated::validate_query(const IVQuery& query) const {
+std::optional<ValidationError> IVSolverInterpolated::validate_query(const IVQuery& query) const {
     // Use common validation for option spec, market price, and arbitrage checks
     auto validation = validate_iv_query(query);
     if (!validation.has_value()) {
-        return validation.error();  // validation.error() is already a string
+        return validation.error();
     }
 
     return std::nullopt;
@@ -98,11 +104,18 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
     // Validate input
     auto error = validate_query(query);
     if (error.has_value()) {
+        // Map ValidationErrorCode to IVErrorCode
+        IVErrorCode iv_code = IVErrorCode::NegativeSpot;  // Default
+        switch (error->code) {
+            case ValidationErrorCode::InvalidSpotPrice: iv_code = IVErrorCode::NegativeSpot; break;
+            case ValidationErrorCode::InvalidStrike: iv_code = IVErrorCode::NegativeStrike; break;
+            case ValidationErrorCode::InvalidMaturity: iv_code = IVErrorCode::NegativeMaturity; break;
+            default: iv_code = IVErrorCode::InvalidGridConfig; break;
+        }
         return std::unexpected(IVError{
-            .code = IVErrorCode::NegativeSpot,  // Generic validation error
-            .message = *error,
+            .code = iv_code,
             .iterations = 0,
-            .final_error = 0.0,
+            .final_error = error->value,
             .last_vol = std::nullopt
         });
     }
@@ -116,8 +129,6 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
     if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
         return std::unexpected(IVError{
             .code = IVErrorCode::InvalidGridConfig,
-            .message = "Query parameters out of surface bounds. "
-                       "Use PDE-based IV solver for out-of-grid queries.",
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -143,14 +154,33 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
     const double sigma0 = (sigma_min + sigma_max) / 2.0;  // Initial guess
     auto result = newton_find_root(objective, derivative, sigma0, sigma_min, sigma_max, newton_config);
 
-    // Check convergence
+    // Check convergence - transform RootFindingError to IVError
     if (!result.has_value()) {
+        const auto& root_error = result.error();
+        IVErrorCode error_code;
+        switch (root_error.code) {
+            case RootFindingErrorCode::MaxIterationsExceeded:
+                error_code = IVErrorCode::MaxIterationsExceeded;
+                break;
+            case RootFindingErrorCode::InvalidBracket:
+                error_code = IVErrorCode::BracketingFailed;
+                break;
+            case RootFindingErrorCode::NumericalInstability:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+            case RootFindingErrorCode::NoProgress:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+            default:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+        }
+
         return std::unexpected(IVError{
-            .code = IVErrorCode::MaxIterationsExceeded,
-            .message = result.error().message,
-            .iterations = result.error().iterations,
-            .final_error = result.error().final_error,
-            .last_vol = result.error().last_value
+            .code = error_code,
+            .iterations = root_error.iterations,
+            .final_error = root_error.final_error,
+            .last_vol = root_error.last_value
         });
     }
 

@@ -136,7 +136,7 @@ static void compare_scenario(
     AmericanOptionSolver solver(mango_params, workspace);
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
-        throw std::runtime_error(mango_result_expected.error().message);
+        throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
     }
     const AmericanOptionResult& mango_result = *mango_result_expected;
 
@@ -271,7 +271,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     AmericanOptionSolver solver(params, workspace);
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
-        throw std::runtime_error(mango_result_expected.error().message);
+        throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
     }
     const AmericanOptionResult& result = *mango_result_expected;
 
@@ -329,7 +329,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     AmericanOptionSolver solver(params, workspace);
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
-        throw std::runtime_error(mango_result_expected.error().message);
+        throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
     }
 
     // Get Greeks from result
