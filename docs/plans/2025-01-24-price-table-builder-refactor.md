@@ -4,13 +4,23 @@
 **Status:** Design Complete
 **Goal:** Comprehensive refactor addressing resource ownership, memory pressure, grid configuration bugs, parallelization, and validation.
 
+## Naming Changes
+
+Drop redundant "4D" suffix from all names since price tables are inherently 4-dimensional (moneyness × maturity × volatility × rate):
+
+- `PriceTable4DBuilder` → `PriceTableBuilder`
+- `PriceTable4DResult` → `PriceTableResult`
+- `BSpline4D` → `BSplineEvaluator` (more descriptive)
+- File: `price_table_4d_builder.hpp` → `price_table_builder.hpp`
+- File: `price_table_4d_builder.cpp` → `price_table_builder.cpp`
+
 ## Problems Addressed
 
 1. **Resource ownership** - PriceTableSurface stores data twice (workspace + evaluator)
-2. **Memory explosion** - Full 4D tensor kept in result (>10 GB for large grids)
+2. **Memory explosion** - Full tensor kept in result (>10 GB for large grids)
 3. **Grid configuration ignored** - Custom x_bounds/n_space/n_time overridden by GridAccuracyParams
 4. **Serial extraction bottleneck** - Extraction not parallelized despite parallel PDE solving
-5. **No snapshot validation** - Invalid maturities corrupt 4D tensor silently
+5. **No snapshot validation** - Invalid maturities corrupt tensor silently
 
 ## Architecture Overview
 
@@ -21,7 +31,7 @@
 ```
 PriceTableWorkspace (grids + coefficients)
          ↑ owned by
-     BSpline4D (evaluator logic)
+     BSplineEvaluator (evaluator logic)
          ↑ wrapped by shared_ptr
   PriceTableSurface (user-facing API)
 ```
@@ -30,7 +40,7 @@ PriceTableWorkspace (grids + coefficients)
 ```cpp
 class PriceTableSurface {
 public:
-    explicit PriceTableSurface(std::shared_ptr<BSpline4D> evaluator)
+    explicit PriceTableSurface(std::shared_ptr<BSplineEvaluator> evaluator)
         : evaluator_(std::move(evaluator)) {}
 
     double eval(double m, double tau, double sigma, double rate) const {
@@ -43,17 +53,17 @@ public:
     }
 
 private:
-    std::shared_ptr<BSpline4D> evaluator_;
+    std::shared_ptr<BSplineEvaluator> evaluator_;
     // REMOVED: std::shared_ptr<PriceTableWorkspace> workspace_
-    // REMOVED: std::unique_ptr<BSpline4D> evaluator_
+    // REMOVED: std::unique_ptr<BSplineEvaluator> evaluator_
 };
 ```
 
-**Changes to BSpline4D:**
+**Changes to BSplineEvaluator:**
 ```cpp
-class BSpline4D {
+class BSplineEvaluator {
 public:
-    static std::expected<BSpline4D, std::string> create(PriceTableWorkspace&& ws);
+    static std::expected<BSplineEvaluator, std::string> create(PriceTableWorkspace&& ws);
 
     double eval(double m, double tau, double sigma, double rate) const;
 
@@ -71,25 +81,25 @@ private:
 
 **Design:** Remove raw price tensor from result. Provide on-demand diagnostics.
 
-**Changes to PriceTable4DResult:**
+**Changes to PriceTableResult:**
 ```cpp
-struct PriceTable4DResult {
+struct PriceTableResult {
     PriceTableSurface surface;              // Lightweight evaluator wrapper
     size_t n_pde_solves;                    // Useful stat
     double precompute_time_seconds;         // Useful stat
     BSplineFittingStats fitting_stats;      // Fitting diagnostics
 
     // REMOVED: std::vector<double> prices_4d (can be >10 GB)
-    // REMOVED: std::shared_ptr<BSpline4D> evaluator (redundant with surface)
+    // REMOVED: std::shared_ptr<BSplineEvaluator> evaluator (redundant with surface)
 };
 ```
 
 **New diagnostic APIs:**
 ```cpp
-class PriceTable4DBuilder {
+class PriceTableBuilder {
 public:
     // Existing precompute returns lightweight result
-    std::expected<PriceTable4DResult, PriceTableError> precompute(
+    std::expected<PriceTableResult, PriceTableError> precompute(
         const PriceTableConfig& config);
 
     // On-demand residual computation (does not store raw prices)
@@ -114,8 +124,8 @@ public:
 
 **Validation and precedence logic:**
 ```cpp
-std::expected<PriceTable4DResult, PriceTableError>
-PriceTable4DBuilder::precompute(const PriceTableConfig& config)
+std::expected<PriceTableResult, PriceTableError>
+PriceTableBuilder::precompute(const PriceTableConfig& config)
 {
     const double T_max = maturity_.back();
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config;
@@ -280,8 +290,8 @@ struct PriceTableError {
 
 **Validation in precompute():**
 ```cpp
-std::expected<PriceTable4DResult, PriceTableError>
-PriceTable4DBuilder::precompute(const PriceTableConfig& config)
+std::expected<PriceTableResult, PriceTableError>
+PriceTableBuilder::precompute(const PriceTableConfig& config)
 {
     const double T_max = maturity_.back();
     const double epsilon = 1e-10;
@@ -348,9 +358,9 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 ## Implementation Order
 
 1. **Add PriceTableError type** - Foundation for all error handling
-2. **Refactor BSpline4D ownership** - Own workspace, update constructor
-3. **Refactor PriceTableSurface** - Wrap BSpline4D only, expose workspace
-4. **Remove prices_4d from result** - Update PriceTable4DResult struct
+2. **Refactor BSplineEvaluator ownership** - Own workspace, update constructor
+3. **Refactor PriceTableSurface** - Wrap BSplineEvaluator only, expose workspace
+4. **Remove prices_4d from result** - Update PriceTableResult struct
 5. **Add snapshot validation** - In precompute() before solver setup
 6. **Fix grid configuration** - Respect x_bounds, build custom_grid_config
 7. **Parallelize extraction** - Flatten loop in extract_batch_results_to_4d
@@ -367,7 +377,7 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 - `price_table_grid_config_test.cc` - x_bounds precedence logic
 
 ### Integration Tests
-- `price_table_4d_builder_test.cc` - Update existing tests for new API
+- `price_table_builder_test.cc` - Update existing tests for new API
 - Test error cases: unsorted grid, missing T_max, exceeds T_max
 - Test x_bounds respected vs auto-estimation fallback
 - Verify no prices_4d in result
@@ -381,7 +391,7 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 
 ### Breaking Changes
 
-**1. PriceTable4DResult no longer contains prices_4d:**
+**1. PriceTableResult no longer contains prices_4d:**
 ```cpp
 // OLD
 auto result = builder.precompute(config);
@@ -423,8 +433,8 @@ auto workspace = std::make_shared<PriceTableWorkspace>(...);
 PriceTableSurface surface(workspace);
 
 // NEW
-auto evaluator = std::make_shared<BSpline4D>(
-    BSpline4D::create(std::move(workspace)).value());
+auto evaluator = std::make_shared<BSplineEvaluator>(
+    BSplineEvaluator::create(std::move(workspace)).value());
 PriceTableSurface surface(evaluator);
 ```
 
@@ -464,24 +474,24 @@ if (!result && result.error().code ==
 
 ### 1. Ownership Model - Move Semantics
 
-**Issue:** `BSpline4D::create(PriceTableWorkspace&& ws)` moving large workspace may cause extra copies. Returning `expected<BSpline4D>` by value forces workspace to live inside expected temporarily.
+**Issue:** `BSplineEvaluator::create(PriceTableWorkspace&& ws)` moving large workspace may cause extra copies. Returning `expected<BSplineEvaluator>` by value forces workspace to live inside expected temporarily.
 
 **Resolution:**
 - Change factory signature to return pointer directly:
   ```cpp
-  static std::expected<std::shared_ptr<BSpline4D>, std::string>
+  static std::expected<std::shared_ptr<BSplineEvaluator>, std::string>
   create(PriceTableWorkspace&& ws);
   ```
-- Implementation moves workspace directly into heap-allocated BSpline4D:
+- Implementation moves workspace directly into heap-allocated BSplineEvaluator:
   ```cpp
-  std::expected<std::shared_ptr<BSpline4D>, std::string>
-  BSpline4D::create(PriceTableWorkspace&& ws) {
+  std::expected<std::shared_ptr<BSplineEvaluator>, std::string>
+  BSplineEvaluator::create(PriceTableWorkspace&& ws) {
       // Validate workspace...
-      return std::make_shared<BSpline4D>(std::move(ws));
+      return std::make_shared<BSplineEvaluator>(std::move(ws));
   }
   ```
 - Ensure `PriceTableWorkspace` has deleted copy constructor, move-only
-- Thread safety: `shared_ptr<BSpline4D>` is thread-safe for concurrent eval()
+- Thread safety: `shared_ptr<BSplineEvaluator>` is thread-safe for concurrent eval()
 - **Testing:** Add instrumentation to count PriceTableWorkspace moves/copies, verify exactly 1 move occurs
 
 ### 2. Memory Safety - Parallel Loop
@@ -534,7 +544,7 @@ if (!result && result.error().code ==
                                  workspace_result.error());
       }
 
-      auto evaluator_result = BSpline4D::create(std::move(workspace_result.value()));
+      auto evaluator_result = BSplineEvaluator::create(std::move(workspace_result.value()));
       if (!evaluator_result) {
           return std::unexpected("Failed to create evaluator: " +
                                  evaluator_result.error());
@@ -656,7 +666,7 @@ if (!result && result.error().code ==
 - For massive grids (>10 GB): use streaming to avoid memory explosion:
   ```cpp
   std::expected<ResidualStats, PriceTableError>
-  PriceTable4DBuilder::compute_residuals(
+  PriceTableBuilder::compute_residuals(
       const PriceTableSurface& surface,
       size_t subsample_factor = 1) const  // subsample for huge grids
   {
@@ -677,7 +687,7 @@ if (!result && result.error().code ==
   ```
 - Expose grids via builder accessors for downstream consumers:
   ```cpp
-  class PriceTable4DBuilder {
+  class PriceTableBuilder {
   public:
       std::span<const double> moneyness() const { return moneyness_; }
       std::span<const double> maturity() const { return maturity_; }
@@ -697,7 +707,7 @@ if (!result && result.error().code ==
   - **Audit all consumers:**
     ```bash
     grep -r "prices_4d" tests/ examples/ tools/ benchmarks/
-    grep -r "PriceTable4DResult" tests/ examples/ tools/
+    grep -r "PriceTableResult" tests/ examples/ tools/
     ```
   - **Update each consumer category:**
     - **Unit tests comparing raw prices:** Use `compute_residuals()` instead
@@ -708,11 +718,11 @@ if (!result && result.error().code ==
   - **Migration path:**
     - Phase 1 (this PR): Add new APIs (`compute_residuals`, `builder.moneyness()`, `precompute_with_save`)
     - Phase 2 (this PR): Update all consumers to use new APIs
-    - Phase 3 (this PR): Remove `prices_4d` from `PriceTable4DResult`
+    - Phase 3 (this PR): Remove `prices_4d` from `PriceTableResult`
 - **Testing strategy:**
   - Before removing `prices_4d`: add tests for all new APIs
   - After removing: verify no compilation errors, all tests pass
-  - Add regression test: ensure `PriceTable4DResult` size < 1 KB (was ~2 GB)
+  - Add regression test: ensure `PriceTableResult` size < 1 KB (was ~2 GB)
 - **Performance validation:**
   - Benchmark extraction phase before/after parallelization
   - Document overhead of bounds checks (should be <1%)
@@ -721,7 +731,7 @@ if (!result && result.error().code ==
 ## References
 
 - Recent API refactor: PR #244 (custom_grid_config support)
-- Memory profiling: price_table_4d_builder.cpp:145 (10 GB tensor issue)
+- Memory profiling: price_table_builder.cpp:145 (10 GB tensor issue)
 - Extraction bottleneck: price_table_extraction.cpp:70-122
-- Grid config bug: price_table_4d_builder.cpp:175-182
+- Grid config bug: price_table_builder.cpp:175-182
 - Snapshot validation: price_table_extraction.cpp:42 (existing assert)
