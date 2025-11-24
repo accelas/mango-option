@@ -56,13 +56,15 @@ TEST(QuantLibBatchTest, DISABLED_StandardScenarios_IV_Interpolated) {
     std::vector<double> rate_grid = {0.00, 0.02, 0.05, 0.10};
 
     // Build price table (one-time cost)
-    auto builder = PriceTable4DBuilder::create(
+    auto builder_result = PriceTable4DBuilder::create(
         moneyness_grid,
         maturity_grid,
         vol_grid,
         rate_grid,
         100.0  // K_ref
     );
+    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
+    auto builder = builder_result.value();
 
     // Pre-compute prices for PUT options
     auto precompute_result = builder.precompute(OptionType::PUT, 101, 1000);
@@ -102,20 +104,21 @@ TEST(QuantLibBatchTest, DISABLED_StandardScenarios_IV_Interpolated) {
             ql_result.price
         };
 
-        auto iv_result = iv_solver.solve(query);
+        auto iv_result = iv_solver.solve_impl(query);
 
-        ASSERT_TRUE(iv_result.converged)
-            << "IV solver failed: " << iv_result.failure_reason.value_or("unknown");
+        ASSERT_TRUE(iv_result.has_value())
+            << "IV solver failed with code: " << static_cast<int>(iv_result.error().code);
 
         // Validate accuracy
-        double abs_error = std::abs(iv_result.implied_vol - scenario.volatility);
+        const auto& iv_success = iv_result.value();
+        double abs_error = std::abs(iv_success.implied_vol - scenario.volatility);
         double rel_error_pct = (abs_error / scenario.volatility) * 100.0;
 
         EXPECT_LT(rel_error_pct, scenario.iv_tolerance_pct)
             << "IV error: " << rel_error_pct << "%"
             << "\n  True vol: " << scenario.volatility
-            << "\n  Recovered: " << iv_result.implied_vol
-            << "\n  Iterations: " << iv_result.iterations;
+            << "\n  Recovered: " << iv_success.implied_vol
+            << "\n  Iterations: " << iv_success.iterations;
 
         if (rel_error_pct < scenario.iv_tolerance_pct) {
             passed++;
