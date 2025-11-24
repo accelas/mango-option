@@ -38,6 +38,7 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/option/price_table_workspace.hpp"
+#include "src/option/option_chain.hpp"
 #include <cassert>
 #include <vector>
 #include <memory>
@@ -77,21 +78,6 @@ struct PriceTableConfig {
     size_t n_time = 1000;
     double dividend_yield = 0.0;
     std::optional<std::pair<double, double>> x_bounds;
-};
-
-/// Market option chain data (from exchanges)
-///
-/// Represents raw option chain data as typically received from market data
-/// feeds or exchanges. Can contain duplicate strikes/maturities (e.g., multiple
-/// options with same parameters but different bid/ask spreads).
-struct OptionChain {
-    std::string ticker;                  ///< Underlying ticker symbol
-    double spot = 0.0;                   ///< Current underlying price
-    std::vector<double> strikes;         ///< Strike prices (may have duplicates)
-    std::vector<double> maturities;      ///< Times to expiration in years (may have duplicates)
-    std::vector<double> implied_vols;    ///< Market implied volatilities (for grid)
-    std::vector<double> rates;           ///< Risk-free rates (may have duplicates)
-    double dividend_yield = 0.0;         ///< Continuous dividend yield
 };
 
 /// Thin value object exposing a user-friendly interface to the price surface

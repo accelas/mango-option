@@ -1,4 +1,10 @@
 cc_library(
+    name = "option_chain",
+    hdrs = ["option_chain.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "price_table_axes",
     hdrs = ["price_table_axes.hpp"],
     deps = [
@@ -193,6 +199,7 @@ cc_library(
     srcs = ["price_table_4d_builder.cpp"],
     hdrs = ["price_table_4d_builder.hpp"],
     deps = [
+        ":option_chain",
         ":american_option_batch",
         ":price_table_grid",
         ":price_table_extraction",

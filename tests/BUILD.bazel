@@ -827,3 +827,12 @@ cc_test(
         "-Wextra",
     ],
 )
+
+cc_test(
+    name = "option_chain_test",
+    srcs = ["option_chain_test.cc"],
+    deps = [
+        "//src/option:option_chain",
+        "@googletest//:gtest_main",
+    ],
+)
