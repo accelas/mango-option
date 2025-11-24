@@ -87,6 +87,22 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("iterations", &mango::IVError::iterations)
         .def_readwrite("final_error", &mango::IVError::final_error)
         .def_readwrite("last_vol", &mango::IVError::last_vol)
+        .def_property_readonly("message", [](const mango::IVError& e) {
+            // Helper function to convert error code to human-readable string
+            switch (e.code) {
+                case mango::IVErrorCode::NegativeSpot: return "Negative spot price";
+                case mango::IVErrorCode::NegativeStrike: return "Negative strike price";
+                case mango::IVErrorCode::NegativeMaturity: return "Negative maturity";
+                case mango::IVErrorCode::NegativeMarketPrice: return "Negative market price";
+                case mango::IVErrorCode::ArbitrageViolation: return "Arbitrage violation";
+                case mango::IVErrorCode::MaxIterationsExceeded: return "Maximum iterations exceeded";
+                case mango::IVErrorCode::BracketingFailed: return "Bracketing failed";
+                case mango::IVErrorCode::NumericalInstability: return "Numerical instability";
+                case mango::IVErrorCode::InvalidGridConfig: return "Invalid grid configuration";
+                case mango::IVErrorCode::PDESolveFailed: return "PDE solve failed";
+                default: return "Unknown error";
+            }
+        })
         .def("__repr__", [](const mango::IVError& e) {
             std::string repr = "<IVError code=" + std::to_string(static_cast<int>(e.code));
             if (e.last_vol.has_value()) {
@@ -104,7 +120,9 @@ PYBIND11_MODULE(mango_iv, m) {
         .value("ArbitrageViolation", mango::IVErrorCode::ArbitrageViolation)
         .value("MaxIterationsExceeded", mango::IVErrorCode::MaxIterationsExceeded)
         .value("BracketingFailed", mango::IVErrorCode::BracketingFailed)
+        .value("NumericalInstability", mango::IVErrorCode::NumericalInstability)
         .value("InvalidGridConfig", mango::IVErrorCode::InvalidGridConfig)
+        .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 
     // IVSolver class (now using FDM solver with std::expected)

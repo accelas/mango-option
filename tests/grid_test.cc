@@ -272,7 +272,7 @@ TEST(GridSpecTest, MultiSinhRejectsEmptyClusters) {
     auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
 
     ASSERT_FALSE(result.has_value());
-    // Error returned, error code available in result.error().code
+    EXPECT_EQ(result.error().code, mango::ValidationErrorCode::InvalidGridSize);
 }
 
 TEST(GridSpecTest, MultiSinhRejectsNegativeAlpha) {
@@ -283,7 +283,7 @@ TEST(GridSpecTest, MultiSinhRejectsNegativeAlpha) {
     auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
 
     ASSERT_FALSE(result.has_value());
-    // Error returned, error code available in result.error().code
+    EXPECT_EQ(result.error().code, mango::ValidationErrorCode::InvalidGridSpacing);
 }
 
 TEST(GridSpecTest, MultiSinhRejectsNegativeWeight) {
@@ -294,7 +294,7 @@ TEST(GridSpecTest, MultiSinhRejectsNegativeWeight) {
     auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
 
     ASSERT_FALSE(result.has_value());
-    // Error returned, error code available in result.error().code
+    EXPECT_EQ(result.error().code, mango::ValidationErrorCode::InvalidGridSpacing);
 }
 
 TEST(GridSpecTest, MultiSinhRejectsCenterOutOfBounds) {
@@ -305,7 +305,7 @@ TEST(GridSpecTest, MultiSinhRejectsCenterOutOfBounds) {
     auto result = mango::GridSpec<>::multi_sinh_spaced(-3.0, 3.0, 101, clusters);
 
     ASSERT_FALSE(result.has_value());
-    // Error returned, error code available in result.error().code
+    EXPECT_EQ(result.error().code, mango::ValidationErrorCode::OutOfRange);
 }
 
 TEST(GridSpecTest, MultiSinhThreeClustersMonotonic) {
