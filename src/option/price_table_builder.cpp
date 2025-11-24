@@ -212,8 +212,35 @@ PriceTableBuilder<N>::solve_batch(
         constexpr double MAX_DX = 0.05;     // Von Neumann stability
 
         // Check if user's grid_spec meets solver constraints
-        const double grid_width = config_.grid_estimator.x_max() - config_.grid_estimator.x_min();
-        const double dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
+        const double grid_x_min = config_.grid_estimator.x_min();
+        const double grid_x_max = config_.grid_estimator.x_max();
+        const double grid_width = grid_x_max - grid_x_min;
+
+        // Issue 1 fix: Verify PDE grid covers price-table moneyness domain
+        // Extraction will interpolate within [x_min_requested, x_max_requested]
+        // so PDE grid must cover that range to avoid extrapolation
+        const double x_min_requested = std::log(axes.grids[0].front());
+        const double x_max_requested = std::log(axes.grids[0].back());
+        const bool covers_domain =
+            (grid_x_min <= x_min_requested) &&
+            (grid_x_max >= x_max_requested);
+
+        // Issue 2 fix: Compute actual max spacing for non-uniform grids
+        // Sinh grids concentrate points at center, so max spacing is in wings
+        // Using average dx would underestimate and potentially violate Von Neumann
+        double max_dx;
+        if (config_.grid_estimator.type() == GridSpec<double>::Type::Uniform) {
+            // Uniform grid: all spacings equal
+            max_dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
+        } else {
+            // Non-uniform grid: generate and find actual max spacing
+            auto grid_buffer = config_.grid_estimator.generate();
+            max_dx = 0.0;
+            for (size_t i = 1; i < grid_buffer.size(); ++i) {
+                double spacing = grid_buffer[i] - grid_buffer[i-1];
+                max_dx = std::max(max_dx, spacing);
+            }
+        }
 
         // Compute minimum required width based on option parameters
         // For accuracy, grid should cover ~3σ√τ on each side of log-moneyness
@@ -225,8 +252,9 @@ PriceTableBuilder<N>::solve_batch(
         const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
 
         const bool grid_meets_constraints =
+            covers_domain &&
             (grid_width <= MAX_WIDTH) &&
-            (dx <= MAX_DX) &&
+            (max_dx <= MAX_DX) &&
             (grid_width >= min_required_width);
 
         if (grid_meets_constraints) {
