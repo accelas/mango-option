@@ -319,7 +319,13 @@ struct PriceTableResult {
 **Step 3a: Extend BatchAmericanOptionSolver API**
 **Location:** `src/option/american_option_batch.hpp` and `src/option/american_option_batch.cpp`
 
-Add new parameter to **both** `solve_batch` overloads:
+**⚠️ IMPLEMENTATION ORDER: Update PUBLIC API first, then thread through to private methods.**
+
+---
+
+**1. PUBLIC API UPDATES** (in header file, lines 187-199)
+
+Add `custom_grid` parameter to **both** public `solve_batch` overloads:
 ```cpp
 // Current signatures (american_option_batch.hpp):
 BatchAmericanOptionResult solve_batch(
@@ -346,9 +352,11 @@ BatchAmericanOptionResult solve_batch(
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
 ```
 
-**Implementation changes in `american_option_batch.cpp`:**
+---
 
-1. **Update vector overload** to forward `custom_grid`:
+**2. IMPLEMENTATION UPDATES** (in .cpp file)
+
+**2a. Update vector overload** to forward `custom_grid`:
 ```cpp
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
     const std::vector<AmericanOptionParams>& params,
@@ -360,11 +368,11 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
 }
 ```
 
-2. **Update internal implementation paths** (preserve existing parameters):
+**2b. Update private method signatures** (header lines 213-241, then implementations)
 
-   **Note:** Keep all existing parameters (`use_shared_grid`, `SetupCallback`) to maintain zero functional changes. Only add `custom_grid` at the end.
+**Note:** Keep all existing parameters (`use_shared_grid`, `SetupCallback`) to maintain zero functional changes. Only add `custom_grid` at the end.
 
-   **VERIFIED CURRENT SIGNATURES** (from american_option_batch.hpp:213-241):
+**VERIFIED CURRENT SIGNATURES** (from american_option_batch.hpp:213-241):
    ```cpp
    // solve_regular_batch - private method (accesses grid_accuracy_ member)
    BatchAmericanOptionResult solve_regular_batch(
@@ -394,7 +402,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
    ```
 
-   **Update span overload dispatch** (src/option/american_option_batch.cpp):
+**2c. Update span overload dispatch** (src/option/american_option_batch.cpp):
    ```cpp
    // Span overload dispatches to either solve_regular_batch or solve_normalized_chain
    // Both paths must thread custom_grid through
@@ -414,7 +422,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
    }
    ```
 
-   **Implementation in solve_regular_batch**:
+**2d. Implementation in solve_regular_batch**:
    ```cpp
    // In implementation, check custom_grid before using grid_accuracy_ member:
    if (custom_grid.has_value()) {
@@ -426,7 +434,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
    }
    ```
 
-   **Implementation in solve_normalized_chain**:
+**2e. Implementation in solve_normalized_chain**:
    ```cpp
    // In implementation, check custom_grid before using grid_accuracy_ member:
    if (custom_grid.has_value()) {
