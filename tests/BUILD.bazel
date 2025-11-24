@@ -902,7 +902,6 @@ cc_test(
         "//src/option:american_option_batch",
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
-        "//src/option:price_table_4d_builder",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],

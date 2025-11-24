@@ -196,30 +196,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_4d_builder",
-    srcs = ["price_table_4d_builder.cpp"],
-    hdrs = ["price_table_4d_builder.hpp"],
-    deps = [
-        ":option_chain",
-        ":american_option_batch",
-        ":price_table_grid",
-        ":price_table_extraction",
-        ":bspline_price_table",
-        "//src/math:bspline_nd_separable",
-        ":price_table_workspace",
-        "//src/pde/core:trbdf2_config",
-        "//src/math:root_finding",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "iv_result",
     hdrs = ["iv_result.hpp"],
     deps = [
