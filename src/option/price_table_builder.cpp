@@ -269,6 +269,28 @@ PriceTableBuilder<N>::solve_batch(
                 accuracy.alpha = config_.grid_estimator.concentration();
             }
 
+            // Compute n_sigma to cover user's requested domain bounds
+            // Domain is centered at x=0 (ATM), with half-width = n_sigma * max_sigma_sqrt_tau
+            // User's domain: [x_min, x_max] from grid_estimator
+            // Required: n_sigma >= max(|x_min|, |x_max|) / max_sigma_sqrt_tau
+            const double x_min = config_.grid_estimator.x_min();
+            const double x_max = config_.grid_estimator.x_max();
+            const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
+
+            // Safety margin (10%) for boundary effects in PDE solver
+            constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+
+            // Compute required n_sigma, guarding against near-zero sigma*sqrt(tau)
+            // (which could happen with very short maturities or near-zero volatility)
+            if (max_sigma_sqrt_tau < 1e-10) {
+                // Fallback to default n_sigma when volatility × sqrt(maturity) ≈ 0
+                accuracy.n_sigma = 5.0;
+            } else {
+                double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+                // Use at least the default (5.0) but expand if needed for user's domain
+                accuracy.n_sigma = std::max(5.0, required_n_sigma);
+            }
+
             solver.set_grid_accuracy(accuracy);
             return solver.solve_batch(batch, true);  // use_shared_grid = true, auto-estimation
         }
