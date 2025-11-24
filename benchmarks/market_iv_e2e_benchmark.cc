@@ -163,20 +163,6 @@ std::vector<MarketObservation> generate_market_observations(
     return observations;
 }
 
-
-PriceTableConfig make_price_table_config(
-    const MarketGrid& grid,
-    size_t n_space = 51,
-    size_t n_time = 500)
-{
-    PriceTableConfig config;
-    config.option_type = OptionType::PUT;
-    config.n_space = n_space;
-    config.n_time = n_time;
-    config.dividend_yield = grid.dividend;
-    return config;
-}
-
 } // namespace
 
 // ============================================================================
@@ -190,7 +176,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
         // API STEP 1: Create grid spec and builder with market grids
         auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
         if (!grid_spec_result) {
-            state.SkipWithError(grid_spec_result.error().c_str());
+            state.SkipWithError("GridSpec creation failed");
             return;
         }
         auto grid_spec = grid_spec_result.value();
@@ -244,7 +230,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     // Build price table once (setup, not timed)
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
     if (!grid_spec_result) {
-        state.SkipWithError(grid_spec_result.error().c_str());
+        state.SkipWithError("GridSpec creation failed");
         return;
     }
     auto grid_spec = grid_spec_result.value();
@@ -355,7 +341,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         // Step 1-2: Build price table
         auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
         if (!grid_spec_result) {
-            state.SkipWithError(grid_spec_result.error().c_str());
+            state.SkipWithError("GridSpec creation failed");
             return;
         }
         auto grid_spec = grid_spec_result.value();

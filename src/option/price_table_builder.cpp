@@ -299,8 +299,8 @@ PriceTableBuilder<N>::extract_tensor(
             " results (Nσ × Nr), got " + std::to_string(batch.results.size()));
     }
 
-    // Create tensor
-    const size_t total_points = Nm * Nt * Nσ * Nr;
+    // Create tensor (use axes.total_points() for consistency with validation)
+    const size_t total_points = axes.total_points();
     const size_t tensor_bytes = total_points * sizeof(double);
     const size_t arena_bytes = tensor_bytes + 64;  // 64-byte alignment padding
 
