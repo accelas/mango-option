@@ -46,7 +46,13 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
             0.0));
     }
 
-    auto spline = std::make_shared<BSpline4D>(*surface.workspace());
+    auto spline_result = BSpline4D::create(*surface.workspace());
+    if (!spline_result.has_value()) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
+    }
+    auto spline = std::make_shared<BSpline4D>(std::move(spline_result.value()));
     return create(
         std::move(spline),
         surface.K_ref(),

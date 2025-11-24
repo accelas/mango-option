@@ -151,7 +151,9 @@ TEST(BSpline4DTest, Construction) {
     EXPECT_NO_THROW({
         auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
         ASSERT_TRUE(workspace.has_value());
-        BSpline4D spline(workspace.value());
+        auto spline_result = BSpline4D::create(workspace.value());
+        ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+        auto spline = std::move(spline_result.value());
     });
 }
 
@@ -180,7 +182,9 @@ TEST(BSpline4DTest, ConstantFunction) {
 
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Test at various points
     std::mt19937 rng(42);
@@ -238,7 +242,9 @@ TEST(BSpline4DTest, SeparableFunction) {
 
     auto workspace = PriceTableWorkspace::create(m_grid, t_grid, v_grid, r_grid, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Test approximation at grid points (not exact without proper fitting)
     // Relaxed tolerance since we're using function values as coefficients
@@ -300,7 +306,9 @@ TEST(BSpline4DTest, BoundaryHandling) {
     std::vector<double> coeffs(8 * 6 * 5 * 4, 1.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Test at boundaries (should not crash)
     EXPECT_NO_THROW({
@@ -339,7 +347,9 @@ TEST(BSpline4DTest, PerformanceSingleEval) {
 
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Warm-up
     for (int i = 0; i < 100; ++i) {
@@ -394,7 +404,9 @@ TEST(BSpline4DTest, PerformanceSmallGrid) {
     std::vector<double> coeffs(10 * 8 * 6 * 5, 1.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     constexpr int n_queries = 100000;
 
@@ -435,7 +447,9 @@ TEST(BSpline4DTest, Accessors) {
     std::vector<double> coeffs(10 * 8 * 6 * 5, 1.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     auto [Nm, Nt, Nv, Nr] = spline.dimensions();
     EXPECT_EQ(Nm, 10);
@@ -467,7 +481,9 @@ TEST(BSpline4DTest, ExactBoundaryEvaluation) {
     std::vector<double> coeffs(8 * 6 * 5 * 4, 42.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Test all 16 corners
     double val1 = spline.eval(m.front(), t.front(), v.front(), r.front());
@@ -516,7 +532,9 @@ TEST(BSpline4DTest, ClampingBehaviorOutsideBounds) {
     std::vector<double> coeffs(8 * 6 * 5 * 4, 10.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Query slightly past each axis boundary
     double val_m_below = spline.eval(m.front() - 0.1, t.front(), v.front(), r.front());
@@ -558,7 +576,9 @@ TEST(BSpline4DTest, ExtremeBoundsClampingRegression) {
     std::vector<double> coeffs(8 * 6 * 5 * 4, 7.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Query WAY outside bounds (100× the grid range)
     double val_extreme1 = spline.eval(-100.0, t.front(), v.front(), r.front());
@@ -596,7 +616,9 @@ TEST(BSpline4DTest, NaNPropagation) {
 
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Query near the NaN coefficient region:
     // Coefficient at (m[0]=0.8, t[5]=2.0, v[0]=0.1, r[0]=0.0)
@@ -626,7 +648,9 @@ TEST(BSpline4DTest, InfCoefficientHandling) {
 
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Should not crash, but may return Inf
     EXPECT_NO_THROW({
@@ -645,7 +669,9 @@ TEST(BSpline4DTest, AllZeroCoefficients) {
     std::vector<double> coeffs(8 * 6 * 5 * 4, 0.0);
     auto workspace = PriceTableWorkspace::create(m, t, v, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    BSpline4D spline(workspace.value());
+    auto spline_result = BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Should return zero everywhere
     double val1 = spline.eval(1.0, 0.5, 0.3, 0.05);
@@ -670,7 +696,9 @@ TEST(BSpline4D, ConstructsFromWorkspace) {
 
     auto ws = mango::PriceTableWorkspace::create(m, tau, sigma, r, coeffs, 100.0, 0.02).value();
 
-    mango::BSpline4D spline(ws);
+    auto spline_result = mango::BSpline4D::create(ws);
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Verify dimensions match
     auto [nm, nt, nv, nr] = spline.dimensions();
@@ -698,12 +726,16 @@ TEST(BSpline4D, WorkspaceAndVectorConstructorsGiveSameResults) {
 
     // Construct from workspace
     auto ws = mango::PriceTableWorkspace::create(m, tau, sigma, r, coeffs, 100.0, 0.02).value();
-    mango::BSpline4D spline_ws(ws);
+    auto spline_ws_result = mango::BSpline4D::create(ws);
+    ASSERT_TRUE(spline_ws_result.has_value()) << "BSpline4D creation failed: " << spline_ws_result.error();
+    auto spline_ws = std::move(spline_ws_result.value());
 
     // Construct from vectors (old API)
     auto workspace = PriceTableWorkspace::create(m, tau, sigma, r, coeffs, 100.0, 0.0);
     ASSERT_TRUE(workspace.has_value());
-    mango::BSpline4D spline_vec(workspace.value());
+    auto spline_vec_result = mango::BSpline4D::create(workspace.value());
+    ASSERT_TRUE(spline_vec_result.has_value()) << "BSpline4D creation failed: " << spline_vec_result.error();
+    auto spline_vec = std::move(spline_vec_result.value());
 
     // Compare evaluations at multiple points
     std::vector<std::tuple<double, double, double, double>> test_points = {

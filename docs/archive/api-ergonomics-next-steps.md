@@ -124,8 +124,12 @@ PriceTableGrid grid{
     .K_ref = surf.K_ref
 };
 
+auto spline_result = BSpline4D::create(*surf.evaluator);
+if (!spline_result.has_value()) {
+    // handle error
+}
 PriceTableSurface surface(
-    std::make_shared<BSpline4D>(*surf.evaluator),  // Share ownership
+    std::make_shared<BSpline4D>(std::move(spline_result.value())),  // Share ownership
     std::move(grid),
     0.0  // dividend
 );

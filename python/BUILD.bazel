@@ -7,7 +7,6 @@ pybind_extension(
         "//src/option:iv_solver_fdm",
         "//src/option:american_option",
         "//src/math:root_finding",
-        "//src/option:iv_types",
         "//src/support:error_types",
     ],
     copts = [

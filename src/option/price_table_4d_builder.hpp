@@ -104,8 +104,16 @@ public:
     /// @param workspace Shared workspace containing all data
     explicit PriceTableSurface(std::shared_ptr<PriceTableWorkspace> workspace)
         : workspace_(std::move(workspace))
-        , evaluator_(workspace_ ? std::make_unique<BSpline4D>(*workspace_) : nullptr)
-    {}
+        , evaluator_(nullptr)
+    {
+        if (workspace_) {
+            auto spline_result = BSpline4D::create(*workspace_);
+            // Precondition: Workspace must be valid (already validated by PriceTable4DBuilder)
+            // BSpline4D creation should not fail if workspace is valid
+            assert(spline_result.has_value() && "BSpline4D creation failed (programming error)");
+            evaluator_ = std::make_unique<BSpline4D>(std::move(spline_result.value()));
+        }
+    }
 
     bool valid() const {
         return workspace_ != nullptr;

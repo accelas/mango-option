@@ -14,6 +14,8 @@
 
 #include "src/math/bspline_nd.hpp"
 #include "src/option/price_table_workspace.hpp"
+#include <expected>
+#include <string>
 #include <memory>
 
 namespace mango {
@@ -25,19 +27,21 @@ namespace mango {
 ///
 /// Usage:
 ///   auto workspace = PriceTableWorkspace::create(...).value();
-///   BSpline4D spline(workspace);  // Now uses BSplineND internally
-///   double price = spline.eval(m, tau, sigma, r);
+///   auto spline_result = BSpline4D::create(workspace);
+///   if (!spline_result) { /* handle error */ }
+///   double price = spline_result->eval(m, tau, sigma, r);
 class BSpline4D {
 public:
-    /// Construct from price table workspace
+    /// Factory method to create BSpline4D from workspace
     ///
     /// @param workspace Workspace containing grids, knots, and coefficients
-    explicit BSpline4D(const PriceTableWorkspace& workspace) {
+    /// @return BSpline4D on success, error message on failure
+    static std::expected<BSpline4D, std::string> create(const PriceTableWorkspace& workspace) {
         // Extract data from workspace
-        m_grid_ = std::vector<double>(workspace.moneyness().begin(), workspace.moneyness().end());
-        tau_grid_ = std::vector<double>(workspace.maturity().begin(), workspace.maturity().end());
-        sigma_grid_ = std::vector<double>(workspace.volatility().begin(), workspace.volatility().end());
-        r_grid_ = std::vector<double>(workspace.rate().begin(), workspace.rate().end());
+        std::vector<double> m_grid(workspace.moneyness().begin(), workspace.moneyness().end());
+        std::vector<double> tau_grid(workspace.maturity().begin(), workspace.maturity().end());
+        std::vector<double> sigma_grid(workspace.volatility().begin(), workspace.volatility().end());
+        std::vector<double> r_grid(workspace.rate().begin(), workspace.rate().end());
 
         std::vector<double> m_knots(workspace.knots_moneyness().begin(), workspace.knots_moneyness().end());
         std::vector<double> tau_knots(workspace.knots_maturity().begin(), workspace.knots_maturity().end());
@@ -46,20 +50,34 @@ public:
 
         std::vector<double> coeffs(workspace.coefficients().begin(), workspace.coefficients().end());
 
-        // Create BSplineND<double, 4> (copy grids for BSplineND)
+        // Create BSplineND<double, 4>
         auto result = BSplineND<double, 4>::create(
-            {m_grid_, tau_grid_, sigma_grid_, r_grid_},
+            {m_grid, tau_grid, sigma_grid, r_grid},
             {std::move(m_knots), std::move(tau_knots), std::move(sigma_knots), std::move(r_knots)},
             std::move(coeffs));
 
         if (!result.has_value()) {
-            // Should never fail if workspace is valid
-            throw std::runtime_error("BSplineND creation failed: " + result.error());
+            return std::unexpected(result.error());
         }
 
-        spline_ = std::make_unique<BSplineND<double, 4>>(std::move(result.value()));
+        // Construct BSpline4D with validated spline
+        return BSpline4D(std::move(m_grid), std::move(tau_grid), std::move(sigma_grid), std::move(r_grid), std::move(result.value()));
     }
 
+private:
+    /// Private constructor (use create() factory instead)
+    BSpline4D(std::vector<double> m_grid, std::vector<double> tau_grid,
+              std::vector<double> sigma_grid, std::vector<double> r_grid,
+              BSplineND<double, 4> spline)
+        : m_grid_(std::move(m_grid))
+        , tau_grid_(std::move(tau_grid))
+        , sigma_grid_(std::move(sigma_grid))
+        , r_grid_(std::move(r_grid))
+        , spline_(std::make_unique<BSplineND<double, 4>>(std::move(spline)))
+    {
+    }
+
+public:
     /// Evaluate price at query point
     ///
     /// @param m Moneyness
@@ -117,11 +135,11 @@ public:
     const std::vector<double>& rate_grid() const { return r_grid_; }
 
 private:
-    std::unique_ptr<BSplineND<double, 4>> spline_;
     std::vector<double> m_grid_;
     std::vector<double> tau_grid_;
     std::vector<double> sigma_grid_;
     std::vector<double> r_grid_;
+    std::unique_ptr<BSplineND<double, 4>> spline_;
 };
 
 }  // namespace mango
