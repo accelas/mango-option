@@ -360,46 +360,70 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
 }
 ```
 
-2. **Update `solve_regular_batch`** (called by span overload):
-```cpp
-// Add custom_grid parameter to solve_regular_batch signature
-BatchAmericanOptionResult solve_regular_batch(
-    std::span<const AmericanOptionParams> params,
-    const GridAccuracyParams& accuracy,
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
+2. **Update internal implementation paths** (preserve existing parameters):
 
-// In implementation, check custom_grid before calling compute_global_grid_for_batch:
-if (custom_grid.has_value()) {
-    // Use provided grid directly (bypass estimation)
-    auto [grid_spec, time_domain] = custom_grid.value();
-    // Build workspace from provided grid_spec + time_domain
-} else {
-    // Existing path: estimate grid via compute_global_grid_for_batch
-}
-```
+   **Note:** Keep all existing parameters (`use_shared_grid`, `SetupCallback`) to maintain zero functional changes. Only add `custom_grid` at the end.
 
-3. **Update `solve_normalized_chain`** (used by price table path with `use_shared_grid=true`):
-```cpp
-// Add custom_grid parameter to solve_normalized_chain signature
-BatchAmericanOptionResult solve_normalized_chain(
-    std::span<const AmericanOptionParams> params,
-    const GridAccuracyParams& accuracy,
-    const std::vector<double>& snapshot_times,
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
+   **Update span overload dispatch** (src/option/american_option_batch.cpp):
+   ```cpp
+   // Span overload dispatches to either solve_regular_batch or solve_normalized_chain
+   // Both paths must thread custom_grid through
+   BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
+       std::span<const AmericanOptionParams> params,
+       bool use_shared_grid,
+       SetupCallback setup,
+       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
+   {
+       if (use_shared_grid && !setup) {
+           // Normalized path: forward custom_grid
+           return solve_normalized_chain(params, accuracy_, snapshot_times_, custom_grid);
+       } else {
+           // Regular path: forward custom_grid
+           return solve_regular_batch(params, accuracy_, setup, custom_grid);
+       }
+   }
+   ```
 
-// In implementation, bypass estimate_grid_for_option when custom_grid provided:
-if (custom_grid.has_value()) {
-    auto [grid_spec, time_domain] = custom_grid.value();
-    // Use provided grid directly
-} else {
-    // Existing path: estimate grid for normalized option
-}
-```
+   **Update `solve_regular_batch`** (keep existing signature, add custom_grid):
+   ```cpp
+   // KEEP existing parameters, add custom_grid at end
+   BatchAmericanOptionResult solve_regular_batch(
+       std::span<const AmericanOptionParams> params,
+       const GridAccuracyParams& accuracy,
+       SetupCallback setup,  // KEEP existing parameter
+       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
+
+   // In implementation:
+   if (custom_grid.has_value()) {
+       auto [grid_spec, time_domain] = custom_grid.value();
+       // Use provided grid directly (bypass compute_global_grid_for_batch)
+   } else {
+       // Existing path: estimate grid via compute_global_grid_for_batch
+   }
+   ```
+
+   **Update `solve_normalized_chain`** (keep existing signature, add custom_grid):
+   ```cpp
+   // KEEP existing parameters, add custom_grid at end
+   BatchAmericanOptionResult solve_normalized_chain(
+       std::span<const AmericanOptionParams> params,
+       const GridAccuracyParams& accuracy,
+       const std::vector<double>& snapshot_times,  // KEEP existing parameter
+       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
+
+   // In implementation:
+   if (custom_grid.has_value()) {
+       auto [grid_spec, time_domain] = custom_grid.value();
+       // Use provided grid directly (bypass estimate_grid_for_option)
+   } else {
+       // Existing path: estimate grid for normalized option
+   }
+   ```
 
 **Impact:** When `custom_grid.has_value()`, bypass all auto-estimation paths and use provided `GridSpec` + `TimeDomain` directly.
 
 **Step 3b: Update PriceTableBuilder to use new API**
-**Location:** `src/option/price_table_builder.cpp:131-142`
+**Location:** `src/option/price_table_builder.cpp:131-150`
 
 ```cpp
 // BEFORE (buggy - only forwards point counts):
@@ -407,10 +431,23 @@ GridAccuracyParams accuracy;
 accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t(100));
 accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
 accuracy.max_time_steps = config_.n_time;
+
+// Extract alpha parameter for sinh-spaced grids
+if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
+    accuracy.alpha = config_.grid_estimator.concentration();
+}
+
 solver.set_grid_accuracy(accuracy);
-return solver.solve_batch(batch, true);  // uses GridAccuracyParams
+
+// Register maturity grid as snapshot times (CRITICAL: enables tensor extraction)
+solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
+
+// Solve batch with shared grid optimization (normalized chain solver)
+return solver.solve_batch(batch, true);  // use_shared_grid = true
 
 // AFTER (fixed - passes complete GridSpec with domain bounds):
+BatchAmericanOptionSolver solver;
+
 // Build custom grid config with user's exact GridSpec
 GridSpec<double> user_grid = config_.grid_estimator;
 
@@ -424,6 +461,10 @@ auto time_domain = TimeDomain::from_n_steps(
 // Pass complete grid specification (bypasses auto-estimation)
 std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
     std::make_pair(user_grid, time_domain);
+
+// CRITICAL: Register maturity grid as snapshot times
+// This enables extract_tensor() to access surfaces at each maturity point
+solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
 // Solve with custom grid (x_min/x_max preserved)
 return solver.solve_batch(batch, true, nullptr, custom_grid);
@@ -458,9 +499,9 @@ if (axes.grids[0].front() <= 0.0) {
     return std::unexpected("Moneyness must be positive (needed for log)");
 }
 
-// 3. Check non-negative maturity
-if (axes.grids[1].front() < 0.0) {
-    return std::unexpected("Maturity cannot be negative");
+// 3. Check positive maturity (strict > 0, matching legacy builder)
+if (axes.grids[1].front() <= 0.0) {
+    return std::unexpected("Maturity must be positive (τ > 0 required for PDE time domain)");
 }
 
 // 4. Check positive volatility
@@ -592,19 +633,71 @@ public:
 };
 ```
 
-**Implementation approach:** Each factory:
-1. Constructs `PriceTableAxes<4>` from input vectors
-2. Constructs `PriceTableConfig` with defaults
-3. Runs validation
-4. Returns both via `std::pair` (caller owns axes, passes to `build()`)
+**Implementation approach:** Each factory must replicate legacy builder behavior:
+
+**`from_vectors()`:**
+1. **Sort and dedupe** each input vector (ascending order, remove duplicates)
+2. Validate all values > 0 (moneyness, maturity, volatility, rate)
+3. Construct `PriceTableAxes<4>` from sorted vectors
+4. Construct `PriceTableConfig` with provided `grid_spec`, `n_time`, `type`, `K_ref`, `dividend_yield`
+5. Run validation (≥4 points per axis, domain coverage)
+6. Return `std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>`
+
+**`from_strikes()`:**
+1. **Sort and dedupe** strikes, maturities, volatilities, rates (ascending order)
+2. Validate strikes > 0 and spot > 0
+3. **Compute moneyness** as `spot / strike` for each strike
+4. **Reverse moneyness order** (descending spot/strike → ascending moneyness for sorted strikes)
+   - Example: strikes [80, 100, 120] with spot=100 → moneyness [0.833, 1.0, 1.25]
+5. **Select K_ref**: Use spot value as reference strike
+6. Construct `PriceTableAxes<4>` with moneyness, maturities, volatilities, rates
+7. Construct `PriceTableConfig` with K_ref=spot, provided grid_spec, n_time, type, dividend_yield
+8. Run validation
+9. Return `std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>`
+
+**`from_chain()`:**
+1. Extract spot, strikes, maturities, implied_vols, rates, dividend_yield from `OptionChain`
+2. **Sort and dedupe** each vector (ascending order, remove duplicates)
+3. Validate strikes > 0 and spot > 0
+4. **Compute moneyness** as `spot / strike` for each strike
+5. **Reverse moneyness order** (see from_strikes logic)
+6. **Select K_ref**: Use chain.spot as reference strike
+7. **Copy dividend_yield** from chain.dividend_yield to config
+8. Construct `PriceTableAxes<4>` with moneyness, maturities, implied_vols, rates
+9. Construct `PriceTableConfig` with K_ref=chain.spot, dividend_yield=chain.dividend_yield, provided grid_spec, n_time, type
+10. Run validation
+11. Return `std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>`
+
+**Reference:** Legacy implementation in `src/option/price_table_4d_builder.hpp:246-337`
 
 ### Step 7: Update All Consumers
-**Inventory of files to update:**
+
+**CRITICAL:** Before Step 8 deletion, perform repo-wide search for all references:
+```bash
+# Search code and docs for all references
+grep -r "PriceTable4DBuilder" tests/ examples/ benchmarks/ docs/ CLAUDE.md --include="*.cc" --include="*.hpp" --include="*.md"
+```
+
+**Known inventory of files to update:**
+
+**Tests:**
 - `tests/price_table_4d_integration_test.cc` - Main integration tests
 - `tests/price_table_end_to_end_performance_test.cc` - Performance tests
-- `benchmarks/market_iv_e2e_benchmark.cc` - Benchmarks
-- `examples/` - Any example files using builder
-- `docs/API_GUIDE.md` - Documentation
+- `tests/quantlib_accuracy_batch_test.cc` - Accuracy tests
+- `tests/normalized_solver_regression_test.cc` - Regression tests
+
+**Benchmarks:**
+- `benchmarks/market_iv_e2e_benchmark.cc` - E2E benchmarks
+- `benchmarks/README_MARKET_IV_E2E.md` - Benchmark docs (lines 44, 128)
+
+**Examples:**
+- Search `examples/` for any usage
+
+**Documentation:**
+- `docs/API_GUIDE.md` - API documentation
+- `CLAUDE.md` - Quick reference (line 137)
+
+**Migration note:** List is not exhaustive. Implementer must verify no references remain before Step 8 deletion.
 
 **Migration pattern for each file:**
 ```cpp
