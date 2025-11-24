@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 
 namespace mango {
 
@@ -119,9 +120,11 @@ double AmericanOptionResult::gamma() const {
 }
 
 double AmericanOptionResult::theta() const {
-    // STUB: Return 0.0 for now
-    // TODO: Implement using finite difference from solution_prev()
-    return 0.0;
+    // Theta computation requires temporal finite differences from successive solution snapshots.
+    // This is not yet implemented - would need Grid to store solution at t and t-dt.
+    throw std::runtime_error(
+        "theta() is not yet implemented. "
+        "Requires temporal finite differences from successive solution snapshots.");
 }
 
 std::pair<size_t, size_t> AmericanOptionResult::find_grid_index(double x) const {

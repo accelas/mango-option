@@ -37,6 +37,7 @@
 #include "src/support/error_types.hpp"
 #include <span>
 #include <optional>
+#include <unordered_map>
 
 namespace mango {
 

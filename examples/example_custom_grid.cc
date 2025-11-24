@@ -15,20 +15,21 @@
 #include <iostream>
 #include <iomanip>
 #include <memory_resource>
+#include <optional>
 
 int main() {
     std::cout << "=== Custom Grid Configuration Example ===\n\n";
 
     // Base option parameters
-    mango::PricingParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .type = mango::OptionType::PUT
-    };
+    mango::OptionSpec spec;
+    spec.spot = 100.0;
+    spec.strike = 100.0;
+    spec.maturity = 1.0;
+    spec.rate = 0.05;
+    spec.dividend_yield = 0.02;
+    spec.type = mango::OptionType::PUT;
+
+    mango::PricingParams params(spec, 0.20);
 
     std::pmr::synchronized_pool_resource pool;
 
@@ -40,16 +41,18 @@ int main() {
     std::cout << "1. AUTO-ESTIMATED GRID (Recommended)\n";
     std::cout << std::string(60, '-') << "\n";
 
-    auto [auto_grid_spec, auto_n_time] = mango::estimate_grid_for_option(params);
+    auto [auto_grid_spec, auto_time_domain] = mango::estimate_grid_for_option(params);
 
-    std::cout << "  Grid: " << auto_grid_spec.n() << " spatial points\n";
-    std::cout << "  Time: " << auto_n_time << " steps\n";
+    std::cout << "  Grid: " << auto_grid_spec.n_points() << " spatial points\n";
+    std::cout << "  Time: " << auto_time_domain.n_steps() << " steps\n";
     std::cout << "  Range: [" << std::fixed << std::setprecision(3)
               << auto_grid_spec.x_min() << ", "
               << auto_grid_spec.x_max() << "]\n";
 
-    auto auto_workspace = mango::PDEWorkspace::create(auto_grid_spec, &pool).value();
-    mango::AmericanOptionSolver auto_solver(params, auto_workspace, auto_n_time);
+    size_t n = auto_grid_spec.n_points();
+    std::pmr::vector<double> auto_buffer(mango::PDEWorkspace::required_size(n), &pool);
+    auto auto_workspace = mango::PDEWorkspace::from_buffer(auto_buffer, n).value();
+    mango::AmericanOptionSolver auto_solver(params, auto_workspace);
     auto auto_result = auto_solver.solve();
 
     std::cout << "  Price: $" << std::setprecision(6) << auto_result->value() << "\n";
@@ -70,8 +73,16 @@ int main() {
     std::cout << "  Grid: 201 uniform points\n";
     std::cout << "  Range: [-3.0, 3.0] (log-moneyness)\n";
 
-    auto uniform_workspace = mango::PDEWorkspace::create(uniform_spec.value(), &pool).value();
-    mango::AmericanOptionSolver uniform_solver(params, uniform_workspace, 1000);
+    size_t n_uniform = uniform_spec->n_points();
+    std::pmr::vector<double> uniform_buffer(mango::PDEWorkspace::required_size(n_uniform), &pool);
+    auto uniform_workspace = mango::PDEWorkspace::from_buffer(uniform_buffer, n_uniform).value();
+
+    // Create custom grid config with manual grid and time domain
+    mango::TimeDomain uniform_time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
+    std::optional<std::pair<mango::GridSpec<double>, mango::TimeDomain>> uniform_config =
+        std::make_pair(uniform_spec.value(), uniform_time);
+
+    mango::AmericanOptionSolver uniform_solver(params, uniform_workspace, std::nullopt, uniform_config);
     auto uniform_result = uniform_solver.solve();
 
     std::cout << "  Price: $" << uniform_result->value() << "\n";
@@ -95,8 +106,16 @@ int main() {
     std::cout << "  Range: [-3.0, 3.0] (log-moneyness)\n";
     std::cout << "  Concentration: Around x=0 (ATM, S=K)\n";
 
-    auto sinh_workspace = mango::PDEWorkspace::create(sinh_spec.value(), &pool).value();
-    mango::AmericanOptionSolver sinh_solver(params, sinh_workspace, 1000);
+    size_t n_sinh = sinh_spec->n_points();
+    std::pmr::vector<double> sinh_buffer(mango::PDEWorkspace::required_size(n_sinh), &pool);
+    auto sinh_workspace = mango::PDEWorkspace::from_buffer(sinh_buffer, n_sinh).value();
+
+    // Create custom grid config with manual grid and time domain
+    mango::TimeDomain sinh_time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
+    std::optional<std::pair<mango::GridSpec<double>, mango::TimeDomain>> sinh_config =
+        std::make_pair(sinh_spec.value(), sinh_time);
+
+    mango::AmericanOptionSolver sinh_solver(params, sinh_workspace, std::nullopt, sinh_config);
     auto sinh_result = sinh_solver.solve();
 
     std::cout << "  Price: $" << sinh_result->value() << "\n";
@@ -127,9 +146,16 @@ int main() {
     std::cout << "    - x=0.0 (ATM, weight=2.0)\n";
     std::cout << "    - x=-0.2 (20% ITM, weight=1.0)\n";
 
-    auto multi_sinh_workspace = mango::PDEWorkspace::create(
-        multi_sinh_spec.value(), &pool).value();
-    mango::AmericanOptionSolver multi_sinh_solver(params, multi_sinh_workspace, 1000);
+    size_t n_multi_sinh = multi_sinh_spec->n_points();
+    std::pmr::vector<double> multi_sinh_buffer(mango::PDEWorkspace::required_size(n_multi_sinh), &pool);
+    auto multi_sinh_workspace = mango::PDEWorkspace::from_buffer(multi_sinh_buffer, n_multi_sinh).value();
+
+    // Create custom grid config with manual grid and time domain
+    mango::TimeDomain multi_sinh_time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
+    std::optional<std::pair<mango::GridSpec<double>, mango::TimeDomain>> multi_sinh_config =
+        std::make_pair(multi_sinh_spec.value(), multi_sinh_time);
+
+    mango::AmericanOptionSolver multi_sinh_solver(params, multi_sinh_workspace, std::nullopt, multi_sinh_config);
     auto multi_sinh_result = multi_sinh_solver.solve();
 
     std::cout << "  Price: $" << multi_sinh_result->value() << "\n";
@@ -153,14 +179,16 @@ int main() {
         .max_time_steps = 500
     };
 
-    auto [fast_grid, fast_n_time] = mango::estimate_grid_for_option(params, fast_accuracy);
-    auto fast_workspace = mango::PDEWorkspace::create(fast_grid.value(), &pool).value();
-    mango::AmericanOptionSolver fast_solver(params, fast_workspace, fast_n_time);
+    auto [fast_grid, fast_time_domain] = mango::estimate_grid_for_option(params, fast_accuracy);
+    size_t n_fast = fast_grid.n_points();
+    std::pmr::vector<double> fast_buffer(mango::PDEWorkspace::required_size(n_fast), &pool);
+    auto fast_workspace = mango::PDEWorkspace::from_buffer(fast_buffer, n_fast).value();
+    mango::AmericanOptionSolver fast_solver(params, fast_workspace);
     auto fast_result = fast_solver.solve();
 
     std::cout << "  Fast mode (tol=1e-2):\n";
-    std::cout << "    Grid: " << fast_grid.value().n() << " points\n";
-    std::cout << "    Time: " << fast_n_time << " steps\n";
+    std::cout << "    Grid: " << fast_grid.n_points() << " points\n";
+    std::cout << "    Time: " << fast_time_domain.n_steps() << " steps\n";
     std::cout << "    Price: $" << fast_result->value() << "\n\n";
 
     // High accuracy mode
@@ -174,14 +202,16 @@ int main() {
         .max_time_steps = 5000
     };
 
-    auto [high_grid, high_n_time] = mango::estimate_grid_for_option(params, high_accuracy);
-    auto high_workspace = mango::PDEWorkspace::create(high_grid.value(), &pool).value();
-    mango::AmericanOptionSolver high_solver(params, high_workspace, high_n_time);
+    auto [high_grid, high_time_domain] = mango::estimate_grid_for_option(params, high_accuracy);
+    size_t n_high = high_grid.n_points();
+    std::pmr::vector<double> high_buffer(mango::PDEWorkspace::required_size(n_high), &pool);
+    auto high_workspace = mango::PDEWorkspace::from_buffer(high_buffer, n_high).value();
+    mango::AmericanOptionSolver high_solver(params, high_workspace);
     auto high_result = high_solver.solve();
 
     std::cout << "  High accuracy mode (tol=1e-6):\n";
-    std::cout << "    Grid: " << high_grid.value().n() << " points\n";
-    std::cout << "    Time: " << high_n_time << " steps\n";
+    std::cout << "    Grid: " << high_grid.n_points() << " points\n";
+    std::cout << "    Time: " << high_time_domain.n_steps() << " steps\n";
     std::cout << "    Price: $" << high_result->value() << "\n\n";
 
     // =========================================================================
@@ -195,7 +225,7 @@ int main() {
               << std::setw(12) << "Delta\n";
     std::cout << std::string(60, '-') << "\n";
     std::cout << std::setw(20) << "Auto-estimated"
-              << std::setw(12) << auto_grid_spec.n()
+              << std::setw(12) << auto_grid_spec.n_points()
               << std::setw(15) << std::setprecision(6) << auto_result->value()
               << std::setw(12) << auto_result->delta() << "\n";
     std::cout << std::setw(20) << "Uniform"
@@ -211,11 +241,11 @@ int main() {
               << std::setw(15) << multi_sinh_result->value()
               << std::setw(12) << multi_sinh_result->delta() << "\n";
     std::cout << std::setw(20) << "Fast mode"
-              << std::setw(12) << fast_grid.value().n()
+              << std::setw(12) << fast_grid.n_points()
               << std::setw(15) << fast_result->value()
               << std::setw(12) << fast_result->delta() << "\n";
     std::cout << std::setw(20) << "High accuracy"
-              << std::setw(12) << high_grid.value().n()
+              << std::setw(12) << high_grid.n_points()
               << std::setw(15) << high_result->value()
               << std::setw(12) << high_result->delta() << "\n";
     std::cout << std::string(60, '=') << "\n";

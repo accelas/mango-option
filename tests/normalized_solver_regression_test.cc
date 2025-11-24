@@ -123,7 +123,10 @@ TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
     auto workspace = workspace_result.value();
 
     // Create solver with custom grid to avoid auto-estimation
-    AmericanOptionSolver solver(params, workspace, std::nullopt, grid_spec, 100);
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params.maturity, 100);
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config =
+        std::make_pair(grid_spec, time_domain);
+    AmericanOptionSolver solver(params, workspace, std::nullopt, custom_grid_config);
 
     // Set snapshot times using the new method
     std::vector<double> snapshot_times = {0.25, 0.5, 0.75, 1.0};

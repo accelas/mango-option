@@ -17,34 +17,38 @@
 #include <vector>
 #include <chrono>
 
+// Helper to create PricingParams
+mango::PricingParams make_params(double spot, double strike, double maturity,
+                                  double volatility, double rate, double dividend) {
+    mango::OptionSpec spec;
+    spec.spot = spot;
+    spec.strike = strike;
+    spec.maturity = maturity;
+    spec.rate = rate;
+    spec.dividend_yield = dividend;
+    spec.type = mango::OptionType::PUT;
+    return mango::PricingParams(spec, volatility);
+}
+
 int main() {
     std::cout << "=== Batch American Option Pricing Example ===\n\n";
 
     // 1. Define a batch of options to price
     std::vector<mango::PricingParams> option_batch = {
         // ATM puts at different maturities
-        {.strike = 100.0, .spot = 100.0, .maturity = 0.25, .volatility = 0.20,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
-        {.strike = 100.0, .spot = 100.0, .maturity = 0.5, .volatility = 0.20,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
-        {.strike = 100.0, .spot = 100.0, .maturity = 1.0, .volatility = 0.20,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
+        make_params(100.0, 100.0, 0.25, 0.20, 0.05, 0.02),
+        make_params(100.0, 100.0, 0.5, 0.20, 0.05, 0.02),
+        make_params(100.0, 100.0, 1.0, 0.20, 0.05, 0.02),
 
         // ITM, ATM, OTM puts (1-year maturity)
-        {.strike = 100.0, .spot = 90.0, .maturity = 1.0, .volatility = 0.20,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
-        {.strike = 100.0, .spot = 100.0, .maturity = 1.0, .volatility = 0.20,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
-        {.strike = 100.0, .spot = 110.0, .maturity = 1.0, .volatility = 0.20,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
+        make_params(90.0, 100.0, 1.0, 0.20, 0.05, 0.02),
+        make_params(100.0, 100.0, 1.0, 0.20, 0.05, 0.02),
+        make_params(110.0, 100.0, 1.0, 0.20, 0.05, 0.02),
 
         // Different volatilities (ATM, 1-year)
-        {.strike = 100.0, .spot = 100.0, .maturity = 1.0, .volatility = 0.10,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
-        {.strike = 100.0, .spot = 100.0, .maturity = 1.0, .volatility = 0.30,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
-        {.strike = 100.0, .spot = 100.0, .maturity = 1.0, .volatility = 0.40,
-         .rate = 0.05, .continuous_dividend_yield = 0.02, .type = mango::OptionType::PUT},
+        make_params(100.0, 100.0, 1.0, 0.10, 0.05, 0.02),
+        make_params(100.0, 100.0, 1.0, 0.30, 0.05, 0.02),
+        make_params(100.0, 100.0, 1.0, 0.40, 0.05, 0.02),
     };
 
     std::cout << "Batch size: " << option_batch.size() << " options\n\n";
@@ -79,13 +83,16 @@ int main() {
         auto solve_start = std::chrono::high_resolution_clock::now();
 
         // Auto-estimate grid for this option
-        auto [grid_spec, n_time] = mango::estimate_grid_for_option(params);
+        auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
+        (void)time_domain;  // Not directly used; solver will reconstruct it
 
-        // Create workspace (reusing pool)
-        auto workspace = mango::PDEWorkspace::create(grid_spec, &pool);
+        // Create workspace (buffer must stay alive through solve)
+        size_t n = grid_spec.n_points();
+        std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
+        auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
 
         // Solve
-        mango::AmericanOptionSolver solver(params, workspace, n_time);
+        mango::AmericanOptionSolver solver(params, workspace);
         auto result = solver.solve();
 
         auto solve_end = std::chrono::high_resolution_clock::now();

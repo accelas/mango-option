@@ -255,7 +255,8 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     const AmericanOptionParams& params)
 {
     // Estimate grid for this option
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    (void)time_domain;  // time_domain not used here; solver will reconstruct it
 
     // Allocate workspace buffer (local, temporary)
     size_t n = grid_spec.n_points();

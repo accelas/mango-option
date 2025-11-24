@@ -69,9 +69,9 @@ struct GridAccuracyParams {
  *
  * @param params Option pricing parameters
  * @param accuracy Grid accuracy parameters (optional)
- * @return Tuple of (GridSpec, n_time_steps)
+ * @return Pair of (GridSpec, TimeDomain) for consistent discretization
  */
-inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
+inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
     const PricingParams& params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
@@ -101,7 +101,8 @@ inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
 
     // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
     auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
-    return {grid_spec.value(), Nt};
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params.maturity, Nt);
+    return {grid_spec.value(), time_domain};
 }
 
 /**
@@ -112,35 +113,39 @@ inline std::tuple<GridSpec<double>, size_t> estimate_grid_for_option(
  *
  * @param params Span of option parameters for the batch
  * @param accuracy Grid accuracy parameters (optional)
- * @return Tuple of (GridSpec, n_time_steps) covering all options
+ * @return Pair of (GridSpec, TimeDomain) covering all options
  */
-inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
+inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
     std::span<const PricingParams> params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
     if (params.empty()) {
         // Return minimal valid sinh grid for empty batch
         auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, accuracy.alpha);
-        return {grid_spec.value(), 100};
+        TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 100);
+        return {grid_spec.value(), time_domain};
     }
 
     double global_x_min = std::numeric_limits<double>::max();
     double global_x_max = std::numeric_limits<double>::lowest();
     size_t global_Nx = 0;
     size_t global_Nt = 0;
+    double max_maturity = 0.0;
 
     // Estimate grid for each option and take union/maximum
     for (const auto& p : params) {
-        auto [grid_spec, Nt] = estimate_grid_for_option(p, accuracy);
+        auto [grid_spec, time_domain] = estimate_grid_for_option(p, accuracy);
         global_x_min = std::min(global_x_min, grid_spec.x_min());
         global_x_max = std::max(global_x_max, grid_spec.x_max());
         global_Nx = std::max(global_Nx, grid_spec.n_points());
-        global_Nt = std::max(global_Nt, Nt);
+        global_Nt = std::max(global_Nt, time_domain.n_steps());
+        max_maturity = std::max(max_maturity, p.maturity);
     }
 
     // Create sinh-spaced grid with same concentration parameter
     auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
-    return {grid_spec.value(), global_Nt};
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, global_Nt);
+    return {grid_spec.value(), time_domain};
 }
 
 /**
@@ -161,16 +166,16 @@ public:
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
      * @param snapshot_times Optional times to record solution snapshots
-     * @param custom_grid Optional custom grid specification (bypasses auto-estimation)
-     * @param custom_n_time Optional custom time steps (used with custom_grid)
+     * @param custom_grid_config Optional custom grid config (GridSpec + TimeDomain)
+     *                           When provided, bypasses auto-estimation entirely.
+     *                           Both must be provided together to ensure consistent discretization.
      * @return AmericanOptionSolver on success, ValidationError on failure
      */
     static std::expected<AmericanOptionSolver, ValidationError>
     create(const PricingParams& params,
            PDEWorkspace workspace,
            std::optional<std::span<const double>> snapshot_times = std::nullopt,
-           std::optional<GridSpec<double>> custom_grid = std::nullopt,
-           std::optional<size_t> custom_n_time = std::nullopt) noexcept;
+           std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config = std::nullopt) noexcept;
 
     /**
      * Direct PDEWorkspace constructor (deprecated - use create() instead).
@@ -181,14 +186,12 @@ public:
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
      * @param snapshot_times Optional times to record solution snapshots
-     * @param custom_grid Optional custom grid specification (bypasses auto-estimation)
-     * @param custom_n_time Optional custom time steps (used with custom_grid)
+     * @param custom_grid_config Optional custom grid config (GridSpec + TimeDomain)
      */
     AmericanOptionSolver(const PricingParams& params,
                         PDEWorkspace workspace,
                         std::optional<std::span<const double>> snapshot_times = std::nullopt,
-                        std::optional<GridSpec<double>> custom_grid = std::nullopt,
-                        std::optional<size_t> custom_n_time = std::nullopt);
+                        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config = std::nullopt);
 
     /**
      * Set snapshot times for solution recording.
@@ -224,8 +227,8 @@ private:
     std::vector<double> snapshot_times_;
 
     // Optional custom grid configuration (bypasses auto-estimation)
-    std::optional<GridSpec<double>> custom_grid_;
-    std::optional<size_t> custom_n_time_;
+    // Both GridSpec and TimeDomain must be provided together for consistent discretization
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config_;
 };
 
 }  // namespace mango

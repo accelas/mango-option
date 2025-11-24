@@ -194,7 +194,7 @@ std::expected<BracketingResult, std::string> OptionBracketing::group_options(
                     .options = std::move(current_bracket),
                     .original_indices = std::move(current_indices),
                     .grid_spec = grid_spec,
-                    .n_time = n_time,
+                    .time_domain = n_time,
                     .stats = stats
                 });
             } else {
@@ -212,7 +212,7 @@ std::expected<BracketingResult, std::string> OptionBracketing::group_options(
                         .options = {current_bracket[j]},
                         .original_indices = {current_indices[j]},
                         .grid_spec = grid_spec,
-                        .n_time = n_time,
+                        .time_domain = n_time,
                         .stats = stats
                     });
                 }
@@ -246,7 +246,7 @@ std::expected<BracketingResult, std::string> OptionBracketing::group_options(
                 .options = std::move(current_bracket),
                 .original_indices = std::move(current_indices),
                 .grid_spec = grid_spec,
-                .n_time = n_time,
+                .time_domain = n_time,
                 .stats = stats
             });
         } else {
@@ -264,7 +264,7 @@ std::expected<BracketingResult, std::string> OptionBracketing::group_options(
                     .options = {current_bracket[j]},
                     .original_indices = {current_indices[j]},
                     .grid_spec = grid_spec,
-                    .n_time = n_time,
+                    .time_domain = n_time,
                     .stats = stats
                 });
             }
@@ -275,7 +275,7 @@ std::expected<BracketingResult, std::string> OptionBracketing::group_options(
     return result;
 }
 
-std::expected<std::pair<GridSpec<double>, size_t>, std::string>
+std::expected<std::pair<GridSpec<double>, TimeDomain>, std::string>
 OptionBracketing::estimate_bracket_grid(
     std::span<const PricingParams> options,
     const GridAccuracyParams& accuracy)
@@ -328,7 +328,8 @@ OptionBracketing::estimate_bracket_grid(
     bracket_rep.strike = 1.0;  // ATM representative
 
     // Get grid estimation for bracket representative
-    auto [grid_spec, n_time] = estimate_grid_for_option(bracket_rep, accuracy);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(bracket_rep, accuracy);
+    size_t n_time = time_domain.n_steps();
 
     // Recompute Nx to maintain dx for the widened domain
     double domain_width = x_max - x_min;
@@ -349,7 +350,9 @@ OptionBracketing::estimate_bracket_grid(
     // Create grid with adjusted bounds and spacing
     grid_spec = GridSpec<double>::uniform(x_min, x_max, n_space).value();
 
-    return std::make_pair(grid_spec, n_time);
+    // Create TimeDomain from n_time
+    TimeDomain result_time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
+    return std::make_pair(grid_spec, result_time_domain);
 }
 
 } // namespace mango

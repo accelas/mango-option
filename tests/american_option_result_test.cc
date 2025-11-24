@@ -190,14 +190,14 @@ TEST_F(AmericanOptionResultTest, CallOptionGreeks) {
     EXPECT_LE(delta, 1.0);
 }
 
-// Test 10: Theta (stub returns 0.0 for now)
+// Test 10: Theta (not yet implemented - should throw)
 TEST_F(AmericanOptionResultTest, ThetaStub) {
     AmericanOptionResult result(grid, params);
 
-    double theta = result.theta();
-
-    // For now, theta is stubbed to return 0.0
-    EXPECT_DOUBLE_EQ(theta, 0.0);
+    // theta() is not yet implemented and should throw std::runtime_error
+    EXPECT_THROW({
+        result.theta();
+    }, std::runtime_error);
 }
 
 // Test 11: Gamma correction term verification

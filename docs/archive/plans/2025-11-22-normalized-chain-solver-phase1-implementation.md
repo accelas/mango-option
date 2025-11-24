@@ -177,7 +177,7 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
     }
 
     // 6. Grid constraints (dx, width, margins)
-    auto [grid_spec, n_time] = estimate_grid_for_option(first, grid_accuracy_);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(first, grid_accuracy_);
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
     size_t n_space = grid_spec.n_points();
@@ -335,7 +335,7 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
     }
 
     // Check grid constraints
-    auto [grid_spec, n_time] = estimate_grid_for_option(first, grid_accuracy_);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(first, grid_accuracy_);
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
     size_t n_space = grid_spec.n_points();

@@ -1112,7 +1112,7 @@ Modify `src/option/american_option.cpp`:
 std::expected<AmericanOptionResult, SolverError>
 AmericanOptionSolver::solve() {
     // Estimate grid configuration
-    auto [grid_spec, n_time] = estimate_grid_for_option(params_);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params_);
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params_.maturity, n_time);
 
     // Validate workspace size

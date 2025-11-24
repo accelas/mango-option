@@ -1,12 +1,10 @@
-# WIP: These examples need API fixes before they compile
-# TODO: Fix API mismatches (GridSpec, PricingParams, AmericanOptionResult)
-# cc_binary(
-#     name = "example_american_option_pricing",
-#     srcs = ["example_american_option_pricing.cc"],
-#     deps = [
-#         "//src/option:american_option",
-#     ],
-# )
+cc_binary(
+    name = "example_american_option_pricing",
+    srcs = ["example_american_option_pricing.cc"],
+    deps = [
+        "//src/option:american_option",
+    ],
+)
 
 # cc_binary(
 #     name = "example_iv_solver_fdm",
@@ -16,30 +14,30 @@
 #     ],
 # )
 
-# cc_binary(
-#     name = "example_batch_pricing",
-#     srcs = ["example_batch_pricing.cc"],
-#     deps = [
-#         "//src/option:american_option",
-#     ],
-# )
+cc_binary(
+    name = "example_batch_pricing",
+    srcs = ["example_batch_pricing.cc"],
+    deps = [
+        "//src/option:american_option",
+    ],
+)
 
-# cc_binary(
-#     name = "example_greeks_calculation",
-#     srcs = ["example_greeks_calculation.cc"],
-#     deps = [
-#         "//src/option:american_option",
-#     ],
-# )
+cc_binary(
+    name = "example_greeks_calculation",
+    srcs = ["example_greeks_calculation.cc"],
+    deps = [
+        "//src/option:american_option",
+    ],
+)
 
-# cc_binary(
-#     name = "example_custom_grid",
-#     srcs = ["example_custom_grid.cc"],
-#     deps = [
-#         "//src/option:american_option",
-#         "//src/pde/core:grid",
-#     ],
-# )
+cc_binary(
+    name = "example_custom_grid",
+    srcs = ["example_custom_grid.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/pde/core:grid",
+    ],
+)
 
 cc_binary(
     name = "example_expected_validation",

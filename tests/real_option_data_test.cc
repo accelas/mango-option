@@ -74,7 +74,7 @@ TEST(RealOptionDataTest, SolverMatchesRecordedPrices) {
         params.type = option_type->Value(i) == 0 ? OptionType::PUT : OptionType::CALL;
 
         // Create workspace for this option's estimated grid
-        auto [grid_spec, n_time] = estimate_grid_for_option(params);
+        auto [grid_spec, time_domain] = estimate_grid_for_option(params);
         auto workspace_result = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource());
         ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
 
