@@ -464,107 +464,259 @@ if (!result && result.error().code ==
 
 ### 1. Ownership Model - Move Semantics
 
-**Issue:** `BSpline4D::create(PriceTableWorkspace&& ws)` moving large workspace may cause extra copies.
+**Issue:** `BSpline4D::create(PriceTableWorkspace&& ws)` moving large workspace may cause extra copies. Returning `expected<BSpline4D>` by value forces workspace to live inside expected temporarily.
 
 **Resolution:**
-- Ensure `PriceTableWorkspace` has deleted copy constructor
-- Factory returns `std::expected<BSpline4D, string>` by value (NRVO applies)
-- Constructor is `explicit BSpline4D(PriceTableWorkspace&& ws) : workspace_(std::move(ws))`
-- Thread safety: `shared_ptr<BSpline4D>` in `PriceTableSurface` is thread-safe for read-only eval()
+- Change factory signature to return pointer directly:
+  ```cpp
+  static std::expected<std::shared_ptr<BSpline4D>, std::string>
+  create(PriceTableWorkspace&& ws);
+  ```
+- Implementation moves workspace directly into heap-allocated BSpline4D:
+  ```cpp
+  std::expected<std::shared_ptr<BSpline4D>, std::string>
+  BSpline4D::create(PriceTableWorkspace&& ws) {
+      // Validate workspace...
+      return std::make_shared<BSpline4D>(std::move(ws));
+  }
+  ```
+- Ensure `PriceTableWorkspace` has deleted copy constructor, move-only
+- Thread safety: `shared_ptr<BSpline4D>` is thread-safe for concurrent eval()
+- **Testing:** Add instrumentation to count PriceTableWorkspace moves/copies, verify exactly 1 move occurs
 
 ### 2. Memory Safety - Parallel Loop
 
-**Issue:** Flattened loop assumes `batch_result.results[batch_idx]` exists for all (vol,r) pairs.
+**Issue:** Flattened loop assumes `batch_result.results[batch_idx]` exists for all (vol,r) pairs. Silent `continue` on failures leaves uninitialized data.
 
 **Resolution:**
-- Add bounds check: `if (batch_idx >= batch_result.results.size()) continue;`
-- Check result validity: `if (!result_expected.has_value() || !result_expected->converged) continue;`
+- Track failed slices explicitly instead of silently skipping:
+  ```cpp
+  std::atomic<size_t> failed_slices{0};
+
+  #pragma omp parallel for
+  for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
+      // Decode indices...
+
+      if (batch_idx >= batch_result.results.size() ||
+          !result_expected.has_value() ||
+          !result_expected->converged) {
+          failed_slices.fetch_add(1, std::memory_order_relaxed);
+          continue;  // Leave zeros in prices_view
+      }
+      // ... spline interpolation
+  }
+
+  if (failed_slices.load() > 0) {
+      return std::unexpected(PriceTableError{
+          .code = PriceTableErrorCode::INCOMPLETE_RESULTS,
+          .invalid_values = {static_cast<double>(failed_slices.load())},
+          .details = std::to_string(failed_slices.load()) + " slices failed"
+      });
+  }
+  ```
 - Each iteration writes to unique `prices_view[m_idx, mat_idx, vol_idx, r_idx]` - no contention
 - Spline objects are stack-allocated per iteration - no shared state
+- Bounds check is per-slice (outer loop), not per-lattice-node (inner loop) - negligible overhead
+- **Testing:** Inject batch failures, verify error is surfaced (not silent zeros)
 
 ### 3. API Breaking Changes - Serialization
 
-**Issue:** Serialization code expects `PriceTableSurface(shared_ptr<workspace>)` constructor.
+**Issue:** Serialization code expects `PriceTableSurface(shared_ptr<workspace>)` constructor. Unconditional `.value()` on expected will terminate on failure.
 
 **Resolution:**
-- Update serialization to deserialize workspace first, then construct BSpline4D:
+- Update serialization with proper error handling:
   ```cpp
-  auto workspace = load_workspace_from_arrow(file);
-  auto evaluator_result = BSpline4D::create(std::move(workspace));
-  auto surface = PriceTableSurface(
-      std::make_shared<BSpline4D>(std::move(evaluator_result.value())));
+  std::expected<PriceTableSurface, std::string>
+  deserialize_surface(const std::filesystem::path& file) {
+      auto workspace_result = load_workspace_from_arrow(file);
+      if (!workspace_result) {
+          return std::unexpected("Failed to load workspace: " +
+                                 workspace_result.error());
+      }
+
+      auto evaluator_result = BSpline4D::create(std::move(workspace_result.value()));
+      if (!evaluator_result) {
+          return std::unexpected("Failed to create evaluator: " +
+                                 evaluator_result.error());
+      }
+
+      return PriceTableSurface(evaluator_result.value());  // shared_ptr, cheap copy
+  }
   ```
-- Add to implementation checklist: audit Arrow exporter, snapshot replay
+- Workspace move is cheap (moved into make_shared inside create())
+- Add to implementation checklist: audit Arrow exporter, snapshot replay, scripting bindings
+- **Testing:** Verify no extra allocations during deserialize (memory profiler or custom allocator)
 
 ### 4. Grid Configuration - Solver API
 
-**Issue:** Does `BatchAmericanOptionSolver` handle both `custom_grid_config` and `GridAccuracyParams`?
+**Issue:** Are `custom_grid_config` and `GridAccuracyParams` truly mutually exclusive? What if both are set? What about adaptive solvers?
 
 **Resolution:**
-- Per PR #244 API: `AmericanOptionSolver` constructor takes `custom_grid_config` parameter
-- When `custom_grid_config` is provided, solver uses it directly (bypasses auto-estimation)
-- When nullopt, solver uses `GridAccuracyParams` for auto-estimation
-- These paths are mutually exclusive by design
-- Add validation: when `x_bounds` provided, do NOT call `set_grid_accuracy()`
+- Add validation to ensure mutual exclusivity:
+  ```cpp
+  if (config.x_bounds.has_value()) {
+      // Build custom_grid_config...
+      custom_grid_config = std::make_pair(grid_spec, time_domain);
+
+      // Explicitly DO NOT call set_grid_accuracy() - paths are exclusive
+  } else {
+      // Use GridAccuracyParams
+      GridAccuracyParams accuracy;
+      // ...
+      batch_solver.set_grid_accuracy(accuracy);
+
+      // custom_grid_config remains nullopt
+  }
+
+  // Assert mutual exclusivity
+  assert(!(custom_grid_config.has_value() && /* accuracy was set */));
+  ```
+- Document contract in PriceTableConfig:
+  - If `x_bounds` is set: grid is FIXED, no adaptive modification allowed
+  - If `x_bounds` is nullopt: auto-estimation with adaptive time steps allowed
+- **Testing:** Test both paths independently, verify error if both supplied
 
 ### 5. Error Handling - Rich Context
 
-**Issue:** `PriceTableError` only has `invalid_values` and `expected_value` - may need more context.
+**Issue:** `PriceTableError` with default values misleading (`axis_index=0` implies moneyness even when irrelevant, `expected_value=0.0` ambiguous).
 
 **Resolution:**
-- Add optional fields to `PriceTableError`:
+- Use optional for ambiguous fields:
   ```cpp
   struct PriceTableError {
       PriceTableErrorCode code;
       std::vector<double> invalid_values;
-      double expected_value = 0.0;
-      std::optional<std::string> details;  // For complex contexts
-      size_t axis_index = 0;  // Which dimension failed (0=m, 1=τ, 2=σ, 3=r)
+      std::optional<double> expected_value;  // nullopt when not applicable
+      std::optional<std::string> details;    // For complex contexts
+      std::optional<size_t> axis_index;      // 0=m, 1=τ, 2=σ, 3=r, nullopt=not axis-specific
   };
   ```
-- Most errors use just code + values, but complex cases can add `details`
+- Example usage:
+  ```cpp
+  // Axis-specific error
+  PriceTableError{
+      .code = INVALID_GRID_UNSORTED,
+      .invalid_values = maturity_,
+      .axis_index = 1  // τ axis
+  };
+
+  // Scalar error
+  PriceTableError{
+      .code = INVALID_GRID_MISSING_TERMINAL,
+      .invalid_values = {maturity_.back()},
+      .expected_value = T_max
+  };
+  ```
+- **Testing:** Verify serialization/deserialization of error structs, test ABI stability
 
 ### 6. Validation Placement - Solver Grid Modifications
 
 **Issue:** Solver might modify time grid after validation (adaptive steps, padding).
 
 **Resolution:**
-- Validation ensures input is well-formed before solver
-- If using `custom_grid_config`, grid is fixed (no adaptive modification)
-- If using auto-estimation, validation only checks snapshot times are reasonable
-- Add post-solve assertion in extraction: verify `result.grid()->num_snapshots() == maturity_.size()`
-- If mismatch, error indicates solver dropped snapshots (programming error, not user error)
+- **With custom_grid_config (x_bounds set):**
+  - Grid is FIXED, no adaptive modification
+  - Post-solve: assert exact equality `num_snapshots() == maturity_.size()`
+  - Mismatch indicates programming error
+
+- **With auto-estimation (x_bounds nullopt):**
+  - Adaptive padding allowed
+  - Post-solve: verify requested snapshots are subset of actual snapshots
+  - Check: `for each requested_time: exists actual_time within epsilon`
+  - Mismatch indicates solver dropped snapshots (error)
+
+- Update extraction to handle both modes:
+  ```cpp
+  if (custom_grid_config.has_value()) {
+      if (result.grid()->num_snapshots() != maturity_.size()) {
+          return std::unexpected(PriceTableError{
+              .code = PriceTableErrorCode::SNAPSHOT_MISMATCH
+          });
+      }
+  } else {
+      for (double t : maturity_) {
+          if (!/* t in result snapshots */) {
+              return std::unexpected(PriceTableError{
+                  .code = PriceTableErrorCode::SNAPSHOT_DROPPED,
+                  .invalid_values = {t}
+              });
+          }
+      }
+  }
+  ```
+- **Testing:** Test both fixed and adaptive modes separately
 
 ### 7. Diagnostics - Grid Access
 
-**Issue:** `compute_residuals()` needs moneyness/maturity grids from builder.
+**Issue:** `compute_residuals()` needs grids from builder. Downstream consumers (Arrow export, CLI) need grid access after removing `prices_4d`.
 
 **Resolution:**
 - Builder stores grids as members: `moneyness_`, `maturity_`, `volatility_`, `rate_`
-- `compute_residuals()` is a builder method, so it has access to these grids
-- Implementation:
+- `compute_residuals()` is builder method with grid access
+- For massive grids (>10 GB): use streaming to avoid memory explosion:
   ```cpp
   std::expected<ResidualStats, PriceTableError>
-  PriceTable4DBuilder::compute_residuals(const PriceTableSurface& surface) const
+  PriceTable4DBuilder::compute_residuals(
+      const PriceTableSurface& surface,
+      size_t subsample_factor = 1) const  // subsample for huge grids
   {
-      // Use builder's moneyness_, maturity_ grids
-      // Evaluate surface.eval(m, tau, sigma, r) at each grid point
-      // Compare with re-evaluated spline
+      ResidualStats stats;
+      // Stream through grid points, don't materialize full tensor
+      for (size_t m_idx = 0; m_idx < Nm; m_idx += subsample_factor) {
+          for (size_t t_idx = 0; t_idx < Nt; t_idx += subsample_factor) {
+              for (size_t v_idx = 0; v_idx < Nv; v_idx += subsample_factor) {
+                  for (size_t r_idx = 0; r_idx < Nr; r_idx += subsample_factor) {
+                      double actual = surface.eval(...);
+                      // Compare with ground truth, update stats
+                  }
+              }
+          }
+      }
+      return stats;
   }
   ```
+- Expose grids via builder accessors for downstream consumers:
+  ```cpp
+  class PriceTable4DBuilder {
+  public:
+      std::span<const double> moneyness() const { return moneyness_; }
+      std::span<const double> maturity() const { return maturity_; }
+      std::span<const double> volatility() const { return volatility_; }
+      std::span<const double> rate() const { return rate_; }
+  };
+  ```
+- Arrow export uses `builder.moneyness()` + `surface.eval()` instead of `result.prices_4d`
+- **Testing:** Test residuals with 1GB+ grids using subsampling
 
 ### 8. Missing Updates - Downstream Consumers
 
-**Issue:** Removing `prices_4d` breaks tests, Arrow export, CLI tools.
+**Issue:** Removing `prices_4d` breaks tests, Arrow export, CLI tools. Need concrete migration strategy.
 
 **Resolution:**
-- Add to implementation plan (before step 4):
-  - **3.5. Audit all consumers of prices_4d**
-    - Find with: `grep -r "prices_4d" tests/ examples/ tools/`
-    - Update tests to use `compute_residuals()` or remove raw price checks
-    - Update Arrow exporter to use `precompute_with_save()` streaming path
-    - Update CLI tools to use new diagnostic APIs
-- Add to migration guide: deprecation timeline for `prices_4d` access
+- Add to implementation plan (step 3.5 before removing prices_4d):
+  - **Audit all consumers:**
+    ```bash
+    grep -r "prices_4d" tests/ examples/ tools/ benchmarks/
+    grep -r "PriceTable4DResult" tests/ examples/ tools/
+    ```
+  - **Update each consumer category:**
+    - **Unit tests comparing raw prices:** Use `compute_residuals()` instead
+    - **Integration tests diffing tables:** Use `precompute_with_save()` to serialize, diff files
+    - **Arrow export:** Replace `result.prices_4d` with loop over `builder.moneyness()` + `surface.eval()`
+    - **CLI diagnostic tools:** Add `--compute-residuals` flag, remove `--dump-raw-prices`
+    - **Benchmarks measuring memory:** Update expected values (should drop by ~2 GB)
+  - **Migration path:**
+    - Phase 1 (this PR): Add new APIs (`compute_residuals`, `builder.moneyness()`, `precompute_with_save`)
+    - Phase 2 (this PR): Update all consumers to use new APIs
+    - Phase 3 (this PR): Remove `prices_4d` from `PriceTable4DResult`
+- **Testing strategy:**
+  - Before removing `prices_4d`: add tests for all new APIs
+  - After removing: verify no compilation errors, all tests pass
+  - Add regression test: ensure `PriceTable4DResult` size < 1 KB (was ~2 GB)
+- **Performance validation:**
+  - Benchmark extraction phase before/after parallelization
+  - Document overhead of bounds checks (should be <1%)
+  - Profile `compute_residuals()` with 10 GB grid
 
 ## References
 
