@@ -26,10 +26,11 @@ This refactor is split into **two phases**:
 - **Delete specialized builder** completely (not just deprecate)
 
 **Critical fixes required for parity:**
-1. Grid configuration must honor user's `config.grid_estimator` (lines 131-142 bug fix)
-2. Return `PriceTableResult<N>` with full diagnostics (not just surface pointer)
-3. Comprehensive validation (prevent 2-point grids, negative values, out-of-domain)
-4. Helper factories that return both builder AND axes (axes ownership solved)
+1. **Replace AlignedArena with PMR** (lines 183-186) - Use `std::pmr::vector` like rest of codebase
+2. Grid configuration must honor user's `config.grid_estimator` (lines 131-142 bug fix)
+3. Return `PriceTableResult<N>` with full diagnostics (not just surface pointer)
+4. Comprehensive validation (prevent 2-point grids, negative values, out-of-domain)
+5. Helper factories that return both builder AND axes (axes ownership solved)
 
 **Timeline:** Must be completed atomically (no intermediate broken state)
 
@@ -114,7 +115,56 @@ double price = surface->value({1.0, 0.25, 0.20, 0.05});
 
 ## Implementation Steps (Phase 1)
 
-### Step 1: Add `PriceTableResult<N>` struct
+### Step 1: Replace AlignedArena with PMR
+**Location:** `src/option/price_table_builder.cpp:178-194`
+
+**Problem:** Generic builder uses custom `memory::AlignedArena`, but rest of codebase uses standard PMR allocators
+
+**Solution:** Replace with `std::pmr::vector` pattern used elsewhere:
+
+```cpp
+// BEFORE (lines 178-194):
+const size_t total_points = Nm * Nt * Nσ * Nr;
+const size_t tensor_bytes = total_points * sizeof(double);
+const size_t arena_bytes = tensor_bytes + 64;  // 64-byte alignment padding
+
+auto arena = memory::AlignedArena::create(arena_bytes);
+if (!arena.has_value()) {
+    return std::unexpected("Failed to create arena: " + arena.error());
+}
+
+std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
+auto tensor_result = PriceTensor<N>::create(shape, arena.value());
+if (!tensor_result.has_value()) {
+    return std::unexpected("Failed to create tensor: " + tensor_result.error());
+}
+
+auto tensor = tensor_result.value();
+
+// AFTER (use PMR like american_option_batch.cpp:442-446):
+const size_t total_points = Nm * Nt * Nσ * Nr;
+
+// Use PMR for temporary tensor storage (discarded after fitting)
+std::pmr::monotonic_buffer_resource pool;
+std::pmr::vector<double> tensor_data(&pool);
+tensor_data.resize(total_points, 0.0);
+
+// Wrap in mdspan for N-D access
+std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
+using std::experimental::mdspan;
+using std::experimental::dextents;
+mdspan<double, dextents<size_t, N>> tensor(tensor_data.data(), Nm, Nt, Nσ, Nr);
+```
+
+**Benefits:**
+- Consistent with rest of codebase (american_option_batch.cpp, iv_solver_fdm.cpp)
+- Standard C++17 PMR instead of custom arena
+- Thread-local pools possible for multi-threaded builds
+- No custom error handling for arena allocation
+
+**Impact:** Remove dependency on `memory::AlignedArena`, simplify code
+
+### Step 2: Add `PriceTableResult<N>` struct
 **Location:** `src/option/price_table_builder.hpp`
 
 ```cpp
@@ -151,7 +201,7 @@ struct PriceTableResult {
 
 **Update:** Change `build()` signature to return `PriceTableResult<N>` instead of `shared_ptr<Surface<N>>`
 
-### Step 2: Fix Grid Configuration Bug
+### Step 3: Fix Grid Configuration Bug
 **Location:** `src/option/price_table_builder.cpp:131-142`
 
 ```cpp
@@ -172,7 +222,7 @@ if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
 }
 ```
 
-### Step 3: Port Validation Logic
+### Step 4: Port Validation Logic
 **Location:** `src/option/price_table_builder.cpp` (in `build()` method)
 
 ```cpp
@@ -217,7 +267,7 @@ if (config_.K_ref <= 0.0) {
 // (Port the x_bounds validation logic from PriceTable4DBuilder::precompute)
 ```
 
-### Step 4: Add Helper Factories
+### Step 5: Add Helper Factories
 **Location:** `src/option/price_table_builder.hpp`
 
 ```cpp
@@ -261,7 +311,7 @@ public:
 3. Runs validation
 4. Returns both via `std::pair` (caller owns axes, passes to `build()`)
 
-### Step 5: Update All Consumers
+### Step 6: Update All Consumers
 **Inventory of files to update:**
 - `tests/price_table_4d_integration_test.cc` - Main integration tests
 - `tests/price_table_end_to_end_performance_test.cc` - Performance tests
@@ -285,7 +335,7 @@ auto surface = result.surface;
 const auto& stats = result.fitting_stats;
 ```
 
-### Step 6: Delete Specialized Builder
+### Step 7: Delete Specialized Builder
 **Files to delete:**
 - `src/option/price_table_4d_builder.hpp`
 - `src/option/price_table_4d_builder.cpp`
@@ -293,7 +343,7 @@ const auto& stats = result.fitting_stats;
 
 **Verify:** Run `bazel test //...` to ensure no broken dependencies
 
-### Step 7: Update Documentation
+### Step 8: Update Documentation
 - `docs/API_GUIDE.md` - Replace all examples with generic builder
 - Inline doc comments - Update to reference `PriceTableBuilder<4>`
 - `CLAUDE.md` - Update quick reference examples
