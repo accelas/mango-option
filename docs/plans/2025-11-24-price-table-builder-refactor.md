@@ -356,7 +356,7 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
 
 **Keep extraction assert as safety net:**
 ```cpp
-// In extract_batch_results_to_4d (line 42)
+// In extract_batch_results (line 42)
 assert(n_time != 0 && "No snapshots recorded (programming error)");
 ```
 
@@ -367,32 +367,43 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 1. **Add PriceTableError type** - Foundation for all error handling
 2. **Refactor BSplineEvaluator ownership** - Own workspace, update constructor
 3. **Refactor PriceTableSurface** - Wrap BSplineEvaluator only, expose workspace
-4. **Remove prices_4d from result** - Update PriceTableResult struct
+4. **Add diagnostic methods** - compute_residuals(), precompute_with_save() (MUST come before removing prices_4d)
 5. **Add snapshot validation** - In precompute() before solver setup
 6. **Fix grid configuration** - Respect x_bounds, build custom_grid_config
-7. **Parallelize extraction** - Flatten loop in extract_batch_results_to_4d
-8. **Add diagnostic methods** - compute_residuals(), precompute_with_save()
+7. **Parallelize extraction** - Flatten loop in extract_batch_results
+8. **Remove prices_4d from result** - Update PriceTableResult struct (safe now that diagnostics exist)
 9. **Update tests** - All affected test cases
 10. **Update examples/docs** - Reflect new API
 
 ## Testing Plan
 
 ### Unit Tests
-- `price_table_error_test.cc` - Error type construction and handling
+- `price_table_error_test.cc` - Error type construction and handling for all new error codes (INCOMPLETE_RESULTS, SNAPSHOT_MISMATCH, SNAPSHOT_DROPPED, etc.)
 - `price_table_surface_test.cc` - Surface ownership and workspace access
 - `price_table_validation_test.cc` - All snapshot validation cases
 - `price_table_grid_config_test.cc` - x_bounds precedence logic
+- `price_table_diagnostics_test.cc` - New diagnostic APIs:
+  - `compute_residuals()` returns valid tensor with correct dimensions
+  - `precompute_with_save()` creates valid Parquet files
+  - Builder grid accessors (`.moneyness()`, `.maturity()`, etc.) return correct spans
+- `price_table_extraction_test.cc` - Atomic failure tracking:
+  - Partial failures increment atomic counter correctly
+  - INCOMPLETE_RESULTS error returned when failed_slices > 0
+  - Error includes count in invalid_values field
 
 ### Integration Tests
 - `price_table_builder_test.cc` - Update existing tests for new API
 - Test error cases: unsorted grid, missing T_max, exceeds T_max
 - Test x_bounds respected vs auto-estimation fallback
 - Verify no prices_4d in result
+- Test new error code paths (INVALID_GRID_EMPTY, INVALID_GRID_EXCEEDS_TERMINAL, etc.)
+- Test diagnostic workflow: build surface → compute residuals → verify quality
 
 ### Performance Tests
-- Measure extraction phase scaling with core count
+- Measure extraction phase scaling with core count (should be linear to 64 cores)
 - Verify memory usage reduction (no raw tensor in result)
 - Benchmark with large grids (200×100×50×20)
+- Verify atomic counter overhead is negligible
 
 ## Migration Guide
 
@@ -472,13 +483,57 @@ if (!result && result.error().code ==
 }
 ```
 
+### Phased Rollout Strategy
+
+This refactor breaks the `PriceTableResult` API. Follow this three-phase migration:
+
+**Phase 1: Add New APIs (Step 4 in Implementation Order)**
+- Add `compute_residuals(surface) -> std::vector<double>` to builder
+- Add `precompute_with_save(config, path) -> expected<void, PriceTableError>` to builder
+- Add grid accessors to builder: `.moneyness()`, `.maturity()`, `.volatility()`, `.rate()`
+- **Action:** Run `bazel test //tests:price_table_diagnostics_test` to verify new APIs work
+- **Validation:** All new APIs have test coverage before Phase 2
+
+**Phase 2: Update All Consumers (Steps 5-7 in Implementation Order)**
+- Find all uses: `grep -r "prices_4d" tests/ examples/ tools/ benchmarks/`
+- **Update patterns:**
+  - Tests: Replace `result.prices_4d` access with `compute_residuals()` or direct `surface.eval()` calls
+  - Arrow export: Replace `result.prices_4d` with loop over `builder.moneyness()` + `surface.eval()`
+  - CLI diagnostic tools: Add `--compute-residuals` flag, remove `--dump-raw-prices`
+  - Benchmarks: Update expected memory values (should drop by ~2 GB)
+- **Action:** Run `bazel test //... && bazel build //...` to verify all consumers still work
+- **Validation:** No compilation errors, all tests pass with old API still present
+
+**Phase 3: Remove prices_4d (Step 8 in Implementation Order)**
+- Remove `std::vector<double> prices_4d` field from `PriceTableResult` struct
+- Remove `prices_4d` population code from `precompute()` implementation
+- **Action:** Run `bazel test //... && bazel build //...` to verify nothing breaks
+- **Validation:** Compilation succeeds (proves all consumers migrated), memory usage drops by ~2.5 GB
+
+**Rollback Plan:**
+- If Phase 3 breaks: Revert removal, add deprecated warnings to `prices_4d` field
+- If Phase 2 breaks specific consumer: Keep that consumer using old API, mark as technical debt
+
+**Timeline:**
+- Phases 1-3 happen in single PR (all implementation order steps 4-8)
+- No external API changes until Phase 3 completes
+- Internal refactor only - no user-facing changes during Phases 1-2
+
 ## Success Metrics
 
-- Memory usage: <100 MB for typical 50×30×20×10 grid (vs ~2.5 GB before)
+**Memory usage (for typical 50×30×20×10 grid):**
+- Per-surface savings: ~2.4 MB eliminated by removing duplicate coefficient storage (Resolution #1)
+- Total result size: <100 MB vs ~2.5 GB before (Resolution #2 removes prices_4d from PriceTableResult)
+- Clarification: 2.4 MB is saved every time a surface is copied/stored; 2.5 GB is saved once by not returning raw tensor
+
+**Performance:**
 - Extraction scaling: Linear speedup to 64 cores
 - Error rate: Zero "moneyness outside PDE bounds" errors with explicit x_bounds
 - Validation: 100% of invalid grids caught before PDE work
-- API clarity: No duplicate storage, clear ownership chain
+
+**API Quality:**
+- No duplicate storage, clear ownership chain
+- Structured error handling with PriceTableError
 
 ## Code Review Findings & Resolutions
 
