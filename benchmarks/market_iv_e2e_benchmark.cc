@@ -187,12 +187,18 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
 
     for (auto _ : state) {
         // API STEP 1: Create builder with market grids
-        auto builder = PriceTable4DBuilder::create(
+        auto builder_result = PriceTable4DBuilder::create(
             grid.moneyness,
             grid.maturities,
             grid.volatilities,
             grid.rates,
             grid.K_ref);
+
+        if (!builder_result) {
+            state.SkipWithError(builder_result.error().c_str());
+            return;
+        }
+        auto builder = builder_result.value();
 
         // API STEP 2: Precompute all prices (one PDE solve per σ,r pair)
         auto result = builder.precompute(config);
@@ -224,12 +230,18 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     MarketGrid grid = generate_market_grid();
 
     // Build price table once (setup, not timed)
-    auto builder = PriceTable4DBuilder::create(
+    auto builder_result = PriceTable4DBuilder::create(
         grid.moneyness,
         grid.maturities,
         grid.volatilities,
         grid.rates,
         grid.K_ref);
+
+    if (!builder_result) {
+        state.SkipWithError(builder_result.error().c_str());
+        return;
+    }
+    auto builder = builder_result.value();
     auto price_table_result = builder.precompute(make_price_table_config(grid, 51, 500));
 
     if (!price_table_result) {
@@ -318,15 +330,25 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         // FULL WORKFLOW: Build table → Solve IVs
 
         // Step 1-2: Build price table
-        auto builder = PriceTable4DBuilder::create(
+        auto builder_result = PriceTable4DBuilder::create(
             grid.moneyness,
             grid.maturities,
             grid.volatilities,
             grid.rates,
             grid.K_ref);
-        auto price_table = builder
-            .precompute(make_price_table_config(grid, 51, 500))
-            .value();
+
+        if (!builder_result) {
+            state.SkipWithError(builder_result.error().c_str());
+            return;
+        }
+        auto builder = builder_result.value();
+        auto price_table_result = builder.precompute(make_price_table_config(grid, 51, 500));
+
+        if (!price_table_result) {
+            state.SkipWithError(price_table_result.error().c_str());
+            return;
+        }
+        auto price_table = std::move(price_table_result.value());
         const PriceTableSurface& surface = price_table.surface;
 
         // Fill market prices

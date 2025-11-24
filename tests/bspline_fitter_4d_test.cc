@@ -270,7 +270,9 @@ TEST(BSplineFitter4DTest, ConstantFunction) {
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator and test at random points
-    BSpline4D spline(workspace_result.value());
+    auto spline_result = BSpline4D::create(workspace_result.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> m_dist(0.8, 1.2);
@@ -334,7 +336,9 @@ TEST(BSplineFitter4DTest, SeparableFunction) {
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator
-    BSpline4D spline(workspace_result.value());
+    auto spline_result = BSpline4D::create(workspace_result.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Test at grid points (should be well-approximated)
     int count_good = 0;
@@ -468,7 +472,9 @@ TEST(BSplineFitter4DTest, SmoothFunction) {
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator
-    BSpline4D spline(workspace_result.value());
+    auto spline_result = BSpline4D::create(workspace_result.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Test smoothness: evaluate at many off-grid points
     std::mt19937 rng(456);
@@ -564,7 +570,9 @@ TEST(BSplineFitter4DTest, EndToEndWorkflow) {
     ASSERT_TRUE(workspace_result.has_value());
 
     // Create evaluator
-    BSpline4D spline(workspace_result.value());
+    auto spline_result = BSpline4D::create(workspace_result.value());
+    ASSERT_TRUE(spline_result.has_value()) << "BSpline4D creation failed: " << spline_result.error();
+    auto spline = std::move(spline_result.value());
 
     // Step 5: Query at arbitrary points
     struct Query {

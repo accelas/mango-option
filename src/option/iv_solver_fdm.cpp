@@ -221,130 +221,17 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 }
 
-// Atomic validators (uniform API - all take const IVQuery&)
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_spot_positive(const IVQuery& query) const {
-    if (query.spot <= 0.0) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::NegativeSpot,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_strike_positive(const IVQuery& query) const {
-    if (query.strike <= 0.0) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::NegativeStrike,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_maturity_positive(const IVQuery& query) const {
-    if (query.maturity <= 0.0) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::NegativeMaturity,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_price_positive(const IVQuery& query) const {
-    if (query.market_price <= 0.0) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::NegativeMarketPrice,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_call_price_bound(const IVQuery& query) const {
-    if (query.type == OptionType::CALL && query.market_price > query.spot) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::ArbitrageViolation,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_put_price_bound(const IVQuery& query) const {
-    if (query.type == OptionType::PUT && query.market_price > query.strike) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::ArbitrageViolation,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_intrinsic_value(const IVQuery& query) const {
-    double intrinsic = (query.type == OptionType::CALL)
-        ? std::max(0.0, query.spot - query.strike)
-        : std::max(0.0, query.strike - query.spot);
-
-    if (query.market_price < intrinsic) {
-        return std::unexpected(IVError{
-            .code = IVErrorCode::ArbitrageViolation,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-// Composite validators (monadic chains)
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_positive_parameters(const IVQuery& query) const {
-    return validate_spot_positive(query)
-        .and_then([this, &query](auto) { return validate_strike_positive(query); })
-        .and_then([this, &query](auto) { return validate_maturity_positive(query); })
-        .and_then([this, &query](auto) { return validate_price_positive(query); });
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_arbitrage_bounds(const IVQuery& query) const {
-    return validate_call_price_bound(query)
-        .and_then([this, &query](auto) { return validate_put_price_bound(query); })
-        .and_then([this, &query](auto) { return validate_intrinsic_value(query); });
-}
-
+// Validate query using centralized validation + grid params
 std::expected<std::monostate, IVError>
 IVSolverFDM::validate_query(const IVQuery& query) const {
-    return validate_positive_parameters(query)
-        .and_then([this, &query](auto) { return validate_arbitrage_bounds(query); })
-        .and_then([this](auto) { return validate_grid_params(); });
+    // Use centralized IV query validation (option spec + market price + arbitrage)
+    auto validation = validate_iv_query(query);
+    if (!validation.has_value()) {
+        return std::unexpected(validation_error_to_iv_error(validation.error()));
+    }
+
+    // FDM-specific: validate grid parameters if manual mode enabled
+    return validate_grid_params();
 }
 
 std::expected<IVSuccess, IVError>

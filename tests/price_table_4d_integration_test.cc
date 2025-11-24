@@ -14,12 +14,14 @@ using namespace mango;
 
 TEST(PriceTable4DIntegrationTest, FastPathEligible) {
     // Narrow moneyness range → fast path
-    auto builder = PriceTable4DBuilder::create(
+    auto builder_result = PriceTable4DBuilder::create(
         {0.9, 0.95, 1.0, 1.05, 1.1},     // Moneyness (5 points)
         {0.25, 0.5, 1.0, 2.0},           // Maturity (4 points)
         {0.15, 0.20, 0.25, 0.30},        // Volatility (4 points)
         {0.0, 0.02, 0.05, 0.08},         // Rate (4 points)
         100.0);                           // K_ref
+    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
+    auto builder = builder_result.value();
 
     auto result = builder.precompute(OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
 
@@ -37,12 +39,14 @@ TEST(PriceTable4DIntegrationTest, FastPathEligible) {
 
 TEST(PriceTable4DIntegrationTest, FallbackWideRange) {
     // Wide moneyness range → fallback
-    auto builder = PriceTable4DBuilder::create(
+    auto builder_result = PriceTable4DBuilder::create(
         {0.5, 0.7, 0.9, 1.0, 1.1, 1.3, 1.5},  // Wide range (7 points)
         {0.25, 0.5, 1.0, 2.0},                // Maturity (4 points)
         {0.15, 0.20, 0.25, 0.30},             // Volatility (4 points)
         {0.0, 0.02, 0.05, 0.08},              // Rate (4 points)
         100.0);
+    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
+    auto builder = builder_result.value();
 
     auto result = builder.precompute(OptionType::PUT, -3.5, 3.5, 121, 1000, 0.02);
 
@@ -64,14 +68,18 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
     std::vector<double> rate = {0.02, 0.04, 0.06, 0.08};  // 4 points minimum
 
     // Fast path (narrow range)
-    auto builder_fast = PriceTable4DBuilder::create(
+    auto builder_fast_result = PriceTable4DBuilder::create(
         moneyness, maturity, volatility, rate, 100.0);
+    ASSERT_TRUE(builder_fast_result.has_value()) << "Failed to create builder: " << builder_fast_result.error();
+    auto builder_fast = builder_fast_result.value();
     auto result_fast = builder_fast.precompute(
         OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
 
     // Fallback (force by using wider grid)
-    auto builder_fallback = PriceTable4DBuilder::create(
+    auto builder_fallback_result = PriceTable4DBuilder::create(
         moneyness, maturity, volatility, rate, 100.0);
+    ASSERT_TRUE(builder_fallback_result.has_value()) << "Failed to create builder: " << builder_fallback_result.error();
+    auto builder_fallback = builder_fallback_result.value();
     auto result_fallback = builder_fallback.precompute(
         OptionType::PUT, -3.5, 3.5, 121, 1000, 0.02);
 
@@ -117,14 +125,18 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackRawPriceEquivalence) {
     const size_t Nr = rate.size();
 
     // Fast path (narrow range → normalized solver)
-    auto builder_fast = PriceTable4DBuilder::create(
+    auto builder_fast_result = PriceTable4DBuilder::create(
         moneyness, maturity, volatility, rate, 100.0);
+    ASSERT_TRUE(builder_fast_result.has_value()) << "Failed to create builder: " << builder_fast_result.error();
+    auto builder_fast = builder_fast_result.value();
     auto result_fast = builder_fast.precompute(
         OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
 
     // Fallback (wider grid → batch API)
-    auto builder_fallback = PriceTable4DBuilder::create(
+    auto builder_fallback_result = PriceTable4DBuilder::create(
         moneyness, maturity, volatility, rate, 100.0);
+    ASSERT_TRUE(builder_fallback_result.has_value()) << "Failed to create builder: " << builder_fallback_result.error();
+    auto builder_fallback = builder_fallback_result.value();
     auto result_fallback = builder_fallback.precompute(
         OptionType::PUT, -3.5, 3.5, 121, 1000, 0.02);
 
@@ -188,12 +200,14 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackRawPriceEquivalence) {
 
 TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
     // Benchmark fast path
-    auto builder = PriceTable4DBuilder::create(
+    auto builder_result = PriceTable4DBuilder::create(
         {0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2},  // 9 points
         {0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0},              // 7 points
         {0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40},         // 7 points
         {0.0, 0.01, 0.02, 0.03, 0.05, 0.07, 0.10},          // 7 points
         100.0);
+    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
+    auto builder = builder_result.value();
 
     auto start = std::chrono::high_resolution_clock::now();
     auto result = builder.precompute(OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);

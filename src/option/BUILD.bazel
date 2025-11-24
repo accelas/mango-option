@@ -211,12 +211,6 @@ cc_library(
 )
 
 cc_library(
-    name = "iv_types",
-    hdrs = ["iv_types.hpp"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "iv_result",
     hdrs = ["iv_result.hpp"],
     deps = [

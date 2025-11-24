@@ -53,14 +53,14 @@ std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
     // Validate market price: must be finite
     if (!std::isfinite(query.market_price)) {
         return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidSpotPrice,
+            ValidationErrorCode::InvalidMarketPrice,
             query.market_price));
     }
 
     // Validate market price: must be positive
     if (query.market_price <= 0.0) {
         return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidSpotPrice,
+            ValidationErrorCode::InvalidMarketPrice,
             query.market_price));
     }
 
@@ -78,13 +78,13 @@ std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
 
     if (query.market_price < intrinsic) {
         return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidSpotPrice,
+            ValidationErrorCode::InvalidMarketPrice,
             query.market_price));
     }
 
     if (query.market_price > upper_bound) {
         return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidSpotPrice,
+            ValidationErrorCode::InvalidMarketPrice,
             query.market_price));
     }
 

@@ -20,6 +20,7 @@
 #include "src/pde/operators/black_scholes_pde.hpp"
 #include "src/option/option_spec.hpp"
 #include "src/support/error_types.hpp"
+#include <cassert>
 #include <expected>
 #include <variant>
 #include <span>
@@ -58,9 +59,10 @@ public:
         , right_bc_(create_right_bc())
         , spatial_op_(create_spatial_op())
     {
-        if (!grid_) {
-            throw std::invalid_argument("Grid cannot be null");
-        }
+        // Precondition: grid must not be null (comes from Grid::create which returns std::expected)
+        // If callers check the std::expected, grid will never be null.
+        // Null grid is a programming error, not a runtime condition.
+        assert(grid_ != nullptr && "Grid cannot be null (programming error)");
     }
 
     // CRTP interface - called by PDESolver base class via static dispatch
@@ -149,9 +151,10 @@ public:
         , right_bc_(create_right_bc())
         , spatial_op_(create_spatial_op())
     {
-        if (!grid_) {
-            throw std::invalid_argument("Grid cannot be null");
-        }
+        // Precondition: grid must not be null (comes from Grid::create which returns std::expected)
+        // If callers check the std::expected, grid will never be null.
+        // Null grid is a programming error, not a runtime condition.
+        assert(grid_ != nullptr && "Grid cannot be null (programming error)");
     }
 
     // CRTP interface - called by PDESolver base class via static dispatch

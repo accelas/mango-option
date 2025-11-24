@@ -76,7 +76,9 @@ std::unique_ptr<BSpline4D> fit_test_surface() {
         K_ref, 0.0);  // dividend_yield = 0
     EXPECT_TRUE(workspace_result.has_value());
 
-    return std::make_unique<BSpline4D>(workspace_result.value());
+    auto spline_result = BSpline4D::create(workspace_result.value());
+    EXPECT_TRUE(spline_result.has_value());
+    return std::make_unique<BSpline4D>(std::move(spline_result.value()));
 }
 
 } // namespace

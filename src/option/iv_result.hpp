@@ -9,6 +9,7 @@
 #include <optional>
 #include <vector>
 #include <expected>
+#include <cmath>
 #include "src/support/error_types.hpp"
 
 namespace mango {
@@ -31,5 +32,59 @@ struct BatchIVResult {
         return failed_count == 0;
     }
 };
+
+/// Convert ValidationError to IVError (shared by all IV solvers)
+///
+/// Maps ValidationErrorCode to IVErrorCode with consistent semantics:
+/// - InvalidSpotPrice → NegativeSpot
+/// - InvalidStrike → NegativeStrike
+/// - InvalidMaturity → NegativeMaturity
+/// - InvalidMarketPrice → NegativeMarketPrice (non-finite or negative) or ArbitrageViolation (positive but out of bounds)
+/// - InvalidRate/InvalidDividend/InvalidVolatility → ArbitrageViolation (shouldn't occur in IV queries)
+/// - default → ArbitrageViolation
+///
+/// @param ve Validation error from validate_iv_query()
+/// @return Corresponding IVError with mapped error code
+inline IVError validation_error_to_iv_error(const ValidationError& ve) {
+    IVErrorCode code;
+    switch (ve.code) {
+        case ValidationErrorCode::InvalidSpotPrice:
+            code = IVErrorCode::NegativeSpot;
+            break;
+        case ValidationErrorCode::InvalidStrike:
+            code = IVErrorCode::NegativeStrike;
+            break;
+        case ValidationErrorCode::InvalidMaturity:
+            code = IVErrorCode::NegativeMaturity;
+            break;
+        case ValidationErrorCode::InvalidMarketPrice:
+            // InvalidMarketPrice covers negative prices, non-finite, and arbitrage violations
+            // Priority: non-finite > negative > arbitrage
+            if (!std::isfinite(ve.value)) {
+                code = IVErrorCode::NegativeMarketPrice;  // Non-finite (NaN/inf) treated as invalid input
+            } else if (ve.value <= 0.0) {
+                code = IVErrorCode::NegativeMarketPrice;
+            } else {
+                code = IVErrorCode::ArbitrageViolation;  // Positive but violates bounds
+            }
+            break;
+        case ValidationErrorCode::InvalidRate:
+        case ValidationErrorCode::InvalidDividend:
+        case ValidationErrorCode::InvalidVolatility:
+            // These shouldn't occur in IV queries, but map to a reasonable error
+            code = IVErrorCode::ArbitrageViolation;
+            break;
+        default:
+            code = IVErrorCode::ArbitrageViolation;
+            break;
+    }
+
+    return IVError{
+        .code = code,
+        .iterations = 0,
+        .final_error = ve.value,  // Preserve the invalid value for diagnostics
+        .last_vol = std::nullopt
+    };
+}
 
 }  // namespace mango
