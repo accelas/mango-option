@@ -8,6 +8,7 @@
 #include <limits>
 #include <algorithm>
 #include <numeric>
+#include <chrono>
 
 namespace mango {
 
@@ -16,8 +17,11 @@ PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
     : config_(std::move(config)) {}
 
 template <size_t N>
-std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
+std::expected<PriceTableResult<N>, std::string>
 PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
+    // Start timing
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     if constexpr (N != 4) {
         MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, N, 0);
         return std::unexpected("build() only supports N=4");
@@ -46,6 +50,9 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
             " failures out of " + std::to_string(batch_result.results.size()));
     }
 
+    // Count PDE solves (successful results)
+    size_t n_pde_solves = batch_result.results.size() - batch_result.failed_count;
+
     // Step 4: Extract tensor via interpolation
     auto tensor_result = extract_tensor(batch_result, axes);
     if (!tensor_result.has_value()) {
@@ -60,7 +67,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
 
     auto& fit_result = coeffs_result.value();
     auto coefficients = std::move(fit_result.coefficients);
-    // Note: fit_result.stats will be used in Task 5 for PriceTableResult
+    BSplineFittingStats fitting_stats = fit_result.stats;
 
     // Step 6: Create metadata
     PriceTableMetadata metadata{
@@ -70,7 +77,22 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     };
 
     // Step 7: Build immutable surface
-    return PriceTableSurface<N>::build(axes, std::move(coefficients), metadata);
+    auto surface_result = PriceTableSurface<N>::build(axes, std::move(coefficients), metadata);
+    if (!surface_result.has_value()) {
+        return std::unexpected("Surface build failed: " + surface_result.error());
+    }
+
+    // End timing
+    auto end_time = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration<double>(end_time - start_time).count();
+
+    // Return full result with diagnostics
+    return PriceTableResult<N>{
+        .surface = std::move(surface_result.value()),
+        .n_pde_solves = n_pde_solves,
+        .precompute_time_seconds = elapsed,
+        .fitting_stats = fitting_stats
+    };
 }
 
 template <size_t N>

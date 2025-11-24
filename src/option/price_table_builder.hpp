@@ -57,8 +57,8 @@ public:
     /// Build price table surface
     ///
     /// @param axes Grid points for each dimension
-    /// @return Immutable surface or error message
-    [[nodiscard]] std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
+    /// @return PriceTableResult with surface and diagnostics, or error message
+    [[nodiscard]] std::expected<PriceTableResult<N>, std::string>
     build(const PriceTableAxes<N>& axes);
 
     /// For testing: expose make_batch method

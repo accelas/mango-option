@@ -30,7 +30,8 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
 
     // Full pipeline should succeed (4×4=16 PDE solves, ~1s)
     auto result = builder.build(axes);
-    EXPECT_TRUE(result.has_value()) << "Build failed: " << result.error();
+    ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
+    EXPECT_NE(result->surface, nullptr);
 }
 
 // REGRESSION TEST: build() only supports N=4
