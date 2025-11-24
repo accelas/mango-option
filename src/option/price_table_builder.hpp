@@ -11,6 +11,27 @@
 
 namespace mango {
 
+/// B-spline fitting diagnostics (extracted from BSplineNDSeparable)
+struct BSplineFittingStats {
+    double max_residual_axis0 = 0.0;
+    double max_residual_axis1 = 0.0;
+    double max_residual_axis2 = 0.0;
+    double max_residual_axis3 = 0.0;
+    double max_residual_overall = 0.0;
+
+    double condition_axis0 = 0.0;
+    double condition_axis1 = 0.0;
+    double condition_axis2 = 0.0;
+    double condition_axis3 = 0.0;
+    double condition_max = 0.0;
+
+    size_t failed_slices_axis0 = 0;
+    size_t failed_slices_axis1 = 0;
+    size_t failed_slices_axis2 = 0;
+    size_t failed_slices_axis3 = 0;
+    size_t failed_slices_total = 0;
+};
+
 /// Builder for N-dimensional price table surfaces
 ///
 /// Orchestrates PDE solves across grid points, fits B-spline coefficients,

@@ -78,6 +78,16 @@ cc_test(
 )
 
 cc_test(
+    name = "bspline_fitting_stats_test",
+    size = "small",
+    srcs = ["bspline_fitting_stats_test.cc"],
+    deps = [
+        "//src/option:price_table_builder",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "recursion_helpers_test",
     size = "small",
     srcs = ["recursion_helpers_test.cc"],
