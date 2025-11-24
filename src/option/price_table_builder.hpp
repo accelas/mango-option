@@ -8,6 +8,7 @@
 #include "src/option/american_option_batch.hpp"
 #include <expected>
 #include <string>
+#include <memory>
 
 namespace mango {
 
@@ -30,6 +31,15 @@ struct BSplineFittingStats {
     size_t failed_slices_axis2 = 0;
     size_t failed_slices_axis3 = 0;
     size_t failed_slices_total = 0;
+};
+
+/// Result from price table build with diagnostics
+template <size_t N>
+struct PriceTableResult {
+    std::shared_ptr<const PriceTableSurface<N>> surface = nullptr;  ///< Immutable surface
+    size_t n_pde_solves = 0;                    ///< Number of PDE solves performed
+    double precompute_time_seconds = 0.0;       ///< Wall-clock build time
+    BSplineFittingStats fitting_stats;          ///< B-spline fitting diagnostics
 };
 
 /// Builder for N-dimensional price table surfaces
