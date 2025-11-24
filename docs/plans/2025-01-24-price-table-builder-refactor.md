@@ -460,6 +460,112 @@ if (!result && result.error().code ==
 - Validation: 100% of invalid grids caught before PDE work
 - API clarity: No duplicate storage, clear ownership chain
 
+## Code Review Findings & Resolutions
+
+### 1. Ownership Model - Move Semantics
+
+**Issue:** `BSpline4D::create(PriceTableWorkspace&& ws)` moving large workspace may cause extra copies.
+
+**Resolution:**
+- Ensure `PriceTableWorkspace` has deleted copy constructor
+- Factory returns `std::expected<BSpline4D, string>` by value (NRVO applies)
+- Constructor is `explicit BSpline4D(PriceTableWorkspace&& ws) : workspace_(std::move(ws))`
+- Thread safety: `shared_ptr<BSpline4D>` in `PriceTableSurface` is thread-safe for read-only eval()
+
+### 2. Memory Safety - Parallel Loop
+
+**Issue:** Flattened loop assumes `batch_result.results[batch_idx]` exists for all (vol,r) pairs.
+
+**Resolution:**
+- Add bounds check: `if (batch_idx >= batch_result.results.size()) continue;`
+- Check result validity: `if (!result_expected.has_value() || !result_expected->converged) continue;`
+- Each iteration writes to unique `prices_view[m_idx, mat_idx, vol_idx, r_idx]` - no contention
+- Spline objects are stack-allocated per iteration - no shared state
+
+### 3. API Breaking Changes - Serialization
+
+**Issue:** Serialization code expects `PriceTableSurface(shared_ptr<workspace>)` constructor.
+
+**Resolution:**
+- Update serialization to deserialize workspace first, then construct BSpline4D:
+  ```cpp
+  auto workspace = load_workspace_from_arrow(file);
+  auto evaluator_result = BSpline4D::create(std::move(workspace));
+  auto surface = PriceTableSurface(
+      std::make_shared<BSpline4D>(std::move(evaluator_result.value())));
+  ```
+- Add to implementation checklist: audit Arrow exporter, snapshot replay
+
+### 4. Grid Configuration - Solver API
+
+**Issue:** Does `BatchAmericanOptionSolver` handle both `custom_grid_config` and `GridAccuracyParams`?
+
+**Resolution:**
+- Per PR #244 API: `AmericanOptionSolver` constructor takes `custom_grid_config` parameter
+- When `custom_grid_config` is provided, solver uses it directly (bypasses auto-estimation)
+- When nullopt, solver uses `GridAccuracyParams` for auto-estimation
+- These paths are mutually exclusive by design
+- Add validation: when `x_bounds` provided, do NOT call `set_grid_accuracy()`
+
+### 5. Error Handling - Rich Context
+
+**Issue:** `PriceTableError` only has `invalid_values` and `expected_value` - may need more context.
+
+**Resolution:**
+- Add optional fields to `PriceTableError`:
+  ```cpp
+  struct PriceTableError {
+      PriceTableErrorCode code;
+      std::vector<double> invalid_values;
+      double expected_value = 0.0;
+      std::optional<std::string> details;  // For complex contexts
+      size_t axis_index = 0;  // Which dimension failed (0=m, 1=τ, 2=σ, 3=r)
+  };
+  ```
+- Most errors use just code + values, but complex cases can add `details`
+
+### 6. Validation Placement - Solver Grid Modifications
+
+**Issue:** Solver might modify time grid after validation (adaptive steps, padding).
+
+**Resolution:**
+- Validation ensures input is well-formed before solver
+- If using `custom_grid_config`, grid is fixed (no adaptive modification)
+- If using auto-estimation, validation only checks snapshot times are reasonable
+- Add post-solve assertion in extraction: verify `result.grid()->num_snapshots() == maturity_.size()`
+- If mismatch, error indicates solver dropped snapshots (programming error, not user error)
+
+### 7. Diagnostics - Grid Access
+
+**Issue:** `compute_residuals()` needs moneyness/maturity grids from builder.
+
+**Resolution:**
+- Builder stores grids as members: `moneyness_`, `maturity_`, `volatility_`, `rate_`
+- `compute_residuals()` is a builder method, so it has access to these grids
+- Implementation:
+  ```cpp
+  std::expected<ResidualStats, PriceTableError>
+  PriceTable4DBuilder::compute_residuals(const PriceTableSurface& surface) const
+  {
+      // Use builder's moneyness_, maturity_ grids
+      // Evaluate surface.eval(m, tau, sigma, r) at each grid point
+      // Compare with re-evaluated spline
+  }
+  ```
+
+### 8. Missing Updates - Downstream Consumers
+
+**Issue:** Removing `prices_4d` breaks tests, Arrow export, CLI tools.
+
+**Resolution:**
+- Add to implementation plan (before step 4):
+  - **3.5. Audit all consumers of prices_4d**
+    - Find with: `grep -r "prices_4d" tests/ examples/ tools/`
+    - Update tests to use `compute_residuals()` or remove raw price checks
+    - Update Arrow exporter to use `precompute_with_save()` streaming path
+    - Update CLI tools to use new diagnostic APIs
+- Add to migration guide: deprecation timeline for `prices_4d` access
+
 ## References
 
 - Recent API refactor: PR #244 (custom_grid_config support)
