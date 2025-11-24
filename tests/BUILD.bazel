@@ -625,7 +625,8 @@ cc_test(
 #     name = "price_table_4d_integration_test",
 #     srcs = ["price_table_4d_integration_test.cc"],
 #     deps = [
-#         "//src/option:price_table_4d_builder",
+#         "//src/option:price_table_builder",
+#         "//src/option:price_table_surface",
 #         "@googletest//:gtest_main",
 #     ],
 #     copts = ["-std=c++23"],
@@ -636,7 +637,7 @@ cc_test(
 #     name = "price_table_end_to_end_performance_test",
 #     srcs = ["price_table_end_to_end_performance_test.cc"],
 #     deps = [
-#         "//src/option:price_table_4d_builder",
+#         "//src/option:price_table_builder",
 #         "@googletest//:gtest_main",
 #     ],
 #     copts = ["-std=c++23"],
@@ -761,7 +762,8 @@ cc_test(
         "//src/option:american_option",
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
-        "//src/option:price_table_4d_builder",
+        "//src/option:price_table_builder",
+        "//src/option:price_table_surface",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -881,7 +883,6 @@ cc_test(
     srcs = ["normalized_solver_regression_test.cc"],
     deps = [
         "//src/option:american_option_batch",
-        "//src/option:price_table_4d_builder",
         "@googletest//:gtest_main",
     ],
     copts = [

@@ -4,8 +4,7 @@
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/price_table_4d_builder.hpp"
-#include "src/option/price_table_workspace.hpp"
+#include "src/option/price_table_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -138,20 +137,33 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error());
         }
 
-        auto workspace_result = PriceTableWorkspace::create(
+        // Create PriceTableAxes
+        PriceTableAxes<4> axes;
+        axes.grids = {
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
-            fixture_ptr->rate_grid,
-            fit_result->coefficients,
-            fixture_ptr->K_ref,
-            0.0);  // dividend_yield = 0
+            fixture_ptr->rate_grid
+        };
 
-        if (!workspace_result.has_value()) {
-            throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
+        // Create PriceTensor with coefficients
+        PriceTensor<4> tensor(axes);
+        tensor.data() = fit_result->coefficients;
+
+        // Create metadata
+        PriceTableMetadata meta{
+            .K_ref = fixture_ptr->K_ref,
+            .dividend_yield = 0.0,
+            .type = OptionType::PUT
+        };
+
+        // Create surface
+        auto surface_result = PriceTableSurface<4>::create(axes, std::move(tensor), meta);
+        if (!surface_result.has_value()) {
+            throw std::runtime_error("Failed to create surface: " + surface_result.error());
         }
 
-        auto evaluator_result = BSpline4D::create(workspace_result.value());
+        auto evaluator_result = BSpline4D::create(*surface_result.value());
         if (!evaluator_result.has_value()) {
             throw std::runtime_error("Failed to create BSpline4D: " + evaluator_result.error());
         }
