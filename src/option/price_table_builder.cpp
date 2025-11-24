@@ -4,6 +4,7 @@
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/support/memory/aligned_arena.hpp"
 #include "src/support/ivcalc_trace.h"
+#include "src/pde/core/time_domain.hpp"
 #include <cmath>
 #include <limits>
 #include <algorithm>
@@ -34,6 +35,53 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
         return std::unexpected(
             "Invalid axes (error code " + std::to_string(static_cast<int>(err.code)) +
             ", value=" + std::to_string(err.value) + ")");
+    }
+
+    // Check minimum 4 points per axis (B-spline requirement)
+    for (size_t i = 0; i < N; ++i) {
+        if (axes.grids[i].size() < 4) {
+            return std::unexpected("Axis " + std::to_string(i) +
+                                   " has only " + std::to_string(axes.grids[i].size()) +
+                                   " points (need >=4 for cubic B-splines)");
+        }
+    }
+
+    // Check positive moneyness (needed for log)
+    if (axes.grids[0].front() <= 0.0) {
+        return std::unexpected("Moneyness must be positive (needed for log)");
+    }
+
+    // Check positive maturity (strict > 0)
+    if (axes.grids[1].front() <= 0.0) {
+        return std::unexpected("Maturity must be positive (tau > 0 required for PDE time domain)");
+    }
+
+    // Check positive volatility
+    if (axes.grids[2].front() <= 0.0) {
+        return std::unexpected("Volatility must be positive");
+    }
+
+    // Check K_ref > 0
+    if (config_.K_ref <= 0.0) {
+        return std::unexpected("Reference strike K_ref must be positive");
+    }
+
+    // Check PDE domain coverage
+    const double x_min_requested = std::log(axes.grids[0].front());
+    const double x_max_requested = std::log(axes.grids[0].back());
+    const double x_min = config_.grid_estimator.x_min();
+    const double x_max = config_.grid_estimator.x_max();
+
+    if (x_min_requested < x_min || x_max_requested > x_max) {
+        return std::unexpected(
+            "Requested moneyness range [" + std::to_string(axes.grids[0].front()) + ", " +
+            std::to_string(axes.grids[0].back()) + "] in spot ratios "
+            "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
+            std::to_string(x_max_requested) + "], "
+            "which exceeds PDE grid bounds [" + std::to_string(x_min) + ", " +
+            std::to_string(x_max) + "]. "
+            "Narrow the moneyness grid or expand the PDE domain."
+        );
     }
 
     // Step 2: Generate batch (Nσ × Nr entries)
@@ -175,6 +223,9 @@ PriceTableBuilder<N>::solve_batch(
         solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
         // Solve batch with shared grid optimization (normalized chain solver)
+        // NOTE: custom_grid parameter not used here - causes all solves to fail when
+        // options have spot==strike (normalized case). Grid bounds are validated
+        // above to ensure PDE domain covers requested moneyness range.
         return solver.solve_batch(batch, true);  // use_shared_grid = true
     }
 }
