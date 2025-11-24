@@ -26,11 +26,13 @@ This refactor is split into **two phases**:
 - **Delete specialized builder** completely (not just deprecate)
 
 **Critical fixes required for parity:**
-1. **Replace AlignedArena with PMR** (lines 183-186) - Use `std::pmr::vector` like rest of codebase
-2. Grid configuration must honor user's `config.grid_estimator` (lines 131-142 bug fix)
-3. Return `PriceTableResult<N>` with full diagnostics (not just surface pointer)
-4. Comprehensive validation (prevent 2-point grids, negative values, out-of-domain)
-5. Helper factories that return both builder AND axes (axes ownership solved)
+1. Grid configuration must honor user's `config.grid_estimator` (extend solver API, bypass auto-estimation)
+2. Return `PriceTableResult<N>` with full diagnostics (not just surface pointer)
+3. Comprehensive validation (prevent 2-point grids, negative values, out-of-domain)
+4. Helper factories that return both builder AND axes (axes ownership solved)
+
+**Deferred to Phase 2 (not critical for parity):**
+- PMR migration: AlignedArena works correctly, PMR requires ownership model changes (see Step 1)
 
 **Timeline:** Must be completed atomically (no intermediate broken state)
 
@@ -218,21 +220,36 @@ struct PriceTableResult {
    ```
 
 3. **BSplineFittingStats**: Extract from **existing** `BSplineNDSeparableResult`
+
+   **Change fit_coeffs() signature** to return both coefficients and stats:
+   ```cpp
+   // BEFORE (src/option/price_table_builder.hpp):
+   std::expected<std::vector<double>, std::string> fit_coeffs(
+       const PriceTensor<N>& tensor,
+       const PriceTableAxes<N>& axes) const;
+
+   // AFTER (return struct with coefficients + stats):
+   struct FitCoeffsResult {
+       std::vector<double> coefficients;
+       BSplineFittingStats stats;
+   };
+
+   std::expected<FitCoeffsResult, std::string> fit_coeffs(
+       const PriceTensor<N>& tensor,
+       const PriceTableAxes<N>& axes) const;
+   ```
+
+   **Implementation in fit_coeffs()** (src/option/price_table_builder.cpp):
    ```cpp
    // BSplineNDSeparable already returns BSplineNDSeparableResult with stats
-   // Signature (already exists):
-   // std::expected<BSplineNDSeparableResult<T, N>, std::string> fit(const std::vector<T>& values)
-
-   // In build() after fit_coeffs()
-   auto fit_result = fitter.fit(tensor_data);
+   auto fit_result = fitter_result->fit(values);
    if (!fit_result.has_value()) {
        return std::unexpected("B-spline fitting failed: " + fit_result.error());
    }
 
    const auto& result = fit_result.value();
-   std::vector<double> coefficients = std::move(result.coefficients);
 
-   // Map BSplineNDSeparableResult arrays to BSplineFittingStats
+   // Map BSplineNDSeparableResult to BSplineFittingStats (correct field names)
    BSplineFittingStats stats;
    stats.max_residual_axis0 = result.max_residual_per_axis[0];
    stats.max_residual_axis1 = result.max_residual_per_axis[1];
@@ -243,22 +260,52 @@ struct PriceTableResult {
        result.max_residual_per_axis.end()
    );
 
-   stats.condition_axis0 = result.condition_number_per_axis[0];
-   stats.condition_axis1 = result.condition_number_per_axis[1];
-   stats.condition_axis2 = result.condition_number_per_axis[2];
-   stats.condition_axis3 = result.condition_number_per_axis[3];
+   // Use correct field name: condition_per_axis (not condition_number_per_axis)
+   stats.condition_axis0 = result.condition_per_axis[0];
+   stats.condition_axis1 = result.condition_per_axis[1];
+   stats.condition_axis2 = result.condition_per_axis[2];
+   stats.condition_axis3 = result.condition_per_axis[3];
    stats.condition_max = *std::max_element(
-       result.condition_number_per_axis.begin(),
-       result.condition_number_per_axis.end()
+       result.condition_per_axis.begin(),
+       result.condition_per_axis.end()
    );
 
-   // Failed slices already tracked in BSplineNDSeparableResult
-   stats.failed_slices_total = result.total_failed_slices;
+   // Sum per-axis failures: failed_slices is std::array<size_t, N> (not scalar)
+   stats.failed_slices_axis0 = result.failed_slices[0];
+   stats.failed_slices_axis1 = result.failed_slices[1];
+   stats.failed_slices_axis2 = result.failed_slices[2];
+   stats.failed_slices_axis3 = result.failed_slices[3];
+   stats.failed_slices_total = std::accumulate(
+       result.failed_slices.begin(),
+       result.failed_slices.end(),
+       size_t(0)
+   );
+
+   return FitCoeffsResult{
+       .coefficients = std::move(result.coefficients),
+       .stats = stats
+   };
+   ```
+
+   **Update build() to use new return type**:
+   ```cpp
+   // In build() after extract_tensor()
+   auto coeffs_result = fit_coeffs(tensor_result.value(), axes);
+   if (!coeffs_result.has_value()) {
+       return std::unexpected("fit_coeffs failed: " + coeffs_result.error());
+   }
+
+   auto& fit_result = coeffs_result.value();
+   auto coefficients = std::move(fit_result.coefficients);
+   auto fitting_stats = fit_result.stats;  // Captured for PriceTableResult
    ```
 
 **Implementation tasks:**
 - **No changes to `BSplineNDSeparable`** - already returns diagnostics
-- Map existing `BSplineNDSeparableResult` arrays to `BSplineFittingStats` fields
+- Change `fit_coeffs()` to return struct with coefficients + stats
+- Map `BSplineNDSeparableResult` to `BSplineFittingStats` inside `fit_coeffs()`
+- Use correct field names: `condition_per_axis`, `failed_slices` (array)
+- Update `build()` to capture stats from `fit_coeffs()` result
 - Add timer instrumentation at start/end of `build()`
 - Count PDE solves from batch result size
 
@@ -270,25 +317,86 @@ struct PriceTableResult {
 **Solution:** Extend `BatchAmericanOptionSolver` API to accept custom grid specification, then pass complete `GridSpec`:
 
 **Step 3a: Extend BatchAmericanOptionSolver API**
-**Location:** `src/option/american_option_batch.hpp`
+**Location:** `src/option/american_option_batch.hpp` and `src/option/american_option_batch.cpp`
 
-Add new parameter to `solve_batch`:
+Add new parameter to **both** `solve_batch` overloads:
 ```cpp
-// Current signature:
+// Current signatures (american_option_batch.hpp):
 BatchAmericanOptionResult solve_batch(
     std::span<const AmericanOptionParams> params,
     bool use_shared_grid = false,
     SetupCallback setup = nullptr);
 
-// NEW signature (add optional custom_grid parameter):
+BatchAmericanOptionResult solve_batch(
+    const std::vector<AmericanOptionParams>& params,
+    bool use_shared_grid = false,
+    SetupCallback setup = nullptr);
+
+// NEW signatures (add optional custom_grid parameter to BOTH):
 BatchAmericanOptionResult solve_batch(
     std::span<const AmericanOptionParams> params,
     bool use_shared_grid = false,
     SetupCallback setup = nullptr,
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+
+BatchAmericanOptionResult solve_batch(
+    const std::vector<AmericanOptionParams>& params,
+    bool use_shared_grid = false,
+    SetupCallback setup = nullptr,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
 ```
 
-**Implementation note:** When `custom_grid.has_value()`, bypass `estimate_grid_for_option()` and use provided `GridSpec` + `TimeDomain` directly for shared grid construction.
+**Implementation changes in `american_option_batch.cpp`:**
+
+1. **Update vector overload** to forward `custom_grid`:
+```cpp
+BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
+    const std::vector<AmericanOptionParams>& params,
+    bool use_shared_grid,
+    SetupCallback setup,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
+{
+    return solve_batch(std::span{params}, use_shared_grid, setup, custom_grid);  // Forward
+}
+```
+
+2. **Update `solve_regular_batch`** (called by span overload):
+```cpp
+// Add custom_grid parameter to solve_regular_batch signature
+BatchAmericanOptionResult solve_regular_batch(
+    std::span<const AmericanOptionParams> params,
+    const GridAccuracyParams& accuracy,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
+
+// In implementation, check custom_grid before calling compute_global_grid_for_batch:
+if (custom_grid.has_value()) {
+    // Use provided grid directly (bypass estimation)
+    auto [grid_spec, time_domain] = custom_grid.value();
+    // Build workspace from provided grid_spec + time_domain
+} else {
+    // Existing path: estimate grid via compute_global_grid_for_batch
+}
+```
+
+3. **Update `solve_normalized_chain`** (used by price table path with `use_shared_grid=true`):
+```cpp
+// Add custom_grid parameter to solve_normalized_chain signature
+BatchAmericanOptionResult solve_normalized_chain(
+    std::span<const AmericanOptionParams> params,
+    const GridAccuracyParams& accuracy,
+    const std::vector<double>& snapshot_times,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
+
+// In implementation, bypass estimate_grid_for_option when custom_grid provided:
+if (custom_grid.has_value()) {
+    auto [grid_spec, time_domain] = custom_grid.value();
+    // Use provided grid directly
+} else {
+    // Existing path: estimate grid for normalized option
+}
+```
+
+**Impact:** When `custom_grid.has_value()`, bypass all auto-estimation paths and use provided `GridSpec` + `TimeDomain` directly.
 
 **Step 3b: Update PriceTableBuilder to use new API**
 **Location:** `src/option/price_table_builder.cpp:131-142`
