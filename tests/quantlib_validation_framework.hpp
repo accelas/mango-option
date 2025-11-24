@@ -158,7 +158,8 @@ inline PricingValidationResult validate_pricing(
     auto mango_result = solver.solve();
     if (!mango_result.has_value()) {
         validation.passed = false;
-        validation.failure_message = "Solver failed: " + mango_result.error().message;
+        validation.failure_message = "Solver failed with error code " +
+            std::to_string(static_cast<int>(mango_result.error().code));
         return validation;
     }
 
@@ -229,7 +230,8 @@ inline IVValidationResult validate_iv_fdm(
 
     if (!iv_result.has_value()) {
         validation.passed = false;
-        validation.failure_message = "IV solver failed: " + iv_result.error().message;
+        validation.failure_message = "IV solver failed with error code " +
+            std::to_string(static_cast<int>(iv_result.error().code));
         return validation;
     }
 

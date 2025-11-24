@@ -122,7 +122,7 @@ int main() {
             std::cout << "  u(" << grid_span[i] << ") = " << solution[i] << "\n";
         }
     } else {
-        std::cout << "Solver failed to converge: " << status.error().message << "\n";
+        std::cout << "Solver failed to converge: " << status."Error code: " << static_cast<int>(result.error().code) << "\n";
         return 1;
     }
 

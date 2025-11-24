@@ -21,7 +21,7 @@ protected:
         auto result = solve_american_option_auto(params);
         if (!result) {
             const auto& error = result.error();
-            ADD_FAILURE() << "Solver failed: " << error.message
+            ADD_FAILURE() << "Solver failed: " << error
                           << " (code=" << static_cast<int>(error.code)
                           << ", iterations=" << error.iterations << ")";
             // Cannot return empty AmericanOptionResult (not default constructible)
@@ -181,7 +181,7 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
 
     // Use convenience function - it will automatically size the grid appropriately
     auto result_exp = solve_american_option_auto(params);
-    ASSERT_TRUE(result_exp.has_value()) << result_exp.error().message;
+    ASSERT_TRUE(result_exp.has_value()) << result_exp.error();
     AmericanOptionResult result = std::move(result_exp.value());
     ASSERT_TRUE(result.converged);
 

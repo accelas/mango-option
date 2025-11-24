@@ -96,7 +96,6 @@ TEST(BatchIVResultTest, SomeFailures) {
     results.push_back(IVSuccess{.implied_vol = 0.20, .iterations = 10, .final_error = 1e-8});
     results.push_back(std::unexpected(IVError{
         .code = IVErrorCode::MaxIterationsExceeded,
-        .message = "Failed to converge",
         .iterations = 100,
         .final_error = 1e-2
     }));
@@ -125,12 +124,10 @@ TEST(BatchIVResultTest, SomeFailures) {
 TEST(BatchIVResultTest, AllFailed) {
     std::vector<std::expected<IVSuccess, IVError>> results;
     results.push_back(std::unexpected(IVError{
-        .code = IVErrorCode::NegativeSpot,
-        .message = "Spot must be positive"
+        .code = IVErrorCode::NegativeSpot
     }));
     results.push_back(std::unexpected(IVError{
-        .code = IVErrorCode::ArbitrageViolation,
-        .message = "Arbitrage detected"
+        .code = IVErrorCode::ArbitrageViolation
     }));
 
     mango::BatchIVResult batch{

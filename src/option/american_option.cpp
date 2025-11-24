@@ -36,7 +36,10 @@ AmericanOptionSolver::AmericanOptionSolver(
     // Validate parameters
     auto validation = validate_pricing_params(params_);
     if (!validation) {
-        throw std::invalid_argument(validation.error());
+        auto err = validation.error();
+        throw std::invalid_argument(
+            "Validation error code " + std::to_string(static_cast<int>(err.code)) +
+            " (value=" + std::to_string(err.value) + ")");
     }
 }
 
@@ -62,10 +65,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     if (workspace_.size() != grid_spec.n_points()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = std::format(
-                "Workspace size mismatch: workspace has {} points, grid needs {}",
-                workspace_.size(), grid_spec.n_points()),
-            .iterations = 0
+            .iterations = 0,
+            .residual = static_cast<double>(workspace_.size())  // Store actual workspace size
         });
     }
 
@@ -77,8 +78,8 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     if (!grid_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = std::format("Failed to create Grid: {}", grid_result.error()),
-            .iterations = 0
+            .iterations = 0,
+            .residual = grid_result.error().value  // Store the error value from ValidationError
         });
     }
     auto grid = grid_result.value();

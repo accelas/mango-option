@@ -55,71 +55,98 @@ public:
     };
 
     // Factory methods for common grid types
-    static std::expected<GridSpec, std::string> uniform(T x_min, T x_max, size_t n_points) {
+    static std::expected<GridSpec, ValidationError> uniform(T x_min, T x_max, size_t n_points) {
         if (n_points < 2) {
-            return std::unexpected<std::string>("Grid must have at least 2 points");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize,
+                static_cast<double>(n_points)));
         }
         if (x_min >= x_max) {
-            return std::unexpected<std::string>("x_min must be less than x_max");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidBounds,
+                static_cast<double>(x_min)));
         }
         return GridSpec(Type::Uniform, x_min, x_max, n_points);
     }
 
-    static std::expected<GridSpec, std::string> log_spaced(T x_min, T x_max, size_t n_points) {
+    static std::expected<GridSpec, ValidationError> log_spaced(T x_min, T x_max, size_t n_points) {
         if (n_points < 2) {
-            return std::unexpected<std::string>("Grid must have at least 2 points");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize,
+                static_cast<double>(n_points)));
         }
         if (x_min <= 0 || x_max <= 0) {
-            return std::unexpected<std::string>("Log-spaced grid requires positive bounds");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidBounds,
+                static_cast<double>(x_min)));
         }
         if (x_min >= x_max) {
-            return std::unexpected<std::string>("x_min must be less than x_max");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidBounds,
+                static_cast<double>(x_min)));
         }
         return GridSpec(Type::LogSpaced, x_min, x_max, n_points);
     }
 
-    static std::expected<GridSpec, std::string> sinh_spaced(T x_min, T x_max, size_t n_points, T concentration = T(1.0)) {
+    static std::expected<GridSpec, ValidationError> sinh_spaced(T x_min, T x_max, size_t n_points, T concentration = T(1.0)) {
         if (n_points < 2) {
-            return std::unexpected<std::string>("Grid must have at least 2 points");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize,
+                static_cast<double>(n_points)));
         }
         if (x_min >= x_max) {
-            return std::unexpected<std::string>("x_min must be less than x_max");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidBounds,
+                static_cast<double>(x_min)));
         }
         if (concentration <= 0) {
-            return std::unexpected<std::string>("Concentration parameter must be positive");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSpacing,
+                static_cast<double>(concentration)));
         }
         return GridSpec(Type::SinhSpaced, x_min, x_max, n_points, concentration);
     }
 
-    static std::expected<GridSpec, std::string> multi_sinh_spaced(
+    static std::expected<GridSpec, ValidationError> multi_sinh_spaced(
         T x_min, T x_max, size_t n_points,
         std::vector<MultiSinhCluster<T>> clusters,
         bool auto_merge = true) {
 
         if (n_points < 2) {
-            return std::unexpected<std::string>("Grid must have at least 2 points");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize,
+                static_cast<double>(n_points)));
         }
         if (x_min >= x_max) {
-            return std::unexpected<std::string>("x_min must be less than x_max");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidBounds,
+                static_cast<double>(x_min)));
         }
         if (clusters.empty()) {
-            return std::unexpected<std::string>("MultiSinhSpaced requires at least one cluster");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidGridSize,
+                0.0));
         }
 
         // Validate each cluster
         for (size_t i = 0; i < clusters.size(); ++i) {
             if (clusters[i].alpha <= 0) {
-                return std::unexpected<std::string>(
-                    std::format("Cluster {} alpha must be positive", i));
+                return std::unexpected(ValidationError(
+                    ValidationErrorCode::InvalidGridSpacing,
+                    static_cast<double>(clusters[i].alpha),
+                    i));
             }
             if (clusters[i].weight <= 0) {
-                return std::unexpected<std::string>(
-                    std::format("Cluster {} weight must be positive", i));
+                return std::unexpected(ValidationError(
+                    ValidationErrorCode::InvalidGridSpacing,
+                    static_cast<double>(clusters[i].weight),
+                    i));
             }
             if (clusters[i].center_x < x_min || clusters[i].center_x > x_max) {
-                return std::unexpected<std::string>(
-                    std::format("Cluster {} center {} out of range [{}, {}]",
-                               i, clusters[i].center_x, x_min, x_max));
+                return std::unexpected(ValidationError(
+                    ValidationErrorCode::OutOfRange,
+                    static_cast<double>(clusters[i].center_x),
+                    i));
             }
         }
 
@@ -738,7 +765,7 @@ namespace {
 /// @param times Requested snapshot times (may be off-grid)
 /// @param time_domain Time domain specification
 /// @return Pair of (sorted unique state indices, snapped times) or error
-inline std::expected<std::pair<std::vector<size_t>, std::vector<double>>, std::string>
+inline std::expected<std::pair<std::vector<size_t>, std::vector<double>>, ValidationError>
 convert_times_to_indices(std::span<const double> times,
                          const TimeDomain& time_domain) {
     const double t_start = time_domain.t_start();
@@ -748,11 +775,14 @@ convert_times_to_indices(std::span<const double> times,
 
     // Validate preconditions
     if (n_steps == 0) {
-        return std::unexpected("TimeDomain has zero time steps");
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
     }
     if (dt <= 0.0) {
-        return std::unexpected(std::format(
-            "Invalid TimeDomain: dt={}", dt));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSpacing,
+            dt));
     }
 
     std::vector<size_t> indices;
@@ -763,8 +793,9 @@ convert_times_to_indices(std::span<const double> times,
     for (double t : times) {
         // Validate range
         if (t < t_start || t > t_end) {
-            return std::unexpected(std::format(
-                "Snapshot time {} out of range [{}, {}]", t, t_start, t_end));
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::OutOfRange,
+                t));
         }
 
         // Convert to nearest state index
@@ -806,7 +837,7 @@ public:
     /// @param time_domain Time domain information
     /// @param snapshot_times Optional times to record snapshots
     /// @return Grid instance or error message
-    static std::expected<std::shared_ptr<Grid<T>>, std::string>
+    static std::expected<std::shared_ptr<Grid<T>>, ValidationError>
     create(const GridSpec<T>& grid_spec, const TimeDomain& time_domain,
            std::span<const double> snapshot_times = {}) {
         // Generate grid buffer

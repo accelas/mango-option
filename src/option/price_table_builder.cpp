@@ -24,7 +24,10 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     // Step 1: Validate axes
     auto axes_valid = axes.validate();
     if (!axes_valid.has_value()) {
-        return std::unexpected("Invalid axes: " + axes_valid.error());
+        auto err = axes_valid.error();
+        return std::unexpected(
+            "Invalid axes (error code " + std::to_string(static_cast<int>(err.code)) +
+            ", value=" + std::to_string(err.value) + ")");
     }
 
     // Step 2: Generate batch (Nσ × Nr entries)

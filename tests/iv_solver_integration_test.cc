@@ -64,8 +64,6 @@ TEST(IVSolverIntegration, ValidationErrorPath) {
     // Verify failure with correct error code
     ASSERT_FALSE(result.has_value()) << "Should fail validation";
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
-    EXPECT_TRUE(result.error().message.find("positive") != std::string::npos)
-        << "Error message should mention 'positive'";
     EXPECT_EQ(result.error().iterations, 0) << "No iterations on validation error";
 }
 
@@ -86,8 +84,6 @@ TEST(IVSolverIntegration, ArbitrageErrorPath) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
-    EXPECT_TRUE(result.error().message.find("arbitrage") != std::string::npos)
-        << "Error message should mention 'arbitrage'";
 }
 
 TEST(IVSolverIntegration, BatchProcessingWorkflow) {

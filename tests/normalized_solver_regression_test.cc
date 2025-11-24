@@ -131,8 +131,10 @@ TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
 
     // Solve
     auto result = solver.solve();
-    ASSERT_TRUE(result.has_value()) << "Solve should succeed with registered snapshots: "
-                                     << (result.has_value() ? "" : result.error().message);
+    if (!result.has_value()) {
+        FAIL() << "Solve should succeed with registered snapshots: " << result.error();
+    }
+    ASSERT_TRUE(result.has_value());
 
     // Verify snapshots were registered
     const auto& grid = result.value().grid();

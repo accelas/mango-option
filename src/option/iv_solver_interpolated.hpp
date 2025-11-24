@@ -26,7 +26,7 @@
  *   if (result.has_value()) {
  *       std::cout << "IV: " << result->implied_vol << "\n";
  *   } else {
- *       std::cerr << "Error: " << result.error().message << "\n";
+ *       std::cerr << "Error: " <<  "Error code: " << static_cast<int>(result.error().code) << "\n";
  *   }
  *
  * Algorithm:
@@ -80,8 +80,8 @@ public:
     ///
     /// @param surface Pre-computed price table surface
     /// @param config Solver configuration
-    /// @return IV solver or error message
-    static std::expected<IVSolverInterpolated, std::string> create(
+    /// @return IV solver or ValidationError
+    static std::expected<IVSolverInterpolated, ValidationError> create(
         std::shared_ptr<const BSpline4D> spline,
         double K_ref,
         std::pair<double, double> m_range,
@@ -91,7 +91,7 @@ public:
         const IVSolverInterpolatedConfig& config = {});
 
     /// Convenience factory that derives metadata from PriceTableSurface
-    static std::expected<IVSolverInterpolated, std::string> create(
+    static std::expected<IVSolverInterpolated, ValidationError> create(
         const PriceTableSurface& surface,
         const IVSolverInterpolatedConfig& config = {});
 
@@ -174,7 +174,7 @@ private:
     }
 
     /// Validate query parameters
-    std::optional<std::string> validate_query(const IVQuery& query) const;
+    std::optional<ValidationError> validate_query(const IVQuery& query) const;
 
     /// Determine adaptive volatility bounds based on intrinsic value
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
