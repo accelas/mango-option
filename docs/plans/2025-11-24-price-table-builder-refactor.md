@@ -364,6 +364,36 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
 
    **Note:** Keep all existing parameters (`use_shared_grid`, `SetupCallback`) to maintain zero functional changes. Only add `custom_grid` at the end.
 
+   **VERIFIED CURRENT SIGNATURES** (from american_option_batch.hpp:213-241):
+   ```cpp
+   // solve_regular_batch - private method (accesses grid_accuracy_ member)
+   BatchAmericanOptionResult solve_regular_batch(
+       std::span<const AmericanOptionParams> params,
+       bool use_shared_grid = false,
+       SetupCallback setup = nullptr);
+
+   // solve_normalized_chain - private method (accesses grid_accuracy_, snapshot_times_ members)
+   BatchAmericanOptionResult solve_normalized_chain(
+       std::span<const AmericanOptionParams> params,
+       SetupCallback setup);
+   ```
+
+   **NEW SIGNATURES** (add custom_grid at end):
+   ```cpp
+   // solve_regular_batch - add custom_grid parameter
+   BatchAmericanOptionResult solve_regular_batch(
+       std::span<const AmericanOptionParams> params,
+       bool use_shared_grid = false,
+       SetupCallback setup = nullptr,
+       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+
+   // solve_normalized_chain - add custom_grid parameter
+   BatchAmericanOptionResult solve_normalized_chain(
+       std::span<const AmericanOptionParams> params,
+       SetupCallback setup,
+       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+   ```
+
    **Update span overload dispatch** (src/option/american_option_batch.cpp):
    ```cpp
    // Span overload dispatches to either solve_regular_batch or solve_normalized_chain
@@ -374,49 +404,36 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
        SetupCallback setup,
        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
    {
-       if (use_shared_grid && !setup) {
+       if (use_shared_grid && !setup && use_normalized_) {
            // Normalized path: forward custom_grid
-           return solve_normalized_chain(params, accuracy_, snapshot_times_, custom_grid);
+           return solve_normalized_chain(params, setup, custom_grid);
        } else {
            // Regular path: forward custom_grid
-           return solve_regular_batch(params, accuracy_, setup, custom_grid);
+           return solve_regular_batch(params, use_shared_grid, setup, custom_grid);
        }
    }
    ```
 
-   **Update `solve_regular_batch`** (keep existing signature, add custom_grid):
+   **Implementation in solve_regular_batch**:
    ```cpp
-   // KEEP existing parameters, add custom_grid at end
-   BatchAmericanOptionResult solve_regular_batch(
-       std::span<const AmericanOptionParams> params,
-       const GridAccuracyParams& accuracy,
-       SetupCallback setup,  // KEEP existing parameter
-       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
-
-   // In implementation:
+   // In implementation, check custom_grid before using grid_accuracy_ member:
    if (custom_grid.has_value()) {
        auto [grid_spec, time_domain] = custom_grid.value();
        // Use provided grid directly (bypass compute_global_grid_for_batch)
+       // Build workspace from provided grid_spec + time_domain
    } else {
-       // Existing path: estimate grid via compute_global_grid_for_batch
+       // Existing path: use grid_accuracy_ member to estimate grid
    }
    ```
 
-   **Update `solve_normalized_chain`** (keep existing signature, add custom_grid):
+   **Implementation in solve_normalized_chain**:
    ```cpp
-   // KEEP existing parameters, add custom_grid at end
-   BatchAmericanOptionResult solve_normalized_chain(
-       std::span<const AmericanOptionParams> params,
-       const GridAccuracyParams& accuracy,
-       const std::vector<double>& snapshot_times,  // KEEP existing parameter
-       std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid);
-
-   // In implementation:
+   // In implementation, check custom_grid before using grid_accuracy_ member:
    if (custom_grid.has_value()) {
        auto [grid_spec, time_domain] = custom_grid.value();
        // Use provided grid directly (bypass estimate_grid_for_option)
    } else {
-       // Existing path: estimate grid for normalized option
+       // Existing path: use grid_accuracy_ member to estimate grid
    }
    ```
 
@@ -687,6 +704,43 @@ rg -n "PriceTable4D" -g'*.md'
 ```
 
 **Expected results:** Should find zero matches before Step 8 deletion proceeds.
+
+---
+
+**⚠️ BREAKING CHANGE: PriceTableResult Return Type**
+
+The generic builder's `build()` returns `std::expected<PriceTableResult<N>, std::string>` where:
+```cpp
+struct PriceTableResult<N> {
+    std::shared_ptr<const PriceTableSurface<N>> surface;  // shared_ptr, not value!
+    size_t n_pde_solves;
+    double precompute_time_seconds;
+    BSplineFittingStats fitting_stats;
+};
+```
+
+**Migration impact on existing code:**
+```cpp
+// OLD (specialized builder returns PriceTable4DResult):
+auto result = builder.precompute(OptionType::PUT, 101, 1000);
+auto& surface = result->surface;        // PriceTableSurface (value type)
+double price = surface.eval(m, tau, sigma, r);
+
+// NEW (generic builder returns PriceTableResult<4>):
+auto result = builder.build(axes);
+auto surface = result->surface;         // shared_ptr<const PriceTableSurface<4>>
+double price = surface->eval(m, tau, sigma, r);  // Note: -> not .
+```
+
+**Key differences:**
+1. `result->surface` is now `shared_ptr`, not value type
+2. Access surface methods with `->` not `.`
+3. Code using `&result->surface` must change to `result->surface.get()`
+4. Code passing `result->surface` by reference must update
+
+**All consumers MUST be updated before Step 8 deletion.**
+
+---
 
 **Known inventory of files to update:**
 
