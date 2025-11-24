@@ -88,22 +88,26 @@ int main() {
     std::cout << "Computing Greeks across moneyness spectrum...\n";
 
     for (double spot : spots) {
-        mango::PricingParams params{
-            .strike = strike,
-            .spot = spot,
-            .maturity = maturity,
-            .volatility = volatility,
-            .rate = rate,
-            .continuous_dividend_yield = dividend_yield,
-            .type = mango::OptionType::PUT
-        };
+        mango::OptionSpec spec;
+        spec.spot = spot;
+        spec.strike = strike;
+        spec.maturity = maturity;
+        spec.rate = rate;
+        spec.dividend_yield = dividend_yield;
+        spec.type = mango::OptionType::PUT;
+
+        mango::PricingParams params(spec, volatility);
 
         // Auto-estimate grid
-        auto [grid_spec, n_time] = mango::estimate_grid_for_option(params);
+        auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
+        (void)time_domain;  // Not directly used; solver will reconstruct it
 
-        // Create workspace and solve
-        auto workspace = mango::PDEWorkspace::create(grid_spec, &pool);
-        mango::AmericanOptionSolver solver(params, workspace, n_time);
+        // Create workspace (buffer must stay alive through solve)
+        size_t n = grid_spec.n_points();
+        std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
+        auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
+
+        mango::AmericanOptionSolver solver(params, workspace);
         auto result = solver.solve();
 
         if (result.has_value()) {

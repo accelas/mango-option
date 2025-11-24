@@ -161,18 +161,26 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         // determines time stepping internally based on grid and params
     } else {
         // Default mode: Use automatic grid estimation
-        auto [auto_grid, auto_nt] = estimate_grid_for_option(option_params);
+        auto [auto_grid, auto_time_domain] = estimate_grid_for_option(option_params);
+        (void)auto_time_domain;  // Not used here; AmericanOptionSolver will reconstruct it
         grid_spec = auto_grid;
-        // Note: auto_nt (n_time) is not used as AmericanOptionSolver
-        // handles time stepping internally
-        (void)auto_nt;  // Suppress unused warning
     }
 
-    // Allocate workspace buffer (local, temporary)
-    size_t n = grid_spec.n_points();
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+    // Thread-local workspace cache to avoid repeated allocations during Brent iterations
+    // Each thread (or serial context) maintains its own cache, avoiding data races
+    thread_local std::unordered_map<size_t, std::pmr::vector<double>> workspace_cache;
 
-    auto pde_workspace_result = PDEWorkspace::from_buffer(buffer, n);
+    size_t n = grid_spec.n_points();
+    size_t required_size = PDEWorkspace::required_size(n);
+
+    // Reuse cached buffer if available and large enough, otherwise create new one
+    auto& buffer = workspace_cache[n];
+    if (buffer.size() < required_size) {
+        buffer.resize(required_size);
+    }
+
+    auto pde_workspace_result = PDEWorkspace::from_buffer(
+        std::span<double>(buffer.data(), buffer.size()), n);
     if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
@@ -184,19 +192,17 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve
     try {
-        // Pass custom grid if manual mode is enabled
-        std::optional<GridSpec<double>> custom_grid_opt = std::nullopt;
-        std::optional<size_t> custom_n_time_opt = std::nullopt;
+        // Pass custom grid config if manual mode is enabled
+        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config = std::nullopt;
 
         if (config_.use_manual_grid) {
-            custom_grid_opt = grid_spec;
-            custom_n_time_opt = config_.grid_n_time;
+            TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, config_.grid_n_time);
+            custom_grid_config = std::make_pair(grid_spec, time_domain);
         }
 
         AmericanOptionSolver solver(option_params, pde_workspace_result.value(),
                                     std::nullopt,  // snapshot_times
-                                    custom_grid_opt,
-                                    custom_n_time_opt);
+                                    custom_grid_config);
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 

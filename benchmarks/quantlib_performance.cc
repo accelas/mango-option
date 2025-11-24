@@ -90,7 +90,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -150,7 +150,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
         0.30    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -210,7 +210,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
         0.25    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -272,7 +272,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -295,7 +295,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         benchmark::DoNotOptimize(price);
     }
 
-    state.SetLabel("mango " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
+    state.SetLabel("mango " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(time_domain.n_steps()));
 }
 BENCHMARK(BM_Mango_GridResolution)
     ->Args({101, 1000})

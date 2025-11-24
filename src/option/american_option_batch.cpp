@@ -65,7 +65,8 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
     }
 
     // 6. Grid constraints (dx, width, margins)
-    auto [grid_spec, n_time] = estimate_grid_for_option(first, grid_accuracy_);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(first, grid_accuracy_);
+    (void)time_domain;  // Not used in eligibility check
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
     size_t n_space = grid_spec.n_points();
@@ -176,7 +177,8 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
     }
 
     // Check grid constraints
-    auto [grid_spec, n_time] = estimate_grid_for_option(first, grid_accuracy_);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(first, grid_accuracy_);
+    (void)time_domain;  // Not used in trace function
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
     size_t n_space = grid_spec.n_points();
@@ -405,7 +407,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     size_t failed_count = 0;
 
     // Precompute shared grid if needed
-    std::optional<std::tuple<GridSpec<double>, size_t>> shared_grid;
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> shared_grid;
     if (use_shared_grid) {
         shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
     }
@@ -415,13 +417,13 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     size_t shared_n_space = 0;
 
     if (use_shared_grid) {
-        auto [grid_spec, n_time] = shared_grid.value();
+        auto [grid_spec, time_domain] = shared_grid.value();
         shared_n_space = grid_spec.n_points();
         workspace_size_elements = PDEWorkspace::required_size(shared_n_space);
     } else {
         // For per-option grids, estimate max workspace size across all options
         for (const auto& p : params) {
-            auto [grid_spec, n_time] = estimate_grid_for_option(p, grid_accuracy_);
+            auto [grid_spec, time_domain] = estimate_grid_for_option(p, grid_accuracy_);
             size_t n = grid_spec.n_points();
             workspace_size_elements = std::max(workspace_size_elements, PDEWorkspace::required_size(n));
         }
@@ -444,8 +446,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         std::pmr::vector<double> thread_buffer(&thread_pool);
 
         if (use_shared_grid) {
-            auto [grid_spec, n_time] = shared_grid.value();
-            TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, n_time);  // Temp time domain for batch
+            auto [grid_spec, time_domain] = shared_grid.value();
 
             // Create Grid with solution storage
             auto grid_result = Grid<double>::create(grid_spec, time_domain);
@@ -480,8 +481,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 }
             } else {
                 // Per-option grid: create workspace for this option
-                auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
-                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params[i].maturity, n_time);
+                auto [grid_spec, time_domain] = estimate_grid_for_option(params[i], grid_accuracy_);
 
                 // Create Grid with solution storage
                 auto grid_result = Grid<double>::create(grid_spec, time_domain);
@@ -505,8 +505,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 std::pmr::vector<double> heap_buffer(std::pmr::get_default_resource());
 
                 if (!use_shared_grid) {
-                    auto [grid_spec, n_time] = estimate_grid_for_option(params[i], grid_accuracy_);
-                    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params[i].maturity, n_time);
+                    auto [grid_spec, time_domain] = estimate_grid_for_option(params[i], grid_accuracy_);
 
                     auto grid_result = Grid<double>::create(grid_spec, time_domain);
                     if (grid_result.has_value()) {

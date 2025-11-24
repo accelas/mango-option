@@ -263,7 +263,7 @@ private:
 std::expected<AmericanOptionResult, SolverError>
 AmericanOptionSolver::solve() {
     // Compute grid configuration from params
-    auto [grid_spec, n_time] = estimate_grid_for_option(params_);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params_);
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params_.maturity, n_time);
 
     // Validate workspace size matches grid
@@ -513,7 +513,7 @@ AmericanOptionParams params{
 };
 
 // Estimate grid size
-auto [grid_spec, n_time] = estimate_grid_for_option(params);
+auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 size_t n_space = grid_spec.n_points();
 
 // Allocate workspace buffer (reusable)
@@ -568,7 +568,7 @@ std::pmr::synchronized_pool_resource pool;
 // Compute max n_space across all options
 size_t max_n_space = 0;
 for (const auto& params : option_batch) {
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
     max_n_space = std::max(max_n_space, grid_spec.n_points());
 }
 
@@ -577,7 +577,7 @@ std::pmr::vector<double> buffer(PDEWorkspace::required_size(max_n_space), 0.0, &
 
 // Solve multiple options (reuse workspace)
 for (const auto& params : option_batch) {
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
     size_t n_space = grid_spec.n_points();
 
     // Create workspace spans for this grid size

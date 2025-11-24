@@ -235,7 +235,7 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     );
 
     // Use automatic grid estimation
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -272,8 +272,8 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     }
 
     state.counters["n_space"] = static_cast<double>(n);
-    state.counters["n_time"] = static_cast<double>(n_time);
-    state.SetLabel(std::format("American (single, {}x{})", n, n_time));
+    state.counters["n_time"] = static_cast<double>(time_domain.n_steps());
+    state.SetLabel(std::format("American (single, {}x{})", n, time_domain.n_steps()));
 }
 BENCHMARK(BM_README_AmericanSingle)
     ->MinTime(kMinBenchmarkTimeSec);
@@ -302,7 +302,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
         // Sequential processing - no batch API
         for (size_t idx = 0; idx < batch.size(); ++idx) {
             const auto& params = batch[idx];
-            auto [grid_spec, n_time] = estimate_grid_for_option(params);
+            auto [grid_spec, time_domain] = estimate_grid_for_option(params);
             size_t n = grid_spec.n_points();
             std::pmr::synchronized_pool_resource pool;
             std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);

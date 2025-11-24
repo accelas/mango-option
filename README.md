@@ -76,7 +76,7 @@ mango::PricingParams params{
 };
 
 // Auto-estimate grid
-auto [grid_spec, n_time] = mango::estimate_grid_for_option(params);
+auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
 
 // Create workspace
 std::pmr::synchronized_pool_resource pool;

@@ -40,7 +40,7 @@ int main() {
     };
 
     // Auto-estimate grid
-    auto [grid_spec, n_time] = mango::estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
 
     // Create workspace
     std::pmr::synchronized_pool_resource pool;
@@ -118,7 +118,7 @@ mango::PricingParams params{
 };
 
 // Auto-estimate grid (accounts for σ, T, moneyness)
-auto [grid_spec, n_time] = mango::estimate_grid_for_option(params);
+auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
 
 // Create workspace
 std::pmr::synchronized_pool_resource pool;
@@ -585,7 +585,7 @@ std::vector<mango::PricingParams> params_batch = { /* ... */ };
 std::vector<std::expected<mango::AmericanOptionResult, mango::SolverError>> results(params_batch.size());
 
 // Shared grid for all options (requires compute_global_grid_for_batch)
-auto [grid_spec, n_time] = mango::compute_global_grid_for_batch(params_batch);
+auto [grid_spec, time_domain] = mango::compute_global_grid_for_batch(params_batch);
 
 #pragma omp parallel for
 for (size_t i = 0; i < params_batch.size(); ++i) {
@@ -695,7 +695,7 @@ mango::GridAccuracyParams accuracy{
     .max_time_steps = 5000
 };
 
-auto [grid_spec, n_time] = mango::estimate_grid_for_option(params, accuracy);
+auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy);
 ```
 
 **Tolerance guidelines:**

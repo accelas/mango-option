@@ -168,6 +168,7 @@ cc_library(
         ":option_spec",
         ":american_option",
         "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
     ],
     copts = [
         "-Wall",

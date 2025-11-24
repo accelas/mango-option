@@ -23,8 +23,7 @@ AmericanOptionSolver::create(
     const PricingParams& params,
     PDEWorkspace workspace,
     std::optional<std::span<const double>> snapshot_times,
-    std::optional<GridSpec<double>> custom_grid,
-    std::optional<size_t> custom_n_time) noexcept
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config) noexcept
 {
     // Validate parameters first
     auto validation = validate_pricing_params(params);
@@ -33,7 +32,7 @@ AmericanOptionSolver::create(
     }
 
     // Construct (all validation done, cannot fail)
-    return AmericanOptionSolver(params, workspace, snapshot_times, custom_grid, custom_n_time);
+    return AmericanOptionSolver(params, workspace, snapshot_times, custom_grid_config);
 }
 
 // Constructor (throws for backward compatibility)
@@ -41,12 +40,10 @@ AmericanOptionSolver::AmericanOptionSolver(
     const PricingParams& params,
     PDEWorkspace workspace,
     std::optional<std::span<const double>> snapshot_times,
-    std::optional<GridSpec<double>> custom_grid,
-    std::optional<size_t> custom_n_time)
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config)
     : params_(params)
     , workspace_(workspace)
-    , custom_grid_(custom_grid)
-    , custom_n_time_(custom_n_time)
+    , custom_grid_config_(custom_grid_config)
 {
     // Store snapshot times if provided
     if (snapshot_times.has_value()) {
@@ -68,18 +65,10 @@ AmericanOptionSolver::AmericanOptionSolver(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // Use custom grid if provided, otherwise estimate from params
-    auto [grid_spec, n_time] = [this]() -> std::tuple<GridSpec<double>, size_t> {
-        if (custom_grid_.has_value() && custom_n_time_.has_value()) {
-            // Use custom grid configuration (for benchmarking / manual grid control)
-            return {custom_grid_.value(), custom_n_time_.value()};
-        } else {
-            // Auto-estimate grid from option parameters
-            return estimate_grid_for_option(params_);
-        }
-    }();
-
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params_.maturity, n_time);
+    // Use custom grid config if provided, otherwise estimate from params
+    auto [grid_spec, time_domain] = custom_grid_config_.has_value()
+        ? custom_grid_config_.value()
+        : estimate_grid_for_option(params_);
 
     // Validate workspace size matches grid
     if (workspace_.size() != grid_spec.n_points()) {

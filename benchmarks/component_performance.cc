@@ -150,7 +150,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -189,7 +189,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
         0.30    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -228,7 +228,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
         0.25    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -272,7 +272,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         }
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -419,7 +419,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -457,7 +457,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         state.counters["time_ms"] = avg_time_ms;
     }
 
-    state.SetLabel("Grid: " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
+    state.SetLabel("Grid: " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(time_domain.n_steps()));
 }
 BENCHMARK(BM_AmericanPut_GridResolution)
     ->Args({51, 500})
@@ -489,7 +489,8 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
         ));
     }
 
-    auto [grid_spec, n_time] = compute_global_grid_for_batch(batch);
+    auto [grid_spec, time_domain] = compute_global_grid_for_batch(batch);
+    (void)time_domain;  // Not used in this benchmark
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
