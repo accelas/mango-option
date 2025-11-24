@@ -98,6 +98,15 @@ struct PriceTableResult {
 
 **New diagnostic APIs:**
 ```cpp
+/// Residual statistics from B-spline fitting (avoids materializing raw tensor)
+struct ResidualStats {
+    double max_residual;           ///< Maximum absolute error
+    double rms_residual;           ///< Root-mean-square error
+    double mean_residual;          ///< Mean error (bias indicator)
+    size_t num_points_evaluated;   ///< Number of grid points checked
+    size_t num_points_above_threshold;  ///< Points with |error| > threshold
+};
+
 class PriceTableBuilder {
 public:
     // Existing precompute returns lightweight result
@@ -105,6 +114,7 @@ public:
         const PriceTableConfig& config);
 
     // On-demand residual computation (does not store raw prices)
+    // Streams through grid, computes stats without materializing full tensor
     std::expected<ResidualStats, PriceTableError> compute_residuals(
         const PriceTableSurface& surface) const;
 
@@ -116,9 +126,10 @@ public:
 };
 ```
 
-**Memory impact:**
-- 50×30×20×10 grid: removes 2.4 MB
-- 200×100×50×20 grid: removes 1.6 GB
+**Memory impact (prices_4d tensor size):**
+- 50×30×20×10 grid: removes 2.4 MB (300,000 doubles × 8 bytes)
+- 200×100×50×20 grid: removes 160 MB (20,000,000 doubles × 8 bytes)
+- Very large grids (e.g., 150×80×60×30): can exceed 2 GB
 
 ### 3. Grid Configuration Precedence
 
@@ -383,7 +394,7 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 - `price_table_validation_test.cc` - All snapshot validation cases
 - `price_table_grid_config_test.cc` - x_bounds precedence logic
 - `price_table_diagnostics_test.cc` - New diagnostic APIs:
-  - `compute_residuals()` returns valid tensor with correct dimensions
+  - `compute_residuals()` returns ResidualStats with reasonable error bounds (max/RMS/mean)
   - `precompute_with_save()` creates valid Parquet files
   - Builder grid accessors (`.moneyness()`, `.maturity()`, etc.) return correct spans
 - `price_table_extraction_test.cc` - Atomic failure tracking:
@@ -417,8 +428,13 @@ auto& raw_prices = result.prices_4d;  // No longer exists
 
 // NEW
 auto result = builder.precompute(config);
-// If you need residuals:
-auto residuals = builder.compute_residuals(result.surface);
+// If you need residual statistics:
+auto stats_result = builder.compute_residuals(result.surface);
+if (stats_result.has_value()) {
+    const auto& stats = stats_result.value();
+    std::cout << "Max error: " << stats.max_residual << "\n";
+    std::cout << "RMS error: " << stats.rms_residual << "\n";
+}
 // If you need raw prices:
 builder.precompute_with_save(config, "prices.parquet");
 ```
@@ -488,19 +504,23 @@ if (!result && result.error().code ==
 This refactor breaks the `PriceTableResult` API. Follow this three-phase migration:
 
 **Phase 1: Add New APIs (Step 4 in Implementation Order)**
-- Add `compute_residuals(surface) -> std::vector<double>` to builder
+- Add `compute_residuals(surface) -> expected<ResidualStats, PriceTableError>` to builder
 - Add `precompute_with_save(config, path) -> expected<void, PriceTableError>` to builder
 - Add grid accessors to builder: `.moneyness()`, `.maturity()`, `.volatility()`, `.rate()`
 - **Action:** Run `bazel test //tests:price_table_diagnostics_test` to verify new APIs work
 - **Validation:** All new APIs have test coverage before Phase 2
 
-**Phase 2: Update All Consumers (Steps 5-7 in Implementation Order)**
+**Phase 2: Update All Consumers (between Step 4 and Step 8)**
+This phase happens after adding diagnostic APIs (Step 4) but before removing prices_4d (Step 8).
+During this phase, also complete Steps 5-7 (validation, grid config, extraction parallelization).
+
 - Find all uses: `grep -r "prices_4d" tests/ examples/ tools/ benchmarks/`
 - **Update patterns:**
-  - Tests: Replace `result.prices_4d` access with `compute_residuals()` or direct `surface.eval()` calls
+  - Tests (Step 9): Replace `result.prices_4d` access with `compute_residuals()` or direct `surface.eval()` calls
   - Arrow export: Replace `result.prices_4d` with loop over `builder.moneyness()` + `surface.eval()`
   - CLI diagnostic tools: Add `--compute-residuals` flag, remove `--dump-raw-prices`
-  - Benchmarks: Update expected memory values (should drop by ~2 GB)
+  - Benchmarks: Update expected memory values (should drop by ~2.5 GB)
+  - Examples/docs (Step 10): Update to use new APIs
 - **Action:** Run `bazel test //... && bazel build //...` to verify all consumers still work
 - **Validation:** No compilation errors, all tests pass with old API still present
 
@@ -521,10 +541,15 @@ This refactor breaks the `PriceTableResult` API. Follow this three-phase migrati
 
 ## Success Metrics
 
-**Memory usage (for typical 50×30×20×10 grid):**
+**Memory usage:**
 - Per-surface savings: ~2.4 MB eliminated by removing duplicate coefficient storage (Resolution #1)
-- Total result size: <100 MB vs ~2.5 GB before (Resolution #2 removes prices_4d from PriceTableResult)
-- Clarification: 2.4 MB is saved every time a surface is copied/stored; 2.5 GB is saved once by not returning raw tensor
+  - Applies every time a surface is copied or stored
+  - Grid-independent (coefficient storage size)
+- Result size reduction (Resolution #2 removes prices_4d from PriceTableResult):
+  - 50×30×20×10 grid: 2.4 MB saved
+  - 200×100×50×20 grid: 160 MB saved
+  - Very large grids (150×80×60×30+): can save >2 GB
+  - One-time savings (not per-copy)
 
 **Performance:**
 - Extraction scaling: Linear speedup to 64 cores
