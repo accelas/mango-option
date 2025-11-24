@@ -17,6 +17,26 @@ namespace mango {
 // Note: estimate_grid_for_option() is now defined in american_option.hpp
 
 // Constructor with PDEWorkspace
+// Factory method (noexcept, returns std::expected)
+std::expected<AmericanOptionSolver, ValidationError>
+AmericanOptionSolver::create(
+    const PricingParams& params,
+    PDEWorkspace workspace,
+    std::optional<std::span<const double>> snapshot_times,
+    std::optional<GridSpec<double>> custom_grid,
+    std::optional<size_t> custom_n_time) noexcept
+{
+    // Validate parameters first
+    auto validation = validate_pricing_params(params);
+    if (!validation) {
+        return std::unexpected(validation.error());
+    }
+
+    // Construct (all validation done, cannot fail)
+    return AmericanOptionSolver(params, workspace, snapshot_times, custom_grid, custom_n_time);
+}
+
+// Constructor (throws for backward compatibility)
 AmericanOptionSolver::AmericanOptionSolver(
     const PricingParams& params,
     PDEWorkspace workspace,

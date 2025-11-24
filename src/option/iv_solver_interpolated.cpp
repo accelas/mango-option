@@ -46,7 +46,13 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
             0.0));
     }
 
-    auto spline = std::make_shared<BSpline4D>(*surface.workspace());
+    auto spline_result = BSpline4D::create(*surface.workspace());
+    if (!spline_result.has_value()) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
+    }
+    auto spline = std::make_shared<BSpline4D>(std::move(spline_result.value()));
     return create(
         std::move(spline),
         surface.K_ref(),
@@ -101,23 +107,11 @@ std::pair<double, double> IVSolverInterpolated::adaptive_bounds(const IVQuery& q
 }
 
 std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery& query) const noexcept {
-    // Validate input
+    // Validate input using centralized validation
     auto error = validate_query(query);
     if (error.has_value()) {
-        // Map ValidationErrorCode to IVErrorCode
-        IVErrorCode iv_code = IVErrorCode::NegativeSpot;  // Default
-        switch (error->code) {
-            case ValidationErrorCode::InvalidSpotPrice: iv_code = IVErrorCode::NegativeSpot; break;
-            case ValidationErrorCode::InvalidStrike: iv_code = IVErrorCode::NegativeStrike; break;
-            case ValidationErrorCode::InvalidMaturity: iv_code = IVErrorCode::NegativeMaturity; break;
-            default: iv_code = IVErrorCode::InvalidGridConfig; break;
-        }
-        return std::unexpected(IVError{
-            .code = iv_code,
-            .iterations = 0,
-            .final_error = error->value,
-            .last_vol = std::nullopt
-        });
+        // Convert ValidationError to IVError using shared mapping
+        return std::unexpected(validation_error_to_iv_error(*error));
     }
 
     const double moneyness = query.spot / query.strike;

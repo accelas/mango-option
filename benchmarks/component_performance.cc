@@ -121,7 +121,11 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
         }
 
-        fixture_ptr->evaluator = std::make_shared<BSpline4D>(workspace_result.value());
+        auto evaluator_result = BSpline4D::create(workspace_result.value());
+        if (!evaluator_result.has_value()) {
+            throw std::runtime_error("Failed to create BSpline4D: " + evaluator_result.error());
+        }
+        fixture_ptr->evaluator = std::make_shared<BSpline4D>(std::move(evaluator_result.value()));
 
         return fixture_ptr.release();
     }();

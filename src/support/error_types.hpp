@@ -34,6 +34,7 @@ enum class ValidationErrorCode {
     InvalidVolatility,
     InvalidRate,
     InvalidDividend,
+    InvalidMarketPrice,
     InvalidGridSize,
     InvalidBounds,
     OutOfRange,

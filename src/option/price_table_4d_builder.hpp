@@ -38,6 +38,7 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/option/price_table_workspace.hpp"
+#include <cassert>
 #include <vector>
 #include <memory>
 #include <stdexcept>
@@ -103,17 +104,25 @@ public:
     /// @param workspace Shared workspace containing all data
     explicit PriceTableSurface(std::shared_ptr<PriceTableWorkspace> workspace)
         : workspace_(std::move(workspace))
-        , evaluator_(workspace_ ? std::make_unique<BSpline4D>(*workspace_) : nullptr)
-    {}
+        , evaluator_(nullptr)
+    {
+        if (workspace_) {
+            auto spline_result = BSpline4D::create(*workspace_);
+            // Precondition: Workspace must be valid (already validated by PriceTable4DBuilder)
+            // BSpline4D creation should not fail if workspace is valid
+            assert(spline_result.has_value() && "BSpline4D creation failed (programming error)");
+            evaluator_ = std::make_unique<BSpline4D>(std::move(spline_result.value()));
+        }
+    }
 
     bool valid() const {
         return workspace_ != nullptr;
     }
 
     double eval(double m, double tau, double sigma, double rate) const {
-        if (!valid()) {
-            throw std::runtime_error("PriceTableSurface not initialized");
-        }
+        // Precondition: Surface must be initialized before evaluation
+        // This is a programming error, not a runtime condition
+        assert(valid() && "PriceTableSurface not initialized (programming error)");
         return evaluator_->eval(m, tau, sigma, rate);
     }
 
@@ -182,20 +191,31 @@ public:
     /// @param volatility Volatility grid σ (sorted, ≥4 points)
     /// @param rate Risk-free rate grid r (sorted, ≥4 points)
     /// @param K_ref Reference strike price
-    static PriceTable4DBuilder create(
+    /// @return Builder on success, error message on validation failure
+    static std::expected<PriceTable4DBuilder, std::string> create(
         std::vector<double> moneyness,
         std::vector<double> maturity,
         std::vector<double> volatility,
         std::vector<double> rate,
         double K_ref)
     {
-        return PriceTable4DBuilder(
+        // Construct builder (no validation yet)
+        PriceTable4DBuilder builder(
             std::move(moneyness),
             std::move(maturity),
             std::move(volatility),
             std::move(rate),
-            K_ref
+            K_ref,
+            /* skip_validation = */ true
         );
+
+        // Validate after construction
+        auto validation = builder.validate_grids();
+        if (!validation) {
+            return std::unexpected(validation.error());
+        }
+
+        return builder;
     }
 
 
@@ -214,15 +234,16 @@ public:
     ///
     /// Usage example:
     /// ```cpp
-    /// auto builder = PriceTable4DBuilder::from_strikes(
+    /// auto result = PriceTable4DBuilder::from_strikes(
     ///     450.0,  // spot price
     ///     {400, 425, 450, 475, 500},  // strikes
     ///     {0.1, 0.25, 0.5, 1.0},      // maturities
     ///     {0.15, 0.20, 0.25, 0.30},   // volatilities
     ///     {0.03, 0.04, 0.05}          // rates
     /// );
+    /// if (!result) { /* handle error */ }
     /// ```
-    static PriceTable4DBuilder from_strikes(
+    static std::expected<PriceTable4DBuilder, std::string> from_strikes(
         double spot,
         std::vector<double> strikes,
         std::vector<double> maturities,
@@ -231,10 +252,10 @@ public:
     {
         // Validate inputs
         if (strikes.empty()) {
-            throw std::invalid_argument("Strike array cannot be empty");
+            return std::unexpected("Strike array cannot be empty");
         }
         if (spot <= 0.0) {
-            throw std::invalid_argument("Spot price must be positive");
+            return std::unexpected("Spot price must be positive");
         }
 
         // Auto-compute moneyness: m = spot / strike
@@ -243,7 +264,7 @@ public:
         moneyness.reserve(strikes.size());
         for (double K : strikes) {
             if (K <= 0.0) {
-                throw std::invalid_argument("All strikes must be positive");
+                return std::unexpected("All strikes must be positive");
             }
             moneyness.push_back(spot / K);
         }
@@ -284,9 +305,10 @@ public:
     ///     .rates = {0.03, 0.04, 0.05},
     ///     .dividend_yield = 0.015
     /// };
-    /// auto builder = PriceTable4DBuilder::from_chain(spy_chain);
+    /// auto result = PriceTable4DBuilder::from_chain(spy_chain);
+    /// if (!result) { /* handle error */ }
     /// ```
-    static PriceTable4DBuilder from_chain(const OptionChain& chain)
+    static std::expected<PriceTable4DBuilder, std::string> from_chain(const OptionChain& chain)
     {
         // Helper to extract unique sorted values
         auto unique_sorted = [](std::vector<double> vec) {
@@ -371,17 +393,17 @@ private:
         std::vector<double> maturity,
         std::vector<double> volatility,
         std::vector<double> rate,
-        double K_ref)
+        double K_ref,
+        bool skip_validation = false)
         : moneyness_(std::move(moneyness))
         , maturity_(std::move(maturity))
         , volatility_(std::move(volatility))
         , rate_(std::move(rate))
         , K_ref_(K_ref)
     {
-        auto validation_result = validate_grids();
-        if (!validation_result) {
-            throw std::invalid_argument(validation_result.error());
-        }
+        // Note: Validation is now handled by static factories
+        // Constructor does not throw - callers must check std::expected
+        (void)skip_validation;  // Parameter used to document intent
     }
 
     std::expected<void, std::string> validate_grids() const;

@@ -153,11 +153,30 @@ inline std::tuple<GridSpec<double>, size_t> compute_global_grid_for_batch(
 class AmericanOptionSolver {
 public:
     /**
-     * Direct PDEWorkspace constructor.
+     * Factory method to create AmericanOptionSolver with validation.
      *
-     * This constructor takes PDEWorkspace directly, enabling flexible
-     * memory management. The solver creates Grid internally and returns
-     * the AmericanOptionResult wrapper.
+     * Validates option parameters before construction, providing type-safe
+     * error handling via std::expected. Use this instead of the constructor.
+     *
+     * @param params Option pricing parameters
+     * @param workspace PDEWorkspace with pre-allocated buffers
+     * @param snapshot_times Optional times to record solution snapshots
+     * @param custom_grid Optional custom grid specification (bypasses auto-estimation)
+     * @param custom_n_time Optional custom time steps (used with custom_grid)
+     * @return AmericanOptionSolver on success, ValidationError on failure
+     */
+    static std::expected<AmericanOptionSolver, ValidationError>
+    create(const PricingParams& params,
+           PDEWorkspace workspace,
+           std::optional<std::span<const double>> snapshot_times = std::nullopt,
+           std::optional<GridSpec<double>> custom_grid = std::nullopt,
+           std::optional<size_t> custom_n_time = std::nullopt) noexcept;
+
+    /**
+     * Direct PDEWorkspace constructor (deprecated - use create() instead).
+     *
+     * @deprecated Use AmericanOptionSolver::create() for type-safe error handling
+     * @throws std::invalid_argument if parameters are invalid
      *
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers

@@ -236,7 +236,11 @@ std::expected<PriceTable4DResult, std::string> PriceTable4DBuilder::precompute(
     auto workspace = std::make_shared<PriceTableWorkspace>(std::move(workspace_result.value()));
 
     // Create evaluator for backward compatibility
-    auto evaluator = std::make_shared<BSpline4D>(*workspace);
+    auto evaluator_result = BSpline4D::create(*workspace);
+    if (!evaluator_result.has_value()) {
+        return std::unexpected("BSpline4D creation failed: " + evaluator_result.error());
+    }
+    auto evaluator = std::make_shared<BSpline4D>(std::move(evaluator_result.value()));
 
     // Populate fitting statistics from result (using C++23 ranges)
     BSplineFittingStats fitting_stats{

@@ -72,8 +72,10 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
 
     // Test 1: Banded solver (default)
     {
-        auto builder = PriceTable4DBuilder::create(
+        auto builder_result = PriceTable4DBuilder::create(
             moneyness, maturity, volatility, rate, 100.0);
+        ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
+        auto builder = builder_result.value();
 
         auto start = std::chrono::high_resolution_clock::now();
         auto result = builder.precompute(OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
@@ -117,8 +119,10 @@ TEST_F(PriceTableEndToEndPerformanceTest, SmallerGridSanityCheck) {
     std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.02, 0.04, 0.06, 0.08};
 
-    auto builder = PriceTable4DBuilder::create(
+    auto builder_result = PriceTable4DBuilder::create(
         moneyness, maturity, volatility, rate, 100.0);
+    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
+    auto builder = builder_result.value();
 
     auto start = std::chrono::high_resolution_clock::now();
     auto result = builder.precompute(OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
