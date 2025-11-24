@@ -85,10 +85,19 @@ public:
     [[nodiscard]] std::expected<std::vector<double>, std::string> fit_coeffs_for_testing(
         const PriceTensor<N>& tensor,
         const PriceTableAxes<N>& axes) const {
-        return fit_coeffs(tensor, axes);
+        auto result = fit_coeffs(tensor, axes);
+        if (!result.has_value()) {
+            return std::unexpected(result.error());
+        }
+        return std::move(result.value().coefficients);
     }
 
 private:
+    /// Internal result from B-spline coefficient fitting
+    struct FitCoeffsResult {
+        std::vector<double> coefficients;
+        BSplineFittingStats stats;
+    };
     /// Generate batch of AmericanOptionParams from axes
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
         const PriceTableAxes<N>& axes) const;
@@ -104,7 +113,7 @@ private:
         const PriceTableAxes<N>& axes) const;
 
     /// Fit B-spline coefficients from tensor
-    [[nodiscard]] std::expected<std::vector<double>, std::string> fit_coeffs(
+    [[nodiscard]] std::expected<FitCoeffsResult, std::string> fit_coeffs(
         const PriceTensor<N>& tensor,
         const PriceTableAxes<N>& axes) const;
 

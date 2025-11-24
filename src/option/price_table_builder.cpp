@@ -6,6 +6,8 @@
 #include "src/support/ivcalc_trace.h"
 #include <cmath>
 #include <limits>
+#include <algorithm>
+#include <numeric>
 
 namespace mango {
 
@@ -56,6 +58,10 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
         return std::unexpected("fit_coeffs failed: " + coeffs_result.error());
     }
 
+    auto& fit_result = coeffs_result.value();
+    auto coefficients = std::move(fit_result.coefficients);
+    // Note: fit_result.stats will be used in Task 5 for PriceTableResult
+
     // Step 6: Create metadata
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
@@ -64,7 +70,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     };
 
     // Step 7: Build immutable surface
-    return PriceTableSurface<N>::build(axes, std::move(coeffs_result.value()), metadata);
+    return PriceTableSurface<N>::build(axes, std::move(coefficients), metadata);
 }
 
 template <size_t N>
@@ -254,7 +260,7 @@ PriceTableBuilder<N>::extract_tensor(
 }
 
 template <size_t N>
-std::expected<std::vector<double>, std::string>
+std::expected<typename PriceTableBuilder<N>::FitCoeffsResult, std::string>
 PriceTableBuilder<N>::fit_coeffs(
     const PriceTensor<N>& tensor,
     const PriceTableAxes<N>& axes) const
@@ -296,7 +302,42 @@ PriceTableBuilder<N>::fit_coeffs(
         return std::unexpected("B-spline fitting failed: " + fit_result.error());
     }
 
-    return std::move(fit_result.value().coefficients);
+    const auto& result = fit_result.value();
+
+    // Map BSplineNDSeparableResult to BSplineFittingStats
+    BSplineFittingStats stats;
+    stats.max_residual_axis0 = result.max_residual_per_axis[0];
+    stats.max_residual_axis1 = result.max_residual_per_axis[1];
+    stats.max_residual_axis2 = result.max_residual_per_axis[2];
+    stats.max_residual_axis3 = result.max_residual_per_axis[3];
+    stats.max_residual_overall = *std::max_element(
+        result.max_residual_per_axis.begin(),
+        result.max_residual_per_axis.end()
+    );
+
+    stats.condition_axis0 = result.condition_per_axis[0];
+    stats.condition_axis1 = result.condition_per_axis[1];
+    stats.condition_axis2 = result.condition_per_axis[2];
+    stats.condition_axis3 = result.condition_per_axis[3];
+    stats.condition_max = *std::max_element(
+        result.condition_per_axis.begin(),
+        result.condition_per_axis.end()
+    );
+
+    stats.failed_slices_axis0 = result.failed_slices[0];
+    stats.failed_slices_axis1 = result.failed_slices[1];
+    stats.failed_slices_axis2 = result.failed_slices[2];
+    stats.failed_slices_axis3 = result.failed_slices[3];
+    stats.failed_slices_total = std::accumulate(
+        result.failed_slices.begin(),
+        result.failed_slices.end(),
+        size_t(0)
+    );
+
+    return FitCoeffsResult{
+        .coefficients = std::move(result.coefficients),
+        .stats = stats
+    };
 }
 
 // Explicit instantiations
