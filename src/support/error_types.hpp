@@ -156,4 +156,12 @@ inline std::ostream& operator<<(std::ostream& os, const ValidationError& err) {
     return os;
 }
 
+/// Output stream operator for SolverError
+inline std::ostream& operator<<(std::ostream& os, const SolverError& err) {
+    os << "SolverError{code=" << static_cast<int>(err.code)
+       << ", iterations=" << err.iterations
+       << ", residual=" << err.residual << "}";
+    return os;
+}
+
 } // namespace mango

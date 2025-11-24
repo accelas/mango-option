@@ -376,36 +376,45 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
     // Run Brent
     auto brent_result = brent_find_root(objective, vol_lower, vol_upper, config_.root_config);
 
-    // Check convergence
-    if (!brent_result.has_value()) {
-        IVErrorCode error_code;
-        const std::string& reason = brent_result.error().message;
+    // Transform RootFindingError to IVError using monadic .or_else
+    return brent_result
+        .or_else([](const RootFindingError& root_error) -> std::expected<RootFindingSuccess, IVError> {
+            // Map RootFindingErrorCode to IVErrorCode
+            IVErrorCode error_code;
+            switch (root_error.code) {
+                case RootFindingErrorCode::MaxIterationsExceeded:
+                    error_code = IVErrorCode::MaxIterationsExceeded;
+                    break;
+                case RootFindingErrorCode::InvalidBracket:
+                    error_code = IVErrorCode::BracketingFailed;
+                    break;
+                case RootFindingErrorCode::NumericalInstability:
+                    error_code = IVErrorCode::NumericalInstability;
+                    break;
+                case RootFindingErrorCode::NoProgress:
+                    error_code = IVErrorCode::NumericalInstability;
+                    break;
+                default:
+                    error_code = IVErrorCode::NumericalInstability;
+                    break;
+            }
 
-        if (reason.find("Max iterations") != std::string::npos ||
-            reason.find("Maximum iterations") != std::string::npos) {
-            error_code = IVErrorCode::MaxIterationsExceeded;
-        } else if (reason.find("not bracketed") != std::string::npos) {
-            error_code = IVErrorCode::BracketingFailed;
-        } else {
-            error_code = IVErrorCode::MaxIterationsExceeded;
-        }
-
-        return std::unexpected(IVError{
-            .code = error_code,
-            .message = brent_result.error().message,
-            .iterations = brent_result.error().iterations,
-            .final_error = brent_result.error().final_error,
-            .last_vol = brent_result.error().last_value
+            return std::unexpected(IVError{
+                .code = error_code,
+                .iterations = root_error.iterations,
+                .final_error = root_error.final_error,
+                .last_vol = root_error.last_value
+            });
+        })
+        .transform([](const RootFindingSuccess& success) -> IVSuccess {
+            // Transform RootFindingSuccess to IVSuccess
+            return IVSuccess{
+                .implied_vol = success.root,
+                .iterations = success.iterations,
+                .final_error = success.final_error,
+                .vega = std::nullopt
+            };
         });
-    }
-
-    // Success
-    return IVSuccess{
-        .implied_vol = brent_result->root,
-        .iterations = brent_result->iterations,
-        .final_error = brent_result->final_error,
-        .vega = std::nullopt
-    };
 }
 
 std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) const {

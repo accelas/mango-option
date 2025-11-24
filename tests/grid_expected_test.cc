@@ -134,11 +134,11 @@ TEST(GridSpecExpectedTest, SinhSpacedInvalidTooFewPoints) {
 TEST(GridSpecExpectedTest, SinhSpacedInvalidConcentration) {
     auto result = GridSpec<>::sinh_spaced(0.0, 1.0, 10, 0.0);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), "Concentration parameter must be positive");
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSpacing);
 
     auto result_negative = GridSpec<>::sinh_spaced(0.0, 1.0, 10, -1.0);
     EXPECT_FALSE(result_negative.has_value());
-    EXPECT_EQ(result_negative.error(), "Concentration parameter must be positive");
+    EXPECT_EQ(result_negative.error().code, ValidationErrorCode::InvalidGridSpacing);
 }
 
 // Test error handling with multiple validation failures
@@ -157,7 +157,6 @@ TEST(GridSpecExpectedTest, MultipleErrorsLogSpaced) {
     EXPECT_FALSE(result.has_value());
     // Should report the first validation error encountered
     EXPECT_TRUE(result.error().code == ValidationErrorCode::InvalidGridSize || result.error().code == ValidationErrorCode::InvalidBounds);
-                result.error().find("Log-spaced grid requires positive bounds") != std::string::npos);
 }
 
 TEST(GridSpecExpectedTest, MultipleErrorsSinhSpaced) {
@@ -166,7 +165,6 @@ TEST(GridSpecExpectedTest, MultipleErrorsSinhSpaced) {
     EXPECT_FALSE(result.has_value());
     // Should report the first validation error encountered
     EXPECT_TRUE(result.error().code == ValidationErrorCode::InvalidGridSize || result.error().code == ValidationErrorCode::InvalidBounds);
-                result.error().find("Concentration parameter must be positive") != std::string::npos);
 }
 
 // Test backward compatibility - existing tests should still work

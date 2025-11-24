@@ -1,5 +1,6 @@
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
+#include "src/support/error_types.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -55,7 +56,7 @@ TEST(GridSnapshotTest, OutOfRangeTimeRejected) {
     auto grid_result = mango::Grid<double>::create(grid_spec, time_domain, bad_times);
 
     EXPECT_FALSE(grid_result.has_value());
-    EXPECT_EQ(grid_result.error().code, ValidationErrorCode::OutOfRange);
+    EXPECT_EQ(grid_result.error().code, mango::ValidationErrorCode::OutOfRange);
 }
 
 TEST(GridSnapshotTest, RecordAndRetrieve) {

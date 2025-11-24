@@ -84,13 +84,11 @@ PYBIND11_MODULE(mango_iv, m) {
     py::class_<mango::IVError>(m, "IVError")
         .def(py::init<>())
         .def_readwrite("code", &mango::IVError::code)
-        .def_readwrite("message", &mango::IVError::message)
         .def_readwrite("iterations", &mango::IVError::iterations)
         .def_readwrite("final_error", &mango::IVError::final_error)
         .def_readwrite("last_vol", &mango::IVError::last_vol)
         .def("__repr__", [](const mango::IVError& e) {
-            std::string repr = "<IVError code=" + std::to_string(static_cast<int>(e.code)) +
-                       " message='" + e.message + "'";
+            std::string repr = "<IVError code=" + std::to_string(static_cast<int>(e.code));
             if (e.last_vol.has_value()) {
                 repr += " last_vol=" + std::to_string(*e.last_vol);
             }
@@ -158,8 +156,9 @@ PYBIND11_MODULE(mango_iv, m) {
            [[maybe_unused]] size_t n_time) {
             auto grid_spec_result = mango::GridSpec<double>::uniform(x_min, x_max, n_space);
             if (!grid_spec_result.has_value()) {
+                auto err = grid_spec_result.error();
                 throw py::value_error(
-                    "Failed to create grid: " + grid_spec_result.error());
+                    "Failed to create grid (error code " + std::to_string(static_cast<int>(err.code)) + ")");
             }
 
             // Allocate workspace buffer (local, temporary)
@@ -177,7 +176,7 @@ PYBIND11_MODULE(mango_iv, m) {
             if (!solve_result) {
                 auto error = solve_result.error();
                 throw py::value_error(
-                    "American option solve failed: " + error.message);
+                    "American option solve failed (error code " + std::to_string(static_cast<int>(error.code)) + ")");
             }
 
             return std::move(solve_result.value());

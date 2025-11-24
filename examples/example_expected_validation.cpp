@@ -131,7 +131,11 @@ int main() {
             buffer.resize(PDEWorkspace::required_size(n));
             workspace = PDEWorkspace::from_buffer(buffer, n);
         } else {
-            workspace = std::unexpected(grid_spec.error());
+            // Convert ValidationError to string for std::expected<PDEWorkspace, std::string>
+            auto err = grid_spec.error();
+            workspace = std::unexpected(
+                "Validation error code " + std::to_string(static_cast<int>(err.code)));
+
         }
 
         if (workspace.has_value()) {
@@ -263,7 +267,7 @@ int main() {
             std::cout << "   ✓ Option value: $" << std::fixed << std::setprecision(4)
                      << solution.value().value_at(valid_params.spot) << "\n";
         } else {
-            std::cout << "   ✗ Solve failed: " << solution.error().message << "\n";
+            std::cout << "   ✗ Solve failed: " << "Error code: " << static_cast<int>(solution.error().code) << "\n";
         }
         std::cout << "\n";
     }

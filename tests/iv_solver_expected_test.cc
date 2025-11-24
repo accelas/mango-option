@@ -59,7 +59,7 @@ TEST(IVSolverFDMExpected, ValidationNegativeSpot) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationNegativeStrike) {
@@ -79,7 +79,7 @@ TEST(IVSolverFDMExpected, ValidationNegativeStrike) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeStrike);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationNegativeMaturity) {
@@ -99,7 +99,7 @@ TEST(IVSolverFDMExpected, ValidationNegativeMaturity) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeMaturity);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationNegativeMarketPrice) {
@@ -119,7 +119,7 @@ TEST(IVSolverFDMExpected, ValidationNegativeMarketPrice) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeMarketPrice);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
@@ -140,7 +140,7 @@ TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
@@ -161,7 +161,7 @@ TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
@@ -183,7 +183,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
@@ -205,7 +205,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationZeroSpot) {
@@ -225,7 +225,7 @@ TEST(IVSolverFDMExpected, ValidationZeroSpot) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 TEST(IVSolverFDMExpected, ValidationZeroStrike) {
@@ -245,7 +245,7 @@ TEST(IVSolverFDMExpected, ValidationZeroStrike) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeStrike);
-    EXPECT_FALSE(result.error().empty());
+    // Error code checked above
 }
 
 // Task 2.3 Brent Solver Integration Tests

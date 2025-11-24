@@ -23,7 +23,7 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
 {
     if (!spline) {
         return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridConfig,
+            ValidationErrorCode::InvalidGridSize,
             0.0));
     }
     if (K_ref <= 0.0) {
@@ -42,7 +42,7 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
 {
     if (!surface.valid()) {
         return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridConfig,
+            ValidationErrorCode::InvalidGridSize,
             0.0));
     }
 
@@ -129,8 +129,6 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
     if (!is_in_bounds(query, sigma_min) || !is_in_bounds(query, sigma_max)) {
         return std::unexpected(IVError{
             .code = IVErrorCode::InvalidGridConfig,
-            // error code set above
-                       "Use PDE-based IV solver for out-of-grid queries.",
             .iterations = 0,
             .final_error = 0.0,
             .last_vol = std::nullopt
@@ -156,14 +154,33 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
     const double sigma0 = (sigma_min + sigma_max) / 2.0;  // Initial guess
     auto result = newton_find_root(objective, derivative, sigma0, sigma_min, sigma_max, newton_config);
 
-    // Check convergence
+    // Check convergence - transform RootFindingError to IVError
     if (!result.has_value()) {
+        const auto& root_error = result.error();
+        IVErrorCode error_code;
+        switch (root_error.code) {
+            case RootFindingErrorCode::MaxIterationsExceeded:
+                error_code = IVErrorCode::MaxIterationsExceeded;
+                break;
+            case RootFindingErrorCode::InvalidBracket:
+                error_code = IVErrorCode::BracketingFailed;
+                break;
+            case RootFindingErrorCode::NumericalInstability:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+            case RootFindingErrorCode::NoProgress:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+            default:
+                error_code = IVErrorCode::NumericalInstability;
+                break;
+        }
+
         return std::unexpected(IVError{
-            .code = IVErrorCode::MaxIterationsExceeded,
-            .message = result.error().message,
-            .iterations = result.error().iterations,
-            .final_error = result.error().final_error,
-            .last_vol = result.error().last_value
+            .code = error_code,
+            .iterations = root_error.iterations,
+            .final_error = root_error.final_error,
+            .last_vol = root_error.last_value
         });
     }
 
