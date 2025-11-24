@@ -53,7 +53,7 @@ This refactor is split into **two phases**:
 ## Goals
 
 1. Update all consumers (tests, examples, benchmarks) to use `PriceTableBuilder<4>`
-2. Deprecate specialized `PriceTable4DBuilder` (mark with warnings, keep functional)
+2. **Delete specialized `PriceTable4DBuilder`** completely after migration (not just deprecate)
 3. Document migration path
 4. **Zero functional changes** - APIs behave identically
 
@@ -155,19 +155,25 @@ if (!aligned_buffer) {
     return std::unexpected("Failed to allocate aligned buffer");
 }
 
+// RAII cleanup MUST be declared BEFORE objects that use the buffer
+// This ensures buffer is freed AFTER pool and vector are destroyed
+std::unique_ptr<std::byte, decltype(&std::free)> buffer_guard(
+    static_cast<std::byte*>(aligned_buffer),
+    &std::free
+);
+
 // Wrap aligned buffer in PMR resource
-std::pmr::monotonic_buffer_resource pool(aligned_buffer, aligned_bytes);
-std::pmr::vector<double> tensor_data(&pool);
+std::pmr::monotonic_buffer_resource pool(buffer_guard.get(), aligned_bytes);
+
+// Construct vector with polymorphic_allocator (not raw pointer)
+std::pmr::polymorphic_allocator<double> alloc{&pool};
+std::pmr::vector<double> tensor_data{alloc};
 tensor_data.resize(total_points, 0.0);
 
 // Wrap in mdspan for N-D access
 using std::experimental::mdspan;
 using std::experimental::dextents;
 mdspan<double, dextents<size_t, N>> tensor(tensor_data.data(), Nm, Nt, Nσ, Nr);
-
-// IMPORTANT: Free aligned buffer after fitting
-auto cleanup = [aligned_buffer]() { std::free(aligned_buffer); };
-std::unique_ptr<void, decltype(cleanup)> buffer_guard(aligned_buffer, cleanup);
 ```
 
 **Benefits:**
@@ -239,14 +245,23 @@ struct PriceTableResult {
 
 3. **BSplineFittingStats**: Extract from `BSplineNDSeparable::fit()` return value
    ```cpp
-   // Modify BSplineNDSeparable<T, N>::fit() to return stats
+   // Modify BSplineNDSeparable<T, N>::fit() to return new result type
+   // This REPLACES the existing std::expected<std::vector<T>, std::string>
    struct BSplineFitResult {
        std::vector<T> coefficients;
        BSplineFittingStats stats;  // NEW: residuals, condition numbers, failures
    };
 
+   // Update signature:
+   // BEFORE: std::expected<std::vector<T>, std::string> fit(const std::vector<T>& values)
+   // AFTER:  std::expected<BSplineFitResult<T>, std::string> fit(const std::vector<T>& values)
+
    // In build() after fit_coeffs()
    auto fit_result = fitter.fit(tensor_data);
+   if (!fit_result.has_value()) {
+       return std::unexpected("B-spline fitting failed: " + fit_result.error());
+   }
+   std::vector<double> coefficients = std::move(fit_result.value().coefficients);
    BSplineFittingStats stats = fit_result.value().stats;
    ```
 
@@ -259,23 +274,35 @@ struct PriceTableResult {
 ### Step 3: Fix Grid Configuration Bug
 **Location:** `src/option/price_table_builder.cpp:131-142`
 
+**Problem:** `GridAccuracyParams` only forwards point counts and alpha concentration, but not the critical x_min/x_max spatial domain bounds. The batch solver then calls `estimate_grid_for_option()` which auto-computes bounds per option, ignoring the user's `config.grid_estimator` domain.
+
+**Solution:** Pass the complete `GridSpec` directly through `custom_grid_config` parameter instead of using `GridAccuracyParams`:
+
 ```cpp
-// BEFORE (buggy):
+// BEFORE (buggy - only forwards point counts):
 GridAccuracyParams accuracy;
 accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t(100));
 accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
-
-// AFTER (fixed):
-GridAccuracyParams accuracy;
-accuracy.min_spatial_points = config_.grid_estimator.n_points();  // Use exact value
-accuracy.max_spatial_points = config_.grid_estimator.n_points();  // Use exact value
 accuracy.max_time_steps = config_.n_time;
+solver.set_grid_accuracy(accuracy);
 
-// Extract alpha parameter for sinh-spaced grids
-if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-    accuracy.alpha = config_.grid_estimator.concentration();
-}
+// AFTER (fixed - passes complete GridSpec with domain bounds):
+// Build custom grid config with user's exact GridSpec
+GridSpec<double> user_grid = config_.grid_estimator;
+TimeDomain time_domain{
+    .T_max = axes.grids[1].back(),  // max maturity
+    .n_steps = config_.n_time
+};
+
+// Pass complete grid specification (bypasses auto-estimation)
+std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config =
+    std::make_pair(user_grid, time_domain);
+
+// Solve with custom grid (x_min/x_max preserved)
+return solver.solve_batch(batch, true, custom_grid_config);
 ```
+
+**Impact:** User's spatial domain [x_min, x_max] from `config.grid_estimator` is now respected exactly, not auto-estimated per option.
 
 ### Step 4: Port Validation Logic
 **Location:** `src/option/price_table_builder.cpp` (in `build()` method)
@@ -347,10 +374,44 @@ if (x_min_requested < x_min || x_max_requested > x_max) {
 // outside their knot domain, which would produce arbitrary garbage values
 ```
 
-### Step 5: Add Helper Factories
+### Step 5: Move OptionChain to Shared Header
+**Location:** New file `src/option/option_chain.hpp`
+
+**Problem:** `OptionChain` is currently defined in `src/option/price_table_4d_builder.hpp:87`, which will be deleted in Step 8. The `from_chain()` factory needs this type.
+
+**Solution:** Extract `OptionChain` to a new shared header before deletion:
+
+```cpp
+// NEW FILE: src/option/option_chain.hpp
+#pragma once
+
+#include <vector>
+#include <string>
+
+namespace mango {
+
+/// Option chain for building price tables
+/// Extracted from PriceTable4DBuilder for reusability
+struct OptionChain {
+    double spot;
+    std::vector<double> strikes;
+    std::vector<double> maturities;
+    std::vector<double> implied_vols;
+};
+
+} // namespace mango
+```
+
+**Update:** Modify `src/option/price_table_4d_builder.hpp` to include the new header instead of defining OptionChain inline.
+
+**Impact:** OptionChain becomes a shared type, usable by both builders during migration, remains available after deletion.
+
+### Step 6: Add Helper Factories
 **Location:** `src/option/price_table_builder.hpp`
 
 ```cpp
+#include "src/option/option_chain.hpp"  // NEW: Include shared OptionChain type
+
 template <size_t N>
 class PriceTableBuilder {
 public:
@@ -400,7 +461,7 @@ public:
 3. Runs validation
 4. Returns both via `std::pair` (caller owns axes, passes to `build()`)
 
-### Step 6: Update All Consumers
+### Step 7: Update All Consumers
 **Inventory of files to update:**
 - `tests/price_table_4d_integration_test.cc` - Main integration tests
 - `tests/price_table_end_to_end_performance_test.cc` - Performance tests
@@ -418,28 +479,39 @@ auto& stats = result->fitting_stats;
 
 // NEW (with explicit PDE resolution control)
 auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();  // Match old n_space=101
-auto [builder, axes] = PriceTableBuilder<4>::from_vectors(
+auto factory_result = PriceTableBuilder<4>::from_vectors(
     vec1, vec2, vec3, vec4,
     K_ref,
     grid_spec,           // PDE spatial grid
     1000,                // PDE time steps (match old n_time=1000)
     OptionType::PUT
-).value();
+);
+if (!factory_result.has_value()) {
+    // Handle factory error
+    return;
+}
+auto [builder, axes] = std::move(factory_result.value());
 
-auto result = builder.build(axes).value();
-auto surface = result.surface;
-const auto& stats = result.fitting_stats;
+auto result = builder.build(axes);
+if (!result.has_value()) {
+    // Handle build error
+    return;
+}
+auto surface = result->surface;
+const auto& stats = result->fitting_stats;
 ```
 
-### Step 7: Delete Specialized Builder
+### Step 8: Delete Specialized Builder
 **Files to delete:**
 - `src/option/price_table_4d_builder.hpp`
 - `src/option/price_table_4d_builder.cpp`
 - Update `BUILD` file to remove targets
 
+**Note:** OptionChain was extracted to shared header in Step 5, so deletion is safe.
+
 **Verify:** Run `bazel test //...` to ensure no broken dependencies
 
-### Step 8: Update Documentation
+### Step 9: Update Documentation
 - `docs/API_GUIDE.md` - Replace all examples with generic builder
 - Inline doc comments - Update to reference `PriceTableBuilder<4>`
 - `CLAUDE.md` - Update quick reference examples
@@ -598,58 +670,9 @@ build_with_save(
 - Very large grids (e.g., 150×80×60×30): can exceed 2 GB temporarily
 - **Key improvement:** Tensor never included in result, always discarded after fitting
 
-### 3. Fix Grid Configuration Override Bug
+**Note:** Grid configuration bug fix was moved to Phase 1 Step 3 (uses custom_grid_config to properly propagate x_min/x_max).
 
-**Current bug (src/option/price_table_builder.cpp:131-142):**
-```cpp
-GridAccuracyParams accuracy;
-// BUG: Overrides config_.grid_estimator!
-accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t(100));
-accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
-```
-
-**Problem:** `GridAccuracyParams` forces min=100, max=1200, ignoring user's `config_.grid_estimator.n_points()`.
-
-**Solution:** Respect user's `GridSpec` from config:
-
-```cpp
-template <size_t N>
-BatchAmericanOptionResult
-PriceTableBuilder<N>::solve_batch(
-    const std::vector<AmericanOptionParams>& batch,
-    const PriceTableAxes<N>& axes) const
-{
-    if constexpr (N != 4) {
-        // Return empty result for N≠4
-        return /* ... */;
-    }
-
-    BatchAmericanOptionSolver solver;
-
-    // FIXED: Use grid_estimator from config directly
-    GridAccuracyParams accuracy;
-    accuracy.min_spatial_points = config_.grid_estimator.n_points();  // Use exact value
-    accuracy.max_spatial_points = config_.grid_estimator.n_points();  // Use exact value
-    accuracy.max_time_steps = config_.n_time;
-
-    // Extract alpha parameter for sinh-spaced grids
-    if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-        accuracy.alpha = config_.grid_estimator.concentration();
-    }
-
-    solver.set_grid_accuracy(accuracy);
-
-    // Register maturity grid as snapshot times
-    solver.set_snapshot_times(axes.grids[1]);  // maturity axis
-
-    // Solve batch with shared grid (normalized chain solver)
-    return solver.solve_batch(batch, true);  // use_shared_grid = true
-}
-```
-
-**Impact:** User's grid specification from `PriceTableConfig::grid_estimator` is now respected exactly.
-
-### 4. Parallelize Extraction Phase
+### 3. Parallelize Extraction Phase
 
 **Current problem (src/option/price_table_builder.cpp:203-250):**
 ```cpp
@@ -756,7 +779,7 @@ PriceTableBuilder<N>::extract_tensor(
 
 **Performance impact:** Extraction phase now scales linearly with core count (previously serial bottleneck).
 
-### 5. Snapshot Grid Validation
+### 4. Snapshot Grid Validation
 
 **Design:** Validate maturity grid up-front before any PDE work. Use structured error types without redundant messages.
 
