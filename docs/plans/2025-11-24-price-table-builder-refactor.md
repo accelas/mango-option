@@ -1,136 +1,125 @@
 # Price Table Builder Refactor
 
-**Date:** 2025-11-24
-**Status:** Design Complete
-**Goal:** Comprehensive refactor addressing resource ownership, memory pressure, grid configuration bugs, parallelization, and validation.
+**Date:** 2025-11-24 (Revised: 2025-11-24)
+**Status:** Design Complete - Targets Generic Architecture
+**Goal:** Comprehensive refactor of `PriceTableBuilder<N>` addressing memory pressure, grid configuration bugs, parallelization, validation, and error handling.
 
-## Naming Changes
+## Architecture Decision
 
-Drop redundant "4D" suffix from all names since price tables are inherently 4-dimensional (moneyness × maturity × volatility × rate):
+**Target:** Generic `PriceTableBuilder<N>` template (already in codebase at `src/option/price_table_builder.{hpp,cpp}`)
 
-- `PriceTable4DBuilder` → `PriceTableBuilder`
-- `PriceTable4DResult` → `PriceTableResult`
-- `BSpline4D` → `BSplineEvaluator` (more descriptive)
-- File: `price_table_4d_builder.hpp` → `price_table_builder.hpp`
-- File: `price_table_4d_builder.cpp` → `price_table_builder.cpp`
+**Rationale:** The generic architecture provides:
+- Clean separation: `PriceTableAxes<N>` → `PriceTableConfig` → `PriceTableSurface<N>`
+- Better composability: Works with any N dimensions (though N=4 only currently implemented)
+- No duplicate storage: Single ownership chain through `BSplineND<N>`
+- Already uses `BatchAmericanOptionSolver` with normalized solving
 
-## Problems Addressed
+**Deprecation:** Phase out specialized `PriceTable4DBuilder` in favor of generic `PriceTableBuilder<4>`
 
-1. **Resource ownership** - PriceTableSurface stores data twice (workspace + evaluator)
-2. **Memory explosion** - Full tensor kept in result (>10 GB for large grids)
-3. **Grid configuration ignored** - Custom x_bounds/n_space/n_time overridden by GridAccuracyParams
-4. **Serial extraction bottleneck** - Extraction not parallelized despite parallel PDE solving
-5. **No snapshot validation** - Invalid maturities corrupt tensor silently
+## Problems Addressed in Generic Builder
+
+Analyzing `src/option/price_table_builder.cpp`:
+
+1. **String errors** - All methods return `std::string`, not structured error types (lines 17-67)
+2. **Grid configuration override** - `GridAccuracyParams` overrides `config_.grid_estimator` (lines 131-142)
+3. **Serial extraction** - Loop over (σ,r) batches not parallelized (lines 203-250)
+4. **No snapshot validation** - Maturity grid never validated against solver's recorded snapshots
+5. **No atomic failure tracking** - `extract_tensor()` fills NaN for failures but doesn't count them (lines 208-216, 232-238)
+6. **No diagnostics** - No `BSplineFittingStats`, no save-to-disk API, no residual metrics
+7. **Temporary tensor in result?** - Need to verify `PriceTensor<N>` doesn't leak into result (currently discarded after fit)
 
 ## Architecture Overview
 
-### 1. Resource Ownership Chain
+### 1. Current Generic Architecture (Already Clean!)
 
-**Design:** Single ownership path eliminates duplicate storage.
+**Existing ownership chain in `PriceTableSurface<N>`:**
 
 ```
-PriceTableWorkspace (grids + coefficients)
-         ↑ owned by
-     BSplineEvaluator (evaluator logic)
-         ↑ wrapped by shared_ptr
-  PriceTableSurface (user-facing API)
+    PriceTableAxes<N> (grid points + names)
+    PriceTableMetadata (K_ref, dividends)
+    std::vector<double> (B-spline coefficients)
+              ↓ passed to factory
+        BSplineND<N> (created from grids + coeffs)
+              ↑ owned via unique_ptr
+      PriceTableSurface<N> (axes_ + meta_ + spline_)
 ```
 
-**Changes to PriceTableSurface:**
+**Current implementation (src/option/price_table_surface.hpp):**
 ```cpp
+template <size_t N>
 class PriceTableSurface {
-public:
-    explicit PriceTableSurface(std::shared_ptr<BSplineEvaluator> evaluator)
-        : evaluator_(std::move(evaluator)) {}
-
-    double eval(double m, double tau, double sigma, double rate) const {
-        return evaluator_->eval(m, tau, sigma, rate);
-    }
-
-    // Expose workspace for serialization/diagnostics
-    const PriceTableWorkspace& workspace() const {
-        return evaluator_->workspace();
-    }
-
 private:
-    std::shared_ptr<BSplineEvaluator> evaluator_;
-    // REMOVED: std::shared_ptr<PriceTableWorkspace> workspace_
-    // REMOVED: std::unique_ptr<BSplineEvaluator> evaluator_
+    PriceTableAxes<N> axes_;               // Grid metadata
+    PriceTableMetadata meta_;              // K_ref, dividends
+    std::unique_ptr<BSplineND<N>> spline_; // Evaluator (owns coeffs)
 };
 ```
 
-**Changes to BSplineEvaluator:**
+**Status:** ✅ Already optimal - single ownership, no duplication
+
+### 2. Add Result Type with Diagnostics
+
+**Current:** `PriceTableBuilder<N>::build()` returns only `std::shared_ptr<const PriceTableSurface<N>>`
+
+**Problem:** No diagnostics, fitting stats, or build metadata
+
+**Solution:** Add `PriceTableResult<N>` struct with diagnostics:
+
 ```cpp
-class BSplineEvaluator {
-public:
-    // Factory returns shared_ptr directly to avoid double-move
-    static std::expected<std::shared_ptr<BSplineEvaluator>, PriceTableError>
-    create(PriceTableWorkspace&& ws);
-
-    double eval(double m, double tau, double sigma, double rate) const;
-
-    const PriceTableWorkspace& workspace() const { return workspace_; }
-
-private:
-    PriceTableWorkspace workspace_;  // Owned, not shared
-    // ... evaluation state
-};
-```
-
-**Memory impact:** Eliminates duplicate coefficient storage. For 50×30×20×10 grid: saves ~2.4 MB per surface instance.
-
-### 2. Lightweight Result Type
-
-**Design:** Remove raw price tensor from result. Provide on-demand diagnostics.
-
-**Changes to PriceTableResult:**
-```cpp
+/// Result from price table build with diagnostics
+template <size_t N>
 struct PriceTableResult {
-    PriceTableSurface surface;              // Lightweight evaluator wrapper
-    size_t n_pde_solves;                    // Useful stat
-    double precompute_time_seconds;         // Useful stat
-    BSplineFittingStats fitting_stats;      // Fitting diagnostics
+    std::shared_ptr<const PriceTableSurface<N>> surface;  // Immutable surface
+    size_t n_pde_solves;                    // Number of PDE solves performed
+    double precompute_time_seconds;         // Wall-clock build time
+    BSplineFittingStats fitting_stats;      // B-spline fitting diagnostics
 
-    // REMOVED: std::vector<double> prices_4d (can be >10 GB)
-    // REMOVED: std::shared_ptr<BSplineEvaluator> evaluator (redundant with surface)
+    // Note: PriceTensor<N> NOT included (discarded after fitting to save memory)
+};
+```
+
+**New builder signature:**
+```cpp
+template <size_t N>
+class PriceTableBuilder {
+    [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
+    build(const PriceTableAxes<N>& axes);
 };
 ```
 
 **New diagnostic APIs:**
 ```cpp
+template <size_t N>
 class PriceTableBuilder {
 public:
-    // Existing precompute returns lightweight result (includes BSplineFittingStats)
-    std::expected<PriceTableResult, PriceTableError> precompute(
-        const PriceTableConfig& config);
+    // Rename: build() → build_with_diagnostics()
+    // Returns: PriceTableResult<N> with fitting stats + timing
+    std::expected<PriceTableResult<N>, PriceTableError>
+    build_with_diagnostics(const PriceTableAxes<N>& axes);
 
-    // Optional: stream raw prices to disk during precompute (returns result + saves)
-    std::expected<PriceTableResult, PriceTableError> precompute_with_save(
-        const PriceTableConfig& config,
+    // Optional: stream temporary tensor to disk before fitting (for external tools)
+    // Returns: PriceTableResult<N> AND saves raw tensor to Parquet
+    std::expected<PriceTableResult<N>, PriceTableError>
+    build_with_save(
+        const PriceTableAxes<N>& axes,
         const std::filesystem::path& output_path,
         bool streaming = true);
 
-    // Grid accessors for downstream consumers (Arrow export, CLI tools)
-    std::span<const double> moneyness() const { return moneyness_; }
-    std::span<const double> maturity() const { return maturity_; }
-    std::span<const double> volatility() const { return volatility_; }
-    std::span<const double> rate() const { return rate_; }
+    // Grid accessors for consumers (currently access PriceTableConfig directly)
+    const PriceTableConfig& config() const { return config_; }
 };
 ```
 
-**Rationale for removing `compute_residuals()`:**
-- `PriceTableResult` already contains `BSplineFittingStats` with residual information
-- After removing `prices_4d`, there's no ground truth data to compare against
-- Users get residuals from `result.fitting_stats` (computed during B-spline fitting)
-- Avoids impossible-to-implement API that requires non-existent data
+**Note:** Grid points come from `PriceTableAxes<N>`, not stored in builder. Builder only stores `config_` for PDE parameters.
 
-**Rationale for `precompute_with_save()` returning `PriceTableResult`:**
-- Users need both surface (for queries) AND persisted data (for external tools)
+**Rationale for `build_with_save()` returning `PriceTableResult<N>`:**
+- Users need both surface (for queries) AND persisted tensor (for external tools/analysis)
 - Returning void would force running PDE pipeline twice (2× compute cost)
-- Returns same result as `precompute()` but also streams prices to disk
-- Single execution provides both in-memory evaluator and archived raw data
+- Returns same result as `build()` but also streams `PriceTensor<N>` to disk before fitting
+- Single execution provides both in-memory surface and archived raw tensor
+- Tensor still discarded from memory after fitting (only saved to disk)
 
-**Atomicity contract for `precompute_with_save()`:**
+**Atomicity contract for `build_with_save()`:**
 - **Before starting:** Remove any stale `{output_path}.tmp` (crash recovery)
 - Writes to temporary file: `{output_path}.tmp`
 - On success: atomic rename `{output_path}.tmp` → `{output_path}`
@@ -144,155 +133,166 @@ public:
 - **Testing:** Inject failures at various stages, verify no corrupt files remain
 - **Testing:** Create stale .tmp file, verify it's cleaned up on next run
 
-**Memory impact (prices_4d tensor size):**
-- 50×30×20×10 grid: removes 2.4 MB (300,000 doubles × 8 bytes)
-- 200×100×50×20 grid: removes 160 MB (20,000,000 doubles × 8 bytes)
-- Very large grids (e.g., 150×80×60×30): can exceed 2 GB
+**Memory impact (PriceTensor<N> size):**
+- 50×30×20×10 grid: 2.4 MB (300,000 doubles × 8 bytes) - temporary during build only
+- 200×100×50×20 grid: 160 MB (20,000,000 doubles × 8 bytes) - temporary during build only
+- Very large grids (e.g., 150×80×60×30): can exceed 2 GB temporarily
+- **Key improvement:** Tensor never included in result, always discarded after fitting
 
-### 3. Grid Configuration Precedence
+### 3. Fix Grid Configuration Override Bug
 
-**Design:** When user supplies explicit `x_bounds`, respect them by building `GridSpec`/`TimeDomain` and passing as `custom_grid_config`. Fall back to auto-estimation only when bounds not provided.
-
-**Validation and precedence logic:**
+**Current bug (src/option/price_table_builder.cpp:131-142):**
 ```cpp
-std::expected<PriceTableResult, PriceTableError>
-PriceTableBuilder::precompute(const PriceTableConfig& config)
+GridAccuracyParams accuracy;
+// BUG: Overrides config_.grid_estimator!
+accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t(100));
+accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
+```
+
+**Problem:** `GridAccuracyParams` forces min=100, max=1200, ignoring user's `config_.grid_estimator.n_points()`.
+
+**Solution:** Respect user's `GridSpec` from config:
+
+```cpp
+template <size_t N>
+BatchAmericanOptionResult
+PriceTableBuilder<N>::solve_batch(
+    const std::vector<AmericanOptionParams>& batch,
+    const PriceTableAxes<N>& axes) const
 {
-    // Validate grid is non-empty before accessing .back()
-    if (maturity_.empty()) {
-        return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_EMPTY,
-            .axis_index = 1  // τ axis
-        });
+    if constexpr (N != 4) {
+        // Return empty result for N≠4
+        return /* ... */;
     }
 
-    const double T_max = maturity_.back();
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config;
+    BatchAmericanOptionSolver solver;
 
-    if (config.x_bounds.has_value()) {
-        // USER-SPECIFIED BOUNDS TAKE PRECEDENCE
-        auto [x_min, x_max] = config.x_bounds.value();
+    // FIXED: Use grid_estimator from config directly
+    GridAccuracyParams accuracy;
+    accuracy.min_spatial_points = config_.grid_estimator.n_points();  // Use exact value
+    accuracy.max_spatial_points = config_.grid_estimator.n_points();  // Use exact value
+    accuracy.max_time_steps = config_.n_time;
 
-        // Validate bounds contain requested moneyness range
-        const double x_min_requested = std::log(moneyness_.front());
-        const double x_max_requested = std::log(moneyness_.back());
-
-        if (x_min_requested < x_min) {
-            return std::unexpected(PriceTableError{
-                .code = PriceTableErrorCode::INVALID_BOUNDS,
-                .invalid_values = {x_min, x_min_requested},  // [provided, needed]
-                .details = "Lower bound too high: need " + std::to_string(x_min_requested) +
-                           " but got " + std::to_string(x_min)
-            });
-        }
-
-        if (x_max_requested > x_max) {
-            return std::unexpected(PriceTableError{
-                .code = PriceTableErrorCode::INVALID_BOUNDS,
-                .invalid_values = {x_max, x_max_requested},  // [provided, needed]
-                .details = "Upper bound too low: need " + std::to_string(x_max_requested) +
-                           " but got " + std::to_string(x_max)
-            });
-        }
-
-        // Build explicit GridSpec from config
-        auto grid_result = GridSpec<double>::sinh_stretched(
-            x_min, x_max, config.n_space, 2.0);
-        if (!grid_result) {
-            return std::unexpected(PriceTableError{
-                .code = PriceTableErrorCode::INVALID_GRID_SPEC
-            });
-        }
-
-        // Build TimeDomain from config
-        TimeDomain time_domain = TimeDomain::from_n_steps(0.0, T_max, config.n_time);
-
-        custom_grid_config = std::make_pair(grid_result.value(), time_domain);
-
-        // Bypass GridAccuracyParams entirely
-    } else {
-        // FALL BACK TO AUTO-ESTIMATION
-        // Use GridAccuracyParams (existing behavior)
-        GridAccuracyParams accuracy;
-        accuracy.min_spatial_points = config.n_space;
-        accuracy.max_spatial_points = config.n_space;
-        accuracy.max_time_steps = config.n_time;
-        batch_solver.set_grid_accuracy(accuracy);
+    // Extract alpha parameter for sinh-spaced grids
+    if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
+        accuracy.alpha = config_.grid_estimator.concentration();
     }
 
-    // ... build batch params with custom_grid_config
+    solver.set_grid_accuracy(accuracy);
+
+    // Register maturity grid as snapshot times
+    solver.set_snapshot_times(axes.grids[1]);  // maturity axis
+
+    // Solve batch with shared grid (normalized chain solver)
+    return solver.solve_batch(batch, true);  // use_shared_grid = true
 }
 ```
 
-**API documentation update:**
+**Impact:** User's grid specification from `PriceTableConfig::grid_estimator` is now respected exactly.
+
+### 4. Parallelize Extraction Phase
+
+**Current problem (src/option/price_table_builder.cpp:203-250):**
 ```cpp
-/// Configuration for PDE solves
-///
-/// Grid configuration precedence:
-/// 1. If x_bounds is set: uses exact bounds, bypasses auto-estimation
-/// 2. If x_bounds is nullopt: uses GridAccuracyParams for auto-estimation
-///
-/// Recommendation: Specify x_bounds explicitly for price table construction
-/// to ensure moneyness grid fits within PDE domain.
-struct PriceTableConfig {
-    OptionType option_type = OptionType::PUT;
-    size_t n_space = 101;
-    size_t n_time = 1000;
-    double dividend_yield = 0.0;
-    std::optional<std::pair<double, double>> x_bounds;
-};
-```
-
-**Impact:** Eliminates "moneyness outside PDE bounds" errors when users provide correct bounds.
-
-### 4. Parallel Extraction Phase
-
-**Design:** Flatten nested (Nv × Nr × Nt) iteration space into single parallel loop for better load balancing and scalability.
-
-**Current structure (price_table_extraction.cpp):**
-```cpp
-// Outer parallel over (σ, r): 200 iterations
-MANGO_PRAGMA_PARALLEL_FOR
-for (size_t idx = 0; idx < Nv * Nr; ++idx) {
-    // Inner SERIAL over maturity: 30 iterations
-    for (size_t j = 0; j < Nt; ++j) {
-        // Build spline, interpolate
+// Serial loops over (σ, r) batches
+for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+        // ... nested loop over maturity
+        for (size_t j = 0; j < Nt; ++j) {
+            // Build spline, interpolate
+        }
     }
 }
 ```
 
-**New structure:**
+**Problem:** Serial execution leaves cores idle. For 20×10×30 = 6000 slices, this is embarrassingly parallel work.
+
+**Solution:** Add OpenMP parallel loop over outer (σ, r) iteration:
+
 ```cpp
-// Single parallel loop over all work: 6000 iterations
-// Track failures explicitly (from resolution #2)
-const size_t total_work = Nv * Nr * Nt;
-std::atomic<size_t> failed_slices{0};
-
-MANGO_PRAGMA_PARALLEL_FOR
-for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
-    // Decode flat index to (vol_idx, r_idx, mat_idx)
-    const size_t vol_idx = work_idx / (Nr * Nt);
-    const size_t remainder = work_idx % (Nr * Nt);
-    const size_t r_idx = remainder / Nt;
-    const size_t mat_idx = remainder % Nt;
-
-    // Get batch result
-    const size_t batch_idx = vol_idx * Nr + r_idx;
-
-    if (batch_idx >= batch_result.results.size() ||
-        !batch_result.results[batch_idx].has_value() ||
-        !batch_result.results[batch_idx]->converged) {
-        failed_slices.fetch_add(1, std::memory_order_relaxed);
-        continue;  // Leave zeros in prices_view
+template <size_t N>
+std::expected<PriceTensor<N>, std::string>
+PriceTableBuilder<N>::extract_tensor(
+    const BatchAmericanOptionResult& batch,
+    const PriceTableAxes<N>& axes) const
+{
+    if constexpr (N != 4) {
+        return std::unexpected("extract_tensor only supports N=4");
     }
 
-    const auto& result = batch_result.results[batch_idx].value();
-    auto result_grid = result.grid();
-    auto x_grid = result_grid->x();
+    const size_t Nm = axes.grids[0].size();  // moneyness
+    const size_t Nt = axes.grids[1].size();  // maturity
+    const size_t Nσ = axes.grids[2].size();  // volatility
+    const size_t Nr = axes.grids[3].size();  // rate
 
-    // Build spline for this (σ, r, τ) combination
-    size_t step_idx = step_indices[mat_idx];
-    std::span<const double> spatial_solution = result.at_time(step_idx);
+    // ... create tensor ...
+
+    // Precompute log-moneyness
+    std::vector<double> log_moneyness(Nm);
+    for (size_t i = 0; i < Nm; ++i) {
+        log_moneyness[i] = std::log(axes.grids[0][i]);
+    }
+
+    // Track failures atomically
+    std::atomic<size_t> failed_slices{0};
+
+    // FIXED: Parallelize outer loop over (σ, r) batches
+    MANGO_PRAGMA_PARALLEL_FOR
+    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+            size_t batch_idx = σ_idx * Nr + r_idx;
+            const auto& result_expected = batch.results[batch_idx];
+
+            if (!result_expected.has_value()) {
+                failed_slices.fetch_add(Nt, std::memory_order_relaxed);  // Nt failures
+                // Fill with NaN
+                for (size_t i = 0; i < Nm; ++i) {
+                    for (size_t j = 0; j < Nt; ++j) {
+                        tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                    }
+                }
+                continue;
+            }
+
+            const auto& result = result_expected.value();
+            auto grid = result.grid();
+            auto x_grid = grid->x();
+
+            // For each maturity snapshot
+            for (size_t j = 0; j < Nt; ++j) {
+                std::span<const double> spatial_solution = result.at_time(j);
+
+                // Build cubic spline
+                CubicSpline<double> spline;
+                auto build_error = spline.build(x_grid, spatial_solution);
+
+                if (build_error.has_value()) {
+                    // Spline build failed
+                    failed_slices.fetch_add(1, std::memory_order_relaxed);
+                    for (size_t i = 0; i < Nm; ++i) {
+                        tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                    }
+                    continue;
+                }
+
+                // Interpolate and scale by K_ref
+                const double K_ref = config_.K_ref;
+                for (size_t i = 0; i < Nm; ++i) {
+                    double normalized_price = spline.eval(log_moneyness[i]);
+                    tensor.view[i, j, σ_idx, r_idx] = K_ref * normalized_price;
+                }
+            }
+        }
+    }
+
+    // Check for failures
+    if (failed_slices.load() > 0) {
+        return std::unexpected("Extraction had " + std::to_string(failed_slices.load()) +
+                               " failed slices out of " + std::to_string(Nσ * Nr * Nt));
+    }
+
+    return tensor;
+}
 
     if (spatial_solution.empty()) {
         failed_slices.fetch_add(1, std::memory_order_relaxed);
