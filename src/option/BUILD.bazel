@@ -236,7 +236,7 @@ cc_library(
         ":bspline_price_table",
         ":american_option",
         ":iv_result",
-        ":price_table_4d_builder",
+        ":price_table_surface",
         ":option_spec",
         "//src/math:root_finding",
         "//src/support:parallel",
