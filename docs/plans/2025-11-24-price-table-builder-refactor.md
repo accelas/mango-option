@@ -98,33 +98,31 @@ struct PriceTableResult {
 
 **New diagnostic APIs:**
 ```cpp
-/// Residual statistics from B-spline fitting (avoids materializing raw tensor)
-struct ResidualStats {
-    double max_residual;           ///< Maximum absolute error
-    double rms_residual;           ///< Root-mean-square error
-    double mean_residual;          ///< Mean error (bias indicator)
-    size_t num_points_evaluated;   ///< Number of grid points checked
-    size_t num_points_above_threshold;  ///< Points with |error| > threshold
-};
-
 class PriceTableBuilder {
 public:
-    // Existing precompute returns lightweight result
+    // Existing precompute returns lightweight result (includes BSplineFittingStats)
     std::expected<PriceTableResult, PriceTableError> precompute(
         const PriceTableConfig& config);
-
-    // On-demand residual computation (does not store raw prices)
-    // Streams through grid, computes stats without materializing full tensor
-    std::expected<ResidualStats, PriceTableError> compute_residuals(
-        const PriceTableSurface& surface) const;
 
     // Optional: stream raw prices to disk during precompute
     std::expected<void, PriceTableError> precompute_with_save(
         const PriceTableConfig& config,
         const std::filesystem::path& output_path,
         bool streaming = true);
+
+    // Grid accessors for downstream consumers (Arrow export, CLI tools)
+    std::span<const double> moneyness() const { return moneyness_; }
+    std::span<const double> maturity() const { return maturity_; }
+    std::span<const double> volatility() const { return volatility_; }
+    std::span<const double> rate() const { return rate_; }
 };
 ```
+
+**Rationale for removing `compute_residuals()`:**
+- `PriceTableResult` already contains `BSplineFittingStats` with residual information
+- After removing `prices_4d`, there's no ground truth data to compare against
+- Users get residuals from `result.fitting_stats` (computed during B-spline fitting)
+- Avoids impossible-to-implement API that requires non-existent data
 
 **Memory impact (prices_4d tensor size):**
 - 50×30×20×10 grid: removes 2.4 MB (300,000 doubles × 8 bytes)
@@ -140,6 +138,14 @@ public:
 std::expected<PriceTableResult, PriceTableError>
 PriceTableBuilder::precompute(const PriceTableConfig& config)
 {
+    // Validate grid is non-empty before accessing .back()
+    if (maturity_.empty()) {
+        return std::unexpected(PriceTableError{
+            .code = PriceTableErrorCode::INVALID_GRID_EMPTY,
+            .axis_index = 1  // τ axis
+        });
+    }
+
     const double T_max = maturity_.back();
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config;
 
@@ -331,6 +337,7 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
     const double epsilon = 1e-10;
 
     // Validate maturity grid before solver setup
+    // Note: Empty check already done in Section 3 (before accessing .back())
 
     // Check 1: Must be sorted
     if (!std::is_sorted(maturity_.begin(), maturity_.end())) {
@@ -346,14 +353,6 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_NEGATIVE,
             .invalid_values = {maturity_.front()},
-            .axis_index = 1  // τ axis
-        });
-    }
-
-    // Check 3: Grid must be non-empty
-    if (maturity_.empty()) {
-        return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_EMPTY,
             .axis_index = 1  // τ axis
         });
     }
@@ -376,15 +375,17 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 ## Implementation Order
 
 1. **Add PriceTableError type** - Foundation for all error handling
-2. **Refactor BSplineEvaluator ownership** - Own workspace, update constructor
+2. **Refactor BSplineEvaluator ownership** - Own workspace, update constructor, use PriceTableError
 3. **Refactor PriceTableSurface** - Wrap BSplineEvaluator only, expose workspace
-4. **Add diagnostic methods** - compute_residuals(), precompute_with_save() (MUST come before removing prices_4d)
-5. **Add snapshot validation** - In precompute() before solver setup
+4. **Add diagnostic methods** - precompute_with_save(), grid accessors (MUST come before removing prices_4d)
+5. **Add snapshot validation** - In precompute() before solver setup (with empty check)
 6. **Fix grid configuration** - Respect x_bounds, build custom_grid_config
 7. **Parallelize extraction** - Flatten loop in extract_batch_results
-8. **Remove prices_4d from result** - Update PriceTableResult struct (safe now that diagnostics exist)
-9. **Update tests** - All affected test cases
+8. **Update all consumers** - Tests, Arrow export, CLI, benchmarks use new APIs (MUST come before Step 9)
+9. **Remove prices_4d from result** - Update PriceTableResult struct (safe now - all consumers migrated)
 10. **Update examples/docs** - Reflect new API
+
+**Critical ordering constraint:** Steps 8-9 must happen in this order. Removing prices_4d (Step 9) before updating consumers (Step 8) will break the build. This matches the phased rollout strategy (Phase 2 → Phase 3).
 
 ## Testing Plan
 
@@ -394,9 +395,9 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 - `price_table_validation_test.cc` - All snapshot validation cases
 - `price_table_grid_config_test.cc` - x_bounds precedence logic
 - `price_table_diagnostics_test.cc` - New diagnostic APIs:
-  - `compute_residuals()` returns ResidualStats with reasonable error bounds (max/RMS/mean)
   - `precompute_with_save()` creates valid Parquet files
   - Builder grid accessors (`.moneyness()`, `.maturity()`, etc.) return correct spans
+  - `BSplineFittingStats` in result contains valid residual metrics
 - `price_table_extraction_test.cc` - Atomic failure tracking:
   - Partial failures increment atomic counter correctly
   - INCOMPLETE_RESULTS error returned when failed_slices > 0
@@ -408,7 +409,7 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 - Test x_bounds respected vs auto-estimation fallback
 - Verify no prices_4d in result
 - Test new error code paths (INVALID_GRID_EMPTY, INVALID_GRID_EXCEEDS_TERMINAL, etc.)
-- Test diagnostic workflow: build surface → compute residuals → verify quality
+- Test diagnostic workflow: build surface → inspect BSplineFittingStats → verify quality
 
 ### Performance Tests
 - Measure extraction phase scaling with core count (should be linear to 64 cores)
@@ -428,14 +429,12 @@ auto& raw_prices = result.prices_4d;  // No longer exists
 
 // NEW
 auto result = builder.precompute(config);
-// If you need residual statistics:
-auto stats_result = builder.compute_residuals(result.surface);
-if (stats_result.has_value()) {
-    const auto& stats = stats_result.value();
-    std::cout << "Max error: " << stats.max_residual << "\n";
-    std::cout << "RMS error: " << stats.rms_residual << "\n";
-}
-// If you need raw prices:
+// Residual statistics are in the result:
+const auto& stats = result.fitting_stats;
+std::cout << "Max residual: " << stats.max_residual_overall << "\n";
+std::cout << "Failed slices: " << stats.failed_slices_total << "\n";
+
+// If you need raw prices for external processing:
 builder.precompute_with_save(config, "prices.parquet");
 ```
 
@@ -504,40 +503,41 @@ if (!result && result.error().code ==
 This refactor breaks the `PriceTableResult` API. Follow this three-phase migration:
 
 **Phase 1: Add New APIs (Step 4 in Implementation Order)**
-- Add `compute_residuals(surface) -> expected<ResidualStats, PriceTableError>` to builder
 - Add `precompute_with_save(config, path) -> expected<void, PriceTableError>` to builder
 - Add grid accessors to builder: `.moneyness()`, `.maturity()`, `.volatility()`, `.rate()`
 - **Action:** Run `bazel test //tests:price_table_diagnostics_test` to verify new APIs work
 - **Validation:** All new APIs have test coverage before Phase 2
+- **Note:** Residuals already available via `result.fitting_stats` (no new API needed)
 
-**Phase 2: Update All Consumers (between Step 4 and Step 8)**
-This phase happens after adding diagnostic APIs (Step 4) but before removing prices_4d (Step 8).
+**Phase 2: Update All Consumers (Step 8 in Implementation Order)**
+This phase happens after adding diagnostic APIs (Step 4) and before removing prices_4d (Step 9).
 During this phase, also complete Steps 5-7 (validation, grid config, extraction parallelization).
 
 - Find all uses: `grep -r "prices_4d" tests/ examples/ tools/ benchmarks/`
 - **Update patterns:**
-  - Tests (Step 9): Replace `result.prices_4d` access with `compute_residuals()` or direct `surface.eval()` calls
+  - Tests: Replace `result.prices_4d` access with `result.fitting_stats` or direct `surface.eval()` calls
   - Arrow export: Replace `result.prices_4d` with loop over `builder.moneyness()` + `surface.eval()`
-  - CLI diagnostic tools: Add `--compute-residuals` flag, remove `--dump-raw-prices`
-  - Benchmarks: Update expected memory values (should drop by ~2.5 GB)
-  - Examples/docs (Step 10): Update to use new APIs
+  - CLI diagnostic tools: Use `result.fitting_stats` for residuals, remove `--dump-raw-prices`
+  - Benchmarks: Update expected memory values (varies by grid size: 2.4 MB to 160 MB+)
+  - Examples/docs: Update to use `fitting_stats` and grid accessors (will be finalized in Step 10)
 - **Action:** Run `bazel test //... && bazel build //...` to verify all consumers still work
 - **Validation:** No compilation errors, all tests pass with old API still present
 
-**Phase 3: Remove prices_4d (Step 8 in Implementation Order)**
+**Phase 3: Remove prices_4d (Step 9 in Implementation Order)**
 - Remove `std::vector<double> prices_4d` field from `PriceTableResult` struct
 - Remove `prices_4d` population code from `precompute()` implementation
 - **Action:** Run `bazel test //... && bazel build //...` to verify nothing breaks
-- **Validation:** Compilation succeeds (proves all consumers migrated), memory usage drops by ~2.5 GB
+- **Validation:** Compilation succeeds (proves all consumers migrated), memory usage drops (2.4 MB to 160+ MB depending on grid)
 
 **Rollback Plan:**
 - If Phase 3 breaks: Revert removal, add deprecated warnings to `prices_4d` field
 - If Phase 2 breaks specific consumer: Keep that consumer using old API, mark as technical debt
 
 **Timeline:**
-- Phases 1-3 happen in single PR (all implementation order steps 4-8)
+- Phases 1-3 happen in single PR (implementation order steps 4-9)
 - No external API changes until Phase 3 completes
 - Internal refactor only - no user-facing changes during Phases 1-2
+- Steps 1-3 (error types, ownership) are prerequisites done first
 
 ## Success Metrics
 
@@ -567,16 +567,21 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
 **Issue:** `BSplineEvaluator::create(PriceTableWorkspace&& ws)` moving large workspace may cause extra copies. Returning `expected<BSplineEvaluator>` by value forces workspace to live inside expected temporarily.
 
 **Resolution:**
-- Change factory signature to return pointer directly:
+- Change factory signature to return pointer with structured error:
   ```cpp
-  static std::expected<std::shared_ptr<BSplineEvaluator>, std::string>
+  static std::expected<std::shared_ptr<BSplineEvaluator>, PriceTableError>
   create(PriceTableWorkspace&& ws);
   ```
 - Implementation moves workspace directly into heap-allocated BSplineEvaluator:
   ```cpp
-  std::expected<std::shared_ptr<BSplineEvaluator>, std::string>
+  std::expected<std::shared_ptr<BSplineEvaluator>, PriceTableError>
   BSplineEvaluator::create(PriceTableWorkspace&& ws) {
       // Validate workspace...
+      if (!ws.is_valid()) {
+          return std::unexpected(PriceTableError{
+              .code = PriceTableErrorCode::INVALID_GRID_SPEC
+          });
+      }
       return std::make_shared<BSplineEvaluator>(std::move(ws));
   }
   ```
@@ -746,35 +751,12 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
   ```
 - **Testing:** Test both fixed and adaptive modes separately
 
-### 7. Diagnostics - Grid Access
+### 7. Diagnostics - Grid Access & Residuals
 
-**Issue:** `compute_residuals()` needs grids from builder. Downstream consumers (Arrow export, CLI) need grid access after removing `prices_4d`.
+**Issue:** Downstream consumers (Arrow export, CLI) need grid access after removing `prices_4d`. Users need residual diagnostics for quality assessment.
 
 **Resolution:**
 - Builder stores grids as members: `moneyness_`, `maturity_`, `volatility_`, `rate_`
-- `compute_residuals()` is builder method with grid access
-- For massive grids (>10 GB): use streaming to avoid memory explosion:
-  ```cpp
-  std::expected<ResidualStats, PriceTableError>
-  PriceTableBuilder::compute_residuals(
-      const PriceTableSurface& surface,
-      size_t subsample_factor = 1) const  // subsample for huge grids
-  {
-      ResidualStats stats;
-      // Stream through grid points, don't materialize full tensor
-      for (size_t m_idx = 0; m_idx < Nm; m_idx += subsample_factor) {
-          for (size_t t_idx = 0; t_idx < Nt; t_idx += subsample_factor) {
-              for (size_t v_idx = 0; v_idx < Nv; v_idx += subsample_factor) {
-                  for (size_t r_idx = 0; r_idx < Nr; r_idx += subsample_factor) {
-                      double actual = surface.eval(...);
-                      // Compare with ground truth, update stats
-                  }
-              }
-          }
-      }
-      return stats;
-  }
-  ```
 - Expose grids via builder accessors for downstream consumers:
   ```cpp
   class PriceTableBuilder {
@@ -786,7 +768,11 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
   };
   ```
 - Arrow export uses `builder.moneyness()` + `surface.eval()` instead of `result.prices_4d`
-- **Testing:** Test residuals with 1GB+ grids using subsampling
+- **Residuals available via `BSplineFittingStats`:**
+  - Already computed during B-spline fitting process
+  - Already included in `PriceTableResult.fitting_stats`
+  - No need for separate `compute_residuals()` API (would require ground truth data)
+- **Testing:** Test grid accessors return correct spans, fitting_stats populated correctly
 
 ### 8. Missing Updates - Downstream Consumers
 
