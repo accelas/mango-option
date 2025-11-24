@@ -284,7 +284,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         // Just iterate once to report
     }
 
-    state.SetLabel("Grid " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
+    state.SetLabel("Grid " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(time_domain.n_steps()));
     state.counters["abs_error"] = error;
     state.counters["rel_error_%"] = rel_error;
     state.counters["reference"] = ql_reference;

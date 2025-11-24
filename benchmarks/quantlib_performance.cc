@@ -295,7 +295,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
         benchmark::DoNotOptimize(price);
     }
 
-    state.SetLabel("mango " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(n_time));
+    state.SetLabel("mango " + std::to_string(grid_spec.n_points()) + "x" + std::to_string(time_domain.n_steps()));
 }
 BENCHMARK(BM_Mango_GridResolution)
     ->Args({101, 1000})
