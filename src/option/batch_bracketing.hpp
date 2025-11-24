@@ -13,6 +13,7 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/american_option.hpp"
 #include "src/pde/core/grid.hpp"
+#include "src/pde/core/time_domain.hpp"
 #include <vector>
 #include <span>
 #include <expected>
@@ -62,8 +63,8 @@ struct OptionBracket {
     /// Optimal grid specification for this bracket
     GridSpec<double> grid_spec;
 
-    /// Number of time steps for this bracket
-    size_t n_time;
+    /// Time domain for this bracket
+    TimeDomain time_domain;
 
     /// Bracket statistics for diagnostics
     struct Stats {
@@ -145,7 +146,7 @@ public:
      * @param accuracy Grid accuracy parameters
      * @return Grid specification and time steps
      */
-    static std::expected<std::pair<GridSpec<double>, size_t>, std::string>
+    static std::expected<std::pair<GridSpec<double>, TimeDomain>, std::string>
     estimate_bracket_grid(
         std::span<const PricingParams> options,
         const GridAccuracyParams& accuracy = {});

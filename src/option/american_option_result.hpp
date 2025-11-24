@@ -108,10 +108,11 @@ public:
     /**
      * @brief Compute theta: ∂V/∂t
      *
-     * STUB: Returns 0.0 for now.
-     * Future implementation will use finite difference from solution_prev().
+     * NOT IMPLEMENTED: This method throws std::runtime_error.
+     * Theta computation requires temporal finite differences from successive
+     * solution snapshots, which is not yet supported.
      *
-     * @return Theta at current spot price (currently 0.0)
+     * @throws std::runtime_error Always throws - method not implemented
      */
     double theta() const;
 

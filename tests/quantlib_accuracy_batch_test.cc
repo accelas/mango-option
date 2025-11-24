@@ -149,7 +149,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
@@ -181,7 +181,7 @@ TEST(QuantLibBatchTest, Greeks_ATM) {
     AmericanOptionParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;

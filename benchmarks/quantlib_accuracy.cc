@@ -120,7 +120,7 @@ static void compare_scenario(
     );
 
     // Create workspace (use automatic grid determination)
-    auto [grid_spec, n_time] = estimate_grid_for_option(mango_params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -255,7 +255,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -313,7 +313,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
         0.20    // volatility
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -635,7 +635,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
     );
 
     // Create workspace (use automatic grid determination)
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -707,7 +707,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         dividends
     );
 
-    auto [grid_spec, n_time] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
