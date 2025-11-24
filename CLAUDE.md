@@ -132,13 +132,15 @@ auto result = solver.solve_impl(query);
 
 **Pattern 2: Price Table Pre-computation**
 ```cpp
-#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_builder.hpp"
+#include "src/option/price_table_surface.hpp"
 
-auto builder = mango::PriceTable4DBuilder::create(
-    moneyness_grid, maturity_grid, vol_grid, rate_grid, K_ref);
-builder->precompute(OptionType::PUT, 101, 1000);
-auto surface = builder->get_surface();
-double price = surface.eval(m, tau, sigma, r);  // ~500ns
+auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
+    moneyness_grid, maturity_grid, vol_grid, rate_grid, K_ref,
+    grid_spec, 1000, mango::OptionType::PUT).value();
+auto result = builder.build(axes);
+double price = result->surface->value({m, tau, sigma, r});  // ~500ns
 ```
 
 **See [docs/API_GUIDE.md](docs/API_GUIDE.md) for complete patterns**
