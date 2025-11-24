@@ -131,15 +131,18 @@ public:
 - Single execution provides both in-memory evaluator and archived raw data
 
 **Atomicity contract for `precompute_with_save()`:**
+- **Before starting:** Remove any stale `{output_path}.tmp` (crash recovery)
 - Writes to temporary file: `{output_path}.tmp`
 - On success: atomic rename `{output_path}.tmp` → `{output_path}`
 - On failure (PDE error, IO error, INCOMPLETE_RESULTS):
-  - Temporary file deleted automatically
+  - Temporary file deleted automatically in error path
   - Returns error, no file left on disk
   - Idempotent: safe to retry immediately
+- **Crash recovery:** Stale .tmp files from crashed processes cleaned up on next run
 - If output_path exists: overwritten atomically (no partial state visible)
 - Thread-safe: multiple concurrent writes to different paths supported
 - **Testing:** Inject failures at various stages, verify no corrupt files remain
+- **Testing:** Create stale .tmp file, verify it's cleaned up on next run
 
 **Memory impact (prices_4d tensor size):**
 - 50×30×20×10 grid: removes 2.4 MB (300,000 doubles × 8 bytes)
@@ -174,11 +177,21 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
         const double x_min_requested = std::log(moneyness_.front());
         const double x_max_requested = std::log(moneyness_.back());
 
-        if (x_min_requested < x_min || x_max_requested > x_max) {
+        if (x_min_requested < x_min) {
             return std::unexpected(PriceTableError{
                 .code = PriceTableErrorCode::INVALID_BOUNDS,
-                .expected_value = x_min_requested,  // or x_max_requested
-                .invalid_values = {x_min, x_max}
+                .invalid_values = {x_min, x_min_requested},  // [provided, needed]
+                .details = "Lower bound too high: need " + std::to_string(x_min_requested) +
+                           " but got " + std::to_string(x_min)
+            });
+        }
+
+        if (x_max_requested > x_max) {
+            return std::unexpected(PriceTableError{
+                .code = PriceTableErrorCode::INVALID_BOUNDS,
+                .invalid_values = {x_max, x_max_requested},  // [provided, needed]
+                .details = "Upper bound too low: need " + std::to_string(x_max_requested) +
+                           " but got " + std::to_string(x_max)
             });
         }
 
@@ -289,10 +302,16 @@ for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
     CubicSpline<double> spline;
     auto build_error = spline.build(x_grid, spatial_solution);
 
+    if (build_error) {
+        // Spline build failed - treat as slice failure
+        failed_slices.fetch_add(1, std::memory_order_relaxed);
+        continue;  // Leave zeros in prices_view
+    }
+
     // Interpolate to moneyness grid
     for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
         const double x = log_moneyness[m_idx];
-        double V_norm = build_error ? boundary_value : spline.eval(x);
+        double V_norm = spline.eval(x);
         prices_view(m_idx, mat_idx, vol_idx, r_idx) = K_ref * V_norm;  // mdspan uses ()
     }
 }
@@ -356,10 +375,34 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
 {
     const double epsilon = 1e-10;
 
+    // Validate moneyness grid (required for x_bounds logic, log calculations)
+    if (moneyness_.empty()) {
+        return std::unexpected(PriceTableError{
+            .code = PriceTableErrorCode::INVALID_GRID_EMPTY,
+            .axis_index = 0  // moneyness axis
+        });
+    }
+
+    if (!std::is_sorted(moneyness_.begin(), moneyness_.end())) {
+        return std::unexpected(PriceTableError{
+            .code = PriceTableErrorCode::INVALID_GRID_UNSORTED,
+            .invalid_values = moneyness_,
+            .axis_index = 0  // moneyness axis
+        });
+    }
+
+    if (moneyness_.front() <= 0.0) {
+        return std::unexpected(PriceTableError{
+            .code = PriceTableErrorCode::INVALID_GRID_NEGATIVE,
+            .invalid_values = {moneyness_.front()},
+            .details = "Moneyness must be positive (needed for log)",
+            .axis_index = 0  // moneyness axis
+        });
+    }
+
     // Validate maturity grid before solver setup
     // Note: Empty check already done in Section 3 (before accessing .back())
 
-    // Check 1: Must be sorted
     if (!std::is_sorted(maturity_.begin(), maturity_.end())) {
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_UNSORTED,
@@ -368,7 +411,6 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
         });
     }
 
-    // Check 2: No negative values
     if (maturity_.front() < 0.0) {
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_NEGATIVE,
@@ -436,6 +478,32 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 - Verify memory usage reduction (no raw tensor in result)
 - Benchmark with large grids (200×100×50×20)
 - Verify atomic counter overhead is negligible
+
+### Atomic Write Tests
+- `price_table_atomic_write_test.cc` - Test failure modes for atomic write protocol:
+  - **Inject write failure during serialization**: Verify `.tmp` file cleaned up, `IO_ERROR_WRITE_FAILED` returned
+  - **Inject failure during atomic rename**: Verify cleanup, proper error propagation
+  - **Pre-existing stale `.tmp` file**: Create stale `{output_path}.tmp` before calling `precompute_with_save()`, verify it's removed before starting
+  - **Concurrent writes to different paths**: Multiple threads write to different files, verify no interference
+  - **Idempotency**: Call `precompute_with_save()` twice with same path, verify second call succeeds (overwrites)
+  - **Crash recovery simulation**: Leave stale `.tmp` file, restart process, verify cleanup on next run
+
+### Schema Migration Tests
+- `price_table_schema_test.cc` - Test schema versioning and migration:
+  - **Load v1 (legacy) snapshot**: Create legacy Parquet file (no stats metadata), verify:
+    - `deserialize_result()` succeeds
+    - `n_pde_solves = 0`, `precompute_time_seconds = 0.0`
+    - `fitting_stats.max_residual_overall = -1.0` (sentinel value)
+    - Consumer can detect legacy file: `if (stats.max_residual_overall < 0) { /* legacy */ }`
+  - **Load v2 (new) snapshot**: Create new Parquet file with full metadata, verify:
+    - All fields present and correct
+    - No sentinel values
+  - **Migration tool roundtrip**:
+    - Create v1 snapshot
+    - Run `mango-upgrade-snapshots v1.parquet v2.parquet`
+    - Load v2 snapshot, verify stats populated (re-computed from workspace)
+  - **Schema version detection**: Verify loader correctly reads schema version from Arrow metadata
+  - **Backward compatibility**: Verify v1 files still load after v2 implementation
 
 ## Migration Guide
 
@@ -696,14 +764,18 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
   - Schema version embedded in Arrow metadata (version=2, previous=1)
   - Version 1 (legacy): workspace only, no stats (pre-refactor snapshots)
   - Version 2 (new): workspace + n_pde_solves + time + BSplineFittingStats
-  - Loader checks version, populates defaults for missing fields:
+  - Loader checks version, populates sentinel for missing fields:
     ```cpp
     if (schema_version == 1) {
         n_solves = 0;  // Unknown for legacy files
         time = 0.0;
-        stats = BSplineFittingStats{};  // All zeros indicate no data
+        // Use sentinel values to distinguish "no data" from "zero residual"
+        stats = BSplineFittingStats{};
+        stats.max_residual_overall = -1.0;  // Sentinel: negative impossible for real residuals
+        // Consumers check: if (stats.max_residual_overall < 0) { /* legacy file */ }
     }
     ```
+  - Alternative: Add `bool has_fitting_stats = true;` field to schema v2 (explicit flag)
   - Migration tool provided: `mango-upgrade-snapshots` re-saves v1 → v2 with computed stats
 - Add to implementation checklist: audit Arrow exporter, snapshot replay, scripting bindings
 - **Testing:** Verify no extra allocations during deserialize (memory profiler or custom allocator)
