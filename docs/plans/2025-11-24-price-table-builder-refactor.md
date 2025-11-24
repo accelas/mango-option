@@ -64,7 +64,7 @@ private:
 class BSplineEvaluator {
 public:
     // Factory returns shared_ptr directly to avoid double-move
-    static std::expected<std::shared_ptr<BSplineEvaluator>, std::string>
+    static std::expected<std::shared_ptr<BSplineEvaluator>, PriceTableError>
     create(PriceTableWorkspace&& ws);
 
     double eval(double m, double tau, double sigma, double rate) const;
@@ -276,7 +276,7 @@ for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
     for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
         const double x = log_moneyness[m_idx];
         double V_norm = build_error ? boundary_value : spline.eval(x);
-        prices_view[m_idx, mat_idx, vol_idx, r_idx] = K_ref * V_norm;
+        prices_view(m_idx, mat_idx, vol_idx, r_idx) = K_ref * V_norm;  // mdspan uses ()
     }
 }
 
@@ -429,13 +429,20 @@ auto& raw_prices = result.prices_4d;  // No longer exists
 
 // NEW
 auto result = builder.precompute(config);
+if (!result) {
+    // Handle error: result.error()
+    return;
+}
 // Residual statistics are in the result:
-const auto& stats = result.fitting_stats;
+const auto& stats = result.value().fitting_stats;
 std::cout << "Max residual: " << stats.max_residual_overall << "\n";
 std::cout << "Failed slices: " << stats.failed_slices_total << "\n";
 
 // If you need raw prices for external processing:
-builder.precompute_with_save(config, "prices.parquet");
+auto save_result = builder.precompute_with_save(config, "prices.parquet");
+if (!save_result) {
+    // Handle save error
+}
 ```
 
 **2. Return type changed to PriceTableError:**
@@ -619,7 +626,7 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
       });
   }
   ```
-- Each iteration writes to unique `prices_view[m_idx, mat_idx, vol_idx, r_idx]` - no contention
+- Each iteration writes to unique `prices_view(m_idx, mat_idx, vol_idx, r_idx)` - no contention
 - Spline objects are stack-allocated per iteration - no shared state
 - Bounds check is per-slice (outer loop), not per-lattice-node (inner loop) - negligible overhead
 - **Testing:** Inject batch failures, verify error is surfaced (not silent zeros)
@@ -631,18 +638,19 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
 **Resolution:**
 - Update serialization with proper error handling:
   ```cpp
-  std::expected<PriceTableSurface, std::string>
+  std::expected<PriceTableSurface, PriceTableError>
   deserialize_surface(const std::filesystem::path& file) {
       auto workspace_result = load_workspace_from_arrow(file);
       if (!workspace_result) {
-          return std::unexpected("Failed to load workspace: " +
-                                 workspace_result.error());
+          return std::unexpected(PriceTableError{
+              .code = PriceTableErrorCode::WORKSPACE_CREATION_FAILED,
+              .details = "Failed to load workspace: " + workspace_result.error()
+          });
       }
 
       auto evaluator_result = BSplineEvaluator::create(std::move(workspace_result.value()));
       if (!evaluator_result) {
-          return std::unexpected("Failed to create evaluator: " +
-                                 evaluator_result.error());
+          return std::unexpected(evaluator_result.error());  // Already PriceTableError
       }
 
       return PriceTableSurface(evaluator_result.value());  // shared_ptr, cheap copy
@@ -786,23 +794,23 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
     grep -r "PriceTableResult" tests/ examples/ tools/
     ```
   - **Update each consumer category:**
-    - **Unit tests comparing raw prices:** Use `compute_residuals()` instead
+    - **Unit tests comparing raw prices:** Use `result.fitting_stats` for quality checks or direct `surface.eval()` calls
     - **Integration tests diffing tables:** Use `precompute_with_save()` to serialize, diff files
     - **Arrow export:** Replace `result.prices_4d` with loop over `builder.moneyness()` + `surface.eval()`
-    - **CLI diagnostic tools:** Add `--compute-residuals` flag, remove `--dump-raw-prices`
-    - **Benchmarks measuring memory:** Update expected values (should drop by ~2 GB)
+    - **CLI diagnostic tools:** Use `result.fitting_stats` for residuals, remove `--dump-raw-prices`
+    - **Benchmarks measuring memory:** Update expected values (varies by grid: 2.4 MB to 160 MB+)
   - **Migration path:**
-    - Phase 1 (this PR): Add new APIs (`compute_residuals`, `builder.moneyness()`, `precompute_with_save`)
-    - Phase 2 (this PR): Update all consumers to use new APIs
+    - Phase 1 (this PR): Add new APIs (`builder.moneyness()`, `precompute_with_save()`, grid accessors)
+    - Phase 2 (this PR): Update all consumers to use new APIs and `fitting_stats`
     - Phase 3 (this PR): Remove `prices_4d` from `PriceTableResult`
 - **Testing strategy:**
   - Before removing `prices_4d`: add tests for all new APIs
   - After removing: verify no compilation errors, all tests pass
-  - Add regression test: ensure `PriceTableResult` size < 1 KB (was ~2 GB)
+  - Add regression test: ensure `PriceTableResult` size < 1 KB (varies by grid)
 - **Performance validation:**
   - Benchmark extraction phase before/after parallelization
   - Document overhead of bounds checks (should be <1%)
-  - Profile `compute_residuals()` with 10 GB grid
+  - Verify `BSplineFittingStats` computation overhead is negligible
 
 ## References
 
