@@ -4,36 +4,46 @@
 
 namespace mango {
 
-std::expected<void, std::string> validate_option_spec(const OptionSpec& spec) {
+std::expected<void, ValidationError> validate_option_spec(const OptionSpec& spec) {
     // Validate spot price
     if (spec.spot <= 0.0 || !std::isfinite(spec.spot)) {
-        return std::unexpected(std::string("Spot price must be positive and finite"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidSpotPrice,
+            spec.spot));
     }
 
     // Validate strike price
     if (spec.strike <= 0.0 || !std::isfinite(spec.strike)) {
-        return std::unexpected(std::string("Strike price must be positive and finite"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidStrike,
+            spec.strike));
     }
 
     // Validate maturity
     if (spec.maturity <= 0.0 || !std::isfinite(spec.maturity)) {
-        return std::unexpected(std::string("Time to maturity must be positive and finite"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidMaturity,
+            spec.maturity));
     }
 
     // Validate rate (allow negative but must be finite)
     if (!std::isfinite(spec.rate)) {
-        return std::unexpected(std::string("Risk-free rate must be finite"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidRate,
+            spec.rate));
     }
 
     // Validate dividend yield (must be non-negative and finite)
     if (spec.dividend_yield < 0.0 || !std::isfinite(spec.dividend_yield)) {
-        return std::unexpected(std::string("Dividend yield must be non-negative and finite"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidDividend,
+            spec.dividend_yield));
     }
 
     return {};
 }
 
-std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
+std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
     // Validate base option spec first (using slicing)
     auto spec_validation = validate_option_spec(static_cast<const OptionSpec&>(query));
     if (!spec_validation) {
@@ -42,12 +52,16 @@ std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
 
     // Validate market price: must be finite
     if (!std::isfinite(query.market_price)) {
-        return std::unexpected(std::string("Market price must be finite"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidSpotPrice,
+            query.market_price));
     }
 
     // Validate market price: must be positive
     if (query.market_price <= 0.0) {
-        return std::unexpected(std::string("Market price must be positive"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidSpotPrice,
+            query.market_price));
     }
 
     // Check for arbitrage violations
@@ -63,19 +77,21 @@ std::expected<void, std::string> validate_iv_query(const IVQuery& query) {
     }
 
     if (query.market_price < intrinsic) {
-        return std::unexpected(std::string("Market price below intrinsic value (arbitrage)"));
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidSpotPrice,
+            query.market_price));
     }
 
     if (query.market_price > upper_bound) {
-        const char* opt_type = (query.type == OptionType::CALL) ? "Call" : "Put";
-        const char* bound_type = (query.type == OptionType::CALL) ? "spot" : "strike";
-        return std::unexpected(std::string(opt_type) + " price above " + bound_type + " (arbitrage)");
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidSpotPrice,
+            query.market_price));
     }
 
     return {};
 }
 
-std::expected<void, std::string> validate_pricing_params(const PricingParams& params) {
+std::expected<void, ValidationError> validate_pricing_params(const PricingParams& params) {
     // Validate base option spec first (using slicing)
     auto spec_validation = validate_option_spec(static_cast<const OptionSpec&>(params));
     if (!spec_validation) {
@@ -84,19 +100,31 @@ std::expected<void, std::string> validate_pricing_params(const PricingParams& pa
 
     // Check volatility
     if (params.volatility <= 0.0 || !std::isfinite(params.volatility)) {
-        return std::unexpected("Volatility must be positive and finite");
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidVolatility,
+            params.volatility));
     }
 
     // Validate discrete dividends
-    for (const auto& [time, amount] : params.discrete_dividends) {
+    for (size_t i = 0; i < params.discrete_dividends.size(); ++i) {
+        const auto& [time, amount] = params.discrete_dividends[i];
         if (time < 0.0 || time > params.maturity) {
-            return std::unexpected("Discrete dividend time must be in [0, maturity]");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidDividend,
+                time,
+                i));
         }
         if (amount < 0.0) {
-            return std::unexpected("Discrete dividend amount must be non-negative");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidDividend,
+                amount,
+                i));
         }
         if (!std::isfinite(time) || !std::isfinite(amount)) {
-            return std::unexpected("Discrete dividend time and amount must be finite");
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidDividend,
+                time,
+                i));
         }
     }
 

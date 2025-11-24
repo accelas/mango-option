@@ -47,7 +47,7 @@ TEST(PriceTableAxesTest, RejectNonMonotonic) {
 
     auto result = axes.validate();
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("monotonic"), std::string::npos);
+    EXPECT_EQ(result.error().code, ValidationErrorCode::UnsortedGrid);
 }
 
 TEST(PriceTableAxesTest, RejectEmptyGrid) {
@@ -57,7 +57,7 @@ TEST(PriceTableAxesTest, RejectEmptyGrid) {
 
     auto result = axes.validate();
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("empty"), std::string::npos);
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
 }
 
 } // namespace

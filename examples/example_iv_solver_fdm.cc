@@ -135,7 +135,7 @@ int main() {
         std::cout << "  Implied Vol: " << (result_itm->implied_vol * 100) << "%\n";
         std::cout << "  Iterations:  " << result_itm->iterations << "\n\n";
     } else {
-        std::cerr << "  Error: " << result_itm.error().message << "\n\n";
+        std::cerr << "  Error: " << result_itm."Error code: " << static_cast<int>(result.error().code) << "\n\n";
     }
 
     // Test Case 2: OTM put
@@ -156,7 +156,7 @@ int main() {
         std::cout << "  Implied Vol: " << (result_otm->implied_vol * 100) << "%\n";
         std::cout << "  Iterations:  " << result_otm->iterations << "\n\n";
     } else {
-        std::cerr << "  Error: " << result_otm.error().message << "\n\n";
+        std::cerr << "  Error: " << result_otm."Error code: " << static_cast<int>(result.error().code) << "\n\n";
     }
 
     // Test Case 3: Arbitrage violation (price too high)
@@ -168,7 +168,7 @@ int main() {
     if (result_arb.has_value()) {
         std::cout << "  Unexpected success!\n\n";
     } else {
-        std::cout << "  Expected failure: " << result_arb.error().message << "\n\n";
+        std::cout << "  Expected failure: " << result_arb."Error code: " << static_cast<int>(result.error().code) << "\n\n";
     }
 
     return 0;

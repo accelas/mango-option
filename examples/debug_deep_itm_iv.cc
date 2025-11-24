@@ -103,7 +103,7 @@ int main() {
     } else {
         std::cout << "  Converged: No\n";
         std::cout << "  Error code: " << static_cast<int>(iv_result.error().code) << "\n";
-        std::cout << "  Message: " << iv_result.error().message << "\n";
+        std::cout << "  Message: " << iv_result."Error code: " << static_cast<int>(result.error().code) << "\n";
         std::cout << "  Iterations: " << iv_result.error().iterations << "\n";
         std::cout << "  Final error: " << iv_result.error().final_error << "\n";
         if (iv_result.error().last_vol.has_value()) {

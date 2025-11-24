@@ -1,6 +1,9 @@
 cc_library(
     name = "price_table_axes",
     hdrs = ["price_table_axes.hpp"],
+    deps = [
+        "//src/support:error_types",
+    ],
     visibility = ["//visibility:public"],
 )
 

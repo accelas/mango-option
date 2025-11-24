@@ -320,7 +320,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
     for (size_t i = 0; i < params.size(); ++i) {
         results.emplace_back(std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Not yet computed",
+            // error code set above,
             .iterations = 0
         }));
     }
@@ -398,7 +398,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     for (size_t i = 0; i < params.size(); ++i) {
         results.emplace_back(std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Not yet computed",
+            // error code set above,
             .iterations = 0
         }));
     }
@@ -526,7 +526,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 if (!grid || !workspace_ptr) {
                     results[i] = std::unexpected(SolverError{
                         .code = SolverErrorCode::InvalidConfiguration,
-                        .message = "Failed to create workspace (pool and heap fallback failed)",
+                        // error code set above,
                         .iterations = 0
                     });
                     MANGO_PRAGMA_ATOMIC

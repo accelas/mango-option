@@ -55,7 +55,7 @@ TEST(GridSnapshotTest, OutOfRangeTimeRejected) {
     auto grid_result = mango::Grid<double>::create(grid_spec, time_domain, bad_times);
 
     EXPECT_FALSE(grid_result.has_value());
-    EXPECT_TRUE(grid_result.error().find("out of range") != std::string::npos);
+    EXPECT_EQ(grid_result.error().code, ValidationErrorCode::OutOfRange);
 }
 
 TEST(GridSnapshotTest, RecordAndRetrieve) {

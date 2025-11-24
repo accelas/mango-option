@@ -66,7 +66,7 @@ int main() {
             return 1;
         }
     } else {
-        std::cerr << "Solver failed: " << result.error().message << "\n";
+        std::cerr << "Solver failed with error code: " << static_cast<int>(result.error().code) << "\n";
         return 1;
     }
 }

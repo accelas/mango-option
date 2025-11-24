@@ -359,15 +359,16 @@ private:
         auto result = solve_implicit_stage_dispatch(t_stage, w1, u_current, rhs);
 
         if (!result.converged) {
-            SolverError error{
-                .code = SolverErrorCode::Stage1ConvergenceFailure,
-                .message = result.failure_reason.value_or("TR-BDF2 stage1 failed to converge"),
-                .iterations = result.iterations
-            };
+            // Check if failure was due to singular Jacobian
+            bool is_singular = result.failure_reason &&
+                              result.failure_reason.value() == "Singular Jacobian";
 
-            if (error.message == "Singular Jacobian") {
-                error.code = SolverErrorCode::LinearSolveFailure;
-            }
+            SolverError error{
+                .code = is_singular ? SolverErrorCode::LinearSolveFailure
+                                    : SolverErrorCode::Stage1ConvergenceFailure,
+                .iterations = result.iterations,
+                .residual = 0.0  // residual not available in NewtonResult
+            };
 
             return std::unexpected(error);
         }
@@ -408,15 +409,16 @@ private:
         auto result = solve_implicit_stage_dispatch(t_next, w2, u_current, rhs);
 
         if (!result.converged) {
-            SolverError error{
-                .code = SolverErrorCode::Stage2ConvergenceFailure,
-                .message = result.failure_reason.value_or("TR-BDF2 stage2 failed to converge"),
-                .iterations = result.iterations
-            };
+            // Check if failure was due to singular Jacobian
+            bool is_singular = result.failure_reason &&
+                              result.failure_reason.value() == "Singular Jacobian";
 
-            if (error.message == "Singular Jacobian") {
-                error.code = SolverErrorCode::LinearSolveFailure;
-            }
+            SolverError error{
+                .code = is_singular ? SolverErrorCode::LinearSolveFailure
+                                    : SolverErrorCode::Stage2ConvergenceFailure,
+                .iterations = result.iterations,
+                .residual = 0.0  // residual not available in NewtonResult
+            };
 
             return std::unexpected(error);
         }
@@ -679,7 +681,7 @@ private:
             // Projected Thomas should never fail for well-posed problems
             // Possible causes: singular matrix, NaN/Inf in inputs
             return {false, 1, std::numeric_limits<double>::infinity(),
-                   std::optional<std::string>(std::string(result.message()))};
+                   std::optional<std::string>("Projected Thomas solver failed")};
         }
 
         // ═══════════════════════════════════════════════════════════════════════

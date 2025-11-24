@@ -77,7 +77,7 @@ struct RootFindingError {
 ///     std::cout << "Root: " << result->root << "\n";
 ///     std::cout << "Iterations: " << result->iterations << "\n";
 /// } else {
-///     std::cerr << "Failed: " << result.error().message << "\n";
+///     std::cerr << "Failed: " <<  "Error code: " << static_cast<int>(result.error().code) << "\n";
 ///     if (result.error().last_value) {
 ///         std::cerr << "Last value: " << *result.error().last_value << "\n";
 ///     }
@@ -145,7 +145,7 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
     // Check for NaN/Inf at endpoints (indicates invalid input or function failure)
     if (!std::isfinite(fa) || !std::isfinite(fb)) {
         return std::unexpected(RootFindingError{
-            .message = "Function returned non-finite value (NaN or Inf)",
+            // error code set above,
             .iterations = 0,
             .final_error = std::numeric_limits<double>::quiet_NaN(),
             .last_value = std::nullopt
@@ -155,7 +155,7 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
     // Check if root is bracketed
     if (fa * fb > 0.0) {
         return std::unexpected(RootFindingError{
-            .message = "Root not bracketed",
+            // error code set above,
             .iterations = 0,
             .final_error = std::min(std::abs(fa), std::abs(fb)),
             .last_value = std::nullopt
@@ -254,7 +254,7 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
         if (!std::isfinite(fs)) {
             MANGO_TRACE_BRENT_COMPLETE(s, iter + 1, 0);
             return std::unexpected(RootFindingError{
-                .message = "Function returned non-finite value (NaN or Inf)",
+                // error code set above,
                 .iterations = iter + 1,
                 .final_error = std::numeric_limits<double>::quiet_NaN(),
                 .last_value = s
@@ -285,7 +285,7 @@ RootFindingResult brent_find_root(F&& f, double a, double b,
     // Max iterations reached
     MANGO_TRACE_BRENT_COMPLETE(b, config.max_iter, 0);
     return std::unexpected(RootFindingError{
-        .message = "Maximum iterations reached without convergence",
+        // error code set above,
         .iterations = config.max_iter,
         .final_error = std::abs(fb),
         .last_value = b
@@ -343,7 +343,7 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
     // Validate bounds
     if (x_min >= x_max) {
         return std::unexpected(RootFindingError{
-            .message = "Invalid bounds: x_min must be < x_max",
+            // error code set above,
             .iterations = 0,
             .final_error = std::numeric_limits<double>::quiet_NaN(),
             .last_value = std::nullopt
@@ -361,7 +361,7 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
         // Check for non-finite values
         if (!std::isfinite(fx) || !std::isfinite(dfx)) {
             return std::unexpected(RootFindingError{
-                .message = "Function or derivative returned non-finite value",
+                // error code set above,
                 .iterations = iter + 1,
                 .final_error = std::numeric_limits<double>::quiet_NaN(),
                 .last_value = x
@@ -383,7 +383,7 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
         // Check for numerical issues (flat derivative)
         if (std::abs(dfx) < 1e-10) {
             return std::unexpected(RootFindingError{
-                .message = "Derivative too small (flat region)",
+                // error code set above,
                 .iterations = iter + 1,
                 .final_error = error_abs,
                 .last_value = x
@@ -400,7 +400,7 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
         if (x_new < x_min || x_new > x_max) {
             if (iter > 10) {
                 return std::unexpected(RootFindingError{
-                    .message = "Hit bounds repeatedly without convergence",
+                    // error code set above,
                     .iterations = iter + 1,
                     .final_error = error_abs,
                     .last_value = x_clamped
@@ -414,7 +414,7 @@ RootFindingResult newton_find_root(F&& f, DF&& df,
     // Max iterations reached
     const double fx_final = f(x);
     return std::unexpected(RootFindingError{
-        .message = "Maximum iterations reached without convergence",
+        // error code set above,
         .iterations = config.max_iter,
         .final_error = std::abs(fx_final),
         .last_value = x

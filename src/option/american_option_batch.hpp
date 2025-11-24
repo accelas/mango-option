@@ -266,7 +266,7 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     if (!workspace_result.has_value()) {
         return std::unexpected(SolverError{
             .code = SolverErrorCode::InvalidConfiguration,
-            .message = "Failed to create PDEWorkspace: " + workspace_result.error(),
+            // error code set above + workspace_result.error(),
             .iterations = 0
         });
     }
