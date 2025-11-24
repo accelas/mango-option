@@ -637,7 +637,8 @@ public:
 
 **`from_vectors()`:**
 1. **Sort and dedupe** each input vector (ascending order, remove duplicates)
-2. Validate all values > 0 (moneyness, maturity, volatility, rate)
+2. Validate positivity: moneyness > 0, maturity > 0, volatility > 0, K_ref > 0
+   - **Note:** Rates may be negative or zero (e.g., EUR/JPY curves) - no positivity check
 3. Construct `PriceTableAxes<4>` from sorted vectors
 4. Construct `PriceTableConfig` with provided `grid_spec`, `n_time`, `type`, `K_ref`, `dividend_yield`
 5. Run validation (≥4 points per axis, domain coverage)
@@ -674,9 +675,18 @@ public:
 
 **CRITICAL:** Before Step 8 deletion, perform repo-wide search for all references:
 ```bash
-# Search code and docs for all references
-grep -r "PriceTable4DBuilder" tests/ examples/ benchmarks/ docs/ CLAUDE.md --include="*.cc" --include="*.hpp" --include="*.md"
+# Search code and docs for all references (from repo root)
+# Searches .cpp, .cc, .hpp files in all directories
+rg -n "price_table_4d_builder" -g'*.[ch]pp' -g'*.cc'
+
+# Also search for the type name
+rg -n "PriceTable4DBuilder"
+
+# Search markdown docs
+rg -n "PriceTable4D" -g'*.md'
 ```
+
+**Expected results:** Should find zero matches before Step 8 deletion proceeds.
 
 **Known inventory of files to update:**
 
@@ -685,6 +695,10 @@ grep -r "PriceTable4DBuilder" tests/ examples/ benchmarks/ docs/ CLAUDE.md --inc
 - `tests/price_table_end_to_end_performance_test.cc` - Performance tests
 - `tests/quantlib_accuracy_batch_test.cc` - Accuracy tests
 - `tests/normalized_solver_regression_test.cc` - Regression tests
+
+**Source code (critical):**
+- `src/option/iv_solver_interpolated.cpp` - **CRITICAL**: Depends on `price_table_4d_builder.hpp`
+- `src/option/iv_solver_interpolated.hpp` - Includes old builder header
 
 **Benchmarks:**
 - `benchmarks/market_iv_e2e_benchmark.cc` - E2E benchmarks
@@ -698,6 +712,61 @@ grep -r "PriceTable4DBuilder" tests/ examples/ benchmarks/ docs/ CLAUDE.md --inc
 - `CLAUDE.md` - Quick reference (line 137)
 
 **Migration note:** List is not exhaustive. Implementer must verify no references remain before Step 8 deletion.
+
+**Special migration: IVSolverInterpolated** (critical for Step 8 deletion):
+
+`IVSolverInterpolated` currently depends on the specialized builder. Migration steps:
+
+1. **Update includes** (src/option/iv_solver_interpolated.cpp, iv_solver_interpolated.hpp):
+   ```cpp
+   // BEFORE:
+   #include "src/option/price_table_4d_builder.hpp"
+
+   // AFTER:
+   #include "src/option/price_table_builder.hpp"
+   #include "src/option/price_table_axes.hpp"
+   #include "src/option/price_table_surface.hpp"
+   ```
+
+2. **Update surface storage** (if storing PriceTableSurface):
+   ```cpp
+   // BEFORE:
+   PriceTableSurface surface_;  // From specialized builder
+
+   // AFTER:
+   std::shared_ptr<const PriceTableSurface<4>> surface_;  // From generic builder
+   ```
+
+3. **Update surface construction** (where IV solver builds table):
+   ```cpp
+   // BEFORE (using specialized builder):
+   auto builder_result = PriceTable4DBuilder::create(moneyness, maturity, vol, rate, K_ref);
+   auto result = builder_result->precompute(OptionType::PUT, 101, 1000);
+   surface_ = result->surface;
+
+   // AFTER (using generic builder):
+   auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+   auto factory_result = PriceTableBuilder<4>::from_vectors(
+       moneyness, maturity, vol, rate, K_ref, grid_spec, 1000, OptionType::PUT
+   );
+   if (!factory_result.has_value()) { /* handle error */ }
+   auto [builder, axes] = std::move(factory_result.value());
+
+   auto build_result = builder.build(axes);
+   if (!build_result.has_value()) { /* handle error */ }
+   surface_ = build_result->surface;
+   ```
+
+4. **Update metadata access** (if extracting K_ref, dividend_yield):
+   ```cpp
+   // BEFORE:
+   double K_ref = builder.K_ref();
+
+   // AFTER:
+   double K_ref = surface_->metadata().K_ref;
+   ```
+
+5. **Verify compilation**: After changes, ensure `IVSolverInterpolated` compiles and tests pass
 
 **Migration pattern for each file:**
 ```cpp
