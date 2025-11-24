@@ -75,19 +75,8 @@ double PriceTableSurface<N>::value(const std::array<double, N>& coords) const {
 
 template <size_t N>
 double PriceTableSurface<N>::partial(size_t axis, const std::array<double, N>& coords) const {
-    // Simple finite difference for now (can optimize later with analytic derivatives)
-    constexpr double h = 1e-8;
-
-    std::array<double, N> coords_plus = coords;
-    std::array<double, N> coords_minus = coords;
-
-    coords_plus[axis] += h;
-    coords_minus[axis] -= h;
-
-    double f_plus = spline_->eval(coords_plus);
-    double f_minus = spline_->eval(coords_minus);
-
-    return (f_plus - f_minus) / (2.0 * h);
+    // Use analytic B-spline derivative (single evaluation, no finite difference noise)
+    return spline_->eval_partial(axis, coords);
 }
 
 // Explicit template instantiations

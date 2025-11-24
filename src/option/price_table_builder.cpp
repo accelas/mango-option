@@ -203,30 +203,57 @@ PriceTableBuilder<N>::solve_batch(
     } else {
         BatchAmericanOptionSolver solver;
 
-        // Apply grid configuration from PriceTableConfig
-        GridAccuracyParams accuracy;
-
-        // Set spatial grid bounds (allow estimation within range)
-        accuracy.min_spatial_points = std::min(config_.grid_estimator.n_points(), size_t(100));
-        accuracy.max_spatial_points = std::max(config_.grid_estimator.n_points(), size_t(1200));
-        accuracy.max_time_steps = config_.n_time;
-
-        // Extract alpha parameter for sinh-spaced grids
-        if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-            accuracy.alpha = config_.grid_estimator.concentration();
-        }
-
-        solver.set_grid_accuracy(accuracy);
-
         // Register maturity grid as snapshot times
         // This enables extract_tensor to access surfaces at each maturity point
         solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
-        // Solve batch with shared grid optimization (normalized chain solver)
-        // NOTE: custom_grid parameter not used - see investigation report in
-        // tests/price_table_builder_custom_grid_*.cc for detailed analysis.
-        // Grid bounds are validated above to ensure PDE domain covers requested range.
-        return solver.solve_batch(batch, true);  // use_shared_grid = true
+        // Solver stability constraints (from BatchAmericanOptionSolver)
+        constexpr double MAX_WIDTH = 5.8;   // Convergence limit (log-units)
+        constexpr double MAX_DX = 0.05;     // Von Neumann stability
+
+        // Check if user's grid_spec meets solver constraints
+        const double grid_width = config_.grid_estimator.x_max() - config_.grid_estimator.x_min();
+        const double dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
+
+        // Compute minimum required width based on option parameters
+        // For accuracy, grid should cover ~3σ√τ on each side of log-moneyness
+        double max_sigma_sqrt_tau = 0.0;
+        for (const auto& p : batch) {
+            double sigma_sqrt_tau = p.volatility * std::sqrt(p.maturity);
+            max_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, sigma_sqrt_tau);
+        }
+        const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
+
+        const bool grid_meets_constraints =
+            (grid_width <= MAX_WIDTH) &&
+            (dx <= MAX_DX) &&
+            (grid_width >= min_required_width);
+
+        if (grid_meets_constraints) {
+            // Grid meets constraints: use custom_grid directly
+            // This honors user's exact spatial resolution request
+            const double max_maturity = axes.grids[1].back();
+            TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, config_.n_time);
+            auto custom_grid = std::make_pair(config_.grid_estimator, time_domain);
+            return solver.solve_batch(batch, true, nullptr, custom_grid);
+        } else {
+            // Grid violates constraints: use auto-estimation with configured bounds
+            // This ensures solver stability while covering requested domain
+            GridAccuracyParams accuracy;
+            const size_t n_points = config_.grid_estimator.n_points();
+            const size_t clamped = std::clamp(n_points, size_t(100), size_t(1200));
+            accuracy.min_spatial_points = clamped;
+            accuracy.max_spatial_points = clamped;
+            accuracy.max_time_steps = config_.n_time;
+
+            // Extract alpha parameter for sinh-spaced grids
+            if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
+                accuracy.alpha = config_.grid_estimator.concentration();
+            }
+
+            solver.set_grid_accuracy(accuracy);
+            return solver.solve_batch(batch, true);  // use_shared_grid = true, auto-estimation
+        }
     }
 }
 

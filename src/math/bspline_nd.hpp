@@ -143,6 +143,53 @@ public:
         return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
     }
 
+    /// Evaluate partial derivative of B-spline at query point (analytic)
+    ///
+    /// Computes ∂f/∂xₐ using analytic B-spline derivative formula.
+    /// Uses derivative basis functions for the specified axis, regular basis
+    /// for all other axes.
+    ///
+    /// @param axis Dimension to differentiate (0 to N-1)
+    /// @param query N-dimensional query point
+    /// @return Partial derivative ∂f/∂x_axis
+    T eval_partial(size_t axis, const QueryPoint& query) const {
+        assert(axis < N && "Axis index out of bounds");
+
+        // Clamp queries to domain
+        QueryPoint clamped;
+        for (size_t dim = 0; dim < N; ++dim) {
+            clamped[dim] = clamp_bspline_query(
+                query[dim],
+                grids_[dim].front(),
+                grids_[dim].back()
+            );
+        }
+
+        // Find knot spans for all dimensions
+        std::array<int, N> spans;
+        for (size_t dim = 0; dim < N; ++dim) {
+            spans[dim] = find_span_cubic(knots_[dim], clamped[dim]);
+        }
+
+        // Evaluate basis functions for all dimensions
+        // For the derivative axis, use derivative basis; for others, use regular basis
+        std::array<std::array<T, 4>, N> basis_weights;
+        for (size_t dim = 0; dim < N; ++dim) {
+            if (dim == axis) {
+                // Use derivative basis for this dimension
+                cubic_basis_derivative_nonuniform(knots_[dim], spans[dim], clamped[dim],
+                                                  basis_weights[dim].data());
+            } else {
+                // Use regular basis for other dimensions
+                cubic_basis_nonuniform(knots_[dim], spans[dim], clamped[dim],
+                                      basis_weights[dim].data());
+            }
+        }
+
+        // Tensor-product evaluation (same as eval, but with derivative weights in one axis)
+        return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
+    }
+
     /// Get grid dimensions
     [[nodiscard]] Shape dimensions() const noexcept {
         Shape dims;
