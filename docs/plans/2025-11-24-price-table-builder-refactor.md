@@ -1,22 +1,150 @@
-# Price Table Builder Refactor
+# Price Table Builder Refactor - Two-Phase Design
 
 **Date:** 2025-11-24 (Revised: 2025-11-24)
-**Status:** Design Complete - Targets Generic Architecture
-**Goal:** Comprehensive refactor of `PriceTableBuilder<N>` addressing memory pressure, grid configuration bugs, parallelization, validation, and error handling.
+**Status:** Design Complete - Two-Phase Approach
+**Goal:** Replace specialized builder with generic architecture, then add targeted improvements
 
-## Architecture Decision
+## Overview
 
-**Target:** Generic `PriceTableBuilder<N>` template (already in codebase at `src/option/price_table_builder.{hpp,cpp}`)
+This refactor is split into **two independent phases**:
 
-**Rationale:** The generic architecture provides:
+### Phase 1: Migration (Mandatory)
+**Goal:** Replace specialized `PriceTable4DBuilder` with generic `PriceTableBuilder<4>`
+
+**Why:** Generic architecture already exists and provides:
 - Clean separation: `PriceTableAxes<N>` → `PriceTableConfig` → `PriceTableSurface<N>`
-- Better composability: Works with any N dimensions (though N=4 only currently implemented)
+- Better composability: Works with any N dimensions (N=4 implemented, others possible)
 - No duplicate storage: Single ownership chain through `BSplineND<N>`
 - Already uses `BatchAmericanOptionSolver` with normalized solving
 
-**Deprecation:** Phase out specialized `PriceTable4DBuilder` in favor of generic `PriceTableBuilder<4>`
+**Scope:**
+- Update all consumers to use `PriceTableBuilder<4>` instead of `PriceTable4DBuilder`
+- Provide migration helpers/examples
+- Deprecate (but don't remove) specialized builder
+- **No functional changes** - pure API migration
 
-## Problems Addressed in Generic Builder
+**Timeline:** Prerequisite for Phase 2
+
+### Phase 2: Improvements (Optional, can be done incrementally)
+**Goal:** Address bugs and add enhancements to generic `PriceTableBuilder<N>`
+
+**Identified issues:**
+1. String errors → Structured `PriceTableError` types
+2. Grid configuration override bug (lines 131-142)
+3. Serial extraction → Parallel with OpenMP
+4. No snapshot validation
+5. No atomic failure tracking
+6. No diagnostics (`BSplineFittingStats`, timing, save-to-disk)
+
+**Scope:** Each improvement can be implemented independently
+**Timeline:** Incremental, based on priority
+
+---
+
+# Phase 1: Migration to Generic Builder
+
+## Goals
+
+1. Update all consumers (tests, examples, benchmarks) to use `PriceTableBuilder<4>`
+2. Deprecate specialized `PriceTable4DBuilder` (mark with warnings, keep functional)
+3. Document migration path
+4. **Zero functional changes** - APIs behave identically
+
+## API Comparison
+
+### Specialized Builder (Current)
+```cpp
+// Create builder
+auto builder_result = PriceTable4DBuilder::create(
+    moneyness_vec,  // std::vector<double>
+    maturity_vec,   // std::vector<double>
+    vol_vec,        // std::vector<double>
+    rate_vec,       // std::vector<double>
+    K_ref           // double
+);
+if (!builder_result) {
+    // Handle error (string)
+    return;
+}
+auto& builder = builder_result.value();
+
+// Build surface
+auto result = builder.precompute(OptionType::PUT, 101, 1000);
+if (!result) {
+    // Handle error (string)
+    return;
+}
+
+// Use surface
+double price = result->surface.eval(1.0, 0.25, 0.20, 0.05);
+```
+
+### Generic Builder (Target)
+```cpp
+// Create axes
+PriceTableAxes<4> axes;
+axes.grids = {moneyness_vec, maturity_vec, vol_vec, rate_vec};
+axes.names = {"moneyness", "maturity", "volatility", "rate"};
+
+// Create config
+PriceTableConfig config;
+config.option_type = OptionType::PUT;
+config.K_ref = K_ref;
+config.grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+config.n_time = 1000;
+
+// Build surface
+PriceTableBuilder<4> builder(config);
+auto result = builder.build(axes);
+if (!result) {
+    // Handle error (string)
+    return;
+}
+
+// Use surface
+auto surface = result.value().surface;
+double price = surface->value({1.0, 0.25, 0.20, 0.05});
+```
+
+## Implementation Steps (Phase 1)
+
+1. **Add helper factory** (ease migration)
+   ```cpp
+   // Helper in price_table_builder.hpp
+   static std::expected<PriceTableBuilder<4>, std::string>
+   from_vectors(
+       std::vector<double> moneyness,
+       std::vector<double> maturity,
+       std::vector<double> volatility,
+       std::vector<double> rate,
+       double K_ref,
+       OptionType type = OptionType::PUT);
+   ```
+
+2. **Update tests** (tests/price_table_builder_test.cc)
+   - Mechanical replacement: `PriceTable4DBuilder` → `PriceTableBuilder<4>`
+   - Update result access: `result->surface` → `result->surface`
+   - No behavioral changes
+
+3. **Update examples** (examples/)
+   - Show both APIs side-by-side initially
+   - Gradually transition to generic only
+
+4. **Deprecate specialized builder**
+   - Add `[[deprecated]]` attribute to `PriceTable4DBuilder`
+   - Add migration guide in doc comments
+   - Keep implementation for backward compatibility
+
+5. **Documentation**
+   - Update API_GUIDE.md with generic examples
+   - Document why generic is preferred
+   - Provide migration checklist
+
+---
+
+# Phase 2: Improvements to Generic Builder
+
+## Problems Identified
 
 Analyzing `src/option/price_table_builder.cpp`:
 
@@ -26,7 +154,6 @@ Analyzing `src/option/price_table_builder.cpp`:
 4. **No snapshot validation** - Maturity grid never validated against solver's recorded snapshots
 5. **No atomic failure tracking** - `extract_tensor()` fills NaN for failures but doesn't count them (lines 208-216, 232-238)
 6. **No diagnostics** - No `BSplineFittingStats`, no save-to-disk API, no residual metrics
-7. **Temporary tensor in result?** - Need to verify `PriceTensor<N>` doesn't leak into result (currently discarded after fit)
 
 ## Architecture Overview
 
@@ -293,46 +420,9 @@ PriceTableBuilder<N>::extract_tensor(
 
     return tensor;
 }
-
-    if (spatial_solution.empty()) {
-        failed_slices.fetch_add(1, std::memory_order_relaxed);
-        continue;
-    }
-
-    CubicSpline<double> spline;
-    auto build_error = spline.build(x_grid, spatial_solution);
-
-    if (build_error) {
-        // Spline build failed - treat as slice failure
-        failed_slices.fetch_add(1, std::memory_order_relaxed);
-        continue;  // Leave zeros in prices_view
-    }
-
-    // Interpolate to moneyness grid
-    for (size_t m_idx = 0; m_idx < Nm; ++m_idx) {
-        const double x = log_moneyness[m_idx];
-        double V_norm = spline.eval(x);
-        prices_view(m_idx, mat_idx, vol_idx, r_idx) = K_ref * V_norm;  // mdspan uses ()
-    }
-}
-
-// Check for failures after extraction
-if (failed_slices.load() > 0) {
-    return std::unexpected(PriceTableError{
-        .code = PriceTableErrorCode::INCOMPLETE_RESULTS,
-        .invalid_values = {static_cast<double>(failed_slices.load())},
-        .details = std::to_string(failed_slices.load()) + " slices failed"
-    });
-}
 ```
 
-**Rationale:**
-- Single-level parallelism: simpler than nested OpenMP
-- Better load balancing: 6000 work items vs 200
-- Scales to 64+ cores: uniform ~12μs work packets
-- Low overhead: grain size large enough that scheduling cost is negligible
-
-**Performance impact:** Extraction phase now scales linearly with core count like PDE solving phase.
+**Performance impact:** Extraction phase now scales linearly with core count (previously serial bottleneck).
 
 ### 5. Snapshot Grid Validation
 
@@ -368,116 +458,163 @@ struct PriceTableError {
 };
 ```
 
-**Validation in precompute():**
+**Validation in build():**
 ```cpp
-std::expected<PriceTableResult, PriceTableError>
-PriceTableBuilder::precompute(const PriceTableConfig& config)
+template <size_t N>
+std::expected<PriceTableResult<N>, PriceTableError>
+PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes)
 {
-    const double epsilon = 1e-10;
-
-    // Validate moneyness grid (required for x_bounds logic, log calculations)
-    if (moneyness_.empty()) {
+    if constexpr (N != 4) {
         return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_EMPTY,
-            .axis_index = 0  // moneyness axis
+            .code = PriceTableErrorCode::UNSUPPORTED_DIMENSION,
+            .details = "Only N=4 currently supported"
         });
     }
 
-    if (!std::is_sorted(moneyness_.begin(), moneyness_.end())) {
+    // Validate axes (delegates to PriceTableAxes::validate())
+    auto validation = axes.validate();
+    if (!validation.has_value()) {
+        // Convert ValidationError to PriceTableError
+        auto val_err = validation.error();
         return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_UNSORTED,
-            .invalid_values = moneyness_,
-            .axis_index = 0  // moneyness axis
+            .code = (val_err.code == ValidationErrorCode::InvalidGridSize)
+                    ? PriceTableErrorCode::INVALID_GRID_EMPTY
+                    : PriceTableErrorCode::INVALID_GRID_UNSORTED,
+            .invalid_values = {val_err.value},
+            .axis_index = val_err.axis
         });
     }
 
-    if (moneyness_.front() <= 0.0) {
+    // Additional validation: moneyness must be positive (needed for log)
+    if (axes.grids[0].front() <= 0.0) {
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_NEGATIVE,
-            .invalid_values = {moneyness_.front()},
+            .invalid_values = {axes.grids[0].front()},
             .details = "Moneyness must be positive (needed for log)",
             .axis_index = 0  // moneyness axis
         });
     }
 
-    // Validate maturity grid before solver setup
-    // Note: Empty check already done in Section 3 (before accessing .back())
-
-    if (!std::is_sorted(maturity_.begin(), maturity_.end())) {
-        return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_UNSORTED,
-            .invalid_values = maturity_,
-            .axis_index = 1  // τ axis
-        });
-    }
-
-    if (maturity_.front() < 0.0) {
+    // Additional validation: maturity must be non-negative
+    if (axes.grids[1].front() < 0.0) {
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_NEGATIVE,
-            .invalid_values = {maturity_.front()},
-            .axis_index = 1  // τ axis
+            .invalid_values = {axes.grids[1].front()},
+            .axis_index = 1  // maturity axis
         });
     }
 
-    // Note: Validation that maturity grid fits within PDE time domain happens
-    // post-solve (see resolution #6) since T_max depends on solver configuration
-
-    // ... proceed with PDE solves
+    // ... proceed with make_batch(), solve_batch(), extract_tensor(), fit_coeffs()
 }
 ```
 
 **Keep extraction assert as safety net:**
 ```cpp
-// In extract_batch_results (line 42)
-assert(n_time != 0 && "No snapshots recorded (programming error)");
+// In extract_tensor() (line ~220)
+// This should never trigger if validation is correct (defensive programming)
+if (batch.results.empty()) {
+    return std::unexpected("Batch results empty (programming error)");
+}
 ```
 
 **Impact:** Invalid grids caught immediately with actionable errors, before expensive PDE work.
 
 ## Implementation Order
 
-1. **Add PriceTableError type** - Foundation for all error handling
-2. **Refactor BSplineEvaluator ownership** - Own workspace, update constructor, use PriceTableError
-3. **Refactor PriceTableSurface** - Wrap BSplineEvaluator only, expose workspace
-4. **Add diagnostic methods** - precompute_with_save(), grid accessors (MUST come before removing prices_4d)
-5. **Add snapshot validation** - In precompute() before solver setup (with empty check)
-6. **Fix grid configuration** - Respect x_bounds, build custom_grid_config
-7. **Parallelize extraction** - Flatten loop in extract_batch_results
-8. **Update all consumers** - Tests, Arrow export, CLI, benchmarks use new APIs (MUST come before Step 9)
-9. **Remove prices_4d from result** - Update PriceTableResult struct (safe now - all consumers migrated)
-10. **Update examples/docs** - Reflect new API
+Working with existing `PriceTableBuilder<N>` at `src/option/price_table_builder.{hpp,cpp}`:
 
-**Critical ordering constraint:** Steps 8-9 must happen in this order. Removing prices_4d (Step 9) before updating consumers (Step 8) will break the build. This matches the phased rollout strategy (Phase 2 → Phase 3).
+1. **Add PriceTableError type** (src/support/error_types.hpp)
+   - Define `PriceTableErrorCode` enum with all codes
+   - Define `PriceTableError` struct with optional fields
+   - Update all builder methods to return `PriceTableError` instead of `std::string`
+
+2. **Add PriceTableResult<N> struct** (src/option/price_table_builder.hpp)
+   - Define struct with `surface`, `n_pde_solves`, `precompute_time_seconds`, `fitting_stats`
+   - Update `build()` signature to return `PriceTableResult<N>`
+
+3. **Add BSplineFittingStats** (src/math/bspline_nd_separable.hpp)
+   - Add diagnostics to `BSplineNDSeparable::fit()` return value
+   - Track max residuals, condition numbers, failed slices per axis
+
+4. **Fix grid configuration bug** (src/option/price_table_builder.cpp:131-142)
+   - Remove min/max clamping in `GridAccuracyParams`
+   - Use `config_.grid_estimator.n_points()` exactly
+
+5. **Add snapshot validation** (src/option/price_table_builder.cpp:18-30)
+   - Call `axes.validate()` at start of `build()`
+   - Add moneyness positive check, maturity non-negative check
+   - Return `PriceTableError` on validation failure
+
+6. **Parallelize extraction** (src/option/price_table_builder.cpp:203-250)
+   - Add `MANGO_PRAGMA_PARALLEL_FOR` to outer (σ, r) loop
+   - Add `std::atomic<size_t> failed_slices` counter
+   - Increment counter on PDE failure or spline build failure
+   - Return error if `failed_slices > 0`
+
+7. **Add build_with_save()** (new method in price_table_builder.cpp)
+   - Call `build()` to get tensor
+   - Stream tensor to Parquet before `fit_coeffs()`
+   - Implement atomic write protocol (.tmp → rename)
+   - Return same `PriceTableResult<N>` as `build()`
+
+8. **Update tests** (tests/price_table_builder_test.cc)
+   - Update for `PriceTableResult<N>` return type
+   - Add error handling tests for `PriceTableError`
+   - Add atomic write tests, schema migration tests
+
+9. **Deprecate specialized builder** (mark in docs/comments)
+   - Add deprecation warnings to `PriceTable4DBuilder`
+   - Update examples to use `PriceTableBuilder<4>`
+   - Migration guide for existing users
+
+10. **Update documentation** (docs/API_GUIDE.md, inline docs)
+    - Show generic builder usage patterns
+    - Document error codes and handling
+    - Performance characteristics
+
+**Critical constraint:** No breaking changes to existing generic API (it's not used yet). Build new features incrementally.
 
 ## Testing Plan
 
 ### Unit Tests
-- `price_table_error_test.cc` - Error type construction and handling for all new error codes (INCOMPLETE_RESULTS, SNAPSHOT_MISMATCH, SNAPSHOT_DROPPED, etc.)
-- `price_table_surface_test.cc` - Surface ownership and workspace access
-- `price_table_validation_test.cc` - All snapshot validation cases
-- `price_table_grid_config_test.cc` - x_bounds precedence logic
-- `price_table_diagnostics_test.cc` - New diagnostic APIs:
-  - `precompute_with_save()` creates valid Parquet files
-  - Builder grid accessors (`.moneyness()`, `.maturity()`, etc.) return correct spans
-  - `BSplineFittingStats` in result contains valid residual metrics
-- `price_table_extraction_test.cc` - Atomic failure tracking:
-  - Partial failures increment atomic counter correctly
-  - INCOMPLETE_RESULTS error returned when failed_slices > 0
-  - Error includes count in invalid_values field
+- `price_table_error_test.cc` - Error type construction and handling for all codes
+  - Test `PriceTableError` struct initialization
+  - Test all `PriceTableErrorCode` values
+  - Test optional field handling (`details`, `axis_index`, `expected_value`)
+
+- `bspline_fitting_stats_test.cc` - B-spline fitting diagnostics
+  - Test stats collection during `BSplineNDSeparable::fit()`
+  - Test max residual tracking per axis
+  - Test condition number estimation
+  - Test failed slice counting
+
+- `price_table_validation_test.cc` - Axes validation
+  - Test empty grid detection (all 4 axes)
+  - Test unsorted grid detection
+  - Test negative moneyness detection
+  - Test negative maturity detection
+  - Test validation error conversion to `PriceTableError`
 
 ### Integration Tests
-- `price_table_builder_test.cc` - Update existing tests for new API
-- Test error cases: unsorted grid, missing T_max, exceeds T_max
-- Test x_bounds respected vs auto-estimation fallback
-- Verify no prices_4d in result
-- Test new error code paths (INVALID_GRID_EMPTY, INVALID_GRID_EXCEEDS_TERMINAL, etc.)
-- Test diagnostic workflow: build surface → inspect BSplineFittingStats → verify quality
+- `price_table_builder_test.cc` - End-to-end builder tests
+  - Update for `PriceTableResult<N>` return type (not `shared_ptr<Surface>`)
+  - Test error cases: empty grids, unsorted grids, negative values
+  - Test grid configuration: verify `config_.grid_estimator` respected
+  - Test diagnostics: verify `fitting_stats`, `n_pde_solves`, `precompute_time_seconds` populated
+  - Test tensor NOT in result (verify it's temporary only)
+
+- `price_table_extraction_test.cc` - Parallel extraction tests
+  - Test atomic failure counter increments correctly
+  - Test failed PDE solves tracked
+  - Test failed spline builds tracked
+  - Test error returned when `failed_slices > 0`
+  - Test parallel execution (verify OpenMP pragma effective)
 
 ### Performance Tests
-- Measure extraction phase scaling with core count (should be linear to 64 cores)
-- Verify memory usage reduction (no raw tensor in result)
-- Benchmark with large grids (200×100×50×20)
-- Verify atomic counter overhead is negligible
+- Measure extraction phase scaling with core count (expect linear to 16-32 cores)
+- Verify `PriceTensor<N>` temporary only (not in result)
+- Benchmark with large grids (200×100×50×20 = 20M points)
+- Verify atomic counter overhead negligible (< 1% of extraction time)
 
 ### Atomic Write Tests
 - `price_table_atomic_write_test.cc` - Test failure modes for atomic write protocol:
@@ -507,92 +644,103 @@ assert(n_time != 0 && "No snapshots recorded (programming error)");
 
 ## Migration Guide
 
-### Breaking Changes
+### From Specialized PriceTable4DBuilder to Generic PriceTableBuilder<N>
 
-**1. PriceTableResult no longer contains prices_4d:**
+**No immediate breaking changes** - specialized builder still works. Migrate incrementally:
+
+#### Phase 1: Understand Architecture Differences
+
+**Specialized (PriceTable4DBuilder):**
 ```cpp
-// OLD
-auto result = builder.precompute(config);
-auto& raw_prices = result.prices_4d;  // No longer exists
-
-// NEW
-auto result = builder.precompute(config);
-if (!result) {
-    // Handle error: result.error()
-    return;
-}
-// Residual statistics are in the result:
-const auto& stats = result.value().fitting_stats;
-std::cout << "Max residual: " << stats.max_residual_overall << "\n";
-std::cout << "Failed slices: " << stats.failed_slices_total << "\n";
-
-// If you need raw prices for external processing:
-auto save_result = builder.precompute_with_save(config, "prices.parquet");
-if (!save_result) {
-    // Handle save error
-    return;
-}
-// save_result.value() contains full PriceTableResult + data saved to disk
+auto builder_result = PriceTable4DBuilder::create(
+    moneyness_vec, maturity_vec, vol_vec, rate_vec, K_ref);
+auto result = builder_result->precompute(OptionType::PUT, 101, 1000);
 ```
 
-**2. Return type changed to PriceTableError:**
+**Generic (PriceTableBuilder<4>):**
 ```cpp
-// OLD
-auto result = builder.precompute(config);
-if (!result) {
-    std::cerr << result.error() << "\n";  // string
-}
+// 1. Build axes
+PriceTableAxes<4> axes;
+axes.grids[0] = moneyness_vec;
+axes.grids[1] = maturity_vec;
+axes.grids[2] = vol_vec;
+axes.grids[3] = rate_vec;
+axes.names = {"moneyness", "maturity", "volatility", "rate"};
 
-// NEW
-auto result = builder.precompute(config);
-if (!result) {
-    const auto& err = result.error();
-    switch (err.code) {
-        case PriceTableErrorCode::INVALID_GRID_UNSORTED:
-            // Handle unsorted grid
-            break;
-        // ...
-    }
-}
-```
-
-**3. PriceTableSurface constructor changed:**
-```cpp
-// OLD (internal use only, should not affect users)
-auto workspace = std::make_shared<PriceTableWorkspace>(...);
-PriceTableSurface surface(workspace);
-
-// NEW (with proper error handling)
-PriceTableWorkspace workspace(...);  // Stack or moved from elsewhere
-auto evaluator_result = BSplineEvaluator::create(std::move(workspace));
-if (!evaluator_result) {
-    // Handle error: evaluator_result.error()
-    return;
-}
-PriceTableSurface surface(evaluator_result.value());  // shared_ptr, cheap
-```
-
-### Non-Breaking Changes
-
-**Grid configuration now respects x_bounds:**
-```cpp
+// 2. Build config
 PriceTableConfig config;
-config.x_bounds = {-1.0, 1.0};  // Now actually used!
-config.n_space = 101;
+config.option_type = OptionType::PUT;
+config.K_ref = K_ref;
+config.grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
 config.n_time = 1000;
 
-// Builds GridSpec with exact [-1.0, 1.0] bounds
-auto result = builder.precompute(config);
+// 3. Build
+PriceTableBuilder<4> builder(config);
+auto result = builder.build(axes);
 ```
 
-**Better validation errors:**
+#### Phase 2: Update Return Type Handling
+
+**OLD (specialized builder, after refactor):**
 ```cpp
-// OLD: Silent corruption or unclear errors
-// NEW: Immediate, actionable errors
 auto result = builder.precompute(config);
-if (!result && result.error().code ==
-    PriceTableErrorCode::INVALID_GRID_MISSING_TERMINAL) {
-    // Grid missing T_max - append it and retry
+if (!result) {
+    // Handle PriceTableError
+}
+const auto& surface = result->surface;
+```
+
+**NEW (generic builder):**
+```cpp
+auto result = builder.build(axes);
+if (!result) {
+    // Handle PriceTableError (same error type!)
+}
+const auto& result_val = result.value();
+auto surface = result_val.surface;  // shared_ptr<const PriceTableSurface<4>>
+const auto& stats = result_val.fitting_stats;
+```
+
+#### Phase 3: Access Diagnostics
+
+**Both builders will support:**
+```cpp
+auto result = builder.build(axes);  // or precompute(config) for specialized
+if (result) {
+    std::cout << "PDE solves: " << result->n_pde_solves << "\n";
+    std::cout << "Build time: " << result->precompute_time_seconds << "s\n";
+    std::cout << "Max residual: " << result->fitting_stats.max_residual_overall << "\n";
+}
+```
+
+### Non-Breaking Enhancements
+
+**1. Grid configuration now respected:**
+```cpp
+PriceTableConfig config;
+config.grid_estimator = GridSpec<double>::sinh_stretched(-2.0, 2.0, 201, 2.0).value();
+config.n_time = 2000;
+
+// Previously: ignored, clamped to [100, 1200]
+// Now: used exactly as specified
+```
+
+**2. Better validation errors:**
+```cpp
+auto result = builder.build(axes);
+if (!result) {
+    const auto& err = result.error();
+    if (err.axis_index.has_value()) {
+        std::cout << "Error on axis " << err.axis_index.value() << ": ";
+    }
+    std::cout << static_cast<int>(err.code) << "\n";
+}
+```
+
+**3. Parallel extraction (automatic):**
+- Extraction now parallelized automatically
+- No code changes needed
+- Expect ~10-16× speedup on 32-core machines
 }
 ```
 
