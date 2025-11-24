@@ -172,7 +172,9 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
         {surf.rate_grid.front(), surf.rate_grid.back()});
 
     if (!solver_result) {
-        throw std::runtime_error("Failed to create IV solver: " + solver_result.error());
+        auto err = solver_result.error();
+        throw std::runtime_error("Failed to create IV solver (error code " +
+            std::to_string(static_cast<int>(err.code)) + ")");
     }
     const auto& solver = solver_result.value();
 
@@ -195,7 +197,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     auto run_once = [&]() {
         auto result = solver.solve_impl(query);
         if (!result.has_value()) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         benchmark::DoNotOptimize(result->implied_vol);
     };
@@ -245,7 +247,7 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace.value());
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -309,7 +311,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
             AmericanOptionSolver solver(params, workspace.value());
             auto result = solver.solve();
             if (!result) {
-                throw std::runtime_error(result.error().message);
+                throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
             }
             double price = result->value_at(params.spot);
             benchmark::DoNotOptimize(price);
@@ -370,7 +372,7 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
         for (size_t idx = 0; idx < batch_result.results.size(); ++idx) {
             const auto& res = batch_result.results[idx];
             if (!res) {
-                throw std::runtime_error(res.error().message);
+                throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(res.error().code)));
             }
             // Capture first price for validation
             if (idx == 0) {
@@ -430,7 +432,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     auto run_once = [&]() {
         auto result = solver.solve_impl(query);
         if (!result.has_value()) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         benchmark::DoNotOptimize(result->implied_vol);
     };

@@ -164,7 +164,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace);
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -203,7 +203,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace);
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -242,7 +242,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace);
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -286,7 +286,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         AmericanOptionSolver solver(params, workspace);
         auto result = solver.solve();
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -373,7 +373,9 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
         {surf.rate_grid.front(), surf.rate_grid.back()});
 
     if (!solver_result) {
-        throw std::runtime_error("Failed to create IV solver: " + solver_result.error());
+        auto err = solver_result.error();
+        throw std::runtime_error("Failed to create IV solver (error code " +
+            std::to_string(static_cast<int>(err.code)) + ")");
     }
     const auto& solver = solver_result.value();
 
@@ -389,7 +391,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     for (auto _ : state) {
         auto result = solver.solve_impl(query);
         if (!result.has_value()) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         benchmark::DoNotOptimize(result->implied_vol);
     }
@@ -437,7 +439,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
         auto end = std::chrono::high_resolution_clock::now();
 
         if (!result) {
-            throw std::runtime_error(result.error().message);
+            throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
         double price = result->value_at(params.spot);
         benchmark::DoNotOptimize(price);
@@ -508,7 +510,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
         for (const auto& res : results) {
             if (!res) {
-                throw std::runtime_error(res.error().message);
+                throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(res.error().code)));
             }
         }
         benchmark::DoNotOptimize(results);

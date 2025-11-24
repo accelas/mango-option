@@ -256,7 +256,9 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
 
     auto iv_solver_result = IVSolverInterpolated::create(surface, solver_config);
     if (!iv_solver_result) {
-        state.SkipWithError(iv_solver_result.error().c_str());
+        auto err = iv_solver_result.error();
+        std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
+        state.SkipWithError(error_msg.c_str());
         return;
     }
     const auto& iv_solver = iv_solver_result.value();
@@ -336,7 +338,9 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         // Step 3-4: Compute IVs
         auto iv_solver_result = IVSolverInterpolated::create(surface);
         if (!iv_solver_result) {
-            state.SkipWithError(iv_solver_result.error().c_str());
+            auto err = iv_solver_result.error();
+            std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
+            state.SkipWithError(error_msg.c_str());
             return;
         }
         auto& iv_solver = iv_solver_result.value();
