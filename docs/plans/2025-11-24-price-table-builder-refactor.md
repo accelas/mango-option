@@ -130,6 +130,17 @@ public:
 - Returns same result as `precompute()` but also streams prices to disk
 - Single execution provides both in-memory evaluator and archived raw data
 
+**Atomicity contract for `precompute_with_save()`:**
+- Writes to temporary file: `{output_path}.tmp`
+- On success: atomic rename `{output_path}.tmp` → `{output_path}`
+- On failure (PDE error, IO error, INCOMPLETE_RESULTS):
+  - Temporary file deleted automatically
+  - Returns error, no file left on disk
+  - Idempotent: safe to retry immediately
+- If output_path exists: overwritten atomically (no partial state visible)
+- Thread-safe: multiple concurrent writes to different paths supported
+- **Testing:** Inject failures at various stages, verify no corrupt files remain
+
 **Memory impact (prices_4d tensor size):**
 - 50×30×20×10 grid: removes 2.4 MB (300,000 doubles × 8 bytes)
 - 200×100×50×20 grid: removes 160 MB (20,000,000 doubles × 8 bytes)
@@ -658,25 +669,45 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
           return std::unexpected(workspace_result.error());  // Already PriceTableError
       }
 
-      auto evaluator_result = BSplineEvaluator::create(std::move(workspace_result.value()));
+      // Extract metadata BEFORE moving workspace
+      auto& ws = workspace_result.value();
+      size_t n_solves = ws.n_pde_solves;
+      double time = ws.precompute_time_seconds;
+      BSplineFittingStats stats = ws.fitting_stats;
+
+      auto evaluator_result = BSplineEvaluator::create(std::move(ws));
       if (!evaluator_result) {
           return std::unexpected(evaluator_result.error());  // Already PriceTableError
       }
 
-      // Reconstruct full result (stats persisted in Arrow metadata)
+      // Reconstruct full result (stats extracted before move)
       PriceTableResult result{
           .surface = PriceTableSurface(evaluator_result.value()),
-          .n_pde_solves = workspace_result.value().n_pde_solves,  // from metadata
-          .precompute_time_seconds = workspace_result.value().time,  // from metadata
-          .fitting_stats = workspace_result.value().fitting_stats   // from metadata
+          .n_pde_solves = n_solves,
+          .precompute_time_seconds = time,
+          .fitting_stats = stats
       };
       return result;
   }
   ```
 - Arrow schema extended to include metadata: n_pde_solves, time, BSplineFittingStats
 - Enables full quality validation on deserialized surfaces
+- **Backward compatibility strategy:**
+  - Schema version embedded in Arrow metadata (version=2, previous=1)
+  - Version 1 (legacy): workspace only, no stats (pre-refactor snapshots)
+  - Version 2 (new): workspace + n_pde_solves + time + BSplineFittingStats
+  - Loader checks version, populates defaults for missing fields:
+    ```cpp
+    if (schema_version == 1) {
+        n_solves = 0;  // Unknown for legacy files
+        time = 0.0;
+        stats = BSplineFittingStats{};  // All zeros indicate no data
+    }
+    ```
+  - Migration tool provided: `mango-upgrade-snapshots` re-saves v1 → v2 with computed stats
 - Add to implementation checklist: audit Arrow exporter, snapshot replay, scripting bindings
 - **Testing:** Verify no extra allocations during deserialize (memory profiler or custom allocator)
+- **Testing:** Load v1 snapshots, verify graceful degradation (no crash, usable surface)
 
 ### 4. Grid Configuration - Solver API
 
