@@ -141,28 +141,44 @@ if (!tensor_result.has_value()) {
 
 auto tensor = tensor_result.value();
 
-// AFTER (use PMR like american_option_batch.cpp:442-446):
+// AFTER (use PMR with aligned allocation):
 const size_t total_points = Nm * Nt * Nσ * Nr;
+const size_t tensor_bytes = total_points * sizeof(double);
 
-// Use PMR for temporary tensor storage (discarded after fitting)
-std::pmr::monotonic_buffer_resource pool;
+// CRITICAL: Preserve 64-byte alignment for AVX-512
+// Solution: Use aligned_alloc to create backing buffer, wrap in PMR
+constexpr size_t alignment = 64;
+const size_t aligned_bytes = (tensor_bytes + alignment - 1) & ~(alignment - 1);
+
+void* aligned_buffer = std::aligned_alloc(alignment, aligned_bytes);
+if (!aligned_buffer) {
+    return std::unexpected("Failed to allocate aligned buffer");
+}
+
+// Wrap aligned buffer in PMR resource
+std::pmr::monotonic_buffer_resource pool(aligned_buffer, aligned_bytes);
 std::pmr::vector<double> tensor_data(&pool);
 tensor_data.resize(total_points, 0.0);
 
 // Wrap in mdspan for N-D access
-std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
 using std::experimental::mdspan;
 using std::experimental::dextents;
 mdspan<double, dextents<size_t, N>> tensor(tensor_data.data(), Nm, Nt, Nσ, Nr);
+
+// IMPORTANT: Free aligned buffer after fitting
+auto cleanup = [aligned_buffer]() { std::free(aligned_buffer); };
+std::unique_ptr<void, decltype(cleanup)> buffer_guard(aligned_buffer, cleanup);
 ```
 
 **Benefits:**
-- Consistent with rest of codebase (american_option_batch.cpp, iv_solver_fdm.cpp)
-- Standard C++17 PMR instead of custom arena
-- Thread-local pools possible for multi-threaded builds
-- No custom error handling for arena allocation
+- ✅ Preserves 64-byte alignment for AVX-512 (critical for performance)
+- ✅ Uses PMR for consistency with codebase patterns
+- ✅ Standard C++17 facilities (aligned_alloc + PMR)
+- ✅ RAII cleanup via unique_ptr
 
-**Impact:** Remove dependency on `memory::AlignedArena`, simplify code
+**Impact:** Best of both worlds - aligned allocation + PMR interface
+
+**Alternative:** Keep `AlignedArena` if it already provides PMR-compatible interface
 
 ### Step 2: Add `PriceTableResult<N>` struct
 **Location:** `src/option/price_table_builder.hpp`
@@ -200,6 +216,45 @@ struct PriceTableResult {
 ```
 
 **Update:** Change `build()` signature to return `PriceTableResult<N>` instead of `shared_ptr<Surface<N>>`
+
+**Instrumentation (HOW to populate the fields):**
+
+1. **n_pde_solves**: Count from `BatchAmericanOptionResult`
+   ```cpp
+   // In build() after solve_batch()
+   size_t n_pde_solves = Nσ * Nr;  // One solve per (σ, r) combination
+   // OR: batch_result.results.size() - batch_result.failed_count
+   ```
+
+2. **precompute_time_seconds**: Wall-clock timer
+   ```cpp
+   // In build() - start timer before solve_batch()
+   auto start_time = std::chrono::high_resolution_clock::now();
+
+   // ... solve_batch(), extract_tensor(), fit_coeffs() ...
+
+   auto end_time = std::chrono::high_resolution_clock::now();
+   double elapsed = std::chrono::duration<double>(end_time - start_time).count();
+   ```
+
+3. **BSplineFittingStats**: Extract from `BSplineNDSeparable::fit()` return value
+   ```cpp
+   // Modify BSplineNDSeparable<T, N>::fit() to return stats
+   struct BSplineFitResult {
+       std::vector<T> coefficients;
+       BSplineFittingStats stats;  // NEW: residuals, condition numbers, failures
+   };
+
+   // In build() after fit_coeffs()
+   auto fit_result = fitter.fit(tensor_data);
+   BSplineFittingStats stats = fit_result.value().stats;
+   ```
+
+**Implementation tasks:**
+- Add `BSplineFitResult` struct to `bspline_nd_separable.hpp`
+- Update `BSplineNDSeparable::fit()` to compute and return stats
+- Add timer instrumentation at start/end of `build()`
+- Count PDE solves from batch result size
 
 ### Step 3: Fix Grid Configuration Bug
 **Location:** `src/option/price_table_builder.cpp:131-142`
@@ -262,9 +317,34 @@ if (config_.K_ref <= 0.0) {
     return std::unexpected("Reference strike K_ref must be positive");
 }
 
-// 6. Check PDE domain coverage (after solver setup, before solve)
-// Ensure log(moneyness_min) >= x_min and log(moneyness_max) <= x_max
-// (Port the x_bounds validation logic from PriceTable4DBuilder::precompute)
+// 6. Check PDE domain coverage
+// CRITICAL: Validate that moneyness grid fits within PDE spatial domain
+// Port logic from PriceTable4DBuilder::precompute (lines 120-142)
+const double x_min_requested = std::log(axes.grids[0].front());  // log(moneyness_min)
+const double x_max_requested = std::log(axes.grids[0].back());   // log(moneyness_max)
+
+// Get PDE bounds from grid_spec in config
+const double x_min = config_.grid_estimator.x_min();  // PDE domain lower bound
+const double x_max = config_.grid_estimator.x_max();  // PDE domain upper bound
+
+// Validate requested range fits within PDE domain
+if (x_min_requested < x_min || x_max_requested > x_max) {
+    return std::unexpected(
+        "Requested moneyness range [" + std::to_string(axes.grids[0].front()) + ", " +
+        std::to_string(axes.grids[0].back()) + "] in spot ratios "
+        "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
+        std::to_string(x_max_requested) + "], "
+        "which exceeds PDE grid bounds [" + std::to_string(x_min) + ", " +
+        std::to_string(x_max) + "]. "
+        "Narrow the moneyness grid or expand the PDE domain. "
+        "Example: for moneyness [0.7, 1.5], use grid_spec with x_min <= " +
+        std::to_string(x_min_requested) + " and x_max >= " +
+        std::to_string(x_max_requested) + "."
+    );
+}
+
+// This check prevents interpolation artifacts from cubic splines extrapolating
+// outside their knot domain, which would produce arbitrary garbage values
 ```
 
 ### Step 5: Add Helper Factories
@@ -278,6 +358,7 @@ public:
     explicit PriceTableBuilder(PriceTableConfig config);
 
     // NEW: Factory that returns BOTH builder and axes (solves ownership problem)
+    // PDE resolution control: caller specifies grid_spec and n_time
     static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
     from_vectors(
         std::vector<double> moneyness,
@@ -285,6 +366,8 @@ public:
         std::vector<double> volatility,
         std::vector<double> rate,
         double K_ref,
+        GridSpec<double> grid_spec,     // PDE spatial grid (e.g., uniform(-3, 3, 101))
+        size_t n_time,                   // PDE time steps (e.g., 1000)
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0);
 
@@ -296,12 +379,18 @@ public:
         std::vector<double> maturities,
         std::vector<double> volatilities,
         std::vector<double> rates,
+        GridSpec<double> grid_spec,     // PDE spatial grid
+        size_t n_time,                   // PDE time steps
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0);
 
     // NEW: Factory from option chain
     static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
-    from_chain(const OptionChain& chain, OptionType type = OptionType::PUT);
+    from_chain(
+        const OptionChain& chain,
+        GridSpec<double> grid_spec,     // PDE spatial grid
+        size_t n_time,                   // PDE time steps
+        OptionType type = OptionType::PUT);
 };
 ```
 
@@ -327,9 +416,16 @@ auto result = builder_result->precompute(OptionType::PUT, 101, 1000);
 auto& surface = result->surface;
 auto& stats = result->fitting_stats;
 
-// NEW
+// NEW (with explicit PDE resolution control)
+auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();  // Match old n_space=101
 auto [builder, axes] = PriceTableBuilder<4>::from_vectors(
-    vec1, vec2, vec3, vec4, K_ref, OptionType::PUT).value();
+    vec1, vec2, vec3, vec4,
+    K_ref,
+    grid_spec,           // PDE spatial grid
+    1000,                // PDE time steps (match old n_time=1000)
+    OptionType::PUT
+).value();
+
 auto result = builder.build(axes).value();
 auto surface = result.surface;
 const auto& stats = result.fitting_stats;
