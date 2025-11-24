@@ -57,6 +57,7 @@ cc_library(
     srcs = ["price_table_builder.cpp"],
     hdrs = ["price_table_builder.hpp"],
     deps = [
+        ":option_chain",
         ":price_table_config",
         ":price_table_axes",
         ":price_table_surface",

@@ -413,6 +413,140 @@ PriceTableBuilder<N>::fit_coeffs(
     };
 }
 
+// Helper: sort and dedupe a vector
+namespace {
+std::vector<double> sort_and_dedupe(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+    return v;
+}
+}  // namespace
+
+// Factory method implementations (explicit specialization for N=4)
+template <>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+PriceTableBuilder<4>::from_vectors(
+    std::vector<double> moneyness,
+    std::vector<double> maturity,
+    std::vector<double> volatility,
+    std::vector<double> rate,
+    double K_ref,
+    GridSpec<double> grid_spec,
+    size_t n_time,
+    OptionType type,
+    double dividend_yield)
+{
+    // Sort and dedupe
+    moneyness = sort_and_dedupe(std::move(moneyness));
+    maturity = sort_and_dedupe(std::move(maturity));
+    volatility = sort_and_dedupe(std::move(volatility));
+    rate = sort_and_dedupe(std::move(rate));
+
+    // Validate positivity
+    if (!moneyness.empty() && moneyness.front() <= 0.0) {
+        return std::unexpected("Moneyness must be positive");
+    }
+    if (!maturity.empty() && maturity.front() <= 0.0) {
+        return std::unexpected("Maturity must be positive");
+    }
+    if (!volatility.empty() && volatility.front() <= 0.0) {
+        return std::unexpected("Volatility must be positive");
+    }
+    if (K_ref <= 0.0) {
+        return std::unexpected("K_ref must be positive");
+    }
+
+    // Build axes
+    PriceTableAxes<4> axes;
+    axes.grids[0] = std::move(moneyness);
+    axes.grids[1] = std::move(maturity);
+    axes.grids[2] = std::move(volatility);
+    axes.grids[3] = std::move(rate);
+    axes.names = {"moneyness", "maturity", "volatility", "rate"};
+
+    // Build config
+    PriceTableConfig config;
+    config.option_type = type;
+    config.K_ref = K_ref;
+    config.grid_estimator = grid_spec;
+    config.n_time = n_time;
+    config.dividend_yield = dividend_yield;
+
+    return std::make_pair(PriceTableBuilder<4>(config), std::move(axes));
+}
+
+template <>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+PriceTableBuilder<4>::from_strikes(
+    double spot,
+    std::vector<double> strikes,
+    std::vector<double> maturities,
+    std::vector<double> volatilities,
+    std::vector<double> rates,
+    GridSpec<double> grid_spec,
+    size_t n_time,
+    OptionType type,
+    double dividend_yield)
+{
+    if (spot <= 0.0) {
+        return std::unexpected("Spot must be positive");
+    }
+
+    // Sort and dedupe
+    strikes = sort_and_dedupe(std::move(strikes));
+    maturities = sort_and_dedupe(std::move(maturities));
+    volatilities = sort_and_dedupe(std::move(volatilities));
+    rates = sort_and_dedupe(std::move(rates));
+
+    // Validate strikes positive
+    if (!strikes.empty() && strikes.front() <= 0.0) {
+        return std::unexpected("Strikes must be positive");
+    }
+
+    // Compute moneyness = spot/strike
+    std::vector<double> moneyness;
+    moneyness.reserve(strikes.size());
+    for (double K : strikes) {
+        moneyness.push_back(spot / K);
+    }
+    // Note: if strikes are ascending, moneyness is descending
+    // Sort to make ascending
+    std::sort(moneyness.begin(), moneyness.end());
+
+    return from_vectors(
+        std::move(moneyness),
+        std::move(maturities),
+        std::move(volatilities),
+        std::move(rates),
+        spot,  // K_ref = spot
+        grid_spec,
+        n_time,
+        type,
+        dividend_yield
+    );
+}
+
+template <>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+PriceTableBuilder<4>::from_chain(
+    const OptionChain& chain,
+    GridSpec<double> grid_spec,
+    size_t n_time,
+    OptionType type)
+{
+    return from_strikes(
+        chain.spot,
+        chain.strikes,
+        chain.maturities,
+        chain.implied_vols,
+        chain.rates,
+        grid_spec,
+        n_time,
+        type,
+        chain.dividend_yield
+    );
+}
+
 // Explicit instantiations
 template class PriceTableBuilder<2>;
 template class PriceTableBuilder<3>;
