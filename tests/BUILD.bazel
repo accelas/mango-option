@@ -78,6 +78,54 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_builder_custom_grid_test",
+    size = "small",
+    srcs = ["price_table_builder_custom_grid_test.cc"],
+    deps = [
+        "//src/option:price_table_builder",
+        "//src/pde/core:time_domain",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "price_table_builder_custom_grid_advanced_test",
+    size = "small",
+    srcs = ["price_table_builder_custom_grid_advanced_test.cc"],
+    deps = [
+        "//src/option:price_table_builder",
+        "//src/pde/core:time_domain",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "price_table_builder_custom_grid_diagnosis_test",
+    size = "small",
+    srcs = ["price_table_builder_custom_grid_diagnosis_test.cc"],
+    deps = [
+        "//src/option:price_table_builder",
+        "//src/pde/core:time_domain",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "price_table_builder_root_cause_test",
+    size = "small",
+    srcs = ["price_table_builder_root_cause_test.cc"],
+    deps = [
+        "//src/option:price_table_builder",
+        "//src/pde/core:time_domain",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "bspline_fitting_stats_test",
     size = "small",
     srcs = ["bspline_fitting_stats_test.cc"],

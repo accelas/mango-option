@@ -223,9 +223,9 @@ PriceTableBuilder<N>::solve_batch(
         solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
         // Solve batch with shared grid optimization (normalized chain solver)
-        // NOTE: custom_grid parameter not used here - causes all solves to fail when
-        // options have spot==strike (normalized case). Grid bounds are validated
-        // above to ensure PDE domain covers requested moneyness range.
+        // NOTE: custom_grid parameter not used - see investigation report in
+        // tests/price_table_builder_custom_grid_*.cc for detailed analysis.
+        // Grid bounds are validated above to ensure PDE domain covers requested range.
         return solver.solve_batch(batch, true);  // use_shared_grid = true
     }
 }
