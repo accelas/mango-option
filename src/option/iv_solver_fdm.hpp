@@ -201,42 +201,7 @@ private:
     /// @return Difference between theoretical and market price
     double objective_function(const IVQuery& query, double volatility) const;
 
-    // Atomic validators (C++23 monadic) - uniform API: all take const IVQuery&
-    /// Validate spot price is positive
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_spot_positive(const IVQuery& query) const;
-
-    /// Validate strike price is positive
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_strike_positive(const IVQuery& query) const;
-
-    /// Validate time to maturity is positive
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_maturity_positive(const IVQuery& query) const;
-
-    /// Validate market price is positive
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_price_positive(const IVQuery& query) const;
-
-    /// Validate call price <= spot price (arbitrage check)
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_call_price_bound(const IVQuery& query) const;
-
-    /// Validate put price <= strike price (arbitrage check)
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_put_price_bound(const IVQuery& query) const;
-
-    /// Validate market price >= intrinsic value (arbitrage check)
-    /// @param query Option specification and market price
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_intrinsic_value(const IVQuery& query) const;
-
+    // Grid validators (FDM-specific, only used when manual grid mode enabled)
     /// Validate grid n_space is positive (manual grid mode)
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_n_space_positive() const;
@@ -253,20 +218,12 @@ private:
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_alpha_nonnegative() const;
 
-    // Composite validators (C++23 monadic)
-    /// Validate positive parameters (spot, strike, maturity, market_price)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_positive_parameters(const IVQuery& query) const;
-
-    /// Validate arbitrage bounds (call/put constraints, intrinsic value)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_arbitrage_bounds(const IVQuery& query) const;
-
     /// Validate grid parameters (FDM-specific, only when manual grid mode enabled)
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_grid_params() const;
 
-    /// Validate query (composite of all validation stages: params → arbitrage → grid)
+    /// Validate query using centralized validation + grid params
+    /// Uses validate_iv_query() from option_spec.cpp for consistency
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_query(const IVQuery& query) const;
 
