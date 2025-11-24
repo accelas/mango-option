@@ -104,8 +104,8 @@ public:
     std::expected<PriceTableResult, PriceTableError> precompute(
         const PriceTableConfig& config);
 
-    // Optional: stream raw prices to disk during precompute
-    std::expected<void, PriceTableError> precompute_with_save(
+    // Optional: stream raw prices to disk during precompute (returns result + saves)
+    std::expected<PriceTableResult, PriceTableError> precompute_with_save(
         const PriceTableConfig& config,
         const std::filesystem::path& output_path,
         bool streaming = true);
@@ -123,6 +123,12 @@ public:
 - After removing `prices_4d`, there's no ground truth data to compare against
 - Users get residuals from `result.fitting_stats` (computed during B-spline fitting)
 - Avoids impossible-to-implement API that requires non-existent data
+
+**Rationale for `precompute_with_save()` returning `PriceTableResult`:**
+- Users need both surface (for queries) AND persisted data (for external tools)
+- Returning void would force running PDE pipeline twice (2× compute cost)
+- Returns same result as `precompute()` but also streams prices to disk
+- Single execution provides both in-memory evaluator and archived raw data
 
 **Memory impact (prices_4d tensor size):**
 - 50×30×20×10 grid: removes 2.4 MB (300,000 doubles × 8 bytes)
@@ -317,7 +323,10 @@ enum class PriceTableErrorCode {
     PDE_SOLVE_FAILED,
     INCOMPLETE_RESULTS,        // Some PDE solves failed
     SNAPSHOT_MISMATCH,         // Fixed grid snapshot count wrong
-    SNAPSHOT_DROPPED           // Adaptive grid dropped snapshots
+    SNAPSHOT_DROPPED,          // Adaptive grid dropped snapshots
+    IO_ERROR_WRITE_FAILED,     // Failed to write to disk (precompute_with_save)
+    IO_ERROR_READ_FAILED,      // Failed to read from disk (deserialize)
+    IO_ERROR_INVALID_FORMAT    // File format invalid or corrupted
 };
 
 struct PriceTableError {
@@ -442,7 +451,9 @@ std::cout << "Failed slices: " << stats.failed_slices_total << "\n";
 auto save_result = builder.precompute_with_save(config, "prices.parquet");
 if (!save_result) {
     // Handle save error
+    return;
 }
+// save_result.value() contains full PriceTableResult + data saved to disk
 ```
 
 **2. Return type changed to PriceTableError:**
@@ -473,6 +484,7 @@ auto workspace = std::make_shared<PriceTableWorkspace>(...);
 PriceTableSurface surface(workspace);
 
 // NEW (with proper error handling)
+PriceTableWorkspace workspace(...);  // Stack or moved from elsewhere
 auto evaluator_result = BSplineEvaluator::create(std::move(workspace));
 if (!evaluator_result) {
     // Handle error: evaluator_result.error()
@@ -510,7 +522,7 @@ if (!result && result.error().code ==
 This refactor breaks the `PriceTableResult` API. Follow this three-phase migration:
 
 **Phase 1: Add New APIs (Step 4 in Implementation Order)**
-- Add `precompute_with_save(config, path) -> expected<void, PriceTableError>` to builder
+- Add `precompute_with_save(config, path) -> expected<PriceTableResult, PriceTableError>` to builder
 - Add grid accessors to builder: `.moneyness()`, `.maturity()`, `.volatility()`, `.rate()`
 - **Action:** Run `bazel test //tests:price_table_diagnostics_test` to verify new APIs work
 - **Validation:** All new APIs have test coverage before Phase 2
@@ -633,19 +645,17 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
 
 ### 3. API Breaking Changes - Serialization
 
-**Issue:** Serialization code expects `PriceTableSurface(shared_ptr<workspace>)` constructor. Unconditional `.value()` on expected will terminate on failure.
+**Issue:** Serialization code expects `PriceTableSurface(shared_ptr<workspace>)` constructor. Unconditional `.value()` on expected will terminate on failure. Additionally, deserializing only a surface loses `BSplineFittingStats` and other metadata.
 
 **Resolution:**
-- Update serialization with proper error handling:
+- Update serialization to roundtrip full `PriceTableResult`:
   ```cpp
-  std::expected<PriceTableSurface, PriceTableError>
-  deserialize_surface(const std::filesystem::path& file) {
-      auto workspace_result = load_workspace_from_arrow(file);
+  // load_workspace_from_arrow now returns PriceTableError (not string)
+  std::expected<PriceTableResult, PriceTableError>
+  deserialize_result(const std::filesystem::path& file) {
+      auto workspace_result = load_workspace_from_arrow(file);  // returns expected<..., PriceTableError>
       if (!workspace_result) {
-          return std::unexpected(PriceTableError{
-              .code = PriceTableErrorCode::WORKSPACE_CREATION_FAILED,
-              .details = "Failed to load workspace: " + workspace_result.error()
-          });
+          return std::unexpected(workspace_result.error());  // Already PriceTableError
       }
 
       auto evaluator_result = BSplineEvaluator::create(std::move(workspace_result.value()));
@@ -653,10 +663,18 @@ During this phase, also complete Steps 5-7 (validation, grid config, extraction 
           return std::unexpected(evaluator_result.error());  // Already PriceTableError
       }
 
-      return PriceTableSurface(evaluator_result.value());  // shared_ptr, cheap copy
+      // Reconstruct full result (stats persisted in Arrow metadata)
+      PriceTableResult result{
+          .surface = PriceTableSurface(evaluator_result.value()),
+          .n_pde_solves = workspace_result.value().n_pde_solves,  // from metadata
+          .precompute_time_seconds = workspace_result.value().time,  // from metadata
+          .fitting_stats = workspace_result.value().fitting_stats   // from metadata
+      };
+      return result;
   }
   ```
-- Workspace move is cheap (moved into make_shared inside create())
+- Arrow schema extended to include metadata: n_pde_solves, time, BSplineFittingStats
+- Enables full quality validation on deserialized surfaces
 - Add to implementation checklist: audit Arrow exporter, snapshot replay, scripting bindings
 - **Testing:** Verify no extra allocations during deserialize (memory profiler or custom allocator)
 
