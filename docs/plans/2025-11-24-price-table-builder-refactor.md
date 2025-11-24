@@ -63,7 +63,9 @@ private:
 ```cpp
 class BSplineEvaluator {
 public:
-    static std::expected<BSplineEvaluator, std::string> create(PriceTableWorkspace&& ws);
+    // Factory returns shared_ptr directly to avoid double-move
+    static std::expected<std::shared_ptr<BSplineEvaluator>, std::string>
+    create(PriceTableWorkspace&& ws);
 
     double eval(double m, double tau, double sigma, double rate) const;
 
@@ -215,7 +217,9 @@ for (size_t idx = 0; idx < Nv * Nr; ++idx) {
 **New structure:**
 ```cpp
 // Single parallel loop over all work: 6000 iterations
+// Track failures explicitly (from resolution #2)
 const size_t total_work = Nv * Nr * Nt;
+std::atomic<size_t> failed_slices{0};
 
 MANGO_PRAGMA_PARALLEL_FOR
 for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
@@ -227,13 +231,15 @@ for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
 
     // Get batch result
     const size_t batch_idx = vol_idx * Nr + r_idx;
-    const auto& result_expected = batch_result.results[batch_idx];
 
-    if (!result_expected.has_value() || !result_expected->converged) {
-        continue;
+    if (batch_idx >= batch_result.results.size() ||
+        !batch_result.results[batch_idx].has_value() ||
+        !batch_result.results[batch_idx]->converged) {
+        failed_slices.fetch_add(1, std::memory_order_relaxed);
+        continue;  // Leave zeros in prices_view
     }
 
-    const auto& result = result_expected.value();
+    const auto& result = batch_result.results[batch_idx].value();
     auto result_grid = result.grid();
     auto x_grid = result_grid->x();
 
@@ -241,7 +247,10 @@ for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
     size_t step_idx = step_indices[mat_idx];
     std::span<const double> spatial_solution = result.at_time(step_idx);
 
-    if (spatial_solution.empty()) continue;
+    if (spatial_solution.empty()) {
+        failed_slices.fetch_add(1, std::memory_order_relaxed);
+        continue;
+    }
 
     CubicSpline<double> spline;
     auto build_error = spline.build(x_grid, spatial_solution);
@@ -252,6 +261,15 @@ for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
         double V_norm = build_error ? boundary_value : spline.eval(x);
         prices_view[m_idx, mat_idx, vol_idx, r_idx] = K_ref * V_norm;
     }
+}
+
+// Check for failures after extraction
+if (failed_slices.load() > 0) {
+    return std::unexpected(PriceTableError{
+        .code = PriceTableErrorCode::INCOMPLETE_RESULTS,
+        .invalid_values = {static_cast<double>(failed_slices.load())},
+        .details = std::to_string(failed_slices.load()) + " slices failed"
+    });
 }
 ```
 
@@ -272,19 +290,25 @@ for (size_t work_idx = 0; work_idx < total_work; ++work_idx) {
 enum class PriceTableErrorCode {
     INVALID_GRID_UNSORTED,
     INVALID_GRID_NEGATIVE,
+    INVALID_GRID_EMPTY,
     INVALID_GRID_MISSING_TERMINAL,
     INVALID_GRID_EXCEEDS_TERMINAL,
     INVALID_BOUNDS,
     INVALID_GRID_SPEC,
     WORKSPACE_CREATION_FAILED,
     BSPLINE_FIT_FAILED,
-    PDE_SOLVE_FAILED
+    PDE_SOLVE_FAILED,
+    INCOMPLETE_RESULTS,        // Some PDE solves failed
+    SNAPSHOT_MISMATCH,         // Fixed grid snapshot count wrong
+    SNAPSHOT_DROPPED           // Adaptive grid dropped snapshots
 };
 
 struct PriceTableError {
     PriceTableErrorCode code;
     std::vector<double> invalid_values;
-    double expected_value = 0.0;
+    std::optional<double> expected_value;   // nullopt when not applicable
+    std::optional<std::string> details;     // For complex contexts
+    std::optional<size_t> axis_index;       // 0=m, 1=τ, 2=σ, 3=r, nullopt=not axis-specific
 };
 ```
 
@@ -293,7 +317,6 @@ struct PriceTableError {
 std::expected<PriceTableResult, PriceTableError>
 PriceTableBuilder::precompute(const PriceTableConfig& config)
 {
-    const double T_max = maturity_.back();
     const double epsilon = 1e-10;
 
     // Validate maturity grid before solver setup
@@ -302,7 +325,8 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
     if (!std::is_sorted(maturity_.begin(), maturity_.end())) {
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_UNSORTED,
-            .invalid_values = maturity_
+            .invalid_values = maturity_,
+            .axis_index = 1  // τ axis
         });
     }
 
@@ -310,38 +334,21 @@ PriceTableBuilder::precompute(const PriceTableConfig& config)
     if (maturity_.front() < 0.0) {
         return std::unexpected(PriceTableError{
             .code = PriceTableErrorCode::INVALID_GRID_NEGATIVE,
-            .invalid_values = {maturity_.front()}
+            .invalid_values = {maturity_.front()},
+            .axis_index = 1  // τ axis
         });
     }
 
-    // Check 3: Must include T_max
-    if (std::abs(maturity_.back() - T_max) >= epsilon) {
+    // Check 3: Grid must be non-empty
+    if (maturity_.empty()) {
         return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_MISSING_TERMINAL,
-            .expected_value = T_max,
-            .invalid_values = {maturity_.back()}
+            .code = PriceTableErrorCode::INVALID_GRID_EMPTY,
+            .axis_index = 1  // τ axis
         });
     }
 
-    // Check 4: All values <= T_max
-    auto exceeds = std::find_if(maturity_.begin(), maturity_.end(),
-                                [T_max, epsilon](double t) {
-                                    return t > T_max + epsilon;
-                                });
-    if (exceeds != maturity_.end()) {
-        std::vector<double> exceeding;
-        std::copy_if(maturity_.begin(), maturity_.end(),
-                     std::back_inserter(exceeding),
-                     [T_max, epsilon](double t) {
-                         return t > T_max + epsilon;
-                     });
-
-        return std::unexpected(PriceTableError{
-            .code = PriceTableErrorCode::INVALID_GRID_EXCEEDS_TERMINAL,
-            .expected_value = T_max,
-            .invalid_values = exceeding
-        });
-    }
+    // Note: Validation that maturity grid fits within PDE time domain happens
+    // post-solve (see resolution #6) since T_max depends on solver configuration
 
     // ... proceed with PDE solves
 }
@@ -432,10 +439,13 @@ if (!result) {
 auto workspace = std::make_shared<PriceTableWorkspace>(...);
 PriceTableSurface surface(workspace);
 
-// NEW
-auto evaluator = std::make_shared<BSplineEvaluator>(
-    BSplineEvaluator::create(std::move(workspace)).value());
-PriceTableSurface surface(evaluator);
+// NEW (with proper error handling)
+auto evaluator_result = BSplineEvaluator::create(std::move(workspace));
+if (!evaluator_result) {
+    // Handle error: evaluator_result.error()
+    return;
+}
+PriceTableSurface surface(evaluator_result.value());  // shared_ptr, cheap
 ```
 
 ### Non-Breaking Changes
