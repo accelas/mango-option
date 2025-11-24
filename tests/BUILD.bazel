@@ -761,6 +761,18 @@ cc_test(
 )
 
 cc_test(
+    name = "batch_solver_custom_grid_test",
+    size = "small",
+    srcs = ["batch_solver_custom_grid_test.cc"],
+    deps = [
+        "//src/option:american_option_batch",
+        "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "mdspan_integration_test",
     srcs = ["mdspan_integration_test.cc"],
     deps = [

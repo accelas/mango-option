@@ -273,7 +273,8 @@ std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameter
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
     std::span<const AmericanOptionParams> params,
     bool use_shared_grid,
-    SetupCallback setup)
+    SetupCallback setup,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
 {
     // Ensure grid_accuracy_ is initialized
     if (grid_accuracy_.tol == 0.0) {
@@ -286,32 +287,34 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_batch(
     // creating temporary solvers for all options or tracking index mapping.
     // For simplicity, fall back to regular batch when callback is needed.
     if (setup) {
-        return solve_regular_batch(params, use_shared_grid, setup);
+        return solve_regular_batch(params, use_shared_grid, setup, custom_grid);
     }
 
     // Automatic routing based on eligibility
     if (use_normalized_ && is_normalized_eligible(params, use_shared_grid)) {
         MANGO_TRACE_NORMALIZED_SELECTED(params.size());
-        return solve_normalized_chain(params, setup);
+        return solve_normalized_chain(params, setup, custom_grid);
     } else {
         if (use_normalized_ && !is_normalized_eligible(params, use_shared_grid)) {
             trace_ineligibility_reason(params, use_shared_grid);
         }
-        return solve_regular_batch(params, use_shared_grid, setup);
+        return solve_regular_batch(params, use_shared_grid, setup, custom_grid);
     }
 }
 
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     const std::vector<AmericanOptionParams>& params,
     bool use_shared_grid,
-    SetupCallback setup)
+    SetupCallback setup,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
 {
-    return solve_regular_batch(std::span{params}, use_shared_grid, setup);
+    return solve_regular_batch(std::span{params}, use_shared_grid, setup, custom_grid);
 }
 
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
     std::span<const AmericanOptionParams> params,
-    SetupCallback setup)
+    SetupCallback setup,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
 {
     // Group by PDE parameters: (σ, r, q, type, maturity)
     auto pde_groups = group_by_pde_parameters(params);
@@ -344,7 +347,8 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
         auto solve_result = solve_regular_batch(
             std::span{&normalized_params, 1},
             /*use_shared_grid=*/true,
-            setup);
+            setup,
+            custom_grid);
 
         if (!solve_result.results[0].has_value()) {
             // Mark all options in this group as failed
@@ -387,7 +391,8 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
 BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     std::span<const AmericanOptionParams> params,
     bool use_shared_grid,
-    SetupCallback setup)
+    SetupCallback setup,
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid)
 {
     if (params.empty()) {
         return BatchAmericanOptionResult{.results = {}, .failed_count = 0};
@@ -409,7 +414,13 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     // Precompute shared grid if needed
     std::optional<std::pair<GridSpec<double>, TimeDomain>> shared_grid;
     if (use_shared_grid) {
-        shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
+        if (custom_grid.has_value()) {
+            // Use provided grid directly (bypass auto-estimation)
+            shared_grid = custom_grid;
+        } else {
+            // Existing path: use grid_accuracy_ member to estimate grid
+            shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
+        }
     }
 
     // Precompute workspace size outside parallel region
@@ -422,10 +433,18 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         workspace_size_elements = PDEWorkspace::required_size(shared_n_space);
     } else {
         // For per-option grids, estimate max workspace size across all options
-        for (const auto& p : params) {
-            auto [grid_spec, time_domain] = estimate_grid_for_option(p, grid_accuracy_);
+        if (custom_grid.has_value()) {
+            // Use custom grid size
+            auto [grid_spec, time_domain] = custom_grid.value();
             size_t n = grid_spec.n_points();
-            workspace_size_elements = std::max(workspace_size_elements, PDEWorkspace::required_size(n));
+            workspace_size_elements = PDEWorkspace::required_size(n);
+        } else {
+            // Estimate based on all options
+            for (const auto& p : params) {
+                auto [grid_spec, time_domain] = estimate_grid_for_option(p, grid_accuracy_);
+                size_t n = grid_spec.n_points();
+                workspace_size_elements = std::max(workspace_size_elements, PDEWorkspace::required_size(n));
+            }
         }
     }
 
@@ -481,7 +500,9 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 }
             } else {
                 // Per-option grid: create workspace for this option
-                auto [grid_spec, time_domain] = estimate_grid_for_option(params[i], grid_accuracy_);
+                auto [grid_spec, time_domain] = custom_grid.has_value()
+                    ? custom_grid.value()
+                    : estimate_grid_for_option(params[i], grid_accuracy_);
 
                 // Create Grid with solution storage
                 auto grid_result = Grid<double>::create(grid_spec, time_domain);
@@ -504,20 +525,23 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 // Try allocating from default resource (heap) as fallback
                 std::pmr::vector<double> heap_buffer(std::pmr::get_default_resource());
 
-                if (!use_shared_grid) {
-                    auto [grid_spec, time_domain] = estimate_grid_for_option(params[i], grid_accuracy_);
+                // Determine grid to use
+                auto [grid_spec, time_domain] = use_shared_grid && shared_grid.has_value()
+                    ? shared_grid.value()
+                    : (custom_grid.has_value()
+                        ? custom_grid.value()
+                        : estimate_grid_for_option(params[i], grid_accuracy_));
 
-                    auto grid_result = Grid<double>::create(grid_spec, time_domain);
-                    if (grid_result.has_value()) {
-                        grid = grid_result.value();
+                auto grid_result = Grid<double>::create(grid_spec, time_domain);
+                if (grid_result.has_value()) {
+                    grid = grid_result.value();
 
-                        size_t n = grid_spec.n_points();
-                        heap_buffer.resize(PDEWorkspace::required_size(n));
-                        auto workspace_result = PDEWorkspace::from_buffer(heap_buffer, n);
-                        if (workspace_result.has_value()) {
-                            workspace_storage = workspace_result.value();
-                            workspace_ptr = &workspace_storage.value();
-                        }
+                    size_t n = grid_spec.n_points();
+                    heap_buffer.resize(PDEWorkspace::required_size(n));
+                    auto workspace_result = PDEWorkspace::from_buffer(heap_buffer, n);
+                    if (workspace_result.has_value()) {
+                        workspace_storage = workspace_result.value();
+                        workspace_ptr = &workspace_storage.value();
                     }
                 }
 
