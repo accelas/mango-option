@@ -13,7 +13,7 @@
  * - Expected speedup: ≥1.47× (banded solver is ~40% of total runtime)
  */
 
-#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_builder.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>
@@ -72,13 +72,18 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
 
     // Test 1: Banded solver (default)
     {
-        auto builder_result = PriceTable4DBuilder::create(
-            moneyness, maturity, volatility, rate, 100.0);
-        ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
-        auto builder = builder_result.value();
+        auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
+        ASSERT_TRUE(grid_spec_result.has_value());
+        auto grid_spec = grid_spec_result.value();
+
+        auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+            moneyness, maturity, volatility, rate, 100.0,
+            grid_spec, 1000, OptionType::PUT, 0.02);
+        ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
+        auto [builder, axes] = std::move(builder_axes_result.value());
 
         auto start = std::chrono::high_resolution_clock::now();
-        auto result = builder.precompute(OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
+        auto result = builder.build(axes);
         auto end = std::chrono::high_resolution_clock::now();
 
         ASSERT_TRUE(result.has_value()) << "Banded solver precomputation failed";
@@ -90,7 +95,7 @@ TEST_F(PriceTableEndToEndPerformanceTest, BandedSolverSpeedup) {
         std::cout << "  Throughput: " << (result->n_pde_solves * 1000.0 / duration_ms) << " PDEs/sec\n";
 
         // Verify prices are sensible
-        double price_atm = result->evaluator->eval(1.0, 1.0, 0.20, 0.05);
+        double price_atm = result->surface->value({1.0, 1.0, 0.20, 0.05});
         EXPECT_GT(price_atm, 0.0);
         EXPECT_LT(price_atm, 100.0);
 
@@ -119,13 +124,18 @@ TEST_F(PriceTableEndToEndPerformanceTest, SmallerGridSanityCheck) {
     std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.02, 0.04, 0.06, 0.08};
 
-    auto builder_result = PriceTable4DBuilder::create(
-        moneyness, maturity, volatility, rate, 100.0);
-    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
-    auto builder = builder_result.value();
+    auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
+    ASSERT_TRUE(grid_spec_result.has_value());
+    auto grid_spec = grid_spec_result.value();
+
+    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
+        moneyness, maturity, volatility, rate, 100.0,
+        grid_spec, 1000, OptionType::PUT, 0.02);
+    ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
+    auto [builder, axes] = std::move(builder_axes_result.value());
 
     auto start = std::chrono::high_resolution_clock::now();
-    auto result = builder.precompute(OptionType::PUT, -3.0, 3.0, 101, 1000, 0.02);
+    auto result = builder.build(axes);
     auto end = std::chrono::high_resolution_clock::now();
 
     ASSERT_TRUE(result.has_value());

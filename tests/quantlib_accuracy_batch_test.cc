@@ -11,7 +11,8 @@
  */
 
 #include "tests/quantlib_validation_framework.hpp"
-#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_builder.hpp"
+#include "src/option/price_table_surface.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;
@@ -56,18 +57,25 @@ TEST(QuantLibBatchTest, DISABLED_StandardScenarios_IV_Interpolated) {
     std::vector<double> rate_grid = {0.00, 0.02, 0.05, 0.10};
 
     // Build price table (one-time cost)
-    auto builder_result = PriceTable4DBuilder::create(
+    auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
+    ASSERT_TRUE(grid_spec_result.has_value());
+    auto grid_spec = grid_spec_result.value();
+
+    auto builder_axes_result = PriceTableBuilder<4>::from_vectors(
         moneyness_grid,
         maturity_grid,
         vol_grid,
         rate_grid,
-        100.0  // K_ref
-    );
-    ASSERT_TRUE(builder_result.has_value()) << "Failed to create builder: " << builder_result.error();
-    auto builder = builder_result.value();
+        100.0,  // K_ref
+        grid_spec,
+        1000,
+        OptionType::PUT,
+        0.0);   // dividend_yield
+    ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
+    auto [builder, axes] = std::move(builder_axes_result.value());
 
     // Pre-compute prices for PUT options
-    auto precompute_result = builder.precompute(OptionType::PUT, 101, 1000);
+    auto precompute_result = builder.build(axes);
     ASSERT_TRUE(precompute_result.has_value())
         << "Price table precomputation failed: " << precompute_result.error();
 
@@ -170,7 +178,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
         << "Convergence test: " << rel_error << "%"
         << "\n  Mango: $" << mango_price
         << "\n  Reference: $" << ql_reference.price
-        << "\n  Grid: " << grid_spec.n_points() << "x" << n_time;
+        << "\n  Grid: " << grid_spec.n_points() << "x" << time_domain.n_steps();
 }
 
 // ============================================================================

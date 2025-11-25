@@ -4,7 +4,7 @@
  */
 
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_surface.hpp"
 #include "src/support/parallel.hpp"
 #include "src/math/root_finding.hpp"
 #include <algorithm>
@@ -13,54 +13,61 @@
 namespace mango {
 
 std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
-    std::shared_ptr<const BSpline4D> spline,
-    double K_ref,
-    std::pair<double, double> m_range,
-    std::pair<double, double> tau_range,
-    std::pair<double, double> sigma_range,
-    std::pair<double, double> r_range,
+    std::shared_ptr<const PriceTableSurface<4>> surface,
     const IVSolverInterpolatedConfig& config)
 {
-    if (!spline) {
+    // Validate surface pointer
+    if (!surface) {
         return std::unexpected(ValidationError(
             ValidationErrorCode::InvalidGridSize,
             0.0));
     }
-    if (K_ref <= 0.0) {
+
+    // Extract metadata from surface
+    const auto& axes = surface->axes();
+    const auto& meta = surface->metadata();
+
+    // Validate K_ref
+    if (meta.K_ref <= 0.0) {
         return std::unexpected(ValidationError(
             ValidationErrorCode::InvalidStrike,
-            K_ref));
+            meta.K_ref));
     }
+
+    // Extract ranges from axes
+    // Grid indices: 0=moneyness, 1=maturity, 2=volatility, 3=rate
+    if (axes.grids[0].empty() || axes.grids[1].empty() ||
+        axes.grids[2].empty() || axes.grids[3].empty()) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
+    }
+
+    auto m_range = std::make_pair(axes.grids[0].front(), axes.grids[0].back());
+    auto tau_range = std::make_pair(axes.grids[1].front(), axes.grids[1].back());
+    auto sigma_range = std::make_pair(axes.grids[2].front(), axes.grids[2].back());
+    auto r_range = std::make_pair(axes.grids[3].front(), axes.grids[3].back());
 
     return IVSolverInterpolated(
-        std::move(spline), K_ref, m_range, tau_range, sigma_range, r_range, config);
+        std::move(surface),
+        meta.K_ref,
+        m_range,
+        tau_range,
+        sigma_range,
+        r_range,
+        config);
 }
 
-std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
-    const PriceTableSurface& surface,
-    const IVSolverInterpolatedConfig& config)
-{
-    if (!surface.valid()) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            0.0));
-    }
+double IVSolverInterpolated::eval_price(double moneyness, double maturity, double vol, double rate, double strike) const {
+    double price_Kref = surface_->value({moneyness, maturity, vol, rate});
+    double scale_factor = strike / K_ref_;
+    return price_Kref * scale_factor;
+}
 
-    auto spline_result = BSpline4D::create(*surface.workspace());
-    if (!spline_result.has_value()) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            0.0));
-    }
-    auto spline = std::make_shared<BSpline4D>(std::move(spline_result.value()));
-    return create(
-        std::move(spline),
-        surface.K_ref(),
-        surface.moneyness_range(),
-        surface.maturity_range(),
-        surface.volatility_range(),
-        surface.rate_range(),
-        config);
+double IVSolverInterpolated::compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const {
+    double vega_Kref = surface_->partial(2, {moneyness, maturity, vol, rate});
+    const double scale_factor = strike / K_ref_;
+    return vega_Kref * scale_factor;
 }
 
 std::optional<ValidationError> IVSolverInterpolated::validate_query(const IVQuery& query) const {

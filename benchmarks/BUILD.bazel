@@ -178,7 +178,8 @@ cc_binary(
     ],
     linkstatic = True,
     deps = [
-        "//src/option:price_table_4d_builder",
+        "//src/option:price_table_builder",
+        "//src/option:price_table_surface",
         "//src/option:iv_solver_interpolated",
         "//src/option:bspline_price_table",
         "//src/math:bspline_nd_separable",

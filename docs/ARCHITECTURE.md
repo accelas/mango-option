@@ -31,7 +31,8 @@ graph TD
     BC[BoundaryConditions<br/>boundary_conditions.hpp]
     ROOT[Root Finding<br/>root_finding.hpp]
     SPLINE[B-Spline<br/>bspline_nd.hpp]
-    PTABLE[PriceTable4D Builder<br/>price_table_4d_builder.hpp]
+    PTABLE[PriceTableBuilder<N><br/>price_table_builder.hpp]
+    SURFACE[PriceTableSurface<N><br/>price_table_surface.hpp]
     IVFAST[IVSolverInterpolated<br/>iv_solver_interpolated.hpp]
 
     IV -->|Brent's method| ROOT
@@ -41,8 +42,9 @@ graph TD
     PDE --> BC
     PTABLE -->|Pre-compute prices| AO
     PTABLE -->|Fit coefficients| SPLINE
+    PTABLE -->|Produces| SURFACE
     IVFAST -->|Newton on surface| ROOT
-    IVFAST -->|Query surface| PTABLE
+    IVFAST -->|Query| SURFACE
 ```
 
 ### Three Deployment Paths
