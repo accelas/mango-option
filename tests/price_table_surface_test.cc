@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include "src/support/memory/aligned_arena.hpp"
 
 namespace mango {
@@ -59,7 +59,7 @@ TEST(PriceTableSurfaceTest, RejectInvalidCoefficients) {
     auto result = PriceTableSurface<2>::build(std::move(axes), std::move(coeffs), meta);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("size"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::FittingFailed);
 }
 
 // REGRESSION TEST: Verify build() return type includes template parameter <N>

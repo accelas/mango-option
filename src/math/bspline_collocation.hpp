@@ -24,13 +24,13 @@
 
 #include "src/math/banded_matrix_solver.hpp"
 #include "src/math/bspline_basis.hpp"
+#include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include <expected>
 #include <span>
 #include <vector>
 #include <concepts>
 #include <optional>
-#include <string>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -72,20 +72,22 @@ public:
     /// Factory method to create BSplineCollocation1D instance
     ///
     /// @param grid Data grid points (sorted, ≥4 points)
-    /// @return Solver instance or error message
-    [[nodiscard]] static std::expected<BSplineCollocation1D, std::string> create(
+    /// @return Solver instance or error
+    [[nodiscard]] static std::expected<BSplineCollocation1D, InterpolationError> create(
         std::vector<T> grid)
     {
         // Validate grid size
         if (grid.size() < 4) {
-            return std::unexpected(
-                "Grid must have ≥4 points for cubic B-splines, got " +
-                std::to_string(grid.size()) + " points");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::InsufficientGridPoints,
+                grid.size()});
         }
 
         // Validate grid is sorted
         if (!std::is_sorted(grid.begin(), grid.end())) {
-            return std::unexpected("Grid must be sorted in ascending order");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::GridNotSorted,
+                grid.size()});
         }
 
         // Check for near-duplicate points
@@ -93,16 +95,18 @@ public:
         for (size_t i = 1; i < grid.size(); ++i) {
             const T spacing = grid[i] - grid[i-1];
             if (spacing < MIN_SPACING) {
-                return std::unexpected(
-                    "Grid points too close together (spacing < 1e-14) at index " +
-                    std::to_string(i) + ": [" +
-                    std::to_string(grid[i-1]) + ", " + std::to_string(grid[i]) + "]");
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::GridNotSorted,
+                    grid.size(),
+                    i});
             }
         }
 
         // Check for zero-width grid
         if (grid.back() - grid.front() < MIN_SPACING) {
-            return std::unexpected("Grid has zero width (all points nearly identical)");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ZeroWidthGrid,
+                grid.size()});
         }
 
         // All validations passed
@@ -112,28 +116,34 @@ public:
     /// Fit B-spline coefficients via collocation
     ///
     /// Solves B·c = f where B is the collocation matrix.
-    /// Returns fitted coefficients or error message.
+    /// Returns fitted coefficients or error.
     ///
     /// @param values Function values at grid points (size n)
     /// @param config Solver configuration
     /// @return Fit result with coefficients and diagnostics
-    [[nodiscard]] std::expected<BSplineCollocationResult<T>, std::string> fit(
+    [[nodiscard]] std::expected<BSplineCollocationResult<T>, InterpolationError> fit(
         const std::vector<T>& values,
         const BSplineCollocationConfig<T>& config = {})
     {
         if (values.size() != n_) {
-            return std::unexpected("Value array size mismatch");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ValueSizeMismatch,
+                values.size()});
         }
 
         // Validate input values for NaN/Inf
         for (size_t i = 0; i < n_; ++i) {
             if (std::isnan(values[i])) {
-                return std::unexpected(
-                    "Input values contain NaN at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput,
+                    n_,
+                    i});
             }
             if (std::isinf(values[i])) {
-                return std::unexpected(
-                    "Input values contain infinite value at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput,
+                    n_,
+                    i});
             }
         }
 
@@ -159,18 +169,18 @@ public:
         BandedLUWorkspace<T> workspace(n_, 4);
         auto factor_result = factorize_banded(A, workspace);
         if (!factor_result.ok()) {
-            return std::unexpected(
-                "Failed to factorize collocation system: " +
-                std::string(factor_result.message()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                n_});
         }
 
         // Solve for coefficients
         std::vector<T> coeffs(n_);
         auto solve_result = solve_banded(workspace, std::span<const T>(values), std::span<T>(coeffs));
         if (!solve_result.ok()) {
-            return std::unexpected(
-                "Failed to solve collocation system: " +
-                std::string(solve_result.message()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                n_});
         }
 
         // Compute residuals: ||B·c - f||
@@ -178,9 +188,11 @@ public:
 
         // Check residual tolerance
         if (max_residual > config.tolerance) {
-            return std::unexpected(
-                "Residual " + std::to_string(max_residual) +
-                " exceeds tolerance " + std::to_string(config.tolerance));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                n_,
+                0,
+                static_cast<double>(max_residual)});
         }
 
         // Estimate condition number
@@ -200,27 +212,35 @@ public:
     /// @param coeffs_out Pre-allocated buffer for coefficients (size n_)
     /// @param config Solver configuration
     /// @return Fit result WITHOUT coefficients vector (uses coeffs_out)
-    [[nodiscard]] std::expected<BSplineCollocationResult<T>, std::string> fit_with_buffer(
+    [[nodiscard]] std::expected<BSplineCollocationResult<T>, InterpolationError> fit_with_buffer(
         std::span<const T> values,
         std::span<T> coeffs_out,
         const BSplineCollocationConfig<T>& config = {})
     {
         if (values.size() != n_) {
-            return std::unexpected("Value array size mismatch");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ValueSizeMismatch,
+                values.size()});
         }
         if (coeffs_out.size() != n_) {
-            return std::unexpected("Coefficients buffer size mismatch");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::BufferSizeMismatch,
+                coeffs_out.size()});
         }
 
         // Validate input values
         for (size_t i = 0; i < n_; ++i) {
             if (std::isnan(values[i])) {
-                return std::unexpected(
-                    "Input values contain NaN at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput,
+                    n_,
+                    i});
             }
             if (std::isinf(values[i])) {
-                return std::unexpected(
-                    "Input values contain infinite value at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput,
+                    n_,
+                    i});
             }
         }
 
@@ -246,23 +266,27 @@ public:
         BandedLUWorkspace<T> workspace(n_, 4);
         auto factor_result = factorize_banded(A, workspace);
         if (!factor_result.ok()) {
-            return std::unexpected(
-                "Factorization failed: " + std::string(factor_result.message()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                n_});
         }
 
         auto solve_result = solve_banded(workspace, values, coeffs_out);
         if (!solve_result.ok()) {
-            return std::unexpected(
-                "Solve failed: " + std::string(solve_result.message()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                n_});
         }
 
         // Compute residuals
         const T max_residual = compute_residual_from_span(coeffs_out, values);
 
         if (max_residual > config.tolerance) {
-            return std::unexpected(
-                "Residual " + std::to_string(max_residual) +
-                " exceeds tolerance " + std::to_string(config.tolerance));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                n_,
+                0,
+                static_cast<double>(max_residual)});
         }
 
         // Estimate condition number

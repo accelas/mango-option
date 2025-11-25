@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_config.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_axes.hpp"
+#include "src/option/table/price_table_config.hpp"
 
 TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {
     // Create minimal valid axes (4 points per axis for B-spline)

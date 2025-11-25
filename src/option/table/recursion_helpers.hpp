@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/option/price_table_axes.hpp"
+#include "src/option/table/price_table_axes.hpp"
 #include <array>
 #include <functional>
 

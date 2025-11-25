@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_config.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_axes.hpp"
+#include "src/option/table/price_table_config.hpp"
 
 TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
     // Create axes with specific moneyness range
@@ -49,6 +49,5 @@ TEST(PriceTableBuilderGridTest, RejectsInsufficientGridBounds) {
 
     // Should fail validation because grid bounds don't cover moneyness range
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("exceeds PDE grid bounds") != std::string::npos ||
-                result.error().find("moneyness") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
 }

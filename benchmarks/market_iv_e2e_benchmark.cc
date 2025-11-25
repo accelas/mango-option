@@ -47,8 +47,8 @@
  * ```
  */
 
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
@@ -193,7 +193,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
             grid.dividend);
 
         if (!builder_axes_result) {
-            state.SkipWithError(builder_axes_result.error().c_str());
+            state.SkipWithError("PriceTableBuilder::from_vectors failed");
             return;
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
@@ -202,7 +202,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
         auto result = builder.build(axes);
 
         if (!result) {
-            state.SkipWithError(result.error().c_str());
+            state.SkipWithError("PriceTableBuilder::build failed");
             return;
         }
 
@@ -247,14 +247,14 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         grid.dividend);
 
     if (!builder_axes_result) {
-        state.SkipWithError(builder_axes_result.error().c_str());
+        state.SkipWithError("PriceTableBuilder::from_vectors failed");
         return;
     }
     auto [builder, axes] = std::move(builder_axes_result.value());
     auto price_table_result = builder.build(axes);
 
     if (!price_table_result) {
-        state.SkipWithError(price_table_result.error().c_str());
+        state.SkipWithError("PriceTableBuilder::build failed");
         return;
     }
 
@@ -358,14 +358,14 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             grid.dividend);
 
         if (!builder_axes_result) {
-            state.SkipWithError(builder_axes_result.error().c_str());
+            state.SkipWithError("PriceTableBuilder::from_vectors failed");
             return;
         }
         auto [builder, axes] = std::move(builder_axes_result.value());
         auto price_table_result = builder.build(axes);
 
         if (!price_table_result) {
-            state.SkipWithError(price_table_result.error().c_str());
+            state.SkipWithError("PriceTableBuilder::build failed");
             return;
         }
         auto price_table = std::move(price_table_result.value());

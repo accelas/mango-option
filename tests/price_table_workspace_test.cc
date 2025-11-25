@@ -1,4 +1,4 @@
-#include "src/option/price_table_workspace.hpp"
+#include "src/option/table/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <fstream>

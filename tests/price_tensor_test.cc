@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/price_tensor.hpp"
+#include "src/option/table/price_tensor.hpp"
 #include "src/support/memory/aligned_arena.hpp"
 
 namespace mango {

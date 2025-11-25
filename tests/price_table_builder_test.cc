@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_tensor.hpp"
+#include "src/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace {
@@ -163,23 +165,257 @@ TEST(PriceTableBuilderTest, ExtractTensorInterpolatesSurfaces) {
     auto tensor_result = builder.extract_tensor_for_testing(batch_result, axes);
 
     ASSERT_TRUE(tensor_result.has_value());
-    auto tensor = tensor_result.value();
+    auto& extraction = tensor_result.value();
 
     // Tensor should have full 4D shape: 3×3×1×1 = 9 points
-    EXPECT_EQ(tensor.view.extent(0), 3);  // moneyness
-    EXPECT_EQ(tensor.view.extent(1), 3);  // maturity
-    EXPECT_EQ(tensor.view.extent(2), 1);  // volatility
-    EXPECT_EQ(tensor.view.extent(3), 1);  // rate
+    EXPECT_EQ(extraction.tensor.view.extent(0), 3);  // moneyness
+    EXPECT_EQ(extraction.tensor.view.extent(1), 3);  // maturity
+    EXPECT_EQ(extraction.tensor.view.extent(2), 1);  // volatility
+    EXPECT_EQ(extraction.tensor.view.extent(3), 1);  // rate
 
     // Verify prices are populated (not NaN or zero)
     // Note: K_ref scaling should now be applied
     for (size_t i = 0; i < 3; ++i) {
         for (size_t j = 0; j < 3; ++j) {
-            double price = tensor.view[i, j, 0, 0];
+            double price = extraction.tensor.view[i, j, 0, 0];
             EXPECT_TRUE(std::isfinite(price));
             EXPECT_GT(price, 0.0);
         }
     }
+}
+
+TEST(PriceTableConfigTest, MaxFailureRateDefault) {
+    mango::PriceTableConfig config;
+    EXPECT_DOUBLE_EQ(config.max_failure_rate, 0.0);
+}
+
+TEST(PriceTableConfigTest, ValidateConfigRejectsInvalidRate) {
+    mango::PriceTableConfig config;
+    config.max_failure_rate = 1.5;  // Invalid
+    auto err = mango::validate_config(config);
+    EXPECT_TRUE(err.has_value());
+    EXPECT_NE(err->find("max_failure_rate"), std::string::npos);
+}
+
+TEST(PriceTableConfigTest, ValidateConfigAcceptsValidRate) {
+    mango::PriceTableConfig config;
+    config.max_failure_rate = 0.1;  // Valid
+    auto err = mango::validate_config(config);
+    EXPECT_FALSE(err.has_value());
+}
+
+TEST(PriceTableBuilderTest, BuildRejectsInvalidConfig) {
+    mango::PriceTableConfig config;
+    config.max_failure_rate = 2.0;  // Invalid
+    config.option_type = mango::OptionType::PUT;
+    config.K_ref = 100.0;
+
+    mango::PriceTableBuilder<4> builder(config);
+
+    // Create minimal valid axes (4 points per axis for B-spline)
+    mango::PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0, 1.1, 1.2};
+    axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
+    axes.grids[2] = {0.2, 0.25, 0.3, 0.35};
+    axes.grids[3] = {0.05, 0.06, 0.07, 0.08};
+
+    auto result = builder.build(axes);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
+    auto result = mango::PriceTableBuilder<4>::from_vectors(
+        {0.9, 1.0, 1.1},  // moneyness
+        {0.25, 0.5},      // maturity
+        {0.2, 0.3},       // volatility
+        {0.05},           // rate
+        100.0,            // K_ref
+        mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(),
+        500,              // n_time
+        mango::OptionType::PUT,
+        0.0,              // dividend_yield
+        1.5               // max_failure_rate - INVALID
+    );
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
+}
+
+TEST(PriceTableBuilderTest, FindNearestValidNeighborFindsAdjacent) {
+    // Test helper directly via builder's testing interface
+    // Create 3x3 grid, mark center invalid, verify finds adjacent
+    std::vector<bool> slice_valid(9, true);
+    slice_valid[4] = false;  // Center (1,1) invalid
+
+    mango::PriceTableConfig config;
+    mango::PriceTableBuilder<4> builder(config);
+
+    auto result = builder.find_nearest_valid_neighbor_for_testing(1, 1, 3, 3, slice_valid);
+    ASSERT_TRUE(result.has_value());
+    // Should find one of (0,1), (1,0), (1,2), (2,1) at distance 1
+    auto [nσ, nr] = result.value();
+    size_t dist = std::abs(static_cast<int>(nσ) - 1) + std::abs(static_cast<int>(nr) - 1);
+    EXPECT_EQ(dist, 1);
+}
+
+TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
+    // Create a minimal 4D tensor and inject a NaN at a known τ position
+    // Then verify repair fills it via τ-interpolation
+
+    // Use 2x3x2x2 tensor: Nm=2, Nt=3, Nσ=2, Nr=2
+    auto arena_result = mango::memory::AlignedArena::create(16 * 1024);
+    ASSERT_TRUE(arena_result.has_value());
+    auto tensor_result = mango::PriceTensor<4>::create({2, 3, 2, 2}, arena_result.value());
+    ASSERT_TRUE(tensor_result.has_value());
+    auto& tensor = tensor_result.value();
+
+    // Initialize all values to m_idx + τ_idx (so we can verify interpolation)
+    for (size_t m = 0; m < 2; ++m) {
+        for (size_t t = 0; t < 3; ++t) {
+            for (size_t s = 0; s < 2; ++s) {
+                for (size_t r = 0; r < 2; ++r) {
+                    tensor.view[m, t, s, r] = static_cast<double>(m + t);
+                }
+            }
+        }
+    }
+
+    // Inject NaN at (σ=0, r=0, τ=1) - middle maturity
+    tensor.view[0, 1, 0, 0] = std::numeric_limits<double>::quiet_NaN();
+    tensor.view[1, 1, 0, 0] = std::numeric_limits<double>::quiet_NaN();
+
+    // Create axes
+    mango::PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0};
+    axes.grids[1] = {0.25, 0.5, 0.75};
+    axes.grids[2] = {0.2, 0.3};
+    axes.grids[3] = {0.05, 0.06};
+
+    // Build config and builder
+    mango::PriceTableConfig config;
+    mango::PriceTableBuilder<4> builder(config);
+
+    // Call repair with failed_spline indicating τ=1 failed
+    std::vector<size_t> failed_pde;  // No PDE failures
+    std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
+    failed_spline.emplace_back(0, 0, 1);  // (σ=0, r=0, τ=1)
+
+    auto result = builder.repair_failed_slices_for_testing(
+        tensor, failed_pde, failed_spline, axes);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->repaired_partial_points, 1);
+    EXPECT_EQ(result->repaired_full_slices, 0);
+
+    // Verify interpolated values (τ=0 has val=m+0, τ=2 has val=m+2, so τ=1 should be m+1)
+    double val1 = tensor.view[0, 1, 0, 0];
+    double val2 = tensor.view[1, 1, 0, 0];
+    EXPECT_NEAR(val1, 1.0, 1e-10);
+    EXPECT_NEAR(val2, 2.0, 1e-10);
+}
+
+TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
+    // Create tensor with full slice NaN, verify neighbor copy
+    auto arena_result = mango::memory::AlignedArena::create(16 * 1024);
+    ASSERT_TRUE(arena_result.has_value());
+    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 2, 2}, arena_result.value());
+    ASSERT_TRUE(tensor_result.has_value());
+    auto& tensor = tensor_result.value();
+
+    // Initialize: slice (0,0) gets value 10, slice (0,1) gets value 20, etc.
+    for (size_t m = 0; m < 2; ++m) {
+        for (size_t t = 0; t < 2; ++t) {
+            for (size_t s = 0; s < 2; ++s) {
+                for (size_t r = 0; r < 2; ++r) {
+                    tensor.view[m, t, s, r] = static_cast<double>(10 * (s * 2 + r + 1));
+                }
+            }
+        }
+    }
+
+    // Mark slice (0,0) as NaN (simulating PDE failure)
+    for (size_t m = 0; m < 2; ++m) {
+        for (size_t t = 0; t < 2; ++t) {
+            tensor.view[m, t, 0, 0] = std::numeric_limits<double>::quiet_NaN();
+        }
+    }
+
+    mango::PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0};
+    axes.grids[1] = {0.25, 0.5};
+    axes.grids[2] = {0.2, 0.3};
+    axes.grids[3] = {0.05, 0.06};
+
+    mango::PriceTableConfig config;
+    mango::PriceTableBuilder<4> builder(config);
+
+    // PDE failed at flat index 0 (σ=0, r=0)
+    std::vector<size_t> failed_pde = {0};
+    std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
+
+    auto result = builder.repair_failed_slices_for_testing(
+        tensor, failed_pde, failed_spline, axes);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->repaired_full_slices, 1);
+
+    // Slice (0,0) should now have values from nearest neighbor
+    // Neighbors are (0,1), (1,0), (1,1) - (0,1) or (1,0) should be picked first
+    // Just verify it's no longer NaN and is one of the valid slice values
+    double val1 = tensor.view[0, 0, 0, 0];
+    double val2 = tensor.view[1, 1, 0, 0];
+    EXPECT_FALSE(std::isnan(val1));
+    EXPECT_FALSE(std::isnan(val2));
+}
+
+TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
+    // All slices invalid, verify returns error
+    auto arena_result = mango::memory::AlignedArena::create(16 * 1024);
+    ASSERT_TRUE(arena_result.has_value());
+    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 1, 1}, arena_result.value());
+    ASSERT_TRUE(tensor_result.has_value());
+    auto& tensor = tensor_result.value();
+
+    // Only one (σ,r) slice exists, and it failed
+    for (size_t m = 0; m < 2; ++m) {
+        for (size_t t = 0; t < 2; ++t) {
+            tensor.view[m, t, 0, 0] = std::numeric_limits<double>::quiet_NaN();
+        }
+    }
+
+    mango::PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0};
+    axes.grids[1] = {0.25, 0.5};
+    axes.grids[2] = {0.2};
+    axes.grids[3] = {0.05};
+
+    mango::PriceTableConfig config;
+    mango::PriceTableBuilder<4> builder(config);
+
+    std::vector<size_t> failed_pde = {0};  // Only slice failed
+    std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
+
+    auto result = builder.repair_failed_slices_for_testing(
+        tensor, failed_pde, failed_spline, axes);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::RepairFailed);
+}
+
+TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
+    auto result = mango::PriceTableBuilder<4>::from_vectors(
+        {0.8, 0.9, 1.0, 1.1}, {0.25, 0.5, 0.75, 1.0}, {0.15, 0.2, 0.25, 0.3}, {0.02, 0.04, 0.06, 0.08},
+        100.0,
+        mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(),
+        500);
+    ASSERT_TRUE(result.has_value());
+    auto& [builder, axes] = result.value();
+
+    auto build_result = builder.build(axes);
+    ASSERT_TRUE(build_result.has_value()) << "Error: " << build_result.error();
+
+    EXPECT_EQ(build_result->total_slices, 4 * 4);  // Nσ × Nr = 4 × 4
+    EXPECT_EQ(build_result->total_points, 4 * 4 * 4);  // Nσ × Nr × Nt = 4 × 4 × 4
 }
 
 } // namespace

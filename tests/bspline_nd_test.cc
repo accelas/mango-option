@@ -223,7 +223,7 @@ TEST_F(BSplineNDTest, ValidationErrors) {
         coeffs
     );
     EXPECT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("must have at least 4 points") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
 }
 
 /// Test coefficient size mismatch
@@ -241,7 +241,7 @@ TEST_F(BSplineNDTest, CoefficientSizeMismatch) {
         coeffs
     );
     EXPECT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("does not match grid dimensions") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::CoefficientSizeMismatch);
 }
 
 /// Test boundary clamping

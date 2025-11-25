@@ -4,7 +4,6 @@
  */
 
 #include "src/math/bspline_collocation.hpp"
-#include "src/option/bspline_price_table.hpp"  // For evaluation
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
@@ -265,7 +264,7 @@ TEST_F(BSplineCollocation1DTest, FailOnSmallGrid) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("≥4 points"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
 }
 
 // Test 11: Fail on unsorted grid
@@ -275,7 +274,7 @@ TEST_F(BSplineCollocation1DTest, FailOnUnsortedGrid) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("sorted"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 12: Mismatched value array size
@@ -290,7 +289,7 @@ TEST_F(BSplineCollocation1DTest, FailOnSizeMismatch) {
     auto result = solver.fit(values);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("mismatch"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::ValueSizeMismatch);
 }
 
 // Test 13: Duplicate grid points
@@ -301,7 +300,7 @@ TEST_F(BSplineCollocation1DTest, FailOnDuplicatePoints) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("too close together"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 14: Nearly duplicate points (ill-conditioned)
@@ -319,7 +318,7 @@ TEST_F(BSplineCollocation1DTest, IllConditionedNearDuplicates) {
     if (result.has_value()) {
         EXPECT_GT(result->condition_estimate, 1e10);
     } else {
-        EXPECT_NE(result.error().find("singular"), std::string::npos);
+        EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::FittingFailed);
     }
 }
 
@@ -336,7 +335,7 @@ TEST_F(BSplineCollocation1DTest, FailOnNaNInput) {
     auto result = solver.fit(values);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("NaN"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::NaNInput);
 }
 
 // Test 16: Infinity in input values
@@ -352,7 +351,7 @@ TEST_F(BSplineCollocation1DTest, FailOnInfInput) {
     auto result = solver.fit(values);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("infinite"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InfInput);
 }
 
 // Test 17: Extremely ill-conditioned system (clustering at boundaries)
@@ -377,7 +376,7 @@ TEST_F(BSplineCollocation1DTest, ExtremelyClustered) {
     if (result.has_value()) {
         EXPECT_GT(result->condition_estimate, 1e12);
     } else {
-        EXPECT_NE(result.error().find("singular"), std::string::npos);
+        EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::FittingFailed);
     }
 }
 
@@ -389,7 +388,7 @@ TEST_F(BSplineCollocation1DTest, FailOnZeroWidthGrid) {
 
     ASSERT_FALSE(result.has_value());
     // This will be caught by the "too close together" check since spacing = 0
-    EXPECT_NE(result.error().find("too close together"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 19: Factory pattern - successful creation with valid grid
@@ -414,7 +413,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnSmallGrid) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("≥4 points"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
 }
 
 // Test 21: Factory pattern - fail on unsorted grid
@@ -424,7 +423,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnUnsortedGrid) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("sorted"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 22: Factory pattern - duplicate grid points
@@ -434,7 +433,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnDuplicatePoints) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("too close together"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 23: Factory pattern - zero-width grid
@@ -445,7 +444,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnZeroWidthGrid) {
 
     ASSERT_FALSE(result.has_value());
     // This will be caught by the "too close together" check since spacing = 0
-    EXPECT_NE(result.error().find("too close together"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 24: Factory pattern - nearly duplicate points
@@ -455,7 +454,7 @@ TEST_F(BSplineCollocation1DTest, FactoryFailOnNearlyDuplicatePoints) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("too close together"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }
 
 // Test 25: Factory pattern - minimum valid grid size
@@ -520,9 +519,8 @@ TEST_F(BSplineCollocation1DTest, FactoryErrorMessageDetail) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    auto error = result.error();
-    EXPECT_NE(error.find("4"), std::string::npos);  // Should mention "4"
-    EXPECT_NE(error.find("cubic"), std::string::npos);  // Should mention "cubic"
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
+    EXPECT_EQ(result.error().grid_size, 2);  // Should record the actual grid size
 }
 
 // Test 30: Factory pattern - error message detail for unsorted grid
@@ -532,6 +530,5 @@ TEST_F(BSplineCollocation1DTest, FactoryUnsortedErrorMessage) {
     auto result = BSplineCollocation1D<double>::create(grid);
 
     ASSERT_FALSE(result.has_value());
-    auto error = result.error();
-    EXPECT_NE(error.find("sorted"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::GridNotSorted);
 }

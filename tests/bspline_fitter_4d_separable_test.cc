@@ -83,8 +83,7 @@ TEST(BSplineNDSeparableTest, FactoryCreationFailure) {
 
     auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_small, t, v, r});
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(result.error().empty());
-    EXPECT_TRUE(result.error().find("≥4 points") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
 }
 
 TEST(BSplineNDSeparableTest, FactoryCreationFailureMultipleSmallGrids) {
@@ -95,7 +94,7 @@ TEST(BSplineNDSeparableTest, FactoryCreationFailureMultipleSmallGrids) {
 
     auto result = BSplineNDSeparable<double, 4>::create(std::array<std::vector<double>, 4>{m_small, t_small, v_small, r_small});
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(result.error().empty());
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::InsufficientGridPoints);
 }
 
 // ============================================================================
@@ -201,6 +200,5 @@ TEST(BSplineNDSeparableTest, WrongValueSize) {
     auto result = fitter.fit(values_wrong_size);
 
     EXPECT_FALSE(result.has_value());
-    EXPECT_FALSE(result.error().empty());
-    EXPECT_TRUE(result.error().find("size mismatch") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::ValueSizeMismatch);
 }

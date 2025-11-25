@@ -1,11 +1,11 @@
 #pragma once
 
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_metadata.hpp"
+#include "src/option/table/price_table_axes.hpp"
+#include "src/option/table/price_table_metadata.hpp"
 #include "src/math/bspline_nd.hpp"
+#include "src/support/error_types.hpp"
 #include <memory>
 #include <expected>
-#include <string>
 
 namespace mango {
 
@@ -23,8 +23,8 @@ public:
     /// @param axes Grid points and names for each dimension
     /// @param coeffs Flattened B-spline coefficients (row-major)
     /// @param metadata Reference strike, dividends, etc.
-    /// @return Shared pointer to surface or error message
-    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
+    /// @return Shared pointer to surface or error
+    [[nodiscard]] static std::expected<std::shared_ptr<const PriceTableSurface<N>>, PriceTableError>
     build(PriceTableAxes<N> axes, std::vector<double> coeffs, PriceTableMetadata metadata);
 
     /// Access axes
