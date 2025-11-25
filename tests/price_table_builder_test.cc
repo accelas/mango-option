@@ -182,5 +182,25 @@ TEST(PriceTableBuilderTest, ExtractTensorInterpolatesSurfaces) {
     }
 }
 
+TEST(PriceTableConfigTest, MaxFailureRateDefault) {
+    mango::PriceTableConfig config;
+    EXPECT_DOUBLE_EQ(config.max_failure_rate, 0.0);
+}
+
+TEST(PriceTableConfigTest, ValidateConfigRejectsInvalidRate) {
+    mango::PriceTableConfig config;
+    config.max_failure_rate = 1.5;  // Invalid
+    auto err = mango::validate_config(config);
+    EXPECT_TRUE(err.has_value());
+    EXPECT_NE(err->find("max_failure_rate"), std::string::npos);
+}
+
+TEST(PriceTableConfigTest, ValidateConfigAcceptsValidRate) {
+    mango::PriceTableConfig config;
+    config.max_failure_rate = 0.1;  // Valid
+    auto err = mango::validate_config(config);
+    EXPECT_FALSE(err.has_value());
+}
+
 } // namespace
 } // namespace mango
