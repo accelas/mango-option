@@ -66,11 +66,12 @@ This codebase uses abstraction macros from `src/support/parallel.hpp` for portab
 
 // Add includes (NOT <omp.h> directly)
 #include "src/support/parallel.hpp"
-#include <mutex>     // std::mutex, std::lock_guard
-#include <tuple>     // std::tuple
-#include <map>       // std::map
-#include <vector>    // std::vector (explicit, don't rely on transitive)
-#include <optional>  // std::optional (explicit, don't rely on transitive)
+#include <mutex>           // std::mutex, std::lock_guard
+#include <tuple>           // std::tuple
+#include <map>             // std::map
+#include <unordered_set>   // std::unordered_set (for early bailout dedup)
+#include <vector>          // std::vector (explicit, don't rely on transitive)
+#include <optional>        // std::optional (explicit, don't rely on transitive)
 
 // In extract_tensor():
 // MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
@@ -135,10 +136,19 @@ struct PriceTableConfig {
     GridSpec<double> grid_estimator;
     size_t n_time = 1000;
     double dividend_yield = 0.0;
-    std::vector<DiscreteDividend> discrete_dividends;
+    std::vector<std::pair<double, double>> discrete_dividends;  // (time, amount)
     // NEW: Partial failure tolerance
     double max_failure_rate = 0.0;  // 0.0 = strict (current), 0.1 = allow 10%
 };
+
+// Validation helper (call in factory methods or build())
+inline void validate_config(const PriceTableConfig& config) {
+    if (config.max_failure_rate < 0.0 || config.max_failure_rate > 1.0) {
+        throw std::invalid_argument(
+            "max_failure_rate must be in [0.0, 1.0], got " +
+            std::to_string(config.max_failure_rate));
+    }
+}
 ```
 
 **Update factory methods** to accept optional `max_failure_rate`:
@@ -285,12 +295,16 @@ std::expected<RepairStats, std::string> repair_failed_slices(
     }
 
     // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
+    // Track counts separately for informative error messages
     std::vector<size_t> full_slice_failures = failed_pde;
+    const size_t n_pde_failures = failed_pde.size();
+    size_t n_all_maturity_spline_failures = 0;
     size_t partial_spline_points = 0;  // Count of (σ,r,τ) points, not slices
     for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         if (τ_failures.size() == Nt) {
             auto [σ_idx, r_idx] = slice_key;
             full_slice_failures.push_back(σ_idx * Nr + r_idx);
+            ++n_all_maturity_spline_failures;
         } else {
             partial_spline_points += τ_failures.size();
         }
@@ -352,8 +366,11 @@ std::expected<RepairStats, std::string> repair_failed_slices(
         auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
         if (!neighbor.has_value()) {
             return std::unexpected(
-                "Cannot repair slice (" + std::to_string(σ_idx) + "," +
-                std::to_string(r_idx) + "): no valid neighbors exist");
+                "Repair failed at slice (" + std::to_string(σ_idx) + "," +
+                std::to_string(r_idx) + "): no valid donor. Total full-slice failures: " +
+                std::to_string(full_slice_failures.size()) + " (" +
+                std::to_string(n_pde_failures) + " PDE + " +
+                std::to_string(n_all_maturity_spline_failures) + " all-maturity spline)");
         }
         auto [nσ, nr] = neighbor.value();
 
@@ -476,8 +493,7 @@ auto repair_stats = repair_result.value();
 
 // ... fit_coeffs() ...
 
-// Populate PriceTableResult:
-const size_t Nt = axes.grids[1].size();
+// Populate PriceTableResult (Nt already declared above):
 return PriceTableResult<N>{
     .surface = ...,
     .n_pde_solves = ...,
