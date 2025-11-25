@@ -10,6 +10,8 @@
 #include <expected>
 #include <string>
 #include <memory>
+#include <vector>
+#include <tuple>
 
 namespace mango {
 
@@ -41,6 +43,15 @@ struct PriceTableResult {
     size_t n_pde_solves = 0;                    ///< Number of PDE solves performed
     double precompute_time_seconds = 0.0;       ///< Wall-clock build time
     BSplineFittingStats fitting_stats;          ///< B-spline fitting diagnostics
+};
+
+/// Result from tensor extraction with failure tracking
+template <size_t N>
+struct ExtractionResult {
+    PriceTensor<N> tensor;
+    size_t total_slices;
+    std::vector<size_t> failed_pde;
+    std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
 };
 
 /// Builder for N-dimensional price table surfaces
