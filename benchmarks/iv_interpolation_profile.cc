@@ -11,9 +11,10 @@
  * Run with: bazel run -c opt //benchmarks:iv_interpolation_profile -- --benchmark_filter="Vega"
  */
 
-#include "src/option/bspline_price_table.hpp"
 #include "src/math/bspline_nd_separable.hpp"
-#include "src/option/price_table_workspace.hpp"
+#include "src/option/price_table_surface.hpp"
+#include "src/option/price_table_axes.hpp"
+#include "src/option/price_table_metadata.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <vector>
@@ -48,7 +49,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::unique_ptr<BSpline4D> evaluator;
+    std::shared_ptr<const PriceTableSurface<4>> surface;
 };
 
 const AnalyticSurfaceFixture& GetSurface() {
@@ -102,26 +103,28 @@ const AnalyticSurfaceFixture& GetSurface() {
             throw std::runtime_error("Failed to fit B-spline surface: " + fit_result.error());
         }
 
-        // Create workspace for BSpline4D
-        auto workspace_result = PriceTableWorkspace::create(
+        // Create PriceTableAxes
+        PriceTableAxes<4> axes;
+        axes.grids = {
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
             fixture_ptr->sigma_grid,
-            fixture_ptr->rate_grid,
-            fit_result->coefficients,
-            fixture_ptr->K_ref,
-            0.0);  // dividend_yield = 0
+            fixture_ptr->rate_grid
+        };
 
-        if (!workspace_result.has_value()) {
-            throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
+        // Create metadata
+        PriceTableMetadata meta{
+            .K_ref = fixture_ptr->K_ref,
+            .dividend_yield = 0.0,
+            .discrete_dividends = {}
+        };
+
+        // Create surface with coefficients directly
+        auto surface_result = PriceTableSurface<4>::build(axes, fit_result->coefficients, meta);
+        if (!surface_result.has_value()) {
+            throw std::runtime_error("Failed to create surface: " + surface_result.error());
         }
-
-        auto spline_result = BSpline4D::create(workspace_result.value());
-        if (!spline_result.has_value()) {
-            throw std::runtime_error("Failed to create BSpline4D: " + spline_result.error());
-        }
-
-        fixture_ptr->evaluator = std::make_unique<BSpline4D>(std::move(spline_result.value()));
+        fixture_ptr->surface = std::move(surface_result.value());
 
         return fixture_ptr.release();
     }();
@@ -144,7 +147,7 @@ static void BM_BSpline_Eval(benchmark::State& state) {
     constexpr double r = 0.05;
 
     for (auto _ : state) {
-        double price = surf.evaluator->eval(m, tau, sigma, r);
+        double price = surf.surface->value({m, tau, sigma, r});
         benchmark::DoNotOptimize(price);
     }
 
@@ -219,8 +222,10 @@ static void BM_BSpline_VegaAnalytic(benchmark::State& state) {
     constexpr double r = 0.05;
 
     for (auto _ : state) {
-        double price, vega;
-        surf.evaluator->eval_price_and_vega_analytic(m, tau, sigma, r, price, vega);
+        // Use analytic partial derivative with respect to sigma (dimension 2)
+        double price = surf.surface->value({m, tau, sigma, r});
+        double vega = surf.surface->partial(2, {m, tau, sigma, r});
+        benchmark::DoNotOptimize(price);
         benchmark::DoNotOptimize(vega);
     }
 

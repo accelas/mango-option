@@ -513,47 +513,13 @@ cc_test(
     name = "bspline_collocation_1d_test",
     srcs = ["bspline_collocation_1d_test.cc"],
     deps = [
-        "//src/math:bspline_nd_separable",
-        "//src/option:bspline_price_table",
+        "//src/math:bspline_collocation",
         "@googletest//:gtest_main",
     ],
     copts = [
         "-Wall",
         "-Wextra",
     ],
-)
-
-cc_test(
-    name = "bspline_4d_test",
-    srcs = ["bspline_4d_test.cc"],
-    deps = [
-        "//src/option:bspline_price_table",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-    ],
-)
-
-cc_test(
-    name = "bspline_fitter_4d_test",
-    srcs = ["bspline_fitter_4d_test.cc"],
-    deps = [
-        "//src/math:bspline_nd_separable",
-        "//src/option:bspline_price_table",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-        "-fopenmp",
-    ],
-    linkopts = ["-fopenmp"],
 )
 
 cc_test(
@@ -644,39 +610,6 @@ cc_test(
 #     size = "large",
 #     timeout = "moderate",
 # )
-
-cc_test(
-    name = "bspline_4d_end_to_end_performance_test",
-    srcs = ["bspline_4d_end_to_end_performance_test.cc"],
-    deps = [
-        "//src/math:bspline_nd_separable",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-fopenmp",
-    ],
-    linkopts = ["-fopenmp"],
-    size = "large",
-    timeout = "moderate",
-)
-
-cc_test(
-    name = "bspline_vega_analytic_test",
-    srcs = ["bspline_vega_analytic_test.cc"],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-march=native",
-        "-fopenmp",
-    ],
-    linkopts = ["-fopenmp"],
-    deps = [
-        "//src/option:bspline_price_table",
-        "//src/math:bspline_nd_separable",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
 
 cc_test(
     name = "crc64_test",

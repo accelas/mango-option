@@ -195,16 +195,6 @@ cc_library(
 )
 
 cc_library(
-    name = "bspline_price_table",
-    hdrs = ["bspline_price_table.hpp"],
-    deps = [
-        "//src/math:bspline_nd",
-        ":price_table_workspace",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "iv_result",
     hdrs = ["iv_result.hpp"],
     deps = [

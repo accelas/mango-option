@@ -4,7 +4,6 @@
  */
 
 #include "src/math/bspline_collocation.hpp"
-#include "src/option/bspline_price_table.hpp"  // For evaluation
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
