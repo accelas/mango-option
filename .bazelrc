@@ -40,3 +40,12 @@ build:clang --action_env=CXX=clang++
 build:fuzz --extra_toolchains=//toolchain:cc_toolchain_fuzz_for_k8
 build:fuzz --action_env=CC=clang-19
 build:fuzz --action_env=CXX=clang++-19
+
+# Kokkos backend configurations
+build:openmp --define=kokkos_backend=openmp
+build:sycl --define=kokkos_backend=sycl
+build:cuda --define=kokkos_backend=cuda
+build:hip --define=kokkos_backend=hip
+
+# Default to OpenMP for development
+build --config=openmp

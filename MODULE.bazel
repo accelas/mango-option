@@ -42,3 +42,27 @@ use_repo(non_bcr_deps, "mdspan")
 #     "libbacktrace",
 #     "zlib",
 # )
+
+# Kokkos for portable parallelism
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "kokkos",
+    urls = ["https://github.com/kokkos/kokkos/archive/refs/tags/4.3.00.tar.gz"],
+    strip_prefix = "kokkos-4.3.00",
+    build_file = "//third_party:kokkos.BUILD",
+)
+
+http_archive(
+    name = "eigen",
+    urls = ["https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz"],
+    strip_prefix = "eigen-3.4.0",
+    build_file = "//third_party:eigen.BUILD",
+)
+
+http_archive(
+    name = "kokkidio",
+    urls = ["https://github.com/RL-S/Kokkidio/archive/refs/heads/main.tar.gz"],
+    strip_prefix = "Kokkidio-main",
+    build_file = "//third_party:kokkidio.BUILD",
+)

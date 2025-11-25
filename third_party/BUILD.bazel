@@ -1,0 +1,6 @@
+# Third-party build files directory
+exports_files([
+    "kokkos.BUILD",
+    "eigen.BUILD",
+    "kokkidio.BUILD",
+])
