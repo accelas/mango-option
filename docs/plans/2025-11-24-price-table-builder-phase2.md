@@ -79,110 +79,141 @@ for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
 
 ## Improvement 2: Partial Failure Tolerance + Tracking [High Priority]
 
-### Current Behavior (Blocking Issue)
+### Problem Summary
 
-`build()` aborts immediately if `solve_batch` reports any failure:
+Three blocking issues prevent partial failure tolerance:
+
+1. **`build()` aborts on any failure** (src/option/price_table_builder.cpp:90-96)
+2. **`extract_tensor()` fills NaN for failed slices** (src/option/price_table_builder.cpp:331-369)
+3. **`BSplineNDSeparable::fit()` rejects NaN values** (src/math/bspline_nd_separable.hpp:152-154)
+
+Even if we relax `build()` to tolerate partial failures, the fitting step will fail:
 
 ```cpp
-// src/option/price_table_builder.cpp:90-96
-auto batch_result = solve_batch(batch_params, axes);
-if (batch_result.failed_count > 0) {
-    return std::unexpected(
-        "solve_batch had " + std::to_string(batch_result.failed_count) +
-        " failures out of " + std::to_string(batch_result.results.size()));
+// src/math/bspline_nd_separable.hpp:149-154
+for (size_t i = 0; i < values.size(); ++i) {
+    if (std::isnan(values[i])) {
+        return std::unexpected(
+            "Input values contain NaN at index " + std::to_string(i));
+    }
 }
 ```
 
-This means `extract_tensor()` is **only ever called with 100% successful batches**. The `if (!result_expected.has_value())` branch inside `extract_tensor()` is dead code.
+### Required Changes (In Order)
 
-### Required Upstream Change
-
-Before atomic failure tracking is meaningful, `build()` must tolerate partial failures:
+#### Step 1: Change `build()` to tolerate partial PDE failures
 
 ```cpp
-// OPTION A: Configurable failure tolerance
 struct PriceTableConfig {
     // ... existing fields ...
-    double max_failure_rate = 0.0;  // 0.0 = strict (current), 0.1 = allow 10% failures
+    double max_failure_rate = 0.0;  // 0.0 = strict (current), 0.1 = allow 10%
 };
 
 // In build():
 auto batch_result = solve_batch(batch_params, axes);
 double failure_rate = static_cast<double>(batch_result.failed_count) / batch_result.results.size();
 if (failure_rate > config_.max_failure_rate) {
-    return std::unexpected("solve_batch failure rate " + std::to_string(failure_rate * 100) +
-                           "% exceeds threshold " + std::to_string(config_.max_failure_rate * 100) + "%");
+    return std::unexpected("solve_batch failure rate exceeds threshold");
 }
 // Continue to extract_tensor with partial results...
 ```
 
-```cpp
-// OPTION B: Warning + proceed (always best-effort)
-auto batch_result = solve_batch(batch_params, axes);
-if (batch_result.failed_count > 0) {
-    // Log warning via USDT probe, but continue
-    MANGO_TRACE_WARNING(MODULE_PRICE_TABLE, batch_result.failed_count, batch_result.results.size());
-}
-// Continue to extract_tensor...
-```
-
-### Atomic Failure Tracking (After Upstream Change)
-
-Once partial failures can reach `extract_tensor()`:
+#### Step 2: Change `extract_tensor()` return type to surface failure counts
 
 ```cpp
-std::atomic<size_t> failed_slices{0};
-
-#pragma omp parallel for collapse(2) schedule(static)
-for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-        if (!result_expected.has_value()) {
-            failed_slices.fetch_add(Nt, std::memory_order_relaxed);
-            // Fill with NaN
-            continue;
-        }
-        // ...
-    }
-}
-```
-
-### Return Type Change Required
-
-Current return type cannot surface failure count:
-
-```cpp
-// CURRENT: src/option/price_table_builder.hpp:205
-std::expected<PriceTensor<N>, std::string> extract_tensor(...);
-```
-
-**Options:**
-
-```cpp
-// OPTION A: Wrap in result struct
+// NEW: Extraction result with failure tracking
+template <size_t N>
 struct ExtractionResult {
     PriceTensor<N> tensor;
     size_t failed_slices;
     size_t total_slices;
 };
-std::expected<ExtractionResult, std::string> extract_tensor(...);
 
-// OPTION B: Add to existing PriceTableResult (preferred - less API churn)
+// CHANGED: extract_tensor returns ExtractionResult
+template <size_t N>
+std::expected<ExtractionResult<N>, std::string>
+PriceTableBuilder<N>::extract_tensor(
+    const BatchAmericanOptionResult& batch,
+    const PriceTableAxes<N>& axes) const;
+
+// In build(), plumb the counts through:
+auto extraction = extract_tensor(batch_result, axes);
+if (!extraction.has_value()) {
+    return std::unexpected("extract_tensor failed: " + extraction.error());
+}
+size_t failed_extraction_slices = extraction->failed_slices;
+size_t total_extraction_slices = extraction->total_slices;
+// ... continue to fit_coeffs with extraction->tensor ...
+```
+
+#### Step 3: Handle NaN values before fitting
+
+**Option A: Pre-fill failed slices with neighbor interpolation**
+```cpp
+// After extraction, before fitting:
+// For each failed (σ,r) slice, interpolate from neighboring successful slices
+for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+        if (slice_failed[σ_idx][r_idx]) {
+            interpolate_from_neighbors(tensor, σ_idx, r_idx);
+        }
+    }
+}
+```
+
+**Option B: Modify fitter to skip NaN slices (complex)**
+```cpp
+// In BSplineNDSeparable::fit():
+// Skip 1D fits that contain NaN, mark as failed
+// Requires significant fitter redesign
+```
+
+**Option C: Replace NaN with boundary extrapolation**
+```cpp
+// For failed interior slices, use boundary values
+// Simple but may introduce artifacts
+```
+
+**Recommendation:** Option A (neighbor interpolation) provides best quality while being implementable without fitter changes.
+
+#### Step 4: Extend `PriceTableResult` with failure stats
+
+```cpp
+template <size_t N>
 struct PriceTableResult {
     std::shared_ptr<const PriceTableSurface<N>> surface;
     size_t n_pde_solves;
     double build_time_seconds;
     BSplineFittingStats fitting_stats;
-    size_t failed_extraction_slices;  // NEW
-    size_t total_extraction_slices;   // NEW
+    // NEW: Failure tracking
+    size_t failed_pde_solves;           // From batch_result.failed_count
+    size_t failed_extraction_slices;    // From extraction.failed_slices
+    size_t total_extraction_slices;     // From extraction.total_slices
 };
+```
+
+### Data Flow Summary
+
+```
+solve_batch() → batch_result.failed_count
+                      ↓
+extract_tensor() → ExtractionResult{tensor, failed_slices, total_slices}
+                      ↓
+interpolate_failed_slices() → tensor with NaN replaced
+                      ↓
+fit_coeffs() → FitCoeffsResult (no NaN, fitting succeeds)
+                      ↓
+build() → PriceTableResult{..., failed_pde_solves, failed_extraction_slices, ...}
 ```
 
 ### Implementation Order
 
-1. Change `build()` to tolerate partial failures (add `max_failure_rate` config)
-2. Add failure tracking to `extract_tensor()` with atomic counter
-3. Extend `PriceTableResult` to include failure stats
-4. Add tests for partial failure scenarios
+1. Change `extract_tensor()` return type to `ExtractionResult<N>`
+2. Add atomic failure counting in `extract_tensor()` (parallel-safe)
+3. Add `interpolate_failed_slices()` helper to replace NaN with interpolated values
+4. Change `build()` to accept partial failures (add `max_failure_rate` config)
+5. Extend `PriceTableResult` with failure stats
+6. Add tests for partial failure scenarios
 
 ---
 
@@ -365,9 +396,11 @@ build_with_save(
 |-------|-------------|--------|----------|
 | 1a | Build system: add OpenMP to price_table_builder | Low | None |
 | 1b | Parallelize extract_tensor() | Low | 1a |
-| 2a | Change build() to tolerate partial failures | Medium | None |
-| 2b | Add atomic failure tracking | Low | 2a |
-| 2c | Extend PriceTableResult with failure stats | Low | 2b |
+| 2a | Change extract_tensor() return type to ExtractionResult | Low | None |
+| 2b | Add atomic failure counting in extract_tensor() | Low | 2a, 1b |
+| 2c | Add interpolate_failed_slices() helper | Medium | 2a |
+| 2d | Change build() to accept partial failures | Low | 2a, 2c |
+| 2e | Extend PriceTableResult with failure stats | Low | 2d |
 | 3 | Enriched error messages (Option C) | Low | None |
 | 4 | C++23 ranges for log_moneyness | Low | None |
 | 5 | Unified GridConfig API | Medium | None |
