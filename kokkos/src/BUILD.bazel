@@ -108,3 +108,16 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "price_table",
+    hdrs = ["option/price_table.hpp"],
+    deps = [
+        ":execution_space",
+        ":batch_solver",
+        ":bspline_nd",
+        ":bspline_basis",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
