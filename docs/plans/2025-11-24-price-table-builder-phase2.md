@@ -157,11 +157,48 @@ inline std::optional<std::string> validate_config(const PriceTableConfig& config
 // }
 ```
 
-**Update factory methods** to accept optional `max_failure_rate`:
+**Update factory methods** to accept optional `max_failure_rate` and validate:
 ```cpp
 // In from_vectors(), from_strikes(), from_chain():
 // Add parameter: double max_failure_rate = 0.0
-// Set: config.max_failure_rate = max_failure_rate;
+
+// Example: from_vectors()
+template <size_t N>
+static std::expected<PriceTableBuilder<N>, std::string> from_vectors(
+    /* existing params */,
+    double max_failure_rate = 0.0)
+{
+    PriceTableConfig config;
+    // ... populate config fields ...
+    config.max_failure_rate = max_failure_rate;
+
+    // Validate immediately - reject bad configs before any work
+    if (auto err = validate_config(config); err.has_value()) {
+        return std::unexpected(err.value());
+    }
+
+    return PriceTableBuilder<N>(std::move(config), /* axes */);
+}
+
+// Same pattern for from_strikes() and from_chain()
+```
+
+**In PriceTableBuilder constructor** (defense in depth for direct construction):
+```cpp
+// Add member variable to store deferred validation error:
+// std::string config_validation_error_;  // Empty if valid
+
+template <size_t N>
+PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config, PriceTableAxes<N> axes)
+    : config_(std::move(config)), axes_(std::move(axes))
+{
+    // Validate even if caller bypasses factory
+    if (auto err = validate_config(config_); err.has_value()) {
+        // Constructor can't return std::expected, so store error for build() to check
+        // Alternative: use static factory pattern exclusively (make constructor private)
+        config_validation_error_ = err.value();
+    }
+}
 ```
 
 **In `build()`:**
@@ -462,52 +499,30 @@ struct PriceTableResult {
 
 **In `build()`, validate and populate:**
 ```cpp
-// IMPORTANT: Early bailout if no valid donors exist
-// Must account for BOTH PDE failures AND all-maturity spline failures
-// CAREFUL: Don't double-count slices that failed both PDE and spline
-
-// Convert failed_pde to set for O(1) lookup
-std::unordered_set<size_t> failed_pde_set(
-    extraction.failed_pde.begin(), extraction.failed_pde.end());
-
-// Group spline failures by (σ,r) to find full-slice escalations
-const size_t Nt = axes.grids[1].size();
-const size_t Nr = axes.grids[3].size();
-std::map<std::pair<size_t, size_t>, size_t> spline_failures_per_slice;
-for (auto [σ, r, τ] : extraction.failed_spline) {
-    spline_failures_per_slice[{σ, r}]++;
+// Check for config validation errors (if constructor was used directly)
+if (!config_validation_error_.empty()) {
+    return std::unexpected("Invalid config: " + config_validation_error_);
 }
 
-// Count full-slice failures, avoiding double-counting
-size_t full_slice_failures = failed_pde_set.size();
-for (auto& [slice_key, count] : spline_failures_per_slice) {
-    if (count == Nt) {
-        auto [σ, r] = slice_key;
-        size_t flat_idx = σ * Nr + r;
-        // Only count if NOT already in failed_pde
-        if (failed_pde_set.find(flat_idx) == failed_pde_set.end()) {
-            full_slice_failures++;
-        }
-    }
-}
+// ... solve_batch, extract_tensor ...
 
-if (full_slice_failures >= extraction.total_slices) {
-    return std::unexpected(
-        "All " + std::to_string(extraction.total_slices) +
-        " slices failed - no valid donor exists for repair.");
-}
+// repair_failed_slices handles "no valid donor" detection internally.
+// It uses the same deduplication logic (unordered_set) to count failures
+// and returns a detailed error if repair is impossible:
+//   "Repair failed at slice (σ,r): no valid donor. Total full-slice failures: N (M PDE + P all-maturity spline)"
+// No separate guard needed here - that would duplicate the logic and risk inconsistency.
 
-// Proceed with repair:
 auto repair_result = repair_failed_slices(extraction.tensor, extraction.failed_pde,
                                           extraction.failed_spline, axes);
 if (!repair_result.has_value()) {
-    return std::unexpected("Repair failed: " + repair_result.error());
+    return std::unexpected(repair_result.error());
 }
 auto repair_stats = repair_result.value();
 
 // ... fit_coeffs() ...
 
-// Populate PriceTableResult (Nt already declared above):
+// Populate PriceTableResult:
+const size_t Nt = axes.grids[1].size();
 return PriceTableResult<N>{
     .surface = ...,
     .n_pde_solves = ...,
