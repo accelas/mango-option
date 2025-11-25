@@ -11,3 +11,15 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
 )
+
+cc_test(
+    name = "workspace_test",
+    srcs = ["workspace_test.cc"],
+    deps = [
+        "//kokkos/src:workspace",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
