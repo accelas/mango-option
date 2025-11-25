@@ -56,6 +56,14 @@ cc_library(
     name = "price_table_builder",
     srcs = ["price_table_builder.cpp"],
     hdrs = ["price_table_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
     deps = [
         ":option_chain",
         ":price_table_config",
@@ -69,6 +77,7 @@ cc_library(
         "//src/math:bspline_nd_separable",
         "//src/support:aligned_arena",
         "//src/support:ivcalc_trace_hdr",
+        "//src/support:parallel",
     ],
     visibility = ["//visibility:public"],
 )
