@@ -54,8 +54,8 @@ public:
     // Default copy/move (shared_ptr makes it copyable)
     SpatialOperator(const SpatialOperator&) = default;
     SpatialOperator& operator=(const SpatialOperator&) = default;
-    SpatialOperator(SpatialOperator&&) = default;
-    SpatialOperator& operator=(SpatialOperator&&) = default;
+    SpatialOperator(SpatialOperator&&) noexcept = default;
+    SpatialOperator& operator=(SpatialOperator&&) noexcept = default;
 
     /// Get interior range for this stencil (3-point: [1, n-1))
     /// Precondition: n >= GridSpacing<T>::min_stencil_size() (i.e., n >= 3)

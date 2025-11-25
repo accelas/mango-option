@@ -205,13 +205,13 @@ public:
     }
 
     /// Get grid for specific dimension
-    [[nodiscard]] const std::vector<T>& grid(size_t dim) const {
+    [[nodiscard]] const std::vector<T>& grid(size_t dim) const noexcept {
         assert(dim < N && "Dimension index out of bounds");
         return grids_[dim];
     }
 
     /// Get knots for specific dimension
-    [[nodiscard]] const std::vector<T>& knots(size_t dim) const {
+    [[nodiscard]] const std::vector<T>& knots(size_t dim) const noexcept {
         assert(dim < N && "Dimension index out of bounds");
         return knots_[dim];
     }
