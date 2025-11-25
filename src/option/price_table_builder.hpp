@@ -54,6 +54,12 @@ struct ExtractionResult {
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
 };
 
+/// Statistics from failure repair
+struct RepairStats {
+    size_t repaired_full_slices;
+    size_t repaired_partial_points;
+};
+
 /// Builder for N-dimensional price table surfaces
 ///
 /// Orchestrates PDE solves across grid points, fits B-spline coefficients,
@@ -209,6 +215,18 @@ private:
     [[nodiscard]] std::expected<FitCoeffsResult, std::string> fit_coeffs(
         const PriceTensor<N>& tensor,
         const PriceTableAxes<N>& axes) const;
+
+    /// Repair failed slices using neighbor interpolation
+    [[nodiscard]] std::expected<RepairStats, std::string> repair_failed_slices(
+        PriceTensor<N>& tensor,
+        const std::vector<size_t>& failed_pde,
+        const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+        const PriceTableAxes<N>& axes) const;
+
+    /// Find nearest valid neighbor in (σ,r) grid using Manhattan distance
+    [[nodiscard]] std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
+        size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
+        const std::vector<bool>& slice_valid) const;
 
     PriceTableConfig config_;
 };
