@@ -142,13 +142,19 @@ struct PriceTableConfig {
 };
 
 // Validation helper (call in factory methods or build())
-inline void validate_config(const PriceTableConfig& config) {
+// Returns error string on failure, nullopt on success (fits std::expected pipeline)
+inline std::optional<std::string> validate_config(const PriceTableConfig& config) {
     if (config.max_failure_rate < 0.0 || config.max_failure_rate > 1.0) {
-        throw std::invalid_argument(
-            "max_failure_rate must be in [0.0, 1.0], got " +
-            std::to_string(config.max_failure_rate));
+        return "max_failure_rate must be in [0.0, 1.0], got " +
+               std::to_string(config.max_failure_rate);
     }
+    return std::nullopt;  // Valid
 }
+
+// Usage in build():
+// if (auto err = validate_config(config_); err.has_value()) {
+//     return std::unexpected(err.value());
+// }
 ```
 
 **Update factory methods** to accept optional `max_failure_rate`:
@@ -296,19 +302,27 @@ std::expected<RepairStats, std::string> repair_failed_slices(
 
     // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
     // Track counts separately for informative error messages
-    std::vector<size_t> full_slice_failures = failed_pde;
+    // IMPORTANT: Deduplicate - a slice can be in both failed_pde AND have all-maturity spline failure
+    std::unordered_set<size_t> full_slice_set(failed_pde.begin(), failed_pde.end());
     const size_t n_pde_failures = failed_pde.size();
     size_t n_all_maturity_spline_failures = 0;
     size_t partial_spline_points = 0;  // Count of (σ,r,τ) points, not slices
     for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         if (τ_failures.size() == Nt) {
             auto [σ_idx, r_idx] = slice_key;
-            full_slice_failures.push_back(σ_idx * Nr + r_idx);
-            ++n_all_maturity_spline_failures;
+            size_t flat_idx = σ_idx * Nr + r_idx;
+            // Only count as spline failure if not already a PDE failure
+            if (full_slice_set.find(flat_idx) == full_slice_set.end()) {
+                full_slice_set.insert(flat_idx);
+                ++n_all_maturity_spline_failures;
+            }
+            // (If already in set from PDE failure, it's already counted there)
         } else {
             partial_spline_points += τ_failures.size();
         }
     }
+    // Convert to vector for iteration (order doesn't matter for repair)
+    std::vector<size_t> full_slice_failures(full_slice_set.begin(), full_slice_set.end());
 
     // Track which (σ,r) slices are valid donors (no full failures, no partial spline NaN)
     std::vector<bool> slice_valid(Nσ * Nr, true);
