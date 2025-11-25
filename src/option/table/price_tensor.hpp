@@ -1,6 +1,7 @@
 #pragma once
 
 #include "src/support/memory/aligned_arena.hpp"
+#include "src/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <memory>
 #include <expected>
@@ -34,11 +35,12 @@ struct PriceTensor {
     ///         - Arena allocation failure (returns nullptr)
     [[nodiscard]] static std::expected<PriceTensor, std::string>
     create(std::array<size_t, N> shape, std::shared_ptr<memory::AlignedArena> arena_ptr) {
-        // Calculate total elements
-        size_t total = 1;
-        for (size_t dim = 0; dim < N; ++dim) {
-            total *= shape[dim];
+        // Calculate total elements with overflow check
+        auto total_result = safe_product(shape);
+        if (!total_result.has_value()) {
+            return std::unexpected("Tensor shape overflow: product of dimensions exceeds SIZE_MAX");
         }
+        size_t total = total_result.value();
 
         // Allocate from arena
         double* data = arena_ptr->allocate(total);

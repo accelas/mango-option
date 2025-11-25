@@ -164,6 +164,12 @@ struct PriceTableError {
         : code(code), axis_index(axis_index), count(count) {}
 };
 
+/// Error type for arithmetic overflow in size calculations
+struct OverflowError {
+    size_t operand_a;    ///< First operand in overflow
+    size_t operand_b;    ///< Second operand in overflow
+};
+
 /// Combined error type that can hold any of our specific error types
 using ErrorVariant = std::variant<
     ValidationError,
@@ -171,6 +177,7 @@ using ErrorVariant = std::variant<
     AllocationError,
     InterpolationError,
     PriceTableError,
+    OverflowError,
     std::string  // Generic error message
 >;
 
@@ -188,6 +195,8 @@ inline int error_code(const ErrorVariant& error) {
             return static_cast<int>(e.code);
         } else if constexpr (std::is_same_v<T, PriceTableError>) {
             return static_cast<int>(e.code);
+        } else if constexpr (std::is_same_v<T, OverflowError>) {
+            return -2;  // Overflow error (no enum code)
         } else {
             return -1;  // Generic string error
         }
@@ -224,6 +233,13 @@ inline std::ostream& operator<<(std::ostream& os, const PriceTableError& err) {
     os << "PriceTableError{code=" << static_cast<int>(err.code)
        << ", axis_index=" << err.axis_index
        << ", count=" << err.count << "}";
+    return os;
+}
+
+/// Output stream operator for OverflowError
+inline std::ostream& operator<<(std::ostream& os, const OverflowError& err) {
+    os << "OverflowError{operand_a=" << err.operand_a
+       << ", operand_b=" << err.operand_b << "}";
     return os;
 }
 

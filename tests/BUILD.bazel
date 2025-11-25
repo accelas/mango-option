@@ -10,6 +10,17 @@ cc_test(
 )
 
 cc_test(
+    name = "safe_math_test",
+    size = "small",
+    srcs = ["safe_math_test.cc"],
+    deps = [
+        "//src/math:safe_math",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_axes_test",
     size = "small",
     srcs = ["price_table_axes_test.cc"],
