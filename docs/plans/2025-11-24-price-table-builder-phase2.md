@@ -44,7 +44,10 @@ cc_library(
         "-fopenmp",
     ],
     linkopts = ["-fopenmp"],
-    deps = [...],
+    deps = [
+        # ... existing deps ...
+        "//src/support:parallel",  # NEW: for MANGO_PRAGMA_* macros
+    ],
 )
 ```
 
@@ -52,20 +55,30 @@ cc_library(
 
 ### Code Changes
 
+This codebase uses abstraction macros from `src/support/parallel.hpp` for portability across OpenMP/SYCL/sequential backends. Do NOT use raw `#pragma omp` directives.
+
 ```cpp
 // src/option/price_table_builder.cpp
 
-// Add include
-#include <omp.h>
+// Add include (NOT <omp.h> directly)
+#include "src/support/parallel.hpp"
 
 // In extract_tensor():
-#pragma omp parallel for collapse(2) schedule(static)
+// Use MANGO_PRAGMA_PARALLEL + MANGO_PRAGMA_FOR_COLLAPSE2
+// (equivalent to #pragma omp parallel for collapse(2))
+MANGO_PRAGMA_PARALLEL
+MANGO_PRAGMA_FOR_COLLAPSE2
 for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
     for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
         // ... extract prices from batch result
     }
 }
 ```
+
+**Available macros** (from `src/support/parallel.hpp`):
+- `MANGO_PRAGMA_PARALLEL` → `#pragma omp parallel`
+- `MANGO_PRAGMA_FOR_COLLAPSE2` → `#pragma omp for collapse(2)`
+- `MANGO_PRAGMA_ATOMIC` → `#pragma omp atomic` (for failure counting)
 
 **Expected speedup:** ~10-16× on multi-core machines (only achievable after build system changes)
 
@@ -144,6 +157,25 @@ if (!extraction.has_value()) {
 size_t failed_extraction_slices = extraction->failed_slices;
 size_t total_extraction_slices = extraction->total_slices;
 // ... continue to fit_coeffs with extraction->tensor ...
+```
+
+**Atomic counting in parallel loop** (inside `extract_tensor()`):
+```cpp
+// Use MANGO_PRAGMA_ATOMIC for thread-safe increment
+size_t failed_slices = 0;
+
+MANGO_PRAGMA_PARALLEL
+MANGO_PRAGMA_FOR_COLLAPSE2
+for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+        if (!batch.results[batch_idx].has_value()) {
+            MANGO_PRAGMA_ATOMIC
+            ++failed_slices;
+            // ... fill with NaN ...
+        }
+        // ...
+    }
+}
 ```
 
 #### Step 3: Handle NaN values before fitting
