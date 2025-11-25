@@ -218,7 +218,6 @@ cc_library(
     srcs = ["iv_solver_interpolated.cpp"],
     hdrs = ["iv_solver_interpolated.hpp"],
     deps = [
-        ":bspline_price_table",
         ":american_option",
         ":iv_result",
         ":price_table_surface",
