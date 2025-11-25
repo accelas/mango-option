@@ -20,13 +20,10 @@ PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
 template <size_t N>
 std::expected<PriceTableResult<N>, std::string>
 PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
+    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+
     // Start timing
     auto start_time = std::chrono::high_resolution_clock::now();
-
-    if constexpr (N != 4) {
-        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, N, 0);
-        return std::unexpected("build() only supports N=4");
-    }
 
     // Step 1: Validate axes
     auto axes_valid = axes.validate();
@@ -146,47 +143,44 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
 template <size_t N>
 std::vector<AmericanOptionParams>
 PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
-    if constexpr (N == 4) {
-        std::vector<AmericanOptionParams> batch;
+    static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
-        // Iterate only over high-cost axes: axes[2] (σ) and axes[3] (r)
-        // This creates Nσ × Nr batch entries, NOT Nm × Nt × Nσ × Nr
-        // Each solve produces a surface over (m, τ) that gets reused
-        const size_t Nσ = axes.grids[2].size();
-        const size_t Nr = axes.grids[3].size();
-        batch.reserve(Nσ * Nr);
+    std::vector<AmericanOptionParams> batch;
 
-        // Normalized parameters: Spot = Strike = K_ref
-        // Moneyness and maturity are handled via grid interpolation in extract_tensor
-        const double K_ref = config_.K_ref;
+    // Iterate only over high-cost axes: axes[2] (σ) and axes[3] (r)
+    // This creates Nσ × Nr batch entries, NOT Nm × Nt × Nσ × Nr
+    // Each solve produces a surface over (m, τ) that gets reused
+    const size_t Nσ = axes.grids[2].size();
+    const size_t Nr = axes.grids[3].size();
+    batch.reserve(Nσ * Nr);
 
-        for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-            for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-                double sigma = axes.grids[2][σ_idx];
-                double r = axes.grids[3][r_idx];
+    // Normalized parameters: Spot = Strike = K_ref
+    // Moneyness and maturity are handled via grid interpolation in extract_tensor
+    const double K_ref = config_.K_ref;
 
-                // Normalized solve: Spot = Strike = K_ref
-                // Surface will be interpolated across m and τ in extract_tensor
-                AmericanOptionParams params(
-                    K_ref,                          // spot
-                    K_ref,                          // strike
-                    axes.grids[1].back(),           // maturity (max for this σ,r)
-                    r,                              // rate
-                    config_.dividend_yield,         // dividend_yield
-                    config_.option_type,            // type
-                    sigma,                          // volatility
-                    config_.discrete_dividends      // discrete_dividends
-                );
+    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+            double sigma = axes.grids[2][σ_idx];
+            double r = axes.grids[3][r_idx];
 
-                batch.push_back(params);
-            }
+            // Normalized solve: Spot = Strike = K_ref
+            // Surface will be interpolated across m and τ in extract_tensor
+            AmericanOptionParams params(
+                K_ref,                          // spot
+                K_ref,                          // strike
+                axes.grids[1].back(),           // maturity (max for this σ,r)
+                r,                              // rate
+                config_.dividend_yield,         // dividend_yield
+                config_.option_type,            // type
+                sigma,                          // volatility
+                config_.discrete_dividends      // discrete_dividends
+            );
+
+            batch.push_back(params);
         }
-
-        return batch;
-    } else {
-        // Return empty batch for N≠4
-        return {};
     }
+
+    return batch;
 }
 
 template <size_t N>
@@ -195,105 +189,100 @@ PriceTableBuilder<N>::solve_batch(
     const std::vector<AmericanOptionParams>& batch,
     const PriceTableAxes<N>& axes) const
 {
-    if constexpr (N != 4) {
-        // Return empty result for N≠4
-        BatchAmericanOptionResult result;
-        result.failed_count = batch.size();
-        return result;
+    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+
+    BatchAmericanOptionSolver solver;
+
+    // Register maturity grid as snapshot times
+    // This enables extract_tensor to access surfaces at each maturity point
+    solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
+
+    // Solver stability constraints (from BatchAmericanOptionSolver)
+    constexpr double MAX_WIDTH = 5.8;   // Convergence limit (log-units)
+    constexpr double MAX_DX = 0.05;     // Von Neumann stability
+
+    // Check if user's grid_spec meets solver constraints
+    // Note: Domain coverage (PDE grid covers moneyness range) is already
+    // validated in build() at lines 69-85, so we don't re-check here.
+    const double grid_width = config_.grid_estimator.x_max() - config_.grid_estimator.x_min();
+
+    // Compute actual max spacing for non-uniform grids
+    // Sinh grids concentrate points at center, so max spacing is in wings
+    // Using average dx would underestimate and potentially violate Von Neumann
+    double max_dx;
+    if (config_.grid_estimator.type() == GridSpec<double>::Type::Uniform) {
+        // Uniform grid: all spacings equal
+        max_dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
     } else {
-        BatchAmericanOptionSolver solver;
+        // Non-uniform grid: generate and find actual max spacing
+        auto grid_buffer = config_.grid_estimator.generate();
+        max_dx = 0.0;
+        for (size_t i = 1; i < grid_buffer.size(); ++i) {
+            double spacing = grid_buffer[i] - grid_buffer[i-1];
+            max_dx = std::max(max_dx, spacing);
+        }
+    }
 
-        // Register maturity grid as snapshot times
-        // This enables extract_tensor to access surfaces at each maturity point
-        solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
+    // Compute minimum required width based on option parameters
+    // For accuracy, grid should cover ~3σ√τ on each side of log-moneyness
+    double max_sigma_sqrt_tau = 0.0;
+    for (const auto& p : batch) {
+        double sigma_sqrt_tau = p.volatility * std::sqrt(p.maturity);
+        max_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, sigma_sqrt_tau);
+    }
+    const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
 
-        // Solver stability constraints (from BatchAmericanOptionSolver)
-        constexpr double MAX_WIDTH = 5.8;   // Convergence limit (log-units)
-        constexpr double MAX_DX = 0.05;     // Von Neumann stability
+    const bool grid_meets_constraints =
+        (grid_width <= MAX_WIDTH) &&
+        (max_dx <= MAX_DX) &&
+        (grid_width >= min_required_width);
 
-        // Check if user's grid_spec meets solver constraints
-        // Note: Domain coverage (PDE grid covers moneyness range) is already
-        // validated in build() at lines 69-85, so we don't re-check here.
-        const double grid_width = config_.grid_estimator.x_max() - config_.grid_estimator.x_min();
+    if (grid_meets_constraints) {
+        // Grid meets constraints: use custom_grid directly
+        // This honors user's exact spatial resolution request
+        const double max_maturity = axes.grids[1].back();
+        TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, config_.n_time);
+        auto custom_grid = std::make_pair(config_.grid_estimator, time_domain);
+        return solver.solve_batch(batch, true, nullptr, custom_grid);
+    } else {
+        // Grid violates constraints: use auto-estimation with configured bounds
+        // This ensures solver stability while covering requested domain
+        GridAccuracyParams accuracy;
+        const size_t n_points = config_.grid_estimator.n_points();
+        const size_t clamped = std::clamp(n_points, size_t(100), size_t(1200));
+        accuracy.min_spatial_points = clamped;
+        accuracy.max_spatial_points = clamped;
+        accuracy.max_time_steps = config_.n_time;
 
-        // Compute actual max spacing for non-uniform grids
-        // Sinh grids concentrate points at center, so max spacing is in wings
-        // Using average dx would underestimate and potentially violate Von Neumann
-        double max_dx;
-        if (config_.grid_estimator.type() == GridSpec<double>::Type::Uniform) {
-            // Uniform grid: all spacings equal
-            max_dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
+        // Extract alpha parameter for sinh-spaced grids
+        if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
+            accuracy.alpha = config_.grid_estimator.concentration();
+        }
+
+        // Compute n_sigma to cover user's requested domain bounds
+        // Domain is centered at x=0 (ATM), with half-width = n_sigma * max_sigma_sqrt_tau
+        // User's domain: [x_min, x_max] from grid_estimator
+        // Required: n_sigma >= max(|x_min|, |x_max|) / max_sigma_sqrt_tau
+        const double x_min = config_.grid_estimator.x_min();
+        const double x_max = config_.grid_estimator.x_max();
+        const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
+
+        // Safety margin (10%) for boundary effects in PDE solver
+        constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+
+        // Compute required n_sigma, guarding against near-zero sigma*sqrt(tau)
+        // (which could happen with very short maturities or near-zero volatility)
+        if (max_sigma_sqrt_tau < 1e-10) {
+            // Fallback to default n_sigma when volatility × sqrt(maturity) ≈ 0
+            accuracy.n_sigma = 5.0;
         } else {
-            // Non-uniform grid: generate and find actual max spacing
-            auto grid_buffer = config_.grid_estimator.generate();
-            max_dx = 0.0;
-            for (size_t i = 1; i < grid_buffer.size(); ++i) {
-                double spacing = grid_buffer[i] - grid_buffer[i-1];
-                max_dx = std::max(max_dx, spacing);
-            }
+            double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+            // Use at least the default (5.0) but expand if needed for user's domain
+            accuracy.n_sigma = std::max(5.0, required_n_sigma);
         }
 
-        // Compute minimum required width based on option parameters
-        // For accuracy, grid should cover ~3σ√τ on each side of log-moneyness
-        double max_sigma_sqrt_tau = 0.0;
-        for (const auto& p : batch) {
-            double sigma_sqrt_tau = p.volatility * std::sqrt(p.maturity);
-            max_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, sigma_sqrt_tau);
-        }
-        const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
-
-        const bool grid_meets_constraints =
-            (grid_width <= MAX_WIDTH) &&
-            (max_dx <= MAX_DX) &&
-            (grid_width >= min_required_width);
-
-        if (grid_meets_constraints) {
-            // Grid meets constraints: use custom_grid directly
-            // This honors user's exact spatial resolution request
-            const double max_maturity = axes.grids[1].back();
-            TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, config_.n_time);
-            auto custom_grid = std::make_pair(config_.grid_estimator, time_domain);
-            return solver.solve_batch(batch, true, nullptr, custom_grid);
-        } else {
-            // Grid violates constraints: use auto-estimation with configured bounds
-            // This ensures solver stability while covering requested domain
-            GridAccuracyParams accuracy;
-            const size_t n_points = config_.grid_estimator.n_points();
-            const size_t clamped = std::clamp(n_points, size_t(100), size_t(1200));
-            accuracy.min_spatial_points = clamped;
-            accuracy.max_spatial_points = clamped;
-            accuracy.max_time_steps = config_.n_time;
-
-            // Extract alpha parameter for sinh-spaced grids
-            if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-                accuracy.alpha = config_.grid_estimator.concentration();
-            }
-
-            // Compute n_sigma to cover user's requested domain bounds
-            // Domain is centered at x=0 (ATM), with half-width = n_sigma * max_sigma_sqrt_tau
-            // User's domain: [x_min, x_max] from grid_estimator
-            // Required: n_sigma >= max(|x_min|, |x_max|) / max_sigma_sqrt_tau
-            const double x_min = config_.grid_estimator.x_min();
-            const double x_max = config_.grid_estimator.x_max();
-            const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
-
-            // Safety margin (10%) for boundary effects in PDE solver
-            constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
-
-            // Compute required n_sigma, guarding against near-zero sigma*sqrt(tau)
-            // (which could happen with very short maturities or near-zero volatility)
-            if (max_sigma_sqrt_tau < 1e-10) {
-                // Fallback to default n_sigma when volatility × sqrt(maturity) ≈ 0
-                accuracy.n_sigma = 5.0;
-            } else {
-                double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-                // Use at least the default (5.0) but expand if needed for user's domain
-                accuracy.n_sigma = std::max(5.0, required_n_sigma);
-            }
-
-            solver.set_grid_accuracy(accuracy);
-            return solver.solve_batch(batch, true);  // use_shared_grid = true, auto-estimation
-        }
+        solver.set_grid_accuracy(accuracy);
+        return solver.solve_batch(batch, true);  // use_shared_grid = true, auto-estimation
     }
 }
 
@@ -303,13 +292,12 @@ PriceTableBuilder<N>::extract_tensor(
     const BatchAmericanOptionResult& batch,
     const PriceTableAxes<N>& axes) const
 {
-    if constexpr (N != 4) {
-        return std::unexpected("extract_tensor only supports N=4");
-    } else {
-        const size_t Nm = axes.grids[0].size();  // moneyness
-        const size_t Nt = axes.grids[1].size();  // maturity
-        const size_t Nσ = axes.grids[2].size();  // volatility
-        const size_t Nr = axes.grids[3].size();  // rate
+    static_assert(N == 4, "PriceTableBuilder only supports N=4");
+
+    const size_t Nm = axes.grids[0].size();  // moneyness
+    const size_t Nt = axes.grids[1].size();  // maturity
+    const size_t Nσ = axes.grids[2].size();  // volatility
+    const size_t Nr = axes.grids[3].size();  // rate
 
     // Verify batch size matches (σ, r) grid
     const size_t expected_batch_size = Nσ * Nr;
@@ -395,8 +383,7 @@ PriceTableBuilder<N>::extract_tensor(
         }
     }
 
-        return tensor;
-    }
+    return tensor;
 }
 
 template <size_t N>
@@ -405,12 +392,7 @@ PriceTableBuilder<N>::fit_coeffs(
     const PriceTensor<N>& tensor,
     const PriceTableAxes<N>& axes) const
 {
-    if constexpr (N != 4) {
-        MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE, N, 0);
-        return std::unexpected(
-            "fit_coeffs only supports N=4 dimensions. Requested N=" +
-            std::to_string(N));
-    }
+    static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
     // Extract grids for BSplineNDSeparable
     std::array<std::vector<double>, N> grids;
@@ -614,10 +596,7 @@ PriceTableBuilder<4>::from_chain(
     );
 }
 
-// Explicit instantiations
-template class PriceTableBuilder<2>;
-template class PriceTableBuilder<3>;
+// Explicit instantiation (only N=4 supported)
 template class PriceTableBuilder<4>;
-template class PriceTableBuilder<5>;
 
 } // namespace mango
