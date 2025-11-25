@@ -46,3 +46,16 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "pde_solver",
+    hdrs = ["pde/core/pde_solver.hpp"],
+    deps = [
+        ":execution_space",
+        ":grid",
+        ":workspace",
+        ":thomas_solver",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)

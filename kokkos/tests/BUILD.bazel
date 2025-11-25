@@ -47,3 +47,15 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
 )
+
+cc_test(
+    name = "pde_solver_test",
+    srcs = ["pde_solver_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:pde_solver",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)

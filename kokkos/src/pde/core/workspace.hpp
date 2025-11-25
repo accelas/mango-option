@@ -50,6 +50,11 @@ public:
         ws.thomas_c_prime_ = view_type("thomas_c_prime", n);
         ws.thomas_d_prime_ = view_type("thomas_d_prime", n);
 
+        // Thomas solver temporary buffers (for matrix copy per solve)
+        ws.thomas_diag_temp_ = view_type("thomas_diag_temp", n);
+        ws.thomas_lower_temp_ = view_type("thomas_lower_temp", n - 1);
+        ws.thomas_upper_temp_ = view_type("thomas_upper_temp", n - 1);
+
         return ws;
     }
 
@@ -71,6 +76,10 @@ public:
     [[nodiscard]] view_type thomas_c_prime() const { return thomas_c_prime_; }
     [[nodiscard]] view_type thomas_d_prime() const { return thomas_d_prime_; }
 
+    [[nodiscard]] view_type thomas_diag_temp() const { return thomas_diag_temp_; }
+    [[nodiscard]] view_type thomas_lower_temp() const { return thomas_lower_temp_; }
+    [[nodiscard]] view_type thomas_upper_temp() const { return thomas_upper_temp_; }
+
 private:
     PDEWorkspace() = default;
 
@@ -90,6 +99,10 @@ private:
 
     view_type thomas_c_prime_;
     view_type thomas_d_prime_;
+
+    view_type thomas_diag_temp_;
+    view_type thomas_lower_temp_;
+    view_type thomas_upper_temp_;
 };
 
 }  // namespace mango::kokkos
