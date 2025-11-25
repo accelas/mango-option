@@ -80,7 +80,6 @@ MANGO_PRAGMA_PARALLEL
 **Available macros** (from `src/support/parallel.hpp`):
 - `MANGO_PRAGMA_PARALLEL` → `#pragma omp parallel`
 - `MANGO_PRAGMA_FOR_COLLAPSE2` → `#pragma omp for collapse(2)`
-- `MANGO_PRAGMA_ATOMIC` → `#pragma omp atomic` (for failure counting)
 
 **Expected speedup:** ~10-16× on multi-core machines (only achievable after build system changes)
 
@@ -140,9 +139,8 @@ if (failure_rate > config_.max_failure_rate) {
 template <size_t N>
 struct ExtractionResult {
     PriceTensor<N> tensor;
-    size_t failed_slices;
     size_t total_slices;
-    std::vector<bool> slice_failed;  // [σ_idx * Nr + r_idx] → true if failed
+    std::vector<size_t> failed_indices;  // Flat indices of failed slices (sparse)
 };
 
 // CHANGED: extract_tensor returns ExtractionResult
@@ -157,16 +155,16 @@ auto extraction = extract_tensor(batch_result, axes);
 if (!extraction.has_value()) {
     return std::unexpected("extract_tensor failed: " + extraction.error());
 }
-size_t failed_extraction_slices = extraction->failed_slices;
+size_t failed_extraction_slices = extraction->failed_indices.size();
 size_t total_extraction_slices = extraction->total_slices;
 // ... continue to fit_coeffs with extraction->tensor ...
 ```
 
-**Atomic counting and mask population in parallel loop** (inside `extract_tensor()`):
+**Collecting failed indices in parallel loop** (inside `extract_tensor()`):
 ```cpp
-// Pre-allocate mask (written per-thread, no contention)
-std::vector<bool> slice_failed(Nσ * Nr, false);
-size_t failed_slices = 0;
+// Thread-safe collection of failed indices
+std::vector<size_t> failed_indices;
+std::mutex failed_mutex;  // For thread-safe push_back
 
 // MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
 // See src/option/american_option_batch.cpp:454-500 for reference
@@ -177,31 +175,32 @@ MANGO_PRAGMA_PARALLEL
         for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
             size_t batch_idx = σ_idx * Nr + r_idx;
             if (!batch.results[batch_idx].has_value()) {
-                slice_failed[batch_idx] = true;  // No race: each thread writes unique index
-                MANGO_PRAGMA_ATOMIC
-                ++failed_slices;
+                {
+                    std::lock_guard<std::mutex> lock(failed_mutex);
+                    failed_indices.push_back(batch_idx);
+                }
                 // ... fill with NaN ...
             }
             // ...
         }
     }
 }
+// failed_indices now contains all failed (σ,r) flat indices
 ```
+
+Note: Since failures are rare, the mutex contention is negligible.
 
 #### Step 3: Handle NaN values before fitting
 
 **Option A: Pre-fill failed slices with neighbor interpolation**
 ```cpp
 // After extraction, before fitting (in build()):
-// Use slice_failed mask from ExtractionResult to find slices needing repair
+// Iterate only over failed indices (sparse, efficient)
 auto& extraction_result = extraction.value();
-for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-        size_t flat_idx = σ_idx * Nr + r_idx;
-        if (extraction_result.slice_failed[flat_idx]) {
-            interpolate_from_neighbors(extraction_result.tensor, σ_idx, r_idx, Nr);
-        }
-    }
+for (size_t flat_idx : extraction_result.failed_indices) {
+    size_t σ_idx = flat_idx / Nr;
+    size_t r_idx = flat_idx % Nr;
+    interpolate_from_neighbors(extraction_result.tensor, σ_idx, r_idx, Nσ, Nr);
 }
 // Now tensor has no NaN, safe to call fit_coeffs()
 ```
@@ -242,9 +241,9 @@ struct PriceTableResult {
 ```
 solve_batch() → batch_result.failed_count
                       ↓
-extract_tensor() → ExtractionResult{tensor, failed_slices, total_slices, slice_failed}
+extract_tensor() → ExtractionResult{tensor, total_slices, failed_indices}
                       ↓
-interpolate_failed_slices(slice_failed) → tensor with NaN replaced
+interpolate_failed_slices(failed_indices) → tensor with NaN replaced
                       ↓
 fit_coeffs() → FitCoeffsResult (no NaN, fitting succeeds)
                       ↓
