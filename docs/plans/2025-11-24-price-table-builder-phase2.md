@@ -262,39 +262,61 @@ std::expected<void, std::string> repair_failed_slices(
     }
 
     // 2. Repair per-maturity spline failures: interpolate along τ axis
+    // Group failures by (σ,r) to detect full-slice failures
+    std::map<std::pair<size_t, size_t>, std::vector<size_t>> failures_by_slice;
     for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
-        // Find valid τ neighbors (before and after)
-        std::optional<size_t> τ_before, τ_after;
-        for (size_t j = τ_idx; j-- > 0; ) {
-            if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
-                τ_before = j; break;
+        failures_by_slice[{σ_idx, r_idx}].push_back(τ_idx);
+    }
+
+    for (auto& [slice_key, τ_failures] : failures_by_slice) {
+        auto [σ_idx, r_idx] = slice_key;
+
+        // Check if ALL maturities failed for this (σ,r) slice
+        bool all_maturities_failed = (τ_failures.size() == Nt);
+        if (all_maturities_failed) {
+            // Escalate to full-slice failure: copy from (σ,r) neighbor
+            auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
+            if (!neighbor.has_value()) {
+                return std::unexpected(
+                    "Cannot repair slice (" + std::to_string(σ_idx) + "," +
+                    std::to_string(r_idx) + "): all maturities failed and no valid neighbors");
             }
-        }
-        for (size_t j = τ_idx + 1; j < Nt; ++j) {
-            if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
-                τ_after = j; break;
+            auto [nσ, nr] = neighbor.value();
+            for (size_t i = 0; i < Nm; ++i) {
+                for (size_t j = 0; j < Nt; ++j) {
+                    tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
+                }
             }
+            continue;  // Done with this slice
         }
 
-        if (!τ_before && !τ_after) {
-            return std::unexpected(
-                "Cannot repair maturity slice at τ_idx=" + std::to_string(τ_idx) +
-                ": no valid maturities in this (σ,r) surface");
-        }
+        // Partial failures: interpolate along τ axis
+        for (size_t τ_idx : τ_failures) {
+            std::optional<size_t> τ_before, τ_after;
+            for (size_t j = τ_idx; j-- > 0; ) {
+                if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
+                    τ_before = j; break;
+                }
+            }
+            for (size_t j = τ_idx + 1; j < Nt; ++j) {
+                if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
+                    τ_after = j; break;
+                }
+            }
 
-        // Linear interpolation or nearest-neighbor extrapolation
-        for (size_t i = 0; i < Nm; ++i) {
-            if (τ_before && τ_after) {
-                // Interpolate
-                double t = static_cast<double>(τ_idx - *τ_before) /
-                           static_cast<double>(*τ_after - *τ_before);
-                tensor.view[i, τ_idx, σ_idx, r_idx] =
-                    (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
-                    t * tensor.view[i, *τ_after, σ_idx, r_idx];
-            } else if (τ_before) {
-                tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
-            } else {
-                tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
+            // At least one must exist (not all_maturities_failed)
+            for (size_t i = 0; i < Nm; ++i) {
+                if (τ_before && τ_after) {
+                    double t = static_cast<double>(τ_idx - *τ_before) /
+                               static_cast<double>(*τ_after - *τ_before);
+                    tensor.view[i, τ_idx, σ_idx, r_idx] =
+                        (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
+                        t * tensor.view[i, *τ_after, σ_idx, r_idx];
+                } else if (τ_before) {
+                    tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
+                } else {
+                    tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
+                }
             }
         }
     }
@@ -307,14 +329,18 @@ std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
     size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
     const std::vector<bool>& slice_valid)
 {
+    // Max Manhattan distance on grid is (Nσ-1) + (Nr-1)
+    const size_t max_dist = (Nσ - 1) + (Nr - 1);
+
     // Search in expanding rings (Manhattan distance 1, 2, 3, ...)
-    for (size_t dist = 1; dist < std::max(Nσ, Nr); ++dist) {
+    for (size_t dist = 1; dist <= max_dist; ++dist) {
         for (int dσ = -static_cast<int>(dist); dσ <= static_cast<int>(dist); ++dσ) {
             int dr = static_cast<int>(dist) - std::abs(dσ);
             for (int sign : {-1, 1}) {
                 int nσ = static_cast<int>(σ_idx) + dσ;
                 int nr = static_cast<int>(r_idx) + sign * dr;
-                if (nσ >= 0 && nσ < Nσ && nr >= 0 && nr < Nr) {
+                if (nσ >= 0 && nσ < static_cast<int>(Nσ) &&
+                    nr >= 0 && nr < static_cast<int>(Nr)) {
                     if (slice_valid[nσ * Nr + nr]) {
                         return std::make_pair(static_cast<size_t>(nσ),
                                               static_cast<size_t>(nr));
@@ -323,7 +349,7 @@ std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
             }
         }
     }
-    return std::nullopt;  // No valid neighbor exists
+    return std::nullopt;  // Entire grid is invalid
 }
 ```
 
