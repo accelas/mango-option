@@ -136,11 +136,17 @@ if (failure_rate > config_.max_failure_rate) {
 
 ```cpp
 // NEW: Extraction result with failure tracking
+// Two failure modes exist in extract_tensor():
+// 1. Full PDE failure: !batch.results[batch_idx].has_value() → entire (σ,r) slice NaN
+// 2. Per-maturity spline failure: spline.build() fails → single (σ,r,τ) slice NaN
+//    (src/option/price_table_builder.cpp:366-371)
+
 template <size_t N>
 struct ExtractionResult {
     PriceTensor<N> tensor;
-    size_t total_slices;
-    std::vector<size_t> failed_indices;  // Flat indices of failed slices (sparse)
+    size_t total_slices;              // Nσ × Nr
+    std::vector<size_t> failed_pde;   // Flat (σ,r) indices where PDE failed
+    std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;  // (σ,r,τ) tuples
 };
 
 // CHANGED: extract_tensor returns ExtractionResult
@@ -155,70 +161,176 @@ auto extraction = extract_tensor(batch_result, axes);
 if (!extraction.has_value()) {
     return std::unexpected("extract_tensor failed: " + extraction.error());
 }
-size_t failed_extraction_slices = extraction->failed_indices.size();
+size_t failed_pde_slices = extraction->failed_pde.size();
+size_t failed_spline_slices = extraction->failed_spline.size();
 size_t total_extraction_slices = extraction->total_slices;
 // ... continue to fit_coeffs with extraction->tensor ...
 ```
 
 **Collecting failed indices in parallel loop** (inside `extract_tensor()`):
 ```cpp
-// Thread-safe collection of failed indices
-std::vector<size_t> failed_indices;
+// Thread-safe collection of both failure types
+std::vector<size_t> failed_pde;
+std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
 std::mutex failed_mutex;  // For thread-safe push_back
 
-// MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
-// See src/option/american_option_batch.cpp:454-500 for reference
 MANGO_PRAGMA_PARALLEL
 {
     MANGO_PRAGMA_FOR_COLLAPSE2
     for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
         for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
             size_t batch_idx = σ_idx * Nr + r_idx;
+
+            // Failure mode 1: Full PDE solve failed
             if (!batch.results[batch_idx].has_value()) {
                 {
                     std::lock_guard<std::mutex> lock(failed_mutex);
-                    failed_indices.push_back(batch_idx);
+                    failed_pde.push_back(batch_idx);
                 }
-                // ... fill with NaN ...
+                // Fill entire (m,τ) slice with NaN...
+                continue;
             }
-            // ...
+
+            // PDE succeeded, now extract per-maturity
+            const auto& result = batch.results[batch_idx].value();
+            for (size_t τ_idx = 0; τ_idx < Nt; ++τ_idx) {
+                CubicSpline<double> spline;
+                auto err = spline.build(x_grid, result.at_time(τ_idx));
+
+                // Failure mode 2: Spline construction failed for this maturity
+                if (err.has_value()) {
+                    {
+                        std::lock_guard<std::mutex> lock(failed_mutex);
+                        failed_spline.emplace_back(σ_idx, r_idx, τ_idx);
+                    }
+                    // Fill (m,:) at this (σ,r,τ) with NaN...
+                    continue;
+                }
+                // Evaluate spline...
+            }
         }
     }
 }
-// failed_indices now contains all failed (σ,r) flat indices
 ```
 
-Note: Since failures are rare, the mutex contention is negligible.
+Note: Since failures are rare, mutex contention is negligible.
 
 #### Step 3: Handle NaN values before fitting
 
-**Option A: Pre-fill failed slices with neighbor interpolation**
+The interpolation step MUST guarantee NaN-free output, or abort gracefully. This requires handling both failure modes and edge cases.
+
+**Implementation: `repair_failed_slices()`**
+
 ```cpp
-// After extraction, before fitting (in build()):
-// Iterate only over failed indices (sparse, efficient)
-auto& extraction_result = extraction.value();
-for (size_t flat_idx : extraction_result.failed_indices) {
-    size_t σ_idx = flat_idx / Nr;
-    size_t r_idx = flat_idx % Nr;
-    interpolate_from_neighbors(extraction_result.tensor, σ_idx, r_idx, Nσ, Nr);
+// Returns std::expected<void, std::string> - error if repair impossible
+std::expected<void, std::string> repair_failed_slices(
+    PriceTensor<N>& tensor,
+    const std::vector<size_t>& failed_pde,
+    const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+    const PriceTableAxes<N>& axes)
+{
+    const size_t Nm = axes.grids[0].size();
+    const size_t Nt = axes.grids[1].size();
+    const size_t Nσ = axes.grids[2].size();
+    const size_t Nr = axes.grids[3].size();
+
+    // Track which (σ,r) slices are fully invalid (for neighbor search)
+    std::vector<bool> slice_valid(Nσ * Nr, true);
+    for (size_t flat_idx : failed_pde) {
+        slice_valid[flat_idx] = false;
+    }
+
+    // 1. Repair full PDE failures: copy from nearest valid (σ,r) neighbor
+    for (size_t flat_idx : failed_pde) {
+        size_t σ_idx = flat_idx / Nr;
+        size_t r_idx = flat_idx % Nr;
+
+        auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
+        if (!neighbor.has_value()) {
+            return std::unexpected(
+                "Cannot repair slice (" + std::to_string(σ_idx) + "," +
+                std::to_string(r_idx) + "): no valid neighbors exist");
+        }
+        auto [nσ, nr] = neighbor.value();
+
+        // Copy entire (m,τ) surface from neighbor
+        for (size_t i = 0; i < Nm; ++i) {
+            for (size_t j = 0; j < Nt; ++j) {
+                tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
+            }
+        }
+    }
+
+    // 2. Repair per-maturity spline failures: interpolate along τ axis
+    for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
+        // Find valid τ neighbors (before and after)
+        std::optional<size_t> τ_before, τ_after;
+        for (size_t j = τ_idx; j-- > 0; ) {
+            if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
+                τ_before = j; break;
+            }
+        }
+        for (size_t j = τ_idx + 1; j < Nt; ++j) {
+            if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
+                τ_after = j; break;
+            }
+        }
+
+        if (!τ_before && !τ_after) {
+            return std::unexpected(
+                "Cannot repair maturity slice at τ_idx=" + std::to_string(τ_idx) +
+                ": no valid maturities in this (σ,r) surface");
+        }
+
+        // Linear interpolation or nearest-neighbor extrapolation
+        for (size_t i = 0; i < Nm; ++i) {
+            if (τ_before && τ_after) {
+                // Interpolate
+                double t = static_cast<double>(τ_idx - *τ_before) /
+                           static_cast<double>(*τ_after - *τ_before);
+                tensor.view[i, τ_idx, σ_idx, r_idx] =
+                    (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
+                    t * tensor.view[i, *τ_after, σ_idx, r_idx];
+            } else if (τ_before) {
+                tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
+            } else {
+                tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
+            }
+        }
+    }
+
+    return {};  // Success: tensor is now NaN-free
 }
-// Now tensor has no NaN, safe to call fit_coeffs()
+
+// Helper: find nearest valid (σ,r) using Manhattan distance
+std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
+    size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
+    const std::vector<bool>& slice_valid)
+{
+    // Search in expanding rings (Manhattan distance 1, 2, 3, ...)
+    for (size_t dist = 1; dist < std::max(Nσ, Nr); ++dist) {
+        for (int dσ = -static_cast<int>(dist); dσ <= static_cast<int>(dist); ++dσ) {
+            int dr = static_cast<int>(dist) - std::abs(dσ);
+            for (int sign : {-1, 1}) {
+                int nσ = static_cast<int>(σ_idx) + dσ;
+                int nr = static_cast<int>(r_idx) + sign * dr;
+                if (nσ >= 0 && nσ < Nσ && nr >= 0 && nr < Nr) {
+                    if (slice_valid[nσ * Nr + nr]) {
+                        return std::make_pair(static_cast<size_t>(nσ),
+                                              static_cast<size_t>(nr));
+                    }
+                }
+            }
+        }
+    }
+    return std::nullopt;  // No valid neighbor exists
+}
 ```
 
-**Option B: Modify fitter to skip NaN slices (complex)**
-```cpp
-// In BSplineNDSeparable::fit():
-// Skip 1D fits that contain NaN, mark as failed
-// Requires significant fitter redesign
-```
-
-**Option C: Replace NaN with boundary extrapolation**
-```cpp
-// For failed interior slices, use boundary values
-// Simple but may introduce artifacts
-```
-
-**Recommendation:** Option A (neighbor interpolation) provides best quality while being implementable without fitter changes.
+**Guarantees:**
+- If `repair_failed_slices()` returns success, tensor contains no NaN
+- If repair is impossible (entire axis failed), returns error before `fit_coeffs()` runs
+- Caller can decide: abort build, or proceed with degraded accuracy warning
 
 #### Step 4: Extend `PriceTableResult` with failure stats
 
@@ -229,10 +341,11 @@ struct PriceTableResult {
     size_t n_pde_solves;
     double build_time_seconds;
     BSplineFittingStats fitting_stats;
-    // NEW: Failure tracking
-    size_t failed_pde_solves;           // From batch_result.failed_count
-    size_t failed_extraction_slices;    // From extraction.failed_slices
-    size_t total_extraction_slices;     // From extraction.total_slices
+    // NEW: Failure tracking (two failure modes)
+    size_t failed_pde_slices;           // Full (σ,r) PDE failures
+    size_t failed_spline_slices;        // Per-maturity spline failures
+    size_t repaired_slices;             // Successfully interpolated
+    size_t total_slices;                // Nσ × Nr
 };
 ```
 
@@ -241,23 +354,23 @@ struct PriceTableResult {
 ```
 solve_batch() → batch_result.failed_count
                       ↓
-extract_tensor() → ExtractionResult{tensor, total_slices, failed_indices}
+extract_tensor() → ExtractionResult{tensor, total_slices, failed_pde, failed_spline}
                       ↓
-interpolate_failed_slices(failed_indices) → tensor with NaN replaced
+repair_failed_slices(failed_pde, failed_spline) → tensor with NaN replaced (or error)
                       ↓
-fit_coeffs() → FitCoeffsResult (no NaN, fitting succeeds)
+fit_coeffs() → FitCoeffsResult (NaN-free, fitting succeeds)
                       ↓
-build() → PriceTableResult{..., failed_pde_solves, failed_extraction_slices, ...}
+build() → PriceTableResult{..., failed_pde_slices, failed_spline_slices, repaired_slices, ...}
 ```
 
 ### Implementation Order
 
-1. Change `extract_tensor()` return type to `ExtractionResult<N>`
-2. Add atomic failure counting in `extract_tensor()` (parallel-safe)
-3. Add `interpolate_failed_slices()` helper to replace NaN with interpolated values
+1. Change `extract_tensor()` return type to `ExtractionResult<N>` with both failure vectors
+2. Track both failure modes in parallel loop (mutex-protected push)
+3. Add `repair_failed_slices()` with neighbor search and maturity interpolation
 4. Change `build()` to accept partial failures (add `max_failure_rate` config)
 5. Extend `PriceTableResult` with failure stats
-6. Add tests for partial failure scenarios
+6. Add tests for partial failure scenarios (PDE failures, spline failures, edge cases)
 
 ---
 
@@ -441,8 +554,8 @@ build_with_save(
 | 1a | Build system: add OpenMP to price_table_builder | Low | None |
 | 1b | Parallelize extract_tensor() | Low | 1a |
 | 2a | Change extract_tensor() return type to ExtractionResult | Low | None |
-| 2b | Add atomic failure counting in extract_tensor() | Low | 2a, 1b |
-| 2c | Add interpolate_failed_slices() helper | Medium | 2a |
+| 2b | Track both failure modes (PDE + spline) in parallel loop | Low | 2a, 1b |
+| 2c | Add repair_failed_slices() with neighbor search | Medium | 2a |
 | 2d | Change build() to accept partial failures | Low | 2a, 2c |
 | 2e | Extend PriceTableResult with failure stats | Low | 2d |
 | 3 | Enriched error messages (Option C) | Low | None |
