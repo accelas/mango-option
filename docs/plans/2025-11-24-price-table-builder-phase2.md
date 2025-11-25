@@ -42,8 +42,12 @@ cc_library(
     hdrs = ["price_table_builder.hpp"],
     copts = [
         "-fopenmp",
+        "-pthread",  # Required for std::mutex
     ],
-    linkopts = ["-fopenmp"],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",  # Required for std::mutex (pthread_mutex_* symbols)
+    ],
     deps = [
         # ... existing deps ...
         "//src/support:parallel",  # NEW: for MANGO_PRAGMA_* macros
@@ -259,6 +263,9 @@ std::expected<void, std::string> repair_failed_slices(
                 tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
             }
         }
+
+        // Mark as valid so this slice can be a donor for subsequent repairs
+        slice_valid[flat_idx] = true;
     }
 
     // 2. Repair per-maturity spline failures: interpolate along τ axis
@@ -287,6 +294,8 @@ std::expected<void, std::string> repair_failed_slices(
                     tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
                 }
             }
+            // Mark as valid so this slice can be a donor for subsequent repairs
+            slice_valid[σ_idx * Nr + r_idx] = true;
             continue;  // Done with this slice
         }
 
