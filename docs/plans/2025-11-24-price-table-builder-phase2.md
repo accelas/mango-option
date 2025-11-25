@@ -8,9 +8,9 @@
 
 Phase 1 delivered a generic `PriceTableBuilder<N>` with factory methods and custom grid support. Phase 2 focuses on performance optimizations and API quality improvements.
 
-## Improvements
+---
 
-### 1. Parallelize extract_tensor() [High Priority]
+## Improvement 1: Parallelize extract_tensor() [High Priority]
 
 **Problem:** `extract_tensor()` loops over (σ,r) batches serially.
 
@@ -18,17 +18,47 @@ Phase 1 delivered a generic `PriceTableBuilder<N>` with factory methods and cust
 
 **Impact:** Leaves cores idle during extraction. For 20×10 = 200 batches, this is embarrassingly parallel work.
 
-**Solution:** Add OpenMP to outer loop:
+### Build System Changes Required
+
+The `price_table_builder` Bazel target currently has no OpenMP flags:
+
+```python
+# src/option/BUILD.bazel:55-74 (CURRENT - no OpenMP)
+cc_library(
+    name = "price_table_builder",
+    srcs = ["price_table_builder.cpp"],
+    hdrs = ["price_table_builder.hpp"],
+    deps = [...],
+)
+```
+
+**Required change:**
+
+```python
+# src/option/BUILD.bazel (AFTER)
+cc_library(
+    name = "price_table_builder",
+    srcs = ["price_table_builder.cpp"],
+    hdrs = ["price_table_builder.hpp"],
+    copts = [
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    deps = [...],
+)
+```
+
+**Reference:** See `american_option_batch` target (line 159-166) which already has OpenMP enabled.
+
+### Code Changes
 
 ```cpp
-// BEFORE (serial):
-for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-        // ... extract prices from batch result
-    }
-}
+// src/option/price_table_builder.cpp
 
-// AFTER (parallel):
+// Add include
+#include <omp.h>
+
+// In extract_tensor():
 #pragma omp parallel for collapse(2) schedule(static)
 for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
     for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
@@ -37,22 +67,68 @@ for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
 }
 ```
 
-**Expected speedup:** ~10-16× on multi-core machines
+**Expected speedup:** ~10-16× on multi-core machines (only achievable after build system changes)
 
-**Testing:**
-- Verify identical results with/without parallelization
-- Benchmark extraction time improvement
-- Test with different grid sizes
+### Testing
+- [ ] Verify `-fopenmp` is passed to compiler (check build log)
+- [ ] Verify identical results with `OMP_NUM_THREADS=1` vs default
+- [ ] Benchmark extraction time improvement
+- [ ] Test with different grid sizes
 
 ---
 
-### 2. Atomic Failure Tracking [High Priority]
+## Improvement 2: Partial Failure Tolerance + Tracking [High Priority]
 
-**Problem:** `extract_tensor()` fills NaN for failures but doesn't count them.
+### Current Behavior (Blocking Issue)
 
-**Impact:** No way to detect partial failures or get useful error messages.
+`build()` aborts immediately if `solve_batch` reports any failure:
 
-**Solution:** Add atomic counter for thread-safe failure tracking:
+```cpp
+// src/option/price_table_builder.cpp:90-96
+auto batch_result = solve_batch(batch_params, axes);
+if (batch_result.failed_count > 0) {
+    return std::unexpected(
+        "solve_batch had " + std::to_string(batch_result.failed_count) +
+        " failures out of " + std::to_string(batch_result.results.size()));
+}
+```
+
+This means `extract_tensor()` is **only ever called with 100% successful batches**. The `if (!result_expected.has_value())` branch inside `extract_tensor()` is dead code.
+
+### Required Upstream Change
+
+Before atomic failure tracking is meaningful, `build()` must tolerate partial failures:
+
+```cpp
+// OPTION A: Configurable failure tolerance
+struct PriceTableConfig {
+    // ... existing fields ...
+    double max_failure_rate = 0.0;  // 0.0 = strict (current), 0.1 = allow 10% failures
+};
+
+// In build():
+auto batch_result = solve_batch(batch_params, axes);
+double failure_rate = static_cast<double>(batch_result.failed_count) / batch_result.results.size();
+if (failure_rate > config_.max_failure_rate) {
+    return std::unexpected("solve_batch failure rate " + std::to_string(failure_rate * 100) +
+                           "% exceeds threshold " + std::to_string(config_.max_failure_rate * 100) + "%");
+}
+// Continue to extract_tensor with partial results...
+```
+
+```cpp
+// OPTION B: Warning + proceed (always best-effort)
+auto batch_result = solve_batch(batch_params, axes);
+if (batch_result.failed_count > 0) {
+    // Log warning via USDT probe, but continue
+    MANGO_TRACE_WARNING(MODULE_PRICE_TABLE, batch_result.failed_count, batch_result.results.size());
+}
+// Continue to extract_tensor...
+```
+
+### Atomic Failure Tracking (After Upstream Change)
+
+Once partial failures can reach `extract_tensor()`:
 
 ```cpp
 std::atomic<size_t> failed_slices{0};
@@ -65,72 +141,116 @@ for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
             // Fill with NaN
             continue;
         }
-
-        for (size_t j = 0; j < Nt; ++j) {
-            if (build_error.has_value()) {
-                failed_slices.fetch_add(1, std::memory_order_relaxed);
-                // Fill with NaN
-                continue;
-            }
-        }
+        // ...
     }
 }
-
-// Return failure count in result or error if threshold exceeded
 ```
 
-**Dependency:** Should be implemented together with #1 (parallelization).
+### Return Type Change Required
+
+Current return type cannot surface failure count:
+
+```cpp
+// CURRENT: src/option/price_table_builder.hpp:205
+std::expected<PriceTensor<N>, std::string> extract_tensor(...);
+```
+
+**Options:**
+
+```cpp
+// OPTION A: Wrap in result struct
+struct ExtractionResult {
+    PriceTensor<N> tensor;
+    size_t failed_slices;
+    size_t total_slices;
+};
+std::expected<ExtractionResult, std::string> extract_tensor(...);
+
+// OPTION B: Add to existing PriceTableResult (preferred - less API churn)
+struct PriceTableResult {
+    std::shared_ptr<const PriceTableSurface<N>> surface;
+    size_t n_pde_solves;
+    double build_time_seconds;
+    BSplineFittingStats fitting_stats;
+    size_t failed_extraction_slices;  // NEW
+    size_t total_extraction_slices;   // NEW
+};
+```
+
+### Implementation Order
+
+1. Change `build()` to tolerate partial failures (add `max_failure_rate` config)
+2. Add failure tracking to `extract_tensor()` with atomic counter
+3. Extend `PriceTableResult` to include failure stats
+4. Add tests for partial failure scenarios
 
 ---
 
-### 3. Structured Error Types [Medium Priority]
+## Improvement 3: Integrate with Existing Error Types [Medium Priority]
 
-**Problem:** All methods return `std::string` errors - no programmatic error handling.
+### Problem with Original Plan
 
-**Solution:** Add `PriceTableError` enum and struct:
+The original plan proposed creating a new `PriceTableError` hierarchy, but this project already has structured error types in `src/support/error_types.hpp`:
 
+- `ValidationError` with `ValidationErrorCode` (InvalidStrike, InvalidMaturity, UnsortedGrid, etc.)
+- `SolverError` with `SolverErrorCode` (Stage1ConvergenceFailure, etc.)
+- `AllocationError` with `AllocationErrorCode`
+- `InterpolationError` with `InterpolationErrorCode`
+
+### Conversion Strategy
+
+`PriceTableBuilder` methods return `std::expected<T, std::string>`. To integrate with existing error types:
+
+**Option A: Use std::variant for multiple error types**
 ```cpp
+using PriceTableError = std::variant<
+    ValidationError,
+    SolverError,
+    AllocationError,
+    InterpolationError,
+    std::string  // Fallback for unstructured errors
+>;
+
+std::expected<PriceTableResult<N>, PriceTableError> build(...);
+```
+
+**Option B: Add PriceTableErrorCode to existing system**
+```cpp
+// In src/support/error_types.hpp, add:
 enum class PriceTableErrorCode {
-    // Validation errors
-    INVALID_GRID_UNSORTED,
-    INVALID_GRID_NEGATIVE,
-    INVALID_GRID_EMPTY,
-    INVALID_GRID_TOO_FEW_POINTS,
-    INVALID_K_REF,
-    INVALID_DOMAIN_COVERAGE,
-
-    // Build errors
-    INCOMPLETE_RESULTS,        // Some PDE solves failed
-    BSPLINE_FIT_FAILED,
-
-    // Runtime errors
-    UNSUPPORTED_DIMENSION,
-    IO_ERROR
+    InvalidDomainCoverage,
+    PartialPDEFailure,
+    ExtractionFailure,
+    FittingFailure
 };
 
 struct PriceTableError {
     PriceTableErrorCode code;
-    std::string message;                    // Human-readable description
-    std::optional<size_t> axis_index;       // 0=m, 1=τ, 2=σ, 3=r
-    std::optional<double> invalid_value;    // The problematic value
-    std::optional<size_t> failed_count;     // For INCOMPLETE_RESULTS
+    std::optional<ValidationError> validation_error;  // If validation caused it
+    std::optional<SolverError> solver_error;          // If solver caused it
+    std::string message;
 };
 ```
 
-**API change:**
+**Option C: Keep std::string but enrich messages (minimal change)**
 ```cpp
-// Before
+// Keep current signature
 std::expected<PriceTableResult<N>, std::string> build(...);
 
-// After
-std::expected<PriceTableResult<N>, PriceTableError> build(...);
+// But ensure error messages include structured info:
+return std::unexpected(
+    "Validation failed: " + validation_error_to_string(err) +
+    " [code=" + std::to_string(static_cast<int>(err.code)) +
+    ", value=" + std::to_string(err.value) + "]");
 ```
 
-**Migration:** Provide `error.message` for backwards-compatible string access.
+### Recommendation
+
+Start with **Option C** (minimal change, enriched strings) for Phase 2. Consider **Option B** for a future Phase 3 if programmatic error handling becomes important.
 
 ---
 
-### 4. C++23 Ranges in extract_tensor() [Low Priority]
+## Improvement 4: C++23 Ranges in extract_tensor() [Low Priority]
 
 **Problem:** Explicit loops could be modernized.
 
@@ -158,64 +278,38 @@ auto log_moneyness = axes.grids[0]
 
 ---
 
-### 5. TimeDomain in Factory Methods [Low Priority - Deferred]
+## Improvement 5: TimeDomain in Factory Methods [Deferred]
 
 **Problem:** Factory methods take `size_t n_time` which is less expressive.
 
-**Current API:**
-```cpp
-from_vectors(..., GridSpec<double> grid_spec, size_t n_time, OptionType type, ...)
-```
-
-**Options:**
-
-| Option | API | Pros | Cons |
-|--------|-----|------|------|
-| A | `TimeDomain time` | Reuses existing type | t_end unknown until axes |
-| B | `TimeConfig{n_steps}` | Clear intent | New type |
-| C | `std::variant<size_t, double>` | n_steps or dt | Implicit |
-
-**Recommendation:** Defer until usage patterns clarify requirements.
+**Deferred:** Until usage patterns clarify whether users need dt-based or n_steps-based control.
 
 ---
 
-### 6. build_with_save() [Low Priority - Deferred]
+## Improvement 6: build_with_save() [Deferred]
 
 **Problem:** No way to stream `PriceTensor<N>` to disk for external analysis.
 
-**Proposed API:**
-```cpp
-std::expected<PriceTableResult<N>, PriceTableError>
-build_with_save(
-    const PriceTableAxes<N>& axes,
-    const std::filesystem::path& output_path);
-```
-
-**Atomicity contract:**
-- Write to `{output_path}.tmp` during extraction
-- Atomic rename to `{output_path}` on success
-- Delete `.tmp` on failure
-- Clean stale `.tmp` files on startup (crash recovery)
-
-**Use case:** External tools need raw PDE prices for validation/analysis.
+**Deferred:** Depends on #3 (error types) for proper failure handling.
 
 ---
 
 ## Implementation Order
 
-| Order | Improvement | Effort | Dependencies |
-|-------|-------------|--------|--------------|
-| 1 | Parallelize extraction (#1) | Low | None |
-| 2 | Atomic failure tracking (#2) | Low | #1 |
-| 3 | Structured error types (#3) | Medium | None |
-| 4 | C++23 ranges (#4) | Low | None |
-| 5 | TimeDomain factories (#5) | Low | Deferred |
-| 6 | build_with_save (#6) | Medium | #3 |
+| Order | Improvement | Effort | Blockers |
+|-------|-------------|--------|----------|
+| 1a | Build system: add OpenMP to price_table_builder | Low | None |
+| 1b | Parallelize extract_tensor() | Low | 1a |
+| 2a | Change build() to tolerate partial failures | Medium | None |
+| 2b | Add atomic failure tracking | Low | 2a |
+| 2c | Extend PriceTableResult with failure stats | Low | 2b |
+| 3 | Enriched error messages (Option C) | Low | None |
+| 4 | C++23 ranges for log_moneyness | Low | None |
 
 ## Verification
 
 Before completing Phase 2:
 - [ ] All 68+ tests pass
 - [ ] Benchmarks show expected speedup from parallelization
+- [ ] Partial failure tests verify tracking works
 - [ ] Examples compile and run correctly
-- [ ] Documentation updated for API changes
