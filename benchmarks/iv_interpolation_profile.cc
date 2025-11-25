@@ -95,12 +95,12 @@ const AnalyticSurfaceFixture& GetSurface() {
                 fixture_ptr->rate_grid});
 
         if (!fitter_result.has_value()) {
-            throw std::runtime_error("Failed to create B-spline fitter: " + fitter_result.error());
+            throw std::runtime_error("Failed to create B-spline fitter");
         }
 
         auto fit_result = fitter_result.value().fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         if (!fit_result.has_value()) {
-            throw std::runtime_error("Failed to fit B-spline surface: " + fit_result.error());
+            throw std::runtime_error("Failed to fit B-spline surface");
         }
 
         // Create PriceTableAxes
@@ -122,7 +122,7 @@ const AnalyticSurfaceFixture& GetSurface() {
         // Create surface with coefficients directly
         auto surface_result = PriceTableSurface<4>::build(axes, fit_result->coefficients, meta);
         if (!surface_result.has_value()) {
-            throw std::runtime_error("Failed to create surface: " + surface_result.error());
+            throw std::runtime_error("Failed to create surface");
         }
         fixture_ptr->surface = std::move(surface_result.value());
 
