@@ -986,6 +986,30 @@ struct PriceTableError {
 
 **Solution:** Add method that saves tensor before fitting:
 
+### Improvement 5: C++23 Ranges and mdspan in extract_tensor()
+
+**Problem:** `extract_tensor()` uses explicit loops that could be modernized with C++23 features.
+
+**Current code locations** (src/option/price_table_builder.cpp:342-393):
+1. Log-moneyness computation (lines 343-346)
+2. Nested (σ, r) iteration loops (lines 349-396)
+3. Moneyness interpolation loop (lines 390-393)
+
+**Potential improvements:**
+
+| Change | Current Code | Modernized | Benefit | Tradeoff |
+|--------|--------------|------------|---------|----------|
+| `std::views::transform` | `for (i=0; i<Nm; i++) log_moneyness[i] = std::log(axes.grids[0][i]);` | `auto log_moneyness = axes.grids[0] \| std::views::transform(std::log) \| std::ranges::to<std::vector>();` | Declarative, composable | Need `ranges::to` to materialize for repeated access |
+| `std::views::cartesian_product` | Nested `for (σ_idx...) for (r_idx...)` | `for (auto [σ_idx, r_idx] : std::views::cartesian_product(std::views::iota(0uz, Nσ), std::views::iota(0uz, Nr)))` | Flatter iteration | Obscures `batch_idx = σ_idx * Nr + r_idx` computation; error handling more complex |
+| `std::submdspan` | Manual indexing `tensor.view[i, j, σ_idx, r_idx]` | `auto slice = std::submdspan(tensor.view, std::full_extent, std::full_extent, σ_idx, r_idx);` then `slice[i, j] = value;` | Type-safe 2D slice per (σ, r) | Kokkos reference impl has limited submdspan support; complex API |
+
+**Recommendation:**
+- **Do now:** `std::views::transform` for log_moneyness (clear win, minimal risk)
+- **Defer:** `cartesian_product` - nested loops are clearer for error handling and batch_idx computation
+- **Defer:** `submdspan` - wait for better library support (current Kokkos impl is experimental)
+
+**Dependencies:** C++23 `<ranges>` header, `std::ranges::to` (P1206R7)
+
 ```cpp
 std::expected<PriceTableResult<N>, PriceTableError>
 build_with_save(
