@@ -668,6 +668,125 @@ PriceTableBuilder<N>::find_nearest_valid_neighbor(
     return std::nullopt;
 }
 
+template <size_t N>
+std::expected<RepairStats, std::string>
+PriceTableBuilder<N>::repair_failed_slices(
+    PriceTensor<N>& tensor,
+    const std::vector<size_t>& failed_pde,
+    const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+    const PriceTableAxes<N>& axes) const
+{
+    const size_t Nm = axes.grids[0].size();
+    const size_t Nt = axes.grids[1].size();
+    const size_t Nσ = axes.grids[2].size();
+    const size_t Nr = axes.grids[3].size();
+
+    // Group spline failures by (σ,r) to detect full-slice vs partial failures
+    std::map<std::pair<size_t, size_t>, std::vector<size_t>> spline_failures_by_slice;
+    for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
+        spline_failures_by_slice[{σ_idx, r_idx}].push_back(τ_idx);
+    }
+
+    // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
+    std::unordered_set<size_t> full_slice_set(failed_pde.begin(), failed_pde.end());
+    const size_t n_pde_failures = failed_pde.size();
+    size_t n_all_maturity_spline_failures = 0;
+    size_t partial_spline_points = 0;
+
+    for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
+        if (τ_failures.size() == Nt) {
+            auto [σ_idx, r_idx] = slice_key;
+            size_t flat_idx = σ_idx * Nr + r_idx;
+            if (full_slice_set.find(flat_idx) == full_slice_set.end()) {
+                full_slice_set.insert(flat_idx);
+                ++n_all_maturity_spline_failures;
+            }
+        } else {
+            partial_spline_points += τ_failures.size();
+        }
+    }
+
+    std::vector<size_t> full_slice_failures(full_slice_set.begin(), full_slice_set.end());
+
+    // Track which (σ,r) slices are valid donors
+    std::vector<bool> slice_valid(Nσ * Nr, true);
+    for (size_t flat_idx : full_slice_failures) {
+        slice_valid[flat_idx] = false;
+    }
+
+    // ========== PHASE 1: Repair partial spline failures via τ-interpolation ==========
+    for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
+        auto [σ_idx, r_idx] = slice_key;
+
+        // Skip full-slice failures (handled in Phase 2)
+        if (τ_failures.size() == Nt) continue;
+
+        // Partial failures: interpolate along τ axis
+        for (size_t τ_idx : τ_failures) {
+            std::optional<size_t> τ_before, τ_after;
+            for (size_t j = τ_idx; j-- > 0; ) {
+                if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
+                    τ_before = j; break;
+                }
+            }
+            for (size_t j = τ_idx + 1; j < Nt; ++j) {
+                if (!std::isnan(tensor.view[0, j, σ_idx, r_idx])) {
+                    τ_after = j; break;
+                }
+            }
+
+            // At least one must exist (not all_maturities_failed)
+            for (size_t i = 0; i < Nm; ++i) {
+                if (τ_before && τ_after) {
+                    double t = static_cast<double>(τ_idx - *τ_before) /
+                               static_cast<double>(*τ_after - *τ_before);
+                    tensor.view[i, τ_idx, σ_idx, r_idx] =
+                        (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
+                        t * tensor.view[i, *τ_after, σ_idx, r_idx];
+                } else if (τ_before) {
+                    tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
+                } else {
+                    tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
+                }
+            }
+        }
+    }
+
+    // ========== PHASE 2: Repair full-slice failures via neighbor copy ==========
+    size_t repaired_full_count = 0;
+    for (size_t flat_idx : full_slice_failures) {
+        size_t σ_idx = flat_idx / Nr;
+        size_t r_idx = flat_idx % Nr;
+
+        auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
+        if (!neighbor.has_value()) {
+            return std::unexpected(
+                "Repair failed at slice (" + std::to_string(σ_idx) + "," +
+                std::to_string(r_idx) + "): no valid donor. Total full-slice failures: " +
+                std::to_string(full_slice_failures.size()) + " (" +
+                std::to_string(n_pde_failures) + " PDE + " +
+                std::to_string(n_all_maturity_spline_failures) + " all-maturity spline)");
+        }
+        auto [nσ, nr] = neighbor.value();
+
+        // Copy entire (m,τ) surface from neighbor
+        for (size_t i = 0; i < Nm; ++i) {
+            for (size_t j = 0; j < Nt; ++j) {
+                tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
+            }
+        }
+
+        // Mark as valid so this slice can be a donor for subsequent repairs
+        slice_valid[flat_idx] = true;
+        ++repaired_full_count;
+    }
+
+    return RepairStats{
+        .repaired_full_slices = repaired_full_count,
+        .repaired_partial_points = partial_spline_points
+    };
+}
+
 // Explicit instantiation (only N=4 supported)
 template class PriceTableBuilder<4>;
 

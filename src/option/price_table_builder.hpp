@@ -198,6 +198,15 @@ public:
         return find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
     }
 
+    /// For testing: expose repair_failed_slices method
+    [[nodiscard]] std::expected<RepairStats, std::string> repair_failed_slices_for_testing(
+        PriceTensor<N>& tensor,
+        const std::vector<size_t>& failed_pde,
+        const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+        const PriceTableAxes<N>& axes) const {
+        return repair_failed_slices(tensor, failed_pde, failed_spline, axes);
+    }
+
 private:
     /// Internal result from B-spline coefficient fitting
     struct FitCoeffsResult {
