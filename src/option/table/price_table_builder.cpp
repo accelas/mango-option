@@ -15,6 +15,7 @@
 #include <tuple>
 #include <map>
 #include <unordered_set>
+#include <ranges>
 
 namespace mango {
 
@@ -174,26 +175,22 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     // Moneyness and maturity are handled via grid interpolation in extract_tensor
     const double K_ref = config_.K_ref;
 
-    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-            double sigma = axes.grids[2][σ_idx];
-            double r = axes.grids[3][r_idx];
+    // C++23 cartesian_product: iterate over (σ, r) combinations
+    for (auto [sigma, r] : std::views::cartesian_product(axes.grids[2], axes.grids[3])) {
+        // Normalized solve: Spot = Strike = K_ref
+        // Surface will be interpolated across m and τ in extract_tensor
+        AmericanOptionParams params(
+            K_ref,                          // spot
+            K_ref,                          // strike
+            axes.grids[1].back(),           // maturity (max for this σ,r)
+            r,                              // rate
+            config_.dividend_yield,         // dividend_yield
+            config_.option_type,            // type
+            sigma,                          // volatility
+            config_.discrete_dividends      // discrete_dividends
+        );
 
-            // Normalized solve: Spot = Strike = K_ref
-            // Surface will be interpolated across m and τ in extract_tensor
-            AmericanOptionParams params(
-                K_ref,                          // spot
-                K_ref,                          // strike
-                axes.grids[1].back(),           // maturity (max for this σ,r)
-                r,                              // rate
-                config_.dividend_yield,         // dividend_yield
-                config_.option_type,            // type
-                sigma,                          // volatility
-                config_.discrete_dividends      // discrete_dividends
-            );
-
-            batch.push_back(params);
-        }
+        batch.push_back(params);
     }
 
     return batch;
@@ -231,21 +228,23 @@ PriceTableBuilder<N>::solve_batch(
         max_dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
     } else {
         // Non-uniform grid: generate and find actual max spacing
+        // C++23 pairwise: compute adjacent differences and find maximum
         auto grid_buffer = config_.grid_estimator.generate();
-        max_dx = 0.0;
-        for (size_t i = 1; i < grid_buffer.size(); ++i) {
-            double spacing = grid_buffer[i] - grid_buffer[i-1];
-            max_dx = std::max(max_dx, spacing);
-        }
+        auto spacings = grid_buffer.span() | std::views::pairwise
+                                           | std::views::transform([](auto pair) {
+                                                 auto [a, b] = pair;
+                                                 return b - a;
+                                             });
+        max_dx = std::ranges::max(spacings);
     }
 
     // Compute minimum required width based on option parameters
     // For accuracy, grid should cover ~3σ√τ on each side of log-moneyness
-    double max_sigma_sqrt_tau = 0.0;
-    for (const auto& p : batch) {
-        double sigma_sqrt_tau = p.volatility * std::sqrt(p.maturity);
-        max_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, sigma_sqrt_tau);
-    }
+    // C++23 ranges::max with projection
+    auto sigma_sqrt_tau = [](const AmericanOptionParams& p) {
+        return p.volatility * std::sqrt(p.maturity);
+    };
+    const double max_sigma_sqrt_tau = std::ranges::max(batch | std::views::transform(sigma_sqrt_tau));
     const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
 
     const bool grid_meets_constraints =
@@ -575,14 +574,13 @@ PriceTableBuilder<4>::from_strikes(
     }
 
     // Compute moneyness = spot/strike
-    std::vector<double> moneyness;
-    moneyness.reserve(strikes.size());
-    for (double K : strikes) {
-        moneyness.push_back(spot / K);
-    }
+    // C++23 ranges::to materializes the transform view into a vector
+    auto moneyness = strikes
+        | std::views::transform([spot](double K) { return spot / K; })
+        | std::ranges::to<std::vector>();
     // Note: if strikes are ascending, moneyness is descending
     // Sort to make ascending
-    std::sort(moneyness.begin(), moneyness.end());
+    std::ranges::sort(moneyness);
 
     return from_vectors(
         std::move(moneyness),
