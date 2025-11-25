@@ -239,5 +239,22 @@ TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
     EXPECT_NE(result.error().find("max_failure_rate"), std::string::npos);
 }
 
+TEST(PriceTableBuilderTest, FindNearestValidNeighborFindsAdjacent) {
+    // Test helper directly via builder's testing interface
+    // Create 3x3 grid, mark center invalid, verify finds adjacent
+    std::vector<bool> slice_valid(9, true);
+    slice_valid[4] = false;  // Center (1,1) invalid
+
+    mango::PriceTableConfig config;
+    mango::PriceTableBuilder<4> builder(config);
+
+    auto result = builder.find_nearest_valid_neighbor_for_testing(1, 1, 3, 3, slice_valid);
+    ASSERT_TRUE(result.has_value());
+    // Should find one of (0,1), (1,0), (1,2), (2,1) at distance 1
+    auto [nσ, nr] = result.value();
+    size_t dist = std::abs(static_cast<int>(nσ) - 1) + std::abs(static_cast<int>(nr) - 1);
+    EXPECT_EQ(dist, 1);
+}
+
 } // namespace
 } // namespace mango

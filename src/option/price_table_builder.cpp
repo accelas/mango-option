@@ -641,6 +641,33 @@ PriceTableBuilder<4>::from_chain(
     );
 }
 
+template <size_t N>
+std::optional<std::pair<size_t, size_t>>
+PriceTableBuilder<N>::find_nearest_valid_neighbor(
+    size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
+    const std::vector<bool>& slice_valid) const
+{
+    const size_t max_dist = (Nσ - 1) + (Nr - 1);
+
+    for (size_t dist = 1; dist <= max_dist; ++dist) {
+        for (int dσ = -static_cast<int>(dist); dσ <= static_cast<int>(dist); ++dσ) {
+            int dr = static_cast<int>(dist) - std::abs(dσ);
+            for (int sign : {-1, 1}) {
+                int nσ = static_cast<int>(σ_idx) + dσ;
+                int nr = static_cast<int>(r_idx) + sign * dr;
+                if (nσ >= 0 && nσ < static_cast<int>(Nσ) &&
+                    nr >= 0 && nr < static_cast<int>(Nr)) {
+                    if (slice_valid[nσ * Nr + nr]) {
+                        return std::make_pair(static_cast<size_t>(nσ),
+                                              static_cast<size_t>(nr));
+                    }
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 // Explicit instantiation (only N=4 supported)
 template class PriceTableBuilder<4>;
 

@@ -191,6 +191,13 @@ public:
         return std::move(result.value().coefficients);
     }
 
+    /// For testing: expose find_nearest_valid_neighbor method
+    [[nodiscard]] std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor_for_testing(
+        size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
+        const std::vector<bool>& slice_valid) const {
+        return find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
+    }
+
 private:
     /// Internal result from B-spline coefficient fitting
     struct FitCoeffsResult {
