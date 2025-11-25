@@ -36,3 +36,13 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "black_scholes",
+    hdrs = ["pde/operators/black_scholes.hpp"],
+    deps = [
+        ":execution_space",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -35,3 +35,15 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
 )
+
+cc_test(
+    name = "black_scholes_test",
+    srcs = ["black_scholes_test.cc"],
+    deps = [
+        "//kokkos/src:black_scholes",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
