@@ -123,6 +123,7 @@ cc_library(
     name = "price_table",
     hdrs = ["option/price_table.hpp"],
     deps = [
+        ":american_option",
         ":execution_space",
         ":batch_solver",
         ":bspline_nd",

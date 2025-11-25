@@ -60,11 +60,10 @@ protected:
         auto rate = create_uniform_grid(0.02, 0.08, 3);      // 3 rates
 
         mango::kokkos::PriceTableConfig config{
-            .n_space = 51,
-            .n_time = 100,  // Reduced for fast tests
             .K_ref = 100.0,
             .q = 0.0,
             .is_put = true
+            // n_space and n_time default to 0 = auto-estimate
         };
 
         mango::kokkos::PriceTableBuilder4D<MemSpace> builder(

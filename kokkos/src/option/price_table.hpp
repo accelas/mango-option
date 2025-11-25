@@ -17,6 +17,7 @@
 #include <expected>
 #include <array>
 #include <cmath>
+#include "kokkos/src/option/american_option.hpp"  // For GridAccuracyParams, estimate_batch_grid
 #include "kokkos/src/option/batch_solver.hpp"
 #include "kokkos/src/math/bspline_nd.hpp"
 #include "kokkos/src/math/bspline_basis.hpp"
@@ -26,11 +27,19 @@ namespace mango::kokkos {
 
 /// Configuration for price table builder
 struct PriceTableConfig {
-    size_t n_space = 101;     ///< Spatial grid points per option
-    size_t n_time = 500;      ///< Time steps per option
     double K_ref = 100.0;     ///< Reference strike for normalization
     double q = 0.0;           ///< Dividend yield
     bool is_put = true;       ///< Option type
+
+    /// Grid accuracy parameters for auto-estimation
+    /// If n_space/n_time are 0, they will be auto-estimated per-slice
+    GridAccuracyParams accuracy = GridAccuracyParams{};
+
+    /// Override spatial grid points (0 = auto-estimate)
+    size_t n_space = 0;
+
+    /// Override time steps (0 = auto-estimate)
+    size_t n_time = 0;
 };
 
 /// Error codes for price table
@@ -177,6 +186,15 @@ private:
             .is_put = config_.is_put
         };
 
+        // Auto-estimate grid if not explicitly specified
+        size_t n_space = config_.n_space;
+        size_t n_time = config_.n_time;
+        if (n_space == 0 || n_time == 0) {
+            auto [auto_space, auto_time] = estimate_batch_grid(tau, sigma, config_.accuracy);
+            if (n_space == 0) n_space = auto_space;
+            if (n_time == 0) n_time = auto_time;
+        }
+
         // Convert moneyness to spot/strike pairs
         // moneyness = S/K, so S = moneyness * K_ref
         const double K = config_.K_ref;
@@ -196,8 +214,7 @@ private:
         Kokkos::fence();
 
         // Solve batch
-        BatchAmericanSolver<MemSpace> solver(params, strikes, spots,
-                                              config_.n_space, config_.n_time);
+        BatchAmericanSolver<MemSpace> solver(params, strikes, spots, n_space, n_time);
 
         auto batch_result = solver.solve();
         if (!batch_result.has_value()) {

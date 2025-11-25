@@ -51,9 +51,12 @@ struct PricingPipelineConfig {
     GridConfig volatility{0.1, 0.5, 21};   ///< Volatility grid
     GridConfig rate{0.0, 0.1, 11};         ///< Rate grid
 
-    // PDE solver configuration
-    size_t n_space = 101;                   ///< Spatial grid points
-    size_t n_time = 500;                    ///< Time steps
+    // PDE solver configuration (0 = auto-estimate)
+    size_t n_space = 0;                     ///< Spatial grid points (0 = auto)
+    size_t n_time = 0;                      ///< Time steps (0 = auto)
+
+    /// Grid accuracy parameters for auto-estimation
+    GridAccuracyParams accuracy = GridAccuracyParams{};
 
     // Option parameters
     double K_ref = 100.0;                   ///< Reference strike
@@ -107,11 +110,12 @@ public:
 
         // Configure price table builder
         PriceTableConfig table_config{
-            .n_space = config_.n_space,
-            .n_time = config_.n_time,
             .K_ref = config_.K_ref,
             .q = config_.dividend_yield,
-            .is_put = config_.is_put
+            .is_put = config_.is_put,
+            .accuracy = config_.accuracy,
+            .n_space = config_.n_space,
+            .n_time = config_.n_time
         };
 
         // Build price table
@@ -148,16 +152,27 @@ public:
     /// @return View of pricing results
     [[nodiscard]] std::expected<Kokkos::View<BatchOptionResult*, MemSpace>, PipelineError>
     price_options(view_1d strikes, view_1d spots) const {
+        double maturity = (config_.maturity.min + config_.maturity.max) * 0.5;
+        double volatility = (config_.volatility.min + config_.volatility.max) * 0.5;
+
         BatchPricingParams params{
-            .maturity = (config_.maturity.min + config_.maturity.max) * 0.5,
-            .volatility = (config_.volatility.min + config_.volatility.max) * 0.5,
+            .maturity = maturity,
+            .volatility = volatility,
             .rate = (config_.rate.min + config_.rate.max) * 0.5,
             .dividend_yield = config_.dividend_yield,
             .is_put = config_.is_put
         };
 
-        BatchAmericanSolver<MemSpace> solver(
-            params, strikes, spots, config_.n_space, config_.n_time);
+        // Auto-estimate grid if not explicitly specified
+        size_t n_space = config_.n_space;
+        size_t n_time = config_.n_time;
+        if (n_space == 0 || n_time == 0) {
+            auto [auto_space, auto_time] = estimate_batch_grid(maturity, volatility, config_.accuracy);
+            if (n_space == 0) n_space = auto_space;
+            if (n_time == 0) n_time = auto_time;
+        }
+
+        BatchAmericanSolver<MemSpace> solver(params, strikes, spots, n_space, n_time);
 
         auto result = solver.solve();
         if (!result.has_value()) {
@@ -175,8 +190,17 @@ public:
     /// @return View of pricing results
     [[nodiscard]] std::expected<Kokkos::View<BatchOptionResult*, MemSpace>, PipelineError>
     price_options(const BatchPricingParams& params, view_1d strikes, view_1d spots) const {
-        BatchAmericanSolver<MemSpace> solver(
-            params, strikes, spots, config_.n_space, config_.n_time);
+        // Auto-estimate grid if not explicitly specified
+        size_t n_space = config_.n_space;
+        size_t n_time = config_.n_time;
+        if (n_space == 0 || n_time == 0) {
+            auto [auto_space, auto_time] = estimate_batch_grid(
+                params.maturity, params.volatility, config_.accuracy);
+            if (n_space == 0) n_space = auto_space;
+            if (n_time == 0) n_time = auto_time;
+        }
+
+        BatchAmericanSolver<MemSpace> solver(params, strikes, spots, n_space, n_time);
 
         auto result = solver.solve();
         if (!result.has_value()) {

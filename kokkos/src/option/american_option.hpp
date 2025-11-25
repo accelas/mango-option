@@ -20,6 +20,39 @@ namespace mango::kokkos {
 
 enum class OptionType { Call, Put };
 
+/// Grid accuracy parameters for automatic estimation
+///
+/// Controls spatial/temporal resolution tradeoffs for American option PDE solver.
+/// Matches the original C++ version's GridAccuracyParams.
+struct GridAccuracyParams {
+    /// Domain half-width in units of σ√T (default: 5.0 covers ±5 std devs)
+    double n_sigma = 5.0;
+
+    /// Sinh clustering strength (default: 2.0, unused for uniform grids)
+    double alpha = 2.0;
+
+    /// Target spatial truncation error (default: 1e-2 for ~1e-3 price accuracy)
+    /// - 1e-2: Fast mode (~100-150 points, ~5ms per option)
+    /// - 1e-3: Medium accuracy (~300-400 points, ~50ms per option)
+    /// - 1e-6: High accuracy mode (~1200 points, ~300ms per option)
+    double tol = 1e-2;
+
+    /// CFL safety factor for time step (default: 0.5 for implicit scheme)
+    double c_t = 0.5;
+
+    /// Minimum spatial grid points (default: 51)
+    size_t min_spatial_points = 51;
+
+    /// Maximum spatial grid points (default: 201)
+    size_t max_spatial_points = 201;
+
+    /// Minimum time steps (default: 50)
+    size_t min_time_steps = 50;
+
+    /// Maximum time steps (default: 500)
+    size_t max_time_steps = 500;
+};
+
 /// Grid parameters for estimation
 struct GridParams {
     double x_min;
@@ -58,46 +91,63 @@ enum class SolverError {
     GridError
 };
 
+/// Estimate grid parameters for batch pricing
+///
+/// Automatically determines appropriate spatial/temporal discretization
+/// for batch option pricing where all options share the same maturity and volatility.
+///
+/// @param maturity Time to expiration (years)
+/// @param volatility Annualized volatility
+/// @param accuracy Grid accuracy parameters
+/// @return Pair of (n_space, n_time)
+inline std::pair<size_t, size_t> estimate_batch_grid(
+    double maturity,
+    double volatility,
+    const GridAccuracyParams& accuracy = GridAccuracyParams{})
+{
+    // Domain width in log-moneyness
+    double sigma_sqrt_T = volatility * std::sqrt(maturity);
+    double domain_width = 2.0 * accuracy.n_sigma * sigma_sqrt_T;
+
+    // Spatial resolution based on truncation error tolerance
+    double dx_target = volatility * std::sqrt(accuracy.tol);
+    size_t Nx = static_cast<size_t>(std::ceil(domain_width / dx_target));
+    Nx = std::clamp(Nx, accuracy.min_spatial_points, accuracy.max_spatial_points);
+
+    // Ensure odd number of points (for centered stencils)
+    if (Nx % 2 == 0) Nx++;
+
+    // Time step based on CFL condition for uniform grid
+    double dx = domain_width / static_cast<double>(Nx - 1);
+    double dt = accuracy.c_t * dx;
+    size_t Nt = static_cast<size_t>(std::ceil(maturity / dt));
+    Nt = std::clamp(Nt, accuracy.min_time_steps, accuracy.max_time_steps);
+
+    return {Nx, Nt};
+}
+
 /// Estimate grid parameters for American option pricing
 ///
 /// Automatically determines appropriate spatial/temporal discretization
 /// based on option characteristics (volatility, maturity, moneyness).
 ///
 /// @param params Option pricing parameters
-/// @param n_sigma Domain half-width in units of σ√T (default: 5.0)
-/// @param alpha Sinh clustering strength (default: 2.0, unused for uniform grids)
-/// @param tol Target spatial truncation error (default: 1e-2)
+/// @param accuracy Grid accuracy parameters
 /// @return Pair of (GridParams, TimeParams)
 inline std::pair<GridParams, TimeParams> estimate_grid_for_option(
     const PricingParams& params,
-    double n_sigma = 5.0,
-    double alpha = 2.0,
-    double tol = 1e-2)
+    const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
     // Domain bounds (centered on current moneyness)
     double sigma_sqrt_T = params.volatility * std::sqrt(params.maturity);
     double x0 = std::log(params.spot / params.strike);
-    double x_min = x0 - n_sigma * sigma_sqrt_T;
-    double x_max = x0 + n_sigma * sigma_sqrt_T;
+    double x_min = x0 - accuracy.n_sigma * sigma_sqrt_T;
+    double x_max = x0 + accuracy.n_sigma * sigma_sqrt_T;
 
-    // Spatial resolution (target truncation error)
-    double dx_target = params.volatility * std::sqrt(tol);
-    size_t Nx = static_cast<size_t>(std::ceil((x_max - x_min) / dx_target));
-    Nx = std::clamp(Nx, 100UL, 1200UL);
+    // Use batch estimation for grid size
+    auto [Nx, Nt] = estimate_batch_grid(params.maturity, params.volatility, accuracy);
 
-    // Ensure odd number of points (for centered stencils)
-    if (Nx % 2 == 0) Nx++;
-
-    // Temporal resolution for uniform grid
-    // Note: Using uniform grid spacing (not sinh-clustered) since non-uniform
-    // FD stencils aren't implemented yet. CFL condition for implicit scheme
-    // is much less restrictive than explicit, so we use a reasonable dt.
-    double dx = (x_max - x_min) / static_cast<double>(Nx - 1);
-    double dt = 0.5 * dx;  // CFL safety factor for implicit scheme
-    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
-    Nt = std::clamp(Nt, 50UL, 2000UL);  // Reasonable bounds
-
-    return {GridParams{x_min, x_max, Nx, alpha}, TimeParams{params.maturity, Nt}};
+    return {GridParams{x_min, x_max, Nx, accuracy.alpha}, TimeParams{params.maturity, Nt}};
 }
 
 /// American option solver using finite differences

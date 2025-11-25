@@ -27,8 +27,7 @@ protected:
         config.maturity = {0.25, 1.0, 4};
         config.volatility = {0.15, 0.35, 5};
         config.rate = {0.02, 0.06, 3};
-        config.n_space = 51;
-        config.n_time = 100;
+        // n_space and n_time default to 0 = auto-estimate
         config.K_ref = 100.0;
         config.dividend_yield = 0.01;
         config.is_put = true;
@@ -43,8 +42,9 @@ TEST_F(PricingPipelineTest, Construction) {
 
     EXPECT_FALSE(pipeline.is_price_table_built());
     EXPECT_EQ(pipeline.config().K_ref, 100.0);
-    EXPECT_EQ(pipeline.config().n_space, 51);
-    EXPECT_EQ(pipeline.config().n_time, 100);
+    // n_space and n_time default to 0 = auto-estimate
+    EXPECT_EQ(pipeline.config().n_space, 0);
+    EXPECT_EQ(pipeline.config().n_time, 0);
 }
 
 // Test 2: Price table building
@@ -154,9 +154,7 @@ TEST_F(PricingPipelineTest, IVSolveInterpolated) {
 // Test 5: IV solve via FDM
 TEST_F(PricingPipelineTest, IVSolveFDM) {
     auto config = default_config();
-    // Use finer grid for FDM accuracy
-    config.n_space = 51;
-    config.n_time = 100;  // Reduced for fast tests
+    // Uses auto-estimation by default
     PricingPipeline<Kokkos::HostSpace> pipeline(config);
 
     // Create IV query
@@ -190,8 +188,7 @@ TEST_F(PricingPipelineTest, IVSolveFDM) {
 // Test 6: Comparison - Interpolated vs FDM IV
 TEST_F(PricingPipelineTest, InterpolatedVsFDMComparison) {
     auto config = default_config();
-    config.n_space = 51;
-    config.n_time = 100;  // Reduced for fast tests
+    // Uses auto-estimation by default
     PricingPipeline<Kokkos::HostSpace> pipeline(config);
 
     // Build price table

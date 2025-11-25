@@ -38,11 +38,14 @@ struct IVSolverFDMConfig {
     /// Maximum volatility bound for search
     double sigma_max = 3.0;
 
-    /// Number of spatial grid points for PDE solver
-    size_t n_space = 101;
+    /// Grid accuracy parameters for auto-estimation
+    GridAccuracyParams accuracy = GridAccuracyParams{};
 
-    /// Number of time steps for PDE solver
-    size_t n_time = 500;
+    /// Number of spatial grid points for PDE solver (0 = auto-estimate)
+    size_t n_space = 0;
+
+    /// Number of time steps for PDE solver (0 = auto-estimate)
+    size_t n_time = 0;
 };
 
 /// Result codes for IV solver
