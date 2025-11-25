@@ -109,13 +109,13 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     size_t n_pde_solves = batch_result.results.size() - batch_result.failed_count;
 
     // Step 4: Extract tensor via interpolation
-    auto tensor_result = extract_tensor(batch_result, axes);
-    if (!tensor_result.has_value()) {
-        return std::unexpected("extract_tensor failed: " + tensor_result.error());
+    auto extraction = extract_tensor(batch_result, axes);
+    if (!extraction.has_value()) {
+        return std::unexpected("extract_tensor failed: " + extraction.error());
     }
 
     // Step 5: Fit B-spline coefficients
-    auto coeffs_result = fit_coeffs(tensor_result.value(), axes);
+    auto coeffs_result = fit_coeffs(extraction->tensor, axes);
     if (!coeffs_result.has_value()) {
         return std::unexpected("fit_coeffs failed: " + coeffs_result.error());
     }
@@ -297,7 +297,7 @@ PriceTableBuilder<N>::solve_batch(
 }
 
 template <size_t N>
-std::expected<PriceTensor<N>, std::string>
+std::expected<ExtractionResult<N>, std::string>
 PriceTableBuilder<N>::extract_tensor(
     const BatchAmericanOptionResult& batch,
     const PriceTableAxes<N>& axes) const
@@ -393,7 +393,12 @@ PriceTableBuilder<N>::extract_tensor(
         }
     }
 
-    return tensor;
+    return ExtractionResult<N>{
+        .tensor = std::move(tensor),
+        .total_slices = Nσ * Nr,
+        .failed_pde = {},      // Will populate in Task 8
+        .failed_spline = {}    // Will populate in Task 8
+    };
 }
 
 template <size_t N>

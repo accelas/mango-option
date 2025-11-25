@@ -168,7 +168,7 @@ public:
     }
 
     /// For testing: expose extract_tensor method
-    [[nodiscard]] std::expected<PriceTensor<N>, std::string> extract_tensor_for_testing(
+    [[nodiscard]] std::expected<ExtractionResult<N>, std::string> extract_tensor_for_testing(
         const BatchAmericanOptionResult& batch,
         const PriceTableAxes<N>& axes) const {
         return extract_tensor(batch, axes);
@@ -201,7 +201,7 @@ private:
         const PriceTableAxes<N>& axes) const;
 
     /// Extract PriceTensor from batch results using cubic spline interpolation
-    [[nodiscard]] std::expected<PriceTensor<N>, std::string> extract_tensor(
+    [[nodiscard]] std::expected<ExtractionResult<N>, std::string> extract_tensor(
         const BatchAmericanOptionResult& batch,
         const PriceTableAxes<N>& axes) const;
 

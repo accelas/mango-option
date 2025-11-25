@@ -163,19 +163,19 @@ TEST(PriceTableBuilderTest, ExtractTensorInterpolatesSurfaces) {
     auto tensor_result = builder.extract_tensor_for_testing(batch_result, axes);
 
     ASSERT_TRUE(tensor_result.has_value());
-    auto tensor = tensor_result.value();
+    auto& extraction = tensor_result.value();
 
     // Tensor should have full 4D shape: 3×3×1×1 = 9 points
-    EXPECT_EQ(tensor.view.extent(0), 3);  // moneyness
-    EXPECT_EQ(tensor.view.extent(1), 3);  // maturity
-    EXPECT_EQ(tensor.view.extent(2), 1);  // volatility
-    EXPECT_EQ(tensor.view.extent(3), 1);  // rate
+    EXPECT_EQ(extraction.tensor.view.extent(0), 3);  // moneyness
+    EXPECT_EQ(extraction.tensor.view.extent(1), 3);  // maturity
+    EXPECT_EQ(extraction.tensor.view.extent(2), 1);  // volatility
+    EXPECT_EQ(extraction.tensor.view.extent(3), 1);  // rate
 
     // Verify prices are populated (not NaN or zero)
     // Note: K_ref scaling should now be applied
     for (size_t i = 0; i < 3; ++i) {
         for (size_t j = 0; j < 3; ++j) {
-            double price = tensor.view[i, j, 0, 0];
+            double price = extraction.tensor.view[i, j, 0, 0];
             EXPECT_TRUE(std::isfinite(price));
             EXPECT_GT(price, 0.0);
         }
