@@ -131,3 +131,41 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "iv_solver_interpolated_test",
+    srcs = ["iv_solver_interpolated_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:iv_solver_interpolated",
+        "//kokkos/src:price_table",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
+
+cc_test(
+    name = "iv_solver_interpolated_debug_test",
+    srcs = ["iv_solver_interpolated_debug_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:iv_solver_interpolated",
+        "//kokkos/src:price_table",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
+
+cc_test(
+    name = "iv_solver_simple_test",
+    srcs = ["iv_solver_simple_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:price_table",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)

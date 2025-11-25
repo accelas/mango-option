@@ -131,3 +131,15 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "iv_solver_interpolated",
+    hdrs = ["option/iv_solver_interpolated.hpp"],
+    deps = [
+        ":execution_space",
+        ":root_finding",
+        ":price_table",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
