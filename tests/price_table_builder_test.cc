@@ -202,5 +202,25 @@ TEST(PriceTableConfigTest, ValidateConfigAcceptsValidRate) {
     EXPECT_FALSE(err.has_value());
 }
 
+TEST(PriceTableBuilderTest, BuildRejectsInvalidConfig) {
+    mango::PriceTableConfig config;
+    config.max_failure_rate = 2.0;  // Invalid
+    config.option_type = mango::OptionType::PUT;
+    config.K_ref = 100.0;
+
+    mango::PriceTableBuilder<4> builder(config);
+
+    // Create minimal valid axes (4 points per axis for B-spline)
+    mango::PriceTableAxes<4> axes;
+    axes.grids[0] = {0.9, 1.0, 1.1, 1.2};
+    axes.grids[1] = {0.25, 0.5, 0.75, 1.0};
+    axes.grids[2] = {0.2, 0.25, 0.3, 0.35};
+    axes.grids[3] = {0.05, 0.06, 0.07, 0.08};
+
+    auto result = builder.build(axes);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("max_failure_rate"), std::string::npos);
+}
+
 } // namespace
 } // namespace mango

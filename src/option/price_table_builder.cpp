@@ -27,6 +27,11 @@ std::expected<PriceTableResult<N>, std::string>
 PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
+    // Validate config
+    if (auto err = validate_config(config_); err.has_value()) {
+        return std::unexpected("Invalid config: " + err.value());
+    }
+
     // Start timing
     auto start_time = std::chrono::high_resolution_clock::now();
 
