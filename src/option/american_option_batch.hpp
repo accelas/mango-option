@@ -183,19 +183,24 @@ public:
     /// @param use_shared_grid If true, all options share one global grid
     /// @param setup Optional callback invoked after solver creation
     ///              (disables normalized path - see documentation above)
+    /// @param custom_grid Optional custom grid specification (GridSpec + TimeDomain).
+    ///                    When provided, bypasses auto-estimation and uses exact grid.
+    ///                    When nullopt, uses grid_accuracy_ member for estimation.
     /// @return Batch result with individual results and failure count
     BatchAmericanOptionResult solve_batch(
         std::span<const AmericanOptionParams> params,
         bool use_shared_grid = false,
-        SetupCallback setup = nullptr);
+        SetupCallback setup = nullptr,
+        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
 
     /// Solve a batch of American options (vector overload)
     BatchAmericanOptionResult solve_batch(
         const std::vector<AmericanOptionParams>& params,
         bool use_shared_grid = false,
-        SetupCallback setup = nullptr)
+        SetupCallback setup = nullptr,
+        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt)
     {
-        return solve_batch(std::span{params}, use_shared_grid, setup);
+        return solve_batch(std::span{params}, use_shared_grid, setup, custom_grid);
     }
 
 private:
@@ -213,13 +218,15 @@ private:
     BatchAmericanOptionResult solve_regular_batch(
         std::span<const AmericanOptionParams> params,
         bool use_shared_grid = false,
-        SetupCallback setup = nullptr);
+        SetupCallback setup = nullptr,
+        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
 
     /// Regular batch solving (vector overload)
     BatchAmericanOptionResult solve_regular_batch(
         const std::vector<AmericanOptionParams>& params,
         bool use_shared_grid = false,
-        SetupCallback setup = nullptr);
+        SetupCallback setup = nullptr,
+        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
 
     /// Check if batch qualifies for normalized solving
     bool is_normalized_eligible(
@@ -238,7 +245,8 @@ private:
     /// Fast path: normalized chain solving with PDE grouping
     BatchAmericanOptionResult solve_normalized_chain(
         std::span<const AmericanOptionParams> params,
-        SetupCallback setup);
+        SetupCallback setup,
+        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
 };
 
 /// Solve a single American option with automatic grid determination

@@ -16,7 +16,7 @@
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_surface.hpp"
 #include "src/option/price_table_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
@@ -57,6 +57,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
     std::shared_ptr<const BSpline4D> evaluator;
+    std::shared_ptr<const PriceTableSurface<4>> surface;  // For IVSolverInterpolated
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -107,7 +108,30 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error());
         }
 
-        // Create workspace for BSpline4D
+        // Create PriceTableAxes
+        PriceTableAxes<4> axes;
+        axes.grids = {
+            fixture_ptr->m_grid,
+            fixture_ptr->tau_grid,
+            fixture_ptr->sigma_grid,
+            fixture_ptr->rate_grid
+        };
+
+        // Create metadata
+        PriceTableMetadata meta{
+            .K_ref = fixture_ptr->K_ref,
+            .dividend_yield = 0.0,
+            .discrete_dividends = {}
+        };
+
+        // Create surface with coefficients directly
+        auto surface_result = PriceTableSurface<4>::build(axes, fit_result->coefficients, meta);
+        if (!surface_result.has_value()) {
+            throw std::runtime_error("Failed to create surface: " + surface_result.error());
+        }
+        fixture_ptr->surface = std::move(surface_result.value());
+
+        // Create PriceTableWorkspace for BSpline4D (used by some benchmarks)
         auto workspace_result = PriceTableWorkspace::create(
             fixture_ptr->m_grid,
             fixture_ptr->tau_grid,
@@ -115,12 +139,13 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
             fixture_ptr->rate_grid,
             fit_result->coefficients,
             fixture_ptr->K_ref,
-            0.0);  // dividend_yield = 0
-
+            0.0  // dividend_yield
+        );
         if (!workspace_result.has_value()) {
             throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
         }
 
+        // Create BSpline4D evaluator from workspace
         auto evaluator_result = BSpline4D::create(workspace_result.value());
         if (!evaluator_result.has_value()) {
             throw std::runtime_error("Failed to create BSpline4D: " + evaluator_result.error());
@@ -367,14 +392,8 @@ BENCHMARK(BM_ImpliedVol_ITM_Put);
 static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create solver using factory method
-    auto solver_result = IVSolverInterpolated::create(
-        surf.evaluator,
-        surf.K_ref,
-        {surf.m_grid.front(), surf.m_grid.back()},
-        {surf.tau_grid.front(), surf.tau_grid.back()},
-        {surf.sigma_grid.front(), surf.sigma_grid.back()},
-        {surf.rate_grid.front(), surf.rate_grid.back()});
+    // Create solver using factory method with new API
+    auto solver_result = IVSolverInterpolated::create(surf.surface);
 
     if (!solver_result) {
         auto err = solver_result.error();

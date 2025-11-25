@@ -1,4 +1,10 @@
 cc_library(
+    name = "option_chain",
+    hdrs = ["option_chain.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "price_table_axes",
     hdrs = ["price_table_axes.hpp"],
     deps = [
@@ -51,6 +57,7 @@ cc_library(
     srcs = ["price_table_builder.cpp"],
     hdrs = ["price_table_builder.hpp"],
     deps = [
+        ":option_chain",
         ":price_table_config",
         ":price_table_axes",
         ":price_table_surface",
@@ -189,29 +196,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_4d_builder",
-    srcs = ["price_table_4d_builder.cpp"],
-    hdrs = ["price_table_4d_builder.hpp"],
-    deps = [
-        ":american_option_batch",
-        ":price_table_grid",
-        ":price_table_extraction",
-        ":bspline_price_table",
-        "//src/math:bspline_nd_separable",
-        ":price_table_workspace",
-        "//src/pde/core:trbdf2_config",
-        "//src/math:root_finding",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "iv_result",
     hdrs = ["iv_result.hpp"],
     deps = [
@@ -228,7 +212,7 @@ cc_library(
         ":bspline_price_table",
         ":american_option",
         ":iv_result",
-        ":price_table_4d_builder",
+        ":price_table_surface",
         ":option_spec",
         "//src/math:root_finding",
         "//src/support:parallel",

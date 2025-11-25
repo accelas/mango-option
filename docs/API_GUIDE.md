@@ -320,7 +320,8 @@ auto result = solver.solve_impl(query);
 **Pre-compute American option prices across parameter space:**
 
 ```cpp
-#include "src/option/price_table_4d_builder.hpp"
+#include "src/option/price_table_builder.hpp"
+#include "src/option/price_table_surface.hpp"
 
 // Define 4D parameter grids
 std::vector<double> moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};  // m = S/K
@@ -330,63 +331,72 @@ std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06, 0.08, 0.10};         // 
 
 double K_ref = 100.0;  // Reference strike price
 
-// Create builder
-auto builder_result = mango::PriceTable4DBuilder::create(
+// Create PDE grid specification
+auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+
+// Create builder and axes using factory method
+auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
     moneyness_grid,
     maturity_grid,
     vol_grid,
     rate_grid,
-    K_ref
+    K_ref,
+    grid_spec,
+    1000,  // n_time (time steps)
+    mango::OptionType::PUT
 );
 
-if (!builder_result.has_value()) {
-    std::cerr << "Builder creation failed\n";
+if (!factory_result.has_value()) {
+    std::cerr << "Factory creation failed: " << factory_result.error() << "\n";
     return;
 }
 
-auto builder = std::move(builder_result.value());
+auto [builder, axes] = std::move(factory_result.value());
 
-// Pre-compute prices (parallelized with OpenMP)
+// Build price table (parallelized with OpenMP)
 // This takes ~15-20 minutes for 300K grid on 32 cores
-builder->precompute(
-    mango::OptionType::PUT,
-    101,   // n_space (spatial grid points)
-    1000   // n_time (time steps)
-);
+auto result = builder.build(axes);
 
-// Access the surface
-auto surface = builder->get_surface();
+if (!result.has_value()) {
+    std::cerr << "Build failed: " << result.error() << "\n";
+    return;
+}
 
-// Query price and Greeks (~500ns each)
+// Access the surface (shared_ptr)
+auto surface = result->surface;
+
+// Query price and partials (~500ns each)
 double m = 1.05;      // Moneyness (S/K)
 double tau = 0.25;    // Time to maturity (years)
 double sigma = 0.20;  // Volatility
 double r = 0.05;      // Risk-free rate
 
-double price = surface.eval(m, tau, sigma, r);
-double delta = surface.eval_delta(m, tau, sigma, r);
-double vega = surface.eval_vega(m, tau, sigma, r);
-double gamma = surface.eval_gamma(m, tau, sigma, r);
+double price = surface->value({m, tau, sigma, r});
+double delta = surface->partial(0, {m, tau, sigma, r});  // ∂price/∂m
+double vega = surface->partial(2, {m, tau, sigma, r});   // ∂price/∂σ
+double gamma = surface->partial(1, {m, tau, sigma, r});  // ∂price/∂τ (often called theta)
 ```
 
-### Saving and Loading Price Tables
+### Factory Methods
 
-**Persist pre-computed surfaces to disk:**
+**Three convenience factories for common use cases:**
 
 ```cpp
-// Save to binary file
-builder->save("american_put_surface.bin");
+// 1. from_vectors: Explicit moneyness values
+auto result1 = mango::PriceTableBuilder<4>::from_vectors(
+    moneyness_grid, maturity_grid, vol_grid, rate_grid,
+    K_ref, grid_spec, n_time, mango::OptionType::PUT);
 
-// Later: fast load (milliseconds vs minutes for pre-computation)
-auto loaded_result = mango::PriceTable4DBuilder::load("american_put_surface.bin");
+// 2. from_strikes: Auto-computes moneyness from spot and strikes
+auto result2 = mango::PriceTableBuilder<4>::from_strikes(
+    spot, strikes, maturities, volatilities, rates,
+    grid_spec, n_time, mango::OptionType::CALL);
 
-if (loaded_result.has_value()) {
-    auto loaded_builder = std::move(loaded_result.value());
-    auto surface = loaded_builder->get_surface();
+// 3. from_chain: Extracts all parameters from OptionChain
+auto result3 = mango::PriceTableBuilder<4>::from_chain(
+    option_chain, grid_spec, n_time, mango::OptionType::PUT);
 
-    // Use surface for fast queries
-    double price = surface.eval(1.0, 0.5, 0.25, 0.03);
-}
+// All return std::expected<std::pair<builder, axes>, std::string>
 ```
 
 ### Batch Queries on Price Surface
@@ -394,18 +404,36 @@ if (loaded_result.has_value()) {
 **Evaluate many points efficiently:**
 
 ```cpp
-auto surface = builder->get_surface();
+auto surface = result->surface;
 
-std::vector<std::tuple<double, double, double, double>> queries = {
+std::vector<std::array<double, 4>> queries = {
     {1.00, 0.25, 0.20, 0.05},  // ATM, 3M, 20% vol, 5% rate
     {0.95, 0.50, 0.25, 0.03},  // ITM, 6M, 25% vol, 3% rate
     {1.10, 1.00, 0.15, 0.02},  // OTM, 1Y, 15% vol, 2% rate
 };
 
-for (const auto& [m, tau, sigma, r] : queries) {
-    double price = surface.eval(m, tau, sigma, r);
-    double vega = surface.eval_vega(m, tau, sigma, r);
-    std::cout << "m=" << m << ", price=" << price << ", vega=" << vega << "\n";
+for (const auto& coords : queries) {
+    double price = surface->value(coords);
+    double vega = surface->partial(2, coords);  // ∂price/∂σ
+    std::cout << "m=" << coords[0] << ", price=" << price << ", vega=" << vega << "\n";
+}
+```
+
+### Build Diagnostics
+
+**Access performance and quality metrics:**
+
+```cpp
+auto result = builder.build(axes);
+
+if (result.has_value()) {
+    std::cout << "PDE solves: " << result->n_pde_solves << "\n";
+    std::cout << "Build time: " << result->precompute_time_seconds << "s\n";
+
+    const auto& stats = result->fitting_stats;
+    std::cout << "Max B-spline residual: " << stats.max_residual_overall << "\n";
+    std::cout << "Max condition number: " << stats.condition_max << "\n";
+    std::cout << "Failed slices: " << stats.failed_slices_total << "\n";
 }
 ```
 

@@ -35,8 +35,11 @@ public:
 
     /// Evaluate price at query point
     ///
+    /// Queries outside grid bounds are clamped to boundary values.
+    /// For accurate results, ensure query points lie within grid bounds.
+    ///
     /// @param coords N-dimensional coordinates
-    /// @return Interpolated value
+    /// @return Interpolated value (clamped at boundaries)
     [[nodiscard]] double value(const std::array<double, N>& coords) const;
 
     /// Partial derivative along specified axis

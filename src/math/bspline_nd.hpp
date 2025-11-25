@@ -116,30 +116,70 @@ public:
     /// @param query N-dimensional query point
     /// @return Interpolated value
     T eval(const QueryPoint& query) const {
-        // Clamp queries to domain
+        // Process all dimensions in single loop for better cache locality
         QueryPoint clamped;
+        std::array<int, N> spans;
+        std::array<std::array<T, 4>, N> basis_weights;
+
         for (size_t dim = 0; dim < N; ++dim) {
+            // Clamp query to domain
             clamped[dim] = clamp_bspline_query(
                 query[dim],
                 grids_[dim].front(),
                 grids_[dim].back()
             );
-        }
 
-        // Find knot spans for all dimensions
-        std::array<int, N> spans;
-        for (size_t dim = 0; dim < N; ++dim) {
+            // Find knot span
             spans[dim] = find_span_cubic(knots_[dim], clamped[dim]);
-        }
 
-        // Evaluate basis functions for all dimensions
-        std::array<std::array<T, 4>, N> basis_weights;
-        for (size_t dim = 0; dim < N; ++dim) {
+            // Evaluate basis functions
             cubic_basis_nonuniform(knots_[dim], spans[dim], clamped[dim],
                                  basis_weights[dim].data());
         }
 
         // Tensor-product evaluation with recursive loop unrolling
+        return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
+    }
+
+    /// Evaluate partial derivative of B-spline at query point (analytic)
+    ///
+    /// Computes ∂f/∂xₐ using analytic B-spline derivative formula.
+    /// Uses derivative basis functions for the specified axis, regular basis
+    /// for all other axes.
+    ///
+    /// @param axis Dimension to differentiate (0 to N-1)
+    /// @param query N-dimensional query point
+    /// @return Partial derivative ∂f/∂x_axis
+    T eval_partial(size_t axis, const QueryPoint& query) const {
+        assert(axis < N && "Axis index out of bounds");
+
+        // Process all dimensions in single loop for better cache locality
+        QueryPoint clamped;
+        std::array<int, N> spans;
+        std::array<std::array<T, 4>, N> basis_weights;
+
+        for (size_t dim = 0; dim < N; ++dim) {
+            // Clamp query to domain
+            clamped[dim] = clamp_bspline_query(
+                query[dim],
+                grids_[dim].front(),
+                grids_[dim].back()
+            );
+
+            // Find knot span
+            spans[dim] = find_span_cubic(knots_[dim], clamped[dim]);
+
+            // Evaluate basis functions (derivative basis for target axis, regular for others)
+            if (dim == axis) {
+                cubic_basis_derivative_nonuniform(knots_[dim], spans[dim], clamped[dim],
+                                                  basis_weights[dim].data());
+            } else {
+                cubic_basis_nonuniform(knots_[dim], spans[dim], clamped[dim],
+                                      basis_weights[dim].data());
+            }
+        }
+
+        // Tensor-product evaluation (same as eval, but with derivative weights in one axis)
         return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
     }
 

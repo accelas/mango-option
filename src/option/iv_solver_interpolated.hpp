@@ -46,7 +46,6 @@
 #pragma once
 
 #include "src/option/option_spec.hpp"
-#include "src/option/bspline_price_table.hpp"
 #include "src/option/iv_result.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -58,7 +57,7 @@
 
 namespace mango {
 
-class PriceTableSurface;
+template<size_t> class PriceTableSurface;
 
 /// Configuration for interpolation-based IV solver
 struct IVSolverInterpolatedConfig {
@@ -76,23 +75,13 @@ struct IVSolverInterpolatedConfig {
 /// Thread-safe: Fully thread-safe for both single and batch queries (immutable spline)
 class IVSolverInterpolated {
 public:
-    /// Create solver from PriceTableSurface
+    /// Create solver from PriceTableSurface<4>
     ///
-    /// @param surface Pre-computed price table surface
+    /// @param surface Pre-computed price table surface (4D: moneyness, maturity, vol, rate)
     /// @param config Solver configuration
     /// @return IV solver or ValidationError
     static std::expected<IVSolverInterpolated, ValidationError> create(
-        std::shared_ptr<const BSpline4D> spline,
-        double K_ref,
-        std::pair<double, double> m_range,
-        std::pair<double, double> tau_range,
-        std::pair<double, double> sigma_range,
-        std::pair<double, double> r_range,
-        const IVSolverInterpolatedConfig& config = {});
-
-    /// Convenience factory that derives metadata from PriceTableSurface
-    static std::expected<IVSolverInterpolated, ValidationError> create(
-        const PriceTableSurface& surface,
+        std::shared_ptr<const PriceTableSurface<4>> surface,
         const IVSolverInterpolatedConfig& config = {});
 
     /// Solve for implied volatility (single query)
@@ -114,14 +103,14 @@ public:
 private:
     /// Private constructor (use create() factory methods)
     IVSolverInterpolated(
-        std::shared_ptr<const BSpline4D> spline,
+        std::shared_ptr<const PriceTableSurface<4>> surface,
         double K_ref,
         std::pair<double, double> m_range,
         std::pair<double, double> tau_range,
         std::pair<double, double> sigma_range,
         std::pair<double, double> r_range,
         const IVSolverInterpolatedConfig& config)
-        : spline_(std::move(spline))
+        : surface_(std::move(surface))
         , K_ref_(K_ref)
         , m_range_(m_range)
         , tau_range_(tau_range)
@@ -130,7 +119,7 @@ private:
         , config_(config)
     {}
 
-    std::shared_ptr<const BSpline4D> spline_;
+    std::shared_ptr<const PriceTableSurface<4>> surface_;
     double K_ref_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
     IVSolverInterpolatedConfig config_;
@@ -146,22 +135,10 @@ private:
     /// @param rate Risk-free rate
     /// @param strike Actual strike (for scaling)
     /// @return Scaled price for given strike
-    double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const {
-        double price_Kref = spline_->eval(moneyness, maturity, vol, rate);
-        double scale_factor = strike / K_ref_;
-        return price_Kref * scale_factor;
-    }
+    double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
 
-    /// Compute vega using analytic B-spline derivative
-    double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const {
-        double price_unused, vega_Kref;
-        spline_->eval_price_and_vega_analytic(
-            moneyness, maturity, vol, rate,
-            price_unused, vega_Kref);
-
-        const double scale_factor = strike / K_ref_;
-        return vega_Kref * scale_factor;
-    }
+    /// Compute vega using partial derivative w.r.t. volatility (axis 2)
+    double compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const;
 
     /// Check if query parameters are within surface bounds
     bool is_in_bounds(const IVQuery& query, double vol) const {

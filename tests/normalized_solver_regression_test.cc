@@ -8,7 +8,6 @@
  */
 
 #include "src/option/american_option_batch.hpp"
-#include "src/option/price_table_4d_builder.hpp"
 #include <gtest/gtest.h>
 #include <mutex>
 #include <vector>
