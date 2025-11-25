@@ -1,9 +1,9 @@
 #pragma once
 
-#include "src/option/price_table_config.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_surface.hpp"
-#include "src/option/price_tensor.hpp"
+#include "src/option/table/price_table_config.hpp"
+#include "src/option/table/price_table_axes.hpp"
+#include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/price_tensor.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/option_chain.hpp"

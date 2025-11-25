@@ -12,9 +12,9 @@
  */
 
 #include "src/math/bspline_nd_separable.hpp"
-#include "src/option/price_table_surface.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_metadata.hpp"
+#include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/price_table_axes.hpp"
+#include "src/option/table/price_table_metadata.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <vector>

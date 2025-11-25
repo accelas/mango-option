@@ -1,7 +1,7 @@
 #pragma once
 
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_metadata.hpp"
+#include "src/option/table/price_table_axes.hpp"
+#include "src/option/table/price_table_metadata.hpp"
 #include "src/math/bspline_nd.hpp"
 #include <memory>
 #include <expected>

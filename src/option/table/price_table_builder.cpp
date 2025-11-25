@@ -1,5 +1,5 @@
-#include "src/option/price_table_builder.hpp"
-#include "src/option/recursion_helpers.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/recursion_helpers.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/support/memory/aligned_arena.hpp"

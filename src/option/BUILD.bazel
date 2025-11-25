@@ -5,93 +5,6 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_axes",
-    hdrs = ["price_table_axes.hpp"],
-    deps = [
-        "//src/support:error_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_tensor",
-    hdrs = ["price_tensor.hpp"],
-    deps = [
-        "//src/support:aligned_arena",
-        "@mdspan//:mdspan",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table_metadata",
-    hdrs = ["price_table_metadata.hpp"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table_surface",
-    srcs = ["price_table_surface.cpp"],
-    hdrs = ["price_table_surface.hpp"],
-    deps = [
-        ":price_table_axes",
-        ":price_table_metadata",
-        "//src/math:bspline_nd",
-        "//src/math:bspline_basis",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table_config",
-    hdrs = ["price_table_config.hpp"],
-    deps = [
-        ":american_option",
-        "//src/pde/core:grid",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table_builder",
-    srcs = ["price_table_builder.cpp"],
-    hdrs = ["price_table_builder.hpp"],
-    copts = [
-        "-fopenmp",
-        "-pthread",
-    ],
-    linkopts = [
-        "-fopenmp",
-        "-pthread",
-    ],
-    deps = [
-        ":option_chain",
-        ":price_table_config",
-        ":price_table_axes",
-        ":price_table_surface",
-        ":price_tensor",
-        ":american_option",
-        ":american_option_batch",
-        ":recursion_helpers",
-        "//src/math:cubic_spline_solver",
-        "//src/math:bspline_nd_separable",
-        "//src/support:aligned_arena",
-        "//src/support:ivcalc_trace_hdr",
-        "//src/support:parallel",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "recursion_helpers",
-    hdrs = ["recursion_helpers.hpp"],
-    deps = [
-        ":price_table_axes",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "american_pde_solver",
     hdrs = ["american_pde_solver.hpp"],
     deps = [
@@ -210,7 +123,7 @@ cc_library(
     deps = [
         ":american_option",
         ":iv_result",
-        ":price_table_surface",
+        "//src/option/table:price_table_surface",
         ":option_spec",
         "//src/math:root_finding",
         "//src/support:parallel",
@@ -260,41 +173,5 @@ cc_library(
         "-DHAVE_SYSTEMTAP_SDT",
     ],
     linkopts = ["-fopenmp"],
-    visibility = ["//visibility:public"],
-)
-
-
-
-cc_library(
-    name = "price_table_workspace",
-    srcs = ["price_table_workspace.cpp"],
-    hdrs = ["price_table_workspace.hpp"],
-    deps = [
-        "//src/support:error_types",
-        "//src/math:bspline_basis",
-        "//src/support:crc64",
-        "//third_party/arrow",
-        "@mdspan//:mdspan",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table_grid",
-    hdrs = ["price_table_grid.hpp"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "price_table_extraction",
-    srcs = ["price_table_extraction.cpp"],
-    hdrs = ["price_table_extraction.hpp"],
-    deps = [
-        ":american_option_batch",
-        ":price_table_grid",
-        "//src/math:cubic_spline_solver",
-        "//src/support:parallel",
-        "@mdspan//:mdspan",
-    ],
     visibility = ["//visibility:public"],
 )

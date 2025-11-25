@@ -1,4 +1,4 @@
-#include "src/option/price_table_workspace.hpp"
+#include "src/option/table/price_table_workspace.hpp"
 #include "src/support/crc64.hpp"
 #include <algorithm>
 #include <numeric>

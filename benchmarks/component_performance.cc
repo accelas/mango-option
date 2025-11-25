@@ -15,7 +15,7 @@
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cmath>

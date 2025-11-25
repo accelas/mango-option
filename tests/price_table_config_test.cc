@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_config.hpp"
+#include "src/option/table/price_table_config.hpp"
 
 namespace mango {
 namespace {

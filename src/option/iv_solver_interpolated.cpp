@@ -4,7 +4,7 @@
  */
 
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include "src/support/parallel.hpp"
 #include "src/math/root_finding.hpp"
 #include <algorithm>

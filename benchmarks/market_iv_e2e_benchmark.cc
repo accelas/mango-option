@@ -47,8 +47,8 @@
  * ```
  */
 
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>

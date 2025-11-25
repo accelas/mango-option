@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "src/option/table/price_table_builder.hpp"
 #include "src/option/option_chain.hpp"
 
 TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {

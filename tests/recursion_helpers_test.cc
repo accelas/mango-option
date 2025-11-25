@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/recursion_helpers.hpp"
+#include "src/option/table/recursion_helpers.hpp"
 #include <vector>
 
 namespace mango {

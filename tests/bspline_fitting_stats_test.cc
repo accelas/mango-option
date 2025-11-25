@@ -1,6 +1,6 @@
 // tests/bspline_fitting_stats_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "src/option/table/price_table_builder.hpp"
 
 TEST(BSplineFittingStatsTest, DefaultConstruction) {
     mango::BSplineFittingStats stats;

@@ -1,4 +1,4 @@
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include "src/math/bspline_nd.hpp"
 #include "src/math/bspline_basis.hpp"
 
