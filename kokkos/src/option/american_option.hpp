@@ -4,7 +4,8 @@
 /// @brief American option pricing with Kokkos
 ///
 /// Implements finite difference solver for American options in
-/// log-moneyness coordinates using implicit Euler time-stepping.
+/// log-moneyness coordinates using TR-BDF2 time-stepping with sinh-spaced grids.
+/// Feature parity with the original C++ implementation.
 
 #include <Kokkos_Core.hpp>
 #include <expected>
@@ -28,7 +29,7 @@ struct GridAccuracyParams {
     /// Domain half-width in units of σ√T (default: 5.0 covers ±5 std devs)
     double n_sigma = 5.0;
 
-    /// Sinh clustering strength (default: 2.0, unused for uniform grids)
+    /// Sinh clustering strength (default: 2.0 concentrates points near strike)
     double alpha = 2.0;
 
     /// Target spatial truncation error (default: 1e-2 for ~1e-3 price accuracy)
@@ -37,20 +38,17 @@ struct GridAccuracyParams {
     /// - 1e-6: High accuracy mode (~1200 points, ~300ms per option)
     double tol = 1e-2;
 
-    /// CFL safety factor for time step (default: 0.5 for implicit scheme)
-    double c_t = 0.5;
+    /// CFL safety factor for time step (default: 0.75)
+    double c_t = 0.75;
 
-    /// Minimum spatial grid points (default: 51)
-    size_t min_spatial_points = 51;
+    /// Minimum spatial grid points (default: 100)
+    size_t min_spatial_points = 100;
 
-    /// Maximum spatial grid points (default: 201)
-    size_t max_spatial_points = 201;
+    /// Maximum spatial grid points (default: 1200)
+    size_t max_spatial_points = 1200;
 
-    /// Minimum time steps (default: 50)
-    size_t min_time_steps = 50;
-
-    /// Maximum time steps (default: 500)
-    size_t max_time_steps = 500;
+    /// Maximum time steps (default: 5000)
+    size_t max_time_steps = 5000;
 };
 
 /// Grid parameters for estimation
@@ -117,11 +115,13 @@ inline std::pair<size_t, size_t> estimate_batch_grid(
     // Ensure odd number of points (for centered stencils)
     if (Nx % 2 == 0) Nx++;
 
-    // Time step based on CFL condition for uniform grid
-    double dx = domain_width / static_cast<double>(Nx - 1);
-    double dt = accuracy.c_t * dx;
+    // Time step based on CFL condition
+    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
+    double dx_avg = domain_width / static_cast<double>(Nx);
+    double dx_min = dx_avg * std::exp(-accuracy.alpha);  // Sinh clustering factor
+    double dt = accuracy.c_t * dx_min;
     size_t Nt = static_cast<size_t>(std::ceil(maturity / dt));
-    Nt = std::clamp(Nt, accuracy.min_time_steps, accuracy.max_time_steps);
+    Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound for stability
 
     return {Nx, Nt};
 }
@@ -181,11 +181,10 @@ public:
         : params_(params), grid_params_(grid_params), time_params_(time_params) {}
 
     [[nodiscard]] std::expected<PricingResult, SolverError> solve() {
-        // Create uniform grid (sinh-spaced requires non-uniform FD stencils)
-        // TODO: Implement non-uniform stencils for sinh-spaced grids
-        auto grid_result = Grid<MemSpace>::uniform(
+        // Create sinh-spaced grid (concentrates points near strike)
+        auto grid_result = Grid<MemSpace>::sinh_spaced(
             grid_params_.x_min, grid_params_.x_max,
-            grid_params_.n_points);
+            grid_params_.n_points, grid_params_.alpha);
         if (!grid_result.has_value()) {
             return std::unexpected(SolverError::GridError);
         }
@@ -207,20 +206,17 @@ public:
         BlackScholesOperator<MemSpace> bs_op(params_.volatility, params_.rate,
                                               params_.dividend_yield);
 
-        // Copy grid to host for dx computation (needed for non-uniform grids)
-        auto x_host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, x);
-
         // TR-BDF2 solver
         TRBDF2Solver<MemSpace> solver(grid, workspace);
 
-        // Average grid spacing (for uniform grid approximation)
+        // Average grid spacing (passed but not used in non-uniform operator)
         double dx_avg = (grid_params_.x_max - grid_params_.x_min) /
                        static_cast<double>(grid_params_.n_points - 1);
 
-        // Define callbacks for TR-BDF2
+        // Define callbacks for TR-BDF2 with non-uniform grid support
         auto assemble_jacobian = [&](double coeff_dt, view_type lower,
                                       view_type diag, view_type upper) {
-            bs_op.assemble_jacobian(coeff_dt, dx_avg, lower, diag, upper);
+            bs_op.assemble_jacobian(coeff_dt, x, lower, diag, upper);
         };
 
         auto apply_operator = [&](view_type u_in, view_type Lu_out) {

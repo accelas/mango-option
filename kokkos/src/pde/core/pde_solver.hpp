@@ -196,10 +196,6 @@ public:
         auto diag = workspace_.jacobian_diag();
         auto upper = workspace_.jacobian_upper();
 
-        auto lower_temp = workspace_.thomas_lower_temp();
-        auto diag_temp = workspace_.thomas_diag_temp();
-        auto upper_temp = workspace_.thomas_upper_temp();
-
         // Use projected Thomas for obstacle problems, regular Thomas otherwise
         constexpr bool has_obstacle = !std::is_same_v<ComputeObstacle, std::nullptr_t>;
         ThomasSolver<MemSpace> thomas;
@@ -236,19 +232,20 @@ public:
             apply_boundary_to_matrix(lower, diag, upper);
             apply_boundary_to_rhs(rhs, t_stage1, dt, step);
 
-            // Solve stage 1 with or without obstacle
-            Kokkos::deep_copy(lower_temp, lower);
-            Kokkos::deep_copy(diag_temp, diag);
-            Kokkos::deep_copy(upper_temp, upper);
+            // Get workspace buffers for Thomas solver (avoids allocation in hot loop)
+            auto c_prime = workspace_.thomas_c_prime();
+            auto d_prime = workspace_.thomas_d_prime();
 
+            // Solve stage 1 with or without obstacle
+            // Note: Thomas solver only reads from matrix arrays, uses c_prime/d_prime as workspace
             if constexpr (has_obstacle) {
                 // Compute obstacle at current time
                 compute_obstacle(grid_.x(), psi);
                 // Use Projected Thomas (enforces u ≥ ψ during backward substitution)
-                auto result1 = projected_thomas.solve(lower_temp, diag_temp, upper_temp, rhs, psi, solution);
+                auto result1 = projected_thomas.solve(lower, diag, upper, rhs, psi, solution, c_prime, d_prime);
                 (void)result1;
             } else {
-                auto result1 = thomas.solve(lower_temp, diag_temp, upper_temp, rhs, solution);
+                auto result1 = thomas.solve(lower, diag, upper, rhs, solution, c_prime, d_prime);
                 (void)result1;
             }
 
@@ -284,18 +281,14 @@ public:
             apply_boundary_to_rhs(rhs, t_next, dt, step);
 
             // Solve stage 2 with or without obstacle
-            Kokkos::deep_copy(lower_temp, lower);
-            Kokkos::deep_copy(diag_temp, diag);
-            Kokkos::deep_copy(upper_temp, upper);
-
             if constexpr (has_obstacle) {
                 // Compute obstacle at next time (same as current since obstacle is time-independent)
                 compute_obstacle(grid_.x(), psi);
                 // Use Projected Thomas (enforces u ≥ ψ during backward substitution)
-                auto result2 = projected_thomas.solve(lower_temp, diag_temp, upper_temp, rhs, psi, solution);
+                auto result2 = projected_thomas.solve(lower, diag, upper, rhs, psi, solution, c_prime, d_prime);
                 (void)result2;
             } else {
-                auto result2 = thomas.solve(lower_temp, diag_temp, upper_temp, rhs, solution);
+                auto result2 = thomas.solve(lower, diag, upper, rhs, solution, c_prime, d_prime);
                 (void)result2;
             }
 

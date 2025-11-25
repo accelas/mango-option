@@ -1,0 +1,13 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "comparison_benchmark",
+    srcs = ["comparison_benchmark.cc"],
+    copts = ["-fopenmp", "-O3"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:american_option",
+        "//kokkos/src:batch_solver",
+        "@kokkos//:kokkos",
+    ],
+)
