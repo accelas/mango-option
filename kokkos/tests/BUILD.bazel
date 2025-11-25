@@ -59,3 +59,15 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "american_option_test",
+    srcs = ["american_option_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:american_option",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)

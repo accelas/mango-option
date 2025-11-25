@@ -59,3 +59,17 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "american_option",
+    hdrs = ["option/american_option.hpp"],
+    deps = [
+        ":execution_space",
+        ":grid",
+        ":workspace",
+        ":black_scholes",
+        ":thomas_solver",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
