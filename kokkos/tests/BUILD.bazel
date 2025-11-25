@@ -169,3 +169,16 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "iv_solver_fdm_test",
+    srcs = ["iv_solver_fdm_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:iv_solver_fdm",
+        "//kokkos/src:american_option",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
