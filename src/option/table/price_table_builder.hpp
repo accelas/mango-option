@@ -1,5 +1,6 @@
 #pragma once
 
+#include "src/math/bspline_nd_separable.hpp"
 #include "src/option/table/price_table_config.hpp"
 #include "src/option/table/price_table_axes.hpp"
 #include "src/option/table/price_table_surface.hpp"
@@ -8,33 +9,12 @@
 #include "src/option/american_option_batch.hpp"
 #include "src/option/option_chain.hpp"
 #include <expected>
-#include <string>
 #include <memory>
-#include <vector>
+#include <string>
 #include <tuple>
+#include <vector>
 
 namespace mango {
-
-/// B-spline fitting diagnostics (extracted from BSplineNDSeparable)
-struct BSplineFittingStats {
-    double max_residual_axis0 = 0.0;
-    double max_residual_axis1 = 0.0;
-    double max_residual_axis2 = 0.0;
-    double max_residual_axis3 = 0.0;
-    double max_residual_overall = 0.0;
-
-    double condition_axis0 = 0.0;
-    double condition_axis1 = 0.0;
-    double condition_axis2 = 0.0;
-    double condition_axis3 = 0.0;
-    double condition_max = 0.0;
-
-    size_t failed_slices_axis0 = 0;
-    size_t failed_slices_axis1 = 0;
-    size_t failed_slices_axis2 = 0;
-    size_t failed_slices_axis3 = 0;
-    size_t failed_slices_total = 0;
-};
 
 /// Result from price table build with diagnostics
 template <size_t N>
@@ -42,7 +22,7 @@ struct PriceTableResult {
     std::shared_ptr<const PriceTableSurface<N>> surface = nullptr;  ///< Immutable surface
     size_t n_pde_solves = 0;                    ///< Number of PDE solves performed
     double precompute_time_seconds = 0.0;       ///< Wall-clock build time
-    BSplineFittingStats fitting_stats;          ///< B-spline fitting diagnostics
+    BSplineFittingStats<double, N> fitting_stats;  ///< B-spline fitting diagnostics
     // Failure and repair tracking
     size_t failed_pde_slices = 0;               ///< Count of (σ,r) slices where PDE failed
     size_t failed_spline_points = 0;            ///< Count of (σ,r,τ) points where spline failed
@@ -218,7 +198,7 @@ private:
     /// Internal result from B-spline coefficient fitting
     struct FitCoeffsResult {
         std::vector<double> coefficients;
-        BSplineFittingStats stats;
+        BSplineFittingStats<double, N> stats;
     };
     /// Generate batch of AmericanOptionParams from axes
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch(

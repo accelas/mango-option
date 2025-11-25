@@ -35,11 +35,30 @@
 #include <array>
 #include <concepts>
 #include <string>
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <numeric>
 
 namespace mango {
+
+/// B-spline fitting diagnostics (per-axis and aggregate)
+///
+/// Contains per-axis metrics and computed aggregates for monitoring fit quality.
+/// @tparam T Floating point type
+/// @tparam N Number of dimensions
+template<std::floating_point T, size_t N>
+struct BSplineFittingStats {
+    std::array<T, N> max_residual_per_axis{};   ///< Max residual for each axis
+    T max_residual_overall = T{0};               ///< Max across all axes
+
+    std::array<T, N> condition_per_axis{};       ///< Condition estimate for each axis
+    T condition_max = T{0};                      ///< Max condition across all axes
+
+    std::array<size_t, N> failed_slices_per_axis{};  ///< Failed 1D fits per axis
+    size_t failed_slices_total = 0;              ///< Total failed slices
+};
 
 /// Successful result of N-dimensional separable B-spline fitting
 ///
@@ -50,6 +69,21 @@ struct BSplineNDSeparableResult {
     std::array<T, N> max_residual_per_axis;    ///< Max residual for each axis
     std::array<T, N> condition_per_axis;       ///< Condition estimate for each axis
     std::array<size_t, N> failed_slices;       ///< Failed 1D fits per axis (all zeros on success)
+
+    /// Convert to BSplineFittingStats with computed aggregates
+    BSplineFittingStats<T, N> to_stats() const {
+        BSplineFittingStats<T, N> stats;
+        stats.max_residual_per_axis = max_residual_per_axis;
+        stats.max_residual_overall = *std::max_element(
+            max_residual_per_axis.begin(), max_residual_per_axis.end());
+        stats.condition_per_axis = condition_per_axis;
+        stats.condition_max = *std::max_element(
+            condition_per_axis.begin(), condition_per_axis.end());
+        stats.failed_slices_per_axis = failed_slices;
+        stats.failed_slices_total = std::accumulate(
+            failed_slices.begin(), failed_slices.end(), size_t{0});
+        return stats;
+    }
 };
 
 /// Configuration for N-dimensional separable fitting

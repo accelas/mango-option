@@ -130,7 +130,7 @@ cc_test(
     size = "small",
     srcs = ["bspline_fitting_stats_test.cc"],
     deps = [
-        "//src/option/table:price_table_builder",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
 )

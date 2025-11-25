@@ -481,35 +481,8 @@ PriceTableBuilder<N>::fit_coeffs(
 
     const auto& result = fit_result.value();
 
-    // Map BSplineNDSeparableResult to BSplineFittingStats
-    BSplineFittingStats stats;
-    stats.max_residual_axis0 = result.max_residual_per_axis[0];
-    stats.max_residual_axis1 = result.max_residual_per_axis[1];
-    stats.max_residual_axis2 = result.max_residual_per_axis[2];
-    stats.max_residual_axis3 = result.max_residual_per_axis[3];
-    stats.max_residual_overall = *std::max_element(
-        result.max_residual_per_axis.begin(),
-        result.max_residual_per_axis.end()
-    );
-
-    stats.condition_axis0 = result.condition_per_axis[0];
-    stats.condition_axis1 = result.condition_per_axis[1];
-    stats.condition_axis2 = result.condition_per_axis[2];
-    stats.condition_axis3 = result.condition_per_axis[3];
-    stats.condition_max = *std::max_element(
-        result.condition_per_axis.begin(),
-        result.condition_per_axis.end()
-    );
-
-    stats.failed_slices_axis0 = result.failed_slices[0];
-    stats.failed_slices_axis1 = result.failed_slices[1];
-    stats.failed_slices_axis2 = result.failed_slices[2];
-    stats.failed_slices_axis3 = result.failed_slices[3];
-    stats.failed_slices_total = std::accumulate(
-        result.failed_slices.begin(),
-        result.failed_slices.end(),
-        size_t(0)
-    );
+    // Convert BSplineNDSeparableResult to BSplineFittingStats
+    auto stats = result.to_stats();
 
     return FitCoeffsResult{
         .coefficients = std::move(result.coefficients),
