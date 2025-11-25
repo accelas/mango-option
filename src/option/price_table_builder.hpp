@@ -78,6 +78,7 @@ public:
     /// @param n_time Number of time steps
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
+    /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
     /// @return Pair of (builder, axes) or error message
     static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
     from_vectors(
@@ -89,7 +90,8 @@ public:
         GridSpec<double> grid_spec,
         size_t n_time,
         OptionType type = OptionType::PUT,
-        double dividend_yield = 0.0);
+        double dividend_yield = 0.0,
+        double max_failure_rate = 0.0);
 
     /// Factory from strikes (auto-computes moneyness)
     ///
@@ -106,6 +108,7 @@ public:
     /// @param n_time Number of time steps
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
+    /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
     /// @return Pair of (builder, axes) or error message
     static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
     from_strikes(
@@ -117,7 +120,8 @@ public:
         GridSpec<double> grid_spec,
         size_t n_time,
         OptionType type = OptionType::PUT,
-        double dividend_yield = 0.0);
+        double dividend_yield = 0.0,
+        double max_failure_rate = 0.0);
 
     /// Factory from option chain
     ///
@@ -129,13 +133,15 @@ public:
     /// @param grid_spec PDE spatial grid specification
     /// @param n_time Number of time steps
     /// @param type Option type (PUT or CALL)
+    /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
     /// @return Pair of (builder, axes) or error message
     static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
     from_chain(
         const OptionChain& chain,
         GridSpec<double> grid_spec,
         size_t n_time,
-        OptionType type = OptionType::PUT);
+        OptionType type = OptionType::PUT,
+        double max_failure_rate = 0.0);
 
     /// For testing: expose make_batch method
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch_for_testing(

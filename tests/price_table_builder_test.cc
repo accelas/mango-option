@@ -222,5 +222,22 @@ TEST(PriceTableBuilderTest, BuildRejectsInvalidConfig) {
     EXPECT_NE(result.error().find("max_failure_rate"), std::string::npos);
 }
 
+TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
+    auto result = mango::PriceTableBuilder<4>::from_vectors(
+        {0.9, 1.0, 1.1},  // moneyness
+        {0.25, 0.5},      // maturity
+        {0.2, 0.3},       // volatility
+        {0.05},           // rate
+        100.0,            // K_ref
+        mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(),
+        500,              // n_time
+        mango::OptionType::PUT,
+        0.0,              // dividend_yield
+        1.5               // max_failure_rate - INVALID
+    );
+    EXPECT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("max_failure_rate"), std::string::npos);
+}
+
 } // namespace
 } // namespace mango

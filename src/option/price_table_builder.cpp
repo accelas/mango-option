@@ -493,7 +493,8 @@ PriceTableBuilder<4>::from_vectors(
     GridSpec<double> grid_spec,
     size_t n_time,
     OptionType type,
-    double dividend_yield)
+    double dividend_yield,
+    double max_failure_rate)
 {
     // Sort and dedupe
     moneyness = sort_and_dedupe(std::move(moneyness));
@@ -530,6 +531,12 @@ PriceTableBuilder<4>::from_vectors(
     config.grid_estimator = grid_spec;
     config.n_time = n_time;
     config.dividend_yield = dividend_yield;
+    config.max_failure_rate = max_failure_rate;
+
+    // Validate config
+    if (auto err = validate_config(config); err.has_value()) {
+        return std::unexpected(err.value());
+    }
 
     return std::make_pair(PriceTableBuilder<4>(config), std::move(axes));
 }
@@ -545,7 +552,8 @@ PriceTableBuilder<4>::from_strikes(
     GridSpec<double> grid_spec,
     size_t n_time,
     OptionType type,
-    double dividend_yield)
+    double dividend_yield,
+    double max_failure_rate)
 {
     if (spot <= 0.0) {
         return std::unexpected("Spot must be positive");
@@ -581,7 +589,8 @@ PriceTableBuilder<4>::from_strikes(
         grid_spec,
         n_time,
         type,
-        dividend_yield
+        dividend_yield,
+        max_failure_rate
     );
 }
 
@@ -591,7 +600,8 @@ PriceTableBuilder<4>::from_chain(
     const OptionChain& chain,
     GridSpec<double> grid_spec,
     size_t n_time,
-    OptionType type)
+    OptionType type,
+    double max_failure_rate)
 {
     return from_strikes(
         chain.spot,
@@ -602,7 +612,8 @@ PriceTableBuilder<4>::from_chain(
         grid_spec,
         n_time,
         type,
-        chain.dividend_yield
+        chain.dividend_yield,
+        max_failure_rate
     );
 }
 
