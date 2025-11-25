@@ -278,17 +278,82 @@ auto log_moneyness = axes.grids[0]
 
 ---
 
-## Improvement 5: TimeDomain in Factory Methods [Deferred]
+## Improvement 5: Unified Grid Config API [Medium Priority]
 
-**Problem:** Factory methods take `size_t n_time` which is less expressive.
+**Problem:** Factory methods take `GridSpec` and `size_t n_time` as separate required parameters, inconsistent with batch solver pattern.
 
-**Deferred:** Until usage patterns clarify whether users need dt-based or n_steps-based control.
+**Current API:**
+```cpp
+// PriceTableBuilder factories (current)
+from_vectors(..., GridSpec<double> grid_spec, size_t n_time, OptionType type, ...);
+
+// BatchAmericanOptionSolver (existing pattern)
+solve_batch(..., std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+```
+
+**Proposed unified API:**
+
+```cpp
+using GridConfig = std::pair<GridSpec<double>, TimeDomain>;
+
+// Factory methods with optional grid config
+static std::expected<std::pair<PriceTableBuilder<N>, PriceTableAxes<N>>, std::string>
+from_vectors(
+    std::vector<double> moneyness,
+    std::vector<double> maturity,
+    std::vector<double> volatility,
+    std::vector<double> rate,
+    double K_ref,
+    std::optional<GridConfig> grid_config = std::nullopt,  // NEW: unified
+    OptionType type = OptionType::PUT,
+    double dividend_yield = 0.0);
+
+// Usage:
+// Auto-estimation (default):
+auto [builder, axes] = PriceTableBuilder<4>::from_vectors(m, tau, sigma, r, K_ref).value();
+
+// Custom grid:
+auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value();
+auto time_domain = TimeDomain::from_n_steps(0.0, 2.0, 1000);
+auto [builder, axes] = PriceTableBuilder<4>::from_vectors(
+    m, tau, sigma, r, K_ref,
+    std::make_pair(grid_spec, time_domain)
+).value();
+```
+
+**Benefits:**
+- Consistent with `BatchAmericanOptionSolver::solve_batch()` API
+- `TimeDomain` provides both `n_steps` and `dt` access
+- Auto-estimation when grid_config is nullopt
+- Single optional parameter instead of two required ones
+
+**Implementation:**
+1. Add `using GridConfig = std::pair<GridSpec<double>, TimeDomain>;` to header
+2. Change factory signatures to use `std::optional<GridConfig>`
+3. When nullopt: estimate grid from max maturity and volatility range
+4. When provided: validate TimeDomain.t_end() matches max maturity (or use it)
+5. Store in `PriceTableConfig` as optional
 
 ---
 
 ## Improvement 6: build_with_save() [Deferred]
 
 **Problem:** No way to stream `PriceTensor<N>` to disk for external analysis.
+
+**Proposed API (using unified GridConfig from #5):**
+
+```cpp
+std::expected<PriceTableResult<N>, std::string>
+build_with_save(
+    const PriceTableAxes<N>& axes,
+    const std::filesystem::path& output_path);
+```
+
+**Atomicity contract:**
+- Write to `{output_path}.tmp` during extraction
+- Atomic rename to `{output_path}` on success
+- Delete `.tmp` on failure
+- Clean stale `.tmp` files on startup (crash recovery)
 
 **Deferred:** Depends on #3 (error types) for proper failure handling.
 
@@ -305,6 +370,8 @@ auto log_moneyness = axes.grids[0]
 | 2c | Extend PriceTableResult with failure stats | Low | 2b |
 | 3 | Enriched error messages (Option C) | Low | None |
 | 4 | C++23 ranges for log_moneyness | Low | None |
+| 5 | Unified GridConfig API | Medium | None |
+| 6 | build_with_save() | Medium | #3, #5 |
 
 ## Verification
 
