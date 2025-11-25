@@ -42,14 +42,31 @@ public:
             return std::unexpected(ThomasError::SizeMismatch);
         }
 
-        // For host execution, run serial Thomas algorithm
-        // For device, this would be called per-system in a batched context
+        // Optimized path for HostSpace: avoid mirror copies
+        if constexpr (std::is_same_v<MemSpace, Kokkos::HostSpace>) {
+            return solve_host_impl(lower, diag, upper, rhs, solution, n);
+        } else {
+            // For device memory, copy to host, solve, copy back
+            auto lower_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, lower);
+            auto diag_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, diag);
+            auto upper_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, upper);
+            auto rhs_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, rhs);
+            auto solution_h = Kokkos::create_mirror_view(Kokkos::HostSpace{}, solution);
 
-        auto lower_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, lower);
-        auto diag_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, diag);
-        auto upper_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, upper);
-        auto rhs_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, rhs);
-        auto solution_h = Kokkos::create_mirror_view(Kokkos::HostSpace{}, solution);
+            auto result = solve_host_impl(lower_h, diag_h, upper_h, rhs_h, solution_h, n);
+            if (result.has_value()) {
+                Kokkos::deep_copy(solution, solution_h);
+            }
+            return result;
+        }
+    }
+
+private:
+    /// Host implementation of Thomas algorithm
+    template <typename ViewType>
+    [[nodiscard]] std::expected<void, ThomasError>
+    solve_host_impl(ViewType lower, ViewType diag, ViewType upper,
+                    ViewType rhs, ViewType solution, size_t n) const {
 
         // Workspace for modified coefficients
         std::vector<double> c_prime(n);
@@ -58,32 +75,30 @@ public:
         // Forward elimination
         constexpr double tol = 1e-15;
 
-        if (std::abs(diag_h(0)) < tol) {
+        if (std::abs(diag(0)) < tol) {
             return std::unexpected(ThomasError::SingularMatrix);
         }
 
-        c_prime[0] = upper_h(0) / diag_h(0);
-        d_prime[0] = rhs_h(0) / diag_h(0);
+        c_prime[0] = upper(0) / diag(0);
+        d_prime[0] = rhs(0) / diag(0);
 
         for (size_t i = 1; i < n; ++i) {
-            double denom = diag_h(i) - lower_h(i - 1) * c_prime[i - 1];
+            double denom = diag(i) - lower(i - 1) * c_prime[i - 1];
             if (std::abs(denom) < tol) {
                 return std::unexpected(ThomasError::SingularMatrix);
             }
 
             if (i < n - 1) {
-                c_prime[i] = upper_h(i) / denom;
+                c_prime[i] = upper(i) / denom;
             }
-            d_prime[i] = (rhs_h(i) - lower_h(i - 1) * d_prime[i - 1]) / denom;
+            d_prime[i] = (rhs(i) - lower(i - 1) * d_prime[i - 1]) / denom;
         }
 
         // Back substitution
-        solution_h(n - 1) = d_prime[n - 1];
+        solution(n - 1) = d_prime[n - 1];
         for (size_t i = n - 1; i > 0; --i) {
-            solution_h(i - 1) = d_prime[i - 1] - c_prime[i - 1] * solution_h(i);
+            solution(i - 1) = d_prime[i - 1] - c_prime[i - 1] * solution(i);
         }
-
-        Kokkos::deep_copy(solution, solution_h);
 
         return {};
     }
@@ -150,6 +165,107 @@ public:
             });
 
         Kokkos::fence();
+    }
+};
+
+/// Projected Thomas solver for American options (Brennan-Schwartz algorithm)
+///
+/// Solves the Linear Complementarity Problem:
+///   A·x = d, subject to x ≥ ψ (obstacle constraint)
+///
+/// Key difference from standard Thomas: enforces x ≥ ψ DURING backward
+/// substitution, not after. This is critical for correct American option pricing.
+template <typename MemSpace>
+class ProjectedThomasSolver {
+public:
+    using view_type = Kokkos::View<double*, MemSpace>;
+
+    /// Solve tridiagonal system with obstacle constraint
+    ///
+    /// @param lower Lower diagonal (size n-1)
+    /// @param diag Main diagonal (size n)
+    /// @param upper Upper diagonal (size n-1)
+    /// @param rhs Right-hand side (size n)
+    /// @param psi Obstacle (lower bound) (size n)
+    /// @param solution Output solution (size n), will satisfy x ≥ ψ
+    [[nodiscard]] std::expected<void, ThomasError>
+    solve(view_type lower, view_type diag, view_type upper,
+          view_type rhs, view_type psi, view_type solution) const {
+
+        const size_t n = diag.extent(0);
+
+        // Validate sizes
+        if (lower.extent(0) != n - 1 || upper.extent(0) != n - 1 ||
+            rhs.extent(0) != n || psi.extent(0) != n || solution.extent(0) != n) {
+            return std::unexpected(ThomasError::SizeMismatch);
+        }
+
+        // Optimized path for HostSpace: avoid mirror copies
+        if constexpr (std::is_same_v<MemSpace, Kokkos::HostSpace>) {
+            return solve_host_impl(lower, diag, upper, rhs, psi, solution, n);
+        } else {
+            // For device memory, copy to host, solve, copy back
+            auto lower_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, lower);
+            auto diag_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, diag);
+            auto upper_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, upper);
+            auto rhs_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, rhs);
+            auto psi_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, psi);
+            auto solution_h = Kokkos::create_mirror_view(Kokkos::HostSpace{}, solution);
+
+            auto result = solve_host_impl(lower_h, diag_h, upper_h, rhs_h, psi_h, solution_h, n);
+            if (result.has_value()) {
+                Kokkos::deep_copy(solution, solution_h);
+            }
+            return result;
+        }
+    }
+
+private:
+    /// Host implementation of projected Thomas algorithm
+    template <typename ViewType>
+    [[nodiscard]] std::expected<void, ThomasError>
+    solve_host_impl(ViewType lower, ViewType diag, ViewType upper,
+                    ViewType rhs, ViewType psi, ViewType solution, size_t n) const {
+
+        // Workspace for modified coefficients
+        std::vector<double> c_prime(n);
+        std::vector<double> d_prime(n);
+
+        // ========== Forward Elimination (identical to standard Thomas) ==========
+        constexpr double tol = 1e-15;
+
+        if (std::abs(diag(0)) < tol) {
+            return std::unexpected(ThomasError::SingularMatrix);
+        }
+
+        c_prime[0] = upper(0) / diag(0);
+        d_prime[0] = rhs(0) / diag(0);
+
+        for (size_t i = 1; i < n; ++i) {
+            double denom = diag(i) - lower(i - 1) * c_prime[i - 1];
+            if (std::abs(denom) < tol) {
+                return std::unexpected(ThomasError::SingularMatrix);
+            }
+
+            if (i < n - 1) {
+                c_prime[i] = upper(i) / denom;
+            }
+            d_prime[i] = (rhs(i) - lower(i - 1) * d_prime[i - 1]) / denom;
+        }
+
+        // ========== Projected Back Substitution (KEY DIFFERENCE) ==========
+        // Apply obstacle constraint x ≥ ψ at EACH step
+
+        // Last element with projection
+        solution(n - 1) = std::max(d_prime[n - 1], psi(n - 1));
+
+        // Backward iteration with projection at each step
+        for (size_t i = n - 1; i > 0; --i) {
+            double unconstrained = d_prime[i - 1] - c_prime[i - 1] * solution(i);
+            solution(i - 1) = std::max(unconstrained, psi(i - 1));
+        }
+
+        return {};
     }
 };
 

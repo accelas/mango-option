@@ -53,6 +53,8 @@ cc_test(
     srcs = ["pde_solver_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:pde_solver",
         "@googletest//:gtest_main",
@@ -77,6 +79,8 @@ cc_test(
     srcs = ["american_option_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:american_option",
         "@googletest//:gtest_main",
@@ -101,6 +105,8 @@ cc_test(
     srcs = ["batch_solver_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:batch_solver",
         "@googletest//:gtest_main",
@@ -113,6 +119,8 @@ cc_test(
     srcs = ["price_table_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:price_table",
         "@googletest//:gtest_main",
@@ -137,6 +145,8 @@ cc_test(
     srcs = ["iv_solver_interpolated_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:iv_solver_interpolated",
         "//kokkos/src:price_table",
@@ -150,6 +160,8 @@ cc_test(
     srcs = ["iv_solver_fdm_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:iv_solver_fdm",
         "//kokkos/src:american_option",
@@ -163,6 +175,8 @@ cc_test(
     srcs = ["pricing_pipeline_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
     deps = [
         "//kokkos/src:pricing_pipeline",
         "@googletest//:gtest_main",

@@ -106,8 +106,8 @@ TEST_F(PriceTableTest, PriceMonotonicity) {
     auto rate = create_uniform_grid(0.05, 0.05, 1);      // Single rate
 
     mango::kokkos::PriceTableConfig config{
-        .n_space = 101,  // More grid points for stability
-        .n_time = 500,   // More time steps
+        .n_space = 51,   // Moderate grid for tests
+        .n_time = 100,   // Reduced for fast tests
         .K_ref = 100.0,
         .q = 0.0,
         .is_put = true

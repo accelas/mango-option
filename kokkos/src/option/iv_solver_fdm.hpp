@@ -236,8 +236,8 @@ private:
             .type = query.type
         };
 
-        // Solve American option PDE
-        AmericanOptionSolver<MemSpace> solver(params, config_.n_space, config_.n_time);
+        // Solve American option PDE using automatic grid estimation
+        AmericanOptionSolver<MemSpace> solver(params);
         auto result = solver.solve();
 
         if (!result.has_value()) {

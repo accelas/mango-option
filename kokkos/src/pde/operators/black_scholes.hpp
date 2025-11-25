@@ -32,7 +32,7 @@ public:
     /// Apply operator: Lu = L(u)
     ///
     /// Uses second-order centered differences.
-    /// Boundary values in Lu are undefined (caller handles BCs).
+    /// Boundary values are set to 0 (BCs handle them separately).
     void apply(view_type x, view_type u, view_type Lu, double dx) const {
         const size_t n = u.extent(0);
         const double half_sigma_sq = half_sigma_sq_;
@@ -41,17 +41,21 @@ public:
         const double dx_sq = dx * dx;
         const double two_dx = 2.0 * dx;
 
-        Kokkos::parallel_for("black_scholes_apply",
-            Kokkos::RangePolicy<typename MemSpace::execution_space>(1, n - 1),
+        Kokkos::parallel_for("black_scholes_apply", n,
             KOKKOS_LAMBDA(const size_t i) {
-                // Second derivative: (u[i+1] - 2*u[i] + u[i-1]) / dx^2
-                double u_xx = (u(i + 1) - 2.0 * u(i) + u(i - 1)) / dx_sq;
+                if (i == 0 || i == n - 1) {
+                    // Boundary values: set to 0 (BCs handle separately)
+                    Lu(i) = 0.0;
+                } else {
+                    // Second derivative: (u[i+1] - 2*u[i] + u[i-1]) / dx^2
+                    double u_xx = (u(i + 1) - 2.0 * u(i) + u(i - 1)) / dx_sq;
 
-                // First derivative: (u[i+1] - u[i-1]) / (2*dx)
-                double u_x = (u(i + 1) - u(i - 1)) / two_dx;
+                    // First derivative: (u[i+1] - u[i-1]) / (2*dx)
+                    double u_x = (u(i + 1) - u(i - 1)) / two_dx;
 
-                // L(u) = 0.5*sigma^2*u_xx + drift*u_x - r*u
-                Lu(i) = half_sigma_sq * u_xx + drift * u_x - r * u(i);
+                    // L(u) = 0.5*sigma^2*u_xx + drift*u_x - r*u
+                    Lu(i) = half_sigma_sq * u_xx + drift * u_x - r * u(i);
+                }
             });
 
         Kokkos::fence();

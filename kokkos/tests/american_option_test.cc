@@ -35,10 +35,18 @@ TEST_F(AmericanOptionTest, ATMPutPrice) {
         .type = OptionType::Put
     };
 
+    // Debug: print grid parameters
+    auto [grid_params, time_params] = estimate_grid_for_option(params);
+    std::cout << "Grid: x=[" << grid_params.x_min << ", " << grid_params.x_max
+              << "], n=" << grid_params.n_points
+              << ", alpha=" << grid_params.alpha << "\n";
+    std::cout << "Time: T=" << time_params.T << ", steps=" << time_params.n_steps << "\n";
+
     AmericanOptionSolver<HostMemSpace> solver(params);
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
+    std::cout << "Price: " << result->price << " (expected: 6.5-7.0)\n";
     // Expected price around 6.5-7.0 for these parameters
     EXPECT_GT(result->price, 6.0);
     EXPECT_LT(result->price, 8.0);

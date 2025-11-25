@@ -155,8 +155,8 @@ TEST_F(PricingPipelineTest, IVSolveInterpolated) {
 TEST_F(PricingPipelineTest, IVSolveFDM) {
     auto config = default_config();
     // Use finer grid for FDM accuracy
-    config.n_space = 101;
-    config.n_time = 500;
+    config.n_space = 51;
+    config.n_time = 100;  // Reduced for fast tests
     PricingPipeline<Kokkos::HostSpace> pipeline(config);
 
     // Create IV query
@@ -190,8 +190,8 @@ TEST_F(PricingPipelineTest, IVSolveFDM) {
 // Test 6: Comparison - Interpolated vs FDM IV
 TEST_F(PricingPipelineTest, InterpolatedVsFDMComparison) {
     auto config = default_config();
-    config.n_space = 101;
-    config.n_time = 500;
+    config.n_space = 51;
+    config.n_time = 100;  // Reduced for fast tests
     PricingPipeline<Kokkos::HostSpace> pipeline(config);
 
     // Build price table

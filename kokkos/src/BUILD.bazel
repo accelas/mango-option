@@ -77,6 +77,7 @@ cc_library(
         ":execution_space",
         ":grid",
         ":workspace",
+        ":pde_solver",
         ":black_scholes",
         ":thomas_solver",
         "@kokkos//:kokkos",

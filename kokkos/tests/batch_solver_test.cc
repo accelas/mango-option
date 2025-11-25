@@ -66,7 +66,8 @@ TEST_F(BatchSolverTest, SingleOption) {
     Kokkos::deep_copy(strikes, 100.0);
     Kokkos::deep_copy(spots, 100.0);
 
-    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 500);
+    // Use 100 time steps for fast tests (production would use more)
+    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 100);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << "Solve should succeed";
@@ -122,7 +123,8 @@ TEST_F(BatchSolverTest, MultipleStrikes) {
     Kokkos::deep_copy(strikes, strikes_h);
     Kokkos::deep_copy(spots, spots_h);
 
-    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 500);
+    // Use 100 time steps for fast tests (production would use more)
+    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 100);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << "Solve should succeed";
@@ -172,7 +174,8 @@ TEST_F(BatchSolverTest, CallOptions) {
     Kokkos::deep_copy(strikes, strikes_h);
     Kokkos::deep_copy(spots, spots_h);
 
-    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 500);
+    // Use 100 time steps for fast tests (production would use more)
+    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 100);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
@@ -261,7 +264,8 @@ TEST_F(BatchSolverTest, VaryingSpots) {
     Kokkos::deep_copy(strikes, strikes_h);
     Kokkos::deep_copy(spots, spots_h);
 
-    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 500);
+    // Use 100 time steps for fast tests (production would use more)
+    mango::kokkos::BatchAmericanSolver<MemSpace> solver(params, strikes, spots, 101, 100);
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());

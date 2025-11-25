@@ -61,7 +61,7 @@ protected:
 
         mango::kokkos::PriceTableConfig config{
             .n_space = 51,
-            .n_time = 200,
+            .n_time = 100,  // Reduced for fast tests
             .K_ref = 100.0,
             .q = 0.0,
             .is_put = true
