@@ -1010,6 +1010,30 @@ struct PriceTableError {
 
 **Dependencies:** C++23 `<ranges>` header, `std::ranges::to` (P1206R7)
 
+### Improvement 6: Use TimeDomain in Factory Methods
+
+**Problem:** Factory methods take `size_t n_time` which is less expressive than `TimeDomain`.
+
+**Current API:**
+```cpp
+from_vectors(..., GridSpec<double> grid_spec, size_t n_time, OptionType type, ...)
+```
+
+**Proposed options:**
+
+| Option | API | Pros | Cons |
+|--------|-----|------|------|
+| A | `TimeDomain time` | Reuses existing type, explicit | t_end unknown until axes; would use only n_steps() |
+| B | `TimeConfig{n_steps}` | Clear intent, no wasted t_end | New type to maintain |
+| C | `std::variant<size_t, double>` | n_steps or dt | Implicit, harder to read |
+
+**Complication:** `TimeDomain` requires `t_end`, but max maturity comes from axes (not known at factory call). Options:
+1. Accept TimeDomain, ignore t_end, use only `n_steps()` internally
+2. Create `TimeConfig` struct with just `n_steps` or `dt`
+3. Keep `n_time` but add `from_dt()` variant
+
+**Recommendation:** Defer until usage patterns clarify whether users need dt-based or n_steps-based control.
+
 ```cpp
 std::expected<PriceTableResult<N>, PriceTableError>
 build_with_save(
