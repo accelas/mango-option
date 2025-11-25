@@ -895,3 +895,34 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "iv_solver_interpolated_test",
+    size = "small",
+    srcs = ["iv_solver_interpolated_test.cc"],
+    deps = [
+        "//src/option:iv_solver_interpolated",
+        "//src/option/table:price_table_surface",
+        "//src/option/table:price_table_axes",
+        "//src/option/table:price_table_metadata",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)
+
+cc_test(
+    name = "batch_bracketing_test",
+    size = "small",
+    srcs = ["batch_bracketing_test.cc"],
+    deps = [
+        "//src/option:batch_bracketing",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)
