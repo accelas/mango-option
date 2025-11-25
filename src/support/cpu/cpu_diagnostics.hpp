@@ -22,7 +22,7 @@ struct CPUFeatures {
  * CPUID reports support.
  */
 __attribute__((target("xsave")))
-inline bool check_os_avx_support() {
+inline bool check_os_avx_support() noexcept {
     unsigned int eax, ebx, ecx, edx;
 
     // Check OSXSAVE bit (OS has enabled XSAVE)
@@ -45,7 +45,7 @@ inline bool check_os_avx_support() {
 
 /// Check if OS has enabled AVX-512 state
 __attribute__((target("xsave")))
-inline bool check_os_avx512_support() {
+inline bool check_os_avx512_support() noexcept {
     if (!check_os_avx_support()) {
         return false;
     }
@@ -63,7 +63,7 @@ inline bool check_os_avx512_support() {
  * NOTE: Do NOT use this for dispatch. Use [[gnu::target_clones]]
  * which provides zero-overhead IFUNC resolution.
  */
-inline CPUFeatures detect_cpu_features() {
+inline CPUFeatures detect_cpu_features() noexcept {
     CPUFeatures features;
 
     unsigned int eax, ebx, ecx, edx;

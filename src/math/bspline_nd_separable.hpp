@@ -214,12 +214,17 @@ public:
         std::array<size_t, N> failed{};
 
         // Fit each axis in cache-optimal order (reverse: N-1 → 0)
-        try {
-            fit_all_axes<N-1>(coeffs, config.tolerance, max_residuals, conditions, failed);
-        } catch (const std::exception& e) {
+        fit_all_axes<N-1>(coeffs, config.tolerance, max_residuals, conditions, failed);
+
+        // Check if any axis had failures
+        size_t total_failures = 0;
+        for (size_t i = 0; i < N; ++i) {
+            total_failures += failed[i];
+        }
+        if (total_failures > 0) {
             return std::unexpected(InterpolationError{
                 InterpolationErrorCode::FittingFailed,
-                expected_size});
+                total_failures});
         }
 
         return BSplineNDSeparableResult<T, N>{
@@ -346,7 +351,8 @@ private:
     {
         if (current_dim == N) {
             // Base case: extract and fit 1D slice
-            extract_and_fit_slice<Axis>(
+            // Ignore return value - failures are tracked via failed_count
+            (void)extract_and_fit_slice<Axis>(
                 coeffs, slice_buffer, coeffs_buffer, tolerance, base_offset,
                 max_residual, max_condition, failed_count);
             return;
@@ -374,8 +380,10 @@ private:
     ///
     /// Performs 1D B-spline collocation on a slice perpendicular to Axis.
     /// Updates max residual and condition number statistics.
+    ///
+    /// @return true on success, false on fitting failure
     template<size_t Axis>
-    void extract_and_fit_slice(
+    [[nodiscard]] bool extract_and_fit_slice(
         std::vector<T>& coeffs,
         std::vector<T>& slice_buffer,
         std::vector<T>& coeffs_buffer,
@@ -402,9 +410,7 @@ private:
 
         if (!fit_result.has_value()) {
             ++failed_count;
-            // Note: fit_result.error() is InterpolationError, so we just throw
-            // a simple exception that will be caught in fit() and converted
-            throw std::runtime_error("Fitting failed on axis " + std::to_string(Axis));
+            return false;  // Propagate failure without throwing
         }
 
         // Update statistics
@@ -416,6 +422,8 @@ private:
         for (size_t i = 0; i < n_axis; ++i) {
             coeffs[base_offset + i * stride] = coeffs_buffer[i];
         }
+
+        return true;
     }
 
     std::array<std::vector<T>, N> grids_;
