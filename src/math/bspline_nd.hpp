@@ -116,25 +116,23 @@ public:
     /// @param query N-dimensional query point
     /// @return Interpolated value
     T eval(const QueryPoint& query) const {
-        // Clamp queries to domain
+        // Process all dimensions in single loop for better cache locality
         QueryPoint clamped;
+        std::array<int, N> spans;
+        std::array<std::array<T, 4>, N> basis_weights;
+
         for (size_t dim = 0; dim < N; ++dim) {
+            // Clamp query to domain
             clamped[dim] = clamp_bspline_query(
                 query[dim],
                 grids_[dim].front(),
                 grids_[dim].back()
             );
-        }
 
-        // Find knot spans for all dimensions
-        std::array<int, N> spans;
-        for (size_t dim = 0; dim < N; ++dim) {
+            // Find knot span
             spans[dim] = find_span_cubic(knots_[dim], clamped[dim]);
-        }
 
-        // Evaluate basis functions for all dimensions
-        std::array<std::array<T, 4>, N> basis_weights;
-        for (size_t dim = 0; dim < N; ++dim) {
+            // Evaluate basis functions
             cubic_basis_nonuniform(knots_[dim], spans[dim], clamped[dim],
                                  basis_weights[dim].data());
         }
@@ -155,32 +153,27 @@ public:
     T eval_partial(size_t axis, const QueryPoint& query) const {
         assert(axis < N && "Axis index out of bounds");
 
-        // Clamp queries to domain
+        // Process all dimensions in single loop for better cache locality
         QueryPoint clamped;
+        std::array<int, N> spans;
+        std::array<std::array<T, 4>, N> basis_weights;
+
         for (size_t dim = 0; dim < N; ++dim) {
+            // Clamp query to domain
             clamped[dim] = clamp_bspline_query(
                 query[dim],
                 grids_[dim].front(),
                 grids_[dim].back()
             );
-        }
 
-        // Find knot spans for all dimensions
-        std::array<int, N> spans;
-        for (size_t dim = 0; dim < N; ++dim) {
+            // Find knot span
             spans[dim] = find_span_cubic(knots_[dim], clamped[dim]);
-        }
 
-        // Evaluate basis functions for all dimensions
-        // For the derivative axis, use derivative basis; for others, use regular basis
-        std::array<std::array<T, 4>, N> basis_weights;
-        for (size_t dim = 0; dim < N; ++dim) {
+            // Evaluate basis functions (derivative basis for target axis, regular for others)
             if (dim == axis) {
-                // Use derivative basis for this dimension
                 cubic_basis_derivative_nonuniform(knots_[dim], spans[dim], clamped[dim],
                                                   basis_weights[dim].data());
             } else {
-                // Use regular basis for other dimensions
                 cubic_basis_nonuniform(knots_[dim], spans[dim], clamped[dim],
                                       basis_weights[dim].data());
             }
