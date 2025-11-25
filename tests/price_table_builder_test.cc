@@ -402,5 +402,21 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
     EXPECT_TRUE(result.error().find("no valid donor") != std::string::npos);
 }
 
+TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
+    auto result = mango::PriceTableBuilder<4>::from_vectors(
+        {0.8, 0.9, 1.0, 1.1}, {0.25, 0.5, 0.75, 1.0}, {0.15, 0.2, 0.25, 0.3}, {0.02, 0.04, 0.06, 0.08},
+        100.0,
+        mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(),
+        500);
+    ASSERT_TRUE(result.has_value());
+    auto& [builder, axes] = result.value();
+
+    auto build_result = builder.build(axes);
+    ASSERT_TRUE(build_result.has_value()) << "Error: " << build_result.error();
+
+    EXPECT_EQ(build_result->total_slices, 4 * 4);  // Nσ × Nr = 4 × 4
+    EXPECT_EQ(build_result->total_points, 4 * 4 * 4);  // Nσ × Nr × Nt = 4 × 4 × 4
+}
+
 } // namespace
 } // namespace mango

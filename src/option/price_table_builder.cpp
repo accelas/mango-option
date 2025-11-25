@@ -99,10 +99,16 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
 
     // Step 3: Solve batch with snapshot registration
     auto batch_result = solve_batch(batch_params, axes);
-    if (batch_result.failed_count > 0) {
+
+    // Check failure rate against threshold
+    const double failure_rate = static_cast<double>(batch_result.failed_count) /
+                                static_cast<double>(batch_result.results.size());
+    if (failure_rate > config_.max_failure_rate) {
         return std::unexpected(
-            "solve_batch had " + std::to_string(batch_result.failed_count) +
-            " failures out of " + std::to_string(batch_result.results.size()));
+            "solve_batch failure rate " + std::to_string(failure_rate * 100) +
+            "% exceeds max_failure_rate " + std::to_string(config_.max_failure_rate * 100) +
+            "% (" + std::to_string(batch_result.failed_count) + " of " +
+            std::to_string(batch_result.results.size()) + " failed)");
     }
 
     // Count PDE solves (successful results)
@@ -113,6 +119,14 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     if (!extraction.has_value()) {
         return std::unexpected("extract_tensor failed: " + extraction.error());
     }
+
+    // Step 4b: Repair failed slices
+    auto repair_result = repair_failed_slices(
+        extraction->tensor, extraction->failed_pde, extraction->failed_spline, axes);
+    if (!repair_result.has_value()) {
+        return std::unexpected("repair_failed_slices failed: " + repair_result.error());
+    }
+    auto repair_stats = repair_result.value();
 
     // Step 5: Fit B-spline coefficients
     auto coeffs_result = fit_coeffs(extraction->tensor, axes);
@@ -142,11 +156,18 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     double elapsed = std::chrono::duration<double>(end_time - start_time).count();
 
     // Return full result with diagnostics
+    const size_t Nt = axes.grids[1].size();
     return PriceTableResult<N>{
         .surface = std::move(surface_result.value()),
         .n_pde_solves = n_pde_solves,
         .precompute_time_seconds = elapsed,
-        .fitting_stats = fitting_stats
+        .fitting_stats = fitting_stats,
+        .failed_pde_slices = extraction->failed_pde.size(),
+        .failed_spline_points = extraction->failed_spline.size(),
+        .repaired_full_slices = repair_stats.repaired_full_slices,
+        .repaired_partial_points = repair_stats.repaired_partial_points,
+        .total_slices = extraction->total_slices,
+        .total_points = extraction->total_slices * Nt
     };
 }
 
