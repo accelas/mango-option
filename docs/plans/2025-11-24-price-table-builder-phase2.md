@@ -122,15 +122,32 @@ for (size_t i = 0; i < values.size(); ++i) {
 
 ### Required Changes (In Order)
 
-#### Step 1: Change `build()` to tolerate partial PDE failures
+#### Step 1: Extend `PriceTableConfig` and change `build()` to tolerate partial failures
 
+**In `src/option/price_table_config.hpp`:**
 ```cpp
+// Current struct (src/option/price_table_config.hpp:12-18)
 struct PriceTableConfig {
-    // ... existing fields ...
+    OptionType option_type = OptionType::PUT;
+    double K_ref = 100.0;
+    GridSpec<double> grid_estimator;
+    size_t n_time = 1000;
+    double dividend_yield = 0.0;
+    std::vector<DiscreteDividend> discrete_dividends;
+    // NEW: Partial failure tolerance
     double max_failure_rate = 0.0;  // 0.0 = strict (current), 0.1 = allow 10%
 };
+```
 
-// In build():
+**Update factory methods** to accept optional `max_failure_rate`:
+```cpp
+// In from_vectors(), from_strikes(), from_chain():
+// Add parameter: double max_failure_rate = 0.0
+// Set: config.max_failure_rate = max_failure_rate;
+```
+
+**In `build()`:**
+```cpp
 auto batch_result = solve_batch(batch_params, axes);
 double failure_rate = static_cast<double>(batch_result.failed_count) / batch_result.results.size();
 if (failure_rate > config_.max_failure_rate) {
@@ -234,8 +251,14 @@ are already NaN-free. If we copy first, we may spread NaN from donors that have
 unreported spline failures.
 
 ```cpp
-// Returns std::expected<void, std::string> - error if repair impossible
-std::expected<void, std::string> repair_failed_slices(
+// Return type: repair statistics for PriceTableResult
+struct RepairStats {
+    size_t repaired_full_slices;    // PDE failures + all-maturity spline failures
+    size_t repaired_partial_slices; // Partial spline failures (τ-interpolated)
+};
+
+// Returns repair stats on success, error string on failure
+std::expected<RepairStats, std::string> repair_failed_slices(
     PriceTensor<N>& tensor,
     const std::vector<size_t>& failed_pde,
     const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
@@ -254,10 +277,13 @@ std::expected<void, std::string> repair_failed_slices(
 
     // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
     std::vector<size_t> full_slice_failures = failed_pde;
+    size_t partial_spline_count = 0;
     for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         if (τ_failures.size() == Nt) {
             auto [σ_idx, r_idx] = slice_key;
             full_slice_failures.push_back(σ_idx * Nr + r_idx);
+        } else {
+            partial_spline_count += τ_failures.size();
         }
     }
 
@@ -332,7 +358,10 @@ std::expected<void, std::string> repair_failed_slices(
         slice_valid[flat_idx] = true;
     }
 
-    return {};  // Success: tensor is now NaN-free
+    return RepairStats{
+        .repaired_full_slices = full_slice_failures.size(),
+        .repaired_partial_slices = partial_spline_count
+    };
 }
 
 // Helper: find nearest valid (σ,r) using Manhattan distance
@@ -378,11 +407,37 @@ struct PriceTableResult {
     size_t n_pde_solves;
     double build_time_seconds;
     BSplineFittingStats fitting_stats;
-    // NEW: Failure tracking (two failure modes)
-    size_t failed_pde_slices;           // Full (σ,r) PDE failures
-    size_t failed_spline_slices;        // Per-maturity spline failures
-    size_t repaired_slices;             // Successfully interpolated
-    size_t total_slices;                // Nσ × Nr
+    // NEW: Failure and repair tracking
+    size_t failed_pde_slices;            // Full (σ,r) PDE failures
+    size_t failed_spline_slices;         // Per-maturity spline failures
+    size_t repaired_full_slices;         // Full slices repaired via neighbor copy
+    size_t repaired_partial_slices;      // Partial slices repaired via τ-interpolation
+    size_t total_slices;                 // Nσ × Nr
+};
+```
+
+**In `build()`, populate from RepairStats:**
+```cpp
+// After repair_failed_slices():
+auto repair_result = repair_failed_slices(extraction.tensor, extraction.failed_pde,
+                                          extraction.failed_spline, axes);
+if (!repair_result.has_value()) {
+    return std::unexpected("Repair failed: " + repair_result.error());
+}
+auto repair_stats = repair_result.value();
+
+// ... fit_coeffs() ...
+
+// Populate PriceTableResult:
+return PriceTableResult<N>{
+    .surface = ...,
+    .n_pde_solves = ...,
+    // ...
+    .failed_pde_slices = extraction.failed_pde.size(),
+    .failed_spline_slices = extraction.failed_spline.size(),
+    .repaired_full_slices = repair_stats.repaired_full_slices,
+    .repaired_partial_slices = repair_stats.repaired_partial_slices,
+    .total_slices = extraction.total_slices
 };
 ```
 
@@ -393,11 +448,11 @@ solve_batch() → batch_result.failed_count
                       ↓
 extract_tensor() → ExtractionResult{tensor, total_slices, failed_pde, failed_spline}
                       ↓
-repair_failed_slices(failed_pde, failed_spline) → tensor with NaN replaced (or error)
+repair_failed_slices() → RepairStats{repaired_full_slices, repaired_partial_slices}
                       ↓
 fit_coeffs() → FitCoeffsResult (NaN-free, fitting succeeds)
                       ↓
-build() → PriceTableResult{..., failed_pde_slices, failed_spline_slices, repaired_slices, ...}
+build() → PriceTableResult{..., failed_*, repaired_*, ...}
 ```
 
 ### Implementation Order
