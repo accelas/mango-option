@@ -6,6 +6,7 @@
 #include <expected>
 #include <algorithm>
 #include "src/support/error_types.hpp"
+#include "src/math/safe_math.hpp"
 
 namespace mango {
 
@@ -21,12 +22,27 @@ struct PriceTableAxes {
     std::array<std::string, N> names;          ///< Optional names (e.g., "moneyness", "maturity")
 
     /// Calculate total number of grid points (product of all axis sizes)
+    ///
+    /// Uses safe multiplication with overflow detection via __int128.
+    /// Returns 0 on overflow (callers should validate grids first).
     [[nodiscard]] size_t total_points() const noexcept {
         size_t total = 1;
         for (size_t i = 0; i < N; ++i) {
-            total *= grids[i].size();
+            auto result = safe_multiply(total, grids[i].size());
+            if (!result.has_value()) {
+                return 0;  // Overflow - return 0 to signal error
+            }
+            total = result.value();
         }
         return total;
+    }
+
+    /// Calculate total number of grid points with overflow checking
+    ///
+    /// @return Total points or OverflowError if product exceeds SIZE_MAX
+    [[nodiscard]] std::expected<size_t, OverflowError> total_points_checked() const noexcept {
+        const auto s = shape();
+        return safe_product(std::span<const size_t, N>(s));
     }
 
     /// Validate all grids are non-empty and strictly monotonic

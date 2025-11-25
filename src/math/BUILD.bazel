@@ -1,4 +1,11 @@
 cc_library(
+    name = "safe_math",
+    hdrs = ["safe_math.hpp"],
+    deps = ["//src/support:error_types"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "lapack_banded_layout",
     hdrs = ["lapack_banded_layout.hpp"],
     deps = ["@mdspan//:mdspan"],
@@ -83,6 +90,7 @@ cc_library(
     hdrs = ["bspline_nd.hpp"],
     deps = [
         ":bspline_basis",
+        ":safe_math",
         "//src/support:error_types",
         "@mdspan//:mdspan",
     ],
@@ -94,6 +102,7 @@ cc_library(
     hdrs = ["bspline_nd_separable.hpp"],
     deps = [
         ":bspline_collocation",
+        ":safe_math",
         "//src/support:parallel",
         "@mdspan//:mdspan",
     ],

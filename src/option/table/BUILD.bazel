@@ -3,6 +3,7 @@ cc_library(
     hdrs = ["price_table_axes.hpp"],
     deps = [
         "//src/support:error_types",
+        "//src/math:safe_math",
     ],
     visibility = ["//visibility:public"],
 )
@@ -12,6 +13,7 @@ cc_library(
     hdrs = ["price_tensor.hpp"],
     deps = [
         "//src/support:aligned_arena",
+        "//src/math:safe_math",
         "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],

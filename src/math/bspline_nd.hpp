@@ -28,6 +28,7 @@
 
 #include "src/math/bspline_basis.hpp"
 #include "src/support/error_types.hpp"
+#include "src/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <array>
 #include <vector>
@@ -100,10 +101,17 @@ public:
             }
         }
 
-        // Compute expected coefficient array size
+        // Compute expected coefficient array size with overflow check
         size_t expected_size = 1;
         for (size_t dim = 0; dim < N; ++dim) {
-            expected_size *= grids[dim].size();
+            auto result = safe_multiply(expected_size, grids[dim].size());
+            if (!result.has_value()) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::ValueSizeMismatch,
+                    grids[dim].size(),
+                    dim});
+            }
+            expected_size = result.value();
         }
 
         if (coeffs.size() != expected_size) {

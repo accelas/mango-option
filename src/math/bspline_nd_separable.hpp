@@ -28,6 +28,7 @@
 
 #include "src/math/bspline_collocation.hpp"
 #include "src/support/parallel.hpp"
+#include "src/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <expected>
 #include <span>
@@ -168,10 +169,17 @@ public:
         std::vector<T>&& values,
         const Config& config = {})
     {
-        // Verify size
+        // Verify size with overflow check
         size_t expected_size = 1;
-        for (const auto& grid : grids_) {
-            expected_size *= grid.size();
+        for (size_t i = 0; i < grids_.size(); ++i) {
+            auto result = safe_multiply(expected_size, grids_[i].size());
+            if (!result.has_value()) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::ValueSizeMismatch,
+                    grids_[i].size(),
+                    i});
+            }
+            expected_size = result.value();
         }
 
         if (values.size() != expected_size) {
