@@ -6,3 +6,13 @@ cc_library(
     deps = ["@kokkos//:kokkos"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "grid",
+    hdrs = ["pde/core/grid.hpp"],
+    deps = [
+        ":execution_space",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)

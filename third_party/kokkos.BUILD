@@ -98,7 +98,6 @@ cc_library(
         "core/src/Serial/*.cpp",
     ], exclude = [
         "core/src/impl/Kokkos_Spinwait.cpp",
-        "core/src/impl/Kokkos_hwloc.cpp",
     ]),
     includes = [
         "core/src",

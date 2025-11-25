@@ -1,3 +1,13 @@
 load("@rules_cc//cc:defs.bzl", "cc_test")
 
-# Placeholder - tests will be added in subsequent tasks
+cc_test(
+    name = "grid_test",
+    srcs = ["grid_test.cc"],
+    deps = [
+        "//kokkos/src:grid",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
