@@ -64,8 +64,11 @@ This codebase uses abstraction macros from `src/support/parallel.hpp` for portab
 ```cpp
 // src/option/price_table_builder.cpp
 
-// Add include (NOT <omp.h> directly)
+// Add includes (NOT <omp.h> directly)
 #include "src/support/parallel.hpp"
+#include <mutex>   // std::mutex, std::lock_guard
+#include <tuple>   // std::tuple
+#include <map>     // std::map
 
 // In extract_tensor():
 // MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
@@ -225,6 +228,11 @@ The interpolation step MUST guarantee NaN-free output, or abort gracefully. This
 
 **Implementation: `repair_failed_slices()`**
 
+**CRITICAL**: Repair order matters! Partial spline failures must be repaired FIRST
+(via τ-interpolation), so that when we do full-slice neighbor copies, the donors
+are already NaN-free. If we copy first, we may spread NaN from donors that have
+unreported spline failures.
+
 ```cpp
 // Returns std::expected<void, std::string> - error if repair impossible
 std::expected<void, std::string> repair_failed_slices(
@@ -238,66 +246,34 @@ std::expected<void, std::string> repair_failed_slices(
     const size_t Nσ = axes.grids[2].size();
     const size_t Nr = axes.grids[3].size();
 
-    // Track which (σ,r) slices are fully invalid (for neighbor search)
+    // Group spline failures by (σ,r) to detect full-slice vs partial failures
+    std::map<std::pair<size_t, size_t>, std::vector<size_t>> spline_failures_by_slice;
+    for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
+        spline_failures_by_slice[{σ_idx, r_idx}].push_back(τ_idx);
+    }
+
+    // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
+    std::vector<size_t> full_slice_failures = failed_pde;
+    for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
+        if (τ_failures.size() == Nt) {
+            auto [σ_idx, r_idx] = slice_key;
+            full_slice_failures.push_back(σ_idx * Nr + r_idx);
+        }
+    }
+
+    // Track which (σ,r) slices are valid donors (no full failures, no partial spline NaN)
     std::vector<bool> slice_valid(Nσ * Nr, true);
-    for (size_t flat_idx : failed_pde) {
+    for (size_t flat_idx : full_slice_failures) {
         slice_valid[flat_idx] = false;
     }
 
-    // 1. Repair full PDE failures: copy from nearest valid (σ,r) neighbor
-    for (size_t flat_idx : failed_pde) {
-        size_t σ_idx = flat_idx / Nr;
-        size_t r_idx = flat_idx % Nr;
-
-        auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
-        if (!neighbor.has_value()) {
-            return std::unexpected(
-                "Cannot repair slice (" + std::to_string(σ_idx) + "," +
-                std::to_string(r_idx) + "): no valid neighbors exist");
-        }
-        auto [nσ, nr] = neighbor.value();
-
-        // Copy entire (m,τ) surface from neighbor
-        for (size_t i = 0; i < Nm; ++i) {
-            for (size_t j = 0; j < Nt; ++j) {
-                tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
-            }
-        }
-
-        // Mark as valid so this slice can be a donor for subsequent repairs
-        slice_valid[flat_idx] = true;
-    }
-
-    // 2. Repair per-maturity spline failures: interpolate along τ axis
-    // Group failures by (σ,r) to detect full-slice failures
-    std::map<std::pair<size_t, size_t>, std::vector<size_t>> failures_by_slice;
-    for (auto [σ_idx, r_idx, τ_idx] : failed_spline) {
-        failures_by_slice[{σ_idx, r_idx}].push_back(τ_idx);
-    }
-
-    for (auto& [slice_key, τ_failures] : failures_by_slice) {
+    // ========== PHASE 1: Repair partial spline failures via τ-interpolation ==========
+    // This makes potential donor slices NaN-free before we copy from them
+    for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         auto [σ_idx, r_idx] = slice_key;
 
-        // Check if ALL maturities failed for this (σ,r) slice
-        bool all_maturities_failed = (τ_failures.size() == Nt);
-        if (all_maturities_failed) {
-            // Escalate to full-slice failure: copy from (σ,r) neighbor
-            auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
-            if (!neighbor.has_value()) {
-                return std::unexpected(
-                    "Cannot repair slice (" + std::to_string(σ_idx) + "," +
-                    std::to_string(r_idx) + "): all maturities failed and no valid neighbors");
-            }
-            auto [nσ, nr] = neighbor.value();
-            for (size_t i = 0; i < Nm; ++i) {
-                for (size_t j = 0; j < Nt; ++j) {
-                    tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
-                }
-            }
-            // Mark as valid so this slice can be a donor for subsequent repairs
-            slice_valid[σ_idx * Nr + r_idx] = true;
-            continue;  // Done with this slice
-        }
+        // Skip full-slice failures (handled in Phase 2)
+        if (τ_failures.size() == Nt) continue;
 
         // Partial failures: interpolate along τ axis
         for (size_t τ_idx : τ_failures) {
@@ -328,6 +304,32 @@ std::expected<void, std::string> repair_failed_slices(
                 }
             }
         }
+    }
+    // After Phase 1: all slice_valid slices are now NaN-free
+
+    // ========== PHASE 2: Repair full-slice failures via neighbor copy ==========
+    // Now donors are guaranteed NaN-free (Phase 1 cleaned them)
+    for (size_t flat_idx : full_slice_failures) {
+        size_t σ_idx = flat_idx / Nr;
+        size_t r_idx = flat_idx % Nr;
+
+        auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
+        if (!neighbor.has_value()) {
+            return std::unexpected(
+                "Cannot repair slice (" + std::to_string(σ_idx) + "," +
+                std::to_string(r_idx) + "): no valid neighbors exist");
+        }
+        auto [nσ, nr] = neighbor.value();
+
+        // Copy entire (m,τ) surface from neighbor (now guaranteed NaN-free)
+        for (size_t i = 0; i < Nm; ++i) {
+            for (size_t j = 0; j < Nt; ++j) {
+                tensor.view[i, j, σ_idx, r_idx] = tensor.view[i, j, nσ, nr];
+            }
+        }
+
+        // Mark as valid so this slice can be a donor for subsequent repairs
+        slice_valid[flat_idx] = true;
     }
 
     return {};  // Success: tensor is now NaN-free
