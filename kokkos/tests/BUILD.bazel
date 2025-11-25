@@ -95,3 +95,15 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "batch_solver_test",
+    srcs = ["batch_solver_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:batch_solver",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
