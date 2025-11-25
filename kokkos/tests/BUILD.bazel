@@ -83,3 +83,15 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "bspline_nd_test",
+    srcs = ["bspline_nd_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:bspline_nd",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)

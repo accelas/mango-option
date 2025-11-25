@@ -83,3 +83,14 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "bspline_nd",
+    hdrs = ["math/bspline_nd.hpp"],
+    deps = [
+        ":execution_space",
+        ":bspline_basis",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
