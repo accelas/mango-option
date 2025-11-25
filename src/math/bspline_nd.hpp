@@ -27,6 +27,7 @@
 #pragma once
 
 #include "src/math/bspline_basis.hpp"
+#include "src/support/error_types.hpp"
 #include <experimental/mdspan>
 #include <array>
 #include <vector>
@@ -36,7 +37,6 @@
 #include <cmath>
 #include <limits>
 #include <expected>
-#include <string>
 
 namespace mango {
 
@@ -78,8 +78,8 @@ public:
     /// @param grids N vectors of grid coordinates (each must be sorted, size ≥ 4)
     /// @param knots N vectors of knot sequences (clamped cubic)
     /// @param coeffs Flattened N-D coefficient array in row-major order
-    /// @return BSplineND instance or error message
-    [[nodiscard]] static std::expected<BSplineND, std::string> create(
+    /// @return BSplineND instance or error
+    [[nodiscard]] static std::expected<BSplineND, InterpolationError> create(
         GridArray grids,
         KnotArray knots,
         std::vector<T> coeffs)
@@ -87,12 +87,16 @@ public:
         // Validate grid sizes
         for (size_t dim = 0; dim < N; ++dim) {
             if (grids[dim].size() < 4) {
-                return std::unexpected("Grid dimension " + std::to_string(dim) +
-                                     " must have at least 4 points");
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InsufficientGridPoints,
+                    grids[dim].size(),
+                    dim});
             }
             if (knots[dim].size() != grids[dim].size() + 4) {
-                return std::unexpected("Knot dimension " + std::to_string(dim) +
-                                     " size mismatch");
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::DimensionMismatch,
+                    knots[dim].size(),
+                    dim});
             }
         }
 
@@ -103,9 +107,9 @@ public:
         }
 
         if (coeffs.size() != expected_size) {
-            return std::unexpected("Coefficient size " + std::to_string(coeffs.size()) +
-                                 " does not match grid dimensions (expected " +
-                                 std::to_string(expected_size) + ")");
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::CoefficientSizeMismatch,
+                coeffs.size()});
         }
 
         return BSplineND(std::move(grids), std::move(knots), std::move(coeffs));

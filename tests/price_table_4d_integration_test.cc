@@ -3,8 +3,8 @@
  * @brief Integration tests for PriceTableBuilder<4> with routing
  */
 
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <iostream>

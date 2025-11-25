@@ -1,0 +1,120 @@
+cc_library(
+    name = "price_table_axes",
+    hdrs = ["price_table_axes.hpp"],
+    deps = [
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_tensor",
+    hdrs = ["price_tensor.hpp"],
+    deps = [
+        "//src/support:aligned_arena",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_metadata",
+    hdrs = ["price_table_metadata.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_surface",
+    srcs = ["price_table_surface.cpp"],
+    hdrs = ["price_table_surface.hpp"],
+    deps = [
+        ":price_table_axes",
+        ":price_table_metadata",
+        "//src/math:bspline_nd",
+        "//src/math:bspline_basis",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_config",
+    hdrs = ["price_table_config.hpp"],
+    deps = [
+        "//src/option:american_option",
+        "//src/pde/core:grid",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_builder",
+    srcs = ["price_table_builder.cpp"],
+    hdrs = ["price_table_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":price_table_config",
+        ":price_table_axes",
+        ":price_table_surface",
+        ":price_tensor",
+        ":recursion_helpers",
+        "//src/option:option_chain",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+        "//src/math:bspline_nd_separable",
+        "//src/support:aligned_arena",
+        "//src/support:ivcalc_trace_hdr",
+        "//src/support:parallel",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "recursion_helpers",
+    hdrs = ["recursion_helpers.hpp"],
+    deps = [
+        ":price_table_axes",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_workspace",
+    srcs = ["price_table_workspace.cpp"],
+    hdrs = ["price_table_workspace.hpp"],
+    deps = [
+        "//src/support:error_types",
+        "//src/math:bspline_basis",
+        "//src/support:crc64",
+        "//third_party/arrow",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_grid",
+    hdrs = ["price_table_grid.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_extraction",
+    srcs = ["price_table_extraction.cpp"],
+    hdrs = ["price_table_extraction.hpp"],
+    deps = [
+        ":price_table_grid",
+        "//src/option:american_option_batch",
+        "//src/math:cubic_spline_solver",
+        "//src/support:parallel",
+        "@mdspan//:mdspan",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -72,6 +72,7 @@ cc_library(
     deps = [
         ":banded_matrix_solver",
         ":bspline_basis",
+        "//src/support:error_types",
         "//src/support:parallel",
     ],
     visibility = ["//visibility:public"],
@@ -82,6 +83,7 @@ cc_library(
     hdrs = ["bspline_nd.hpp"],
     deps = [
         ":bspline_basis",
+        "//src/support:error_types",
         "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],

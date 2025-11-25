@@ -35,11 +35,30 @@
 #include <array>
 #include <concepts>
 #include <string>
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <numeric>
 
 namespace mango {
+
+/// B-spline fitting diagnostics (per-axis and aggregate)
+///
+/// Contains per-axis metrics and computed aggregates for monitoring fit quality.
+/// @tparam T Floating point type
+/// @tparam N Number of dimensions
+template<std::floating_point T, size_t N>
+struct BSplineFittingStats {
+    std::array<T, N> max_residual_per_axis{};   ///< Max residual for each axis
+    T max_residual_overall = T{0};               ///< Max across all axes
+
+    std::array<T, N> condition_per_axis{};       ///< Condition estimate for each axis
+    T condition_max = T{0};                      ///< Max condition across all axes
+
+    std::array<size_t, N> failed_slices_per_axis{};  ///< Failed 1D fits per axis
+    size_t failed_slices_total = 0;              ///< Total failed slices
+};
 
 /// Successful result of N-dimensional separable B-spline fitting
 ///
@@ -50,6 +69,21 @@ struct BSplineNDSeparableResult {
     std::array<T, N> max_residual_per_axis;    ///< Max residual for each axis
     std::array<T, N> condition_per_axis;       ///< Condition estimate for each axis
     std::array<size_t, N> failed_slices;       ///< Failed 1D fits per axis (all zeros on success)
+
+    /// Convert to BSplineFittingStats with computed aggregates
+    BSplineFittingStats<T, N> to_stats() const {
+        BSplineFittingStats<T, N> stats;
+        stats.max_residual_per_axis = max_residual_per_axis;
+        stats.max_residual_overall = *std::max_element(
+            max_residual_per_axis.begin(), max_residual_per_axis.end());
+        stats.condition_per_axis = condition_per_axis;
+        stats.condition_max = *std::max_element(
+            condition_per_axis.begin(), condition_per_axis.end());
+        stats.failed_slices_per_axis = failed_slices;
+        stats.failed_slices_total = std::accumulate(
+            failed_slices.begin(), failed_slices.end(), size_t{0});
+        return stats;
+    }
 };
 
 /// Configuration for N-dimensional separable fitting
@@ -80,23 +114,24 @@ template<std::floating_point T, size_t N>
     requires (N >= 1)
 class BSplineNDSeparable {
 public:
-    using Result = std::expected<BSplineNDSeparableResult<T, N>, std::string>;
+    using Result = std::expected<BSplineNDSeparableResult<T, N>, InterpolationError>;
     using Config = BSplineNDSeparableConfig<T>;
 
     /// Factory method to create N-dimensional fitter with validation
     ///
     /// @param grids Array of N grid vectors (each ≥4 points, sorted)
-    /// @return Fitter instance or error message
-    [[nodiscard]] static std::expected<BSplineNDSeparable, std::string> create(
+    /// @return Fitter instance or error
+    [[nodiscard]] static std::expected<BSplineNDSeparable, InterpolationError> create(
         std::array<std::vector<T>, N> grids)
     {
         // Validate each grid via 1D solver creation
         for (size_t i = 0; i < N; ++i) {
             auto solver_result = BSplineCollocation1D<T>::create(grids[i]);
             if (!solver_result.has_value()) {
-                return std::unexpected(
-                    "Grid validation failed for axis " + std::to_string(i) +
-                    ": " + solver_result.error());
+                // Propagate error with axis index
+                auto err = solver_result.error();
+                err.index = i;
+                return std::unexpected(err);
             }
         }
 
@@ -140,22 +175,25 @@ public:
         }
 
         if (values.size() != expected_size) {
-            return std::unexpected(
-                "Value array size mismatch: expected " +
-                std::to_string(expected_size) + ", got " +
-                std::to_string(values.size()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ValueSizeMismatch,
+                values.size()});
         }
 
         // Validate input values for NaN/Inf
         // Note: Can't use SIMD with early return, so check sequentially
         for (size_t i = 0; i < values.size(); ++i) {
             if (std::isnan(values[i])) {
-                return std::unexpected(
-                    "Input values contain NaN at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput,
+                    expected_size,
+                    i});
             }
             if (std::isinf(values[i])) {
-                return std::unexpected(
-                    "Input values contain infinite value at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput,
+                    expected_size,
+                    i});
             }
         }
 
@@ -171,7 +209,9 @@ public:
         try {
             fit_all_axes<N-1>(coeffs, config.tolerance, max_residuals, conditions, failed);
         } catch (const std::exception& e) {
-            return std::unexpected(std::string(e.what()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                expected_size});
         }
 
         return BSplineNDSeparableResult<T, N>{
@@ -354,9 +394,9 @@ private:
 
         if (!fit_result.has_value()) {
             ++failed_count;
-            throw std::runtime_error(
-                "Fitting failed on axis " + std::to_string(Axis) +
-                ": " + fit_result.error());
+            // Note: fit_result.error() is InterpolationError, so we just throw
+            // a simple exception that will be caught in fit() and converted
+            throw std::runtime_error("Fitting failed on axis " + std::to_string(Axis));
         }
 
         // Update statistics

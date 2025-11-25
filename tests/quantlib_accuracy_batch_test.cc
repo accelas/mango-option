@@ -11,8 +11,8 @@
  */
 
 #include "tests/quantlib_validation_framework.hpp"
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;

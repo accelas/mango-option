@@ -3,7 +3,7 @@
  * @brief Implementation of price table extraction utility
  */
 
-#include "src/option/price_table_extraction.hpp"
+#include "src/option/table/price_table_extraction.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/support/parallel.hpp"
 #include <experimental/mdspan>

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "src/option/table/price_table_builder.hpp"
 #include "src/option/option_chain.hpp"
 
 TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
@@ -72,7 +72,7 @@ TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeMoneyness) {
     );
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("positive") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
 
 TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeMaturity) {
@@ -89,7 +89,7 @@ TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeMaturity) {
     );
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("positive") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
 
 TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeVolatility) {
@@ -106,7 +106,7 @@ TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeVolatility) {
     );
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("positive") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
 
 TEST(PriceTableFactoriesTest, FromVectorsRejectsZeroKRef) {
@@ -124,8 +124,7 @@ TEST(PriceTableFactoriesTest, FromVectorsRejectsZeroKRef) {
     );
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("K_ref") != std::string::npos ||
-                result.error().find("positive") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
 
 TEST(PriceTableFactoriesTest, FromVectorsAcceptsNegativeRates) {
@@ -187,8 +186,7 @@ TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeSpot) {
     );
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("Spot") != std::string::npos ||
-                result.error().find("positive") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
 
 TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeStrikes) {
@@ -206,8 +204,7 @@ TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeStrikes) {
     );
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("Strikes") != std::string::npos ||
-                result.error().find("positive") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
 
 TEST(PriceTableFactoriesTest, FromChainExtractsFields) {

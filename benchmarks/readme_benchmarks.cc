@@ -1,11 +1,9 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/bspline_price_table.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/price_table_surface.hpp"
-#include "src/option/price_table_workspace.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -85,8 +83,7 @@ struct AnalyticSurfaceFixture {
     std::vector<double> tau_grid;
     std::vector<double> sigma_grid;
     std::vector<double> rate_grid;
-    std::shared_ptr<const BSpline4D> evaluator;
-    std::shared_ptr<const PriceTableSurface<4>> surface;  // For IVSolverInterpolated
+    std::shared_ptr<const PriceTableSurface<4>> surface;
 };
 
 const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
@@ -129,14 +126,14 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
                 fixture_ptr->rate_grid});
 
         if (!fitter_result.has_value()) {
-            throw std::runtime_error("Failed to create BSpline fitter: " + fitter_result.error());
+            throw std::runtime_error("Failed to create BSpline fitter");
         }
 
         auto& fitter = fitter_result.value();
 
         auto fit_result = fitter.fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
         if (!fit_result.has_value()) {
-            throw std::runtime_error("Failed to fit analytic BSpline surface: " + fit_result.error());
+            throw std::runtime_error("Failed to fit analytic BSpline surface");
         }
 
         // Create PriceTableAxes
@@ -158,30 +155,9 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
         // Create surface with coefficients directly
         auto surface_result = PriceTableSurface<4>::build(axes, fit_result->coefficients, meta);
         if (!surface_result.has_value()) {
-            throw std::runtime_error("Failed to create surface: " + surface_result.error());
+            throw std::runtime_error("Failed to create surface");
         }
         fixture_ptr->surface = std::move(surface_result.value());
-
-        // Create PriceTableWorkspace for BSpline4D (used by some benchmarks)
-        auto workspace_result = PriceTableWorkspace::create(
-            fixture_ptr->m_grid,
-            fixture_ptr->tau_grid,
-            fixture_ptr->sigma_grid,
-            fixture_ptr->rate_grid,
-            fit_result->coefficients,
-            fixture_ptr->K_ref,
-            0.0  // dividend_yield
-        );
-        if (!workspace_result.has_value()) {
-            throw std::runtime_error("Failed to create workspace: " + workspace_result.error());
-        }
-
-        // Create BSpline4D evaluator from workspace
-        auto evaluator_result = BSpline4D::create(workspace_result.value());
-        if (!evaluator_result.has_value()) {
-            throw std::runtime_error("Failed to create BSpline4D: " + evaluator_result.error());
-        }
-        fixture_ptr->evaluator = std::make_shared<BSpline4D>(std::move(evaluator_result.value()));
 
         return fixture_ptr.release();
     }();
@@ -498,7 +474,7 @@ static void BM_README_PriceTableInterpolation(benchmark::State& state) {
     const double rate = 0.02;
 
     auto run_once = [&]() {
-        double price = surf.evaluator->eval(moneyness, maturity, sigma, rate);
+        double price = surf.surface->value({moneyness, maturity, sigma, rate});
         benchmark::DoNotOptimize(price);
     };
 
@@ -525,13 +501,13 @@ static void BM_README_PriceTableGreeks(benchmark::State& state) {
     const double m_eps = 5e-3;
 
     auto run_once = [&]() {
-        const double base = surf.evaluator->eval(moneyness, maturity, sigma, rate);
-        const double price_up_sigma = surf.evaluator->eval(moneyness, maturity, sigma + sigma_eps, rate);
-        const double price_dn_sigma = surf.evaluator->eval(moneyness, maturity, sigma - sigma_eps, rate);
+        const double base = surf.surface->value({moneyness, maturity, sigma, rate});
+        const double price_up_sigma = surf.surface->value({moneyness, maturity, sigma + sigma_eps, rate});
+        const double price_dn_sigma = surf.surface->value({moneyness, maturity, sigma - sigma_eps, rate});
         double vega = (price_up_sigma - price_dn_sigma) / (2.0 * sigma_eps);
 
-        const double price_up_m = surf.evaluator->eval(moneyness + m_eps, maturity, sigma, rate);
-        const double price_dn_m = surf.evaluator->eval(moneyness - m_eps, maturity, sigma, rate);
+        const double price_up_m = surf.surface->value({moneyness + m_eps, maturity, sigma, rate});
+        const double price_dn_m = surf.surface->value({moneyness - m_eps, maturity, sigma, rate});
         double gamma = (price_up_m - 2.0 * base + price_dn_m) / (m_eps * m_eps);
 
         benchmark::DoNotOptimize(vega);

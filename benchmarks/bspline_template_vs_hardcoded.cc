@@ -1,5 +1,8 @@
+// OBSOLETE: This benchmark compared BSpline4D (removed) vs BSplineND template.
+// BSpline4D was dead code - production now uses PriceTableSurface<4> directly.
+// Kept for historical reference but no longer builds.
+
 #include <benchmark/benchmark.h>
-#include "src/option/bspline_price_table.hpp"
 #include "src/math/bspline_nd.hpp"
 #include "src/math/bspline_basis.hpp"
 #include <vector>
@@ -62,37 +65,10 @@ struct BSplineTestData {
     }
 };
 
-// Benchmark hardcoded BSpline4D
-void BM_BSpline4D_Eval(benchmark::State& state) {
-    size_t n_m = state.range(0);
-    size_t n_tau = state.range(1);
-    size_t n_sigma = state.range(2);
-    size_t n_r = state.range(3);
-    size_t n_queries = 1000;
-
-    BSplineTestData data(n_m, n_tau, n_sigma, n_r, n_queries);
-
-    auto ws = mango::PriceTableWorkspace::create(
-        data.m_grid, data.tau_grid, data.sigma_grid, data.r_grid,
-        data.coefficients, 100.0, 0.0);
-
-    if (!ws.has_value()) {
-        state.SkipWithError("Failed to create workspace");
-        return;
-    }
-
-    mango::BSpline4D spline(ws.value());
-
-    double sum = 0.0;
-    for (auto _ : state) {
-        for (const auto& q : data.query_points) {
-            double val = spline.eval(q[0], q[1], q[2], q[3]);
-            benchmark::DoNotOptimize(sum += val);
-        }
-    }
-
-    state.SetItemsProcessed(state.iterations() * n_queries);
-}
+// REMOVED: BSpline4D was dead code, removed in favor of PriceTableSurface<4>
+// void BM_BSpline4D_Eval(benchmark::State& state) {
+//     ...
+// }
 
 // Benchmark template BSplineND<double, 4>
 void BM_BSplineND_Eval(benchmark::State& state) {
@@ -126,15 +102,12 @@ void BM_BSplineND_Eval(benchmark::State& state) {
 }
 
 // Small grid (typical for coarse price tables)
-BENCHMARK(BM_BSpline4D_Eval)->Args({10, 8, 6, 4})->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_BSplineND_Eval)->Args({10, 8, 6, 4})->Unit(benchmark::kMicrosecond);
 
 // Medium grid (typical for production)
-BENCHMARK(BM_BSpline4D_Eval)->Args({20, 15, 10, 8})->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_BSplineND_Eval)->Args({20, 15, 10, 8})->Unit(benchmark::kMicrosecond);
 
 // Large grid (high accuracy requirements)
-BENCHMARK(BM_BSpline4D_Eval)->Args({50, 30, 20, 10})->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_BSplineND_Eval)->Args({50, 30, 20, 10})->Unit(benchmark::kMicrosecond);
 
 }  // namespace
