@@ -66,9 +66,11 @@ This codebase uses abstraction macros from `src/support/parallel.hpp` for portab
 
 // Add includes (NOT <omp.h> directly)
 #include "src/support/parallel.hpp"
-#include <mutex>   // std::mutex, std::lock_guard
-#include <tuple>   // std::tuple
-#include <map>     // std::map
+#include <mutex>     // std::mutex, std::lock_guard
+#include <tuple>     // std::tuple
+#include <map>       // std::map
+#include <vector>    // std::vector (explicit, don't rely on transitive)
+#include <optional>  // std::optional (explicit, don't rely on transitive)
 
 // In extract_tensor():
 // MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
@@ -428,17 +430,29 @@ struct PriceTableResult {
 **In `build()`, validate and populate:**
 ```cpp
 // IMPORTANT: Early bailout if no valid donors exist
-// Even with max_failure_rate = 1.0, repair needs at least one healthy slice
-size_t full_failures = extraction.failed_pde.size();
+// Must account for BOTH PDE failures AND all-maturity spline failures
+
+// Group spline failures by (σ,r) to find full-slice escalations
+const size_t Nt = axes.grids[1].size();
+std::map<std::pair<size_t, size_t>, size_t> spline_failures_per_slice;
 for (auto [σ, r, τ] : extraction.failed_spline) {
-    // Count slices where ALL maturities failed (will escalate to full failure)
-    // (simplified check - actual impl groups by (σ,r) first)
+    spline_failures_per_slice[{σ, r}]++;
 }
-if (full_failures >= extraction.total_slices) {
+
+// Count full-slice failures: PDE failures + slices with ALL maturities failed
+size_t full_slice_failures = extraction.failed_pde.size();
+for (auto& [slice_key, count] : spline_failures_per_slice) {
+    if (count == Nt) {
+        full_slice_failures++;
+    }
+}
+
+if (full_slice_failures >= extraction.total_slices) {
     return std::unexpected(
         "All " + std::to_string(extraction.total_slices) +
-        " slices failed - no valid donor exists for repair. "
-        "Check PDE solver parameters or reduce failure tolerance.");
+        " slices failed (" + std::to_string(extraction.failed_pde.size()) +
+        " PDE, " + std::to_string(full_slice_failures - extraction.failed_pde.size()) +
+        " all-maturity spline) - no valid donor exists for repair.");
 }
 
 // Proceed with repair:
