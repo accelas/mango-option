@@ -148,8 +148,8 @@ public:
             return "Y size must match existing grid";
         }
 
-        // Update y-values
-        y_.assign(y.begin(), y.end());
+        // Update y-values in-place (size already verified)
+        std::copy(y.begin(), y.end(), y_.begin());
 
         // Rebuild spline using cached interval widths
         if (config_.boundary_type == SplineBoundary::NATURAL) {

@@ -407,15 +407,18 @@ template<std::floating_point T>
     return static_cast<T>(1.0 / rcond);
 }
 
-/// Compute 1-norm of banded matrix: ||A||₁ = max column sum
+/// Compute 1-norm of banded matrix: ||A||₁ = max column sum (with workspace)
+///
+/// Uses caller-provided workspace to avoid allocation on repeated calls.
 ///
 /// @tparam T Floating point type
 /// @param A Banded matrix
+/// @param workspace Pre-allocated buffer of size >= A.size(), zeroed by caller
 /// @return 1-norm ||A||₁
 template<std::floating_point T>
-[[nodiscard]] T banded_norm1(const BandedMatrix<T>& A) noexcept {
+[[nodiscard]] T banded_norm1(const BandedMatrix<T>& A, std::span<T> workspace) noexcept {
     const size_t n = A.size();
-    std::vector<T> col_sums(n, T{0});
+    assert(workspace.size() >= n && "Workspace must be at least A.size()");
 
     for (size_t i = 0; i < n; ++i) {
         const size_t col_start = A.col_start(i);
@@ -423,11 +426,31 @@ template<std::floating_point T>
 
         MANGO_PRAGMA_SIMD
         for (size_t j = col_start; j < col_end; ++j) {
-            col_sums[j] += std::abs(A(i, j));
+            workspace[j] += std::abs(A(i, j));
         }
     }
 
-    return *std::max_element(col_sums.begin(), col_sums.end());
+    return *std::max_element(workspace.begin(), workspace.begin() + n);
+}
+
+/// Compute 1-norm of banded matrix: ||A||₁ = max column sum
+///
+/// Convenience overload using thread-local cached workspace.
+/// For repeated calls with same-sized matrices, use the workspace overload
+/// to avoid thread-local lookup overhead.
+///
+/// @tparam T Floating point type
+/// @param A Banded matrix
+/// @return 1-norm ||A||₁
+template<std::floating_point T>
+[[nodiscard]] T banded_norm1(const BandedMatrix<T>& A) noexcept {
+    const size_t n = A.size();
+
+    // Thread-local workspace avoids allocation on repeated calls
+    thread_local std::vector<T> workspace;
+    workspace.assign(n, T{0});  // Resize and zero
+
+    return banded_norm1(A, std::span<T>(workspace));
 }
 
 }  // namespace mango
