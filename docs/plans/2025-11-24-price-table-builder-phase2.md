@@ -162,9 +162,9 @@ inline std::optional<std::string> validate_config(const PriceTableConfig& config
 // In from_vectors(), from_strikes(), from_chain():
 // Add parameter: double max_failure_rate = 0.0
 
-// Example: from_vectors()
-template <size_t N>
-static std::expected<PriceTableBuilder<N>, std::string> from_vectors(
+// Example: from_vectors() - keeps existing return type
+static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+from_vectors(
     /* existing params */,
     double max_failure_rate = 0.0)
 {
@@ -177,33 +177,37 @@ static std::expected<PriceTableBuilder<N>, std::string> from_vectors(
         return std::unexpected(err.value());
     }
 
-    return PriceTableBuilder<N>(std::move(config), /* axes */);
+    // Build axes (existing logic)
+    auto axes_result = PriceTableAxes<4>::from_vectors(...);
+    if (!axes_result.has_value()) {
+        return std::unexpected(axes_result.error());
+    }
+
+    return std::make_pair(
+        PriceTableBuilder<4>(std::move(config)),
+        std::move(axes_result.value()));
 }
 
 // Same pattern for from_strikes() and from_chain()
 ```
 
-**In PriceTableBuilder constructor** (defense in depth for direct construction):
+**Constructor unchanged** - keeps existing signature:
 ```cpp
-// Add member variable to store deferred validation error:
-// std::string config_validation_error_;  // Empty if valid
-
-template <size_t N>
-PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config, PriceTableAxes<N> axes)
-    : config_(std::move(config)), axes_(std::move(axes))
-{
-    // Validate even if caller bypasses factory
-    if (auto err = validate_config(config_); err.has_value()) {
-        // Constructor can't return std::expected, so store error for build() to check
-        // Alternative: use static factory pattern exclusively (make constructor private)
-        config_validation_error_ = err.value();
-    }
-}
+// explicit PriceTableBuilder(PriceTableConfig config)
+// Only stores config_. Axes passed to build() separately.
+// No changes needed to constructor.
 ```
 
-**In `build()`:**
+**In `build()` - validate at start:**
 ```cpp
-auto batch_result = solve_batch(batch_params, axes);
+std::expected<PriceTableResult<N>, std::string>
+PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
+    // Validate config at start of build() - catches direct construction with bad config
+    if (auto err = validate_config(config_); err.has_value()) {
+        return std::unexpected("Invalid config: " + err.value());
+    }
+
+    auto batch_result = solve_batch(batch_params, axes);
 double failure_rate = static_cast<double>(batch_result.failed_count) / batch_result.results.size();
 if (failure_rate > config_.max_failure_rate) {
     return std::unexpected("solve_batch failure rate exceeds threshold");
@@ -499,11 +503,7 @@ struct PriceTableResult {
 
 **In `build()`, validate and populate:**
 ```cpp
-// Check for config validation errors (if constructor was used directly)
-if (!config_validation_error_.empty()) {
-    return std::unexpected("Invalid config: " + config_validation_error_);
-}
-
+// (validate_config call shown above in "In build() - validate at start")
 // ... solve_batch, extract_tensor ...
 
 // repair_failed_slices handles "no valid donor" detection internally.
