@@ -153,6 +153,13 @@ double failure_rate = static_cast<double>(batch_result.failed_count) / batch_res
 if (failure_rate > config_.max_failure_rate) {
     return std::unexpected("solve_batch failure rate exceeds threshold");
 }
+
+// IMPORTANT: Even if failure_rate passes, repair requires at least one valid donor.
+// If failure_rate == 1.0 (all failed), repair will fail later with "no valid neighbors".
+// Consider enforcing: failure_rate < 1.0 (at least one success required)
+if (batch_result.failed_count == batch_result.results.size()) {
+    return std::unexpected("All PDE solves failed - no valid donor for repair");
+}
 // Continue to extract_tensor with partial results...
 ```
 
@@ -253,8 +260,8 @@ unreported spline failures.
 ```cpp
 // Return type: repair statistics for PriceTableResult
 struct RepairStats {
-    size_t repaired_full_slices;    // PDE failures + all-maturity spline failures
-    size_t repaired_partial_slices; // Partial spline failures (τ-interpolated)
+    size_t repaired_full_slices;    // (σ,r) slices: PDE failures + all-maturity spline failures
+    size_t repaired_partial_points; // (σ,r,τ) points: Partial spline failures (τ-interpolated)
 };
 
 // Returns repair stats on success, error string on failure
@@ -277,13 +284,13 @@ std::expected<RepairStats, std::string> repair_failed_slices(
 
     // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
     std::vector<size_t> full_slice_failures = failed_pde;
-    size_t partial_spline_count = 0;
+    size_t partial_spline_points = 0;  // Count of (σ,r,τ) points, not slices
     for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         if (τ_failures.size() == Nt) {
             auto [σ_idx, r_idx] = slice_key;
             full_slice_failures.push_back(σ_idx * Nr + r_idx);
         } else {
-            partial_spline_count += τ_failures.size();
+            partial_spline_points += τ_failures.size();
         }
     }
 
@@ -360,7 +367,7 @@ std::expected<RepairStats, std::string> repair_failed_slices(
 
     return RepairStats{
         .repaired_full_slices = full_slice_failures.size(),
-        .repaired_partial_slices = partial_spline_count
+        .repaired_partial_points = partial_spline_points
     };
 }
 
@@ -408,17 +415,33 @@ struct PriceTableResult {
     double build_time_seconds;
     BSplineFittingStats fitting_stats;
     // NEW: Failure and repair tracking
+    // Note: "slices" = (σ,r) pairs, "points" = (σ,r,τ) triples
     size_t failed_pde_slices;            // Full (σ,r) PDE failures
-    size_t failed_spline_slices;         // Per-maturity spline failures
-    size_t repaired_full_slices;         // Full slices repaired via neighbor copy
-    size_t repaired_partial_slices;      // Partial slices repaired via τ-interpolation
-    size_t total_slices;                 // Nσ × Nr
+    size_t failed_spline_points;         // Per-maturity (σ,r,τ) spline failures
+    size_t repaired_full_slices;         // (σ,r) slices repaired via neighbor copy
+    size_t repaired_partial_points;      // (σ,r,τ) points repaired via τ-interpolation
+    size_t total_slices;                 // Nσ × Nr (for slice ratios)
+    size_t total_points;                 // Nσ × Nr × Nt (for point ratios)
 };
 ```
 
-**In `build()`, populate from RepairStats:**
+**In `build()`, validate and populate:**
 ```cpp
-// After repair_failed_slices():
+// IMPORTANT: Early bailout if no valid donors exist
+// Even with max_failure_rate = 1.0, repair needs at least one healthy slice
+size_t full_failures = extraction.failed_pde.size();
+for (auto [σ, r, τ] : extraction.failed_spline) {
+    // Count slices where ALL maturities failed (will escalate to full failure)
+    // (simplified check - actual impl groups by (σ,r) first)
+}
+if (full_failures >= extraction.total_slices) {
+    return std::unexpected(
+        "All " + std::to_string(extraction.total_slices) +
+        " slices failed - no valid donor exists for repair. "
+        "Check PDE solver parameters or reduce failure tolerance.");
+}
+
+// Proceed with repair:
 auto repair_result = repair_failed_slices(extraction.tensor, extraction.failed_pde,
                                           extraction.failed_spline, axes);
 if (!repair_result.has_value()) {
@@ -429,15 +452,17 @@ auto repair_stats = repair_result.value();
 // ... fit_coeffs() ...
 
 // Populate PriceTableResult:
+const size_t Nt = axes.grids[1].size();
 return PriceTableResult<N>{
     .surface = ...,
     .n_pde_solves = ...,
     // ...
     .failed_pde_slices = extraction.failed_pde.size(),
-    .failed_spline_slices = extraction.failed_spline.size(),
+    .failed_spline_points = extraction.failed_spline.size(),  // (σ,r,τ) count
     .repaired_full_slices = repair_stats.repaired_full_slices,
-    .repaired_partial_slices = repair_stats.repaired_partial_slices,
-    .total_slices = extraction.total_slices
+    .repaired_partial_points = repair_stats.repaired_partial_points,
+    .total_slices = extraction.total_slices,          // Nσ × Nr
+    .total_points = extraction.total_slices * Nt      // Nσ × Nr × Nt
 };
 ```
 
