@@ -14,7 +14,7 @@ PriceTableSurface<N>::PriceTableSurface(
     , spline_(std::move(spline)) {}
 
 template <size_t N>
-std::expected<std::shared_ptr<const PriceTableSurface<N>>, std::string>
+std::expected<std::shared_ptr<const PriceTableSurface<N>>, PriceTableError>
 PriceTableSurface<N>::build(
     PriceTableAxes<N> axes,
     std::vector<double> coeffs,
@@ -22,21 +22,14 @@ PriceTableSurface<N>::build(
 {
     // Validate axes
     if (auto valid = axes.validate(); !valid.has_value()) {
-        // Convert ValidationError to string for legacy API
-        auto err = valid.error();
-        return std::unexpected(
-            "Validation error code " + std::to_string(static_cast<int>(err.code)) +
-            " (value=" + std::to_string(err.value) +
-            ", index=" + std::to_string(err.index) + ")");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     // Check coefficient size matches axes
     size_t expected_size = axes.total_points();
     if (coeffs.size() != expected_size) {
-        return std::unexpected(
-            "Coefficient size " + std::to_string(coeffs.size()) +
-            " does not match axes shape (expected " +
-            std::to_string(expected_size) + ")");
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::FittingFailed, 0, coeffs.size()});
     }
 
     // Create knot sequences for clamped cubic B-splines
@@ -57,7 +50,7 @@ PriceTableSurface<N>::build(
         std::move(coeffs));
 
     if (!spline_result.has_value()) {
-        return std::unexpected("Failed to create B-spline: " + spline_result.error());
+        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }
 
     auto spline = std::make_unique<BSplineND<double, N>>(std::move(spline_result.value()));

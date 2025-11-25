@@ -49,6 +49,5 @@ TEST(PriceTableBuilderGridTest, RejectsInsufficientGridBounds) {
 
     // Should fail validation because grid bounds don't cover moneyness range
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("exceeds PDE grid bounds") != std::string::npos ||
-                result.error().find("moneyness") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
 }

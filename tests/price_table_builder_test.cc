@@ -221,7 +221,7 @@ TEST(PriceTableBuilderTest, BuildRejectsInvalidConfig) {
 
     auto result = builder.build(axes);
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("max_failure_rate"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
 }
 
 TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
@@ -238,7 +238,7 @@ TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
         1.5               // max_failure_rate - INVALID
     );
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("max_failure_rate"), std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::InvalidConfig);
 }
 
 TEST(PriceTableBuilderTest, FindNearestValidNeighborFindsAdjacent) {
@@ -399,7 +399,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
         tensor, failed_pde, failed_spline, axes);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(result.error().find("no valid donor") != std::string::npos);
+    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::RepairFailed);
 }
 
 TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {

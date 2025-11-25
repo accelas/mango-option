@@ -23,13 +23,13 @@ PriceTableBuilder<N>::PriceTableBuilder(PriceTableConfig config)
     : config_(std::move(config)) {}
 
 template <size_t N>
-std::expected<PriceTableResult<N>, std::string>
+std::expected<PriceTableResult<N>, PriceTableError>
 PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
     // Validate config
     if (auto err = validate_config(config_); err.has_value()) {
-        return std::unexpected("Invalid config: " + err.value());
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     // Start timing
@@ -38,39 +38,35 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     // Step 1: Validate axes
     auto axes_valid = axes.validate();
     if (!axes_valid.has_value()) {
-        auto err = axes_valid.error();
-        return std::unexpected(
-            "Invalid axes (error code " + std::to_string(static_cast<int>(err.code)) +
-            ", value=" + std::to_string(err.value) + ")");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     // Check minimum 4 points per axis (B-spline requirement)
     for (size_t i = 0; i < N; ++i) {
         if (axes.grids[i].size() < 4) {
-            return std::unexpected("Axis " + std::to_string(i) +
-                                   " has only " + std::to_string(axes.grids[i].size()) +
-                                   " points (need >=4 for cubic B-splines)");
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::InsufficientGridPoints, i, axes.grids[i].size()});
         }
     }
 
     // Check positive moneyness (needed for log)
     if (axes.grids[0].front() <= 0.0) {
-        return std::unexpected("Moneyness must be positive (needed for log)");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
     }
 
     // Check positive maturity (strict > 0)
     if (axes.grids[1].front() <= 0.0) {
-        return std::unexpected("Maturity must be positive (tau > 0 required for PDE time domain)");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 1});
     }
 
     // Check positive volatility
     if (axes.grids[2].front() <= 0.0) {
-        return std::unexpected("Volatility must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 2});
     }
 
     // Check K_ref > 0
     if (config_.K_ref <= 0.0) {
-        return std::unexpected("Reference strike K_ref must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
     }
 
     // Check PDE domain coverage
@@ -80,21 +76,13 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     const double x_max = config_.grid_estimator.x_max();
 
     if (x_min_requested < x_min || x_max_requested > x_max) {
-        return std::unexpected(
-            "Requested moneyness range [" + std::to_string(axes.grids[0].front()) + ", " +
-            std::to_string(axes.grids[0].back()) + "] in spot ratios "
-            "maps to log-moneyness [" + std::to_string(x_min_requested) + ", " +
-            std::to_string(x_max_requested) + "], "
-            "which exceeds PDE grid bounds [" + std::to_string(x_min) + ", " +
-            std::to_string(x_max) + "]. "
-            "Narrow the moneyness grid or expand the PDE domain."
-        );
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     // Step 2: Generate batch (Nσ × Nr entries)
     auto batch_params = make_batch(axes);
     if (batch_params.empty()) {
-        return std::unexpected("make_batch returned empty batch");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::EmptyBatch});
     }
 
     // Step 3: Solve batch with snapshot registration
@@ -104,11 +92,8 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     const double failure_rate = static_cast<double>(batch_result.failed_count) /
                                 static_cast<double>(batch_result.results.size());
     if (failure_rate > config_.max_failure_rate) {
-        return std::unexpected(
-            "solve_batch failure rate " + std::to_string(failure_rate * 100) +
-            "% exceeds max_failure_rate " + std::to_string(config_.max_failure_rate * 100) +
-            "% (" + std::to_string(batch_result.failed_count) + " of " +
-            std::to_string(batch_result.results.size()) + " failed)");
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ExtractionFailed, 0, batch_result.failed_count});
     }
 
     // Count PDE solves (successful results)
@@ -117,21 +102,21 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     // Step 4: Extract tensor via interpolation
     auto extraction = extract_tensor(batch_result, axes);
     if (!extraction.has_value()) {
-        return std::unexpected("extract_tensor failed: " + extraction.error());
+        return std::unexpected(extraction.error());
     }
 
     // Step 4b: Repair failed slices
     auto repair_result = repair_failed_slices(
         extraction->tensor, extraction->failed_pde, extraction->failed_spline, axes);
     if (!repair_result.has_value()) {
-        return std::unexpected("repair_failed_slices failed: " + repair_result.error());
+        return std::unexpected(repair_result.error());
     }
     auto repair_stats = repair_result.value();
 
     // Step 5: Fit B-spline coefficients
     auto coeffs_result = fit_coeffs(extraction->tensor, axes);
     if (!coeffs_result.has_value()) {
-        return std::unexpected("fit_coeffs failed: " + coeffs_result.error());
+        return std::unexpected(coeffs_result.error());
     }
 
     auto& fit_result = coeffs_result.value();
@@ -148,7 +133,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     // Step 7: Build immutable surface
     auto surface_result = PriceTableSurface<N>::build(axes, std::move(coefficients), metadata);
     if (!surface_result.has_value()) {
-        return std::unexpected("Surface build failed: " + surface_result.error());
+        return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
     }
 
     // End timing
@@ -318,7 +303,7 @@ PriceTableBuilder<N>::solve_batch(
 }
 
 template <size_t N>
-std::expected<ExtractionResult<N>, std::string>
+std::expected<ExtractionResult<N>, PriceTableError>
 PriceTableBuilder<N>::extract_tensor(
     const BatchAmericanOptionResult& batch,
     const PriceTableAxes<N>& axes) const
@@ -335,9 +320,8 @@ PriceTableBuilder<N>::extract_tensor(
     if (batch.results.size() != expected_batch_size) {
         MANGO_TRACE_RUNTIME_ERROR(MODULE_PRICE_TABLE,
             batch.results.size(), expected_batch_size);
-        return std::unexpected(
-            "Batch size mismatch: expected " + std::to_string(expected_batch_size) +
-            " results (Nσ × Nr), got " + std::to_string(batch.results.size()));
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ExtractionFailed, 0, batch.results.size()});
     }
 
     // Create tensor (use axes.total_points() for consistency with validation)
@@ -347,13 +331,15 @@ PriceTableBuilder<N>::extract_tensor(
 
     auto arena = memory::AlignedArena::create(arena_bytes);
     if (!arena.has_value()) {
-        return std::unexpected("Failed to create arena: " + arena.error());
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::ArenaAllocationFailed, 0, arena_bytes});
     }
 
     std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
     auto tensor_result = PriceTensor<N>::create(shape, arena.value());
     if (!tensor_result.has_value()) {
-        return std::unexpected("Failed to create tensor: " + tensor_result.error());
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::TensorCreationFailed, 0, total_points});
     }
 
     auto tensor = tensor_result.value();
@@ -442,7 +428,7 @@ PriceTableBuilder<N>::extract_tensor(
 }
 
 template <size_t N>
-std::expected<typename PriceTableBuilder<N>::FitCoeffsResult, std::string>
+std::expected<typename PriceTableBuilder<N>::FitCoeffsResult, PriceTableError>
 PriceTableBuilder<N>::fit_coeffs(
     const PriceTensor<N>& tensor,
     const PriceTableAxes<N>& axes) const
@@ -458,7 +444,7 @@ PriceTableBuilder<N>::fit_coeffs(
     // Create fitter
     auto fitter_result = BSplineNDSeparable<double, N>::create(std::move(grids));
     if (!fitter_result.has_value()) {
-        return std::unexpected("Failed to create fitter: " + fitter_result.error());
+        return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
     }
 
     // Extract values from tensor (convert mdspan to vector)
@@ -476,7 +462,7 @@ PriceTableBuilder<N>::fit_coeffs(
     // Fit B-spline coefficients
     auto fit_result = fitter_result->fit(values);
     if (!fit_result.has_value()) {
-        return std::unexpected("B-spline fitting failed: " + fit_result.error());
+        return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
     }
 
     const auto& result = fit_result.value();
@@ -501,7 +487,7 @@ std::vector<double> sort_and_dedupe(std::vector<double> v) {
 
 // Factory method implementations (explicit specialization for N=4)
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
 PriceTableBuilder<4>::from_vectors(
     std::vector<double> moneyness,
     std::vector<double> maturity,
@@ -522,16 +508,16 @@ PriceTableBuilder<4>::from_vectors(
 
     // Validate positivity
     if (!moneyness.empty() && moneyness.front() <= 0.0) {
-        return std::unexpected("Moneyness must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
     }
     if (!maturity.empty() && maturity.front() <= 0.0) {
-        return std::unexpected("Maturity must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 1});
     }
     if (!volatility.empty() && volatility.front() <= 0.0) {
-        return std::unexpected("Volatility must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 2});
     }
     if (K_ref <= 0.0) {
-        return std::unexpected("K_ref must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
     }
 
     // Build axes
@@ -553,14 +539,14 @@ PriceTableBuilder<4>::from_vectors(
 
     // Validate config
     if (auto err = validate_config(config); err.has_value()) {
-        return std::unexpected(err.value());
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
     return std::make_pair(PriceTableBuilder<4>(config), std::move(axes));
 }
 
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
 PriceTableBuilder<4>::from_strikes(
     double spot,
     std::vector<double> strikes,
@@ -574,7 +560,7 @@ PriceTableBuilder<4>::from_strikes(
     double max_failure_rate)
 {
     if (spot <= 0.0) {
-        return std::unexpected("Spot must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
     }
 
     // Sort and dedupe
@@ -585,7 +571,7 @@ PriceTableBuilder<4>::from_strikes(
 
     // Validate strikes positive
     if (!strikes.empty() && strikes.front() <= 0.0) {
-        return std::unexpected("Strikes must be positive");
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
     }
 
     // Compute moneyness = spot/strike
@@ -613,7 +599,7 @@ PriceTableBuilder<4>::from_strikes(
 }
 
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
 PriceTableBuilder<4>::from_chain(
     const OptionChain& chain,
     GridSpec<double> grid_spec,
@@ -663,7 +649,7 @@ PriceTableBuilder<N>::find_nearest_valid_neighbor(
 }
 
 template <size_t N>
-std::expected<RepairStats, std::string>
+std::expected<RepairStats, PriceTableError>
 PriceTableBuilder<N>::repair_failed_slices(
     PriceTensor<N>& tensor,
     const std::vector<size_t>& failed_pde,
@@ -683,18 +669,13 @@ PriceTableBuilder<N>::repair_failed_slices(
 
     // Collect slices that need full neighbor copy (PDE failures + all-maturity spline failures)
     std::unordered_set<size_t> full_slice_set(failed_pde.begin(), failed_pde.end());
-    const size_t n_pde_failures = failed_pde.size();
-    size_t n_all_maturity_spline_failures = 0;
     size_t partial_spline_points = 0;
 
     for (auto& [slice_key, τ_failures] : spline_failures_by_slice) {
         if (τ_failures.size() == Nt) {
             auto [σ_idx, r_idx] = slice_key;
             size_t flat_idx = σ_idx * Nr + r_idx;
-            if (full_slice_set.find(flat_idx) == full_slice_set.end()) {
-                full_slice_set.insert(flat_idx);
-                ++n_all_maturity_spline_failures;
-            }
+            full_slice_set.insert(flat_idx);
         } else {
             partial_spline_points += τ_failures.size();
         }
@@ -754,12 +735,8 @@ PriceTableBuilder<N>::repair_failed_slices(
 
         auto neighbor = find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
         if (!neighbor.has_value()) {
-            return std::unexpected(
-                "Repair failed at slice (" + std::to_string(σ_idx) + "," +
-                std::to_string(r_idx) + "): no valid donor. Total full-slice failures: " +
-                std::to_string(full_slice_failures.size()) + " (" +
-                std::to_string(n_pde_failures) + " PDE + " +
-                std::to_string(n_all_maturity_spline_failures) + " all-maturity spline)");
+            return std::unexpected(PriceTableError{
+                PriceTableErrorCode::RepairFailed, σ_idx * Nr + r_idx, full_slice_failures.size()});
         }
         auto [nσ, nr] = neighbor.value();
 

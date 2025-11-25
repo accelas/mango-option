@@ -8,9 +8,9 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/option_chain.hpp"
+#include "src/support/error_types.hpp"
 #include <expected>
 #include <memory>
-#include <string>
 #include <tuple>
 #include <vector>
 
@@ -62,8 +62,8 @@ public:
     /// Build price table surface
     ///
     /// @param axes Grid points for each dimension
-    /// @return PriceTableResult with surface and diagnostics, or error message
-    [[nodiscard]] std::expected<PriceTableResult<N>, std::string>
+    /// @return PriceTableResult with surface and diagnostics, or error
+    [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
     build(const PriceTableAxes<N>& axes);
 
     /// Factory from vectors (returns builder AND axes)
@@ -83,8 +83,8 @@ public:
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
     /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
-    /// @return Pair of (builder, axes) or error message
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+    /// @return Pair of (builder, axes) or error
+    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
     from_vectors(
         std::vector<double> moneyness,
         std::vector<double> maturity,
@@ -113,8 +113,8 @@ public:
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
     /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
-    /// @return Pair of (builder, axes) or error message
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+    /// @return Pair of (builder, axes) or error
+    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
     from_strikes(
         double spot,
         std::vector<double> strikes,
@@ -138,8 +138,8 @@ public:
     /// @param n_time Number of time steps
     /// @param type Option type (PUT or CALL)
     /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
-    /// @return Pair of (builder, axes) or error message
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, std::string>
+    /// @return Pair of (builder, axes) or error
+    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
     from_chain(
         const OptionChain& chain,
         GridSpec<double> grid_spec,
@@ -161,14 +161,14 @@ public:
     }
 
     /// For testing: expose extract_tensor method
-    [[nodiscard]] std::expected<ExtractionResult<N>, std::string> extract_tensor_for_testing(
+    [[nodiscard]] std::expected<ExtractionResult<N>, PriceTableError> extract_tensor_for_testing(
         const BatchAmericanOptionResult& batch,
         const PriceTableAxes<N>& axes) const {
         return extract_tensor(batch, axes);
     }
 
     /// For testing: expose fit_coeffs method
-    [[nodiscard]] std::expected<std::vector<double>, std::string> fit_coeffs_for_testing(
+    [[nodiscard]] std::expected<std::vector<double>, PriceTableError> fit_coeffs_for_testing(
         const PriceTensor<N>& tensor,
         const PriceTableAxes<N>& axes) const {
         auto result = fit_coeffs(tensor, axes);
@@ -186,7 +186,7 @@ public:
     }
 
     /// For testing: expose repair_failed_slices method
-    [[nodiscard]] std::expected<RepairStats, std::string> repair_failed_slices_for_testing(
+    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_failed_slices_for_testing(
         PriceTensor<N>& tensor,
         const std::vector<size_t>& failed_pde,
         const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
@@ -210,17 +210,17 @@ private:
         const PriceTableAxes<N>& axes) const;
 
     /// Extract PriceTensor from batch results using cubic spline interpolation
-    [[nodiscard]] std::expected<ExtractionResult<N>, std::string> extract_tensor(
+    [[nodiscard]] std::expected<ExtractionResult<N>, PriceTableError> extract_tensor(
         const BatchAmericanOptionResult& batch,
         const PriceTableAxes<N>& axes) const;
 
     /// Fit B-spline coefficients from tensor
-    [[nodiscard]] std::expected<FitCoeffsResult, std::string> fit_coeffs(
+    [[nodiscard]] std::expected<FitCoeffsResult, PriceTableError> fit_coeffs(
         const PriceTensor<N>& tensor,
         const PriceTableAxes<N>& axes) const;
 
     /// Repair failed slices using neighbor interpolation
-    [[nodiscard]] std::expected<RepairStats, std::string> repair_failed_slices(
+    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_failed_slices(
         PriceTensor<N>& tensor,
         const std::vector<size_t>& failed_pde,
         const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,

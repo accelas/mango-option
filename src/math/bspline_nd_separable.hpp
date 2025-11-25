@@ -114,23 +114,24 @@ template<std::floating_point T, size_t N>
     requires (N >= 1)
 class BSplineNDSeparable {
 public:
-    using Result = std::expected<BSplineNDSeparableResult<T, N>, std::string>;
+    using Result = std::expected<BSplineNDSeparableResult<T, N>, InterpolationError>;
     using Config = BSplineNDSeparableConfig<T>;
 
     /// Factory method to create N-dimensional fitter with validation
     ///
     /// @param grids Array of N grid vectors (each ≥4 points, sorted)
-    /// @return Fitter instance or error message
-    [[nodiscard]] static std::expected<BSplineNDSeparable, std::string> create(
+    /// @return Fitter instance or error
+    [[nodiscard]] static std::expected<BSplineNDSeparable, InterpolationError> create(
         std::array<std::vector<T>, N> grids)
     {
         // Validate each grid via 1D solver creation
         for (size_t i = 0; i < N; ++i) {
             auto solver_result = BSplineCollocation1D<T>::create(grids[i]);
             if (!solver_result.has_value()) {
-                return std::unexpected(
-                    "Grid validation failed for axis " + std::to_string(i) +
-                    ": " + solver_result.error());
+                // Propagate error with axis index
+                auto err = solver_result.error();
+                err.index = i;
+                return std::unexpected(err);
             }
         }
 
@@ -174,22 +175,25 @@ public:
         }
 
         if (values.size() != expected_size) {
-            return std::unexpected(
-                "Value array size mismatch: expected " +
-                std::to_string(expected_size) + ", got " +
-                std::to_string(values.size()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ValueSizeMismatch,
+                values.size()});
         }
 
         // Validate input values for NaN/Inf
         // Note: Can't use SIMD with early return, so check sequentially
         for (size_t i = 0; i < values.size(); ++i) {
             if (std::isnan(values[i])) {
-                return std::unexpected(
-                    "Input values contain NaN at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput,
+                    expected_size,
+                    i});
             }
             if (std::isinf(values[i])) {
-                return std::unexpected(
-                    "Input values contain infinite value at index " + std::to_string(i));
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput,
+                    expected_size,
+                    i});
             }
         }
 
@@ -205,7 +209,9 @@ public:
         try {
             fit_all_axes<N-1>(coeffs, config.tolerance, max_residuals, conditions, failed);
         } catch (const std::exception& e) {
-            return std::unexpected(std::string(e.what()));
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed,
+                expected_size});
         }
 
         return BSplineNDSeparableResult<T, N>{
@@ -388,9 +394,9 @@ private:
 
         if (!fit_result.has_value()) {
             ++failed_count;
-            throw std::runtime_error(
-                "Fitting failed on axis " + std::to_string(Axis) +
-                ": " + fit_result.error());
+            // Note: fit_result.error() is InterpolationError, so we just throw
+            // a simple exception that will be caught in fit() and converted
+            throw std::runtime_error("Fitting failed on axis " + std::to_string(Axis));
         }
 
         // Update statistics
