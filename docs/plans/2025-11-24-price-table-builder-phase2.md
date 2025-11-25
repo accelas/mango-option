@@ -344,6 +344,7 @@ std::expected<RepairStats, std::string> repair_failed_slices(
 
     // ========== PHASE 2: Repair full-slice failures via neighbor copy ==========
     // Now donors are guaranteed NaN-free (Phase 1 cleaned them)
+    size_t repaired_full_count = 0;  // Count actual successful repairs
     for (size_t flat_idx : full_slice_failures) {
         size_t σ_idx = flat_idx / Nr;
         size_t r_idx = flat_idx % Nr;
@@ -365,10 +366,11 @@ std::expected<RepairStats, std::string> repair_failed_slices(
 
         // Mark as valid so this slice can be a donor for subsequent repairs
         slice_valid[flat_idx] = true;
+        ++repaired_full_count;  // Increment only after successful copy
     }
 
     return RepairStats{
-        .repaired_full_slices = full_slice_failures.size(),
+        .repaired_full_slices = repaired_full_count,  // Actual successes, not attempts
         .repaired_partial_points = partial_spline_points
     };
 }
@@ -431,28 +433,37 @@ struct PriceTableResult {
 ```cpp
 // IMPORTANT: Early bailout if no valid donors exist
 // Must account for BOTH PDE failures AND all-maturity spline failures
+// CAREFUL: Don't double-count slices that failed both PDE and spline
+
+// Convert failed_pde to set for O(1) lookup
+std::unordered_set<size_t> failed_pde_set(
+    extraction.failed_pde.begin(), extraction.failed_pde.end());
 
 // Group spline failures by (σ,r) to find full-slice escalations
 const size_t Nt = axes.grids[1].size();
+const size_t Nr = axes.grids[3].size();
 std::map<std::pair<size_t, size_t>, size_t> spline_failures_per_slice;
 for (auto [σ, r, τ] : extraction.failed_spline) {
     spline_failures_per_slice[{σ, r}]++;
 }
 
-// Count full-slice failures: PDE failures + slices with ALL maturities failed
-size_t full_slice_failures = extraction.failed_pde.size();
+// Count full-slice failures, avoiding double-counting
+size_t full_slice_failures = failed_pde_set.size();
 for (auto& [slice_key, count] : spline_failures_per_slice) {
     if (count == Nt) {
-        full_slice_failures++;
+        auto [σ, r] = slice_key;
+        size_t flat_idx = σ * Nr + r;
+        // Only count if NOT already in failed_pde
+        if (failed_pde_set.find(flat_idx) == failed_pde_set.end()) {
+            full_slice_failures++;
+        }
     }
 }
 
 if (full_slice_failures >= extraction.total_slices) {
     return std::unexpected(
         "All " + std::to_string(extraction.total_slices) +
-        " slices failed (" + std::to_string(extraction.failed_pde.size()) +
-        " PDE, " + std::to_string(full_slice_failures - extraction.failed_pde.size()) +
-        " all-maturity spline) - no valid donor exists for repair.");
+        " slices failed - no valid donor exists for repair.");
 }
 
 // Proceed with repair:
