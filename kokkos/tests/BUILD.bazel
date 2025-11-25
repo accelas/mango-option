@@ -23,3 +23,15 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
 )
+
+cc_test(
+    name = "thomas_solver_test",
+    srcs = ["thomas_solver_test.cc"],
+    deps = [
+        "//kokkos/src:thomas_solver",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
