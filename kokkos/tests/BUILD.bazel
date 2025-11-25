@@ -119,3 +119,15 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "root_finding_test",
+    srcs = ["root_finding_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:root_finding",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)

@@ -121,3 +121,13 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "root_finding",
+    hdrs = ["math/root_finding.hpp"],
+    deps = [
+        ":execution_space",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
