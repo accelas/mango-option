@@ -5,11 +5,16 @@
 #include "src/support/memory/aligned_arena.hpp"
 #include "src/support/ivcalc_trace.h"
 #include "src/pde/core/time_domain.hpp"
+#include "src/support/parallel.hpp"
 #include <cmath>
 #include <limits>
 #include <algorithm>
 #include <numeric>
 #include <chrono>
+#include <mutex>
+#include <tuple>
+#include <map>
+#include <unordered_set>
 
 namespace mango {
 
