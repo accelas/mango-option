@@ -64,13 +64,15 @@ This codebase uses abstraction macros from `src/support/parallel.hpp` for portab
 #include "src/support/parallel.hpp"
 
 // In extract_tensor():
-// Use MANGO_PRAGMA_PARALLEL + MANGO_PRAGMA_FOR_COLLAPSE2
-// (equivalent to #pragma omp parallel for collapse(2))
+// MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
+// See src/option/american_option_batch.cpp:454-500 for reference
 MANGO_PRAGMA_PARALLEL
-MANGO_PRAGMA_FOR_COLLAPSE2
-for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-        // ... extract prices from batch result
+{
+    MANGO_PRAGMA_FOR_COLLAPSE2
+    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+            // ... extract prices from batch result
+        }
     }
 }
 ```
@@ -140,6 +142,7 @@ struct ExtractionResult {
     PriceTensor<N> tensor;
     size_t failed_slices;
     size_t total_slices;
+    std::vector<bool> slice_failed;  // [σ_idx * Nr + r_idx] → true if failed
 };
 
 // CHANGED: extract_tensor returns ExtractionResult
@@ -159,21 +162,28 @@ size_t total_extraction_slices = extraction->total_slices;
 // ... continue to fit_coeffs with extraction->tensor ...
 ```
 
-**Atomic counting in parallel loop** (inside `extract_tensor()`):
+**Atomic counting and mask population in parallel loop** (inside `extract_tensor()`):
 ```cpp
-// Use MANGO_PRAGMA_ATOMIC for thread-safe increment
+// Pre-allocate mask (written per-thread, no contention)
+std::vector<bool> slice_failed(Nσ * Nr, false);
 size_t failed_slices = 0;
 
+// MANGO_PRAGMA_PARALLEL requires a compound statement (braces)
+// See src/option/american_option_batch.cpp:454-500 for reference
 MANGO_PRAGMA_PARALLEL
-MANGO_PRAGMA_FOR_COLLAPSE2
-for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-    for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-        if (!batch.results[batch_idx].has_value()) {
-            MANGO_PRAGMA_ATOMIC
-            ++failed_slices;
-            // ... fill with NaN ...
+{
+    MANGO_PRAGMA_FOR_COLLAPSE2
+    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+            size_t batch_idx = σ_idx * Nr + r_idx;
+            if (!batch.results[batch_idx].has_value()) {
+                slice_failed[batch_idx] = true;  // No race: each thread writes unique index
+                MANGO_PRAGMA_ATOMIC
+                ++failed_slices;
+                // ... fill with NaN ...
+            }
+            // ...
         }
-        // ...
     }
 }
 ```
@@ -182,15 +192,18 @@ for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
 
 **Option A: Pre-fill failed slices with neighbor interpolation**
 ```cpp
-// After extraction, before fitting:
-// For each failed (σ,r) slice, interpolate from neighboring successful slices
+// After extraction, before fitting (in build()):
+// Use slice_failed mask from ExtractionResult to find slices needing repair
+auto& extraction_result = extraction.value();
 for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
     for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-        if (slice_failed[σ_idx][r_idx]) {
-            interpolate_from_neighbors(tensor, σ_idx, r_idx);
+        size_t flat_idx = σ_idx * Nr + r_idx;
+        if (extraction_result.slice_failed[flat_idx]) {
+            interpolate_from_neighbors(extraction_result.tensor, σ_idx, r_idx, Nr);
         }
     }
 }
+// Now tensor has no NaN, safe to call fit_coeffs()
 ```
 
 **Option B: Modify fitter to skip NaN slices (complex)**
@@ -229,9 +242,9 @@ struct PriceTableResult {
 ```
 solve_batch() → batch_result.failed_count
                       ↓
-extract_tensor() → ExtractionResult{tensor, failed_slices, total_slices}
+extract_tensor() → ExtractionResult{tensor, failed_slices, total_slices, slice_failed}
                       ↓
-interpolate_failed_slices() → tensor with NaN replaced
+interpolate_failed_slices(slice_failed) → tensor with NaN replaced
                       ↓
 fit_coeffs() → FitCoeffsResult (no NaN, fitting succeeds)
                       ↓
