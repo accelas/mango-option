@@ -1,0 +1,8 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "execution_space",
+    hdrs = ["support/execution_space.hpp"],
+    deps = ["@kokkos//:kokkos"],
+    visibility = ["//visibility:public"],
+)
