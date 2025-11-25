@@ -129,6 +129,9 @@ for (size_t i = 0; i < values.size(); ++i) {
 
 **In `src/option/price_table_config.hpp`:**
 ```cpp
+// Add include for validate_config return type:
+#include <string>  // std::string, std::to_string
+
 // Current struct (src/option/price_table_config.hpp:12-18)
 struct PriceTableConfig {
     OptionType option_type = OptionType::PUT;
