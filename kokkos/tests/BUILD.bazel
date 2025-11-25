@@ -183,3 +183,44 @@ cc_test(
         "@kokkos//:kokkos",
     ],
 )
+
+cc_test(
+    name = "american_option_accuracy_test",
+    srcs = ["american_option_accuracy_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
+    deps = [
+        "//kokkos/src:american_option",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
+
+cc_test(
+    name = "price_table_integration_test",
+    srcs = ["price_table_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    # CPU-intensive: run exclusively to avoid contention
+    tags = ["exclusive"],
+    deps = [
+        "//kokkos/src:price_table",
+        "//kokkos/src:american_option",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
+
+cc_test(
+    name = "grid_comprehensive_test",
+    srcs = ["grid_comprehensive_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:grid",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
