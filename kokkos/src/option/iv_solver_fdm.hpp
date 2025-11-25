@@ -18,6 +18,7 @@
 #include <cmath>
 #include <functional>
 #include "kokkos/src/option/american_option.hpp"
+#include "kokkos/src/option/iv_common.hpp"
 #include "kokkos/src/math/root_finding.hpp"
 #include "kokkos/src/support/execution_space.hpp"
 
@@ -42,17 +43,6 @@ struct IVSolverFDMConfig {
 
     /// Number of time steps for PDE solver
     size_t n_time = 500;
-};
-
-/// IV query input (option parameters + market price)
-struct IVQuery {
-    double strike;
-    double spot;
-    double maturity;
-    double rate;
-    double dividend_yield;
-    OptionType type;
-    double market_price;
 };
 
 /// Result codes for IV solver

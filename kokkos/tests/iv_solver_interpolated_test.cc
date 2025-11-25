@@ -122,13 +122,13 @@ TEST_F(IVSolverInterpolatedTest, SingleIVAtGridPoint) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 
@@ -169,13 +169,13 @@ TEST_F(IVSolverInterpolatedTest, SingleIVAtInteriorPoint) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 
@@ -220,13 +220,13 @@ TEST_F(IVSolverInterpolatedTest, BatchIVSolve) {
         const double market_price = table.lookup(m, tau, sigma, r) * (K / 100.0);
 
         q_h(i) = mango::kokkos::IVQuery{
-            .spot = S,
             .strike = K,
+            .spot = S,
             .maturity = tau,
             .rate = r,
             .dividend_yield = 0.0,
-            .market_price = market_price,
-            .is_put = true
+            .type = mango::kokkos::OptionType::Put,
+            .market_price = market_price
         };
     }
     Kokkos::deep_copy(queries, q_h);
@@ -268,13 +268,13 @@ TEST_F(IVSolverInterpolatedTest, ITMOption) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 
@@ -310,13 +310,13 @@ TEST_F(IVSolverInterpolatedTest, OTMOption) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 
@@ -351,13 +351,13 @@ TEST_F(IVSolverInterpolatedTest, LowVolatility) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 
@@ -391,13 +391,13 @@ TEST_F(IVSolverInterpolatedTest, HighVolatility) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 
@@ -431,13 +431,13 @@ TEST_F(IVSolverInterpolatedTest, ConvergenceVerification) {
     Kokkos::View<mango::kokkos::IVQuery*, MemSpace> queries("queries", 1);
     auto q_h = Kokkos::create_mirror_view(queries);
     q_h(0) = mango::kokkos::IVQuery{
-        .spot = S,
         .strike = K,
+        .spot = S,
         .maturity = tau,
         .rate = r,
         .dividend_yield = 0.0,
-        .market_price = market_price,
-        .is_put = true
+        .type = mango::kokkos::OptionType::Put,
+        .market_price = market_price
     };
     Kokkos::deep_copy(queries, q_h);
 

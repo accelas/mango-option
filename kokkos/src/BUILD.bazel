@@ -85,6 +85,15 @@ cc_library(
 )
 
 cc_library(
+    name = "iv_common",
+    hdrs = ["option/iv_common.hpp"],
+    deps = [
+        ":american_option",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "bspline_nd",
     hdrs = ["math/bspline_nd.hpp"],
     deps = [
@@ -139,6 +148,7 @@ cc_library(
         ":execution_space",
         ":root_finding",
         ":price_table",
+        ":iv_common",
         "@kokkos//:kokkos",
     ],
     visibility = ["//visibility:public"],
@@ -151,6 +161,21 @@ cc_library(
         ":execution_space",
         ":root_finding",
         ":american_option",
+        ":iv_common",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "pricing_pipeline",
+    hdrs = ["option/pricing_pipeline.hpp"],
+    deps = [
+        ":execution_space",
+        ":price_table",
+        ":batch_solver",
+        ":iv_solver_interpolated",
+        ":iv_solver_fdm",
         "@kokkos//:kokkos",
     ],
     visibility = ["//visibility:public"],

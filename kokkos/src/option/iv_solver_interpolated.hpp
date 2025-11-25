@@ -19,6 +19,7 @@
 #include <cmath>
 #include "kokkos/src/math/root_finding.hpp"
 #include "kokkos/src/option/price_table.hpp"
+#include "kokkos/src/option/iv_common.hpp"
 #include "kokkos/src/support/execution_space.hpp"
 
 namespace mango::kokkos {
@@ -29,17 +30,6 @@ struct IVSolverConfig {
     double tolerance = 1e-6;       ///< Price convergence tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
-};
-
-/// Device-compatible IV query
-struct IVQuery {
-    double spot;
-    double strike;
-    double maturity;
-    double rate;
-    double dividend_yield;
-    double market_price;
-    bool is_put;
 };
 
 /// IV result
