@@ -343,51 +343,70 @@ PriceTableBuilder<N>::extract_tensor(
         log_moneyness[i] = std::log(axes.grids[0][i]);
     }
 
-    // Extract prices from each (σ, r) surface
-    for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
-        for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
-            size_t batch_idx = σ_idx * Nr + r_idx;
-            const auto& result_expected = batch.results[batch_idx];
+    // Failure tracking
+    std::vector<size_t> failed_pde;
+    std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
+    std::mutex failed_mutex;
 
-            if (!result_expected.has_value()) {
-                // Fill with NaN for failed solves
-                for (size_t i = 0; i < Nm; ++i) {
-                    for (size_t j = 0; j < Nt; ++j) {
-                        tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+    // Extract prices from each (σ, r) surface (parallelized)
+    MANGO_PRAGMA_PARALLEL
+    {
+        MANGO_PRAGMA_FOR_COLLAPSE2
+        for (size_t σ_idx = 0; σ_idx < Nσ; ++σ_idx) {
+            for (size_t r_idx = 0; r_idx < Nr; ++r_idx) {
+                size_t batch_idx = σ_idx * Nr + r_idx;
+                const auto& result_expected = batch.results[batch_idx];
+
+                if (!result_expected.has_value()) {
+                    // Track PDE failure
+                    {
+                        std::lock_guard<std::mutex> lock(failed_mutex);
+                        failed_pde.push_back(batch_idx);
                     }
-                }
-                continue;
-            }
-
-            const auto& result = result_expected.value();
-            auto grid = result.grid();
-            auto x_grid = grid->x();  // Spatial grid (log-moneyness)
-
-            // For each maturity snapshot
-            for (size_t j = 0; j < Nt; ++j) {
-                // Get spatial solution at this maturity
-                std::span<const double> spatial_solution = result.at_time(j);
-
-                // Interpolate across moneyness using cubic spline
-                // This resamples the PDE solution onto our moneyness grid
-                CubicSpline<double> spline;
-                auto build_error = spline.build(x_grid, spatial_solution);
-
-                if (build_error.has_value()) {
-                    // Spline fitting failed, fill with NaN
+                    // Fill with NaN for failed solves
                     for (size_t i = 0; i < Nm; ++i) {
-                        tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                        for (size_t j = 0; j < Nt; ++j) {
+                            tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                        }
                     }
                     continue;
                 }
 
-                // Evaluate spline at each moneyness point and scale by K_ref
-                // PDE solves are normalized (Spot=Strike=K_ref), so V_normalized
-                // needs to be scaled back to actual prices: V_actual = K_ref * V_norm
-                const double K_ref = config_.K_ref;
-                for (size_t i = 0; i < Nm; ++i) {
-                    double normalized_price = spline.eval(log_moneyness[i]);
-                    tensor.view[i, j, σ_idx, r_idx] = K_ref * normalized_price;
+                const auto& result = result_expected.value();
+                auto grid = result.grid();
+                auto x_grid = grid->x();  // Spatial grid (log-moneyness)
+
+                // For each maturity snapshot
+                for (size_t j = 0; j < Nt; ++j) {
+                    // Get spatial solution at this maturity
+                    std::span<const double> spatial_solution = result.at_time(j);
+
+                    // Interpolate across moneyness using cubic spline
+                    // This resamples the PDE solution onto our moneyness grid
+                    CubicSpline<double> spline;
+                    auto build_error = spline.build(x_grid, spatial_solution);
+
+                    if (build_error.has_value()) {
+                        // Track spline failure
+                        {
+                            std::lock_guard<std::mutex> lock(failed_mutex);
+                            failed_spline.emplace_back(σ_idx, r_idx, j);
+                        }
+                        // Spline fitting failed, fill with NaN
+                        for (size_t i = 0; i < Nm; ++i) {
+                            tensor.view[i, j, σ_idx, r_idx] = std::numeric_limits<double>::quiet_NaN();
+                        }
+                        continue;
+                    }
+
+                    // Evaluate spline at each moneyness point and scale by K_ref
+                    // PDE solves are normalized (Spot=Strike=K_ref), so V_normalized
+                    // needs to be scaled back to actual prices: V_actual = K_ref * V_norm
+                    const double K_ref = config_.K_ref;
+                    for (size_t i = 0; i < Nm; ++i) {
+                        double normalized_price = spline.eval(log_moneyness[i]);
+                        tensor.view[i, j, σ_idx, r_idx] = K_ref * normalized_price;
+                    }
                 }
             }
         }
@@ -396,8 +415,8 @@ PriceTableBuilder<N>::extract_tensor(
     return ExtractionResult<N>{
         .tensor = std::move(tensor),
         .total_slices = Nσ * Nr,
-        .failed_pde = {},      // Will populate in Task 8
-        .failed_spline = {}    // Will populate in Task 8
+        .failed_pde = std::move(failed_pde),
+        .failed_spline = std::move(failed_spline)
     };
 }
 
