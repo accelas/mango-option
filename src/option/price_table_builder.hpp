@@ -43,6 +43,13 @@ struct PriceTableResult {
     size_t n_pde_solves = 0;                    ///< Number of PDE solves performed
     double precompute_time_seconds = 0.0;       ///< Wall-clock build time
     BSplineFittingStats fitting_stats;          ///< B-spline fitting diagnostics
+    // Failure and repair tracking
+    size_t failed_pde_slices = 0;               ///< Count of (σ,r) slices where PDE failed
+    size_t failed_spline_points = 0;            ///< Count of (σ,r,τ) points where spline failed
+    size_t repaired_full_slices = 0;            ///< Full slices repaired via neighbor copy
+    size_t repaired_partial_points = 0;         ///< Points repaired via τ-interpolation
+    size_t total_slices = 0;                    ///< Total (σ,r) slices in grid
+    size_t total_points = 0;                    ///< Total (σ,r,τ) points in grid
 };
 
 /// Result from tensor extraction with failure tracking
