@@ -61,6 +61,18 @@ cc_test(
 )
 
 cc_test(
+    name = "bspline_basis_test",
+    srcs = ["bspline_basis_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//kokkos/src:bspline_basis",
+        "@googletest//:gtest_main",
+        "@kokkos//:kokkos",
+    ],
+)
+
+cc_test(
     name = "american_option_test",
     srcs = ["american_option_test.cc"],
     copts = ["-fopenmp"],

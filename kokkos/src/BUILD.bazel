@@ -61,6 +61,16 @@ cc_library(
 )
 
 cc_library(
+    name = "bspline_basis",
+    hdrs = ["math/bspline_basis.hpp"],
+    deps = [
+        ":execution_space",
+        "@kokkos//:kokkos",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "american_option",
     hdrs = ["option/american_option.hpp"],
     deps = [
