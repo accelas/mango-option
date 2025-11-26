@@ -120,7 +120,7 @@ private:
     SpatialOpType create_spatial_op() const {
         auto pde = PDEType(
             params_.volatility,
-            make_rate_fn(params_.rate),
+            make_rate_fn(params_.rate, params_.maturity),
             params_.dividend_yield);
         auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
         return operators::create_spatial_operator(std::move(pde), spacing_ptr);
@@ -200,13 +200,13 @@ private:
     };
 
     struct RightBCFunction {
-        std::function<double(double)> discount_fn;  // Capture discount function
+        std::function<double(double)> forward_discount_fn;  // Forward discount from s to T
 
         double operator()(double t, double x) const {
-            // Deep ITM call boundary: S - K*D(t) where D(t) is the discount factor
-            // Using discount_fn directly avoids computing exp(-r(t)*t) which
-            // incorrectly uses instantaneous forward rate instead of integrated rate
-            return std::exp(x) - discount_fn(t);
+            // Deep ITM call boundary: S - K*D_forward where D_forward is the
+            // forward discount factor from current calendar time s to expiry T.
+            // t is time-to-expiry τ, forward_discount_fn returns D(T)/D(T-τ)
+            return std::exp(x) - forward_discount_fn(t);
         }
     };
 
@@ -215,13 +215,13 @@ private:
     }
 
     DirichletBC<RightBCFunction> create_right_bc() const {
-        return DirichletBC(RightBCFunction{make_discount_fn(params_.rate)});
+        return DirichletBC(RightBCFunction{make_forward_discount_fn(params_.rate, params_.maturity)});
     }
 
     SpatialOpType create_spatial_op() const {
         auto pde = PDEType(
             params_.volatility,
-            make_rate_fn(params_.rate),
+            make_rate_fn(params_.rate, params_.maturity),
             params_.dividend_yield);
         auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
         return operators::create_spatial_operator(std::move(pde), spacing_ptr);

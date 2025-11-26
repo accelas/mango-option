@@ -20,36 +20,56 @@ namespace mango {
 /// Rate specification: constant or yield curve
 using RateSpec = std::variant<double, YieldCurve>;
 
-/// Helper to extract rate function from RateSpec
+/// Helper to extract rate function from RateSpec for PDE solver
 ///
-/// Returns a callable that takes time t and returns the instantaneous forward rate.
-/// For constant rate, returns the constant regardless of t.
-/// For YieldCurve, delegates to curve.rate(t).
-inline std::function<double(double)> make_rate_fn(const RateSpec& spec) {
-    return std::visit([](const auto& arg) -> std::function<double(double)> {
+/// The PDE solver uses time-to-expiry τ (0 at expiry, T at valuation date).
+/// Yield curves use calendar time s from valuation date (0 = today, T = expiry).
+/// Conversion: s = T - τ (calendar time = maturity - time_to_expiry)
+///
+/// Returns a callable that takes time-to-expiry τ and returns the instantaneous
+/// forward rate at calendar time s = T - τ.
+///
+/// @param spec Rate specification (constant or yield curve)
+/// @param maturity Total time to maturity T
+inline std::function<double(double)> make_rate_fn(const RateSpec& spec, double maturity) {
+    return std::visit([maturity](const auto& arg) -> std::function<double(double)> {
         using T = std::decay_t<decltype(arg)>;
         if constexpr (std::is_same_v<T, double>) {
             return [r = arg](double) { return r; };
         } else {
-            // Capture by value to ensure curve lifetime
-            return [curve = arg](double t) { return curve.rate(t); };
+            // Convert time-to-expiry τ to calendar time s = T - τ
+            return [curve = arg, maturity](double tau) {
+                double s = std::max(0.0, maturity - tau);
+                return curve.rate(s);
+            };
         }
     }, spec);
 }
 
-/// Helper to extract discount function from RateSpec
+/// Helper to extract forward discount function from RateSpec for boundary conditions
 ///
-/// Returns a callable that takes time t and returns the discount factor D(t).
-/// For constant rate, returns exp(-r*t).
-/// For YieldCurve, delegates to curve.discount(t).
-inline std::function<double(double)> make_discount_fn(const RateSpec& spec) {
-    return std::visit([](const auto& arg) -> std::function<double(double)> {
+/// The boundary condition needs the forward discount factor from current calendar
+/// time s to expiry T: D(T)/D(s). For constant rate, this is exp(-r*τ) where τ = T - s.
+///
+/// Returns a callable that takes time-to-expiry τ and returns the forward discount
+/// factor from calendar time s = T - τ to expiry T.
+///
+/// @param spec Rate specification (constant or yield curve)
+/// @param maturity Total time to maturity T
+inline std::function<double(double)> make_forward_discount_fn(const RateSpec& spec, double maturity) {
+    return std::visit([maturity](const auto& arg) -> std::function<double(double)> {
         using T = std::decay_t<decltype(arg)>;
         if constexpr (std::is_same_v<T, double>) {
-            return [r = arg](double t) { return std::exp(-r * t); };
+            // For constant rate: forward discount = exp(-r*τ)
+            return [r = arg](double tau) { return std::exp(-r * tau); };
         } else {
-            // Capture by value to ensure curve lifetime
-            return [curve = arg](double t) { return curve.discount(t); };
+            // Forward discount from s to T: D(T)/D(s) where s = T - τ
+            return [curve = arg, maturity](double tau) {
+                double s = std::max(0.0, maturity - tau);
+                double D_T = curve.discount(maturity);
+                double D_s = curve.discount(s);
+                return D_T / D_s;
+            };
         }
     }, spec);
 }
