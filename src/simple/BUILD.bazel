@@ -56,3 +56,29 @@ cc_library(
         ":converter",
     ],
 )
+
+cc_library(
+    name = "vol_surface",
+    srcs = ["vol_surface.cpp"],
+    hdrs = ["vol_surface.hpp"],
+    deps = [
+        ":option_chain",
+        "//src/option:iv_solver_interpolated",
+        "//src/option:iv_solver_fdm",
+    ],
+)
+
+# Convenience target for all simple headers
+cc_library(
+    name = "simple",
+    hdrs = ["simple.hpp"],
+    deps = [
+        ":price",
+        ":timestamp",
+        ":option_types",
+        ":option_chain",
+        ":converter",
+        ":chain_builder",
+        ":vol_surface",
+    ],
+)

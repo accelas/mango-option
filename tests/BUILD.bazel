@@ -1015,3 +1015,13 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "simple_vol_surface_test",
+    srcs = ["simple_vol_surface_test.cc"],
+    deps = [
+        "//src/simple:vol_surface",
+        "//src/simple:chain_builder",
+        "@googletest//:gtest_main",
+    ],
+)
