@@ -63,6 +63,14 @@ public:
             return std::unexpected("log_discount at t=0 must be 0");
         }
 
+        // Verify strictly increasing tenors to avoid division by zero in interpolation
+        constexpr double MIN_TENOR_GAP = 1e-10;
+        for (size_t i = 1; i < points.size(); ++i) {
+            if (points[i].tenor <= points[i-1].tenor + MIN_TENOR_GAP) {
+                return std::unexpected("Tenors must be strictly increasing");
+            }
+        }
+
         YieldCurve curve;
         curve.curve_ = std::move(points);
         return curve;

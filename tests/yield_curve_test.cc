@@ -145,3 +145,115 @@ TEST(YieldCurveTest, FromPointsFailsOnNonZeroLogDiscountAtZero) {
     ASSERT_FALSE(result.has_value());
     EXPECT_TRUE(result.error().find("log_discount at t=0") != std::string::npos);
 }
+
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: Duplicate tenors cause division by zero in rate_between()
+// Bug: from_points() didn't reject duplicate tenors, causing NaN in interpolation
+TEST(YieldCurveTest, FromPointsRejectsDuplicateTenors) {
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.0},
+        {1.0, -0.05},
+        {1.0, -0.05},  // Duplicate tenor
+        {2.0, -0.10}
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(result.error().find("strictly increasing") != std::string::npos);
+}
+
+// Regression: Nearly duplicate tenors also cause numerical issues
+TEST(YieldCurveTest, FromPointsRejectsNearlyDuplicateTenors) {
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.0},
+        {1.0, -0.05},
+        {1.0 + 1e-15, -0.05},  // Nearly duplicate tenor
+        {2.0, -0.10}
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(result.error().find("strictly increasing") != std::string::npos);
+}
+
+// Regression: Decreasing tenors after sorting should still work
+TEST(YieldCurveTest, FromPointsSortsAndValidates) {
+    std::vector<mango::TenorPoint> points = {
+        {2.0, -0.10},
+        {0.0, 0.0},
+        {1.0, -0.05}
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_TRUE(result.has_value());
+
+    auto& curve = result.value();
+    EXPECT_NEAR(curve.discount(1.0), std::exp(-0.05), 1e-10);
+}
+
+// Test zero_rate calculation
+TEST(YieldCurveTest, ZeroRateCalculation) {
+    auto curve = mango::YieldCurve::flat(0.05);
+
+    // For flat curve, zero rate should equal the constant rate
+    EXPECT_NEAR(curve.zero_rate(1.0), 0.05, 1e-10);
+    EXPECT_NEAR(curve.zero_rate(2.0), 0.05, 1e-10);
+}
+
+TEST(YieldCurveTest, ZeroRateForNonFlatCurve) {
+    // Upward sloping curve: 5% for first year, 6% for second year
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.0},
+        {1.0, -0.05},
+        {2.0, -0.11}
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_TRUE(result.has_value());
+    auto& curve = result.value();
+
+    // Zero rate at t=1: -ln(D(1))/1 = 0.05/1 = 0.05
+    EXPECT_NEAR(curve.zero_rate(1.0), 0.05, 1e-10);
+
+    // Zero rate at t=2: -ln(D(2))/2 = 0.11/2 = 0.055
+    EXPECT_NEAR(curve.zero_rate(2.0), 0.055, 1e-10);
+}
+
+TEST(YieldCurveTest, ZeroRateAtZeroReturnsFowardRate) {
+    auto curve = mango::YieldCurve::flat(0.05);
+
+    // At t=0, zero_rate falls back to forward rate at t=0
+    EXPECT_NEAR(curve.zero_rate(0.0), 0.05, 1e-10);
+}
+
+// Test equality operator
+TEST(YieldCurveTest, EqualitySameCurve) {
+    auto curve1 = mango::YieldCurve::flat(0.05);
+    auto curve2 = mango::YieldCurve::flat(0.05);
+
+    EXPECT_TRUE(curve1 == curve2);
+}
+
+TEST(YieldCurveTest, EqualityDifferentRate) {
+    auto curve1 = mango::YieldCurve::flat(0.05);
+    auto curve2 = mango::YieldCurve::flat(0.06);
+
+    EXPECT_FALSE(curve1 == curve2);
+}
+
+TEST(YieldCurveTest, EqualityFromPoints) {
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.0},
+        {1.0, -0.05},
+        {2.0, -0.10}
+    };
+
+    auto result1 = mango::YieldCurve::from_points(points);
+    auto result2 = mango::YieldCurve::from_points(points);
+    ASSERT_TRUE(result1.has_value() && result2.has_value());
+
+    EXPECT_TRUE(result1.value() == result2.value());
+}

@@ -9,8 +9,44 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/american_option.hpp"
 #include "src/pde/core/pde_workspace.hpp"
+#include "src/math/yield_curve.hpp"
 
 namespace py = pybind11;
+
+// Helper to convert Python object to RateSpec
+mango::RateSpec python_to_rate_spec(const py::object& obj) {
+    if (py::isinstance<py::float_>(obj) || py::isinstance<py::int_>(obj)) {
+        return obj.cast<double>();
+    } else if (py::isinstance<mango::YieldCurve>(obj)) {
+        return obj.cast<mango::YieldCurve>();
+    } else {
+        throw py::type_error("rate must be a float or YieldCurve");
+    }
+}
+
+// Helper to convert RateSpec to Python object
+py::object rate_spec_to_python(const mango::RateSpec& spec) {
+    return std::visit([](const auto& arg) -> py::object {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return py::cast(arg);
+        } else {
+            return py::cast(arg);
+        }
+    }, spec);
+}
+
+// Helper to format rate for __repr__
+std::string rate_spec_to_string(const mango::RateSpec& spec) {
+    return std::visit([](const auto& arg) -> std::string {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return std::to_string(arg);
+        } else {
+            return "<YieldCurve>";
+        }
+    }, spec);
+}
 
 PYBIND11_MODULE(mango_iv, m) {
     m.doc() = "Python bindings for mango-iv American option pricing and IV solver";
@@ -19,6 +55,39 @@ PYBIND11_MODULE(mango_iv, m) {
     py::enum_<mango::OptionType>(m, "OptionType")
         .value("CALL", mango::OptionType::CALL)
         .value("PUT", mango::OptionType::PUT);
+
+    // TenorPoint structure (for YieldCurve construction)
+    py::class_<mango::TenorPoint>(m, "TenorPoint")
+        .def(py::init<>())
+        .def(py::init([](double tenor, double log_discount) {
+            return mango::TenorPoint{tenor, log_discount};
+        }), py::arg("tenor"), py::arg("log_discount"))
+        .def_readwrite("tenor", &mango::TenorPoint::tenor)
+        .def_readwrite("log_discount", &mango::TenorPoint::log_discount);
+
+    // YieldCurve class
+    py::class_<mango::YieldCurve>(m, "YieldCurve")
+        .def(py::init<>())
+        .def_static("flat", &mango::YieldCurve::flat, py::arg("rate"),
+            "Create a flat yield curve with constant rate")
+        .def_static("from_discounts", [](const std::vector<double>& tenors,
+                                          const std::vector<double>& discounts) {
+            auto result = mango::YieldCurve::from_discounts(tenors, discounts);
+            if (!result.has_value()) {
+                throw py::value_error(result.error());
+            }
+            return result.value();
+        }, py::arg("tenors"), py::arg("discounts"),
+            "Create yield curve from tenor and discount factor vectors")
+        .def("rate", &mango::YieldCurve::rate, py::arg("t"),
+            "Get instantaneous forward rate at time t")
+        .def("discount", &mango::YieldCurve::discount, py::arg("t"),
+            "Get discount factor D(t) at time t")
+        .def("zero_rate", &mango::YieldCurve::zero_rate, py::arg("t"),
+            "Get zero rate at time t: -ln(D(t))/t")
+        .def("__repr__", [](const mango::YieldCurve&) {
+            return "<YieldCurve>";
+        });
 
     // IVQuery structure (replaces IVParams)
     py::class_<mango::IVQuery>(m, "IVQuery")
@@ -30,7 +99,10 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("spot", &mango::IVQuery::spot)
         .def_readwrite("strike", &mango::IVQuery::strike)
         .def_readwrite("maturity", &mango::IVQuery::maturity)
-        .def_readwrite("rate", &mango::IVQuery::rate)
+        .def_property("rate",
+            [](const mango::IVQuery& q) { return rate_spec_to_python(q.rate); },
+            [](mango::IVQuery& q, const py::object& obj) { q.rate = python_to_rate_spec(obj); },
+            "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::IVQuery::dividend_yield)
         .def_readwrite("type", &mango::IVQuery::type)
         .def_readwrite("market_price", &mango::IVQuery::market_price)
@@ -38,7 +110,7 @@ PYBIND11_MODULE(mango_iv, m) {
             return "<IVQuery spot=" + std::to_string(q.spot) +
                    " strike=" + std::to_string(q.strike) +
                    " maturity=" + std::to_string(q.maturity) +
-                   " rate=" + std::to_string(q.rate) +
+                   " rate=" + rate_spec_to_string(q.rate) +
                    " dividend_yield=" + std::to_string(q.dividend_yield) +
                    " type=" + (q.type == mango::OptionType::CALL ? "CALL" : "PUT") +
                    " market_price=" + std::to_string(q.market_price) + ">";
@@ -149,7 +221,10 @@ PYBIND11_MODULE(mango_iv, m) {
         .def_readwrite("spot", &mango::AmericanOptionParams::spot)
         .def_readwrite("maturity", &mango::AmericanOptionParams::maturity)
         .def_readwrite("volatility", &mango::AmericanOptionParams::volatility)
-        .def_readwrite("rate", &mango::AmericanOptionParams::rate)
+        .def_property("rate",
+            [](const mango::AmericanOptionParams& p) { return rate_spec_to_python(p.rate); },
+            [](mango::AmericanOptionParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
+            "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::AmericanOptionParams::dividend_yield)
         .def_readwrite("type", &mango::AmericanOptionParams::type)
         .def_readwrite("discrete_dividends", &mango::AmericanOptionParams::discrete_dividends);
