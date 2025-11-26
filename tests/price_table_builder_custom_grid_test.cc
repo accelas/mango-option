@@ -147,7 +147,13 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
     std::cout << "  moneyness: " << moneyness << std::endl;
     std::cout << "  maturity: " << params.maturity << std::endl;
     std::cout << "  volatility: " << params.volatility << std::endl;
-    std::cout << "  rate: " << params.rate << std::endl;
+    std::cout << "  rate: ";
+    if (std::holds_alternative<double>(params.rate)) {
+        std::cout << std::get<double>(params.rate);
+    } else {
+        std::cout << "<YieldCurve>";
+    }
+    std::cout << std::endl;
 }
 
 } // namespace

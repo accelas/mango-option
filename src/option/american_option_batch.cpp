@@ -14,7 +14,7 @@ namespace mango {
 /// Group of options sharing same PDE parameters
 struct PDEParameterGroup {
     double sigma;
-    double rate;
+    RateSpec rate;
     double dividend;
     OptionType option_type;
     double maturity;
@@ -241,8 +241,20 @@ std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameter
         // Find existing group with matching PDE parameters
         bool found = false;
         for (auto& group : groups) {
+            // Compare rates: must be same variant type and value
+            bool rate_match = false;
+            if (group.rate.index() == p.rate.index()) {
+                if (std::holds_alternative<double>(group.rate)) {
+                    rate_match = std::abs(std::get<double>(group.rate) - std::get<double>(p.rate)) < TOL;
+                } else {
+                    // For yield curves, compare by reference equality (same curve object)
+                    // This is conservative but safe for batching
+                    rate_match = (&std::get<YieldCurve>(group.rate) == &std::get<YieldCurve>(p.rate));
+                }
+            }
+
             if (std::abs(group.sigma - p.volatility) < TOL &&
-                std::abs(group.rate - p.rate) < TOL &&
+                rate_match &&
                 std::abs(group.dividend - p.dividend_yield) < TOL &&
                 std::abs(group.maturity - p.maturity) < TOL &&
                 group.option_type == p.type)
@@ -337,7 +349,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
             1.0,                // spot (normalized)
             1.0,                // strike (normalized)
             group.maturity,     // maturity
-            group.rate,         // rate
+            group.rate,         // rate (RateSpec)
             group.dividend,     // dividend_yield
             group.option_type,  // type
             group.sigma         // volatility

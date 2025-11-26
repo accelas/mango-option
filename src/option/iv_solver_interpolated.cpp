@@ -136,14 +136,23 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
         });
     }
 
+    // Extract rate value - for yield curves, use rate at maturity
+    double rate_value;
+    if (std::holds_alternative<double>(query.rate)) {
+        rate_value = std::get<double>(query.rate);
+    } else {
+        const auto& curve = std::get<YieldCurve>(query.rate);
+        rate_value = curve.rate(query.maturity);
+    }
+
     // Define objective function: f(σ) = Price(σ) - Market_Price
     auto objective = [&](double sigma) -> double {
-        return eval_price(moneyness, query.maturity, sigma, query.rate, query.strike) - query.market_price;
+        return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
     // Define derivative (vega): df/dσ = ∂Price/∂σ
     auto derivative = [&](double sigma) -> double {
-        return compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+        return compute_vega(moneyness, query.maturity, sigma, rate_value, query.strike);
     };
 
     // Use generic bounded Newton-Raphson

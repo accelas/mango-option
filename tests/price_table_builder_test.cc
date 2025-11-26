@@ -98,7 +98,8 @@ TEST(PriceTableBuilderTest, MakeBatch4D) {
     EXPECT_DOUBLE_EQ(batch[0].strike, 100.0);   // K_ref
     EXPECT_DOUBLE_EQ(batch[0].maturity, 0.5);   // Max maturity
     EXPECT_DOUBLE_EQ(batch[0].volatility, 0.20);
-    EXPECT_DOUBLE_EQ(batch[0].rate, 0.05);
+    EXPECT_TRUE(std::holds_alternative<double>(batch[0].rate));
+    EXPECT_DOUBLE_EQ(std::get<double>(batch[0].rate), 0.05);
     EXPECT_DOUBLE_EQ(batch[0].dividend_yield, 0.02);
 
     // Check discrete dividends were copied

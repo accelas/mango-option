@@ -203,6 +203,25 @@ struct PricingParams : OptionSpec {
         : PricingParams(spot_, strike_, maturity_, rate_, dividend_yield_, type_, volatility_,
                         std::vector<std::pair<double, double>>(discrete_dividends_))
     {}
+
+    PricingParams(double spot_,
+                  double strike_,
+                  double maturity_,
+                  RateSpec rate_,
+                  double dividend_yield_,
+                  OptionType type_,
+                  double volatility_,
+                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+        : volatility(volatility_)
+        , discrete_dividends(std::move(discrete_dividends_))
+    {
+        spot = spot_;
+        strike = strike_;
+        maturity = maturity_;
+        rate = std::move(rate_);
+        dividend_yield = dividend_yield_;
+        type = type_;
+    }
 };
 
 /**
