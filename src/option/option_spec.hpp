@@ -18,7 +18,20 @@
 namespace mango {
 
 /// Rate specification: constant or yield curve
+///
+/// Full yield curve support is available in the FDM solver (AmericanOptionSolver,
+/// IVSolverFDM) where the time-varying rate flows through the PDE discretization.
+///
+/// Limitation: Interpolation-based solvers (IVSolverInterpolated, PriceTableSurface)
+/// use a scalar rate axis. When a YieldCurve is provided, it is collapsed to a
+/// zero rate: -ln(D(T))/T. This provides a reasonable flat-rate approximation
+/// but does not capture the full term structure dynamics.
 using RateSpec = std::variant<double, YieldCurve>;
+
+/// Check if RateSpec contains a yield curve (vs constant rate)
+inline bool is_yield_curve(const RateSpec& spec) {
+    return std::holds_alternative<YieldCurve>(spec);
+}
 
 /// Helper to extract rate function from RateSpec for PDE solver
 ///

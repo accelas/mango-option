@@ -73,6 +73,12 @@ struct IVSolverInterpolatedConfig {
 /// Solves: Find σ such that Price(m, τ, σ, r) = Market_Price
 ///
 /// Thread-safe: Fully thread-safe for both single and batch queries (immutable spline)
+///
+/// Rate handling: The price surface uses a scalar rate axis (designed for SOFR/flat rates).
+/// When a YieldCurve is provided, it is collapsed to a zero rate: -ln(D(T))/T.
+/// This provides a reasonable approximation but does not capture term structure dynamics.
+/// For full yield curve support, use IVSolverFDM instead.
+/// When rate approximation is used, IVSuccess::used_rate_approximation is set to true.
 class IVSolverInterpolated {
 public:
     /// Create solver from PriceTableSurface<4>
