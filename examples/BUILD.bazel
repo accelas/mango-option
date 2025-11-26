@@ -80,3 +80,11 @@ cc_binary(
         "//src/simple",
     ],
 )
+
+cc_binary(
+    name = "simple_databento_example",
+    srcs = ["simple_databento_example.cpp"],
+    deps = [
+        "//src/simple",
+    ],
+)
