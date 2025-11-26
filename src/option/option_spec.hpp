@@ -7,12 +7,35 @@
 
 #include <expected>
 #include "src/support/error_types.hpp"
+#include "src/math/yield_curve.hpp"
 #include <string>
 #include <vector>
 #include <utility>
 #include <initializer_list>
+#include <variant>
+#include <functional>
 
 namespace mango {
+
+/// Rate specification: constant or yield curve
+using RateSpec = std::variant<double, YieldCurve>;
+
+/// Helper to extract rate function from RateSpec
+///
+/// Returns a callable that takes time t and returns the rate at that time.
+/// For constant rate, returns the constant regardless of t.
+/// For YieldCurve, delegates to curve.rate(t).
+inline std::function<double(double)> make_rate_fn(const RateSpec& spec) {
+    return std::visit([](const auto& arg) -> std::function<double(double)> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return [r = arg](double) { return r; };
+        } else {
+            // Capture by value to ensure curve lifetime
+            return [curve = arg](double t) { return curve.rate(t); };
+        }
+    }, spec);
+}
 
 /**
  * Option type enumeration.
@@ -39,7 +62,7 @@ struct OptionSpec {
     double spot = 0.0;             ///< Current spot price (S)
     double strike = 0.0;           ///< Strike price (K)
     double maturity = 0.0;         ///< Time to maturity in years (T)
-    double rate = 0.0;             ///< Risk-free rate (annualized, decimal)
+    RateSpec rate = 0.0;           ///< Risk-free rate (constant or yield curve)
     double dividend_yield = 0.0;   ///< Continuous dividend yield (annualized, decimal)
     OptionType type = OptionType::CALL; ///< CALL or PUT (default CALL)
 };

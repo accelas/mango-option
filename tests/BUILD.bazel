@@ -21,6 +21,18 @@ cc_test(
 )
 
 cc_test(
+    name = "rate_spec_test",
+    size = "small",
+    srcs = ["rate_spec_test.cc"],
+    deps = [
+        "//src/option:option_spec",
+        "//src/math:yield_curve",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "safe_math_test",
     size = "small",
     srcs = ["safe_math_test.cc"],
