@@ -47,3 +47,12 @@ cc_library(
         "//src/option:option_spec",
     ],
 )
+
+cc_library(
+    name = "chain_builder",
+    hdrs = ["chain_builder.hpp"],
+    deps = [
+        ":option_chain",
+        ":converter",
+    ],
+)

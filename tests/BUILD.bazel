@@ -1006,3 +1006,12 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "simple_chain_builder_test",
+    srcs = ["simple_chain_builder_test.cc"],
+    deps = [
+        "//src/simple:chain_builder",
+        "@googletest//:gtest_main",
+    ],
+)
