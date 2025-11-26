@@ -144,14 +144,9 @@ private:
     bool is_in_bounds(const IVQuery& query, double vol) const {
         const double m = query.spot / query.strike;
 
-        // Extract rate value - for yield curves, use rate at maturity
-        double rate_value;
-        if (std::holds_alternative<double>(query.rate)) {
-            rate_value = std::get<double>(query.rate);
-        } else {
-            const auto& curve = std::get<YieldCurve>(query.rate);
-            rate_value = curve.rate(query.maturity);
-        }
+        // Extract zero rate for bounds check - must match what solve_impl uses
+        // Using get_zero_rate() ensures consistency: -ln(D(T))/T for curves
+        double rate_value = get_zero_rate(query.rate, query.maturity);
 
         return m >= m_range_.first && m <= m_range_.second &&
                query.maturity >= tau_range_.first && query.maturity <= tau_range_.second &&

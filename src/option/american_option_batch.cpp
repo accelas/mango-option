@@ -247,9 +247,9 @@ std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameter
                 if (std::holds_alternative<double>(group.rate)) {
                     rate_match = std::abs(std::get<double>(group.rate) - std::get<double>(p.rate)) < TOL;
                 } else {
-                    // For yield curves, compare by reference equality (same curve object)
-                    // This is conservative but safe for batching
-                    rate_match = (&std::get<YieldCurve>(group.rate) == &std::get<YieldCurve>(p.rate));
+                    // For yield curves, compare by value (tenor/discount vectors)
+                    // This allows batching options that share the same curve data
+                    rate_match = (std::get<YieldCurve>(group.rate) == std::get<YieldCurve>(p.rate));
                 }
             }
 

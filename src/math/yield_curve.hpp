@@ -146,6 +146,19 @@ public:
         return left.log_discount + alpha * (right.log_discount - left.log_discount);
     }
 
+    /// Equality comparison (compares tenor/discount vectors)
+    bool operator==(const YieldCurve& other) const {
+        if (curve_.size() != other.curve_.size()) return false;
+        constexpr double TOL = 1e-12;
+        for (size_t i = 0; i < curve_.size(); ++i) {
+            if (std::abs(curve_[i].tenor - other.curve_[i].tenor) > TOL ||
+                std::abs(curve_[i].log_discount - other.curve_[i].log_discount) > TOL) {
+                return false;
+            }
+        }
+        return true;
+    }
+
 private:
     /// Forward rate between curve_[idx] and curve_[idx+1]
     double rate_between(size_t idx) const {
