@@ -970,3 +970,12 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "simple_timestamp_test",
+    srcs = ["simple_timestamp_test.cc"],
+    deps = [
+        "//src/simple:timestamp",
+        "@googletest//:gtest_main",
+    ],
+)

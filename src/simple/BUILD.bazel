@@ -5,3 +5,10 @@ cc_library(
     hdrs = ["price.hpp"],
     deps = [],
 )
+
+cc_library(
+    name = "timestamp",
+    srcs = ["timestamp.cpp"],
+    hdrs = ["timestamp.hpp"],
+    deps = [],
+)
