@@ -72,3 +72,11 @@ cc_binary(
         "//src/option:iv_solver_fdm",
     ],
 )
+
+cc_binary(
+    name = "simple_yfinance_example",
+    srcs = ["simple_yfinance_example.cpp"],
+    deps = [
+        "//src/simple",
+    ],
+)
