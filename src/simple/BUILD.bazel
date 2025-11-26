@@ -21,3 +21,13 @@ cc_library(
         ":timestamp",
     ],
 )
+
+cc_library(
+    name = "option_chain",
+    hdrs = ["option_chain.hpp"],
+    deps = [
+        ":option_types",
+        "//src/math:yield_curve",
+        "//src/option:option_spec",
+    ],
+)
