@@ -119,6 +119,45 @@ TEST(AmericanOptionTest, ATMPut) {
 
 Test naming: `*_test.cc` (unit), `*_integration_test.cc` (integration), `*_performance_test.cc` (performance)
 
+### Regression Tests
+
+**For every bug found, add a regression test.** This prevents the bug from reoccurring and documents the fix.
+
+Regression test format:
+```cpp
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: Brief description of what went wrong
+// Bug: Explanation of the root cause
+TEST(ComponentTest, DescriptiveNameForBug) {
+    // Setup that triggers the bug
+    // Assertion that would have caught it
+}
+```
+
+Example from yield curve support:
+```cpp
+// Regression: make_rate_fn must convert time-to-expiry to calendar time
+// Bug: Used curve.rate(τ) directly instead of curve.rate(T - τ)
+TEST(RateSpecTest, TimeConversionForUpslopingCurve) {
+    // Upward sloping curve: rates increase with time
+    std::vector<mango::TenorPoint> points = {...};
+    auto fn = mango::make_rate_fn(spec, maturity);
+
+    // Near expiry (τ small) → calendar time large → HIGH rate
+    EXPECT_NEAR(fn(0.1), 0.05, 1e-10);
+    // Far from expiry (τ large) → calendar time small → LOW rate
+    EXPECT_NEAR(fn(1.9), 0.04, 1e-10);
+}
+```
+
+**Why regression tests matter:**
+- Documents the bug for future developers
+- Prevents reintroduction during refactoring
+- Serves as executable specification of correct behavior
+
 ### Common Development Patterns
 
 **Pattern 1: American IV Calculation**

@@ -38,7 +38,13 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     std::cout << "  strike: " << params.strike << std::endl;
     std::cout << "  maturity: " << params.maturity << std::endl;
     std::cout << "  volatility: " << params.volatility << std::endl;
-    std::cout << "  rate: " << params.rate << std::endl;
+    std::cout << "  rate: ";
+    if (std::holds_alternative<double>(params.rate)) {
+        std::cout << std::get<double>(params.rate);
+    } else {
+        std::cout << "<YieldCurve>";
+    }
+    std::cout << std::endl;
     std::cout << "  dividend_yield: " << params.dividend_yield << std::endl;
 
     // Check grid estimator

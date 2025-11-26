@@ -3,6 +3,12 @@
  * @brief Implementation of option bracketing algorithm
  */
 
+// Suppress false positive maybe-uninitialized warning with GCC 14 and std::variant
+// The warning occurs in std::sort when moving PricingParams objects containing RateSpec (variant)
+// This is a known compiler bug with aggressive inlining and variant tracking
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+
 #include "src/option/batch_bracketing.hpp"
 #include <algorithm>
 #include <cmath>
@@ -37,7 +43,30 @@ double OptionBracketing::compute_distance(
     double d_moneyness = std::abs(log_moneyness_a - log_moneyness_b) / criteria.moneyness_tolerance;
 
     double d_vol = std::abs(a.volatility - b.volatility) / criteria.volatility_tolerance;
-    double d_rate = std::abs(a.rate - b.rate) / criteria.rate_tolerance;
+
+    // Extract rate values for comparison
+    // For yield curves, use rate at maturity (average of the two maturities)
+    double avg_maturity = (a.maturity + b.maturity) / 2.0;
+
+    double rate_a = std::visit([avg_maturity](const auto& r) -> double {
+        using T = std::decay_t<decltype(r)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return r;
+        } else {
+            return r.rate(avg_maturity);
+        }
+    }, a.rate);
+
+    double rate_b = std::visit([avg_maturity](const auto& r) -> double {
+        using T = std::decay_t<decltype(r)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return r;
+        } else {
+            return r.rate(avg_maturity);
+        }
+    }, b.rate);
+
+    double d_rate = std::abs(rate_a - rate_b) / criteria.rate_tolerance;
 
     // Euclidean distance in normalized space
     return std::sqrt(
@@ -356,3 +385,5 @@ OptionBracketing::estimate_bracket_grid(
 }
 
 } // namespace mango
+
+#pragma GCC diagnostic pop

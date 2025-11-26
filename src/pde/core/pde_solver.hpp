@@ -26,8 +26,8 @@ namespace mango {
 
 /// Concept to detect spatial operators with analytical Jacobian capability
 template<typename SpatialOp>
-concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, TridiagonalMatrixView jac) {
-    { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
+concept HasAnalyticalJacobian = requires(const SpatialOp op, double t, double coeff_dt, TridiagonalMatrixView jac) {
+    { op.assemble_jacobian(t, coeff_dt, jac) } -> std::same_as<void>;
 };
 
 /// Concept to detect if derived class provides obstacle condition
@@ -836,7 +836,7 @@ private:
         // Dispatch to analytical or finite-difference Jacobian
         if constexpr (HasAnalyticalJacobian<SpatialOpType>) {
             // Analytical Jacobian (O(n) - fast path)
-            spatial_op.assemble_jacobian(coeff_dt, jac);
+            spatial_op.assemble_jacobian(t, coeff_dt, jac);
         } else {
             // Finite-difference Jacobian (O(n²) - fallback for unsupported operators)
             build_jacobian_finite_difference(t, coeff_dt, u, eps, jac);

@@ -27,11 +27,16 @@ std::expected<void, ValidationError> validate_option_spec(const OptionSpec& spec
     }
 
     // Validate rate (allow negative but must be finite)
-    if (!std::isfinite(spec.rate)) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidRate,
-            spec.rate));
+    // For constant rate, check finiteness; for YieldCurve, skip validation
+    if (std::holds_alternative<double>(spec.rate)) {
+        double rate = std::get<double>(spec.rate);
+        if (!std::isfinite(rate)) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidRate,
+                rate));
+        }
     }
+    // YieldCurve validation is implicitly done during construction
 
     // Validate dividend yield (must be non-negative and finite)
     if (spec.dividend_yield < 0.0 || !std::isfinite(spec.dividend_yield)) {

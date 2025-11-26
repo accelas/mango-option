@@ -49,6 +49,10 @@ using AmericanSolverVariant = std::variant<AmericanPutSolver, AmericanCallSolver
  */
 class AmericanPutSolver : public PDESolver<AmericanPutSolver> {
 public:
+    using RateFn = std::function<double(double)>;
+    using PDEType = operators::BlackScholesPDE<double, RateFn>;
+    using SpatialOpType = operators::SpatialOperator<PDEType, double>;
+
     AmericanPutSolver(const PricingParams& params,
                      std::shared_ptr<Grid<double>> grid,
                      PDEWorkspace workspace)
@@ -113,10 +117,10 @@ private:
         return DirichletBC(RightBCFunction{});
     }
 
-    operators::SpatialOperator<operators::BlackScholesPDE<double>, double> create_spatial_op() const {
-        auto pde = operators::BlackScholesPDE<double>(
+    SpatialOpType create_spatial_op() const {
+        auto pde = PDEType(
             params_.volatility,
-            params_.rate,
+            make_rate_fn(params_.rate, params_.maturity),
             params_.dividend_yield);
         auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
         return operators::create_spatial_operator(std::move(pde), spacing_ptr);
@@ -128,7 +132,7 @@ private:
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
     DirichletBC<RightBCFunction> right_bc_;
-    operators::SpatialOperator<operators::BlackScholesPDE<double>, double> spatial_op_;
+    SpatialOpType spatial_op_;
 };
 
 /**
@@ -141,6 +145,10 @@ private:
  */
 class AmericanCallSolver : public PDESolver<AmericanCallSolver> {
 public:
+    using RateFn = std::function<double(double)>;
+    using PDEType = operators::BlackScholesPDE<double, RateFn>;
+    using SpatialOpType = operators::SpatialOperator<PDEType, double>;
+
     AmericanCallSolver(const PricingParams& params,
                       std::shared_ptr<Grid<double>> grid,
                       PDEWorkspace workspace)
@@ -192,11 +200,13 @@ private:
     };
 
     struct RightBCFunction {
-        double rate;  // Capture risk-free rate
+        std::function<double(double)> forward_discount_fn;  // Forward discount from s to T
 
         double operator()(double t, double x) const {
-            double discount = std::exp(-rate * t);
-            return std::exp(x) - discount;
+            // Deep ITM call boundary: S - K*D_forward where D_forward is the
+            // forward discount factor from current calendar time s to expiry T.
+            // t is time-to-expiry τ, forward_discount_fn returns D(T)/D(T-τ)
+            return std::exp(x) - forward_discount_fn(t);
         }
     };
 
@@ -205,13 +215,13 @@ private:
     }
 
     DirichletBC<RightBCFunction> create_right_bc() const {
-        return DirichletBC(RightBCFunction{params_.rate});
+        return DirichletBC(RightBCFunction{make_forward_discount_fn(params_.rate, params_.maturity)});
     }
 
-    operators::SpatialOperator<operators::BlackScholesPDE<double>, double> create_spatial_op() const {
-        auto pde = operators::BlackScholesPDE<double>(
+    SpatialOpType create_spatial_op() const {
+        auto pde = PDEType(
             params_.volatility,
-            params_.rate,
+            make_rate_fn(params_.rate, params_.maturity),
             params_.dividend_yield);
         auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
         return operators::create_spatial_operator(std::move(pde), spacing_ptr);
@@ -223,7 +233,7 @@ private:
     // Cached BC and spatial operator (created once, reused many times)
     DirichletBC<LeftBCFunction> left_bc_;
     DirichletBC<RightBCFunction> right_bc_;
-    operators::SpatialOperator<operators::BlackScholesPDE<double>, double> spatial_op_;
+    SpatialOpType spatial_op_;
 };
 
 } // namespace mango

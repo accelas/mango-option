@@ -216,5 +216,58 @@ TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
         << "ATM put price seems unreasonably high";
 }
 
+TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
+    // Integration test for yield curve support
+    // Upward sloping curve: 5% for first 6 months, 6% for second 6 months
+    std::vector<TenorPoint> points = {
+        {0.0, 0.0},
+        {0.5, -0.025},   // 5% for first 6 months (integral: 0.05 * 0.5 = 0.025)
+        {1.0, -0.055}    // 6% for second 6 months (integral: 0.025 + 0.06 * 0.5 = 0.055)
+    };
+    auto curve = YieldCurve::from_points(points).value();
+
+    // Create params with yield curve
+    AmericanOptionParams params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        curve,  // rate (YieldCurve)
+        0.02,   // dividend yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
+
+    // Solve with yield curve
+    auto result = solve_american_option_auto(params);
+    ASSERT_TRUE(result.has_value()) << "Solver failed with yield curve";
+    ASSERT_TRUE(result->converged);
+
+    // Price should be positive and reasonable
+    double price = result->value_at(params.spot);
+    EXPECT_GT(price, 0.0);
+    EXPECT_LT(price, params.strike);  // Put can't exceed strike
+
+    // Compare with flat rate at average (5.5%)
+    AmericanOptionParams flat_params(
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.055,  // rate (flat at average)
+        0.02,   // dividend yield
+        OptionType::PUT,
+        0.20    // volatility
+    );
+
+    auto flat_result = solve_american_option_auto(flat_params);
+    ASSERT_TRUE(flat_result.has_value()) << "Solver failed with flat rate";
+    ASSERT_TRUE(flat_result->converged);
+
+    // Prices should be close (within 2% for similar average rate)
+    // Note: Some difference expected due to convexity effects with sloping curve
+    double flat_price = flat_result->value_at(flat_params.spot);
+    EXPECT_NEAR(price, flat_price, flat_price * 0.02)
+        << "Yield curve price differs significantly from flat rate average";
+}
+
 }  // namespace
 }  // namespace mango

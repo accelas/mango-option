@@ -20,6 +20,12 @@ struct IVSuccess {
     size_t iterations;               ///< Number of iterations taken
     double final_error;              ///< |Price(σ) - Market_Price|
     std::optional<double> vega;      ///< Vega at solution (optional)
+
+    /// True if yield curve was collapsed to zero rate for interpolation.
+    /// Only set by IVSolverInterpolated when a YieldCurve is passed.
+    /// The solver uses zero_rate = -ln(D(T))/T as a flat-rate approximation.
+    /// For full term structure dynamics, use IVSolverFDM instead.
+    bool used_rate_approximation = false;
 };
 
 /// Batch IV solver result
