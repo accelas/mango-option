@@ -136,14 +136,11 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
         });
     }
 
-    // Extract rate value - for yield curves, use rate at maturity
-    double rate_value;
-    if (std::holds_alternative<double>(query.rate)) {
-        rate_value = std::get<double>(query.rate);
-    } else {
-        const auto& curve = std::get<YieldCurve>(query.rate);
-        rate_value = curve.rate(query.maturity);
-    }
+    // Extract zero rate for surface lookup
+    // For yield curves, use zero rate = -ln(D(T))/T which matches how surfaces are built
+    // Using instantaneous forward rate curve.rate(T) would be incorrect as it only
+    // reflects the rate at maturity, not the integrated discount factor
+    double rate_value = get_zero_rate(query.rate, query.maturity);
 
     // Define objective function: f(σ) = Price(σ) - Market_Price
     auto objective = [&](double sigma) -> double {

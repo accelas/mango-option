@@ -116,23 +116,25 @@ public:
         stencil_->compute_second_derivative(u, d2u_dx2, range.start, range.end);
     }
 
-    /// Assemble analytical Jacobian for PDEs with constant coefficients
+    /// Assemble analytical Jacobian for PDEs with time-varying coefficients
     ///
     /// For linear PDEs of the form L(u) = a·∂²u/∂x² + b·∂u/∂x + c·u,
     /// computes the Jacobian matrix ∂L/∂u analytically in O(n) time.
     ///
     /// Available only for PDEs satisfying HasJacobianCoefficients concept.
     ///
+    /// @param t Current time (for time-varying rates)
     /// @param coeff_dt TR-BDF2 weight coefficient
     /// @param jac Tridiagonal matrix view to populate
-    void assemble_jacobian([[maybe_unused]] double coeff_dt,
+    void assemble_jacobian([[maybe_unused]] double t,
+                          [[maybe_unused]] double coeff_dt,
                           TridiagonalMatrixView& jac) const
         requires HasJacobianCoefficients<PDE>
     {
-        // Get PDE coefficients
-        const T a = pde_.second_derivative_coeff();  // σ²/2
-        const T b = pde_.first_derivative_coeff();   // r - d - σ²/2
-        const T c = -pde_.discount_rate();           // -r
+        // Get PDE coefficients at current time t
+        const T a = pde_.second_derivative_coeff();   // σ²/2 (time-independent)
+        const T b = pde_.first_derivative_coeff(t);   // r(t) - d - σ²/2
+        const T c = -pde_.discount_rate(t);           // -r(t)
 
         const size_t n = jac.size();
 

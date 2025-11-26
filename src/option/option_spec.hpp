@@ -22,7 +22,7 @@ using RateSpec = std::variant<double, YieldCurve>;
 
 /// Helper to extract rate function from RateSpec
 ///
-/// Returns a callable that takes time t and returns the rate at that time.
+/// Returns a callable that takes time t and returns the instantaneous forward rate.
 /// For constant rate, returns the constant regardless of t.
 /// For YieldCurve, delegates to curve.rate(t).
 inline std::function<double(double)> make_rate_fn(const RateSpec& spec) {
@@ -33,6 +33,39 @@ inline std::function<double(double)> make_rate_fn(const RateSpec& spec) {
         } else {
             // Capture by value to ensure curve lifetime
             return [curve = arg](double t) { return curve.rate(t); };
+        }
+    }, spec);
+}
+
+/// Helper to extract discount function from RateSpec
+///
+/// Returns a callable that takes time t and returns the discount factor D(t).
+/// For constant rate, returns exp(-r*t).
+/// For YieldCurve, delegates to curve.discount(t).
+inline std::function<double(double)> make_discount_fn(const RateSpec& spec) {
+    return std::visit([](const auto& arg) -> std::function<double(double)> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return [r = arg](double t) { return std::exp(-r * t); };
+        } else {
+            // Capture by value to ensure curve lifetime
+            return [curve = arg](double t) { return curve.discount(t); };
+        }
+    }, spec);
+}
+
+/// Helper to extract zero rate at a specific maturity from RateSpec
+///
+/// Returns the continuously compounded rate such that exp(-zero_rate*T) = D(T).
+/// For constant rate, returns the constant.
+/// For YieldCurve, returns -ln(D(T))/T.
+inline double get_zero_rate(const RateSpec& spec, double maturity) {
+    return std::visit([maturity](const auto& arg) -> double {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return arg;
+        } else {
+            return arg.zero_rate(maturity);
         }
     }, spec);
 }

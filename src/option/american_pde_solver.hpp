@@ -200,11 +200,13 @@ private:
     };
 
     struct RightBCFunction {
-        std::function<double(double)> rate_fn;  // Capture rate function
+        std::function<double(double)> discount_fn;  // Capture discount function
 
         double operator()(double t, double x) const {
-            double discount = std::exp(-rate_fn(t) * t);
-            return std::exp(x) - discount;
+            // Deep ITM call boundary: S - K*D(t) where D(t) is the discount factor
+            // Using discount_fn directly avoids computing exp(-r(t)*t) which
+            // incorrectly uses instantaneous forward rate instead of integrated rate
+            return std::exp(x) - discount_fn(t);
         }
     };
 
@@ -213,7 +215,7 @@ private:
     }
 
     DirichletBC<RightBCFunction> create_right_bc() const {
-        return DirichletBC(RightBCFunction{make_rate_fn(params_.rate)});
+        return DirichletBC(RightBCFunction{make_discount_fn(params_.rate)});
     }
 
     SpatialOpType create_spatial_op() const {

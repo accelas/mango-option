@@ -113,6 +113,13 @@ public:
         return std::exp(log_discount(t));
     }
 
+    /// Zero rate: -ln(D(t))/t
+    /// This is the continuously compounded rate such that exp(-zero_rate*t) = D(t)
+    double zero_rate(double t) const {
+        if (t <= 0.0) return rate(0.0);  // Forward rate at t=0
+        return -log_discount(t) / t;
+    }
+
     /// Log discount factor ln(D(t)) via linear interpolation
     double log_discount(double t) const {
         if (curve_.size() < 2) return 0.0;
