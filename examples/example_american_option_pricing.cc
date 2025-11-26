@@ -35,7 +35,7 @@ int main() {
     std::cout << "  Strike:     $" << params.strike << "\n";
     std::cout << "  Maturity:   " << params.maturity << " years\n";
     std::cout << "  Volatility: " << (params.volatility * 100) << "%\n";
-    std::cout << "  Rate:       " << (params.rate * 100) << "%\n";
+    std::cout << "  Rate:       " << (std::get<double>(params.rate) * 100) << "%\n";
     std::cout << "  Dividend:   " << (params.dividend_yield * 100) << "%\n";
     std::cout << "  Type:       " << (params.type == mango::OptionType::PUT ? "PUT" : "CALL") << "\n\n";
 
