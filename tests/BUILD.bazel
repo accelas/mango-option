@@ -961,3 +961,12 @@ cc_test(
         "-Wextra",
     ],
 )
+
+cc_test(
+    name = "simple_price_test",
+    srcs = ["simple_price_test.cc"],
+    deps = [
+        "//src/simple:price",
+        "@googletest//:gtest_main",
+    ],
+)
