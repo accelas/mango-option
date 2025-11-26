@@ -33,6 +33,18 @@ cc_test(
 )
 
 cc_test(
+    name = "black_scholes_pde_rate_fn_test",
+    size = "small",
+    srcs = ["black_scholes_pde_rate_fn_test.cc"],
+    deps = [
+        "//src/pde/operators:black_scholes_pde",
+        "//src/math:yield_curve",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "safe_math_test",
     size = "small",
     srcs = ["safe_math_test.cc"],
