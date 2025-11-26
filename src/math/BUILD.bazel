@@ -6,6 +6,12 @@ cc_library(
 )
 
 cc_library(
+    name = "yield_curve",
+    hdrs = ["yield_curve.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "lapack_banded_layout",
     hdrs = ["lapack_banded_layout.hpp"],
     deps = ["@mdspan//:mdspan"],

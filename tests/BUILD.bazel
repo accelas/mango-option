@@ -10,6 +10,17 @@ cc_test(
 )
 
 cc_test(
+    name = "yield_curve_test",
+    size = "small",
+    srcs = ["yield_curve_test.cc"],
+    deps = [
+        "//src/math:yield_curve",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "safe_math_test",
     size = "small",
     srcs = ["safe_math_test.cc"],
