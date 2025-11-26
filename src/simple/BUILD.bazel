@@ -12,3 +12,12 @@ cc_library(
     hdrs = ["timestamp.hpp"],
     deps = [],
 )
+
+cc_library(
+    name = "option_types",
+    hdrs = ["option_types.hpp"],
+    deps = [
+        ":price",
+        ":timestamp",
+    ],
+)
