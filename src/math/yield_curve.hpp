@@ -42,6 +42,56 @@ public:
         return curve;
     }
 
+    /// Construct from tenor points (must include t=0 with log_discount=0)
+    static std::expected<YieldCurve, std::string>
+    from_points(std::vector<TenorPoint> points) {
+        if (points.empty()) {
+            return std::unexpected("Empty points vector");
+        }
+
+        // Sort by tenor
+        std::sort(points.begin(), points.end(),
+            [](const TenorPoint& a, const TenorPoint& b) {
+                return a.tenor < b.tenor;
+            });
+
+        // Check for t=0
+        if (points[0].tenor != 0.0) {
+            return std::unexpected("First point must have t=0");
+        }
+        if (std::abs(points[0].log_discount) > 1e-10) {
+            return std::unexpected("log_discount at t=0 must be 0");
+        }
+
+        YieldCurve curve;
+        curve.curve_ = std::move(points);
+        return curve;
+    }
+
+    /// Construct from discount factors (convenience)
+    static std::expected<YieldCurve, std::string>
+    from_discounts(std::span<const double> tenors,
+                   std::span<const double> discounts) {
+        if (tenors.size() != discounts.size()) {
+            return std::unexpected("Tenors and discounts must have same size");
+        }
+        if (tenors.empty()) {
+            return std::unexpected("Empty tenors vector");
+        }
+
+        std::vector<TenorPoint> points;
+        points.reserve(tenors.size());
+
+        for (size_t i = 0; i < tenors.size(); ++i) {
+            if (discounts[i] <= 0.0) {
+                return std::unexpected("Discount factors must be positive");
+            }
+            points.push_back({tenors[i], std::log(discounts[i])});
+        }
+
+        return from_points(std::move(points));
+    }
+
     /// Instantaneous forward rate at time t
     double rate(double t) const {
         if (curve_.size() < 2) return 0.0;

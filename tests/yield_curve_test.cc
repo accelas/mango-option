@@ -19,3 +19,51 @@ TEST(YieldCurveTest, FlatCurveDiscountFactor) {
     EXPECT_NEAR(curve.discount(1.0), std::exp(-0.05), 1e-10);
     EXPECT_NEAR(curve.discount(2.0), std::exp(-0.10), 1e-10);
 }
+
+TEST(YieldCurveTest, FromPointsCreatesValidCurve) {
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.0},
+        {1.0, -0.05},   // D(1) = exp(-0.05) ~ 0.9512
+        {2.0, -0.10}    // D(2) = exp(-0.10) ~ 0.9048
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_TRUE(result.has_value());
+
+    auto& curve = result.value();
+    EXPECT_NEAR(curve.discount(0.0), 1.0, 1e-10);
+    EXPECT_NEAR(curve.discount(1.0), std::exp(-0.05), 1e-10);
+    EXPECT_NEAR(curve.discount(2.0), std::exp(-0.10), 1e-10);
+}
+
+TEST(YieldCurveTest, FromPointsFailsWithoutZeroTenor) {
+    std::vector<mango::TenorPoint> points = {
+        {0.5, -0.025},
+        {1.0, -0.05}
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(result.error().find("t=0") != std::string::npos);
+}
+
+TEST(YieldCurveTest, FromDiscountsCreatesValidCurve) {
+    std::vector<double> tenors = {0.0, 0.5, 1.0, 2.0};
+    std::vector<double> discounts = {1.0, 0.9753, 0.9512, 0.9048};
+
+    auto result = mango::YieldCurve::from_discounts(tenors, discounts);
+    ASSERT_TRUE(result.has_value());
+
+    auto& curve = result.value();
+    EXPECT_NEAR(curve.discount(0.0), 1.0, 1e-10);
+    EXPECT_NEAR(curve.discount(0.5), 0.9753, 1e-4);
+    EXPECT_NEAR(curve.discount(1.0), 0.9512, 1e-4);
+}
+
+TEST(YieldCurveTest, FromDiscountsFailsOnSizeMismatch) {
+    std::vector<double> tenors = {0.0, 0.5, 1.0};
+    std::vector<double> discounts = {1.0, 0.9753};  // Wrong size
+
+    auto result = mango::YieldCurve::from_discounts(tenors, discounts);
+    ASSERT_FALSE(result.has_value());
+}
