@@ -56,7 +56,7 @@ public:
     double spot() const { return params_.spot; }
     double strike() const { return params_.strike; }
     double maturity() const { return params_.maturity; }
-    double rate() const { return params_.rate; }
+    const RateSpec& rate() const { return params_.rate; }
     double dividend_yield() const { return params_.dividend_yield; }
     OptionType option_type() const { return params_.type; }
     double volatility() const { return params_.volatility; }

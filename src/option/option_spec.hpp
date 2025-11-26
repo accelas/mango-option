@@ -7,12 +7,101 @@
 
 #include <expected>
 #include "src/support/error_types.hpp"
+#include "src/math/yield_curve.hpp"
 #include <string>
 #include <vector>
 #include <utility>
 #include <initializer_list>
+#include <variant>
+#include <functional>
 
 namespace mango {
+
+/// Rate specification: constant or yield curve
+///
+/// Full yield curve support is available in the FDM solver (AmericanOptionSolver,
+/// IVSolverFDM) where the time-varying rate flows through the PDE discretization.
+///
+/// Limitation: Interpolation-based solvers (IVSolverInterpolated, PriceTableSurface)
+/// use a scalar rate axis. When a YieldCurve is provided, it is collapsed to a
+/// zero rate: -ln(D(T))/T. This provides a reasonable flat-rate approximation
+/// but does not capture the full term structure dynamics.
+using RateSpec = std::variant<double, YieldCurve>;
+
+/// Check if RateSpec contains a yield curve (vs constant rate)
+inline bool is_yield_curve(const RateSpec& spec) {
+    return std::holds_alternative<YieldCurve>(spec);
+}
+
+/// Helper to extract rate function from RateSpec for PDE solver
+///
+/// The PDE solver uses time-to-expiry τ (0 at expiry, T at valuation date).
+/// Yield curves use calendar time s from valuation date (0 = today, T = expiry).
+/// Conversion: s = T - τ (calendar time = maturity - time_to_expiry)
+///
+/// Returns a callable that takes time-to-expiry τ and returns the instantaneous
+/// forward rate at calendar time s = T - τ.
+///
+/// @param spec Rate specification (constant or yield curve)
+/// @param maturity Total time to maturity T
+inline std::function<double(double)> make_rate_fn(const RateSpec& spec, double maturity) {
+    return std::visit([maturity](const auto& arg) -> std::function<double(double)> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return [r = arg](double) { return r; };
+        } else {
+            // Convert time-to-expiry τ to calendar time s = T - τ
+            return [curve = arg, maturity](double tau) {
+                double s = std::max(0.0, maturity - tau);
+                return curve.rate(s);
+            };
+        }
+    }, spec);
+}
+
+/// Helper to extract forward discount function from RateSpec for boundary conditions
+///
+/// The boundary condition needs the forward discount factor from current calendar
+/// time s to expiry T: D(T)/D(s). For constant rate, this is exp(-r*τ) where τ = T - s.
+///
+/// Returns a callable that takes time-to-expiry τ and returns the forward discount
+/// factor from calendar time s = T - τ to expiry T.
+///
+/// @param spec Rate specification (constant or yield curve)
+/// @param maturity Total time to maturity T
+inline std::function<double(double)> make_forward_discount_fn(const RateSpec& spec, double maturity) {
+    return std::visit([maturity](const auto& arg) -> std::function<double(double)> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            // For constant rate: forward discount = exp(-r*τ)
+            return [r = arg](double tau) { return std::exp(-r * tau); };
+        } else {
+            // Forward discount from s to T: D(T)/D(s) where s = T - τ
+            return [curve = arg, maturity](double tau) {
+                double s = std::max(0.0, maturity - tau);
+                double D_T = curve.discount(maturity);
+                double D_s = curve.discount(s);
+                return D_T / D_s;
+            };
+        }
+    }, spec);
+}
+
+/// Helper to extract zero rate at a specific maturity from RateSpec
+///
+/// Returns the continuously compounded rate such that exp(-zero_rate*T) = D(T).
+/// For constant rate, returns the constant.
+/// For YieldCurve, returns -ln(D(T))/T.
+inline double get_zero_rate(const RateSpec& spec, double maturity) {
+    return std::visit([maturity](const auto& arg) -> double {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, double>) {
+            return arg;
+        } else {
+            return arg.zero_rate(maturity);
+        }
+    }, spec);
+}
 
 /**
  * Option type enumeration.
@@ -39,7 +128,7 @@ struct OptionSpec {
     double spot = 0.0;             ///< Current spot price (S)
     double strike = 0.0;           ///< Strike price (K)
     double maturity = 0.0;         ///< Time to maturity in years (T)
-    double rate = 0.0;             ///< Risk-free rate (annualized, decimal)
+    RateSpec rate = 0.0;           ///< Risk-free rate (constant or yield curve)
     double dividend_yield = 0.0;   ///< Continuous dividend yield (annualized, decimal)
     OptionType type = OptionType::CALL; ///< CALL or PUT (default CALL)
 };
@@ -180,6 +269,25 @@ struct PricingParams : OptionSpec {
         : PricingParams(spot_, strike_, maturity_, rate_, dividend_yield_, type_, volatility_,
                         std::vector<std::pair<double, double>>(discrete_dividends_))
     {}
+
+    PricingParams(double spot_,
+                  double strike_,
+                  double maturity_,
+                  RateSpec rate_,
+                  double dividend_yield_,
+                  OptionType type_,
+                  double volatility_,
+                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+        : volatility(volatility_)
+        , discrete_dividends(std::move(discrete_dividends_))
+    {
+        spot = spot_;
+        strike = strike_;
+        maturity = maturity_;
+        rate = std::move(rate_);
+        dividend_yield = dividend_yield_;
+        type = type_;
+    }
 };
 
 /**

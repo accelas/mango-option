@@ -136,14 +136,24 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
         });
     }
 
+    // Extract zero rate for surface lookup
+    // For yield curves, use zero rate = -ln(D(T))/T which matches how surfaces are built
+    // Using instantaneous forward rate curve.rate(T) would be incorrect as it only
+    // reflects the rate at maturity, not the integrated discount factor
+    //
+    // Note: When a YieldCurve is provided, we collapse it to a single zero rate.
+    // This loses term structure dynamics. For full curve support, use IVSolverFDM.
+    const bool rate_is_curve = is_yield_curve(query.rate);
+    double rate_value = get_zero_rate(query.rate, query.maturity);
+
     // Define objective function: f(σ) = Price(σ) - Market_Price
     auto objective = [&](double sigma) -> double {
-        return eval_price(moneyness, query.maturity, sigma, query.rate, query.strike) - query.market_price;
+        return eval_price(moneyness, query.maturity, sigma, rate_value, query.strike) - query.market_price;
     };
 
     // Define derivative (vega): df/dσ = ∂Price/∂σ
     auto derivative = [&](double sigma) -> double {
-        return compute_vega(moneyness, query.maturity, sigma, query.rate, query.strike);
+        return compute_vega(moneyness, query.maturity, sigma, rate_value, query.strike);
     };
 
     // Use generic bounded Newton-Raphson
@@ -193,7 +203,8 @@ std::expected<IVSuccess, IVError> IVSolverInterpolated::solve_impl(const IVQuery
         .implied_vol = result->root,
         .iterations = result->iterations,
         .final_error = result->final_error,
-        .vega = final_vega
+        .vega = final_vega,
+        .used_rate_approximation = rate_is_curve
     };
 }
 
