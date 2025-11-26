@@ -5,7 +5,10 @@ pybind_extension(
     srcs = ["mango_bindings.cpp"],
     deps = [
         "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver_interpolated",
         "//src/option:american_option",
+        "//src/option/table:price_table_workspace",
+        "//src/option/table:price_table_surface",
         "//src/math:root_finding",
         "//src/support:error_types",
     ],

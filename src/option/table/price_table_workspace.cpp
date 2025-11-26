@@ -21,7 +21,7 @@ std::expected<void, std::string> PriceTableWorkspace::validate_inputs(
 {
     // Validate grid sizes
     if (m_grid.size() < 4) {
-        return std::unexpected("Moneyness grid must have >= 4 points");
+        return std::unexpected("Log-moneyness grid must have >= 4 points");
     }
     if (tau_grid.size() < 4) {
         return std::unexpected("Maturity grid must have >= 4 points");
@@ -48,7 +48,7 @@ std::expected<void, std::string> PriceTableWorkspace::validate_inputs(
     };
 
     if (!is_sorted(m_grid)) {
-        return std::unexpected("Moneyness grid must be sorted ascending");
+        return std::unexpected("Log-moneyness grid must be sorted ascending");
     }
     if (!is_sorted(tau_grid)) {
         return std::unexpected("Maturity grid must be sorted ascending");
@@ -100,7 +100,7 @@ std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::allocate_an
     double* ptr = aligned_start;
 
     std::memcpy(ptr, m_grid.data(), m_grid.size() * sizeof(double));
-    ws.moneyness_ = std::span<const double>(ptr, m_grid.size());
+    ws.log_moneyness_ = std::span<const double>(ptr, m_grid.size());
     ptr += m_grid.size();
 
     std::memcpy(ptr, tau_grid.data(), tau_grid.size() * sizeof(double));
@@ -182,7 +182,7 @@ std::expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buf
     double* ptr = aligned_start;
 
     std::memcpy(ptr, m_data, n_m * sizeof(double));
-    ws.moneyness_ = std::span<const double>(ptr, n_m);
+    ws.log_moneyness_ = std::span<const double>(ptr, n_m);
     ptr += n_m;
 
     std::memcpy(ptr, tau_data, n_tau * sizeof(double));
@@ -223,23 +223,30 @@ std::expected<PriceTableWorkspace, std::string> allocate_and_initialize_from_buf
 }
 
 std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
-    std::span<const double> m_grid,
+    std::span<const double> log_m_grid,
     std::span<const double> tau_grid,
     std::span<const double> sigma_grid,
     std::span<const double> r_grid,
     std::span<const double> coefficients,
     double K_ref,
-    double dividend_yield)
+    double dividend_yield,
+    double m_min,
+    double m_max)
 {
     // Validate inputs first
-    auto validation = validate_inputs(m_grid, tau_grid, sigma_grid, r_grid, coefficients);
+    auto validation = validate_inputs(log_m_grid, tau_grid, sigma_grid, r_grid, coefficients);
     if (!validation) {
         return std::unexpected(validation.error());
     }
 
     // Allocate and initialize workspace
-    return allocate_and_initialize(m_grid, tau_grid, sigma_grid, r_grid,
-                                   coefficients, K_ref, dividend_yield);
+    auto result = allocate_and_initialize(log_m_grid, tau_grid, sigma_grid, r_grid,
+                                          coefficients, K_ref, dividend_yield);
+    if (result) {
+        result->m_min_ = m_min;
+        result->m_max_ = m_max;
+    }
+    return result;
 }
 
 std::expected<void, std::string> PriceTableWorkspace::save(
@@ -260,20 +267,24 @@ std::expected<void, std::string> PriceTableWorkspace::save(
         arrow::field("K_ref", arrow::float64()),
         arrow::field("dividend_yield", arrow::float64()),
 
+        // Moneyness bounds (original S/K before log transform)
+        arrow::field("m_min", arrow::float64()),
+        arrow::field("m_max", arrow::float64()),
+
         // Grid dimensions
-        arrow::field("n_moneyness", arrow::uint32()),
+        arrow::field("n_log_moneyness", arrow::uint32()),
         arrow::field("n_maturity", arrow::uint32()),
         arrow::field("n_volatility", arrow::uint32()),
         arrow::field("n_rate", arrow::uint32()),
 
         // Grid vectors (1D arrays)
-        arrow::field("moneyness", arrow::list(arrow::float64())),
+        arrow::field("log_moneyness", arrow::list(arrow::float64())),
         arrow::field("maturity", arrow::list(arrow::float64())),
         arrow::field("volatility", arrow::list(arrow::float64())),
         arrow::field("rate", arrow::list(arrow::float64())),
 
         // Knot vectors
-        arrow::field("knots_moneyness", arrow::list(arrow::float64())),
+        arrow::field("knots_log_moneyness", arrow::list(arrow::float64())),
         arrow::field("knots_maturity", arrow::list(arrow::float64())),
         arrow::field("knots_volatility", arrow::list(arrow::float64())),
         arrow::field("knots_rate", arrow::list(arrow::float64())),
@@ -320,10 +331,11 @@ std::expected<void, std::string> PriceTableWorkspace::save(
     arrow::DoubleBuilder k_ref_builder;
     arrow::DoubleBuilder dividend_builder;
 
+    arrow::DoubleBuilder m_min_builder, m_max_builder;
     arrow::UInt32Builder n_m_builder, n_tau_builder, n_sigma_builder, n_r_builder;
 
     // List builders for grid vectors
-    arrow::ListBuilder moneyness_list_builder(arrow::default_memory_pool(),
+    arrow::ListBuilder log_moneyness_list_builder(arrow::default_memory_pool(),
         std::make_shared<arrow::DoubleBuilder>());
     arrow::ListBuilder maturity_list_builder(arrow::default_memory_pool(),
         std::make_shared<arrow::DoubleBuilder>());
@@ -368,6 +380,8 @@ std::expected<void, std::string> PriceTableWorkspace::save(
         !option_type_builder.Append(option_type).ok() ||
         !k_ref_builder.Append(K_ref_).ok() ||
         !dividend_builder.Append(dividend_yield_).ok() ||
+        !m_min_builder.Append(m_min_).ok() ||
+        !m_max_builder.Append(m_max_).ok() ||
         !n_m_builder.Append(static_cast<uint32_t>(n_m)).ok() ||
         !n_tau_builder.Append(static_cast<uint32_t>(n_tau)).ok() ||
         !n_sigma_builder.Append(static_cast<uint32_t>(n_sigma)).ok() ||
@@ -385,7 +399,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
     };
 
     // Append grid vectors
-    if (!append_list(moneyness_list_builder, moneyness_) ||
+    if (!append_list(log_moneyness_list_builder, log_moneyness_) ||
         !append_list(maturity_list_builder, maturity_) ||
         !append_list(volatility_list_builder, volatility_) ||
         !append_list(rate_list_builder, rate_))
@@ -439,9 +453,9 @@ std::expected<void, std::string> PriceTableWorkspace::save(
     // 2. Checksum for all grid vectors (concatenated)
     // Allocate temporary buffer for concatenated grids
     std::vector<double> all_grids;
-    all_grids.reserve(moneyness_.size() + maturity_.size() +
+    all_grids.reserve(log_moneyness_.size() + maturity_.size() +
                      volatility_.size() + rate_.size());
-    all_grids.insert(all_grids.end(), moneyness_.begin(), moneyness_.end());
+    all_grids.insert(all_grids.end(), log_moneyness_.begin(), log_moneyness_.end());
     all_grids.insert(all_grids.end(), maturity_.begin(), maturity_.end());
     all_grids.insert(all_grids.end(), volatility_.begin(), volatility_.end());
     all_grids.insert(all_grids.end(), rate_.begin(), rate_.end());
@@ -456,7 +470,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
 
     // Finish all builders and create arrays
     std::vector<std::shared_ptr<arrow::Array>> arrays;
-    arrays.reserve(33);  // Updated to match 33 fields in schema v1.0
+    arrays.reserve(35);  // Updated to match 35 fields (added m_min, m_max)
 
     auto finish_builder = [&arrays](arrow::ArrayBuilder& builder) -> bool {
         std::shared_ptr<arrow::Array> array;
@@ -472,11 +486,13 @@ std::expected<void, std::string> PriceTableWorkspace::save(
         !finish_builder(option_type_builder) ||
         !finish_builder(k_ref_builder) ||
         !finish_builder(dividend_builder) ||
+        !finish_builder(m_min_builder) ||
+        !finish_builder(m_max_builder) ||
         !finish_builder(n_m_builder) ||
         !finish_builder(n_tau_builder) ||
         !finish_builder(n_sigma_builder) ||
         !finish_builder(n_r_builder) ||
-        !finish_builder(moneyness_list_builder) ||
+        !finish_builder(log_moneyness_list_builder) ||
         !finish_builder(maturity_list_builder) ||
         !finish_builder(volatility_list_builder) ||
         !finish_builder(rate_list_builder) ||
@@ -644,7 +660,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     }
 
     // 8. Extract dimensions
-    auto n_m_scalar = get_scalar("n_moneyness");
+    auto n_m_scalar = get_scalar("n_log_moneyness");
     auto n_tau_scalar = get_scalar("n_maturity");
     auto n_sigma_scalar = get_scalar("n_volatility");
     auto n_r_scalar = get_scalar("n_rate");
@@ -675,23 +691,29 @@ PriceTableWorkspace::load(const std::string& filepath)
     // 10. Extract metadata
     auto k_ref_scalar = get_scalar("K_ref");
     auto div_scalar = get_scalar("dividend_yield");
+    auto m_min_scalar = get_scalar("m_min");
+    auto m_max_scalar = get_scalar("m_max");
 
-    if (!k_ref_scalar || !div_scalar) {
+    if (!k_ref_scalar || !div_scalar || !m_min_scalar || !m_max_scalar) {
         return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     auto k_ref_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(k_ref_scalar);
     auto div_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(div_scalar);
+    auto m_min_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(m_min_scalar);
+    auto m_max_double = std::dynamic_pointer_cast<arrow::DoubleScalar>(m_max_scalar);
 
-    if (!k_ref_double || !div_double) {
+    if (!k_ref_double || !div_double || !m_min_double || !m_max_double) {
         return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
 
     double K_ref = k_ref_double->value;
     double dividend_yield = div_double->value;
+    double m_min = m_min_double->value;
+    double m_max = m_max_double->value;
 
     // 11. Extract grid buffer views (zero-copy)
-    auto m_view = get_arrow_buffer("moneyness");
+    auto m_view = get_arrow_buffer("log_moneyness");
     auto tau_view = get_arrow_buffer("maturity");
     auto sigma_view = get_arrow_buffer("volatility");
     auto r_view = get_arrow_buffer("rate");
@@ -707,7 +729,7 @@ PriceTableWorkspace::load(const std::string& filepath)
     }
 
     // 13. Extract knot vectors
-    auto knots_m = get_list_values("knots_moneyness");
+    auto knots_m = get_list_values("knots_log_moneyness");
     auto knots_tau = get_list_values("knots_maturity");
     auto knots_sigma = get_list_values("knots_volatility");
     auto knots_r = get_list_values("knots_rate");
@@ -820,17 +842,21 @@ PriceTableWorkspace::load(const std::string& filepath)
         return std::unexpected(LoadError::ARROW_READ_ERROR);
     }
 
-    // 20. Verify alignment of loaded data
+    // 20. Set moneyness bounds
+    auto& ws = ws_result.value();
+    ws.m_min_ = m_min;
+    ws.m_max_ = m_max;
+
+    // 21. Verify alignment of loaded data
     // Note: We rely on allocate_and_initialize() to ensure proper alignment
     // The alignment is best-effort and may not always be perfect for all grid sizes
-    auto& ws = ws_result.value();
 
     // Optional alignment check (disabled for now as it's not critical for correctness)
     // auto check_alignment = [](const void* ptr) -> bool {
     //     auto addr = reinterpret_cast<std::uintptr_t>(ptr);
     //     return (addr % 64) == 0;
     // };
-    // if (!check_alignment(ws.moneyness_.data()) ||
+    // if (!check_alignment(ws.log_moneyness_.data()) ||
     //     !check_alignment(ws.coefficients_.data())) {
     //     return std::unexpected(LoadError::INVALID_ALIGNMENT);
     // }

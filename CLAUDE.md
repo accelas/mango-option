@@ -213,10 +213,11 @@ Shares tridiagonal solver with TR-BDF2 to avoid duplication.
 **IMPORTANT: Always start new work on a fresh branch**
 
 **Pre-PR Checklist:**
-Before creating a pull request, verify:
+Before creating a pull request, verify **all CI checks pass locally**:
 - [ ] All tests pass: `bazel test //...`
 - [ ] All examples compile: `bazel build //examples/...`
 - [ ] All benchmarks compile: `bazel build //benchmarks/...`
+- [ ] Python bindings compile: `bazel build //python:mango_iv`
 - [ ] Code builds without warnings
 - [ ] Documentation updated if API changed
 
@@ -231,10 +232,11 @@ git checkout -b feature/descriptive-name
 # 3. Make changes and commit
 # ... edit files ...
 
-# 4. Verify builds before committing
+# 4. Verify builds before committing (must match CI)
 bazel test //...
 bazel build //examples/...
 bazel build //benchmarks/...
+bazel build //python:mango_iv
 
 git add <files>
 git commit -m "Imperative mood message"
@@ -319,6 +321,7 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
 | Run example | `bazel run //examples:example_newton_solver` |
+| Build Python bindings | `bazel build //python:mango_iv` |
 | Trace execution | `sudo ./scripts/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |
 
