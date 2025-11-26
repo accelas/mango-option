@@ -22,7 +22,7 @@ TEST(BlackScholesPDERateFnTest, ConstantRateFnViaLambda) {
     double expected = half_sigma_sq * V_xx + drift * V_x - r * V;
     // = 0.02 * 1 + 0.01 * 1 - 0.05 * 1 = -0.02
 
-    EXPECT_NEAR(pde(V_xx, V_x, V, t), expected, 1e-10);
+    EXPECT_NEAR(pde(t, V_xx, V_x, V), expected, 1e-10);
 }
 
 TEST(BlackScholesPDERateFnTest, TimeVaryingRate) {
@@ -39,13 +39,13 @@ TEST(BlackScholesPDERateFnTest, TimeVaryingRate) {
     double r1 = 0.05;
     double drift1 = r1 - d - 0.5 * sigma * sigma;
     double expected1 = 0.02 * V_xx + drift1 * V_x - r1 * V;
-    EXPECT_NEAR(pde(V_xx, V_x, V, 0.5), expected1, 1e-10);
+    EXPECT_NEAR(pde(0.5, V_xx, V_x, V), expected1, 1e-10);
 
     // At t=1.5: r=0.06
     double r2 = 0.06;
     double drift2 = r2 - d - 0.5 * sigma * sigma;
     double expected2 = 0.02 * V_xx + drift2 * V_x - r2 * V;
-    EXPECT_NEAR(pde(V_xx, V_x, V, 1.5), expected2, 1e-10);
+    EXPECT_NEAR(pde(1.5, V_xx, V_x, V), expected2, 1e-10);
 }
 
 TEST(BlackScholesPDERateFnTest, WithYieldCurve) {
@@ -67,5 +67,5 @@ TEST(BlackScholesPDERateFnTest, WithYieldCurve) {
 
     // At t=0.5: r=0.05 (first segment)
     double expected = 0.02 * V_xx + (0.05 - d - 0.02) * V_x - 0.05 * V;
-    EXPECT_NEAR(pde(V_xx, V_x, V, 0.5), expected, 1e-10);
+    EXPECT_NEAR(pde(0.5, V_xx, V_x, V), expected, 1e-10);
 }

@@ -60,13 +60,13 @@ public:
      *
      * L(V) = (σ²/2)·∂²V/∂x² + (r(t)-d-σ²/2)·∂V/∂x - r(t)·V
      *
+     * @param t Current time
      * @param d2v_dx2 Second derivative ∂²V/∂x²
      * @param dv_dx First derivative ∂V/∂x
      * @param v Value V
-     * @param t Current time
      * @return L(V)
      */
-    T operator()(T d2v_dx2, T dv_dx, T v, double t) const {
+    T operator()(double t, T d2v_dx2, T dv_dx, T v) const {
         T r = get_rate(t);
         T drift = r - dividend_ - half_sigma_sq_;
         return half_sigma_sq_ * d2v_dx2 + drift * dv_dx - r * v;
@@ -76,7 +76,7 @@ public:
      * Apply operator without time (backward compatible, for constant rate)
      */
     T operator()(T d2v_dx2, T dv_dx, T v) const {
-        return (*this)(d2v_dx2, dv_dx, v, 0.0);
+        return (*this)(0.0, d2v_dx2, dv_dx, v);
     }
 
     /**
