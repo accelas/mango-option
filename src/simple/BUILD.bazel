@@ -31,3 +31,19 @@ cc_library(
         "//src/option:option_spec",
     ],
 )
+
+cc_library(
+    name = "converter",
+    hdrs = [
+        "converter.hpp",
+        "sources/yfinance.hpp",
+        "sources/databento.hpp",
+        "sources/ibkr.hpp",
+    ],
+    deps = [
+        ":price",
+        ":timestamp",
+        ":option_types",
+        "//src/option:option_spec",
+    ],
+)
