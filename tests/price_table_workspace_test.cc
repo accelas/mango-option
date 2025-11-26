@@ -3,61 +3,65 @@
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <cstring>
 
 TEST(PriceTableWorkspace, ConstructsFromGridData) {
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Note: Workspace now stores log-moneyness, not moneyness
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};  // ln(0.8), ln(0.9), ln(1.0), ln(1.1)
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
 
     ASSERT_TRUE(ws_result.has_value());
     auto& ws = ws_result.value();
 
-    EXPECT_EQ(ws.moneyness().size(), 4);
+    EXPECT_EQ(ws.log_moneyness().size(), 4);
     EXPECT_EQ(ws.maturity().size(), 4);
     EXPECT_EQ(ws.coefficients().size(), 256);
     EXPECT_DOUBLE_EQ(ws.K_ref(), 100.0);
+    EXPECT_DOUBLE_EQ(ws.m_min(), 0.8);
+    EXPECT_DOUBLE_EQ(ws.m_max(), 1.1);
 }
 
 TEST(PriceTableWorkspace, RejectsInsufficientGridPoints) {
-    std::vector<double> m_grid = {0.9, 1.0, 1.1};  // Only 3 points
+    std::vector<double> log_m_grid = {-0.11, 0.0, 0.10};  // Only 3 points
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(3 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.9, 1.1);
 
     EXPECT_FALSE(ws_result.has_value());
-    EXPECT_EQ(ws_result.error(), "Moneyness grid must have >= 4 points");
+    EXPECT_EQ(ws_result.error(), "Log-moneyness grid must have >= 4 points");
 }
 
 TEST(PriceTableWorkspace, ValidatesArenaAlignment) {
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
 
     ASSERT_TRUE(ws_result.has_value());
     auto& ws = ws_result.value();
 
     // Check 64-byte alignment for SIMD
-    auto addr = reinterpret_cast<std::uintptr_t>(ws.moneyness().data());
-    EXPECT_EQ(addr % 64, 0) << "Moneyness grid not 64-byte aligned";
+    auto addr = reinterpret_cast<std::uintptr_t>(ws.log_moneyness().data());
+    EXPECT_EQ(addr % 64, 0) << "Log-moneyness grid not 64-byte aligned";
 }
 
 TEST(PriceTableWorkspace, SavesAndLoadsFromArrowFile) {
-    // Create workspace with known data
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create workspace with known data (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
@@ -69,7 +73,7 @@ TEST(PriceTableWorkspace, SavesAndLoadsFromArrowFile) {
     }
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
 
     ASSERT_TRUE(ws_result.has_value());
     auto& ws = ws_result.value();
@@ -95,16 +99,16 @@ TEST(PriceTableWorkspace, SavesAndLoadsFromArrowFile) {
 }
 
 TEST(PriceTableWorkspace, SavedFileContainsCorrectDimensions) {
-    // Create workspace with known dimensions
-    std::vector<double> m_grid = {0.7, 0.8, 0.9, 1.0, 1.1};     // 5 points
-    std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};       // 4 points
-    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};  // 4 points
-    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};      // 4 points
+    // Create workspace with known dimensions (log-moneyness)
+    std::vector<double> log_m_grid = {-0.36, -0.22, -0.11, 0.0, 0.10};  // 5 points
+    std::vector<double> tau_grid = {0.1, 0.25, 0.5, 1.0};               // 4 points
+    std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};          // 4 points
+    std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};              // 4 points
 
     std::vector<double> coeffs(5 * 4 * 4 * 4, 42.0);  // Fill with known value
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.03);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.03, 0.7, 1.1);
 
     ASSERT_TRUE(ws_result.has_value());
     auto& ws = ws_result.value();
@@ -126,15 +130,15 @@ TEST(PriceTableWorkspace, SavedFileContainsCorrectDimensions) {
 }
 
 TEST(PriceTableWorkspace, SavedFileContainsAllSchemaFields) {
-    // Verify saved file contains all 33 fields from schema v1.0
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Verify saved file contains all 35 fields from schema v1.1 (added m_min, m_max)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_schema_fields.arrow";
@@ -181,8 +185,8 @@ TEST(PriceTableWorkspace, LoadFromNonArrowFileReturnsNotArrowFile) {
 }
 
 TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
-    // Create and save workspace
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create and save workspace (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
@@ -193,7 +197,7 @@ TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
     }
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
 
     ASSERT_TRUE(ws_result.has_value());
     auto& ws = ws_result.value();
@@ -209,7 +213,7 @@ TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
     auto& loaded_ws = load_result.value();
 
     // Verify dimensions match
-    EXPECT_EQ(loaded_ws.moneyness().size(), 4);
+    EXPECT_EQ(loaded_ws.log_moneyness().size(), 4);
     EXPECT_EQ(loaded_ws.maturity().size(), 4);
     EXPECT_EQ(loaded_ws.volatility().size(), 4);
     EXPECT_EQ(loaded_ws.rate().size(), 4);
@@ -218,10 +222,12 @@ TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
     // Verify metadata
     EXPECT_DOUBLE_EQ(loaded_ws.K_ref(), 100.0);
     EXPECT_DOUBLE_EQ(loaded_ws.dividend_yield(), 0.02);
+    EXPECT_DOUBLE_EQ(loaded_ws.m_min(), 0.8);
+    EXPECT_DOUBLE_EQ(loaded_ws.m_max(), 1.1);
 
     // Verify grid values
-    for (size_t i = 0; i < m_grid.size(); ++i) {
-        EXPECT_DOUBLE_EQ(loaded_ws.moneyness()[i], m_grid[i]);
+    for (size_t i = 0; i < log_m_grid.size(); ++i) {
+        EXPECT_DOUBLE_EQ(loaded_ws.log_moneyness()[i], log_m_grid[i]);
     }
     for (size_t i = 0; i < tau_grid.size(); ++i) {
         EXPECT_DOUBLE_EQ(loaded_ws.maturity()[i], tau_grid[i]);
@@ -233,7 +239,7 @@ TEST(PriceTableWorkspace, LoadSuccessfulRoundtrip) {
     }
 
     // Verify 64-byte alignment
-    auto addr = reinterpret_cast<std::uintptr_t>(loaded_ws.moneyness().data());
+    auto addr = reinterpret_cast<std::uintptr_t>(loaded_ws.log_moneyness().data());
     EXPECT_EQ(addr % 64, 0) << "Loaded data not 64-byte aligned";
 
     // Cleanup
@@ -245,15 +251,15 @@ TEST(PriceTableWorkspace, LoadValidatesDimensions) {
     // For now, we'll test this indirectly by ensuring load() validates
     // We'll create a proper test after implementing load()
 
-    // Create workspace with known dimensions
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create workspace with known dimensions (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_dimensions_validation.arrow";
@@ -276,15 +282,15 @@ TEST(PriceTableWorkspace, LoadValidatesDimensions) {
 }
 
 TEST(PriceTableWorkspace, LoadVerifiesGridMonotonicity) {
-    // Create workspace with sorted grids
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create workspace with sorted grids (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_monotonicity.arrow";
@@ -300,15 +306,15 @@ TEST(PriceTableWorkspace, LoadVerifiesGridMonotonicity) {
 }
 
 TEST(PriceTableWorkspace, LoadVerifiesKnotVectorSizes) {
-    // Create workspace
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};  // 5 points
-    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};     // 4 points
+    // Create workspace (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10, 0.18};  // 5 points
+    std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};               // 4 points
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(5 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.2);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_knots.arrow";
@@ -320,7 +326,7 @@ TEST(PriceTableWorkspace, LoadVerifiesKnotVectorSizes) {
     ASSERT_TRUE(load_result.has_value());
 
     // Knot vectors should be n + 4 for clamped cubic B-splines
-    EXPECT_EQ(load_result.value().knots_moneyness().size(), 5 + 4);
+    EXPECT_EQ(load_result.value().knots_log_moneyness().size(), 5 + 4);
     EXPECT_EQ(load_result.value().knots_maturity().size(), 4 + 4);
     EXPECT_EQ(load_result.value().knots_volatility().size(), 4 + 4);
     EXPECT_EQ(load_result.value().knots_rate().size(), 4 + 4);
@@ -330,15 +336,15 @@ TEST(PriceTableWorkspace, LoadVerifiesKnotVectorSizes) {
 }
 
 TEST(PriceTableWorkspace, LoadPreservesBufferAlignment) {
-    // Create workspace
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create workspace (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_alignment.arrow";
@@ -352,9 +358,9 @@ TEST(PriceTableWorkspace, LoadPreservesBufferAlignment) {
     ASSERT_TRUE(load_result.has_value());
     auto& loaded_ws = load_result.value();
 
-    // Check that at least the moneyness grid (first buffer) is aligned
-    auto addr = reinterpret_cast<std::uintptr_t>(loaded_ws.moneyness().data());
-    EXPECT_EQ(addr % 64, 0) << "Moneyness grid not 64-byte aligned";
+    // Check that at least the log-moneyness grid (first buffer) is aligned
+    auto addr = reinterpret_cast<std::uintptr_t>(loaded_ws.log_moneyness().data());
+    EXPECT_EQ(addr % 64, 0) << "Log-moneyness grid not 64-byte aligned";
 
     // Cleanup
     std::filesystem::remove(filepath);
@@ -365,8 +371,8 @@ TEST(PriceTableWorkspace, LoadPreservesBufferAlignment) {
 // ============================================================================
 
 TEST(PriceTableWorkspace, LoadDetectsCorruptedCoefficients) {
-    // Create and save valid workspace
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create and save valid workspace (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
@@ -376,7 +382,7 @@ TEST(PriceTableWorkspace, LoadDetectsCorruptedCoefficients) {
     }
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_corrupt_coeffs.arrow";
@@ -421,20 +427,24 @@ TEST(PriceTableWorkspace, LoadDetectsCorruptedCoefficients) {
 }
 
 TEST(PriceTableWorkspace, LoadDetectsCorruptedGrids) {
-    // Create and save valid workspace
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Create and save valid workspace (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_corrupt_grids.arrow";
     auto save_result = ws_result.value().save(filepath, "TEST", 0);
     ASSERT_TRUE(save_result.has_value());
+
+    // Load once to verify the file is valid
+    auto valid_load = mango::PriceTableWorkspace::load(filepath);
+    ASSERT_TRUE(valid_load.has_value()) << "File should be valid before corruption";
 
     // Read entire file into memory
     std::vector<char> file_data;
@@ -447,11 +457,22 @@ TEST(PriceTableWorkspace, LoadDetectsCorruptedGrids) {
         file.read(file_data.data(), size);
     }
 
-    // Corrupt one byte in the first quarter (likely grid data)
-    size_t corrupt_offset = file_data.size() / 4;
-    if (corrupt_offset < file_data.size()) {
-        file_data[corrupt_offset] ^= 0xFF;
+    // Find and corrupt actual grid data by searching for a known grid value
+    // Grid values are stored as IEEE 754 doubles. We'll look for 0.1 (tau_grid[0])
+    // and corrupt it. This ensures we hit actual data, not Arrow metadata.
+    double target_value = 0.1;  // tau_grid[0]
+    bool found_and_corrupted = false;
+    for (size_t i = 0; i + sizeof(double) <= file_data.size(); ++i) {
+        double value;
+        std::memcpy(&value, &file_data[i], sizeof(double));
+        if (value == target_value) {
+            // Corrupt this double by flipping bits
+            file_data[i] ^= 0xFF;
+            found_and_corrupted = true;
+            break;
+        }
     }
+    ASSERT_TRUE(found_and_corrupted) << "Could not find grid value to corrupt";
 
     // Write corrupted data back
     {
@@ -463,11 +484,10 @@ TEST(PriceTableWorkspace, LoadDetectsCorruptedGrids) {
     auto load_result = mango::PriceTableWorkspace::load(filepath);
     EXPECT_FALSE(load_result.has_value());
     if (!load_result.has_value()) {
-        // Could be various errors depending on where corruption occurred
+        // Should be CORRUPTED_GRIDS since we corrupted grid data
         auto err = load_result.error();
-        EXPECT_TRUE(err == mango::PriceTableWorkspace::LoadError::CORRUPTED_COEFFICIENTS ||
-                   err == mango::PriceTableWorkspace::LoadError::CORRUPTED_GRIDS ||
-                   err == mango::PriceTableWorkspace::LoadError::ARROW_READ_ERROR);
+        EXPECT_TRUE(err == mango::PriceTableWorkspace::LoadError::CORRUPTED_GRIDS ||
+                   err == mango::PriceTableWorkspace::LoadError::CORRUPTED_KNOTS);
     }
 
     // Cleanup
@@ -475,15 +495,15 @@ TEST(PriceTableWorkspace, LoadDetectsCorruptedGrids) {
 }
 
 TEST(PriceTableWorkspace, SavedFileHasNonZeroChecksums) {
-    // Verify that saved files contain real (non-zero) checksums
-    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1};
+    // Verify that saved files contain real (non-zero) checksums (log-moneyness)
+    std::vector<double> log_m_grid = {-0.22, -0.11, 0.0, 0.10};
     std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
     std::vector<double> sigma_grid = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> r_grid = {0.02, 0.03, 0.04, 0.05};
     std::vector<double> coeffs(4 * 4 * 4 * 4, 1.0);
 
     auto ws_result = mango::PriceTableWorkspace::create(
-        m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02);
+        log_m_grid, tau_grid, sigma_grid, r_grid, coeffs, 100.0, 0.02, 0.8, 1.1);
     ASSERT_TRUE(ws_result.has_value());
 
     const std::string filepath = "/tmp/test_nonzero_checksums.arrow";

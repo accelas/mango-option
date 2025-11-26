@@ -19,43 +19,55 @@ namespace mango {
 /// 64-byte aligned for AVX-512 SIMD operations.
 ///
 /// Memory layout (all contiguous):
-///   [moneyness grid][maturity grid][volatility grid][rate grid]
+///   [log_moneyness grid][maturity grid][volatility grid][rate grid]
 ///   [knots_m][knots_tau][knots_sigma][knots_r]
 ///   [coefficients]
-///   [metadata: K_ref, dividend_yield]
+///   [metadata: K_ref, dividend_yield, m_min, m_max]
+///
+/// Note: Axis 0 stores log-moneyness (ln(S/K)) for better B-spline interpolation.
+/// The original moneyness bounds are stored in m_min, m_max for user-facing APIs.
 ///
 /// Example:
-///   auto ws = PriceTableWorkspace::create(m, tau, sigma, r, coeffs, K_ref, q);
+///   auto ws = PriceTableWorkspace::create(log_m, tau, sigma, r, coeffs, K_ref, q, m_min, m_max);
 ///   BSpline4D spline(ws.value());
 class PriceTableWorkspace {
 public:
     /// Factory method with validation
     ///
-    /// @param m_grid Moneyness grid (sorted ascending, >= 4 points)
+    /// @param log_m_grid Log-moneyness grid (ln(S/K), sorted ascending, >= 4 points)
     /// @param tau_grid Maturity grid (years, sorted ascending, >= 4 points)
     /// @param sigma_grid Volatility grid (sorted ascending, >= 4 points)
     /// @param r_grid Rate grid (sorted ascending, >= 4 points)
     /// @param coefficients B-spline coefficients (size = n_m * n_tau * n_sigma * n_r)
     /// @param K_ref Reference strike price
     /// @param dividend_yield Continuous dividend yield
+    /// @param m_min Minimum moneyness (S/K) for user-facing bounds
+    /// @param m_max Maximum moneyness (S/K) for user-facing bounds
     /// @return Expected workspace or error message
     static std::expected<PriceTableWorkspace, std::string> create(
-        std::span<const double> m_grid,
+        std::span<const double> log_m_grid,
         std::span<const double> tau_grid,
         std::span<const double> sigma_grid,
         std::span<const double> r_grid,
         std::span<const double> coefficients,
         double K_ref,
-        double dividend_yield);
+        double dividend_yield,
+        double m_min,
+        double m_max);
 
     /// Grid accessors (zero-copy spans into arena)
-    std::span<const double> moneyness() const { return moneyness_; }
+    /// Note: log_moneyness() returns ln(S/K), use m_min()/m_max() for original bounds
+    std::span<const double> log_moneyness() const { return log_moneyness_; }
     std::span<const double> maturity() const { return maturity_; }
     std::span<const double> volatility() const { return volatility_; }
     std::span<const double> rate() const { return rate_; }
 
+    /// Original moneyness bounds (for user-facing APIs)
+    double m_min() const { return m_min_; }
+    double m_max() const { return m_max_; }
+
     /// Knot vector accessors (precomputed clamped cubic knots)
-    std::span<const double> knots_moneyness() const { return knots_m_; }
+    std::span<const double> knots_log_moneyness() const { return knots_m_; }
     std::span<const double> knots_maturity() const { return knots_tau_; }
     std::span<const double> knots_volatility() const { return knots_sigma_; }
     std::span<const double> knots_rate() const { return knots_r_; }
@@ -82,7 +94,7 @@ public:
 
     /// Grid dimensions
     std::tuple<size_t, size_t, size_t, size_t> dimensions() const {
-        return {moneyness_.size(), maturity_.size(),
+        return {log_moneyness_.size(), maturity_.size(),
                 volatility_.size(), rate_.size()};
     }
 
@@ -161,7 +173,7 @@ private:
     std::vector<double> arena_;
 
     // Views into arena (no ownership)
-    std::span<const double> moneyness_;
+    std::span<const double> log_moneyness_;
     std::span<const double> maturity_;
     std::span<const double> volatility_;
     std::span<const double> rate_;
@@ -176,6 +188,8 @@ private:
     // Scalar metadata
     double K_ref_ = 0.0;
     double dividend_yield_ = 0.0;
+    double m_min_ = 0.0;  // Original moneyness bounds
+    double m_max_ = 0.0;
 };
 
 }  // namespace mango
