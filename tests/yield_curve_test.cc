@@ -67,3 +67,81 @@ TEST(YieldCurveTest, FromDiscountsFailsOnSizeMismatch) {
     auto result = mango::YieldCurve::from_discounts(tenors, discounts);
     ASSERT_FALSE(result.has_value());
 }
+
+TEST(YieldCurveTest, RateInterpolation) {
+    // Upward sloping curve: 5% for first year, 6% for second year
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.0},
+        {1.0, -0.05},   // 5% for [0,1]
+        {2.0, -0.11}    // 6% for [1,2] (total: -0.05 - 0.06 = -0.11)
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_TRUE(result.has_value());
+    auto& curve = result.value();
+
+    // Rate in first segment [0,1]: 5%
+    EXPECT_NEAR(curve.rate(0.0), 0.05, 1e-10);
+    EXPECT_NEAR(curve.rate(0.5), 0.05, 1e-10);
+    EXPECT_NEAR(curve.rate(0.99), 0.05, 1e-10);
+
+    // Rate in second segment [1,2]: 6%
+    EXPECT_NEAR(curve.rate(1.0), 0.06, 1e-10);
+    EXPECT_NEAR(curve.rate(1.5), 0.06, 1e-10);
+    EXPECT_NEAR(curve.rate(2.0), 0.06, 1e-10);
+}
+
+TEST(YieldCurveTest, RateExtrapolation) {
+    auto curve = mango::YieldCurve::flat(0.05);
+
+    // Extrapolation beyond curve should continue flat
+    EXPECT_NEAR(curve.rate(50.0), 0.05, 1e-10);
+    EXPECT_NEAR(curve.rate(100.0), 0.05, 1e-10);
+}
+
+TEST(YieldCurveTest, DiscountInterpolation) {
+    // Curve with known discount factors
+    std::vector<double> tenors = {0.0, 1.0, 2.0};
+    std::vector<double> discounts = {1.0, 0.95, 0.90};
+
+    auto result = mango::YieldCurve::from_discounts(tenors, discounts);
+    ASSERT_TRUE(result.has_value());
+    auto& curve = result.value();
+
+    // Midpoint: log-linear interpolation
+    // ln(D(0.5)) = 0.5 * ln(0.95) = -0.0256
+    // D(0.5) = exp(-0.0256) ~ 0.9747
+    double expected_d05 = std::exp(0.5 * std::log(0.95));
+    EXPECT_NEAR(curve.discount(0.5), expected_d05, 1e-6);
+}
+
+// Edge case tests from code review feedback
+
+TEST(YieldCurveTest, FromDiscountsFailsOnNegativeDiscount) {
+    std::vector<double> tenors = {0.0, 1.0, 2.0};
+    std::vector<double> discounts = {1.0, -0.95, 0.90};  // Negative discount
+
+    auto result = mango::YieldCurve::from_discounts(tenors, discounts);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(result.error().find("positive") != std::string::npos);
+}
+
+TEST(YieldCurveTest, FromDiscountsFailsOnZeroDiscount) {
+    std::vector<double> tenors = {0.0, 1.0, 2.0};
+    std::vector<double> discounts = {1.0, 0.0, 0.90};  // Zero discount
+
+    auto result = mango::YieldCurve::from_discounts(tenors, discounts);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(result.error().find("positive") != std::string::npos);
+}
+
+TEST(YieldCurveTest, FromPointsFailsOnNonZeroLogDiscountAtZero) {
+    std::vector<mango::TenorPoint> points = {
+        {0.0, 0.05},   // Non-zero log_discount at t=0
+        {1.0, -0.05}
+    };
+
+    auto result = mango::YieldCurve::from_points(points);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(result.error().find("log_discount at t=0") != std::string::npos);
+}
