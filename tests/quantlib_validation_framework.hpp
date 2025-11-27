@@ -1,6 +1,6 @@
 /**
  * @file quantlib_validation_framework.hpp
- * @brief Unified testing framework for validating mango-iv against QuantLib
+ * @brief Unified testing framework for validating mango-option against QuantLib
  *
  * Provides generic testing utilities for:
  * - American option pricing accuracy
@@ -8,7 +8,7 @@
  * - Greeks accuracy
  * - Batch processing validation
  *
- * Supports multiple mango-iv solvers:
+ * Supports multiple mango-option solvers:
  * - FDM-based pricing (auto-estimation)
  * - FDM-based IV (ground truth)
  * - Interpolated IV (B-spline, fast)
@@ -114,7 +114,7 @@ struct OptionTestScenario {
 };
 
 // ============================================================================
-// Mango-IV Pricing Validation
+// Mango-Option Pricing Validation
 // ============================================================================
 
 struct PricingValidationResult {
@@ -133,7 +133,7 @@ inline PricingValidationResult validate_pricing(
 
     PricingValidationResult validation;
 
-    // Mango-IV pricing with auto-estimation
+    // Mango-Option pricing with auto-estimation
     AmericanOptionParams mango_params(
         scenario.spot, scenario.strike, scenario.maturity,
         scenario.rate, scenario.dividend_yield,
@@ -185,7 +185,7 @@ inline PricingValidationResult validate_pricing(
 }
 
 // ============================================================================
-// Mango-IV Implied Volatility Validation (FDM)
+// Mango-Option Implied Volatility Validation (FDM)
 // ============================================================================
 
 struct IVValidationResult {

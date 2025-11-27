@@ -1,6 +1,6 @@
 /**
  * @file quantlib_accuracy_batch_test.cc
- * @brief Batch validation of mango-iv pricing and IV solvers against QuantLib
+ * @brief Batch validation of mango-option pricing and IV solvers against QuantLib
  *
  * Tests:
  * - FDM pricing accuracy (auto-estimation mode)

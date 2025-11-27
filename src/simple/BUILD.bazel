@@ -1,5 +1,13 @@
 package(default_visibility = ["//visibility:public"])
 
+# Export headers for packaging
+exports_files(glob(["*.hpp"]))
+
+filegroup(
+    name = "public_headers",
+    srcs = glob(["*.hpp"]) + glob(["sources/*.hpp"]),
+)
+
 cc_library(
     name = "price",
     hdrs = ["price.hpp"],

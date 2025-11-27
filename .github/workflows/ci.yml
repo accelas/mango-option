@@ -72,7 +72,7 @@ jobs:
         run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Build Python bindings
-        run: bazel build //python:mango_iv
+        run: bazel build //python:mango_option
 
       - name: Build benchmarks
         run: |

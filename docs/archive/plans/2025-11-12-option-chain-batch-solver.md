@@ -1086,7 +1086,7 @@ m.def("solve_option_chains",
 
 Run:
 ```bash
-bazel build //python:mango_iv
+bazel build //python:mango_option
 ```
 
 Expected: Build succeeds
@@ -1096,19 +1096,19 @@ Expected: Build succeeds
 Run:
 ```bash
 python3 -c "
-import mango_iv
+import mango_option
 
-chain = mango_iv.AmericanOptionChain()
+chain = mango_option.AmericanOptionChain()
 chain.spot = 100.0
 chain.maturity = 1.0
 chain.volatility = 0.20
 chain.rate = 0.05
 chain.continuous_dividend_yield = 0.02
-chain.option_type = mango_iv.OptionType.PUT
+chain.option_type = mango_option.OptionType.PUT
 chain.strikes = [90.0, 95.0, 100.0, 105.0, 110.0]
 
-grid = mango_iv.AmericanOptionGrid()
-results = mango_iv.solve_option_chain(chain, grid)
+grid = mango_option.AmericanOptionGrid()
+results = mango_option.solve_option_chain(chain, grid)
 
 print(f'Solved {len(results)} strikes')
 for r in results:

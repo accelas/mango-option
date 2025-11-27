@@ -1,4 +1,4 @@
-# mdspan Adoption Strategy for mango-iv
+# mdspan Adoption Strategy for mango-option
 
 **Date:** 2025-11-22
 **Status:** ✅ Implemented (2025-11-22)

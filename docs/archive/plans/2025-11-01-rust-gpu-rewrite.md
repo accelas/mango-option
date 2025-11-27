@@ -2,7 +2,7 @@
 
 **Date**: 2025-11-01
 **Status**: Design
-**Goal**: Rewrite mango-iv in Rust with unified CPU/GPU kernels for trading applications
+**Goal**: Rewrite mango-option in Rust with unified CPU/GPU kernels for trading applications
 
 ## Problem
 
@@ -30,7 +30,7 @@ Computational kernels compile to both native code (CPU) and SPIR-V (GPU) from si
 ### Project Structure
 
 ```
-mango-iv-rs/
+mango-option-rs/
 ├── crates/
 │   ├── types/            # Shared types (OptionParams, Grid, etc.)
 │   ├── kernel/           # GPU-compatible kernels (#[no_std])

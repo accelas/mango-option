@@ -1,4 +1,4 @@
-# Dockerfile for mango-iv CI environment
+# Dockerfile for mango-option CI environment
 # This image pre-installs all dependencies to speed up CI runs
 # Uses trixie-slim base for smaller size (~40% reduction)
 FROM debian:trixie-slim

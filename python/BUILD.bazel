@@ -1,7 +1,7 @@
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 
 pybind_extension(
-    name = "mango_iv",
+    name = "mango_option",
     srcs = ["mango_bindings.cpp"],
     deps = [
         "//src/option:iv_solver_fdm",
