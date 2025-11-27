@@ -4,7 +4,7 @@ Main script to download option data and calculate IV surface.
 
 This script:
 1. Downloads option chain data from Yahoo Finance
-2. Calculates implied volatility using mango-iv C++ solver
+2. Calculates implied volatility using mango-option C++ solver
 3. Stores results and raw data in SQLite3 database
 
 Usage:

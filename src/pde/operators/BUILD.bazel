@@ -1,3 +1,12 @@
+# Export headers for packaging
+exports_files(glob(["*.hpp"]))
+
+filegroup(
+    name = "public_headers",
+    srcs = glob(["*.hpp"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "laplacian_pde",
     hdrs = ["laplacian_pde.hpp"],

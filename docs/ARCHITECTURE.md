@@ -1,6 +1,6 @@
 # Software Architecture
 
-Software design patterns, implementation strategies, and performance characteristics of the mango-iv library.
+Software design patterns, implementation strategies, and performance characteristics of the mango-option library.
 
 **For mathematical formulations, see [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)**
 **For usage examples, see [API_GUIDE.md](API_GUIDE.md)**

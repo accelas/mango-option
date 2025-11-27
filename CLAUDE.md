@@ -4,7 +4,7 @@ Guide for Claude Code when working with this repository.
 
 ## Project Overview
 
-**mango-iv** is a C++23 library for pricing American options using finite difference methods. The core solver uses TR-BDF2 time-stepping with Newton iteration. The library provides high-level APIs for option pricing, implied volatility calculation (FDM and interpolation-based), and price table pre-computation.
+**mango-option** is a C++23 library for pricing American options using finite difference methods. The core solver uses TR-BDF2 time-stepping with Newton iteration. The library provides high-level APIs for option pricing, implied volatility calculation (FDM and interpolation-based), and price table pre-computation.
 
 **Key capabilities:**
 - American option pricing via PDE solver (~5-20ms per option)
@@ -47,7 +47,7 @@ bazel clean
 ## Project Structure
 
 ```
-mango-iv/
+mango-option/
 ├── src/
 │   ├── pde/
 │   │   ├── core/          # Grid, boundary conditions, PDE solver, time domain
@@ -217,7 +217,7 @@ Before creating a pull request, verify **all CI checks pass locally**:
 - [ ] All tests pass: `bazel test //...`
 - [ ] All examples compile: `bazel build //examples/...`
 - [ ] All benchmarks compile: `bazel build //benchmarks/...`
-- [ ] Python bindings compile: `bazel build //python:mango_iv`
+- [ ] Python bindings compile: `bazel build //python:mango_option`
 - [ ] Code builds without warnings
 - [ ] Documentation updated if API changed
 
@@ -236,7 +236,7 @@ git checkout -b feature/descriptive-name
 bazel test //...
 bazel build //examples/...
 bazel build //benchmarks/...
-bazel build //python:mango_iv
+bazel build //python:mango_option
 
 git add <files>
 git commit -m "Imperative mood message"
@@ -321,7 +321,7 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
 | Run example | `bazel run //examples:example_newton_solver` |
-| Build Python bindings | `bazel build //python:mango_iv` |
+| Build Python bindings | `bazel build //python:mango_option` |
 | Trace execution | `sudo ./scripts/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |
 

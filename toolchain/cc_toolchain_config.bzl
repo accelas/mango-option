@@ -1,4 +1,4 @@
-"""C++ toolchain configuration for mango-iv with C++23 support."""
+"""C++ toolchain configuration for mango-option with C++23 support."""
 
 load("@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
      "feature",
@@ -242,7 +242,7 @@ def _impl(ctx):
 
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
-        toolchain_identifier = "mango-iv-toolchain",
+        toolchain_identifier = "mango-option-toolchain",
         host_system_name = "local",
         target_system_name = "local",
         target_cpu = "k8",

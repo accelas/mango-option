@@ -1,9 +1,9 @@
 /**
  * @file quantlib_performance.cc
- * @brief Performance comparison between mango-iv and QuantLib
+ * @brief Performance comparison between mango-option and QuantLib
  *
  * Compares performance of American option pricing between:
- * - mango-iv (C++20 FDM implementation)
+ * - mango-option (C++20 FDM implementation)
  * - QuantLib (FDM implementation)
  *
  * Both use similar grid sizes for fair comparison.
@@ -113,7 +113,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
         benchmark::DoNotOptimize(price);
     }
 
-    state.SetLabel("mango-iv");
+    state.SetLabel("mango-option");
 }
 BENCHMARK(BM_Mango_AmericanPut_ATM);
 
@@ -173,7 +173,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
         benchmark::DoNotOptimize(price);
     }
 
-    state.SetLabel("mango-iv");
+    state.SetLabel("mango-option");
 }
 BENCHMARK(BM_Mango_AmericanPut_OTM);
 
@@ -233,7 +233,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
         benchmark::DoNotOptimize(price);
     }
 
-    state.SetLabel("mango-iv");
+    state.SetLabel("mango-option");
 }
 BENCHMARK(BM_Mango_AmericanPut_ITM);
 

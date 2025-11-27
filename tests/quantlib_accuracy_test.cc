@@ -3,7 +3,7 @@
  * @brief Accuracy validation against QuantLib reference implementation
  *
  * This test ensures numerical accuracy doesn't regress by comparing
- * mango-iv American option prices against QuantLib.
+ * mango-option American option prices against QuantLib.
  *
  * Key scenarios tested:
  * - ATM/ITM/OTM options
@@ -100,7 +100,7 @@ void test_scenario(
 {
     SCOPED_TRACE(name);
 
-    // Mango-IV pricing with auto-estimation (production mode)
+    // Mango-Option pricing with auto-estimation (production mode)
     AmericanOptionParams mango_params(
         spot, strike, maturity, rate, dividend_yield,
         is_call ? OptionType::CALL : OptionType::PUT, volatility);

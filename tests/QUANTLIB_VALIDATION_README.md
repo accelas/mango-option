@@ -1,6 +1,6 @@
 # QuantLib Validation Framework
 
-Unified testing framework for validating mango-iv pricing and implied volatility solvers against QuantLib reference implementation.
+Unified testing framework for validating mango-option pricing and implied volatility solvers against QuantLib reference implementation.
 
 ## Overview
 
@@ -112,7 +112,7 @@ The `DISABLED_StandardScenarios_IV_Interpolated` test validates the B-spline-bas
 
 - **QuantLib** - Reference implementation (`libquantlib0-dev`)
 - **GoogleTest** - Testing framework
-- **mango-iv** - Option pricing library
+- **mango-option** - Option pricing library
   - `american_option` - FDM pricing solver
   - `iv_solver_fdm` - FDM-based IV solver
   - `iv_solver_interpolated` - B-spline IV solver

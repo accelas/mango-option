@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
     from iv_surface import OptionDataDownloader
-    import mango_iv
+    import mango_option
 except ImportError as e:
     print(f"Error: Required modules not found: {e}")
     print("Please ensure:")
@@ -92,11 +92,11 @@ def build_price_table(spot_price, min_vol=0.10, max_vol=0.80, n_vol=20,
 
 def calculate_iv_via_fdm(option_params, grid_n_space=101, grid_n_time=1000):
     """Calculate IV using direct FDM solver (slow method)."""
-    config = mango_iv.IVConfig()
+    config = mango_option.IVConfig()
     config.grid_n_space = grid_n_space
     config.grid_n_time = grid_n_time
 
-    solver = mango_iv.IVSolver(option_params, config)
+    solver = mango_option.IVSolver(option_params, config)
     result = solver.solve()
 
     return result
@@ -227,7 +227,7 @@ Examples:
 
         # Method 1: Direct FDM (slow)
         print(f"  Method 1: Direct FDM solver...")
-        params = mango_iv.IVParams()
+        params = mango_option.IVParams()
         params.spot_price = float(spot_price)
         params.strike = float(strike)
         params.time_to_maturity = float(ttm)

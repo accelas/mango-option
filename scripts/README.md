@@ -1,6 +1,6 @@
 # Option IV Surface Calculator Scripts
 
-Python scripts for downloading option data from Yahoo Finance and calculating implied volatility surfaces using the mango-iv C++ library.
+Python scripts for downloading option data from Yahoo Finance and calculating implied volatility surfaces using the `mango-option` C++ library.
 
 ## Overview
 
@@ -36,11 +36,11 @@ This collection of scripts provides an end-to-end workflow for:
 
 ### 1. Build the C++ Python Bindings
 
-First, build the mango-iv Python module:
+First, build the mango-option Python module:
 
 ```bash
 # From repository root
-bazel build //python:mango_iv
+bazel build //python:mango_option
 ```
 
 This creates a Python extension module that wraps the C++ IV solver.
@@ -87,7 +87,7 @@ Or install the module in development mode (recommended):
 
 ```bash
 # Create a symlink in your Python environment
-ln -s ${BAZEL_BIN}/python/mango_iv.so $(python -c "import site; print(site.getsitepackages()[0])")/
+ln -s ${BAZEL_BIN}/python/mango_option.so $(python -c "import site; print(site.getsitepackages()[0])")/
 ```
 
 ## Quick Start
@@ -282,12 +282,12 @@ with OptionDatabase("spy.db") as db:
 
 ## Troubleshooting
 
-### Import Error: mango_iv not found
+### Import Error: mango_option not found
 
 Make sure you've built the Python module and set PYTHONPATH:
 
 ```bash
-bazel build //python:mango_iv
+bazel build //python:mango_option
 export PYTHONPATH="$(bazel info bazel-bin)/python:${PYTHONPATH}"
 ```
 

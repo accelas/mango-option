@@ -1,5 +1,5 @@
 """
-IV surface calculation using mango-iv C++ library.
+IV surface calculation using mango-option C++ library.
 
 This module provides functions to:
 - Calculate implied volatility for individual options
@@ -13,15 +13,15 @@ import numpy as np
 
 # Import the C++ bindings (will be built with Bazel)
 try:
-    import mango_iv
+    import mango_option
 except ImportError:
-    print("Warning: mango_iv module not found. Please build with: bazel build //python:mango_iv")
+    print("Warning: mango_option module not found. Please build with: bazel build //python:mango_option")
     print("Using mock implementation for development")
-    mango_iv = None
+    mango_option = None
 
 
 class IVCalculator:
-    """Calculate implied volatility using mango-iv C++ solver."""
+    """Calculate implied volatility using mango-option C++ solver."""
 
     def __init__(self, grid_n_space: int = 101, grid_n_time: int = 1000,
                  max_iter: int = 100, tolerance: float = 1e-6):
@@ -34,11 +34,11 @@ class IVCalculator:
             max_iter: Maximum iterations for root-finding
             tolerance: Convergence tolerance
         """
-        if mango_iv is None:
-            raise ImportError("mango_iv module not available. Build with Bazel first.")
+        if mango_option is None:
+            raise ImportError("mango_option module not available. Build with Bazel first.")
 
         # Create solver configuration
-        self.config = mango_iv.IVSolverFDMConfig()
+        self.config = mango_option.IVSolverFDMConfig()
         self.config.grid_n_space = grid_n_space
         self.config.grid_n_time = grid_n_time
         self.config.root_config.max_iter = max_iter
@@ -68,17 +68,17 @@ class IVCalculator:
             - vega: Vega at the solution (if available)
         """
         # Create IV query
-        query = mango_iv.IVQuery()
+        query = mango_option.IVQuery()
         query.spot = float(spot_price)
         query.strike = float(strike)
         query.maturity = float(time_to_maturity)
         query.rate = float(risk_free_rate)
         query.market_price = float(market_price)
-        query.type = mango_iv.OptionType.CALL if is_call else mango_iv.OptionType.PUT
+        query.type = mango_option.OptionType.CALL if is_call else mango_option.OptionType.PUT
         query.dividend_yield = 0.0  # Default to 0
 
         # Create solver and solve
-        solver = mango_iv.IVSolverFDM(self.config)
+        solver = mango_option.IVSolverFDM(self.config)
         result = solver.solve(query)
 
         # Convert result to dict

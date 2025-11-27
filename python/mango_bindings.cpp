@@ -1,6 +1,6 @@
 /**
  * @file mango_bindings.cpp
- * @brief Python bindings for mango-iv library using pybind11
+ * @brief Python bindings for mango-option library using pybind11
  */
 
 #include <pybind11/pybind11.h>
@@ -54,8 +54,8 @@ std::string rate_spec_to_string(const mango::RateSpec& spec) {
     }, spec);
 }
 
-PYBIND11_MODULE(mango_iv, m) {
-    m.doc() = "Python bindings for mango-iv American option pricing and IV solver";
+PYBIND11_MODULE(mango_option, m) {
+    m.doc() = "Python bindings for mango-option American option pricing and IV solver";
 
     // OptionType enum
     py::enum_<mango::OptionType>(m, "OptionType")

@@ -1,12 +1,12 @@
 [project]
-name = "mango-iv-scripts"
+name = "mango-option-scripts"
 version = "0.1.0"
-description = "Option data downloader and IV surface calculator using mango-iv"
+description = "Option data downloader and IV surface calculator using mango-option"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "mango-iv contributors" }
+    { name = "mango-option contributors" }
 ]
 
 dependencies = [

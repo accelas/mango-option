@@ -81,7 +81,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["mango-iv contributors"]
+authors = ["mango-option contributors"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
@@ -133,7 +133,7 @@ path = "src/lib.rs"
 **Step 2: Create crates/types/src/lib.rs with OptionType**
 
 ```rust
-//! Core types for mango-iv option pricing
+//! Core types for mango-option option pricing
 //!
 //! These types are `#[repr(C)]` compatible with the existing C codebase.
 
@@ -461,7 +461,7 @@ git commit -m "Add GridParams and TimeParams types
 ```markdown
 # mango-types
 
-Core type definitions for mango-iv option pricing library.
+Core type definitions for mango-option option pricing library.
 
 ## Overview
 
@@ -513,7 +513,7 @@ Add after `[workspace.package]`:
 ```toml
 [workspace.metadata]
 description = "Rust+GPU option pricing library"
-repository = "https://github.com/yourusername/mango-iv"
+repository = "https://github.com/yourusername/mango-option"
 readme = "README.md"
 keywords = ["options", "pricing", "finance", "gpu", "rust"]
 categories = ["science", "mathematics"]
@@ -559,7 +559,7 @@ Add after "## Project Structure" section:
 Rust rewrite for GPU acceleration is in progress. See `docs/plans/2025-11-01-rust-gpu-rewrite.md` for the full design.
 
 ```
-mango-iv-rs/
+mango-option-rs/
 ├── Cargo.toml           # Workspace root
 └── crates/
     └── types/           # Core type definitions (#[repr(C)] for FFI)
