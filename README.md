@@ -2,7 +2,7 @@
 
 Modern C++23 library for American option pricing and implied volatility calculation.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C++23](https://img.shields.io/badge/C++-23-blue)]() [![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![C++23](https://img.shields.io/badge/C++-23-blue)]() [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
@@ -17,12 +17,12 @@ Designed for research, prototyping, and production use with a focus on **correct
 
 ### Key Features
 
-- **Fast American Pricing** – ~1.3ms per option via PDE solver
-- **Implied Volatility** – FDM-based (~15ms) or interpolation-based (~2.1µs)
-- **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries (~193ns)
+- **Fast American Pricing** – ~1.4ms per option via PDE solver
+- **Implied Volatility** – FDM-based (~19ms) or interpolation-based (~3.5µs)
+- **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries (~470ns)
 - **Modern C++23** – std::expected error handling, PMR memory management, SIMD vectorization
 - **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
-- **Production Ready** – OpenMP batching (10× speedup), USDT tracing, zero-allocation solves
+- **Production Ready** – OpenMP batching (15× speedup), USDT tracing, zero-allocation solves
 
 ---
 
@@ -59,67 +59,67 @@ bazel run //examples:example_newton_solver
 
 ## Usage Examples
 
-### American Option Pricing
+### Market Data Integration (Recommended)
+
+```cpp
+#include "src/simple/simple.hpp"
+
+using namespace mango::simple;
+
+// Build option chain from yfinance data
+auto chain = ChainBuilder<YFinanceSource>{}
+    .symbol("SPY")
+    .spot(580.50)
+    .quote_time("2024-06-21T10:30:00")
+    .dividend_yield(0.013)
+    .add_put("2024-06-21", {.strike = 575.0, .bid = 0.52, .ask = 0.58})
+    .add_put("2024-06-21", {.strike = 580.0, .bid = 2.30, .ask = 2.42})
+    .add_call("2024-06-21", {.strike = 580.0, .bid = 2.85, .ask = 2.92})
+    .build();
+
+// Set up market context
+MarketContext ctx;
+ctx.rate = 0.053;  // 5.3% Fed Funds rate
+ctx.valuation_time = Timestamp{"2024-06-21T10:30:00"};
+
+// Compute volatility surface
+auto surface = compute_vol_surface(chain, ctx);
+if (surface.has_value()) {
+    for (const auto& smile : surface->smiles) {
+        std::cout << "Expiry: " << smile.expiry.to_string() << "\n";
+        for (const auto& pt : smile.puts) {
+            std::cout << "  K=" << pt.strike.to_double()
+                      << " IV=" << pt.iv_mid.value_or(0.0) << "\n";
+        }
+    }
+}
+```
+
+### Low-Level API
+
+For direct access to the PDE solver:
 
 ```cpp
 #include "src/option/american_option.hpp"
 
-// Option parameters
-mango::PricingParams params{
-    .strike = 100.0,
-    .spot = 100.0,
-    .maturity = 1.0,
-    .volatility = 0.20,
-    .rate = 0.05,
-    .continuous_dividend_yield = 0.02,
-    .type = mango::OptionType::PUT
-};
+mango::AmericanOptionParams params(
+    100.0,  // spot
+    100.0,  // strike
+    1.0,    // maturity
+    0.05,   // rate
+    0.02,   // dividend_yield
+    mango::OptionType::PUT,
+    0.20    // volatility
+);
 
-// Auto-estimate grid
 auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
-
-// Create workspace
 std::pmr::synchronized_pool_resource pool;
-auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
+std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(grid_spec.n_points()), &pool);
+auto workspace = mango::PDEWorkspace::from_buffer(buffer, grid_spec.n_points()).value();
 
-// Solve
 mango::AmericanOptionSolver solver(params, workspace);
 auto result = solver.solve();
-
-if (result.has_value()) {
-    std::cout << "Price: " << result->price() << "\n";
-    std::cout << "Delta: " << result->delta() << "\n";
-}
-```
-
-### Implied Volatility Calculation
-
-```cpp
-#include "src/option/iv_solver_fdm.hpp"
-
-// Option specification
-mango::OptionSpec spec{
-    .spot = 100.0,
-    .strike = 100.0,
-    .maturity = 1.0,
-    .rate = 0.05,
-    .dividend_yield = 0.02,
-    .type = mango::OptionType::PUT
-};
-
-// IV query with market price
-mango::IVQuery query{.option = spec, .market_price = 10.45};
-
-// Solve
-mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
-auto result = solver.solve_impl(query);
-
-if (result.has_value()) {
-    std::cout << "Implied Vol: " << result->implied_vol << "\n";
-    std::cout << "Iterations: " << result->iterations << "\n";
-} else {
-    std::cerr << "Error: " << result.error().message << "\n";
-}
+std::cout << "Price: " << result->value_at(params.spot) << "\n";
 ```
 
 **For more examples, see [docs/API_GUIDE.md](docs/API_GUIDE.md)**
@@ -139,34 +139,39 @@ if (result.has_value()) {
 
 ## Performance
 
+*Benchmarked on AMD Ryzen 9 9955HX (16C/32T, 5.0 GHz), 64 GB RAM, compiled with `-O3 -march=native`*
+
 ### American Option Pricing
 
 | Configuration | Grid | Time/Option | Use Case |
 |---|---|---|---|
-| Standard (auto) | 101×498 | ~1.3ms | Typical case |
-| Custom fine | 201×2k | ~8-10ms | High accuracy |
+| Standard (auto) | 101×498 | ~1.4ms | Single option |
+| Option chain (shared grid) | 101×498 | ~0.13ms | Multi-strike |
 
 **Batch processing (64 options):**
-- Sequential: ~81ms total (~1.26ms/option)
-- Parallel: ~7.7ms total (~0.12ms/option)
-- **10.4× speedup** with parallelization
+- Sequential: ~87ms total (~1.4ms/option)
+- Parallel: ~5.7ms total (~0.09ms/option)
+- **15× speedup** with parallelization
+
+**Option chain (15 options, shared grid):**
+- Total: ~2.0ms (~0.13ms/option)
+- **10× speedup** vs individual pricing
 
 ### Implied Volatility
 
-| Method | Time/IV | Accuracy |
-|---|---|---|
-| FDM-based (101×1k) | ~15ms | Ground truth |
-| FDM-based (201×2k) | ~61ms | High accuracy |
-| Interpolated (B-spline) | ~2.1µs | <1bp error (95%) |
+| Method | Grid | Time/IV | Accuracy |
+|---|---|---|---|
+| FDM-based (auto) | 101×498 | ~19ms | Ground truth |
+| Interpolated (B-spline) | — | ~3.5µs | <1bp error (95%) |
 
-**Speedup:** 7,000× for interpolated vs FDM
+**Speedup:** 5,400× for interpolated vs FDM
 
 ### Price Table Pre-Computation
 
 - **Grid size:** 300K points (50×30×20×10)
 - **Pre-compute:** 15-20 min (32 cores)
-- **Query:** ~193ns (price), ~952ns (vega+gamma)
-- **Speedup:** 77,000× vs FDM
+- **Query:** ~470ns (price), ~2.4µs (vega+gamma)
+- **Speedup:** 40,000× vs FDM
 
 ---
 
