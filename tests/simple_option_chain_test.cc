@@ -20,16 +20,18 @@ TEST(SimpleOptionChainTest, ChainWithData) {
     slice.settlement = Settlement::PM;
 
     OptionLeg call;
+    call.type = OptionType::CALL;
     call.strike = Price{580.0};
     call.bid = Price{2.85};
     call.ask = Price{2.92};
-    slice.calls.push_back(call);
+    slice.options.push_back(call);
 
     chain.expiries.push_back(std::move(slice));
 
     EXPECT_EQ(chain.symbol, "SPY");
     EXPECT_EQ(chain.expiries.size(), 1);
-    EXPECT_EQ(chain.expiries[0].calls.size(), 1);
+    EXPECT_EQ(chain.expiries[0].options.size(), 1);
+    EXPECT_EQ(std::ranges::distance(chain.expiries[0].calls()), 1);
 }
 
 TEST(SimpleMarketContextTest, DefaultContext) {

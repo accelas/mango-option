@@ -27,6 +27,7 @@ cc_library(
     deps = [
         ":price",
         ":timestamp",
+        "//src/option:option_spec",
     ],
 )
 

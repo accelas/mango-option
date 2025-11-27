@@ -50,7 +50,9 @@ public:
     ChainBuilder& add_call(T&& expiry, const RawOpt& opt) {
         auto ts = Conv::to_timestamp(std::forward<T>(expiry));
         auto& slice = get_or_create_slice(ts);
-        slice.calls.push_back(Conv::to_leg(opt));
+        auto leg = Conv::to_leg(opt);
+        leg.type = OptionType::CALL;
+        slice.options.push_back(std::move(leg));
         return *this;
     }
 
@@ -58,7 +60,9 @@ public:
     ChainBuilder& add_put(T&& expiry, const RawOpt& opt) {
         auto ts = Conv::to_timestamp(std::forward<T>(expiry));
         auto& slice = get_or_create_slice(ts);
-        slice.puts.push_back(Conv::to_leg(opt));
+        auto leg = Conv::to_leg(opt);
+        leg.type = OptionType::PUT;
+        slice.options.push_back(std::move(leg));
         return *this;
     }
 

@@ -21,10 +21,11 @@ TEST(VolSurfaceTest, ComputeSmileFromChain) {
     slice.settlement = Settlement::PM;
 
     OptionLeg call;
+    call.type = OptionType::CALL;
     call.strike = Price{580.0};
     call.bid = Price{5.50};
     call.ask = Price{5.70};
-    slice.calls.push_back(call);
+    slice.options.push_back(call);
 
     chain.expiries.push_back(std::move(slice));
 
@@ -43,10 +44,12 @@ TEST(VolSurfaceTest, ComputeSmileFromChain) {
 
 TEST(VolSmileTest, SmilePointStructure) {
     VolatilitySmile::Point pt;
+    pt.type = OptionType::CALL;
     pt.strike = Price{580.0};
     pt.moneyness = 0.0;  // ATM
     pt.iv_mid = 0.15;
 
+    EXPECT_EQ(pt.type, OptionType::CALL);
     EXPECT_DOUBLE_EQ(pt.strike.to_double(), 580.0);
     EXPECT_TRUE(pt.iv_mid.has_value());
 }
