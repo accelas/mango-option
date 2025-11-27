@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IV Surface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#172033',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        /* Loading animation */
+        @keyframes pulse-border {
+            0%, 100% { border-color: rgba(59, 130, 246, 0.5); }
+            50% { border-color: rgba(59, 130, 246, 1); }
+        }
+        .loading { animation: pulse-border 1.5s ease-in-out infinite; }
+
+        /* Plotly responsive */
+        .js-plotly-plot { width: 100% !important; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <!-- Mobile-first layout -->
+    <div class="flex flex-col lg:flex-row min-h-screen">
+
+        <!-- Sidebar - collapsible on mobile -->
+        <aside id="sidebar" class="w-full lg:w-64 bg-slate-850 border-b lg:border-b-0 lg:border-r border-slate-700 flex-shrink-0">
+            <div class="p-4">
+                <!-- Logo -->
+                <div class="flex items-center gap-2 mb-6">
+                    <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">IV</span>
+                    </div>
+                    <span class="font-semibold text-lg">IV Surface</span>
+                </div>
+
+                <!-- Cached symbols -->
+                <div class="hidden lg:block">
+                    <h3 class="text-xs uppercase text-slate-500 font-medium mb-2">Cached</h3>
+                    <div id="cached-list" class="space-y-1">
+                        {% for item in cached_symbols %}
+                        <button
+                            onclick="loadSymbol('{{ item.symbol }}')"
+                            class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 transition-colors flex justify-between items-center group"
+                        >
+                            <span class="font-medium">{{ item.symbol }}</span>
+                            <span class="text-xs text-slate-500 group-hover:text-slate-400">
+                                {% if item.age_minutes %}{{ item.age_minutes }}m{% endif %}
+                            </span>
+                        </button>
+                        {% else %}
+                        <p class="text-slate-500 text-sm px-3 py-2">No cached symbols</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main content -->
+        <main class="flex-1 flex flex-col min-h-0">
+            <!-- Header with search -->
+            <header class="p-4 border-b border-slate-700 bg-slate-850">
+                <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                    <!-- Search input -->
+                    <div class="flex-1 relative">
+                        <input
+                            type="text"
+                            id="symbol-input"
+                            placeholder="Enter symbol (e.g., AAPL, SPY)"
+                            class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-sm
+                                   focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                                   placeholder-slate-500"
+                            onkeydown="if(event.key === 'Enter') loadSymbol(this.value)"
+                        >
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="flex gap-2">
+                        <button
+                            onclick="loadSymbol(document.getElementById('symbol-input').value)"
+                            class="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium
+                                   transition-colors flex items-center gap-2"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <span class="hidden sm:inline">Load</span>
+                        </button>
+                        <button
+                            onclick="refreshSurface()"
+                            id="refresh-btn"
+                            class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium
+                                   transition-colors disabled:opacity-50"
+                            disabled
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tabs -->
+                <div class="flex gap-1 mt-4 overflow-x-auto" id="tabs">
+                    <button onclick="switchTab('surface')" id="tab-surface"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                                   bg-slate-700 text-white whitespace-nowrap">
+                        IV Surface
+                    </button>
+                    <button onclick="switchTab('equity')" id="tab-equity"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                                   text-slate-400 hover:text-white hover:bg-slate-700 whitespace-nowrap">
+                        Equity
+                    </button>
+                    <button onclick="switchTab('vol')" id="tab-vol"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                                   text-slate-400 hover:text-white hover:bg-slate-700 whitespace-nowrap">
+                        Vol Analysis
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content area -->
+            <div class="flex-1 p-4 overflow-auto">
+                <!-- Landing state -->
+                <div id="landing" class="h-full flex items-center justify-center">
+                    <div class="text-center max-w-md px-4">
+                        <div class="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                            <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-xl font-semibold mb-2">Welcome to IV Surface</h2>
+                        <p class="text-slate-400 mb-6">
+                            Enter a symbol above to compute and visualize its implied volatility surface.
+                        </p>
+                        <div class="flex flex-wrap gap-2 justify-center">
+                            <button onclick="loadSymbol('SPY')"
+                                    class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm transition-colors">
+                                SPY
+                            </button>
+                            <button onclick="loadSymbol('AAPL')"
+                                    class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm transition-colors">
+                                AAPL
+                            </button>
+                            <button onclick="loadSymbol('TSLA')"
+                                    class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm transition-colors">
+                                TSLA
+                            </button>
+                            <button onclick="loadSymbol('NVDA')"
+                                    class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm transition-colors">
+                                NVDA
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading state -->
+                <div id="loading" class="hidden h-full flex items-center justify-center">
+                    <div class="text-center">
+                        <div class="w-12 h-12 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
+                        <p class="text-slate-400" id="loading-text">Computing IV surface...</p>
+                    </div>
+                </div>
+
+                <!-- Surface tab -->
+                <div id="content-surface" class="hidden h-full">
+                    <div id="surface-plot" class="w-full h-full min-h-[400px]"></div>
+                </div>
+
+                <!-- Equity tab -->
+                <div id="content-equity" class="hidden h-full">
+                    <div id="equity-plot" class="w-full h-full min-h-[400px]"></div>
+                </div>
+
+                <!-- Vol analysis tab -->
+                <div id="content-vol" class="hidden h-full">
+                    <div class="grid gap-4 lg:grid-cols-2">
+                        <!-- Vol comparison chart -->
+                        <div class="bg-slate-800 rounded-xl p-4">
+                            <h3 class="font-medium mb-4">Volatility Comparison</h3>
+                            <div id="vol-plot" class="h-64"></div>
+                        </div>
+
+                        <!-- Stats cards -->
+                        <div class="space-y-4">
+                            <div class="bg-slate-800 rounded-xl p-4">
+                                <h3 class="font-medium mb-3">Realized Volatility</h3>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p class="text-xs text-slate-500 uppercase">20-Day</p>
+                                        <p class="text-2xl font-semibold" id="rv-20">--</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-slate-500 uppercase">60-Day</p>
+                                        <p class="text-2xl font-semibold" id="rv-60">--</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-slate-800 rounded-xl p-4">
+                                <h3 class="font-medium mb-3">GARCH Forecast</h3>
+                                <div class="flex items-center gap-2 mb-3">
+                                    <select id="garch-model" onchange="updateVolAnalysis()"
+                                            class="bg-slate-700 border-0 rounded-lg px-3 py-1.5 text-sm">
+                                        <option value="gjr">GJR-GARCH</option>
+                                        <option value="garch">GARCH(1,1)</option>
+                                        <option value="egarch">EGARCH</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-slate-500 uppercase">Current Vol</p>
+                                    <p class="text-2xl font-semibold" id="garch-current">--</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status bar -->
+            <footer class="px-4 py-2 border-t border-slate-700 bg-slate-850 text-xs text-slate-500">
+                <div class="flex flex-wrap gap-x-4 gap-y-1 items-center justify-between">
+                    <div class="flex gap-4">
+                        <span id="status-spot">Spot: --</span>
+                        <span id="status-rate">Rate: 5.0%</span>
+                        <span id="status-type">Puts</span>
+                    </div>
+                    <span id="status-time">--</span>
+                </div>
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        // State
+        let currentSymbol = null;
+        let currentTab = 'surface';
+        let surfaceData = null;
+        let equityData = null;
+        let volData = null;
+
+        // Tab switching
+        function switchTab(tab) {
+            currentTab = tab;
+
+            // Update tab buttons
+            document.querySelectorAll('#tabs button').forEach(btn => {
+                btn.classList.remove('bg-slate-700', 'text-white');
+                btn.classList.add('text-slate-400');
+            });
+            document.getElementById(`tab-${tab}`).classList.remove('text-slate-400');
+            document.getElementById(`tab-${tab}`).classList.add('bg-slate-700', 'text-white');
+
+            // Show/hide content
+            document.querySelectorAll('[id^="content-"]').forEach(el => el.classList.add('hidden'));
+            const content = document.getElementById(`content-${tab}`);
+            if (content) content.classList.remove('hidden');
+
+            // Resize plots on tab switch
+            setTimeout(() => {
+                Plotly.Plots.resize(document.getElementById('surface-plot'));
+                Plotly.Plots.resize(document.getElementById('equity-plot'));
+                Plotly.Plots.resize(document.getElementById('vol-plot'));
+            }, 100);
+        }
+
+        // Load symbol
+        async function loadSymbol(symbol) {
+            if (!symbol) return;
+            symbol = symbol.toUpperCase().trim();
+
+            currentSymbol = symbol;
+            document.getElementById('symbol-input').value = symbol;
+            document.getElementById('refresh-btn').disabled = false;
+
+            // Show loading
+            document.getElementById('landing').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+            document.querySelectorAll('[id^="content-"]').forEach(el => el.classList.add('hidden'));
+
+            try {
+                // Fetch surface data
+                document.getElementById('loading-text').textContent = 'Fetching option chain...';
+                const response = await fetch(`/api/surface/${symbol}?option_type=put`);
+                surfaceData = await response.json();
+
+                if (surfaceData.error) {
+                    throw new Error(surfaceData.error);
+                }
+
+                // Update status bar
+                document.getElementById('status-spot').textContent = `Spot: $${surfaceData.spot.toFixed(2)}`;
+                document.getElementById('status-time').textContent = surfaceData.is_eod ? 'EOD' : 'Live';
+
+                // Render surface
+                renderSurface(surfaceData);
+
+                // Show surface tab
+                document.getElementById('loading').classList.add('hidden');
+                switchTab('surface');
+
+                // Load equity and vol data in background
+                loadEquityData(symbol);
+                loadVolData(symbol);
+
+            } catch (error) {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('landing').classList.remove('hidden');
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        // Render 3D surface
+        function renderSurface(data) {
+            const surface = data.surface;
+
+            // Create grid for surface
+            const uniqueStrikes = [...new Set(surface.moneyness)].sort((a, b) => a - b);
+            const uniqueMaturities = [...new Set(surface.maturities)].sort((a, b) => a - b);
+
+            // Build z matrix
+            const z = [];
+            for (const tau of uniqueMaturities) {
+                const row = [];
+                for (const m of uniqueStrikes) {
+                    // Find matching IV
+                    let iv = null;
+                    for (let i = 0; i < surface.moneyness.length; i++) {
+                        if (Math.abs(surface.moneyness[i] - m) < 0.001 &&
+                            Math.abs(surface.maturities[i] - tau) < 0.001) {
+                            iv = surface.ivs[i] * 100;  // Convert to %
+                            break;
+                        }
+                    }
+                    row.push(iv);
+                }
+                z.push(row);
+            }
+
+            const trace = {
+                type: 'surface',
+                x: uniqueStrikes,
+                y: uniqueMaturities,
+                z: z,
+                colorscale: [
+                    [0, '#1e40af'],
+                    [0.25, '#3b82f6'],
+                    [0.5, '#22c55e'],
+                    [0.75, '#eab308'],
+                    [1, '#ef4444']
+                ],
+                colorbar: {
+                    title: 'IV %',
+                    ticksuffix: '%',
+                    len: 0.75
+                },
+                hovertemplate: 'Moneyness: %{x:.2f}<br>Maturity: %{y:.2f}y<br>IV: %{z:.1f}%<extra></extra>'
+            };
+
+            const layout = {
+                scene: {
+                    xaxis: { title: 'Moneyness (S/K)', gridcolor: '#334155' },
+                    yaxis: { title: 'Maturity (years)', gridcolor: '#334155' },
+                    zaxis: { title: 'IV %', gridcolor: '#334155' },
+                    bgcolor: '#0f172a',
+                    camera: {
+                        eye: { x: 1.5, y: 1.5, z: 1 }
+                    }
+                },
+                paper_bgcolor: '#0f172a',
+                margin: { l: 0, r: 0, t: 0, b: 0 },
+                autosize: true
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+                displaylogo: false
+            };
+
+            Plotly.newPlot('surface-plot', [trace], layout, config);
+        }
+
+        // Load equity data
+        async function loadEquityData(symbol) {
+            try {
+                const response = await fetch(`/api/equity/${symbol}?period=1y`);
+                equityData = await response.json();
+
+                if (!equityData.error) {
+                    renderEquityChart(equityData);
+                }
+            } catch (error) {
+                console.error('Failed to load equity data:', error);
+            }
+        }
+
+        // Render equity chart
+        function renderEquityChart(data) {
+            const trace = {
+                type: 'candlestick',
+                x: data.dates,
+                open: data.open,
+                high: data.high,
+                low: data.low,
+                close: data.close,
+                increasing: { line: { color: '#22c55e' } },
+                decreasing: { line: { color: '#ef4444' } }
+            };
+
+            const layout = {
+                paper_bgcolor: '#0f172a',
+                plot_bgcolor: '#0f172a',
+                xaxis: {
+                    rangeslider: { visible: false },
+                    gridcolor: '#334155',
+                    color: '#94a3b8'
+                },
+                yaxis: {
+                    gridcolor: '#334155',
+                    color: '#94a3b8',
+                    side: 'right'
+                },
+                margin: { l: 10, r: 60, t: 10, b: 40 },
+                autosize: true
+            };
+
+            Plotly.newPlot('equity-plot', [trace], layout, { responsive: true, displaylogo: false });
+        }
+
+        // Load vol analysis
+        async function loadVolData(symbol) {
+            try {
+                const model = document.getElementById('garch-model').value;
+                const response = await fetch(`/api/vol_analysis/${symbol}?model=${model}`);
+                volData = await response.json();
+
+                if (!volData.error) {
+                    renderVolAnalysis(volData);
+                }
+            } catch (error) {
+                console.error('Failed to load vol data:', error);
+            }
+        }
+
+        function updateVolAnalysis() {
+            if (currentSymbol) {
+                loadVolData(currentSymbol);
+            }
+        }
+
+        // Render vol analysis
+        function renderVolAnalysis(data) {
+            // Update stats
+            if (data.realized_vol) {
+                document.getElementById('rv-20').textContent =
+                    (data.realized_vol.rv_20 * 100).toFixed(1) + '%';
+                document.getElementById('rv-60').textContent =
+                    (data.realized_vol.rv_60 * 100).toFixed(1) + '%';
+            }
+
+            if (data.garch && !data.garch.error) {
+                document.getElementById('garch-current').textContent =
+                    (data.garch.current_vol * 100).toFixed(1) + '%';
+
+                // Render forecast chart
+                const trace = {
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    x: data.garch.forecast_days,
+                    y: data.garch.forecast.map(v => v * 100),
+                    line: { color: '#3b82f6', width: 2 },
+                    marker: { size: 8 }
+                };
+
+                const layout = {
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    xaxis: {
+                        title: 'Days Ahead',
+                        gridcolor: '#334155',
+                        color: '#94a3b8'
+                    },
+                    yaxis: {
+                        title: 'Vol %',
+                        gridcolor: '#334155',
+                        color: '#94a3b8',
+                        ticksuffix: '%'
+                    },
+                    margin: { l: 50, r: 20, t: 20, b: 50 },
+                    autosize: true
+                };
+
+                Plotly.newPlot('vol-plot', [trace], layout, { responsive: true, displaylogo: false });
+            }
+        }
+
+        // Refresh
+        function refreshSurface() {
+            if (currentSymbol) {
+                loadSymbol(currentSymbol);
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            Plotly.Plots.resize(document.getElementById('surface-plot'));
+            Plotly.Plots.resize(document.getElementById('equity-plot'));
+            Plotly.Plots.resize(document.getElementById('vol-plot'));
+        });
+    </script>
+</body>
+</html>
