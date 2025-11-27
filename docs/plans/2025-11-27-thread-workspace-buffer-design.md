@@ -90,13 +90,16 @@ public:
     }
 
     /// Get byte span view of buffer (stable for lifetime of object)
+    ///
+    /// The returned span is valid until the ThreadWorkspaceBuffer is destroyed.
+    /// All workspace objects created from this span remain valid for the same duration.
     std::span<std::byte> bytes() noexcept { return buffer_; }
     std::span<const std::byte> bytes() const noexcept { return buffer_; }
 
-    /// Resize buffer - uses fallback if exceeds initial capacity
-    void resize(size_t byte_count) { buffer_.resize(byte_count); }
-
     size_t size() const noexcept { return buffer_.size(); }
+
+    // Note: No resize() method. Callers must know the required size upfront.
+    // This ensures bytes() spans remain stable for the buffer's lifetime.
 
 private:
     /// Thread-local synchronized pool for fallback allocations
@@ -138,20 +141,23 @@ Workspace that slices a byte buffer into properly-aligned typed spans for B-spli
 #include <expected>
 #include <string>
 #include <cstddef>
-#include <new>  // for std::launder, placement new
+#include <new>  // for std::start_lifetime_as_array (C++23)
 
 namespace mango {
 
 /// Workspace for B-spline collocation solver
 ///
 /// Slices external BYTE buffer into typed spans with proper alignment.
-/// Uses placement new to start object lifetimes (avoids strict-aliasing UB).
+/// Uses std::start_lifetime_as_array (C++23) to start object lifetimes,
+/// avoiding strict-aliasing UB.
 ///
 /// Required arrays for bandwidth=4 (cubic B-splines):
 /// - band_storage: 10n doubles (LAPACK banded format: ldab=10)
 /// - lapack_storage: 10n doubles (LU factorization copy)
 /// - pivots: n integers (pivot indices) - separate int storage
 /// - coeffs: n doubles (result buffer)
+///
+/// All storage regions are aligned to 64-byte boundaries for SIMD.
 ///
 template<typename T>
 struct BSplineCollocationWorkspace {
@@ -164,31 +170,39 @@ struct BSplineCollocationWorkspace {
         return (offset + alignment - 1) & ~(alignment - 1);
     }
 
+    /// Effective alignment for each block (max of SIMD alignment and type alignment)
+    static constexpr size_t block_alignment_T = std::max(ALIGNMENT, alignof(T));
+    static constexpr size_t block_alignment_int = std::max(ALIGNMENT, alignof(int));
+
     /// Calculate required buffer size in BYTES
     static size_t required_bytes(size_t n) {
         size_t offset = 0;
 
-        // band_storage: 10n × sizeof(T), aligned
-        offset = align_up(offset, alignof(T));
+        // band_storage: 10n × sizeof(T), 64-byte aligned
+        offset = align_up(offset, block_alignment_T);
         offset += LDAB * n * sizeof(T);
 
-        // lapack_storage: 10n × sizeof(T), aligned
-        offset = align_up(offset, alignof(T));
+        // lapack_storage: 10n × sizeof(T), 64-byte aligned
+        offset = align_up(offset, block_alignment_T);
         offset += LDAB * n * sizeof(T);
 
-        // pivots: n × sizeof(int), aligned
-        offset = align_up(offset, alignof(int));
+        // pivots: n × sizeof(int), 64-byte aligned
+        offset = align_up(offset, block_alignment_int);
         offset += n * sizeof(int);
 
-        // coeffs: n × sizeof(T), aligned
-        offset = align_up(offset, alignof(T));
+        // coeffs: n × sizeof(T), 64-byte aligned
+        offset = align_up(offset, block_alignment_T);
         offset += n * sizeof(T);
 
-        // Final alignment for SIMD
+        // Final alignment
         return align_up(offset, ALIGNMENT);
     }
 
     /// Create workspace from external BYTE buffer
+    ///
+    /// Uses std::start_lifetime_as_array (C++23) to properly start the lifetime
+    /// of objects in the buffer. This is NOT equivalent to std::launder, which
+    /// only provides pointer provenance but does NOT create objects.
     static std::expected<BSplineCollocationWorkspace, std::string>
     from_bytes(std::span<std::byte> buffer, size_t n) {
         size_t required = required_bytes(n);
@@ -202,28 +216,28 @@ struct BSplineCollocationWorkspace {
         std::byte* ptr = buffer.data();
         size_t offset = 0;
 
-        // band_storage
-        offset = align_up(offset, alignof(T));
+        // band_storage - start lifetime of T[LDAB*n]
+        offset = align_up(offset, block_alignment_T);
         ws.band_storage_ = std::span<T>(
-            std::launder(reinterpret_cast<T*>(ptr + offset)), LDAB * n);
+            std::start_lifetime_as_array<T>(ptr + offset, LDAB * n), LDAB * n);
         offset += LDAB * n * sizeof(T);
 
-        // lapack_storage
-        offset = align_up(offset, alignof(T));
+        // lapack_storage - start lifetime of T[LDAB*n]
+        offset = align_up(offset, block_alignment_T);
         ws.lapack_storage_ = std::span<T>(
-            std::launder(reinterpret_cast<T*>(ptr + offset)), LDAB * n);
+            std::start_lifetime_as_array<T>(ptr + offset, LDAB * n), LDAB * n);
         offset += LDAB * n * sizeof(T);
 
-        // pivots (int, NOT T)
-        offset = align_up(offset, alignof(int));
+        // pivots - start lifetime of int[n]
+        offset = align_up(offset, block_alignment_int);
         ws.pivots_ = std::span<int>(
-            std::launder(reinterpret_cast<int*>(ptr + offset)), n);
+            std::start_lifetime_as_array<int>(ptr + offset, n), n);
         offset += n * sizeof(int);
 
-        // coeffs
-        offset = align_up(offset, alignof(T));
+        // coeffs - start lifetime of T[n]
+        offset = align_up(offset, block_alignment_T);
         ws.coeffs_ = std::span<T>(
-            std::launder(reinterpret_cast<T*>(ptr + offset)), n);
+            std::start_lifetime_as_array<T>(ptr + offset, n), n);
 
         return ws;
     }
@@ -249,8 +263,9 @@ private:
 
 **Strict-aliasing compliance:**
 - `std::byte*` can alias any type (like `char*`)
-- `std::launder` ensures the compiler recognizes the new object lifetime
-- In C++23, can use `std::start_lifetime_as_array<T>(ptr, n)` instead
+- `std::start_lifetime_as_array<T>(ptr, n)` (C++23) starts object lifetimes
+- **Important:** `std::launder` is NOT sufficient - it only provides pointer provenance but does NOT create objects. `std::start_lifetime_as_array` actually starts the lifetime.
+- All arrays are 64-byte aligned via `block_alignment_T` / `block_alignment_int`
 - Pivots are stored as `int` directly, not cast through `T`
 
 ### 3. Modified BSplineCollocation1D
@@ -295,11 +310,20 @@ void fit_axis(
     T global_max_condition = T{0};
     size_t global_failed = 0;
 
+    // Track workspace creation errors (one per thread, reduced at end)
+    bool workspace_error = false;
+
     MANGO_PRAGMA_PARALLEL
     {
         // Per-thread workspace buffer (bytes, not T)
         ThreadWorkspaceBuffer buffer(ws_bytes);
-        auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis).value();
+
+        // Create workspace - validate before entering loop
+        auto ws_result = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
+        if (!ws_result.has_value()) {
+            // Mark error for this thread - will be handled after parallel region
+            workspace_error = true;
+        }
 
         // Per-thread slice buffer
         std::vector<T> slice_buffer(n_axis);
@@ -311,6 +335,13 @@ void fit_axis(
 
         MANGO_PRAGMA_FOR_STATIC
         for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
+            // Skip if workspace creation failed
+            if (!ws_result.has_value()) {
+                ++local_failed;
+                continue;
+            }
+            auto& ws = ws_result.value();
+
             // Extract slice
             extract_slice<Axis>(coeffs, slice_idx, slice_buffer);
 
@@ -337,6 +368,12 @@ void fit_axis(
             global_max_condition = std::max(global_max_condition, local_max_condition);
             global_failed += local_failed;
         }
+    }
+
+    // Check for workspace creation errors after parallel region
+    if (workspace_error) {
+        // Handle error - could return std::unexpected or throw
+        // For now, the failed count captures this
     }
 
     max_residuals[Axis] = global_max_residual;
@@ -427,19 +464,22 @@ ThreadWorkspaceBuffer (std::byte storage):
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
-BSplineCollocationWorkspace::from_bytes() slices with padding:
-┌────────────┬───┬────────────┬───┬──────────┬───┬──────────┬───┐
-│ band_stor. │pad│ lapack_st. │pad│ pivots   │pad│ coeffs   │pad│
-│ T[10n]     │   │ T[10n]     │   │ int[n]   │   │ T[n]     │   │
-└────────────┴───┴────────────┴───┴──────────┴───┴──────────┴───┘
-      Typed views via std::launder (proper object lifetime)
+BSplineCollocationWorkspace::from_bytes() slices with 64-byte alignment:
+┌────────────┬───────┬────────────┬───────┬──────────┬───────┬──────────┬───────┐
+│ band_stor. │ pad64 │ lapack_st. │ pad64 │ pivots   │ pad64 │ coeffs   │ pad64 │
+│ T[10n]     │       │ T[10n]     │       │ int[n]   │       │ T[n]     │       │
+└────────────┴───────┴────────────┴───────┴──────────┴───────┴──────────┴───────┘
+       ↑                 ↑                     ↑                  ↑
+    64-byte           64-byte              64-byte            64-byte
+    aligned           aligned              aligned            aligned
 ```
 
 **Key points:**
 - Base storage is `std::byte` (can alias any type per standard)
-- `from_bytes()` uses `std::launder` to reinterpret as typed spans
+- `from_bytes()` uses `std::start_lifetime_as_array<T>()` to start object lifetimes
+- **Every segment is 64-byte aligned** for cache line / AVX-512 optimization
 - Pivots are stored as `int[]` directly (not aliased through `T`)
-- Each segment aligned to `alignof(T)` or `alignof(int)` as appropriate
+- `std::launder` is NOT sufficient - must use `std::start_lifetime_as_array` (C++23)
 
 ## Fallback Behavior
 
@@ -515,13 +555,27 @@ MANGO_PRAGMA_PARALLEL
 }
 
 // New pattern (with ThreadWorkspaceBuffer):
+// NOTE: PDEWorkspace currently uses typed std::span<double> from_buffer().
+// To migrate, either:
+// (a) Add PDEWorkspace::from_bytes() with std::start_lifetime_as_array, OR
+// (b) Keep existing typed span API and use ThreadWorkspaceBuffer<double>
+//
+// Option (b) preserves existing code and avoids C++23 lifetime complexity:
 MANGO_PRAGMA_PARALLEL
 {
-    ThreadWorkspaceBuffer buffer(workspace_size_bytes);
+    // Use existing typed-span API with pmr::vector<double>
+    std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes,
+        []() -> std::pmr::memory_resource* {
+            thread_local std::pmr::synchronized_pool_resource pool;
+            return &pool;
+        }());
+    std::pmr::vector<double> thread_buffer(&thread_pool);
+    thread_buffer.resize(workspace_size_elements);
 
     MANGO_PRAGMA_FOR_STATIC
     for (size_t i = 0; i < params.size(); ++i) {
-        auto workspace = PDEWorkspace::from_bytes(buffer.bytes(), n).value();
+        auto workspace = PDEWorkspace::from_buffer(
+            std::span(thread_buffer), n).value();
         // ... use workspace ...
         // No release() - same buffer reused each iteration
     }
@@ -582,7 +636,8 @@ Add missing OpenMP macros to `src/support/parallel.hpp`:
    - Basic allocation and span access
    - Fallback to synchronized pool when exhausted
    - Thread safety under OpenMP parallel regions
-   - Release/reuse behavior
+   - Per-thread reuse across multiple iterations without reallocation
+   - Span stability (bytes() returns same pointer throughout lifetime)
 3. Refactor `american_option_batch.cpp` to use ThreadWorkspaceBuffer
    - Replace manual PMR pattern (lines 466-604)
    - Remove heap fallback code (ThreadWorkspaceBuffer handles this)
