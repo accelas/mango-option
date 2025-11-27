@@ -108,11 +108,14 @@ public:
     /**
      * @brief Compute theta: ∂V/∂t
      *
-     * NOT IMPLEMENTED: This method throws std::runtime_error.
-     * Theta computation requires temporal finite differences from successive
-     * solution snapshots, which is not yet supported.
+     * Uses backward finite difference in time from the two solution snapshots
+     * stored in the Grid (current and previous timestep).
      *
-     * @throws std::runtime_error Always throws - method not implemented
+     * θ ≈ (V(t+dt) - V(t)) / dt
+     *
+     * This gives negative theta for time decay (option loses value as time passes).
+     *
+     * @return Theta at current spot price (typically negative for time decay)
      */
     double theta() const;
 
@@ -141,7 +144,7 @@ private:
     std::pair<size_t, size_t> find_grid_index(double x) const;
 
     /**
-     * @brief Linear interpolation between two grid points
+     * @brief Linear interpolation between two grid points (uses current solution)
      *
      * @param x Log-moneyness to evaluate at
      * @param i_left Left grid index
@@ -149,6 +152,18 @@ private:
      * @return Interpolated value
      */
     double interpolate(double x, size_t i_left, size_t i_right) const;
+
+    /**
+     * @brief Linear interpolation between two grid points with explicit solution
+     *
+     * @param x Log-moneyness to evaluate at
+     * @param i_left Left grid index
+     * @param i_right Right grid index
+     * @param solution Solution array to interpolate from
+     * @return Interpolated value
+     */
+    double interpolate(double x, size_t i_left, size_t i_right,
+                       std::span<const double> solution) const;
 
     /**
      * @brief Lazy initialize CenteredDifference operator
