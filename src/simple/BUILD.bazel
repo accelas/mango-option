@@ -1,0 +1,84 @@
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "price",
+    hdrs = ["price.hpp"],
+    deps = [],
+)
+
+cc_library(
+    name = "timestamp",
+    srcs = ["timestamp.cpp"],
+    hdrs = ["timestamp.hpp"],
+    deps = [],
+)
+
+cc_library(
+    name = "option_types",
+    hdrs = ["option_types.hpp"],
+    deps = [
+        ":price",
+        ":timestamp",
+    ],
+)
+
+cc_library(
+    name = "option_chain",
+    hdrs = ["option_chain.hpp"],
+    deps = [
+        ":option_types",
+        "//src/math:yield_curve",
+        "//src/option:option_spec",
+    ],
+)
+
+cc_library(
+    name = "converter",
+    hdrs = [
+        "converter.hpp",
+        "sources/yfinance.hpp",
+        "sources/databento.hpp",
+        "sources/ibkr.hpp",
+    ],
+    deps = [
+        ":price",
+        ":timestamp",
+        ":option_types",
+        "//src/option:option_spec",
+    ],
+)
+
+cc_library(
+    name = "chain_builder",
+    hdrs = ["chain_builder.hpp"],
+    deps = [
+        ":option_chain",
+        ":converter",
+    ],
+)
+
+cc_library(
+    name = "vol_surface",
+    srcs = ["vol_surface.cpp"],
+    hdrs = ["vol_surface.hpp"],
+    deps = [
+        ":option_chain",
+        "//src/option:iv_solver_interpolated",
+        "//src/option:iv_solver_fdm",
+    ],
+)
+
+# Convenience target for all simple headers
+cc_library(
+    name = "simple",
+    hdrs = ["simple.hpp"],
+    deps = [
+        ":price",
+        ":timestamp",
+        ":option_types",
+        ":option_chain",
+        ":converter",
+        ":chain_builder",
+        ":vol_surface",
+    ],
+)

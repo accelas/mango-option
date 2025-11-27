@@ -961,3 +961,67 @@ cc_test(
         "-Wextra",
     ],
 )
+
+cc_test(
+    name = "simple_price_test",
+    srcs = ["simple_price_test.cc"],
+    deps = [
+        "//src/simple:price",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_timestamp_test",
+    srcs = ["simple_timestamp_test.cc"],
+    deps = [
+        "//src/simple:timestamp",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_option_types_test",
+    srcs = ["simple_option_types_test.cc"],
+    deps = [
+        "//src/simple:option_types",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_option_chain_test",
+    srcs = ["simple_option_chain_test.cc"],
+    deps = [
+        "//src/simple:option_chain",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_converter_test",
+    srcs = ["simple_converter_test.cc"],
+    deps = [
+        "//src/simple:converter",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_chain_builder_test",
+    srcs = ["simple_chain_builder_test.cc"],
+    deps = [
+        "//src/simple:chain_builder",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_vol_surface_test",
+    srcs = ["simple_vol_surface_test.cc"],
+    deps = [
+        "//src/simple:vol_surface",
+        "//src/simple:chain_builder",
+        "@googletest//:gtest_main",
+    ],
+)
