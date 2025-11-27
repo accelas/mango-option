@@ -70,14 +70,25 @@ namespace mango {
 /// Example:
 ///   MANGO_PRAGMA_PARALLEL
 ///   {
-///       ThreadWorkspaceBuffer buffer(required_bytes);
-///       auto ws = MyWorkspace::from_bytes(buffer.bytes(), n);
+///       ThreadWorkspaceBuffer buffer(MyWorkspace::required_bytes(n));
+///
+///       // Create workspace ONCE per thread (starts object lifetimes)
+///       auto ws = MyWorkspace::from_bytes(buffer.bytes(), n).value();
 ///
 ///       MANGO_PRAGMA_FOR_STATIC
 ///       for (size_t i = 0; i < count; ++i) {
-///           // Use ws - same memory each iteration, zero allocations
+///           // Reuse ws - solver overwrites spans each iteration.
+///           // No re-initialization needed for trivial types.
+///           solver.fit_with_workspace(input[i], ws);
 ///       }
 ///   }
+///
+/// Lifecycle notes:
+/// - from_bytes() starts object lifetimes via start_array_lifetime()
+/// - Workspace is created ONCE per thread, NOT per iteration
+/// - Solver methods overwrite workspace arrays each iteration
+/// - For B-spline fitting: band_storage, lapack_storage, pivots, coeffs
+///   are all written fresh each fit - no stale state accumulates
 ///
 class ThreadWorkspaceBuffer {
 public:
@@ -141,8 +152,10 @@ Workspace that slices a byte buffer into properly-aligned typed spans for B-spli
 #include <expected>
 #include <string>
 #include <cstddef>
-#include <algorithm>  // for std::max
-#include <memory>     // for std::start_lifetime_as_array (C++23) or fallback
+#include <algorithm>    // for std::max
+#include <memory>       // for std::start_lifetime_as_array (C++23), uninitialized_default_construct_n
+#include <type_traits>  // for std::is_trivially_default_constructible_v
+#include <new>          // for std::construct_at
 
 namespace mango {
 
@@ -156,20 +169,24 @@ namespace mango {
     }
 #else
     // Fallback: Start object lifetime without C++23 facility
-    // For trivially default-constructible types (double, int), this is a no-op
-    // but satisfies the object lifetime rules per the standard.
+    // IMPORTANT: Even trivial types need explicit lifetime start per [basic.life].
+    // We use std::construct_at which is guaranteed to begin object lifetime.
     template<typename T>
     T* start_array_lifetime(void* p, size_t n) {
-        auto* typed = static_cast<T*>(p);
+        // void* -> T* requires reinterpret_cast (static_cast is UB for unrelated types)
+        auto* typed = reinterpret_cast<T*>(p);
         if constexpr (std::is_trivially_default_constructible_v<T>) {
-            // Trivial types: lifetime implicitly starts when storage is obtained
-            // Just return the typed pointer (no initialization needed)
-            return typed;
+            // Trivial types: construct_at is required to start lifetime but
+            // doesn't actually write anything for trivial default constructors.
+            // This is the minimal correct way to start lifetime pre-C++23.
+            for (size_t i = 0; i < n; ++i) {
+                std::construct_at(typed + i);
+            }
         } else {
             // Non-trivial types: must explicitly construct
             std::uninitialized_default_construct_n(typed, n);
-            return typed;
         }
+        return typed;
     }
 #endif
 
@@ -391,41 +408,46 @@ template<size_t Axis>
         T local_max_residual = T{0};
         T local_max_condition = T{0};
         size_t local_failed = 0;
+        bool local_ws_error = false;
 
-        MANGO_PRAGMA_FOR_STATIC
-        for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
-            // Early exit if another thread hit a workspace error
-            if (workspace_error.load(std::memory_order_relaxed)) {
-                ++local_failed;
-                continue;
-            }
+        // Create workspace ONCE per thread (outside the loop)
+        // Object lifetimes are started here and remain valid for all iterations.
+        // The workspace's spans point into buffer.bytes() which is stable.
+        auto ws_result = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
+        if (!ws_result.has_value()) {
+            workspace_error.store(true, std::memory_order_relaxed);
+            local_ws_error = true;
+        }
 
-            // Recreate workspace view each iteration (cheap span slicing)
-            // This ensures no stale state from previous iterations
-            auto ws_result = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
-            if (!ws_result.has_value()) {
-                workspace_error.store(true, std::memory_order_relaxed);
-                ++local_failed;
-                continue;
-            }
+        // Only enter loop if workspace was created successfully
+        if (!local_ws_error) {
             auto& ws = ws_result.value();
 
-            // Extract slice
-            extract_slice<Axis>(coeffs, slice_idx, slice_buffer);
+            MANGO_PRAGMA_FOR_STATIC
+            for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
+                // Early exit if another thread hit a workspace error
+                if (workspace_error.load(std::memory_order_relaxed)) {
+                    break;  // Exit loop immediately, don't inflate failure count
+                }
 
-            // Fit with workspace (zero allocations)
-            // Note: solver is accessed via optional dereference (static dispatch)
-            auto result = solvers_[Axis]->fit_with_workspace(
-                slice_buffer, ws, BSplineCollocationConfig<T>{.tolerance = tolerance});
+                // Extract slice into per-thread buffer
+                extract_slice<Axis>(coeffs, slice_idx, slice_buffer);
 
-            if (result.has_value()) {
-                local_max_residual = std::max(local_max_residual, result->max_residual);
-                local_max_condition = std::max(local_max_condition, result->condition_estimate);
+                // Fit with workspace (zero allocations)
+                // Note: solver is accessed via optional dereference (static dispatch)
+                // Workspace spans are reused - solver overwrites them each iteration.
+                auto result = solvers_[Axis]->fit_with_workspace(
+                    slice_buffer, ws, BSplineCollocationConfig<T>{.tolerance = tolerance});
 
-                // Write coefficients back
-                write_slice<Axis>(coeffs, slice_idx, ws.coeffs());
-            } else {
-                ++local_failed;
+                if (result.has_value()) {
+                    local_max_residual = std::max(local_max_residual, result->max_residual);
+                    local_max_condition = std::max(local_max_condition, result->condition_estimate);
+
+                    // Write coefficients back
+                    write_slice<Axis>(coeffs, slice_idx, ws.coeffs());
+                } else {
+                    ++local_failed;
+                }
             }
         }
 
@@ -438,14 +460,15 @@ template<size_t Axis>
         }
     }
 
+    // Always write statistics (even on error, so callers see partial progress)
+    max_residuals[Axis] = global_max_residual;
+    conditions[Axis] = global_max_condition;
+    failed[Axis] = global_failed;
+
     // Return error if any workspace creation failed
     if (workspace_error.load()) {
         return std::unexpected(InterpolationError::AllocationFailed);
     }
-
-    max_residuals[Axis] = global_max_residual;
-    conditions[Axis] = global_max_condition;
-    failed[Axis] = global_failed;
 
     return {};  // Success
 }
@@ -682,33 +705,72 @@ Add missing OpenMP macros to `src/support/parallel.hpp`:
 #endif
 ```
 
-### Phase 1: Add ThreadWorkspaceBuffer (P0)
-1. Create `src/support/thread_workspace.hpp`
-2. Add unit tests for:
-   - Basic allocation and span access
-   - Fallback to synchronized pool when exhausted
-   - Thread safety under OpenMP parallel regions
-   - Per-thread reuse across multiple iterations without reallocation
-   - Span stability (bytes() returns same pointer throughout lifetime)
+### Phase 0: Parallel Primitives (P0)
 
-**Note on american_option_batch.cpp:**
-The existing PMR pattern in `american_option_batch.cpp` already works correctly. Migrating it to
-ThreadWorkspaceBuffer would require adding `PDEWorkspace::from_bytes()`, which is **out of scope**
-for this design. The priority is BSplineCollocationWorkspace where the allocation count is 24,000
-vs. american_option_batch where it's just N (number of options in batch).
+Land the foundational components that all subsequent phases depend on:
 
-**Decision:** Leave american_option_batch.cpp unchanged in Phase 1. The existing code works and
-has acceptable performance. A future design doc can address PDEWorkspace::from_bytes() if needed.
+1. **ThreadWorkspaceBuffer** (`src/support/thread_workspace.hpp`)
+   - Non-templated RAII byte buffer with PMR fallback
+   - Unit tests for allocation, fallback, thread safety, span stability
 
-### Phase 2: Add BSplineCollocationWorkspace (P0)
-1. Create `src/math/bspline_collocation_workspace.hpp`
-2. Add `fit_with_workspace()` to `BSplineCollocation1D`
-3. Modify `BSplineNDSeparable` to:
+2. **Lifetime helpers** (`src/support/lifetime.hpp` or inline in thread_workspace.hpp)
+   - `start_array_lifetime<T>(void*, size_t)` with C++23/fallback paths
+   - Alignment utilities (`block_alignment<T>`, etc.)
+
+3. **OpenMP macros** (`src/support/parallel.hpp`)
+   - `MANGO_PRAGMA_CRITICAL` for thread-safe reductions
+
+### Phase 1: B-Spline Collocation (P0)
+
+Migrate the primary allocation hotspot (24,000 → N allocations):
+
+1. **BSplineCollocationWorkspace<T>** (`src/math/bspline_collocation_workspace.hpp`)
+   - `required_bytes(n)` static method
+   - `from_bytes(span<byte>, n)` factory returning `std::expected`
+   - Typed spans for coeffs, matrix, LU workspace
+
+2. **BSplineCollocation1D** updates
+   - Add `fit_with_workspace(span<const T>, BSplineCollocationWorkspace<T>&)`
+   - Keep existing `fit()` and `fit_with_buffer()` for backward compatibility
+
+3. **BSplineNDSeparable** updates
    - Use ThreadWorkspaceBuffer for per-thread workspace
    - Parallelize slice iteration with `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC`
-   - Use thread-local statistics with critical section reduction
+   - Thread-local statistics with critical section reduction
 
-### Phase 3: Optional Consolidation (P2)
+### Phase 2: American Batch PDE Workspace (P1)
+
+Add byte-buffer interface to existing PDE workspace:
+
+1. **AmericanPDEWorkspace** (new or extend `PDEWorkspace`)
+   - `required_bytes(grid_spec)` static method
+   - `from_bytes(span<byte>, grid_spec)` factory
+   - Owns Grid, solution vectors, LU workspace as typed spans over byte buffer
+
+2. **Unit tests**
+   - Verify workspace correctly slices byte buffer
+   - Compare results against existing PDEWorkspace::create()
+
+### Phase 3: American Batch Solver Refactor (P1)
+
+Migrate `american_option_batch.cpp` to use the new workspace:
+
+1. **Replace per-thread PMR pools** with ThreadWorkspaceBuffer
+   - Currently: `std::pmr::synchronized_pool_resource` per thread
+   - After: `ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(grid_spec))`
+
+2. **Use AmericanPDEWorkspace::from_bytes()**
+   - Create workspace once per thread (outside loop)
+   - Reuse across all options in batch
+
+3. **Verify correctness**
+   - Compare batch results before/after refactor
+   - Benchmark allocation reduction (N pools → N buffers, but simpler allocation pattern)
+
+### Phase 4: Optional Consumers (P2)
+
+Lower-priority migrations for completeness:
+
 1. **IVSolverFDM** (optional): Replace thread_local cache with ThreadWorkspaceBuffer
 2. **PriceTableBuilder/Extraction** (optional): Add CubicSpline workspace API
 3. **AlignedArena**: Keep for PriceTensor (SIMD alignment at base address may be needed)
