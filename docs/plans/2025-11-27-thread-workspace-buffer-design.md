@@ -35,9 +35,14 @@ For a 4D price table with dimensions (20, 10, 20, 10):
 
 ## Design
 
-### 1. ThreadWorkspaceBuffer<T>
+### 1. ThreadWorkspaceBuffer (Byte-Based)
 
-A lightweight RAII wrapper for per-thread PMR buffers with automatic fallback.
+A lightweight RAII wrapper for per-thread raw byte storage with automatic fallback.
+
+**Key design decisions:**
+- Uses `std::byte` storage to avoid strict-aliasing issues when slicing into typed spans
+- No `release()` method - buffer is allocated once and reused across iterations
+- Workspace consumers create typed views via placement or `std::start_lifetime_as`
 
 ```cpp
 // src/support/thread_workspace.hpp
@@ -47,6 +52,7 @@ A lightweight RAII wrapper for per-thread PMR buffers with automatic fallback.
 #include <memory_resource>
 #include <span>
 #include <vector>
+#include <cstddef>
 
 namespace mango {
 
@@ -56,45 +62,39 @@ namespace mango {
 /// Fallback: thread-local synchronized_pool_resource (if exhausted)
 ///
 /// Design principles:
-/// - Buffer provides raw storage only
-/// - Workspace consumers handle alignment via padding (like PDEWorkspace)
-/// - Fallback is transparent - resize beyond capacity just works
+/// - Buffer provides raw byte storage (std::byte)
+/// - Workspace consumers handle alignment and typed access
+/// - Buffer is allocated once per thread, reused across iterations
+/// - No release() - memory stays valid for parallel region lifetime
 ///
 /// Example:
 ///   MANGO_PRAGMA_PARALLEL
 ///   {
-///       ThreadWorkspaceBuffer buffer(expected_size);
-///       auto ws = MyWorkspace::from_buffer(buffer.span(), n);
+///       ThreadWorkspaceBuffer buffer(required_bytes);
+///       auto ws = MyWorkspace::from_bytes(buffer.bytes(), n);
 ///
 ///       MANGO_PRAGMA_FOR_STATIC
 ///       for (size_t i = 0; i < count; ++i) {
-///           // Use ws - zero allocations
+///           // Use ws - same memory each iteration, zero allocations
 ///       }
 ///   }
 ///
-template<typename T = double>
 class ThreadWorkspaceBuffer {
 public:
-    /// Construct with expected element count
-    explicit ThreadWorkspaceBuffer(size_t element_count)
-        : primary_pool_(element_count * sizeof(T), get_fallback_resource())
+    /// Construct with expected byte count
+    explicit ThreadWorkspaceBuffer(size_t byte_count)
+        : primary_pool_(byte_count, get_fallback_resource())
         , buffer_(&primary_pool_)
     {
-        buffer_.resize(element_count);
+        buffer_.resize(byte_count);
     }
 
-    /// Get span view of buffer
-    std::span<T> span() noexcept { return buffer_; }
-    std::span<const T> span() const noexcept { return buffer_; }
+    /// Get byte span view of buffer (stable for lifetime of object)
+    std::span<std::byte> bytes() noexcept { return buffer_; }
+    std::span<const std::byte> bytes() const noexcept { return buffer_; }
 
     /// Resize buffer - uses fallback if exceeds initial capacity
-    void resize(size_t count) { buffer_.resize(count); }
-
-    /// Release for reuse (resets monotonic offset)
-    void release() {
-        primary_pool_.release();
-        buffer_.clear();
-    }
+    void resize(size_t byte_count) { buffer_.resize(byte_count); }
 
     size_t size() const noexcept { return buffer_.size(); }
 
@@ -106,15 +106,28 @@ private:
     }
 
     std::pmr::monotonic_buffer_resource primary_pool_;
-    std::pmr::vector<T> buffer_;
+    std::pmr::vector<std::byte> buffer_;
 };
 
 } // namespace mango
 ```
 
+**Why no release():**
+The original design called `release()` per iteration, which would invalidate the vector's internal pointers (use-after-free). Instead:
+- Buffer is allocated once at parallel region start
+- Same memory is reused across all iterations
+- Workspace `from_bytes()` just creates typed views into stable storage
+- Memory is freed when ThreadWorkspaceBuffer destructor runs at parallel region end
+
 ### 2. BSplineCollocationWorkspace<T>
 
-Workspace that slices a buffer into properly-aligned spans for B-spline collocation.
+Workspace that slices a byte buffer into properly-aligned typed spans for B-spline collocation.
+
+**Key design decisions:**
+- Takes `std::span<std::byte>` input to avoid type aliasing issues
+- Uses `std::start_lifetime_as_array` (C++23) or placement new for typed access
+- Separate storage for `int` pivots (not aliased through `T*`)
+- Alignment via padding to 64-byte boundaries
 
 ```cpp
 // src/math/bspline_collocation_workspace.hpp
@@ -125,43 +138,60 @@ Workspace that slices a buffer into properly-aligned spans for B-spline collocat
 #include <expected>
 #include <string>
 #include <cstddef>
+#include <new>  // for std::launder, placement new
 
 namespace mango {
 
 /// Workspace for B-spline collocation solver
 ///
-/// Slices external buffer into named spans with SIMD-safe padding.
-/// Alignment is handled by padding, not buffer base address.
+/// Slices external BYTE buffer into typed spans with proper alignment.
+/// Uses placement new to start object lifetimes (avoids strict-aliasing UB).
 ///
 /// Required arrays for bandwidth=4 (cubic B-splines):
 /// - band_storage: 10n doubles (LAPACK banded format: ldab=10)
 /// - lapack_storage: 10n doubles (LU factorization copy)
-/// - pivots: n integers (pivot indices)
+/// - pivots: n integers (pivot indices) - separate int storage
 /// - coeffs: n doubles (result buffer)
 ///
 template<typename T>
 struct BSplineCollocationWorkspace {
-    static constexpr size_t SIMD_WIDTH = 8;
+    static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
     static constexpr size_t BANDWIDTH = 4;
     static constexpr size_t LDAB = 10;  // 2*kl + ku + 1 for bandwidth=4
 
-    static constexpr size_t pad_to_simd(size_t n) {
-        return ((n + SIMD_WIDTH - 1) / SIMD_WIDTH) * SIMD_WIDTH;
+    /// Align byte offset to specified alignment
+    static constexpr size_t align_up(size_t offset, size_t alignment) {
+        return (offset + alignment - 1) & ~(alignment - 1);
     }
 
-    /// Calculate required buffer size in elements of type T
-    static size_t required_size(size_t n) {
-        size_t ldab_n = pad_to_simd(LDAB * n);      // band_storage
-        size_t lapack = pad_to_simd(LDAB * n);      // lapack_storage
-        size_t pivots_as_T = pad_to_simd((n * sizeof(int) + sizeof(T) - 1) / sizeof(T));
-        size_t coeffs = pad_to_simd(n);
-        return ldab_n + lapack + pivots_as_T + coeffs;
+    /// Calculate required buffer size in BYTES
+    static size_t required_bytes(size_t n) {
+        size_t offset = 0;
+
+        // band_storage: 10n × sizeof(T), aligned
+        offset = align_up(offset, alignof(T));
+        offset += LDAB * n * sizeof(T);
+
+        // lapack_storage: 10n × sizeof(T), aligned
+        offset = align_up(offset, alignof(T));
+        offset += LDAB * n * sizeof(T);
+
+        // pivots: n × sizeof(int), aligned
+        offset = align_up(offset, alignof(int));
+        offset += n * sizeof(int);
+
+        // coeffs: n × sizeof(T), aligned
+        offset = align_up(offset, alignof(T));
+        offset += n * sizeof(T);
+
+        // Final alignment for SIMD
+        return align_up(offset, ALIGNMENT);
     }
 
-    /// Create workspace from external buffer
+    /// Create workspace from external BYTE buffer
     static std::expected<BSplineCollocationWorkspace, std::string>
-    from_buffer(std::span<T> buffer, size_t n) {
-        size_t required = required_size(n);
+    from_bytes(std::span<std::byte> buffer, size_t n) {
+        size_t required = required_bytes(n);
         if (buffer.size() < required) {
             return std::unexpected("Buffer too small for BSplineCollocationWorkspace");
         }
@@ -169,32 +199,40 @@ struct BSplineCollocationWorkspace {
         BSplineCollocationWorkspace ws;
         ws.n_ = n;
 
+        std::byte* ptr = buffer.data();
         size_t offset = 0;
-        size_t ldab_n = pad_to_simd(LDAB * n);
-        size_t pivots_as_T = pad_to_simd((n * sizeof(int) + sizeof(T) - 1) / sizeof(T));
-        size_t coeffs_n = pad_to_simd(n);
 
-        ws.band_storage_ = buffer.subspan(offset, ldab_n);
-        offset += ldab_n;
+        // band_storage
+        offset = align_up(offset, alignof(T));
+        ws.band_storage_ = std::span<T>(
+            std::launder(reinterpret_cast<T*>(ptr + offset)), LDAB * n);
+        offset += LDAB * n * sizeof(T);
 
-        ws.lapack_storage_ = buffer.subspan(offset, ldab_n);
-        offset += ldab_n;
+        // lapack_storage
+        offset = align_up(offset, alignof(T));
+        ws.lapack_storage_ = std::span<T>(
+            std::launder(reinterpret_cast<T*>(ptr + offset)), LDAB * n);
+        offset += LDAB * n * sizeof(T);
 
-        ws.pivots_storage_ = buffer.subspan(offset, pivots_as_T);
-        offset += pivots_as_T;
+        // pivots (int, NOT T)
+        offset = align_up(offset, alignof(int));
+        ws.pivots_ = std::span<int>(
+            std::launder(reinterpret_cast<int*>(ptr + offset)), n);
+        offset += n * sizeof(int);
 
-        ws.coeffs_ = buffer.subspan(offset, coeffs_n);
+        // coeffs
+        offset = align_up(offset, alignof(T));
+        ws.coeffs_ = std::span<T>(
+            std::launder(reinterpret_cast<T*>(ptr + offset)), n);
 
         return ws;
     }
 
-    // Accessors - return logical size spans
-    std::span<T> band_storage() { return band_storage_.subspan(0, LDAB * n_); }
-    std::span<T> lapack_storage() { return lapack_storage_.subspan(0, LDAB * n_); }
-    std::span<int> pivots() {
-        return std::span<int>(reinterpret_cast<int*>(pivots_storage_.data()), n_);
-    }
-    std::span<T> coeffs() { return coeffs_.subspan(0, n_); }
+    // Accessors - return typed spans (lifetime started by from_bytes)
+    std::span<T> band_storage() { return band_storage_; }
+    std::span<T> lapack_storage() { return lapack_storage_; }
+    std::span<int> pivots() { return pivots_; }  // Properly typed int span
+    std::span<T> coeffs() { return coeffs_; }
 
     size_t size() const { return n_; }
 
@@ -202,12 +240,18 @@ private:
     size_t n_ = 0;
     std::span<T> band_storage_;
     std::span<T> lapack_storage_;
-    std::span<T> pivots_storage_;
+    std::span<int> pivots_;  // int, not T
     std::span<T> coeffs_;
 };
 
 } // namespace mango
 ```
+
+**Strict-aliasing compliance:**
+- `std::byte*` can alias any type (like `char*`)
+- `std::launder` ensures the compiler recognizes the new object lifetime
+- In C++23, can use `std::start_lifetime_as_array<T>(ptr, n)` instead
+- Pivots are stored as `int` directly, not cast through `T`
 
 ### 3. Modified BSplineCollocation1D
 
@@ -243,7 +287,7 @@ void fit_axis(
     std::array<size_t, N>& failed)
 {
     const size_t n_axis = dims_[Axis];
-    const size_t ws_size = BSplineCollocationWorkspace<T>::required_size(n_axis);
+    const size_t ws_bytes = BSplineCollocationWorkspace<T>::required_bytes(n_axis);
     const size_t n_slices = compute_n_slices<Axis>();
 
     // Thread-safe statistics
@@ -253,11 +297,11 @@ void fit_axis(
 
     MANGO_PRAGMA_PARALLEL
     {
-        // Per-thread workspace buffer
-        ThreadWorkspaceBuffer<T> buffer(ws_size);
-        auto ws = BSplineCollocationWorkspace<T>::from_buffer(buffer.span(), n_axis).value();
+        // Per-thread workspace buffer (bytes, not T)
+        ThreadWorkspaceBuffer buffer(ws_bytes);
+        auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis).value();
 
-        // Per-thread slice buffers
+        // Per-thread slice buffer
         std::vector<T> slice_buffer(n_axis);
 
         // Thread-local statistics
@@ -271,6 +315,7 @@ void fit_axis(
             extract_slice<Axis>(coeffs, slice_idx, slice_buffer);
 
             // Fit with workspace (zero allocations)
+            // Note: solver is accessed via optional dereference (static dispatch)
             auto result = solvers_[Axis]->fit_with_workspace(
                 slice_buffer, ws, BSplineCollocationConfig<T>{.tolerance = tolerance});
 
@@ -306,24 +351,49 @@ Use **static dispatch** for all hot-path function calls to enable inlining and a
 
 ### BSplineNDSeparable Solver Storage
 
+**Problem:** `BSplineCollocation1D<T>` is not default-constructible. It's produced via a factory method that returns `std::expected<BSplineCollocation1D<T>, InterpolationError>` because construction can fail (e.g., insufficient points for spline degree).
+
+**Solution:** Use `std::optional` for deferred initialization:
+
 ```cpp
+// WRONG: Assumes default-constructible (compile error)
+std::array<BSplineCollocation1D<T>, N> solvers_;
+
 // WRONG: Dynamic dispatch via pointer (blocks inlining)
 std::array<std::unique_ptr<BSplineCollocation1D<T>>, N> solvers_;
 solvers_[Axis]->fit_with_workspace(...)  // vtable lookup
 
-// CORRECT: Static dispatch via direct member
-std::array<BSplineCollocation1D<T>, N> solvers_;
-solvers_[Axis].fit_with_workspace(...)  // direct call, inlinable
+// CORRECT: Deferred initialization with static dispatch
+std::array<std::optional<BSplineCollocation1D<T>>, N> solvers_;
+
+// Initialization (in constructor or build phase):
+for (size_t axis = 0; axis < N; ++axis) {
+    auto result = BSplineCollocation1D<T>::create(knots[axis], degree);
+    if (result.has_value()) {
+        solvers_[axis].emplace(std::move(result.value()));
+    } else {
+        return std::unexpected(result.error());  // Propagate failure
+    }
+}
+
+// Usage (in hot path):
+solvers_[Axis]->fit_with_workspace(...)  // direct call through optional, inlinable
 ```
+
+**Why `std::optional` enables static dispatch:**
+- `std::optional<T>` stores `T` inline (no heap allocation)
+- `operator->()` and `operator*()` return direct references (no vtable)
+- Compiler can see through `optional` and inline the underlying call
+- Cost: one byte for engaged flag + padding
 
 ### Why Static Dispatch
 
-| Aspect | Dynamic (pointer) | Static (direct) |
-|--------|-------------------|-----------------|
+| Aspect | Dynamic (unique_ptr) | Static (optional) |
+|--------|----------------------|-------------------|
+| Storage | Heap pointer | Inline + 1 byte flag |
 | Vtable lookup | ~3 cycles/call | 0 |
 | Inlining | Blocked | Enabled |
 | Per-fit overhead | 24k × 3 = 72k cycles | 0 |
-| Code size | Smaller (one copy) | May increase (inlined) |
 
 For 24,000 fits in a 4D price table, static dispatch eliminates ~72k cycles of overhead and enables the compiler to inline small functions like coefficient access.
 
@@ -337,28 +407,39 @@ void fit_axis(...) {
     // Axis is constexpr - compiler generates specialized code per axis
     const size_t n_axis = dims_[Axis];  // constant-folded if dims_ is constexpr
 
-    // Static dispatch to correct solver
-    auto& solver = solvers_[Axis];  // no runtime indexing if Axis is constexpr
-    solver.fit_with_workspace(...);  // direct call
+    // Static dispatch to correct solver (optional dereference inlined)
+    auto& solver = *solvers_[Axis];  // Direct access, no runtime indexing
+    solver.fit_with_workspace(...);  // direct call, inlinable
 }
 ```
+
+**Note:** The `*solvers_[Axis]` dereference is safe because:
+1. Construction validates all solvers are created successfully
+2. The class invariant guarantees all optionals are engaged after construction
+3. If construction fails, the builder returns an error before reaching `fit_axis`
 
 ## Memory Layout
 
 ```
-ThreadWorkspaceBuffer (raw storage):
+ThreadWorkspaceBuffer (std::byte storage):
 ┌─────────────────────────────────────────────────────────────┐
-│ [............................................................] │
+│ [std::byte..................................................] │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
-BSplineCollocationWorkspace::from_buffer() slices with padding:
+BSplineCollocationWorkspace::from_bytes() slices with padding:
 ┌────────────┬───┬────────────┬───┬──────────┬───┬──────────┬───┐
 │ band_stor. │pad│ lapack_st. │pad│ pivots   │pad│ coeffs   │pad│
-│ (10n)      │   │ (10n)      │   │ (n ints) │   │ (n)      │   │
+│ T[10n]     │   │ T[10n]     │   │ int[n]   │   │ T[n]     │   │
 └────────────┴───┴────────────┴───┴──────────┴───┴──────────┴───┘
-      64-byte aligned spans (via padding, not base address)
+      Typed views via std::launder (proper object lifetime)
 ```
+
+**Key points:**
+- Base storage is `std::byte` (can alias any type per standard)
+- `from_bytes()` uses `std::launder` to reinterpret as typed spans
+- Pivots are stored as `int[]` directly (not aliased through `T`)
+- Each segment aligned to `alignof(T)` or `alignof(int)` as appropriate
 
 ## Fallback Behavior
 
@@ -436,13 +517,13 @@ MANGO_PRAGMA_PARALLEL
 // New pattern (with ThreadWorkspaceBuffer):
 MANGO_PRAGMA_PARALLEL
 {
-    ThreadWorkspaceBuffer<double> buffer(workspace_size_elements);
+    ThreadWorkspaceBuffer buffer(workspace_size_bytes);
 
     MANGO_PRAGMA_FOR_STATIC
     for (size_t i = 0; i < params.size(); ++i) {
-        auto workspace = PDEWorkspace::from_buffer(buffer.span(), n);
+        auto workspace = PDEWorkspace::from_bytes(buffer.bytes(), n).value();
         // ... use workspace ...
-        buffer.release();  // Reset for next iteration
+        // No release() - same buffer reused each iteration
     }
 }
 ```
