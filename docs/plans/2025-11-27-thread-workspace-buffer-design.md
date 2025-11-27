@@ -2,7 +2,7 @@
 
 ## Overview
 
-Introduce `ThreadWorkspaceBuffer<T>` as a reusable per-thread memory buffer for parallel algorithms, and add workspace pooling to B-spline collocation to eliminate per-fit allocations.
+Introduce `ThreadWorkspaceBuffer` as a reusable per-thread raw byte buffer for parallel algorithms, and add `BSplineCollocationWorkspace<T>` for zero-allocation B-spline fitting.
 
 ## Problem Statement
 
@@ -141,15 +141,36 @@ Workspace that slices a byte buffer into properly-aligned typed spans for B-spli
 #include <expected>
 #include <string>
 #include <cstddef>
-#include <new>  // for std::start_lifetime_as_array (C++23)
+#include <algorithm>  // for std::max
+#include <memory>     // for std::start_lifetime_as_array (C++23) or fallback
 
 namespace mango {
+
+// C++23 feature detection and fallback
+// std::start_lifetime_as_array is P2590R2, available in GCC 14+, Clang 18+
+#ifdef __cpp_lib_start_lifetime_as
+    // C++23: Use standard library function
+    template<typename T>
+    T* start_array_lifetime(void* p, [[maybe_unused]] size_t n) {
+        return std::start_lifetime_as_array<T>(p, n);
+    }
+#else
+    // Fallback: Use placement new to start object lifetime
+    // This is slightly less efficient but portable to C++20/23 compilers
+    // without P2590R2 support.
+    template<typename T>
+    T* start_array_lifetime(void* p, size_t n) {
+        // For trivially-constructible types (like double, int), this is a no-op
+        // but satisfies the object lifetime rules.
+        return std::uninitialized_default_construct_n(static_cast<T*>(p), n);
+    }
+#endif
 
 /// Workspace for B-spline collocation solver
 ///
 /// Slices external BYTE buffer into typed spans with proper alignment.
-/// Uses std::start_lifetime_as_array (C++23) to start object lifetimes,
-/// avoiding strict-aliasing UB.
+/// Uses std::start_lifetime_as_array (C++23) or fallback to start object
+/// lifetimes, avoiding strict-aliasing UB.
 ///
 /// Required arrays for bandwidth=4 (cubic B-splines):
 /// - band_storage: 10n doubles (LAPACK banded format: ldab=10)
@@ -219,25 +240,25 @@ struct BSplineCollocationWorkspace {
         // band_storage - start lifetime of T[LDAB*n]
         offset = align_up(offset, block_alignment_T);
         ws.band_storage_ = std::span<T>(
-            std::start_lifetime_as_array<T>(ptr + offset, LDAB * n), LDAB * n);
+            start_array_lifetime<T>(ptr + offset, LDAB * n), LDAB * n);
         offset += LDAB * n * sizeof(T);
 
         // lapack_storage - start lifetime of T[LDAB*n]
         offset = align_up(offset, block_alignment_T);
         ws.lapack_storage_ = std::span<T>(
-            std::start_lifetime_as_array<T>(ptr + offset, LDAB * n), LDAB * n);
+            start_array_lifetime<T>(ptr + offset, LDAB * n), LDAB * n);
         offset += LDAB * n * sizeof(T);
 
         // pivots - start lifetime of int[n]
         offset = align_up(offset, block_alignment_int);
         ws.pivots_ = std::span<int>(
-            std::start_lifetime_as_array<int>(ptr + offset, n), n);
+            start_array_lifetime<int>(ptr + offset, n), n);
         offset += n * sizeof(int);
 
         // coeffs - start lifetime of T[n]
         offset = align_up(offset, block_alignment_T);
         ws.coeffs_ = std::span<T>(
-            std::start_lifetime_as_array<T>(ptr + offset, n), n);
+            start_array_lifetime<T>(ptr + offset, n), n);
 
         return ws;
     }
@@ -288,6 +309,44 @@ fit_with_workspace(
 }
 ```
 
+### BSplineCollocation1D API Hierarchy
+
+The three `fit*` methods form a progression of allocation control:
+
+| Method | Allocates | User Provides | Use Case |
+|--------|-----------|---------------|----------|
+| `fit()` | BandedMatrix + BandedLUWorkspace + coeffs | Nothing | Simple single-fit API |
+| `fit_with_buffer()` | BandedMatrix + BandedLUWorkspace | coeffs span | Caller manages output only |
+| `fit_with_workspace()` | Nothing | BSplineCollocationWorkspace | Zero-allocation hot path |
+
+**Implementation relationship:**
+```cpp
+// fit() - highest level, allocates everything
+auto result = solver.fit(values, config);
+// Internally: creates BandedMatrix, BandedLUWorkspace, std::vector<T>
+
+// fit_with_buffer() - mid level, caller provides coeffs output
+std::vector<T> coeffs(n);
+auto result = solver.fit_with_buffer(values, coeffs, config);
+// Internally: creates BandedMatrix, BandedLUWorkspace; writes to coeffs
+
+// fit_with_workspace() - lowest level, zero allocations (NEW)
+auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n);
+auto result = solver.fit_with_workspace(values, ws.value(), config);
+// Internally: uses ws.band_storage(), ws.lapack_storage(), ws.pivots()
+// Writes coefficients to ws.coeffs()
+```
+
+**Migration guidance:**
+- **Keep `fit()`** for simple single-option use cases
+- **Keep `fit_with_buffer()`** for compatibility (deprecation NOT recommended)
+- **Use `fit_with_workspace()`** in parallel hot paths (e.g., BSplineNDSeparable)
+
+**Why not deprecate `fit_with_buffer()`?**
+1. Lower barrier to entry—user only needs to allocate coefficients, not understand workspace layout
+2. Adequate for moderate parallelism where workspace overhead is acceptable
+3. Existing callers shouldn't be forced to migrate
+
 ### 4. Modified BSplineNDSeparable
 
 Use ThreadWorkspaceBuffer and parallelize slice iteration.
@@ -310,20 +369,13 @@ void fit_axis(
     T global_max_condition = T{0};
     size_t global_failed = 0;
 
-    // Track workspace creation errors (one per thread, reduced at end)
-    bool workspace_error = false;
+    // Track workspace creation errors (atomic for thread safety)
+    std::atomic<bool> workspace_error{false};
 
     MANGO_PRAGMA_PARALLEL
     {
         // Per-thread workspace buffer (bytes, not T)
         ThreadWorkspaceBuffer buffer(ws_bytes);
-
-        // Create workspace - validate before entering loop
-        auto ws_result = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
-        if (!ws_result.has_value()) {
-            // Mark error for this thread - will be handled after parallel region
-            workspace_error = true;
-        }
 
         // Per-thread slice buffer
         std::vector<T> slice_buffer(n_axis);
@@ -335,8 +387,17 @@ void fit_axis(
 
         MANGO_PRAGMA_FOR_STATIC
         for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
-            // Skip if workspace creation failed
+            // Early exit if another thread hit a workspace error
+            if (workspace_error.load(std::memory_order_relaxed)) {
+                ++local_failed;
+                continue;
+            }
+
+            // Recreate workspace view each iteration (cheap span slicing)
+            // This ensures no stale state from previous iterations
+            auto ws_result = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
             if (!ws_result.has_value()) {
+                workspace_error.store(true, std::memory_order_relaxed);
                 ++local_failed;
                 continue;
             }
@@ -370,10 +431,9 @@ void fit_axis(
         }
     }
 
-    // Check for workspace creation errors after parallel region
-    if (workspace_error) {
-        // Handle error - could return std::unexpected or throw
-        // For now, the failed count captures this
+    // Return error if any workspace creation failed
+    if (workspace_error.load()) {
+        return std::unexpected(InterpolationError::AllocationFailed);
     }
 
     max_residuals[Axis] = global_max_residual;
@@ -555,27 +615,52 @@ MANGO_PRAGMA_PARALLEL
 }
 
 // New pattern (with ThreadWorkspaceBuffer):
-// NOTE: PDEWorkspace currently uses typed std::span<double> from_buffer().
-// To migrate, either:
-// (a) Add PDEWorkspace::from_bytes() with std::start_lifetime_as_array, OR
-// (b) Keep existing typed span API and use ThreadWorkspaceBuffer<double>
+// PDEWorkspace uses typed std::span<double> from_buffer(). Two migration options:
 //
-// Option (b) preserves existing code and avoids C++23 lifetime complexity:
+// OPTION A: Add PDEWorkspace::from_bytes() (recommended for new code)
+// - Requires adding start_array_lifetime<double>() calls
+// - Full byte-buffer integration
+//
+// OPTION B: Keep existing typed span API (minimal changes)
+// - PDEWorkspace::from_buffer() unchanged
+// - ThreadWorkspaceBuffer provides the bytes, caller creates typed view
+
+// OPTION A - Full byte-buffer integration (requires PDEWorkspace changes):
 MANGO_PRAGMA_PARALLEL
 {
-    // Use existing typed-span API with pmr::vector<double>
-    std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes,
-        []() -> std::pmr::memory_resource* {
-            thread_local std::pmr::synchronized_pool_resource pool;
-            return &pool;
-        }());
+    ThreadWorkspaceBuffer buffer(PDEWorkspace::required_bytes(n));
+
+    MANGO_PRAGMA_FOR_STATIC
+    for (size_t i = 0; i < params.size(); ++i) {
+        // Recreate workspace view each iteration (cheap span slicing)
+        auto ws_result = PDEWorkspace::from_bytes(buffer.bytes(), n);
+        if (!ws_result.has_value()) continue;  // Handle error
+        auto& workspace = ws_result.value();
+        // ... use workspace ...
+    }
+}
+
+// OPTION B - Minimal changes (use existing from_buffer API):
+// PDEWorkspace::from_buffer() already takes std::span<double>.
+// We just need to provide a stable typed buffer with fallback.
+MANGO_PRAGMA_PARALLEL
+{
+    // Thread-local fallback for overflow
+    auto get_fallback = []() -> std::pmr::memory_resource* {
+        thread_local std::pmr::synchronized_pool_resource pool;
+        return &pool;
+    };
+
+    std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes, get_fallback());
     std::pmr::vector<double> thread_buffer(&thread_pool);
     thread_buffer.resize(workspace_size_elements);
 
     MANGO_PRAGMA_FOR_STATIC
     for (size_t i = 0; i < params.size(); ++i) {
-        auto workspace = PDEWorkspace::from_buffer(
-            std::span(thread_buffer), n).value();
+        // Recreate workspace view each iteration (cheap span slicing)
+        auto ws_result = PDEWorkspace::from_buffer(std::span(thread_buffer), n);
+        if (!ws_result.has_value()) continue;  // Handle error
+        auto& workspace = ws_result.value();
         // ... use workspace ...
         // No release() - same buffer reused each iteration
     }
