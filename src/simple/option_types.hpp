@@ -5,14 +5,19 @@
 
 #pragma once
 
+#include "src/option/option_spec.hpp"  // For mango::OptionType
 #include "src/simple/price.hpp"
 #include "src/simple/timestamp.hpp"
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
 namespace mango::simple {
+
+// Re-export OptionType for convenience
+using mango::OptionType;
 
 /// Option settlement type
 enum class Settlement {
@@ -25,6 +30,7 @@ enum class Settlement {
 /// All price/volume fields are optional since data sources
 /// may not provide complete information.
 struct OptionLeg {
+    OptionType type;      // CALL or PUT - mandatory
     Price strike{0.0};
 
     // Price data - at least one should be present for IV calculation
@@ -68,8 +74,21 @@ struct OptionLeg {
 struct ExpirySlice {
     Timestamp expiry{""};
     std::optional<Settlement> settlement;
-    std::vector<OptionLeg> calls;
-    std::vector<OptionLeg> puts;
+    std::vector<OptionLeg> options;  // All options (calls and puts together)
+
+    /// Get filtered view of calls only
+    [[nodiscard]] auto calls() const {
+        return options | std::views::filter([](const OptionLeg& leg) {
+            return leg.type == OptionType::CALL;
+        });
+    }
+
+    /// Get filtered view of puts only
+    [[nodiscard]] auto puts() const {
+        return options | std::views::filter([](const OptionLeg& leg) {
+            return leg.type == OptionType::PUT;
+        });
+    }
 };
 
 }  // namespace mango::simple

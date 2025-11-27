@@ -36,14 +36,7 @@ std::optional<double> VolatilitySurface::iv_at(double strike, double tau) const 
     std::optional<double> best_iv;
     double best_dist = std::numeric_limits<double>::max();
 
-    for (const auto& pt : smile.calls) {
-        double dist = std::abs(pt.moneyness - moneyness);
-        if (dist < best_dist && pt.iv_mid) {
-            best_dist = dist;
-            best_iv = pt.iv_mid;
-        }
-    }
-    for (const auto& pt : smile.puts) {
+    for (const auto& pt : smile.points) {
         double dist = std::abs(pt.moneyness - moneyness);
         if (dist < best_dist && pt.iv_mid) {
             best_dist = dist;
@@ -105,8 +98,8 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
 
         if (smile.tau <= 0) continue;  // Skip expired options
 
-        // Process calls
-        for (const auto& leg : slice.calls) {
+        // Process all options
+        for (const auto& leg : slice.options) {
             auto price_opt = (price_source == PriceSource::Mid) ? leg.mid() :
                              (price_source == PriceSource::Bid) ? leg.bid :
                              (price_source == PriceSource::Ask) ? leg.ask :
@@ -118,6 +111,7 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
             double market_price = price_opt->to_double();
 
             VolatilitySmile::Point pt;
+            pt.type = leg.type;
             pt.strike = leg.strike;
             pt.moneyness = std::log(strike / spot);
 
@@ -127,7 +121,7 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
             query.maturity = smile.tau;
             query.rate = rate;
             query.dividend_yield = div_yield;
-            query.type = mango::OptionType::CALL;
+            query.type = leg.type;
             query.market_price = market_price;
 
             if (solver) {
@@ -139,47 +133,10 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
                 }
             }
 
-            smile.calls.push_back(pt);
+            smile.points.push_back(pt);
         }
 
-        // Process puts
-        for (const auto& leg : slice.puts) {
-            auto price_opt = (price_source == PriceSource::Mid) ? leg.mid() :
-                             (price_source == PriceSource::Bid) ? leg.bid :
-                             (price_source == PriceSource::Ask) ? leg.ask :
-                             leg.last;
-
-            if (!price_opt) continue;
-
-            double strike = leg.strike.to_double();
-            double market_price = price_opt->to_double();
-
-            VolatilitySmile::Point pt;
-            pt.strike = leg.strike;
-            pt.moneyness = std::log(strike / spot);
-
-            mango::IVQuery query;
-            query.spot = spot;
-            query.strike = strike;
-            query.maturity = smile.tau;
-            query.rate = rate;
-            query.dividend_yield = div_yield;
-            query.type = mango::OptionType::PUT;
-            query.market_price = market_price;
-
-            if (solver) {
-                auto result = solver->solve_impl(query);
-                if (result) {
-                    pt.iv_mid = result->implied_vol;
-                } else {
-                    ++failed_count;
-                }
-            }
-
-            smile.puts.push_back(pt);
-        }
-
-        if (!smile.calls.empty() || !smile.puts.empty()) {
+        if (!smile.points.empty()) {
             surface.smiles.push_back(std::move(smile));
         }
     }

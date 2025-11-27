@@ -50,6 +50,8 @@ TEST(ChainBuilderTest, AddOptions) {
         .build();
 
     EXPECT_EQ(chain.expiries.size(), 1);
-    EXPECT_EQ(chain.expiries[0].calls.size(), 1);
-    EXPECT_DOUBLE_EQ(chain.expiries[0].calls[0].strike.to_double(), 580.0);
+    EXPECT_EQ(chain.expiries[0].options.size(), 1);
+    EXPECT_EQ(std::ranges::distance(chain.expiries[0].calls()), 1);
+    EXPECT_EQ(chain.expiries[0].options[0].type, OptionType::CALL);
+    EXPECT_DOUBLE_EQ(chain.expiries[0].options[0].strike.to_double(), 580.0);
 }

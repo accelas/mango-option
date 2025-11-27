@@ -10,6 +10,7 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include <expected>
 #include <memory>
+#include <ranges>
 #include <vector>
 
 namespace mango::simple {
@@ -21,16 +22,30 @@ struct VolatilitySmile {
     Price spot{0.0};
 
     struct Point {
+        OptionType type;          // CALL or PUT
         Price strike{0.0};
-        double moneyness = 0.0;  // log(K/S)
+        double moneyness = 0.0;   // log(K/S)
         std::optional<double> iv_bid;
         std::optional<double> iv_ask;
         std::optional<double> iv_mid;
         std::optional<double> iv_last;
     };
 
-    std::vector<Point> calls;
-    std::vector<Point> puts;
+    std::vector<Point> points;  // All points (calls and puts together)
+
+    /// Get filtered view of calls only
+    [[nodiscard]] auto calls() const {
+        return points | std::views::filter([](const Point& pt) {
+            return pt.type == OptionType::CALL;
+        });
+    }
+
+    /// Get filtered view of puts only
+    [[nodiscard]] auto puts() const {
+        return points | std::views::filter([](const Point& pt) {
+            return pt.type == OptionType::PUT;
+        });
+    }
 };
 
 /// Complete volatility surface

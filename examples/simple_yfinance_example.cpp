@@ -6,6 +6,7 @@
 #include "src/simple/simple.hpp"
 #include <iostream>
 #include <iomanip>
+#include <ranges>
 
 using namespace mango::simple;
 
@@ -81,9 +82,9 @@ int main() {
         std::cout << "## Settlement: "
                   << (*expiry.settlement == Settlement::PM ? "PM" : "AM") << "\n\n";
 
-        std::cout << "### Calls (" << expiry.calls.size() << " strikes)\n";
+        std::cout << "### Calls (" << std::ranges::distance(expiry.calls()) << " strikes)\n";
         std::cout << "strike,bid,ask,last,volume,oi,moneyness\n";
-        for (const auto& call : expiry.calls) {
+        for (const auto& call : expiry.calls()) {
             double strike = call.strike.to_double();
             double moneyness = std::log(strike / chain.spot->to_double());
             std::cout << std::setprecision(2) << std::fixed << strike << ","
@@ -95,9 +96,9 @@ int main() {
                       << std::setprecision(6) << moneyness << "\n";
         }
 
-        std::cout << "\n### Puts (" << expiry.puts.size() << " strikes)\n";
+        std::cout << "\n### Puts (" << std::ranges::distance(expiry.puts()) << " strikes)\n";
         std::cout << "strike,bid,ask,last,volume,oi,moneyness\n";
-        for (const auto& put : expiry.puts) {
+        for (const auto& put : expiry.puts()) {
             double strike = put.strike.to_double();
             double moneyness = std::log(strike / chain.spot->to_double());
             std::cout << std::setprecision(2) << std::fixed << strike << ","
@@ -112,8 +113,8 @@ int main() {
 
     std::cout << "\nChain built successfully!\n";
     std::cout << "- Expiries: " << chain.expiries.size() << "\n";
-    std::cout << "- Total calls: " << chain.expiries[0].calls.size() << "\n";
-    std::cout << "- Total puts: " << chain.expiries[0].puts.size() << "\n";
+    std::cout << "- Total calls: " << std::ranges::distance(chain.expiries[0].calls()) << "\n";
+    std::cout << "- Total puts: " << std::ranges::distance(chain.expiries[0].puts()) << "\n";
     std::cout << "\nTo compute implied volatilities, provide an IVSolverInterpolated\n";
     std::cout << "with a precomputed price table to compute_vol_surface().\n";
 
