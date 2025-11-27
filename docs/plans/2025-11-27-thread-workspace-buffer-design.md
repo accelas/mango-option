@@ -171,8 +171,16 @@ namespace mango {
     // Fallback: Start object lifetime without C++23 facility
     // IMPORTANT: Even trivial types need explicit lifetime start per [basic.life].
     // We use std::construct_at which is guaranteed to begin object lifetime.
+    //
+    // CONSTRAINT: T must be trivially destructible because we never call destructors.
+    // The workspace's byte buffer outlives all typed views, and we rely on trivial
+    // destruction to avoid needing explicit cleanup. This is enforced at compile time.
     template<typename T>
     T* start_array_lifetime(void* p, size_t n) {
+        static_assert(std::is_trivially_destructible_v<T>,
+            "start_array_lifetime requires trivially destructible types because "
+            "no destructor is called when the workspace goes out of scope");
+
         // void* -> T* requires reinterpret_cast (static_cast is UB for unrelated types)
         auto* typed = reinterpret_cast<T*>(p);
         if constexpr (std::is_trivially_default_constructible_v<T>) {
@@ -624,15 +632,16 @@ Existing per-thread workspace patterns in the codebase.
 
 | File | Lines | Construct | Status |
 |------|-------|-----------|--------|
-| `american_option_batch.cpp` | 466-604 | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | **OUT OF SCOPE** - existing PMR pattern works, N allocations acceptable |
-| `bspline_nd_separable.hpp` | (new) | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | **PRIMARY TARGET** - 24,000 allocations → N allocations |
+| `american_option_batch.cpp` | 466-604 | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | **Phase 2-3** - migrate to AmericanPDEWorkspace |
+| `bspline_nd_separable.hpp` | (new) | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | **Phase 1 (PRIMARY)** - 24,000 allocations → N allocations |
 
-**american_option_batch.cpp (OUT OF SCOPE):**
+**american_option_batch.cpp (Phase 2-3):**
 
 The existing code uses per-thread `monotonic_buffer_resource` with `pmr::vector<double>`.
 This works correctly and has acceptable performance (N allocations where N = batch size).
-Migrating to ThreadWorkspaceBuffer would require adding `PDEWorkspace::from_bytes()`,
-which is not justified given the low allocation count.
+Phase 2 adds `AmericanPDEWorkspace::from_bytes()` to enable byte-buffer allocation.
+Phase 3 migrates the batch solver to use ThreadWorkspaceBuffer + AmericanPDEWorkspace,
+unifying the workspace pattern across both B-spline and PDE solving hot paths.
 
 **bspline_nd_separable.hpp (PRIMARY TARGET):**
 
@@ -648,11 +657,14 @@ MANGO_PRAGMA_PARALLEL
 {
     ThreadWorkspaceBuffer buffer(BSplineCollocationWorkspace<T>::required_bytes(n_axis));
 
+    // Create workspace ONCE per thread (starts object lifetimes)
+    auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis).value();
+
     MANGO_PRAGMA_FOR_STATIC
     for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
-        auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
-        // Zero allocations in hot path
-        solver.fit_with_workspace(slice_buffer, ws.value(), config);
+        // Reuse ws - solver overwrites spans each iteration.
+        // Zero allocations in hot path.
+        solver.fit_with_workspace(slice_buffer, ws, config);
     }
 }
 ```
@@ -682,11 +694,11 @@ Manual workspace caching that could be simplified with ThreadWorkspaceBuffer.
 
 | File | Pattern | Needs Migration | Priority |
 |------|---------|-----------------|----------|
-| `bspline_nd_separable.hpp` | New parallelization | **Yes** | P0 (primary target) |
-| `american_option_batch.cpp` | Per-thread workspace | No | - (existing PMR pattern works) |
-| `iv_solver_fdm.cpp` | Thread-local cache | Optional | P2 |
-| `price_table_builder.cpp` | Per-iteration alloc | Optional | P2 |
-| `price_table_extraction.cpp` | Per-iteration alloc | Optional | P2 |
+| `bspline_nd_separable.hpp` | New parallelization | **Yes** | P0 (Phase 1, primary) |
+| `american_option_batch.cpp` | Per-thread workspace | **Yes** | P1 (Phase 2-3) |
+| `iv_solver_fdm.cpp` | Thread-local cache | Optional | P2 (Phase 4) |
+| `price_table_builder.cpp` | Per-iteration alloc | Optional | P2 (Phase 4) |
+| `price_table_extraction.cpp` | Per-iteration alloc | Optional | P2 (Phase 4) |
 | `iv_solver_interpolated.cpp` | Simple parallel | No | - |
 | `american_pde_solver.hpp` | SIMD only | No | - |
 
