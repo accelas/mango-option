@@ -55,15 +55,22 @@ async def fetch_option_chain(symbol: str) -> dict:
             if not expirations:
                 return {"error": f"No options available for {symbol}"}
 
+            import time
+
             chains: dict[str, dict] = {}
-            for expiry in expirations:
+            # Limit to first 15 expirations for reasonable response time
+            for i, expiry in enumerate(expirations[:15]):
                 try:
                     opt = ticker.option_chain(expiry)
                     chains[expiry] = {
                         "calls": _process_options(opt.calls, expiry),
                         "puts": _process_options(opt.puts, expiry),
                     }
-                except Exception:
+                    # Rate limit to avoid yfinance throttling
+                    if i < len(expirations) - 1:
+                        time.sleep(0.1)
+                except Exception as e:
+                    print(f"Warning: Failed to fetch {expiry}: {e}")
                     continue  # Skip problematic expirations
 
             if not chains:
@@ -91,22 +98,45 @@ def _process_options(df: pd.DataFrame, expiry: str) -> list[dict]:
     """Process options DataFrame to list of dicts."""
     options = []
     for _, row in df.iterrows():
-        bid = row.get("bid", 0) or 0
-        ask = row.get("ask", 0) or 0
+        bid = row.get("bid", 0)
+        ask = row.get("ask", 0)
+
+        # Handle NaN values
+        if pd.isna(bid):
+            bid = 0
+        if pd.isna(ask):
+            ask = 0
 
         # Skip options with no market
         if bid <= 0 and ask <= 0:
             continue
 
+        # Safe extraction with NaN handling
+        def safe_float(val, default=0.0):
+            if pd.isna(val):
+                return default
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return default
+
+        def safe_int(val, default=0):
+            if pd.isna(val):
+                return default
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return default
+
         options.append(
             {
-                "strike": float(row["strike"]),
-                "bid": float(bid),
-                "ask": float(ask),
-                "last": float(row.get("lastPrice", 0) or 0),
-                "volume": int(row.get("volume", 0) or 0),
-                "open_interest": int(row.get("openInterest", 0) or 0),
-                "implied_vol": float(row.get("impliedVolatility", 0) or 0),
+                "strike": safe_float(row["strike"]),
+                "bid": safe_float(bid),
+                "ask": safe_float(ask),
+                "last": safe_float(row.get("lastPrice", 0)),
+                "volume": safe_int(row.get("volume", 0)),
+                "open_interest": safe_int(row.get("openInterest", 0)),
+                "implied_vol": safe_float(row.get("impliedVolatility", 0)),
                 "expiry": expiry,
             }
         )

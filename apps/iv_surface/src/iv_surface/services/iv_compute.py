@@ -109,6 +109,9 @@ def compute_iv_surface(
     # Compute moneyness for better visualization
     moneyness = [s / spot for s in strikes]
 
+    # Convert maturities to days for display
+    maturities_days = [int(round(tau * 365)) for tau in maturities]
+
     return {
         "symbol": chain_data["symbol"],
         "spot": spot,
@@ -120,7 +123,8 @@ def compute_iv_surface(
         "surface": {
             "strikes": strikes,
             "moneyness": moneyness,
-            "maturities": maturities,
+            "maturities": maturities,  # Keep years for computation
+            "maturities_days": maturities_days,  # Days for display
             "ivs": ivs,
             "prices": prices,
         },

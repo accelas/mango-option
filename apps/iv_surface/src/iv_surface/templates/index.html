@@ -139,6 +139,69 @@
                                    text-slate-400 hover:text-white hover:bg-slate-700 whitespace-nowrap">
                         Vol Analysis
                     </button>
+                    <!-- Surface controls - only visible when surface tab active -->
+                    <div id="surface-controls" class="hidden ml-auto flex items-center gap-3 flex-wrap">
+                        <!-- Option type toggle -->
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-slate-500 uppercase">Type:</span>
+                            <button onclick="toggleOptionType('put')" id="btn-put"
+                                    class="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-red-600 text-white">
+                                Puts
+                            </button>
+                            <button onclick="toggleOptionType('call')" id="btn-call"
+                                    class="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600">
+                                Calls
+                            </button>
+                        </div>
+                        <div class="w-px h-6 bg-slate-600"></div>
+                        <!-- X-axis toggle -->
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-slate-500 uppercase">X-Axis:</span>
+                            <button onclick="toggleXAxis('moneyness')" id="btn-moneyness"
+                                    class="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-blue-600 text-white">
+                                Moneyness
+                            </button>
+                            <button onclick="toggleXAxis('strike')" id="btn-strike"
+                                    class="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600">
+                                Strike
+                            </button>
+                        </div>
+                        <div class="w-px h-6 bg-slate-600"></div>
+                        <!-- Moneyness filter -->
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleFilter()" id="btn-filter"
+                                    class="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600"
+                                    title="Filter by moneyness range">
+                                K/S
+                            </button>
+                            <div id="filter-inputs" class="hidden flex items-center gap-1">
+                                <input type="number" id="filter-min" step="0.05" min="0.5" max="1.5"
+                                       class="w-14 bg-slate-700 border-0 rounded px-2 py-1 text-xs text-center"
+                                       onchange="updateFilter()">
+                                <span class="text-slate-500">-</span>
+                                <input type="number" id="filter-max" step="0.05" min="0.5" max="1.5"
+                                       class="w-14 bg-slate-700 border-0 rounded px-2 py-1 text-xs text-center"
+                                       onchange="updateFilter()">
+                            </div>
+                        </div>
+                        <!-- IV outlier filter -->
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleIvFilter()" id="btn-iv-filter"
+                                    class="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600"
+                                    title="Filter IV outliers">
+                                IV%
+                            </button>
+                            <div id="iv-filter-inputs" class="hidden flex items-center gap-1">
+                                <input type="number" id="iv-filter-min" step="5" min="0" max="200"
+                                       class="w-14 bg-slate-700 border-0 rounded px-2 py-1 text-xs text-center"
+                                       onchange="updateIvFilter()">
+                                <span class="text-slate-500">-</span>
+                                <input type="number" id="iv-filter-max" step="5" min="0" max="500"
+                                       class="w-14 bg-slate-700 border-0 rounded px-2 py-1 text-xs text-center"
+                                       onchange="updateIvFilter()">
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </header>
 
@@ -187,53 +250,59 @@
                 </div>
 
                 <!-- Surface tab -->
-                <div id="content-surface" class="hidden h-full">
-                    <div id="surface-plot" class="w-full h-full min-h-[400px]"></div>
+                <div id="content-surface" class="hidden h-full flex items-start justify-center">
+                    <div class="w-full max-w-6xl">
+                        <div id="surface-plot" class="w-full" style="aspect-ratio: 4/3; max-height: 75vh; min-height: 400px;"></div>
+                    </div>
                 </div>
 
                 <!-- Equity tab -->
-                <div id="content-equity" class="hidden h-full">
-                    <div id="equity-plot" class="w-full h-full min-h-[400px]"></div>
+                <div id="content-equity" class="hidden h-full flex items-start justify-center">
+                    <div class="w-full max-w-6xl">
+                        <div id="equity-plot" class="w-full" style="aspect-ratio: 16/9; max-height: 70vh;"></div>
+                    </div>
                 </div>
 
                 <!-- Vol analysis tab -->
-                <div id="content-vol" class="hidden h-full">
-                    <div class="grid gap-4 lg:grid-cols-2">
-                        <!-- Vol comparison chart -->
-                        <div class="bg-slate-800 rounded-xl p-4">
-                            <h3 class="font-medium mb-4">Volatility Comparison</h3>
-                            <div id="vol-plot" class="h-64"></div>
-                        </div>
-
-                        <!-- Stats cards -->
-                        <div class="space-y-4">
+                <div id="content-vol" class="hidden h-full flex items-start justify-center">
+                    <div class="w-full max-w-6xl">
+                        <div class="grid gap-4 lg:grid-cols-2">
+                            <!-- Vol comparison chart -->
                             <div class="bg-slate-800 rounded-xl p-4">
-                                <h3 class="font-medium mb-3">Realized Volatility</h3>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <p class="text-xs text-slate-500 uppercase">20-Day</p>
-                                        <p class="text-2xl font-semibold" id="rv-20">--</p>
-                                    </div>
-                                    <div>
-                                        <p class="text-xs text-slate-500 uppercase">60-Day</p>
-                                        <p class="text-2xl font-semibold" id="rv-60">--</p>
-                                    </div>
-                                </div>
+                                <h3 class="font-medium mb-4">GARCH Volatility Forecast</h3>
+                                <div id="vol-plot" style="aspect-ratio: 16/10; max-height: 50vh; min-height: 200px;"></div>
                             </div>
 
-                            <div class="bg-slate-800 rounded-xl p-4">
-                                <h3 class="font-medium mb-3">GARCH Forecast</h3>
-                                <div class="flex items-center gap-2 mb-3">
-                                    <select id="garch-model" onchange="updateVolAnalysis()"
-                                            class="bg-slate-700 border-0 rounded-lg px-3 py-1.5 text-sm">
-                                        <option value="gjr">GJR-GARCH</option>
-                                        <option value="garch">GARCH(1,1)</option>
-                                        <option value="egarch">EGARCH</option>
-                                    </select>
+                            <!-- Stats cards -->
+                            <div class="space-y-4">
+                                <div class="bg-slate-800 rounded-xl p-4">
+                                    <h3 class="font-medium mb-3">Realized Volatility</h3>
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <p class="text-xs text-slate-500 uppercase">20-Day</p>
+                                            <p class="text-2xl font-semibold" id="rv-20">--</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xs text-slate-500 uppercase">60-Day</p>
+                                            <p class="text-2xl font-semibold" id="rv-60">--</p>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p class="text-xs text-slate-500 uppercase">Current Vol</p>
-                                    <p class="text-2xl font-semibold" id="garch-current">--</p>
+
+                                <div class="bg-slate-800 rounded-xl p-4">
+                                    <h3 class="font-medium mb-3">GARCH Forecast</h3>
+                                    <div class="flex items-center gap-2 mb-3">
+                                        <select id="garch-model" onchange="updateVolAnalysis()"
+                                                class="bg-slate-700 border-0 rounded-lg px-3 py-1.5 text-sm">
+                                            <option value="gjr">GJR-GARCH</option>
+                                            <option value="garch">GARCH(1,1)</option>
+                                            <option value="egarch">EGARCH</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-slate-500 uppercase">Current Vol</p>
+                                        <p class="text-2xl font-semibold" id="garch-current">--</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -256,19 +325,38 @@
     </div>
 
     <script>
-        // State
-        let currentSymbol = null;
-        let currentTab = 'surface';
-        let surfaceData = null;
-        let equityData = null;
-        let volData = null;
+        // State - use window scope for accessibility from onclick handlers
+        window.currentSymbol = null;
+        window.currentTab = 'surface';
+        window.surfaceData = null;  // Full data with both put/call surfaces
+        window.equityData = null;
+        window.volData = null;
+        window.xAxisMode = 'moneyness';  // 'moneyness' or 'strike'
+        window.optionType = 'put';  // 'put' or 'call'
+        window.eventSource = null;  // SSE connection for streaming
+        window.isStreaming = false;
+        window.surfacePlotInitialized = false;  // Track if plot exists for react() vs newPlot()
+        window.savedCamera = null;  // Store camera position to preserve across re-renders
+
+        // Filter settings - moneyness
+        window.filterEnabled = false;
+        window.filterMoneyMin = 0.8;
+        window.filterMoneyMax = 1.2;
+        window.autoFilterBounds = { min: 0.8, max: 1.2 };  // Auto-estimated bounds
+
+        // Filter settings - IV outliers
+        window.ivFilterEnabled = false;
+        window.ivFilterMin = 10;   // Min IV in %
+        window.ivFilterMax = 100;  // Max IV in %
+        window.autoIvBounds = { min: 10, max: 100 };
 
         // Tab switching
         function switchTab(tab) {
-            currentTab = tab;
+            window.currentTab = tab;
 
-            // Update tab buttons
-            document.querySelectorAll('#tabs button').forEach(btn => {
+            // Update tab buttons (only the main tab buttons, not the axis buttons)
+            ['tab-surface', 'tab-equity', 'tab-vol'].forEach(id => {
+                const btn = document.getElementById(id);
                 btn.classList.remove('bg-slate-700', 'text-white');
                 btn.classList.add('text-slate-400');
             });
@@ -280,6 +368,14 @@
             const content = document.getElementById(`content-${tab}`);
             if (content) content.classList.remove('hidden');
 
+            // Show/hide surface controls
+            const controls = document.getElementById('surface-controls');
+            if (tab === 'surface' && window.surfaceData) {
+                controls.classList.remove('hidden');
+            } else {
+                controls.classList.add('hidden');
+            }
+
             // Resize plots on tab switch
             setTimeout(() => {
                 Plotly.Plots.resize(document.getElementById('surface-plot'));
@@ -288,12 +384,402 @@
             }, 100);
         }
 
-        // Load symbol
-        async function loadSymbol(symbol) {
+        // Toggle X-axis between moneyness and strike
+        function toggleXAxis(mode) {
+            window.xAxisMode = mode;
+
+            // Update button styles
+            const mBtn = document.getElementById('btn-moneyness');
+            const sBtn = document.getElementById('btn-strike');
+
+            if (mode === 'moneyness') {
+                mBtn.classList.remove('bg-slate-700', 'text-slate-300');
+                mBtn.classList.add('bg-blue-600', 'text-white');
+                sBtn.classList.remove('bg-blue-600', 'text-white');
+                sBtn.classList.add('bg-slate-700', 'text-slate-300');
+            } else {
+                sBtn.classList.remove('bg-slate-700', 'text-slate-300');
+                sBtn.classList.add('bg-blue-600', 'text-white');
+                mBtn.classList.remove('bg-blue-600', 'text-white');
+                mBtn.classList.add('bg-slate-700', 'text-slate-300');
+            }
+
+            // Re-render surface
+            if (window.surfaceData) {
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Toggle option type between puts and calls
+        function toggleOptionType(type) {
+            window.optionType = type;
+
+            // Update button styles
+            const pBtn = document.getElementById('btn-put');
+            const cBtn = document.getElementById('btn-call');
+
+            if (type === 'put') {
+                pBtn.classList.remove('bg-slate-700', 'text-slate-300');
+                pBtn.classList.add('bg-red-600', 'text-white');
+                cBtn.classList.remove('bg-green-600', 'text-white');
+                cBtn.classList.add('bg-slate-700', 'text-slate-300');
+            } else {
+                cBtn.classList.remove('bg-slate-700', 'text-slate-300');
+                cBtn.classList.add('bg-green-600', 'text-white');
+                pBtn.classList.remove('bg-red-600', 'text-white');
+                pBtn.classList.add('bg-slate-700', 'text-slate-300');
+            }
+
+            // Update status bar
+            document.getElementById('status-type').textContent = type === 'put' ? 'Puts' : 'Calls';
+
+            // Use cached data if available (no re-fetch needed!)
+            if (window.surfaceData && window.surfaceData.surfaces) {
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Toggle filter visibility
+        function toggleFilter() {
+            window.filterEnabled = !window.filterEnabled;
+            const btn = document.getElementById('btn-filter');
+            const inputs = document.getElementById('filter-inputs');
+
+            if (window.filterEnabled) {
+                btn.classList.remove('bg-slate-700', 'text-slate-300');
+                btn.classList.add('bg-purple-600', 'text-white');
+                inputs.classList.remove('hidden');
+                // Initialize inputs with current values
+                document.getElementById('filter-min').value = window.filterMoneyMin;
+                document.getElementById('filter-max').value = window.filterMoneyMax;
+            } else {
+                btn.classList.remove('bg-purple-600', 'text-white');
+                btn.classList.add('bg-slate-700', 'text-slate-300');
+                inputs.classList.add('hidden');
+            }
+
+            // Re-render with/without filter
+            if (window.surfaceData) {
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Update filter values from inputs
+        function updateFilter() {
+            window.filterMoneyMin = parseFloat(document.getElementById('filter-min').value) || 0.8;
+            window.filterMoneyMax = parseFloat(document.getElementById('filter-max').value) || 1.2;
+
+            if (window.surfaceData) {
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Auto-estimate filter bounds based on data (IQR-based)
+        function estimateFilterBounds(surface) {
+            if (!surface || !surface.moneyness) return { min: 0.8, max: 1.2 };
+
+            const moneyness = [...surface.moneyness].sort((a, b) => a - b);
+            const n = moneyness.length;
+
+            // Use IQR to estimate reasonable range
+            const q1 = moneyness[Math.floor(n * 0.25)];
+            const q3 = moneyness[Math.floor(n * 0.75)];
+            const iqr = q3 - q1;
+
+            // Expand slightly beyond IQR for a reasonable range
+            let min = Math.max(0.5, q1 - 0.5 * iqr);
+            let max = Math.min(1.5, q3 + 0.5 * iqr);
+
+            // Round to nearest 0.05
+            min = Math.round(min * 20) / 20;
+            max = Math.round(max * 20) / 20;
+
+            // Ensure range includes ATM
+            if (min > 1.0) min = 0.95;
+            if (max < 1.0) max = 1.05;
+
+            return { min, max };
+        }
+
+        // Apply auto-estimated filter bounds
+        function applyAutoFilter() {
+            const surface = window.surfaceData?.surfaces?.[window.optionType] || window.surfaceData?.surface;
+            if (surface) {
+                const bounds = estimateFilterBounds(surface);
+                window.filterMoneyMin = bounds.min;
+                window.filterMoneyMax = bounds.max;
+                window.autoFilterBounds = bounds;
+
+                // Update inputs if they exist
+                const minInput = document.getElementById('filter-min');
+                const maxInput = document.getElementById('filter-max');
+                if (minInput) minInput.value = bounds.min;
+                if (maxInput) maxInput.value = bounds.max;
+
+                // Re-render
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Toggle IV filter visibility
+        function toggleIvFilter() {
+            window.ivFilterEnabled = !window.ivFilterEnabled;
+            const btn = document.getElementById('btn-iv-filter');
+            const inputs = document.getElementById('iv-filter-inputs');
+
+            if (window.ivFilterEnabled) {
+                btn.classList.remove('bg-slate-700', 'text-slate-300');
+                btn.classList.add('bg-purple-600', 'text-white');
+                inputs.classList.remove('hidden');
+                document.getElementById('iv-filter-min').value = window.ivFilterMin;
+                document.getElementById('iv-filter-max').value = window.ivFilterMax;
+            } else {
+                btn.classList.remove('bg-purple-600', 'text-white');
+                btn.classList.add('bg-slate-700', 'text-slate-300');
+                inputs.classList.add('hidden');
+            }
+
+            if (window.surfaceData) {
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Update IV filter values from inputs
+        function updateIvFilter() {
+            window.ivFilterMin = parseFloat(document.getElementById('iv-filter-min').value) || 10;
+            window.ivFilterMax = parseFloat(document.getElementById('iv-filter-max').value) || 100;
+
+            if (window.surfaceData) {
+                renderSurface(window.surfaceData);
+            }
+        }
+
+        // Auto-estimate IV filter bounds (IQR-based to remove outliers)
+        function estimateIvFilterBounds(surface) {
+            if (!surface || !surface.ivs) return { min: 10, max: 100 };
+
+            // Convert to percentage and sort
+            const ivs = surface.ivs.map(iv => iv * 100).sort((a, b) => a - b);
+            const n = ivs.length;
+
+            // Use IQR to detect outliers
+            const q1 = ivs[Math.floor(n * 0.25)];
+            const q3 = ivs[Math.floor(n * 0.75)];
+            const iqr = q3 - q1;
+
+            // Standard outlier bounds: Q1 - 1.5*IQR to Q3 + 1.5*IQR
+            let min = Math.max(5, q1 - 1.5 * iqr);
+            let max = q3 + 1.5 * iqr;
+
+            // Round to nearest 5%
+            min = Math.round(min / 5) * 5;
+            max = Math.round(max / 5) * 5;
+
+            return { min, max };
+        }
+
+        // Auto-apply filter when data loads (enables filter + estimates bounds)
+        function autoApplyFilter() {
+            const surface = window.surfaceData?.surfaces?.[window.optionType] || window.surfaceData?.surface;
+            if (surface) {
+                // Enable moneyness filter automatically
+                window.filterEnabled = true;
+                const bounds = estimateFilterBounds(surface);
+                window.filterMoneyMin = bounds.min;
+                window.filterMoneyMax = bounds.max;
+                window.autoFilterBounds = bounds;
+
+                // Update moneyness filter UI
+                const btn = document.getElementById('btn-filter');
+                const inputs = document.getElementById('filter-inputs');
+                if (btn) {
+                    btn.classList.remove('bg-slate-700', 'text-slate-300');
+                    btn.classList.add('bg-purple-600', 'text-white');
+                }
+                if (inputs) {
+                    inputs.classList.remove('hidden');
+                    document.getElementById('filter-min').value = bounds.min;
+                    document.getElementById('filter-max').value = bounds.max;
+                }
+
+                // Enable IV filter automatically
+                window.ivFilterEnabled = true;
+                const ivBounds = estimateIvFilterBounds(surface);
+                window.ivFilterMin = ivBounds.min;
+                window.ivFilterMax = ivBounds.max;
+                window.autoIvBounds = ivBounds;
+
+                // Update IV filter UI
+                const ivBtn = document.getElementById('btn-iv-filter');
+                const ivInputs = document.getElementById('iv-filter-inputs');
+                if (ivBtn) {
+                    ivBtn.classList.remove('bg-slate-700', 'text-slate-300');
+                    ivBtn.classList.add('bg-purple-600', 'text-white');
+                }
+                if (ivInputs) {
+                    ivInputs.classList.remove('hidden');
+                    document.getElementById('iv-filter-min').value = ivBounds.min;
+                    document.getElementById('iv-filter-max').value = ivBounds.max;
+                }
+            }
+        }
+
+        // Update progress indicator
+        function updateProgress(current, total, expiration) {
+            const loadingText = document.getElementById('loading-text');
+            if (loadingText) {
+                const pct = Math.round((current / total) * 100);
+                loadingText.textContent = `Computing IV: ${pct}% (${expiration})`;
+            }
+        }
+
+        // Load surface data using SSE for streaming
+        function loadSurfaceDataStreaming(symbol) {
+            // Close any existing connection
+            if (window.eventSource) {
+                window.eventSource.close();
+            }
+
+            window.isStreaming = true;
+            const plotEl = document.getElementById('surface-plot');
+
+            window.eventSource = new EventSource(`/api/surface/${symbol}/stream`);
+
+            window.eventSource.addEventListener('metadata', (e) => {
+                const data = JSON.parse(e.data);
+                window.surfaceData = {
+                    symbol: data.symbol,
+                    spot: data.spot,
+                    quote_time: data.quote_time,
+                    is_eod: data.is_eod,
+                    surfaces: { put: null, call: null },
+                };
+                document.getElementById('status-spot').textContent = `Spot: $${data.spot.toFixed(2)}`;
+                document.getElementById('status-time').textContent = data.is_eod ? 'EOD' : 'Live';
+                document.getElementById('loading-text').textContent = `Loading ${data.total_expirations} expirations...`;
+            });
+
+            window.eventSource.addEventListener('progress', (e) => {
+                const data = JSON.parse(e.data);
+                updateProgress(data.index, data.total, data.expiration);
+
+                // Update surfaces for progressive rendering
+                if (data.surfaces) {
+                    window.surfaceData.surfaces = data.surfaces;
+                    // Re-render with current data (progressive update)
+                    if (data.index % 3 === 0 || data.index === data.total) {
+                        // Only render every 3rd update to avoid too much redraw
+                        renderSurface(window.surfaceData);
+                    }
+                }
+            });
+
+            window.eventSource.addEventListener('complete', (e) => {
+                const data = JSON.parse(e.data);
+                window.surfaceData = {
+                    symbol: data.symbol,
+                    spot: data.spot,
+                    surfaces: data.surfaces,
+                    stats: data.stats,
+                    is_eod: window.surfaceData?.is_eod,
+                    quote_time: window.surfaceData?.quote_time,
+                };
+
+                window.eventSource.close();
+                window.eventSource = null;
+                window.isStreaming = false;
+
+                // Auto-apply filter on new data load
+                autoApplyFilter();
+
+                // Final render
+                renderSurface(window.surfaceData);
+
+                // Hide loading, show content
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('surface-controls').classList.remove('hidden');
+                switchTab('surface');
+
+                // Load equity and vol data in background
+                loadEquityData(symbol);
+                loadVolData(symbol);
+            });
+
+            window.eventSource.addEventListener('error', (e) => {
+                const data = e.data ? JSON.parse(e.data) : { error: 'Connection lost' };
+                console.error('Stream error:', data);
+                window.eventSource.close();
+                window.eventSource = null;
+                window.isStreaming = false;
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('landing').classList.remove('hidden');
+                alert(`Error: ${data.error || 'Connection lost'}`);
+            });
+
+            window.eventSource.onerror = () => {
+                if (window.isStreaming) {
+                    console.error('EventSource connection error');
+                    window.eventSource.close();
+                    window.eventSource = null;
+                    window.isStreaming = false;
+                }
+            };
+        }
+
+        // Load surface data (non-streaming fallback, also used for quick reload)
+        async function loadSurfaceData(symbol, forceRefresh = false) {
+            // If we already have data for this symbol and not forcing refresh, just re-render
+            if (!forceRefresh && window.surfaceData && window.surfaceData.symbol === symbol) {
+                renderSurface(window.surfaceData);
+                return;
+            }
+
+            // Show loading state on the plot
+            const plotEl = document.getElementById('surface-plot');
+            plotEl.style.opacity = '0.5';
+
+            try {
+                const response = await fetch(`/api/surface/${symbol}`);
+                window.surfaceData = await response.json();
+
+                if (window.surfaceData.error) {
+                    throw new Error(window.surfaceData.error);
+                }
+
+                // Update status bar
+                document.getElementById('status-spot').textContent = `Spot: $${window.surfaceData.spot.toFixed(2)}`;
+                document.getElementById('status-time').textContent = window.surfaceData.is_eod ? 'EOD' : 'Live';
+
+                // Render surface
+                renderSurface(window.surfaceData);
+
+            } catch (error) {
+                console.error('Failed to load surface:', error);
+                alert(`Error: ${error.message}`);
+            } finally {
+                // Restore opacity
+                plotEl.style.opacity = '1';
+            }
+        }
+
+        // Load symbol - uses streaming for progressive rendering
+        async function loadSymbol(symbol, useStreaming = true) {
             if (!symbol) return;
             symbol = symbol.toUpperCase().trim();
 
-            currentSymbol = symbol;
+            // Check if we already have fresh data for this symbol
+            if (window.surfaceData && window.surfaceData.symbol === symbol && !window.isStreaming) {
+                // Already have data, just show it
+                document.getElementById('symbol-input').value = symbol;
+                document.getElementById('refresh-btn').disabled = false;
+                document.getElementById('landing').classList.add('hidden');
+                document.getElementById('surface-controls').classList.remove('hidden');
+                switchTab('surface');
+                renderSurface(window.surfaceData);
+                return;
+            }
+
+            window.currentSymbol = symbol;
             document.getElementById('symbol-input').value = symbol;
             document.getElementById('refresh-btn').disabled = false;
 
@@ -302,70 +788,259 @@
             document.getElementById('loading').classList.remove('hidden');
             document.querySelectorAll('[id^="content-"]').forEach(el => el.classList.add('hidden'));
 
-            try {
-                // Fetch surface data
-                document.getElementById('loading-text').textContent = 'Fetching option chain...';
-                const response = await fetch(`/api/surface/${symbol}?option_type=put`);
-                surfaceData = await response.json();
+            document.getElementById('loading-text').textContent = 'Fetching option chain...';
+            document.getElementById('status-type').textContent = window.optionType === 'put' ? 'Puts' : 'Calls';
 
-                if (surfaceData.error) {
-                    throw new Error(surfaceData.error);
+            if (useStreaming) {
+                // Use SSE for progressive loading
+                loadSurfaceDataStreaming(symbol);
+            } else {
+                // Use regular fetch (fallback)
+                try {
+                    const response = await fetch(`/api/surface/${symbol}`);
+                    window.surfaceData = await response.json();
+
+                    if (window.surfaceData.error) {
+                        throw new Error(window.surfaceData.error);
+                    }
+
+                    // Update status bar
+                    document.getElementById('status-spot').textContent = `Spot: $${window.surfaceData.spot.toFixed(2)}`;
+                    document.getElementById('status-time').textContent = window.surfaceData.is_eod ? 'EOD' : 'Live';
+
+                    // Render surface
+                    renderSurface(window.surfaceData);
+
+                    // Show surface tab and controls
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('surface-controls').classList.remove('hidden');
+                    switchTab('surface');
+
+                    // Load equity and vol data in background
+                    loadEquityData(symbol);
+                    loadVolData(symbol);
+
+                } catch (error) {
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('landing').classList.remove('hidden');
+                    alert(`Error: ${error.message}`);
                 }
-
-                // Update status bar
-                document.getElementById('status-spot').textContent = `Spot: $${surfaceData.spot.toFixed(2)}`;
-                document.getElementById('status-time').textContent = surfaceData.is_eod ? 'EOD' : 'Live';
-
-                // Render surface
-                renderSurface(surfaceData);
-
-                // Show surface tab
-                document.getElementById('loading').classList.add('hidden');
-                switchTab('surface');
-
-                // Load equity and vol data in background
-                loadEquityData(symbol);
-                loadVolData(symbol);
-
-            } catch (error) {
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('landing').classList.remove('hidden');
-                alert(`Error: ${error.message}`);
             }
+        }
+
+        // Polynomial surface fitting using least squares
+        // Model: IV = a0 + a1*x + a2*x² + a3*y + a4*y² + a5*x*y + a6*x²*y + a7*x*y² + a8*x³ + a9*y³
+        function fitPolynomialSurface(xData, yData, zData) {
+            const n = xData.length;
+            if (n < 10) {
+                // Not enough data, return simple average
+                const avgZ = zData.reduce((a, b) => a + b, 0) / n;
+                return [avgZ, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            }
+
+            // Normalize x and y for numerical stability
+            const xMean = xData.reduce((a, b) => a + b, 0) / n;
+            const yMean = yData.reduce((a, b) => a + b, 0) / n;
+            const xStd = Math.sqrt(xData.reduce((a, b) => a + (b - xMean) ** 2, 0) / n) || 1;
+            const yStd = Math.sqrt(yData.reduce((a, b) => a + (b - yMean) ** 2, 0) / n) || 1;
+
+            // Build design matrix A and target vector b
+            const numCoeffs = 10;
+            const A = [];
+            const b = [];
+
+            for (let i = 0; i < n; i++) {
+                const x = (xData[i] - xMean) / xStd;
+                const y = (yData[i] - yMean) / yStd;
+                // Basis: [1, x, x², y, y², xy, x²y, xy², x³, y³]
+                A.push([1, x, x*x, y, y*y, x*y, x*x*y, x*y*y, x*x*x, y*y*y]);
+                b.push(zData[i]);
+            }
+
+            // Solve normal equations: (A^T A) coeffs = A^T b
+            const ATA = Array(numCoeffs).fill(0).map(() => Array(numCoeffs).fill(0));
+            const ATb = Array(numCoeffs).fill(0);
+
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < numCoeffs; j++) {
+                    ATb[j] += A[i][j] * b[i];
+                    for (let k = 0; k < numCoeffs; k++) {
+                        ATA[j][k] += A[i][j] * A[i][k];
+                    }
+                }
+            }
+
+            // Add ridge regularization for stability
+            const lambda = 0.01;
+            for (let i = 0; i < numCoeffs; i++) {
+                ATA[i][i] += lambda;
+            }
+
+            // Solve using Gaussian elimination with partial pivoting
+            const coeffsNorm = solveLinearSystem(ATA, ATb);
+
+            // Store normalization parameters with coefficients
+            return { coeffs: coeffsNorm, xMean, yMean, xStd, yStd };
+        }
+
+        // Solve linear system Ax = b using Gaussian elimination
+        function solveLinearSystem(A, b) {
+            const n = b.length;
+            const aug = A.map((row, i) => [...row, b[i]]);
+
+            for (let col = 0; col < n; col++) {
+                // Partial pivoting
+                let maxRow = col;
+                for (let row = col + 1; row < n; row++) {
+                    if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) {
+                        maxRow = row;
+                    }
+                }
+                [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+
+                if (Math.abs(aug[col][col]) < 1e-10) continue;
+
+                // Eliminate
+                for (let row = col + 1; row < n; row++) {
+                    const factor = aug[row][col] / aug[col][col];
+                    for (let j = col; j <= n; j++) {
+                        aug[row][j] -= factor * aug[col][j];
+                    }
+                }
+            }
+
+            // Back substitution
+            const x = Array(n).fill(0);
+            for (let i = n - 1; i >= 0; i--) {
+                x[i] = aug[i][n];
+                for (let j = i + 1; j < n; j++) {
+                    x[i] -= aug[i][j] * x[j];
+                }
+                x[i] /= aug[i][i] || 1;
+            }
+            return x;
+        }
+
+        // Evaluate polynomial at point (x, y)
+        function evaluatePolynomial(fit, xRaw, yRaw) {
+            if (Array.isArray(fit)) {
+                // Simple coefficients (fallback)
+                return fit[0];
+            }
+            const { coeffs, xMean, yMean, xStd, yStd } = fit;
+            const x = (xRaw - xMean) / xStd;
+            const y = (yRaw - yMean) / yStd;
+            // Basis: [1, x, x², y, y², xy, x²y, xy², x³, y³]
+            return coeffs[0] + coeffs[1]*x + coeffs[2]*x*x + coeffs[3]*y + coeffs[4]*y*y +
+                   coeffs[5]*x*y + coeffs[6]*x*x*y + coeffs[7]*x*y*y + coeffs[8]*x*x*x + coeffs[9]*y*y*y;
         }
 
         // Render 3D surface
         function renderSurface(data) {
-            const surface = data.surface;
-
-            // Create grid for surface
-            const uniqueStrikes = [...new Set(surface.moneyness)].sort((a, b) => a - b);
-            const uniqueMaturities = [...new Set(surface.maturities)].sort((a, b) => a - b);
-
-            // Build z matrix
-            const z = [];
-            for (const tau of uniqueMaturities) {
-                const row = [];
-                for (const m of uniqueStrikes) {
-                    // Find matching IV
-                    let iv = null;
-                    for (let i = 0; i < surface.moneyness.length; i++) {
-                        if (Math.abs(surface.moneyness[i] - m) < 0.001 &&
-                            Math.abs(surface.maturities[i] - tau) < 0.001) {
-                            iv = surface.ivs[i] * 100;  // Convert to %
-                            break;
-                        }
-                    }
-                    row.push(iv);
-                }
-                z.push(row);
+            // Support both old format (data.surface) and new format (data.surfaces.put/call)
+            let surface;
+            if (data.surfaces) {
+                // New format: pick put or call based on current option type
+                surface = data.surfaces[window.optionType];
+            } else if (data.surface) {
+                // Old format: single surface
+                surface = data.surface;
             }
 
-            const trace = {
+            if (!surface || !surface.ivs || surface.ivs.length === 0) {
+                console.log('No surface data to render');
+                return;
+            }
+
+            const spot = data.spot;
+
+            // Apply filters (moneyness and IV)
+            let filteredIndices = [];
+            for (let i = 0; i < surface.ivs.length; i++) {
+                // Check moneyness filter
+                if (window.filterEnabled && surface.moneyness) {
+                    const m = surface.moneyness[i];
+                    if (m < window.filterMoneyMin || m > window.filterMoneyMax) {
+                        continue;  // Skip - outside moneyness range
+                    }
+                }
+                // Check IV filter (ivs are in decimal form, e.g., 0.5 = 50%)
+                if (window.ivFilterEnabled && surface.ivs) {
+                    const ivPct = surface.ivs[i] * 100;
+                    if (ivPct < window.ivFilterMin || ivPct > window.ivFilterMax) {
+                        continue;  // Skip - IV outlier
+                    }
+                }
+                filteredIndices.push(i);
+            }
+
+            // Build filtered arrays
+            const filteredMoneyness = filteredIndices.map(i => surface.moneyness[i]);
+            const filteredStrikes = filteredIndices.map(i => surface.strikes[i]);
+            const filteredMaturities = filteredIndices.map(i => surface.maturities_days?.[i] || Math.round(surface.maturities[i] * 365));
+            const filteredIvs = filteredIndices.map(i => surface.ivs[i]);
+
+            if (filteredIvs.length === 0) {
+                console.log('No data after filtering');
+                return;
+            }
+
+            // Choose X-axis data based on mode
+            const xData = window.xAxisMode === 'moneyness' ? filteredMoneyness : filteredStrikes;
+            const xLabel = window.xAxisMode === 'moneyness' ? 'Moneyness (K/S)' : `Strike ($)`;
+            const atmValue = window.xAxisMode === 'moneyness' ? 1.0 : spot;
+
+            // Use days for maturity (Y-axis)
+            const yData = filteredMaturities;
+
+            // Convert IVs to percentage for z-axis
+            const zData = filteredIvs.map(iv => iv * 100);
+
+            // Fit polynomial regression surface for smoothness
+            // Model: IV = a0 + a1*x + a2*x² + a3*y + a4*y² + a5*x*y + a6*x²*y + a7*x*y²
+            const coeffs = fitPolynomialSurface(xData, yData, zData);
+
+            // Create regular grid for smooth surface - extend beyond data bounds
+            const xMinData = Math.min(...xData);
+            const xMaxData = Math.max(...xData);
+            const yMinData = Math.min(...yData);
+            const yMaxData = Math.max(...yData);
+
+            // Extend grid beyond data bounds for visual continuity
+            const xRange = xMaxData - xMinData;
+            const yRange = yMaxData - yMinData;
+            const xMin = xMinData - xRange * 0.1;
+            const xMax = xMaxData + xRange * 0.1;
+            const yMin = yMinData - yRange * 0.15;  // Extend into negative for visual continuity
+            const yMax = yMaxData + yRange * 0.15;
+
+            const gridSize = 40;  // Resolution of the smooth surface
+            const gridX = [];
+            const gridY = [];
+            for (let i = 0; i < gridSize; i++) {
+                gridX.push(xMin + (xMax - xMin) * i / (gridSize - 1));
+                gridY.push(yMin + (yMax - yMin) * i / (gridSize - 1));
+            }
+
+            // Evaluate regression on grid
+            const gridZ = [];
+            for (let j = 0; j < gridSize; j++) {
+                const row = [];
+                for (let i = 0; i < gridSize; i++) {
+                    const x = gridX[i];
+                    const y = gridY[j];
+                    const iv = evaluatePolynomial(coeffs, x, y);
+                    row.push(Math.max(5, Math.min(200, iv)));  // Clamp to reasonable range
+                }
+                gridZ.push(row);
+            }
+
+            // Smooth surface using polynomial regression
+            const surfaceTrace = {
                 type: 'surface',
-                x: uniqueStrikes,
-                y: uniqueMaturities,
-                z: z,
+                x: gridX,
+                y: gridY,
+                z: gridZ,
                 colorscale: [
                     [0, '#1e40af'],
                     [0.25, '#3b82f6'],
@@ -378,22 +1053,127 @@
                     ticksuffix: '%',
                     len: 0.75
                 },
-                hovertemplate: 'Moneyness: %{x:.2f}<br>Maturity: %{y:.2f}y<br>IV: %{z:.1f}%<extra></extra>'
+                opacity: 0.9,
+                hovertemplate: window.xAxisMode === 'moneyness'
+                    ? 'Moneyness: %{x:.3f}<br>Days: %{y:.0f}d<br>IV: %{z:.1f}%<extra></extra>'
+                    : 'Strike: $%{x:.0f}<br>Days: %{y:.0f}d<br>IV: %{z:.1f}%<extra></extra>',
+                name: 'IV Surface (fitted)',
+                showlegend: true,
+                contours: {
+                    z: { show: true, usecolormap: true, highlightcolor: "#fff", project: { z: false } }
+                }
             };
 
-            const layout = {
-                scene: {
-                    xaxis: { title: 'Moneyness (S/K)', gridcolor: '#334155' },
-                    yaxis: { title: 'Maturity (years)', gridcolor: '#334155' },
-                    zaxis: { title: 'IV %', gridcolor: '#334155' },
-                    bgcolor: '#0f172a',
-                    camera: {
-                        eye: { x: 1.5, y: 1.5, z: 1 }
+            // Compute axis ranges from data for tight fit
+            const xPad = (xMax - xMin) * 0.05;  // 5% padding
+            const yPad = Math.max(5, (yMax - yMin) * 0.05);  // At least 5 days padding
+            const zMin = Math.min(...zData);
+            const zMax = Math.max(...zData);
+            const zPad = (zMax - zMin) * 0.1;  // 10% padding
+
+            // ATM marker as a solid transparent plane using mesh3d
+            // Plane extends beyond data bounds for visibility
+            const yPlaneMin = -yPad * 2;  // Extend into negative (before 0 days)
+            const yPlaneMax = yMax + yPad * 3;  // Extend above max expiry
+            const atmTrace = {
+                type: 'mesh3d',
+                x: [atmValue, atmValue, atmValue, atmValue],
+                y: [yPlaneMin, yPlaneMax, yPlaneMax, yPlaneMin],
+                z: [zMin - zPad, zMin - zPad, zMax + zPad, zMax + zPad],
+                i: [0, 0],  // Triangle indices
+                j: [1, 2],
+                k: [2, 3],
+                color: '#d946ef',  // Fuchsia - distinct from blue-green-yellow-red surface colorscale
+                opacity: 0.2,
+                name: window.xAxisMode === 'moneyness' ? 'ATM (K=S)' : `Spot $${spot.toFixed(0)}`,
+                hovertemplate: window.xAxisMode === 'moneyness'
+                    ? 'ATM Plane (Moneyness = 1)<extra></extra>'
+                    : `Spot Price: $${spot.toFixed(2)}<extra></extra>`,
+                showlegend: true
+            };
+
+            // Data point markers - small dots showing actual option locations
+            const markersTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: xData,
+                y: yData,
+                z: zData,
+                marker: {
+                    size: 3,
+                    color: '#94a3b8',
+                    opacity: 0.6,
+                    line: {
+                        width: 0.5,
+                        color: '#64748b'
                     }
                 },
+                name: 'Option Contracts',
+                hovertemplate: window.xAxisMode === 'moneyness'
+                    ? 'Moneyness: %{x:.3f}<br>Days: %{y}d<br>IV: %{z:.1f}%<extra></extra>'
+                    : 'Strike: $%{x:.0f}<br>Days: %{y}d<br>IV: %{z:.1f}%<extra></extra>',
+                showlegend: true
+            };
+
+            // Title showing option type and filter status
+            const optTypeLabel = window.optionType === 'put' ? 'PUTS' : 'CALLS';
+            const moneyLabel = window.filterEnabled ? ` K/S:${window.filterMoneyMin}-${window.filterMoneyMax}` : '';
+            const ivLabel = window.ivFilterEnabled ? ` IV:${window.ivFilterMin}-${window.ivFilterMax}%` : '';
+            const filterLabel = (moneyLabel || ivLabel) ? ` [${moneyLabel}${ivLabel}]`.replace('[ ', '[') : '';
+
+            const plotEl = document.getElementById('surface-plot');
+
+            // Use saved camera if available (deep copy to avoid reference issues)
+            const defaultCamera = {
+                eye: { x: 1.2, y: -1.8, z: 0.8 },
+                up: { x: 0, y: 0, z: 1 },
+                center: { x: 0, y: 0, z: 0 }
+            };
+            const cameraToUse = window.savedCamera ? JSON.parse(JSON.stringify(window.savedCamera)) : defaultCamera;
+
+            const layout = {
+                title: {
+                    text: `${data.symbol} ${optTypeLabel} IV Surface${filterLabel}`,
+                    font: { color: '#94a3b8', size: 16 },
+                    x: 0.5,
+                    y: 0.95
+                },
+                scene: {
+                    xaxis: {
+                        title: xLabel,
+                        gridcolor: '#334155',
+                        range: [xMin - xPad, xMax + xPad],
+                        autorange: false
+                    },
+                    yaxis: {
+                        title: 'Days to Expiry',
+                        gridcolor: '#334155',
+                        range: [yMin - yPad, yMax + yPad],
+                        autorange: false
+                    },
+                    zaxis: {
+                        title: 'IV %',
+                        gridcolor: '#334155',
+                        range: [Math.max(0, zMin - zPad), zMax + zPad],
+                        autorange: false
+                    },
+                    bgcolor: '#0f172a',
+                    // Camera: maturity on depth axis, 0 days facing viewer
+                    camera: cameraToUse,
+                    // Use manual aspect ratio for good proportions regardless of data scale
+                    aspectmode: 'manual',
+                    aspectratio: { x: 1, y: 1.2, z: 0.8 }
+                },
                 paper_bgcolor: '#0f172a',
-                margin: { l: 0, r: 0, t: 0, b: 0 },
-                autosize: true
+                margin: { l: 0, r: 0, t: 40, b: 0 },
+                autosize: true,
+                showlegend: true,
+                legend: {
+                    x: 0.02,
+                    y: 0.98,
+                    bgcolor: 'rgba(15, 23, 42, 0.8)',
+                    font: { color: '#94a3b8' }
+                }
             };
 
             const config = {
@@ -403,17 +1183,30 @@
                 displaylogo: false
             };
 
-            Plotly.newPlot('surface-plot', [trace], layout, config);
+            // Use react() if plot exists to preserve camera, else newPlot()
+            if (window.surfacePlotInitialized) {
+                Plotly.react(plotEl, [surfaceTrace, atmTrace, markersTrace], layout, config);
+            } else {
+                Plotly.newPlot(plotEl, [surfaceTrace, atmTrace, markersTrace], layout, config);
+                window.surfacePlotInitialized = true;
+
+                // Add listener to save camera position when user interacts with plot
+                plotEl.on('plotly_relayout', function(eventData) {
+                    if (eventData['scene.camera']) {
+                        window.savedCamera = JSON.parse(JSON.stringify(eventData['scene.camera']));
+                    }
+                });
+            }
         }
 
         // Load equity data
         async function loadEquityData(symbol) {
             try {
                 const response = await fetch(`/api/equity/${symbol}?period=1y`);
-                equityData = await response.json();
+                window.equityData = await response.json();
 
-                if (!equityData.error) {
-                    renderEquityChart(equityData);
+                if (!window.equityData.error) {
+                    renderEquityChart(window.equityData);
                 }
             } catch (error) {
                 console.error('Failed to load equity data:', error);
@@ -458,10 +1251,10 @@
             try {
                 const model = document.getElementById('garch-model').value;
                 const response = await fetch(`/api/vol_analysis/${symbol}?model=${model}`);
-                volData = await response.json();
+                window.volData = await response.json();
 
-                if (!volData.error) {
-                    renderVolAnalysis(volData);
+                if (!window.volData.error) {
+                    renderVolAnalysis(window.volData);
                 }
             } catch (error) {
                 console.error('Failed to load vol data:', error);
@@ -469,8 +1262,8 @@
         }
 
         function updateVolAnalysis() {
-            if (currentSymbol) {
-                loadVolData(currentSymbol);
+            if (window.currentSymbol) {
+                loadVolData(window.currentSymbol);
             }
         }
 
@@ -520,10 +1313,12 @@
             }
         }
 
-        // Refresh
+        // Refresh - forces a re-fetch by clearing cached data
         function refreshSurface() {
-            if (currentSymbol) {
-                loadSymbol(currentSymbol);
+            if (window.currentSymbol) {
+                // Clear cached data to force refresh
+                window.surfaceData = null;
+                loadSymbol(window.currentSymbol);
             }
         }
 
