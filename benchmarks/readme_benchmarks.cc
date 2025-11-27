@@ -404,9 +404,6 @@ BENCHMARK(BM_README_AmericanBatch64)
     ->MinTime(kMinBenchmarkTimeSec);
 
 static void BM_README_IV_FDM(benchmark::State& state) {
-    const size_t n_space = static_cast<size_t>(state.range(0));
-    const size_t n_time = static_cast<size_t>(state.range(1));
-
     IVQuery query{
         100.0,  // spot
         100.0,  // strike
@@ -417,18 +414,21 @@ static void BM_README_IV_FDM(benchmark::State& state) {
         6.08    // market_price
     };
 
+    // Use default config with automatic grid estimation
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    // Enable manual grid mode for benchmarking (bypass auto-estimation)
-    config.use_manual_grid = true;
-    config.grid_n_space = n_space;
-    config.grid_n_time = n_time;
-    config.grid_x_min = -3.0;
-    config.grid_x_max = 3.0;
-    config.grid_alpha = 2.0;
+    // use_manual_grid defaults to false - uses estimate_grid_for_option()
 
     IVSolverFDM solver(config);
+
+    // Get grid dimensions for typical case (σ=0.20 for ATM put)
+    // The solver uses estimate_grid_for_option() which bases grid on current σ
+    AmericanOptionParams sample_params(
+        query.spot, query.strike, query.maturity, query.rate,
+        query.dividend_yield, query.type, 0.20);  // Typical IV ~20%
+    auto [grid_spec, time_domain] = estimate_grid_for_option(sample_params);
+
     auto run_once = [&]() {
         auto result = solver.solve_impl(query);
         if (!result.has_value()) {
@@ -445,19 +445,11 @@ static void BM_README_IV_FDM(benchmark::State& state) {
         run_once();
     }
 
-    state.counters["n_space"] = static_cast<double>(n_space);
-    state.counters["n_time"] = static_cast<double>(n_time);
-    if (n_space == 101) {
-        state.SetLabel("American IV (FDM, 101x1k grid)");
-    } else if (n_space == 201) {
-        state.SetLabel("American IV (FDM, 201x2k grid)");
-    } else {
-        state.SetLabel("American IV (FDM)");
-    }
+    state.counters["n_space"] = static_cast<double>(grid_spec.n_points());
+    state.counters["n_time"] = static_cast<double>(time_domain.n_steps());
+    state.SetLabel(std::format("American IV (FDM, {}x{})", grid_spec.n_points(), time_domain.n_steps()));
 }
 BENCHMARK(BM_README_IV_FDM)
-    ->Args({101, 1000})
-    ->Args({201, 2000})
     ->MinTime(kMinBenchmarkTimeSec);
 
 static void BM_README_IV_BSpline(benchmark::State& state) {
@@ -550,6 +542,10 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
         }
     }
 
+    // Get shared grid dimensions
+    auto [grid_spec, time_domain] = compute_global_grid_for_batch(params);
+    const size_t n_options = params.size();
+
     for (auto _ : state) {
         // Solve batch with shared grid (enables normalized optimization)
         BatchAmericanOptionSolver solver;
@@ -563,7 +559,11 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
         }
     }
 
-    state.SetLabel("American option chain (5 strikes × 3 maturities)");
+    state.counters["n_space"] = static_cast<double>(grid_spec.n_points());
+    state.counters["n_time"] = static_cast<double>(time_domain.n_steps());
+    state.counters["n_options"] = static_cast<double>(n_options);
+    state.SetLabel(std::format("Option chain ({} options, shared {}x{})",
+        n_options, grid_spec.n_points(), time_domain.n_steps()));
 }
 BENCHMARK(BM_README_NormalizedChain)->MinTime(kMinBenchmarkTimeSec);
 
