@@ -120,11 +120,32 @@ double AmericanOptionResult::gamma() const {
 }
 
 double AmericanOptionResult::theta() const {
-    // Theta computation requires temporal finite differences from successive solution snapshots.
-    // This is not yet implemented - would need Grid to store solution at t and t-dt.
-    throw std::runtime_error(
-        "theta() is not yet implemented. "
-        "Requires temporal finite differences from successive solution snapshots.");
+    // Theta = ∂V/∂t computed using backward finite difference
+    //
+    // The PDE solver works backward in time from expiry (T) to present (0).
+    // At the final solver step (calendar time t=0), we have:
+    //   - solution() = V at time-to-expiry τ=0 (current)
+    //   - solution_prev() = V at time-to-expiry τ=dt (one step back)
+    //
+    // We use: θ ≈ (V(t+dt) - V(t)) / dt = (V_prev - V_current) / dt
+    // This gives negative theta for time decay (option loses value as time passes).
+
+    // Convert spot to log-moneyness
+    double x_spot = std::log(params_.spot / params_.strike);
+
+    // Find grid indices for interpolation
+    auto [i_left, i_right] = find_grid_index(x_spot);
+
+    // Interpolate both solutions at the spot price
+    double v_current = interpolate(x_spot, i_left, i_right, grid_->solution());
+    double v_prev = interpolate(x_spot, i_left, i_right, grid_->solution_prev());
+
+    // Compute theta using backward difference
+    double dt = grid_->dt();
+    double theta_normalized = (v_prev - v_current) / dt;
+
+    // Convert from normalized (V/K) to actual price
+    return theta_normalized * params_.strike;
 }
 
 std::pair<size_t, size_t> AmericanOptionResult::find_grid_index(double x) const {
@@ -156,8 +177,12 @@ std::pair<size_t, size_t> AmericanOptionResult::find_grid_index(double x) const 
 }
 
 double AmericanOptionResult::interpolate(double x, size_t i_left, size_t i_right) const {
+    return interpolate(x, i_left, i_right, grid_->solution());
+}
+
+double AmericanOptionResult::interpolate(double x, size_t i_left, size_t i_right,
+                                          std::span<const double> solution) const {
     auto x_grid = grid_->x();
-    auto solution = grid_->solution();
 
     // Handle exact match
     if (i_left == i_right) {

@@ -190,14 +190,60 @@ TEST_F(AmericanOptionResultTest, CallOptionGreeks) {
     EXPECT_LE(delta, 1.0);
 }
 
-// Test 10: Theta (not yet implemented - should throw)
-TEST_F(AmericanOptionResultTest, ThetaStub) {
-    AmericanOptionResult result(grid, params);
+// Test 10: Theta computation with known function
+TEST_F(AmericanOptionResultTest, ThetaComputation) {
+    // Fill both current and previous solutions with known values
+    // V_current(x) = 1.0 (constant)
+    // V_prev(x) = 1.5 (constant)
+    // Expected theta = (V_prev - V_current) / dt = 0.5 / 0.01 = 50
+    auto x_span = grid->x();
+    auto solution = grid->solution();
+    auto solution_prev = grid->solution_prev();
 
-    // theta() is not yet implemented and should throw std::runtime_error
-    EXPECT_THROW({
-        result.theta();
-    }, std::runtime_error);
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        solution[i] = 1.0;       // V(t=0) / K
+        solution_prev[i] = 1.5;  // V(t=dt) / K
+    }
+
+    AmericanOptionResult result(grid, params);
+    double theta = result.theta();
+
+    // dt = (t_end - t_start) / n_steps = 1.0 / 100 = 0.01
+    // theta_normalized = (1.5 - 1.0) / 0.01 = 50
+    // theta = theta_normalized * K = 50 * 100 = 5000
+    double dt = 1.0 / 100.0;
+    double expected_theta = (1.5 - 1.0) / dt * params.strike;
+
+    EXPECT_NEAR(theta, expected_theta, 1e-10)
+        << "Theta should match analytical value for constant solution";
+}
+
+// Test 10b: Theta sign for time decay
+TEST_F(AmericanOptionResultTest, ThetaTimeDecay) {
+    // Simulate time decay: V_current > V_prev (option loses value as time passes)
+    // This means theta = (V_prev - V_current) / dt < 0 (time decay)
+    auto solution = grid->solution();
+    auto solution_prev = grid->solution_prev();
+
+    // Use simple linear values that decrease over time
+    // At t=0 (current): V = 1.0 everywhere
+    // At t=dt (prev): V = 0.9 everywhere (option worth less in future)
+    for (size_t i = 0; i < grid->n_space(); ++i) {
+        solution[i] = 1.0;       // Current value (t=0)
+        solution_prev[i] = 0.9;  // Previous value (t=dt, option worth less)
+    }
+
+    AmericanOptionResult result(grid, params);
+    double theta = result.theta();
+
+    // Theta = (V_prev - V_current) / dt = (0.9 - 1.0) / dt < 0
+    EXPECT_LT(theta, 0.0)
+        << "Theta should be negative when option decays over time";
+
+    // Check magnitude
+    double dt = 1.0 / 100.0;  // n_steps = 100
+    double expected = (0.9 - 1.0) / dt * params.strike;  // = -1000
+    EXPECT_NEAR(theta, expected, 1e-10);
 }
 
 // Test 11: Gamma correction term verification
