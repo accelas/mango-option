@@ -155,14 +155,21 @@ namespace mango {
         return std::start_lifetime_as_array<T>(p, n);
     }
 #else
-    // Fallback: Use placement new to start object lifetime
-    // This is slightly less efficient but portable to C++20/23 compilers
-    // without P2590R2 support.
+    // Fallback: Start object lifetime without C++23 facility
+    // For trivially default-constructible types (double, int), this is a no-op
+    // but satisfies the object lifetime rules per the standard.
     template<typename T>
     T* start_array_lifetime(void* p, size_t n) {
-        // For trivially-constructible types (like double, int), this is a no-op
-        // but satisfies the object lifetime rules.
-        return std::uninitialized_default_construct_n(static_cast<T*>(p), n);
+        auto* typed = static_cast<T*>(p);
+        if constexpr (std::is_trivially_default_constructible_v<T>) {
+            // Trivial types: lifetime implicitly starts when storage is obtained
+            // Just return the typed pointer (no initialization needed)
+            return typed;
+        } else {
+            // Non-trivial types: must explicitly construct
+            std::uninitialized_default_construct_n(typed, n);
+            return typed;
+        }
     }
 #endif
 
@@ -353,7 +360,7 @@ Use ThreadWorkspaceBuffer and parallelize slice iteration.
 
 ```cpp
 template<size_t Axis>
-void fit_axis(
+[[nodiscard]] std::expected<void, InterpolationError> fit_axis(
     std::vector<T>& coeffs,
     T tolerance,
     std::array<T, N>& max_residuals,
@@ -439,6 +446,8 @@ void fit_axis(
     max_residuals[Axis] = global_max_residual;
     conditions[Axis] = global_max_condition;
     failed[Axis] = global_failed;
+
+    return {};  // Success
 }
 ```
 
@@ -586,83 +595,41 @@ These are SIMD hints for vectorization, not thread parallelization.
 
 **ThreadWorkspaceBuffer needed:** No
 
-#### Pattern 3: Parallel Region with Per-Thread Workspace (PRIMARY TARGET)
+#### Pattern 3: Parallel Region with Per-Thread Workspace
 
-This is THE pattern ThreadWorkspaceBuffer replaces.
+Existing per-thread workspace patterns in the codebase.
 
-| File | Lines | Construct | Current Implementation |
-|------|-------|-----------|----------------------|
-| `american_option_batch.cpp` | 466-604 | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | Per-thread `monotonic_buffer_resource`, per-thread `pmr::vector<double>`, per-thread Grid, manual heap fallback |
+| File | Lines | Construct | Status |
+|------|-------|-----------|--------|
+| `american_option_batch.cpp` | 466-604 | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | **OUT OF SCOPE** - existing PMR pattern works, N allocations acceptable |
+| `bspline_nd_separable.hpp` | (new) | `MANGO_PRAGMA_PARALLEL` + `MANGO_PRAGMA_FOR_STATIC` | **PRIMARY TARGET** - 24,000 allocations → N allocations |
 
-**ThreadWorkspaceBuffer needed:** Yes (primary migration target)
+**american_option_batch.cpp (OUT OF SCOPE):**
+
+The existing code uses per-thread `monotonic_buffer_resource` with `pmr::vector<double>`.
+This works correctly and has acceptable performance (N allocations where N = batch size).
+Migrating to ThreadWorkspaceBuffer would require adding `PDEWorkspace::from_bytes()`,
+which is not justified given the low allocation count.
+
+**bspline_nd_separable.hpp (PRIMARY TARGET):**
+
+This is where ThreadWorkspaceBuffer provides the most value. Each B-spline fit currently
+allocates BandedMatrix + BandedLUWorkspace. For a 4D price table, that's 24,000 allocations.
+With ThreadWorkspaceBuffer + BSplineCollocationWorkspace, this drops to N (thread count).
 
 ```cpp
-// Current pattern (to be replaced):
+// PRIMARY TARGET: BSplineNDSeparable::fit_axis()
+// See "4. Modified BSplineNDSeparable" section for full implementation
+
 MANGO_PRAGMA_PARALLEL
 {
-    std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes);
-    std::pmr::vector<double> thread_buffer(&thread_pool);
-    thread_buffer.resize(workspace_size_elements);
+    ThreadWorkspaceBuffer buffer(BSplineCollocationWorkspace<T>::required_bytes(n_axis));
 
     MANGO_PRAGMA_FOR_STATIC
-    for (size_t i = 0; i < params.size(); ++i) {
-        auto workspace = PDEWorkspace::from_buffer(thread_buffer, n);
-        // ... use workspace ...
-        if (!use_shared_grid) {
-            thread_pool.release();
-        }
-    }
-}
-
-// New pattern (with ThreadWorkspaceBuffer):
-// PDEWorkspace uses typed std::span<double> from_buffer(). Two migration options:
-//
-// OPTION A: Add PDEWorkspace::from_bytes() (recommended for new code)
-// - Requires adding start_array_lifetime<double>() calls
-// - Full byte-buffer integration
-//
-// OPTION B: Keep existing typed span API (minimal changes)
-// - PDEWorkspace::from_buffer() unchanged
-// - ThreadWorkspaceBuffer provides the bytes, caller creates typed view
-
-// OPTION A - Full byte-buffer integration (requires PDEWorkspace changes):
-MANGO_PRAGMA_PARALLEL
-{
-    ThreadWorkspaceBuffer buffer(PDEWorkspace::required_bytes(n));
-
-    MANGO_PRAGMA_FOR_STATIC
-    for (size_t i = 0; i < params.size(); ++i) {
-        // Recreate workspace view each iteration (cheap span slicing)
-        auto ws_result = PDEWorkspace::from_bytes(buffer.bytes(), n);
-        if (!ws_result.has_value()) continue;  // Handle error
-        auto& workspace = ws_result.value();
-        // ... use workspace ...
-    }
-}
-
-// OPTION B - Minimal changes (use existing from_buffer API):
-// PDEWorkspace::from_buffer() already takes std::span<double>.
-// We just need to provide a stable typed buffer with fallback.
-MANGO_PRAGMA_PARALLEL
-{
-    // Thread-local fallback for overflow
-    auto get_fallback = []() -> std::pmr::memory_resource* {
-        thread_local std::pmr::synchronized_pool_resource pool;
-        return &pool;
-    };
-
-    std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes, get_fallback());
-    std::pmr::vector<double> thread_buffer(&thread_pool);
-    thread_buffer.resize(workspace_size_elements);
-
-    MANGO_PRAGMA_FOR_STATIC
-    for (size_t i = 0; i < params.size(); ++i) {
-        // Recreate workspace view each iteration (cheap span slicing)
-        auto ws_result = PDEWorkspace::from_buffer(std::span(thread_buffer), n);
-        if (!ws_result.has_value()) continue;  // Handle error
-        auto& workspace = ws_result.value();
-        // ... use workspace ...
-        // No release() - same buffer reused each iteration
+    for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
+        auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
+        // Zero allocations in hot path
+        solver.fit_with_workspace(slice_buffer, ws.value(), config);
     }
 }
 ```
@@ -692,8 +659,8 @@ Manual workspace caching that could be simplified with ThreadWorkspaceBuffer.
 
 | File | Pattern | Needs Migration | Priority |
 |------|---------|-----------------|----------|
-| `american_option_batch.cpp` | Per-thread workspace | **Yes** | P0 (primary) |
-| `bspline_nd_separable.hpp` | New parallelization | **Yes** | P0 (new feature) |
+| `bspline_nd_separable.hpp` | New parallelization | **Yes** | P0 (primary target) |
+| `american_option_batch.cpp` | Per-thread workspace | No | - (existing PMR pattern works) |
 | `iv_solver_fdm.cpp` | Thread-local cache | Optional | P2 |
 | `price_table_builder.cpp` | Per-iteration alloc | Optional | P2 |
 | `price_table_extraction.cpp` | Per-iteration alloc | Optional | P2 |
@@ -723,10 +690,15 @@ Add missing OpenMP macros to `src/support/parallel.hpp`:
    - Thread safety under OpenMP parallel regions
    - Per-thread reuse across multiple iterations without reallocation
    - Span stability (bytes() returns same pointer throughout lifetime)
-3. Refactor `american_option_batch.cpp` to use ThreadWorkspaceBuffer
-   - Replace manual PMR pattern (lines 466-604)
-   - Remove heap fallback code (ThreadWorkspaceBuffer handles this)
-   - Verify identical results with existing tests
+
+**Note on american_option_batch.cpp:**
+The existing PMR pattern in `american_option_batch.cpp` already works correctly. Migrating it to
+ThreadWorkspaceBuffer would require adding `PDEWorkspace::from_bytes()`, which is **out of scope**
+for this design. The priority is BSplineCollocationWorkspace where the allocation count is 24,000
+vs. american_option_batch where it's just N (number of options in batch).
+
+**Decision:** Leave american_option_batch.cpp unchanged in Phase 1. The existing code works and
+has acceptable performance. A future design doc can address PDEWorkspace::from_bytes() if needed.
 
 ### Phase 2: Add BSplineCollocationWorkspace (P0)
 1. Create `src/math/bspline_collocation_workspace.hpp`
