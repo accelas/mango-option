@@ -1,4 +1,4 @@
-# C++20 Migration Design: mango-iv
+# C++20 Migration Design: mango-option
 
 **Date:** 2025-11-03
 **Status:** Design Phase
@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-We migrate mango-iv from C23 to C++20 to achieve three goals **(v2.0 - CPU-only):**
+We migrate mango-option from C23 to C++20 to achieve three goals **(v2.0 - CPU-only):**
 
 1. **Type-safe boundary conditions** via compile-time policies (eliminate enum-based branching)
 2. **Better callback ergonomics** via lambdas with captures (eliminate `void*` user_data)

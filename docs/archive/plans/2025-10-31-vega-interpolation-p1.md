@@ -1026,7 +1026,7 @@ git commit -m "bench: add vega interpolation performance benchmark
 
 **Step 1: Update PROJECT_OVERVIEW.md**
 
-Add to the "What mango-iv Provides" section:
+Add to the "What mango-option Provides" section:
 
 ```markdown
 #### Greeks Calculation via Vega Interpolation

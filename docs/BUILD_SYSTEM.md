@@ -1,4 +1,4 @@
-# Makefile Build System for mango-iv
+# Makefile Build System for mango-option
 
 This is an alternative build system using standard Make, designed as a workaround for environments where Bazel is not available (e.g., Claude Code web interface).
 

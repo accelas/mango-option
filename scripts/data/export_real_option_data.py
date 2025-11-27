@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download real market option data, price it with the mango_iv Python binding,
+Download real market option data, price it with the mango_option Python binding,
 and persist the snapshot as an Arrow IPC (Feather) file.
 """
 
@@ -24,10 +24,10 @@ if BAZEL_PYTHON_DIR.exists():
     sys.path.append(str(BAZEL_PYTHON_DIR))
 
 try:
-    import mango_iv
+    import mango_option
 except ImportError as exc:  # pragma: no cover - handled in CLI
     raise SystemExit(
-        "mango_iv module not available. Build it with: bazel build //python:mango_iv"
+        "mango_option module not available. Build it with: bazel build //python:mango_option"
     ) from exc
 
 
@@ -77,9 +77,9 @@ def _estimate_rate() -> float:
 
 
 def _build_params(
-    sample: OptionSample, option_kind: mango_iv.OptionType
-) -> mango_iv.AmericanOptionParams:
-    params = mango_iv.AmericanOptionParams()
+    sample: OptionSample, option_kind: mango_option.OptionType
+) -> mango_option.AmericanOptionParams:
+    params = mango_option.AmericanOptionParams()
     params.spot = sample.spot
     params.strike = sample.strike
     params.maturity = sample.time_to_maturity
@@ -91,9 +91,9 @@ def _build_params(
 
 
 def _price_option(sample: OptionSample) -> float:
-    option_kind = mango_iv.OptionType.CALL if sample.option_type == 1 else mango_iv.OptionType.PUT
+    option_kind = mango_option.OptionType.CALL if sample.option_type == 1 else mango_option.OptionType.PUT
     params = _build_params(sample, option_kind)
-    result = mango_iv.american_option_price(params)
+    result = mango_option.american_option_price(params)
     return float(result.value)
 
 

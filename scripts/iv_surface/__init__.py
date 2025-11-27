@@ -2,7 +2,7 @@
 IV Surface Calculator - Python package for option data and implied volatility.
 
 This package provides tools to download option chain data from Yahoo Finance
-and calculate implied volatility surfaces using the mango-iv C++ library.
+and calculate implied volatility surfaces using the mango-option C++ library.
 
 Modules:
     database: SQLite3 database schema and utilities

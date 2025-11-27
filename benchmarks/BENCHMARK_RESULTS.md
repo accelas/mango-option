@@ -64,14 +64,14 @@ Grid: 101x1000 for all parallel benchmarks
 ## 2. Performance vs QuantLib
 
 ### Direct Comparison (101x1000 grid, single-threaded)
-| Scenario | mango-iv | QuantLib | Slowdown |
+| Scenario | mango-option | QuantLib | Slowdown |
 |----------|----------|----------|----------|
 | ATM Put | 13.0ms | 3.0ms | **4.4x** |
 | OTM Put | 13.2ms | 3.0ms | **4.4x** |
 | ITM Put | 13.0ms | 3.0ms | **4.4x** |
 
 ### Grid Resolution Scaling (single-threaded)
-| Grid Size | mango-iv | QuantLib | Slowdown |
+| Grid Size | mango-option | QuantLib | Slowdown |
 |-----------|----------|----------|----------|
 | 101x1000 | 13.8ms | 3.0ms | **4.6x** |
 | 201x2000 | 78.3ms | 11.1ms | **7.1x** |
@@ -80,19 +80,19 @@ Grid: 101x1000 for all parallel benchmarks
 **Critical Finding:** The performance gap **widens dramatically** with larger grids, suggesting algorithmic inefficiency rather than just slower execution.
 
 ### Parallel Batch Performance (32 cores, 101x1000 grid)
-| Workload | mango-iv (parallel) | QuantLib (single) | Comparison |
+| Workload | mango-option (parallel) | QuantLib (single) | Comparison |
 |----------|---------------------|-------------------|------------|
 | 100 options | 118ms (848 opts/sec) | 297ms (337 opts/sec) | **2.5x faster** ✅ |
 | 100 IVs | 931ms (107 IVs/sec) | N/A | - |
 
-**Key Finding:** With OpenMP parallelization, mango-iv can **outperform QuantLib** on batch workloads by leveraging multi-core hardware.
+**Key Finding:** With OpenMP parallelization, mango-option can **outperform QuantLib** on batch workloads by leveraging multi-core hardware.
 
 ---
 
 ## 3. Accuracy vs QuantLib
 
 ### Price Accuracy (201x2000 grid)
-| Scenario | mango-iv | QuantLib | Error | Rel Error |
+| Scenario | mango-option | QuantLib | Error | Rel Error |
 |----------|----------|----------|-------|-----------|
 | ATM Put 1Y | 6.637 | 6.660 | 0.023 | **0.35%** ✅ |
 | OTM Put 3M | 2.289 | 2.292 | 0.004 | **0.17%** ✅ |
@@ -105,7 +105,7 @@ Grid: 101x1000 for all parallel benchmarks
 **All scenarios < 2% error** - excellent agreement with QuantLib reference.
 
 ### Greeks Accuracy (201x2000 grid, ATM Put 1Y)
-| Greek | mango-iv | QuantLib | Rel Error |
+| Greek | mango-option | QuantLib | Rel Error |
 |-------|----------|----------|-----------|
 | Delta | -0.423 | -0.423 | **0.004%** ⭐ |
 | Gamma | 0.02154 | 0.02148 | **0.29%** ✅ |
@@ -129,7 +129,7 @@ Reference (QuantLib 1001x10000): 6.661
 
 ## Analysis
 
-### Why Is mango-iv Slower?
+### Why Is mango-option Slower?
 
 **Scaling Analysis:**
 - 101 → 201 points (2x): **5.7x slower** (13.8ms → 78.3ms)
@@ -229,7 +229,7 @@ The C++20 implementation is **numerically excellent** with demonstrated **parall
 ### Next Steps
 **Priority 1:** Add OpenMP to source code spatial loops
 - Benchmark shows 12-15x speedup potential
-- Could make mango-iv **10x faster than QuantLib** on batch workloads
+- Could make mango-option **10x faster than QuantLib** on batch workloads
 
 **Priority 2:** Profile and fix O(n²) scaling behavior
 - Would improve both single and parallel performance

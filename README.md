@@ -1,4 +1,4 @@
-# mango-iv
+# mango-option
 
 Modern C++23 library for American option pricing and implied volatility calculation.
 
@@ -6,9 +6,9 @@ Modern C++23 library for American option pricing and implied volatility calculat
 
 ---
 
-## What is mango-iv?
+## What is mango-option?
 
-**mango-iv** solves two fundamental problems in quantitative finance:
+**mango-option** solves two fundamental problems in quantitative finance:
 
 1. **American Option Pricing** – Finite difference PDE solver with TR-BDF2 time stepping
 2. **Implied Volatility Calculation** – Extract implied volatility from market prices
@@ -42,8 +42,8 @@ Optional:
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/mango-iv.git
-cd mango-iv
+git clone https://github.com/your-org/mango-option.git
+cd mango-option
 
 # Build everything
 bazel build //...
@@ -173,7 +173,7 @@ if (result.has_value()) {
 ## Project Structure
 
 ```
-mango-iv/
+mango-option/
 ├── src/
 │   ├── pde/
 │   │   ├── core/          # Grid, PDESolver, boundary conditions

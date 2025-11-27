@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Implement implied volatility calculation for **American options** as the primary scope of the mango-iv project. This design removes the European option module and replaces it with:
+Implement implied volatility calculation for **American options** as the primary scope of the mango-option project. This design removes the European option module and replaces it with:
 
 1. **FDM-based American IV** - Reference implementation using nested Brent + PDE solver (~200-300ms)
 2. **Interpolation-based American IV** - Fast queries via 3D precomputed price tables (~7.5µs)

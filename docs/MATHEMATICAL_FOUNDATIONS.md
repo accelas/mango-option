@@ -1,6 +1,6 @@
 # Mathematical Foundations
 
-Mathematical formulations and numerical methods underlying the mango-iv library.
+Mathematical formulations and numerical methods underlying the mango-option library.
 
 **For software architecture, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 **For usage examples, see [API_GUIDE.md](API_GUIDE.md)**

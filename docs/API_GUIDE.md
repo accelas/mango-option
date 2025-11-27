@@ -1,6 +1,6 @@
 # API Usage Guide
 
-Practical examples and common usage patterns for the mango-iv library.
+Practical examples and common usage patterns for the mango-option library.
 
 **For software architecture, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 **For mathematical formulations, see [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)**

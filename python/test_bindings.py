@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for mango-iv Python bindings
+Tests for mango-option Python bindings
 """
 
 import sys
@@ -10,22 +10,22 @@ import numpy as np
 
 # Try different import paths
 try:
-    import mango_iv
+    import mango_option
 except ImportError:
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'bazel-bin', 'python'))
-        import mango_iv
+        import mango_option
     except ImportError as e:
-        print(f"Failed to import mango_iv: {e}")
-        print("Run: bazel build //python:mango_iv")
+        print(f"Failed to import mango_option: {e}")
+        print("Run: bazel build //python:mango_option")
         sys.exit(1)
 
 
 def test_option_types():
     """Test OptionType enum"""
     print("Testing OptionType enum...")
-    assert mango_iv.OptionType.CALL is not None
-    assert mango_iv.OptionType.PUT is not None
+    assert mango_option.OptionType.CALL is not None
+    assert mango_option.OptionType.PUT is not None
     print("✓ OptionType enum works")
 
 
@@ -34,7 +34,7 @@ def test_yield_curve():
     print("Testing YieldCurve...")
 
     # Flat curve
-    flat = mango_iv.YieldCurve.flat(0.05)
+    flat = mango_option.YieldCurve.flat(0.05)
     assert abs(flat.rate(1.0) - 0.05) < 1e-10
     assert abs(flat.zero_rate(1.0) - 0.05) < 1e-10
     print("✓ Flat YieldCurve works")
@@ -42,7 +42,7 @@ def test_yield_curve():
     # From discounts
     tenors = [0.25, 0.5, 1.0, 2.0]
     discounts = [0.9876, 0.9753, 0.9512, 0.9048]
-    curve = mango_iv.YieldCurve.from_discounts(tenors, discounts)
+    curve = mango_option.YieldCurve.from_discounts(tenors, discounts)
     assert curve.discount(1.0) > 0
     print("✓ YieldCurve from discounts works")
 
@@ -51,13 +51,13 @@ def test_iv_query():
     """Test IVQuery construction"""
     print("Testing IVQuery...")
 
-    query = mango_iv.IVQuery()
+    query = mango_option.IVQuery()
     query.spot = 100.0
     query.strike = 100.0
     query.maturity = 1.0
     query.rate = 0.05
     query.dividend_yield = 0.02
-    query.type = mango_iv.OptionType.PUT
+    query.type = mango_option.OptionType.PUT
     query.market_price = 10.0
 
     assert query.spot == 100.0
@@ -69,16 +69,16 @@ def test_iv_solver_fdm():
     """Test IVSolverFDM"""
     print("Testing IVSolverFDM...")
 
-    config = mango_iv.IVSolverFDMConfig()
-    solver = mango_iv.IVSolverFDM(config)
+    config = mango_option.IVSolverFDMConfig()
+    solver = mango_option.IVSolverFDM(config)
 
-    query = mango_iv.IVQuery()
+    query = mango_option.IVQuery()
     query.spot = 100.0
     query.strike = 100.0
     query.maturity = 1.0
     query.rate = 0.05
     query.dividend_yield = 0.02
-    query.type = mango_iv.OptionType.PUT
+    query.type = mango_option.OptionType.PUT
     query.market_price = 10.0
 
     success, result, error = solver.solve_impl(query)
@@ -92,16 +92,16 @@ def test_american_option_price():
     """Test american_option_price function"""
     print("Testing american_option_price...")
 
-    params = mango_iv.AmericanOptionParams()
+    params = mango_option.AmericanOptionParams()
     params.strike = 100.0
     params.spot = 100.0
     params.maturity = 1.0
     params.volatility = 0.20
     params.rate = 0.05
     params.dividend_yield = 0.02
-    params.type = mango_iv.OptionType.PUT
+    params.type = mango_option.OptionType.PUT
 
-    result = mango_iv.american_option_price(params)
+    result = mango_option.american_option_price(params)
     delta = result.delta()
     print(f"✓ American option price computed, delta = {delta:.4f}")
 
@@ -121,7 +121,7 @@ def test_price_table_workspace():
     coeffs = np.random.rand(n_coeffs) * 10.0
 
     # Create workspace
-    ws = mango_iv.PriceTableWorkspace.create(
+    ws = mango_option.PriceTableWorkspace.create(
         log_m, tau, sigma, r, coeffs,
         K_ref=100.0,
         dividend_yield=0.02,
@@ -148,7 +148,7 @@ def test_price_table_workspace():
         ws.save(filepath, "TEST", 0)  # 0 = PUT
         print(f"✓ Saved to {filepath}")
 
-        loaded = mango_iv.PriceTableWorkspace.load(filepath)
+        loaded = mango_option.PriceTableWorkspace.load(filepath)
         print(f"✓ Loaded: {loaded}")
 
         # Verify loaded data matches
@@ -167,7 +167,7 @@ def test_price_table_surface():
     print("Testing PriceTableSurface4D...")
 
     # Create axes
-    axes = mango_iv.PriceTableAxes4D()
+    axes = mango_option.PriceTableAxes4D()
     axes.grids = [
         np.array([0.8, 0.9, 1.0, 1.1, 1.2]),  # moneyness
         np.array([0.1, 0.25, 0.5, 1.0]),       # maturity
@@ -177,7 +177,7 @@ def test_price_table_surface():
     axes.names = ["moneyness", "maturity", "volatility", "rate"]
 
     # Create metadata
-    meta = mango_iv.PriceTableMetadata()
+    meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
     meta.dividend_yield = 0.02
     meta.m_min = 0.8
@@ -189,7 +189,7 @@ def test_price_table_surface():
     coeffs = np.random.rand(n_coeffs) * 10.0
 
     # Build surface
-    surface = mango_iv.PriceTableSurface4D.build(axes, coeffs, meta)
+    surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
     print(f"✓ Built surface")
 
     # Query value
@@ -206,7 +206,7 @@ def test_iv_solver_interpolated():
     print("Testing IVSolverInterpolated...")
 
     # Build a surface first
-    axes = mango_iv.PriceTableAxes4D()
+    axes = mango_option.PriceTableAxes4D()
     axes.grids = [
         np.array([0.8, 0.9, 1.0, 1.1, 1.2]),
         np.array([0.1, 0.25, 0.5, 1.0]),
@@ -214,7 +214,7 @@ def test_iv_solver_interpolated():
         np.array([0.01, 0.03, 0.05, 0.07])
     ]
 
-    meta = mango_iv.PriceTableMetadata()
+    meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
     meta.dividend_yield = 0.02
     meta.m_min = 0.8
@@ -223,25 +223,25 @@ def test_iv_solver_interpolated():
     shape = axes.shape
     coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
 
-    surface = mango_iv.PriceTableSurface4D.build(axes, coeffs, meta)
+    surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
 
     # Create solver
-    config = mango_iv.IVSolverInterpolatedConfig()
+    config = mango_option.IVSolverInterpolatedConfig()
     config.max_iterations = 50
     config.tolerance = 1e-6
 
-    solver = mango_iv.IVSolverInterpolated.create(surface, config)
+    solver = mango_option.IVSolverInterpolated.create(surface, config)
     print("✓ Created IVSolverInterpolated")
 
     # Note: With random coefficients, the solver may not converge
     # but we can verify the API works
-    query = mango_iv.IVQuery()
+    query = mango_option.IVQuery()
     query.spot = 100.0
     query.strike = 100.0
     query.maturity = 0.5
     query.rate = 0.05
     query.dividend_yield = 0.02
-    query.type = mango_iv.OptionType.PUT
+    query.type = mango_option.OptionType.PUT
     query.market_price = 5.0
 
     success, result, error = solver.solve_impl(query)
@@ -257,9 +257,9 @@ def test_load_error_enum():
     """Test PriceTableLoadError enum"""
     print("Testing PriceTableLoadError enum...")
 
-    assert mango_iv.PriceTableLoadError.FILE_NOT_FOUND is not None
-    assert mango_iv.PriceTableLoadError.CORRUPTED_COEFFICIENTS is not None
-    assert mango_iv.PriceTableLoadError.NOT_ARROW_FILE is not None
+    assert mango_option.PriceTableLoadError.FILE_NOT_FOUND is not None
+    assert mango_option.PriceTableLoadError.CORRUPTED_COEFFICIENTS is not None
+    assert mango_option.PriceTableLoadError.NOT_ARROW_FILE is not None
     print("✓ PriceTableLoadError enum accessible")
 
 
@@ -269,7 +269,7 @@ def test_error_handling():
 
     # Load non-existent file
     try:
-        mango_iv.PriceTableWorkspace.load("/nonexistent/path.arrow")
+        mango_option.PriceTableWorkspace.load("/nonexistent/path.arrow")
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "File not found" in str(e)
@@ -277,7 +277,7 @@ def test_error_handling():
 
     # Insufficient grid points (< 4)
     try:
-        mango_iv.PriceTableWorkspace.create(
+        mango_option.PriceTableWorkspace.create(
             np.array([-0.1, 0.0, 0.1]),  # Only 3 points
             np.array([0.1, 0.25, 0.5, 1.0]),
             np.array([0.1, 0.2, 0.3, 0.4]),
@@ -290,7 +290,7 @@ def test_error_handling():
         print(f"✓ Insufficient grid points raises ValueError: {e}")
 
     # PriceTableAxes with wrong number of grids
-    axes = mango_iv.PriceTableAxes4D()
+    axes = mango_option.PriceTableAxes4D()
     try:
         axes.grids = [np.array([1.0, 2.0, 3.0, 4.0])]  # Only 1 grid instead of 4
         assert False, "Should have raised ValueError"
@@ -304,7 +304,7 @@ def test_surface_to_solver_integration():
     print("Testing surface to solver integration...")
 
     # Build surface
-    axes = mango_iv.PriceTableAxes4D()
+    axes = mango_option.PriceTableAxes4D()
     axes.grids = [
         np.array([0.8, 0.9, 1.0, 1.1, 1.2]),
         np.array([0.1, 0.25, 0.5, 1.0]),
@@ -312,7 +312,7 @@ def test_surface_to_solver_integration():
         np.array([0.01, 0.03, 0.05, 0.07])
     ]
 
-    meta = mango_iv.PriceTableMetadata()
+    meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
     meta.dividend_yield = 0.02
     meta.m_min = 0.8
@@ -321,11 +321,11 @@ def test_surface_to_solver_integration():
     shape = axes.shape
     coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
 
-    surface = mango_iv.PriceTableSurface4D.build(axes, coeffs, meta)
+    surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
 
     # Verify surface can be passed to IVSolverInterpolated (tests shared_ptr const conversion)
-    config = mango_iv.IVSolverInterpolatedConfig()
-    solver = mango_iv.IVSolverInterpolated.create(surface, config)
+    config = mango_option.IVSolverInterpolatedConfig()
+    solver = mango_option.IVSolverInterpolated.create(surface, config)
     assert solver is not None
     print("✓ Surface correctly passes to IVSolverInterpolated.create()")
 

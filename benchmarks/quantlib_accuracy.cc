@@ -1,6 +1,6 @@
 /**
  * @file quantlib_accuracy.cc
- * @brief Accuracy comparison between mango-iv and QuantLib
+ * @brief Accuracy comparison between mango-option and QuantLib
  *
  * Compares numerical accuracy of American option pricing:
  * - Uses QuantLib as reference implementation
@@ -108,7 +108,7 @@ static void compare_scenario(
     double dividend_yield,
     bool is_call)
 {
-    // Mango-IV pricing with workspace
+    // Mango-Option pricing with workspace
     AmericanOptionParams mango_params(
         spot,
         strike,
@@ -244,7 +244,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
         ql_reference = ref.price;
     }
 
-    // Mango-IV pricing at automatically determined resolution
+    // Mango-Option pricing at automatically determined resolution
     AmericanOptionParams params(
         100.0,  // spot
         100.0,  // strike

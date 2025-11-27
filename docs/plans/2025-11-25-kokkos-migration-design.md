@@ -8,7 +8,7 @@
 
 ## Overview
 
-Rewrite mango-iv core to use Kokkos for:
+Rewrite mango-option core to use Kokkos for:
 - **GPU acceleration** — SYCL primary, CUDA/HIP supported
 - **Portable parallelism** — Replace OpenMP with Kokkos::parallel_for
 - **Unified memory model** — Kokkos::View replaces mdspan + PMR arenas
@@ -288,7 +288,7 @@ bazel test //kokkos/... --config=openmp    # Tests
 ### During Development
 
 ```
-mango-iv/
+mango-option/
 ├── src/                    # Current code (untouched)
 ├── tests/                  # Current tests (untouched)
 ├── benchmarks/             # Current benchmarks (untouched)
@@ -312,7 +312,7 @@ mango-iv/
 ### After Switchover
 
 ```
-mango-iv/
+mango-option/
 ├── src/                    # Was kokkos/src/
 ├── tests/                  # Was kokkos/tests/
 ├── benchmarks/             # Was kokkos/benchmarks/

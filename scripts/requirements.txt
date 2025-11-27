@@ -1,4 +1,4 @@
-# Python dependencies for mango-iv option data downloader
+# Python dependencies for mango-option option data downloader
 #
 # Recommended: Use uv (fast, modern package manager)
 #   uv sync

@@ -1,13 +1,13 @@
 # IV Surface Calculator Examples
 
-This directory contains example scripts demonstrating how to use the mango-iv option data downloader and IV calculator.
+This directory contains example scripts demonstrating how to use the mango-option option data downloader and IV calculator.
 
 ## Prerequisites
 
 1. **Build the C++ bindings:**
    ```bash
    # From repository root
-   bazel build //python:mango_iv.so
+   bazel build //python:mango_option.so
    ```
 
 2. **Install Python dependencies:**
@@ -255,10 +255,10 @@ Summary:
 
 ### Common Issues
 
-**Import Error: mango_iv not found**
+**Import Error: mango_option not found**
 ```bash
 # Make sure you built the C++ module and set PYTHONPATH
-bazel build //python:mango_iv.so
+bazel build //python:mango_option.so
 export PYTHONPATH="$(bazel info bazel-bin)/python:${PYTHONPATH}"
 ```
 

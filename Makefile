@@ -1,4 +1,4 @@
-# Makefile for mango-iv PDE Solver
+# Makefile for mango-option PDE Solver
 # Alternative to Bazel for environments without Bazel support
 
 # Compiler settings
@@ -58,7 +58,7 @@ all: lib examples
 
 # Help target
 help:
-	@echo "Makefile for mango-iv PDE Solver"
+	@echo "Makefile for mango-option PDE Solver"
 	@echo ""
 	@echo "Targets:"
 	@echo "  all           - Build library and examples (default)"
