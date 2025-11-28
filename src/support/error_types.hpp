@@ -87,7 +87,8 @@ enum class InterpolationErrorCode {
     InfInput,
     FittingFailed,
     EvaluationFailed,
-    ExtrapolationNotAllowed
+    ExtrapolationNotAllowed,
+    WorkspaceCreationFailed   // from_bytes() failed
 };
 
 /// Detailed interpolation error for fitting and evaluation failures
@@ -96,12 +97,18 @@ struct InterpolationError {
     size_t grid_size;      ///< Grid size involved
     size_t index;          ///< Index or axis where error occurred
     double max_residual;   ///< Maximum residual for fitting errors
+    std::string message;   ///< Empty for most errors; used for workspace errors
 
+    // Existing constructor (backward compatible)
     InterpolationError(InterpolationErrorCode code,
                       size_t grid_size = 0,
                       size_t index = 0,
                       double max_residual = 0.0)
         : code(code), grid_size(grid_size), index(index), max_residual(max_residual) {}
+
+    // Constructor with message for workspace errors
+    InterpolationError(InterpolationErrorCode code, std::string msg)
+        : code(code), grid_size(0), index(0), max_residual(0.0), message(std::move(msg)) {}
 };
 
 /// IV solver error categories
@@ -224,7 +231,11 @@ inline std::ostream& operator<<(std::ostream& os, const InterpolationError& err)
     os << "InterpolationError{code=" << static_cast<int>(err.code)
        << ", grid_size=" << err.grid_size
        << ", index=" << err.index
-       << ", max_residual=" << err.max_residual << "}";
+       << ", max_residual=" << err.max_residual;
+    if (!err.message.empty()) {
+        os << ", message=\"" << err.message << "\"";
+    }
+    os << "}";
     return os;
 }
 
@@ -326,6 +337,9 @@ inline PriceTableError convert_to_price_table_error(const InterpolationError& er
         case InterpolationErrorCode::EvaluationFailed:
         case InterpolationErrorCode::ExtrapolationNotAllowed:
             code = PriceTableErrorCode::FittingFailed;
+            break;
+        case InterpolationErrorCode::WorkspaceCreationFailed:
+            code = PriceTableErrorCode::ArenaAllocationFailed;
             break;
     }
     return PriceTableError{code, err.index, err.grid_size};

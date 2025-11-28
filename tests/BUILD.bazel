@@ -931,6 +931,15 @@ cc_test(
 )
 
 cc_test(
+    name = "interpolation_error_test",
+    srcs = ["interpolation_error_test.cc"],
+    deps = [
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "iv_result_test",
     srcs = ["iv_result_test.cc"],
     deps = [
