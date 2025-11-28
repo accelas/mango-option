@@ -8,6 +8,7 @@
 #include "src/pde/core/grid.hpp"
 #include "src/support/error_types.hpp"
 #include <expected>
+#include <optional>
 
 namespace mango {
 
@@ -51,9 +52,10 @@ private:
     SliceCache cache_;
 
     /// Compute hybrid IV/price error metric with vega floor
-    double compute_error_metric(double interpolated_price, double reference_price,
-                                double spot, double strike, double tau,
-                                double sigma, double rate, double dividend_yield) const;
+    /// Returns nullopt for low-vega regions where price error is within tolerance
+    std::optional<double> compute_error_metric(double interpolated_price, double reference_price,
+                                               double spot, double strike, double tau,
+                                               double sigma, double rate, double dividend_yield) const;
 
     /// Build BatchAmericanOptionResult by merging cached and fresh results
     /// @param all_params All (σ,r) parameter combos in full batch order

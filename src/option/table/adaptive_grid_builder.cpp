@@ -49,6 +49,21 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
     double min_rate = *std::min_element(chain.rates.begin(), chain.rates.end());
     double max_rate = *std::max_element(chain.rates.begin(), chain.rates.end());
 
+    // Expand bounds when min == max (or close) to ensure linspace produces distinct points
+    // Without this, linspace(x, x, 5) yields {x, x, x, x, x} which dedupes to 1 point,
+    // failing B-spline fitting that requires >= 4 points per dimension.
+    auto expand_bounds = [](double& lo, double& hi, double min_spread) {
+        if (hi - lo < min_spread) {
+            double mid = (lo + hi) / 2.0;
+            lo = mid - min_spread / 2.0;
+            hi = mid + min_spread / 2.0;
+        }
+    };
+    expand_bounds(min_moneyness, max_moneyness, 0.10);  // ±5% around ATM
+    expand_bounds(min_tau, max_tau, 0.5);               // ±0.25 years
+    expand_bounds(min_vol, max_vol, 0.10);              // ±5% vol
+    expand_bounds(min_rate, max_rate, 0.04);            // ±2% rate
+
     // Helper to create evenly spaced grid
     auto linspace = [](double lo, double hi, size_t n) {
         std::vector<double> v(n);
@@ -96,8 +111,13 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
 
         auto& [builder, axes] = builder_result.value();
 
-        // Check if τ grid changed - if so, invalidate cache
-        cache_.invalidate_if_tau_changed(maturity_grid);
+        // On first iteration, set the initial tau grid; subsequent iterations
+        // compare against it and clear cache only if tau actually changed.
+        if (iteration == 0) {
+            cache_.set_tau_grid(maturity_grid);
+        } else {
+            cache_.invalidate_if_tau_changed(maturity_grid);
+        }
 
         // Generate all (σ,r) parameter combinations
         auto all_params = builder.make_batch_internal(axes);
@@ -124,8 +144,19 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         // Solve missing pairs
         BatchAmericanOptionResult fresh_results;
         if (!missing_params.empty()) {
+            // Configure grid accuracy from user's grid_spec
+            // This influences the solver's grid generation while letting it handle bounds
+            GridAccuracyParams accuracy;
+            const size_t n_points = grid_spec.n_points();
+            accuracy.min_spatial_points = std::min(n_points, size_t{100});
+            accuracy.max_spatial_points = std::max(n_points, size_t{100});
+            accuracy.max_time_steps = n_time;
+            if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
+                accuracy.alpha = grid_spec.concentration();
+            }
+
             BatchAmericanOptionSolver batch_solver;
-            batch_solver.set_grid_accuracy(GridAccuracyParams{})
+            batch_solver.set_grid_accuracy(accuracy)
                         .set_snapshot_times(std::span{maturity_grid});
             fresh_results = batch_solver.solve_batch(missing_params, true);
 
@@ -240,11 +271,17 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             stats.pde_solves_validation++;
 
             double ref_price = fd_result->value();
-            double iv_error = compute_error_metric(
+            auto iv_error_opt = compute_error_metric(
                 interp_price, ref_price,
                 chain.spot, strike, tau, sigma, rate,
                 chain.dividend_yield);
 
+            // Skip low-vega samples where error metric is undefined
+            if (!iv_error_opt.has_value()) {
+                continue;
+            }
+
+            double iv_error = iv_error_opt.value();
             max_error = std::max(max_error, iv_error);
             sum_error += iv_error;
             valid_samples++;
@@ -328,7 +365,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
     return result;
 }
 
-double AdaptiveGridBuilder::compute_error_metric(
+std::optional<double> AdaptiveGridBuilder::compute_error_metric(
     double interpolated_price, double reference_price,
     double spot, double strike, double tau, double sigma, double rate,
     double dividend_yield) const
@@ -356,8 +393,13 @@ double AdaptiveGridBuilder::compute_error_metric(
         // ΔIV ≈ ΔP / vega (first-order Taylor approximation)
         return price_error / vega;
     } else {
-        // Vega too small (deep ITM/OTM or very short τ): use floor to avoid
-        // division by near-zero and cap noise in regions where IV is ill-defined
+        // Vega too small (deep ITM/OTM or very short τ): IV is ill-defined.
+        // If price error is within tolerance, skip this sample entirely.
+        // Otherwise, use vega_floor to get a bounded error estimate.
+        double price_tol = params_.target_iv_error * params_.vega_floor;
+        if (price_error <= price_tol) {
+            return std::nullopt;  // Price is accurate enough - skip this sample
+        }
         return price_error / params_.vega_floor;
     }
 }

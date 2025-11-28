@@ -260,5 +260,75 @@ TEST(ErrorBinsTest, ProblematicBins) {
     EXPECT_TRUE(found_bin0);
 }
 
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: Cache must be initialized before checking for changes
+// Bug: invalidate_if_tau_changed was called before set_tau_grid, so
+// current_tau_grid_ was always empty, causing cache wipe every iteration
+TEST(SliceCacheTest, RegressionCacheInitializationOrder) {
+    SliceCache cache;
+
+    auto dummy = make_dummy_result();
+    ASSERT_NE(dummy, nullptr);
+    cache.add(0.20, 0.05, dummy);
+    cache.add(0.25, 0.05, dummy);
+
+    EXPECT_EQ(cache.size(), 2);
+
+    // Without calling set_tau_grid first, invalidate_if_tau_changed
+    // would see an empty current grid and clear the cache
+    std::vector<double> tau = {0.25, 0.5, 1.0};
+
+    // CORRECT: Set tau grid first on iteration 0
+    cache.set_tau_grid(tau);
+
+    // Now invalidate_if_tau_changed should NOT clear (grids match)
+    cache.invalidate_if_tau_changed(tau);
+    EXPECT_EQ(cache.size(), 2) << "Cache should be preserved when tau grid unchanged";
+
+    // Different tau grid SHOULD clear
+    std::vector<double> tau2 = {0.1, 0.5, 1.0};
+    cache.invalidate_if_tau_changed(tau2);
+    EXPECT_EQ(cache.size(), 0) << "Cache should clear when tau grid changes";
+}
+
+// Regression: Single-value axes must be expanded to provide distinct grid points
+// Bug: linspace(x, x, 5) produces {x, x, x, x, x} which dedupes to 1 point,
+// causing B-spline fitting failure (requires >= 4 points)
+TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
+    OptionChain chain;
+    chain.spot = 100.0;
+    chain.dividend_yield = 0.0;
+
+    // Single strike = single moneyness value (needs expansion)
+    chain.strikes = {100.0};
+    // Multiple maturities (don't need expansion for this test to be valid)
+    chain.maturities = {0.25, 0.5, 1.0};
+    // Single vol (needs expansion)
+    chain.implied_vols = {0.20};
+    // Single rate (needs expansion)
+    chain.rates = {0.05};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.01;  // Very relaxed
+    params.max_iterations = 1;
+    params.validation_samples = 4;
+
+    AdaptiveGridBuilder builder(params);
+
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
+    auto result = builder.build(chain, grid_spec, 100, OptionType::PUT);
+
+    // Should succeed (bounds expanded) rather than fail with InsufficientGridPoints
+    ASSERT_TRUE(result.has_value())
+        << "Single-value axes should be expanded to valid ranges. "
+        << "Error code: " << (result.has_value() ? 0 : static_cast<int>(result.error().code));
+
+    // Surface should be usable
+    EXPECT_NE(result->surface, nullptr);
+}
+
 }  // namespace
 }  // namespace mango
