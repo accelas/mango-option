@@ -59,21 +59,28 @@ A lightweight RAII wrapper for per-thread raw byte storage with automatic fallba
 
 #include <memory_resource>
 #include <span>
-#include <vector>
 #include <cstddef>
+#include <cstdlib>   // std::aligned_alloc, std::free
+#include <memory>    // std::unique_ptr
 
 namespace mango {
 
-/// Per-thread workspace buffer with automatic fallback
+/// Per-thread workspace buffer with 64-byte alignment guarantee
 ///
-/// Primary: monotonic_buffer_resource (fast bump allocation)
+/// Primary: monotonic_buffer_resource over 64-byte aligned storage
 /// Fallback: thread-local synchronized_pool_resource (if exhausted)
 ///
 /// Design principles:
-/// - Buffer provides raw byte storage (std::byte)
-/// - Workspace consumers handle alignment and typed access
+/// - Buffer provides raw byte storage (std::byte) with 64-byte alignment
+/// - Workspace consumers handle typed access; alignment is guaranteed by buffer
 /// - Buffer is allocated once per thread, reused across iterations
 /// - No release() - memory stays valid for parallel region lifetime
+///
+/// IMPORTANT: Alignment guarantee
+/// The underlying storage is allocated with std::aligned_alloc(64, ...) to ensure
+/// the base pointer is 64-byte aligned. This is required for AVX-512 aligned loads
+/// and cache-line optimization. std::pmr::vector only guarantees alignof(max_align_t)
+/// which is typically 16 bytes - insufficient for our SIMD requirements.
 ///
 /// Example:
 ///   MANGO_PRAGMA_PARALLEL
@@ -100,35 +107,52 @@ namespace mango {
 ///
 class ThreadWorkspaceBuffer {
 public:
-    /// Construct with expected byte count
+    static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
+
+    /// Construct with expected byte count (64-byte aligned)
     explicit ThreadWorkspaceBuffer(size_t byte_count)
-        : primary_pool_(byte_count, get_fallback_resource())
-        , buffer_(&primary_pool_)
+        : size_(align_up(byte_count, ALIGNMENT))
+        , storage_(allocate_aligned(size_), &std::free)
     {
-        buffer_.resize(byte_count);
+        // Verify alignment (should always succeed with aligned_alloc)
+        assert(reinterpret_cast<std::uintptr_t>(storage_.get()) % ALIGNMENT == 0);
     }
 
     /// Get byte span view of buffer (stable for lifetime of object)
     ///
     /// The returned span is valid until the ThreadWorkspaceBuffer is destroyed.
     /// All workspace objects created from this span remain valid for the same duration.
-    std::span<std::byte> bytes() noexcept { return buffer_; }
-    std::span<const std::byte> bytes() const noexcept { return buffer_; }
+    /// GUARANTEE: The base pointer is 64-byte aligned.
+    std::span<std::byte> bytes() noexcept {
+        return {static_cast<std::byte*>(storage_.get()), size_};
+    }
+    std::span<const std::byte> bytes() const noexcept {
+        return {static_cast<const std::byte*>(storage_.get()), size_};
+    }
 
-    size_t size() const noexcept { return buffer_.size(); }
+    size_t size() const noexcept { return size_; }
 
     // Note: No resize() method. Callers must know the required size upfront.
     // This ensures bytes() spans remain stable for the buffer's lifetime.
 
 private:
-    /// Thread-local synchronized pool for fallback allocations
-    static std::pmr::memory_resource* get_fallback_resource() {
-        thread_local std::pmr::synchronized_pool_resource pool;
-        return &pool;
+    static constexpr size_t align_up(size_t n, size_t alignment) {
+        return (n + alignment - 1) & ~(alignment - 1);
     }
 
-    std::pmr::monotonic_buffer_resource primary_pool_;
-    std::pmr::vector<std::byte> buffer_;
+    /// Allocate 64-byte aligned storage
+    /// Falls back to over-allocation + manual alignment if aligned_alloc unavailable
+    static void* allocate_aligned(size_t byte_count) {
+        // std::aligned_alloc requires size to be multiple of alignment
+        void* ptr = std::aligned_alloc(ALIGNMENT, byte_count);
+        if (!ptr) {
+            throw std::bad_alloc{};
+        }
+        return ptr;
+    }
+
+    size_t size_;
+    std::unique_ptr<void, decltype(&std::free)> storage_;
 };
 
 } // namespace mango
@@ -413,6 +437,7 @@ The existing `PDEWorkspace` takes `std::span<double>`, requiring callers to mana
 #include <expected>
 #include <string>
 #include <cstddef>
+#include <format>      // C++20: std::format (GCC 13+, Clang 14+, MSVC 19.29+)
 
 namespace mango {
 
@@ -735,21 +760,55 @@ inline std::ostream& operator<<(std::ostream& os, const InterpolationError& err)
 }
 ```
 
-4. Update `convert_to_price_table_error()` to handle new code:
+4. **CRITICAL: Update `convert_to_price_table_error()` switch** (src/support/error_types.hpp:309-332)
+
+   The existing switch on `InterpolationErrorCode` has no `default` case. Adding a new enum
+   value WITHOUT updating this switch causes undefined behavior (uninitialized `code` variable).
+
+   Add the new case alongside existing ones:
 ```cpp
-case InterpolationErrorCode::WorkspaceCreationFailed:
-    code = PriceTableErrorCode::ArenaAllocationFailed;  // Most appropriate existing code
-    break;
+/// Convert InterpolationError to PriceTableError
+inline PriceTableError convert_to_price_table_error(const InterpolationError& err) {
+    PriceTableErrorCode code;
+    switch (err.code) {
+        case InterpolationErrorCode::InsufficientGridPoints:
+            code = PriceTableErrorCode::InsufficientGridPoints;
+            break;
+        case InterpolationErrorCode::GridNotSorted:
+        case InterpolationErrorCode::ZeroWidthGrid:
+            code = PriceTableErrorCode::GridNotSorted;
+            break;
+        case InterpolationErrorCode::ValueSizeMismatch:
+        case InterpolationErrorCode::BufferSizeMismatch:
+        case InterpolationErrorCode::DimensionMismatch:
+        case InterpolationErrorCode::CoefficientSizeMismatch:
+        case InterpolationErrorCode::NaNInput:
+        case InterpolationErrorCode::InfInput:
+        case InterpolationErrorCode::FittingFailed:
+        case InterpolationErrorCode::EvaluationFailed:
+        case InterpolationErrorCode::ExtrapolationNotAllowed:
+            code = PriceTableErrorCode::FittingFailed;
+            break;
+        // NEW: Handle workspace creation failures
+        case InterpolationErrorCode::WorkspaceCreationFailed:
+            code = PriceTableErrorCode::ArenaAllocationFailed;
+            break;
+    }
+    return PriceTableError{code, err.index, err.grid_size};
+}
 ```
 
+   **Why ArenaAllocationFailed?** This existing PriceTableErrorCode is the closest semantic match
+   for "failed to create workspace from memory buffer" - it indicates memory/allocation issues.
+
 **Migration checklist:**
-- [ ] Update InterpolationErrorCode enum
+- [ ] Update InterpolationErrorCode enum (add WorkspaceCreationFailed)
 - [ ] Add message field to InterpolationError struct
-- [ ] Add new constructor overload
-- [ ] Update operator<< for new field
-- [ ] Update convert_to_price_table_error switch
+- [ ] Add new constructor overload for message
+- [ ] Update operator<< for new message field
+- [ ] **Update convert_to_price_table_error switch** (CRITICAL - causes UB if missed)
 - [ ] Add test for new error code
-- [ ] Verify all pattern-matching switch statements are exhaustive (compiler warnings)
+- [ ] Build with `-Wswitch` to verify all switches are exhaustive
 
 ## Dispatch Mechanism
 
