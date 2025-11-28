@@ -21,6 +21,17 @@ cc_test(
 )
 
 cc_test(
+    name = "thread_workspace_test",
+    size = "small",
+    srcs = ["thread_workspace_test.cc"],
+    deps = [
+        "//src/support:thread_workspace",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "aligned_arena_test",
     size = "small",
     srcs = ["aligned_arena_test.cc"],

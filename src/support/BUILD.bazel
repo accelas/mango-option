@@ -27,6 +27,13 @@ cc_library(
 )
 
 cc_library(
+    name = "thread_workspace",
+    hdrs = ["thread_workspace.hpp"],
+    deps = [":parallel"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "error_types",
     hdrs = ["error_types.hpp"],
     visibility = ["//visibility:public"],
