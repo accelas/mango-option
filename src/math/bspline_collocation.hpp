@@ -27,6 +27,7 @@
 #include "src/math/bspline_collocation_workspace.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
+#include <experimental/mdspan>
 #include <expected>
 #include <span>
 #include <vector>
@@ -68,9 +69,18 @@ struct BSplineCollocationConfig {
 /// Space: O(n) for banded storage
 ///
 /// @tparam T Floating point type (float, double, long double)
-template<std::floating_point T>
+/// @tparam Bandwidth Number of non-zero entries per row (degree + 1)
+template<std::floating_point T, size_t Bandwidth = 4>
 class BSplineCollocation1D {
 public:
+    /// Bandwidth for B-splines (degree + 1, default 4 for cubic)
+    static constexpr size_t BANDWIDTH = Bandwidth;
+
+    /// mdspan type for internal band storage (n × Bandwidth, row-major)
+    using band_extents_type = std::experimental::extents<size_t, std::dynamic_extent, BANDWIDTH>;
+    using band_view_type = std::experimental::mdspan<T, band_extents_type>;
+    using const_band_view_type = std::experimental::mdspan<const T, band_extents_type>;
+
     /// Factory method to create BSplineCollocation1D instance
     ///
     /// @param grid Data grid points (sorted, ≥4 points)
@@ -390,8 +400,8 @@ private:
         // Build knot vector (clamped cubic)
         knots_ = clamped_knots_cubic<T>(grid_);
 
-        // Pre-allocate banded storage (4 entries per row for cubic B-splines)
-        band_values_.resize(n_ * 4, T{0});
+        // Pre-allocate banded storage (BANDWIDTH entries per row)
+        band_values_.resize(n_ * BANDWIDTH, T{0});
         band_col_start_.resize(n_, 0);
     }
 
@@ -403,28 +413,41 @@ private:
     std::vector<T> band_values_;        ///< Banded matrix values (n×4, row-major)
     std::vector<int> band_col_start_;   ///< First column index for each row's band
 
+    /// Get mdspan view of band_values_ for clean 2D indexing
+    ///
+    /// Returns view with extents (n_, BANDWIDTH) for band_[i, k] access
+    [[nodiscard]] band_view_type band_view() noexcept {
+        return band_view_type(band_values_.data(), n_);
+    }
+
+    [[nodiscard]] const_band_view_type band_view() const noexcept {
+        return const_band_view_type(band_values_.data(), n_);
+    }
+
     /// Build collocation matrix B[i,j] = N_j(x_i) in banded format
     void build_collocation_matrix() {
+        auto band = band_view();
+
         for (size_t i = 0; i < n_; ++i) {
             const T x = grid_[i];
 
             // Find knot span
             const int span = find_span_cubic(knots_, x);
 
-            // Evaluate 4 non-zero basis functions at x
-            T basis[4];
+            // Evaluate BANDWIDTH non-zero basis functions at x
+            T basis[BANDWIDTH];
             cubic_basis_nonuniform(knots_, span, x, basis);
 
             // Store in banded format
-            band_col_start_[i] = std::max(0, span - 3);
+            band_col_start_[i] = std::max(0, span - static_cast<int>(BANDWIDTH - 1));
 
             // Fill band values (left to right order)
-            for (int k = 0; k < 4; ++k) {
-                const int col = span - k;
+            for (size_t k = 0; k < BANDWIDTH; ++k) {
+                const int col = span - static_cast<int>(k);
                 if (col >= 0 && col < static_cast<int>(n_)) {
                     const int band_idx = col - band_col_start_[i];
-                    if (band_idx >= 0 && band_idx < 4) {
-                        band_values_[i * 4 + band_idx] = basis[k];
+                    if (band_idx >= 0 && band_idx < static_cast<int>(BANDWIDTH)) {
+                        band[i, static_cast<size_t>(band_idx)] = basis[k];
                     }
                 }
             }
@@ -436,17 +459,18 @@ private:
         const std::vector<T>& coeffs,
         const std::vector<T>& values) const
     {
+        auto band = band_view();
         T max_res = T{0};
 
         for (size_t i = 0; i < n_; ++i) {
-            // Compute (B·c)[i] - only sum over 4 non-zero entries
+            // Compute (B·c)[i] - only sum over BANDWIDTH non-zero entries
             T Bc_i = T{0};
             const int j_start = band_col_start_[i];
-            const int j_end = std::min(j_start + 4, static_cast<int>(n_));
+            const int j_end = std::min(j_start + static_cast<int>(BANDWIDTH), static_cast<int>(n_));
 
             for (int j = j_start; j < j_end; ++j) {
-                const int band_idx = j - j_start;
-                const T b_ij = band_values_[i * 4 + band_idx];
+                const size_t band_idx = static_cast<size_t>(j - j_start);
+                const T b_ij = band[i, band_idx];
                 Bc_i = std::fma(b_ij, coeffs[j], Bc_i);
             }
 
@@ -462,18 +486,17 @@ private:
         std::span<const T> coeffs,
         std::span<const T> values) const
     {
+        auto band = band_view();
         T max_residual = T{0};
 
         for (size_t i = 0; i < n_; ++i) {
             T Bc_i = T{0};
             const int col_start = band_col_start_[i];
 
-            for (size_t k = 0; k < 4 &&
+            for (size_t k = 0; k < BANDWIDTH &&
                  (col_start + static_cast<int>(k)) < static_cast<int>(n_); ++k)
             {
-                Bc_i = std::fma(band_values_[i * 4 + k],
-                               coeffs[col_start + k],
-                               Bc_i);
+                Bc_i = std::fma(band[i, k], coeffs[col_start + k], Bc_i);
             }
 
             const T residual = std::abs(Bc_i - values[i]);
@@ -485,15 +508,16 @@ private:
 
     /// Compute 1-norm of collocation matrix ||B||₁ = max column sum
     [[nodiscard]] T compute_matrix_norm1() const {
+        auto band = band_view();
         std::vector<T> col_sums(n_, T{0});
 
         for (size_t i = 0; i < n_; ++i) {
             const int j_start = band_col_start_[i];
-            const int j_end = std::min(j_start + 4, static_cast<int>(n_));
+            const int j_end = std::min(j_start + static_cast<int>(BANDWIDTH), static_cast<int>(n_));
 
             for (int j = j_start; j < j_end; ++j) {
-                const int band_idx = j - j_start;
-                const T b_ij = band_values_[i * 4 + band_idx];
+                const size_t band_idx = static_cast<size_t>(j - j_start);
+                const T b_ij = band[i, band_idx];
                 col_sums[j] += std::abs(b_ij);
             }
         }
@@ -510,23 +534,24 @@ private:
         build_collocation_matrix();
 
         // Zero the workspace band storage
-        auto band_storage = ws.band_storage();
-        std::fill(band_storage.begin(), band_storage.end(), T{0});
+        auto ws_band_storage = ws.band_storage();
+        std::fill(ws_band_storage.begin(), ws_band_storage.end(), T{0});
 
-        // Get mdspan view for clean indexing (handles LAPACK layout internally)
-        auto band_view = ws.band_view();
+        // Get mdspan views for clean indexing
+        auto internal_band = band_view();
+        auto ws_band = ws.band_view();
 
         // Copy from internal format to LAPACK banded format via mdspan
         for (size_t i = 0; i < n_; ++i) {
             const int col_start = band_col_start_[i];
-            const int col_end = std::min(col_start + 4, static_cast<int>(n_));
+            const int col_end = std::min(col_start + static_cast<int>(BANDWIDTH), static_cast<int>(n_));
 
             for (int j = col_start; j < col_end; ++j) {
-                const int band_idx = j - col_start;
-                const T value = band_values_[i * 4 + band_idx];
+                const size_t band_idx = static_cast<size_t>(j - col_start);
+                const T value = internal_band[i, band_idx];
 
-                // mdspan handles LAPACK banded format offset calculation
-                band_view[i, static_cast<size_t>(j)] = value;
+                // ws_band handles LAPACK banded format offset calculation
+                ws_band[i, static_cast<size_t>(j)] = value;
             }
         }
     }
