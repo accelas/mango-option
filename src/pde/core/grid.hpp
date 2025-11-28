@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <format>
 #include <experimental/mdspan>
+#include "src/support/aligned_allocator.hpp"
 #include "src/support/error_types.hpp"
 #include "src/pde/core/time_domain.hpp"
 
@@ -849,8 +850,8 @@ public:
 
         size_t n = grid_view.size();
 
-        // Allocate solution storage (2 × n for current + previous)
-        std::vector<T> solution(2 * n);
+        // Allocate solution storage (2 × n for current + previous), 64-byte aligned
+        AlignedVector<T> solution(2 * n);
 
         // Create instance (private constructor, so use new)
         auto grid = std::shared_ptr<Grid<T>>(
@@ -969,7 +970,7 @@ private:
     Grid(GridBuffer<T>&& grid_buffer,
          GridSpacing<T>&& spacing,
          const TimeDomain& time,
-         std::vector<T>&& solution)
+         AlignedVector<T>&& solution)
         : grid_buffer_(std::move(grid_buffer))
         , spacing_(std::move(spacing))
         , time_(time)
@@ -990,7 +991,7 @@ private:
     GridBuffer<T> grid_buffer_;     // Spatial grid points
     GridSpacing<T> spacing_;        // Grid spacing (uniform or non-uniform)
     TimeDomain time_;               // Time domain metadata
-    std::vector<T> solution_;       // [u_current | u_prev] (2 × n_space)
+    AlignedVector<T> solution_;     // [u_current | u_prev] (2 × n_space), 64-byte aligned
 
     // Snapshot storage
     std::vector<size_t> snapshot_indices_;       // State indices to record

@@ -8,9 +8,8 @@ filegroup(
 )
 
 cc_library(
-    name = "aligned_arena",
-    srcs = ["memory/aligned_arena.cpp"],
-    hdrs = ["memory/aligned_arena.hpp"],
+    name = "aligned_allocator",
+    hdrs = ["aligned_allocator.hpp"],
     visibility = ["//visibility:public"],
 )
 

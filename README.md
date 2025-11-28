@@ -22,7 +22,7 @@ Designed for research, prototyping, and production use with a focus on **correct
 - **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries (~470ns)
 - **Modern C++23** – std::expected error handling, PMR memory management, SIMD vectorization
 - **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
-- **Production Ready** – OpenMP batching (15× speedup), USDT tracing, zero-allocation solves
+- **Production Ready** – OpenMP batching (15× speedup), USDT tracing, zero-allocation parallel workloads
 
 ---
 
@@ -186,7 +186,7 @@ mango-option/
 │   ├── option/            # American option pricing, IV solvers, price tables
 │   ├── math/              # Root finding, B-splines, tridiagonal solvers
 │   └── support/           # Memory management, CPU features, utilities
-├── tests/                 # 38 test files with GoogleTest
+├── tests/                 # 86+ test files with GoogleTest
 ├── examples/              # Example programs
 ├── benchmarks/            # Performance benchmarks
 └── docs/                  # Documentation
@@ -209,7 +209,7 @@ bazel test //tests:iv_solver_test
 bazel test //tests:pde_solver_test --test_output=all
 ```
 
-**Test coverage:** 38 test files, 13,000+ lines of tests
+**Test coverage:** 86+ test files
 
 ---
 
@@ -231,7 +231,7 @@ This is a research project. Contributions welcome!
 
 ## License
 
-TBD (to be determined)
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 

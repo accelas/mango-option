@@ -2,7 +2,6 @@
 #include "src/option/table/recursion_helpers.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/math/bspline_nd_separable.hpp"
-#include "src/support/memory/aligned_arena.hpp"
 #include "src/support/ivcalc_trace.h"
 #include "src/pde/core/time_domain.hpp"
 #include "src/support/parallel.hpp"
@@ -323,22 +322,12 @@ PriceTableBuilder<N>::extract_tensor(
             PriceTableErrorCode::ExtractionFailed, 0, batch.results.size()});
     }
 
-    // Create tensor (use axes.total_points() for consistency with validation)
-    const size_t total_points = axes.total_points();
-    const size_t tensor_bytes = total_points * sizeof(double);
-    const size_t arena_bytes = tensor_bytes + 64;  // 64-byte alignment padding
-
-    auto arena = memory::AlignedArena::create(arena_bytes);
-    if (!arena.has_value()) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::ArenaAllocationFailed, 0, arena_bytes});
-    }
-
+    // Create tensor
     std::array<size_t, N> shape = {Nm, Nt, Nσ, Nr};
-    auto tensor_result = PriceTensor<N>::create(shape, arena.value());
+    auto tensor_result = PriceTensor<N>::create(shape);
     if (!tensor_result.has_value()) {
         return std::unexpected(PriceTableError{
-            PriceTableErrorCode::TensorCreationFailed, 0, total_points});
+            PriceTableErrorCode::TensorCreationFailed, 0, axes.total_points()});
     }
 
     auto tensor = tensor_result.value();

@@ -12,6 +12,7 @@ cc_library(
     hdrs = ["grid.hpp"],
     deps = [
         ":time_domain",
+        "//src/support:aligned_allocator",
         "//src/support:error_types",
         "@mdspan//:mdspan",
     ],

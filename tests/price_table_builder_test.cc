@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_tensor.hpp"
-#include "src/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace {
@@ -264,9 +263,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
     // Then verify repair fills it via τ-interpolation
 
     // Use 2x3x2x2 tensor: Nm=2, Nt=3, Nσ=2, Nr=2
-    auto arena_result = mango::memory::AlignedArena::create(16 * 1024);
-    ASSERT_TRUE(arena_result.has_value());
-    auto tensor_result = mango::PriceTensor<4>::create({2, 3, 2, 2}, arena_result.value());
+    auto tensor_result = mango::PriceTensor<4>::create({2, 3, 2, 2});
     ASSERT_TRUE(tensor_result.has_value());
     auto& tensor = tensor_result.value();
 
@@ -317,9 +314,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
 
 TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
     // Create tensor with full slice NaN, verify neighbor copy
-    auto arena_result = mango::memory::AlignedArena::create(16 * 1024);
-    ASSERT_TRUE(arena_result.has_value());
-    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 2, 2}, arena_result.value());
+    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 2, 2});
     ASSERT_TRUE(tensor_result.has_value());
     auto& tensor = tensor_result.value();
 
@@ -371,9 +366,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
 
 TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
     // All slices invalid, verify returns error
-    auto arena_result = mango::memory::AlignedArena::create(16 * 1024);
-    ASSERT_TRUE(arena_result.has_value());
-    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 1, 1}, arena_result.value());
+    auto tensor_result = mango::PriceTensor<4>::create({2, 2, 1, 1});
     ASSERT_TRUE(tensor_result.has_value());
     auto& tensor = tensor_result.value();
 
