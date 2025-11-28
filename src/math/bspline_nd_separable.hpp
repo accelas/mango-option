@@ -27,7 +27,9 @@
 #pragma once
 
 #include "src/math/bspline_collocation.hpp"
+#include "src/math/bspline_collocation_workspace.hpp"
 #include "src/support/parallel.hpp"
+#include "src/support/thread_workspace.hpp"
 #include "src/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <expected>
@@ -298,6 +300,8 @@ private:
     /// Iterates over all (N-1)-dimensional slices perpendicular to this axis,
     /// performs 1D B-spline fitting on each slice, and writes back coefficients.
     ///
+    /// Uses ThreadWorkspaceBuffer for zero-allocation parallel fitting.
+    ///
     /// @tparam Axis Which axis to fit (0 to N-1)
     /// @param coeffs Coefficient array (modified in-place)
     /// @param tolerance Max residual for fitting
@@ -315,116 +319,119 @@ private:
         static_assert(Axis < N, "Axis index out of bounds");
 
         const size_t n_axis = dims_[Axis];
+        const size_t n_slices = total_slices<Axis>();
 
-        // Temporary buffers for slice extraction
-        std::vector<T> slice_buffer(n_axis);
-        std::vector<T> coeffs_buffer(n_axis);
-
-        // Track per-axis statistics
+        // Per-axis statistics (thread-safe reduction targets)
         T max_residual = T{0};
         T max_condition = T{0};
+        size_t failed_count = 0;
 
-        // Iterate over all slices perpendicular to this axis
-        iterate_slices<Axis>(
-            coeffs, slice_buffer, coeffs_buffer, tolerance,
-            0, 0, max_residual, max_condition, failed[Axis]);
+        // Calculate workspace size for this axis
+        const size_t ws_bytes = BSplineCollocationWorkspace<T>::required_bytes(n_axis);
+
+        MANGO_PRAGMA_PARALLEL
+        {
+            // Create workspace buffer ONCE per thread
+            ThreadWorkspaceBuffer buffer(ws_bytes);
+            auto ws = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis).value();
+
+            // Temporary buffer for slice extraction (per-thread)
+            std::vector<T> slice_buffer(n_axis);
+
+            // Thread-local accumulators
+            T local_max_residual = T{0};
+            T local_max_condition = T{0};
+            size_t local_failed = 0;
+
+            MANGO_PRAGMA_FOR
+            for (size_t slice_idx = 0; slice_idx < n_slices; ++slice_idx) {
+                // Calculate base offset for this slice
+                size_t base_offset = slice_idx_to_offset<Axis>(slice_idx);
+
+                // Extract 1D slice along this axis (SIMD-optimized)
+                const size_t stride = strides_[Axis];
+                MANGO_PRAGMA_SIMD
+                for (size_t i = 0; i < n_axis; ++i) {
+                    slice_buffer[i] = coeffs[base_offset + i * stride];
+                }
+
+                // Fit using workspace
+                auto result = solvers_[Axis]->fit_with_workspace(
+                    std::span<const T>{slice_buffer},
+                    ws,
+                    BSplineCollocationConfig<T>{.tolerance = tolerance});
+
+                if (result.has_value()) {
+                    local_max_residual = std::max(local_max_residual, result->max_residual);
+                    local_max_condition = std::max(local_max_condition, result->condition_estimate);
+
+                    // Copy coefficients from ws.coeffs() back to output (SIMD-optimized)
+                    auto fitted_coeffs = ws.coeffs();
+                    MANGO_PRAGMA_SIMD
+                    for (size_t i = 0; i < n_axis; ++i) {
+                        coeffs[base_offset + i * stride] = fitted_coeffs[i];
+                    }
+                } else {
+                    ++local_failed;
+                }
+            }
+
+            // Reduction via critical section
+            MANGO_PRAGMA_CRITICAL
+            {
+                max_residual = std::max(max_residual, local_max_residual);
+                max_condition = std::max(max_condition, local_max_condition);
+                failed_count += local_failed;
+            }
+        }
 
         max_residuals[Axis] = max_residual;
         conditions[Axis] = max_condition;
+        failed[Axis] = failed_count;
     }
 
-    /// Recursively iterate over slice indices
+    /// Calculate total number of slices perpendicular to given axis
     ///
-    /// Builds multi-index for all dimensions except Axis, then extracts and fits slice.
-    /// Uses compile-time recursion to generate efficient nested loops.
+    /// Returns product of all dimensions except Axis
     template<size_t Axis>
-    void iterate_slices(
-        std::vector<T>& coeffs,
-        std::vector<T>& slice_buffer,
-        std::vector<T>& coeffs_buffer,
-        T tolerance,
-        size_t current_dim,
-        size_t base_offset,
-        T& max_residual,
-        T& max_condition,
-        size_t& failed_count)
-    {
-        if (current_dim == N) {
-            // Base case: extract and fit 1D slice
-            // Ignore return value - failures are tracked via failed_count
-            (void)extract_and_fit_slice<Axis>(
-                coeffs, slice_buffer, coeffs_buffer, tolerance, base_offset,
-                max_residual, max_condition, failed_count);
-            return;
-        }
-
-        if (current_dim == Axis) {
-            // Skip the axis we're fitting
-            iterate_slices<Axis>(
-                coeffs, slice_buffer, coeffs_buffer, tolerance,
-                current_dim + 1, base_offset,
-                max_residual, max_condition, failed_count);
-        } else {
-            // Iterate over this dimension
-            for (size_t i = 0; i < dims_[current_dim]; ++i) {
-                size_t offset = base_offset + i * strides_[current_dim];
-                iterate_slices<Axis>(
-                    coeffs, slice_buffer, coeffs_buffer, tolerance,
-                    current_dim + 1, offset,
-                    max_residual, max_condition, failed_count);
+    [[nodiscard]] size_t total_slices() const noexcept {
+        size_t count = 1;
+        for (size_t d = 0; d < N; ++d) {
+            if (d != Axis) {
+                count *= dims_[d];
             }
         }
+        return count;
     }
 
-    /// Extract slice, fit, and write back coefficients
+    /// Convert flat slice index to base offset for given axis
     ///
-    /// Performs 1D B-spline collocation on a slice perpendicular to Axis.
-    /// Updates max residual and condition number statistics.
-    ///
-    /// @return true on success, false on fitting failure
+    /// Maps 1D slice index → N-dimensional offset by treating all dims except Axis
+    /// as a flattened index space.
     template<size_t Axis>
-    [[nodiscard]] bool extract_and_fit_slice(
-        std::vector<T>& coeffs,
-        std::vector<T>& slice_buffer,
-        std::vector<T>& coeffs_buffer,
-        T tolerance,
-        size_t base_offset,
-        T& max_residual,
-        T& max_condition,
-        size_t& failed_count)
-    {
-        const size_t n_axis = dims_[Axis];
-        const size_t stride = strides_[Axis];
+    [[nodiscard]] size_t slice_idx_to_offset(size_t slice_idx) const noexcept {
+        size_t offset = 0;
+        size_t remaining = slice_idx;
 
-        // Extract 1D slice along this axis (SIMD-optimized)
-        MANGO_PRAGMA_SIMD
-        for (size_t i = 0; i < n_axis; ++i) {
-            slice_buffer[i] = coeffs[base_offset + i * stride];
+        for (size_t d = 0; d < N; ++d) {
+            if (d == Axis) continue;
+
+            // Calculate stride for this dimension (product of all smaller dims except Axis)
+            size_t stride_d = 1;
+            for (size_t k = d + 1; k < N; ++k) {
+                if (k != Axis) {
+                    stride_d *= dims_[k];
+                }
+            }
+
+            size_t index_d = remaining / stride_d;
+            remaining %= stride_d;
+            offset += index_d * strides_[d];
         }
 
-        // Fit B-spline coefficients using 1D solver
-        auto fit_result = solvers_[Axis]->fit_with_buffer(
-            std::span<const T>{slice_buffer},
-            std::span<T>{coeffs_buffer},
-            BSplineCollocationConfig<T>{.tolerance = tolerance});
-
-        if (!fit_result.has_value()) {
-            ++failed_count;
-            return false;  // Propagate failure without throwing
-        }
-
-        // Update statistics
-        max_residual = std::max(max_residual, fit_result->max_residual);
-        max_condition = std::max(max_condition, fit_result->condition_estimate);
-
-        // Write coefficients back (SIMD-optimized)
-        MANGO_PRAGMA_SIMD
-        for (size_t i = 0; i < n_axis; ++i) {
-            coeffs[base_offset + i * stride] = coeffs_buffer[i];
-        }
-
-        return true;
+        return offset;
     }
+
 
     std::array<std::vector<T>, N> grids_;
     std::array<size_t, N> dims_;
