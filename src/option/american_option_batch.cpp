@@ -5,6 +5,8 @@
 
 #include "src/option/american_option_batch.hpp"
 #include "src/support/ivcalc_trace.h"
+#include "src/support/thread_workspace.hpp"
+#include "src/pde/core/american_pde_workspace.hpp"
 #include <cmath>
 #include <algorithm>
 #include <ranges>
@@ -436,45 +438,37 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
     }
 
     // Precompute workspace size outside parallel region
-    size_t workspace_size_elements = 0;
+    size_t workspace_size_bytes = 0;
     size_t shared_n_space = 0;
 
     if (use_shared_grid) {
         auto [grid_spec, time_domain] = shared_grid.value();
         shared_n_space = grid_spec.n_points();
-        workspace_size_elements = PDEWorkspace::required_size(shared_n_space);
+        workspace_size_bytes = AmericanPDEWorkspace::required_bytes(shared_n_space);
     } else {
         // For per-option grids, estimate max workspace size across all options
         if (custom_grid.has_value()) {
             // Use custom grid size
             auto [grid_spec, time_domain] = custom_grid.value();
             size_t n = grid_spec.n_points();
-            workspace_size_elements = PDEWorkspace::required_size(n);
+            workspace_size_bytes = AmericanPDEWorkspace::required_bytes(n);
         } else {
             // Estimate based on all options
             for (const auto& p : params) {
                 auto [grid_spec, time_domain] = estimate_grid_for_option(p, grid_accuracy_);
                 size_t n = grid_spec.n_points();
-                workspace_size_elements = std::max(workspace_size_elements, PDEWorkspace::required_size(n));
+                workspace_size_bytes = std::max(workspace_size_bytes, AmericanPDEWorkspace::required_bytes(n));
             }
         }
     }
 
-    // Convert to bytes for monotonic_buffer_resource
-    const size_t workspace_size_bytes = workspace_size_elements * sizeof(double);
-
     MANGO_PRAGMA_PARALLEL
     {
-        // Per-thread monotonic buffer sized for workspace reuse
-        // Using monotonic_buffer_resource instead of unsynchronized_pool for:
-        // - Predictable allocation (no fragmentation)
-        // - Faster allocation (bump pointer)
-        // - Zero overhead release() (just resets offset)
-        std::pmr::monotonic_buffer_resource thread_pool(workspace_size_bytes);
+        // Per-thread workspace buffer (64-byte aligned)
+        ThreadWorkspaceBuffer buffer(workspace_size_bytes);
 
         // Per-thread shared grid (only for shared grid strategy)
         std::shared_ptr<Grid<double>> thread_grid;
-        std::pmr::vector<double> thread_buffer(&thread_pool);
 
         if (use_shared_grid) {
             auto [grid_spec, time_domain] = shared_grid.value();
@@ -483,9 +477,6 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
             auto grid_result = Grid<double>::create(grid_spec, time_domain);
             if (grid_result.has_value()) {
                 thread_grid = grid_result.value();
-
-                // Allocate buffer for shared workspace (in elements, not bytes)
-                thread_buffer.resize(workspace_size_elements);
             }
             // If creation failed, thread_grid remains null and we'll fail in loop
         }
@@ -496,18 +487,18 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         for (size_t i = 0; i < params.size(); ++i) {
             // Get or create grid and workspace for this iteration
             std::shared_ptr<Grid<double>> grid;
-            std::pmr::vector<double> buffer(&thread_pool);
             PDEWorkspace* workspace_ptr = nullptr;
-            std::optional<PDEWorkspace> workspace_storage;
+            std::optional<AmericanPDEWorkspace> workspace_storage;
+            std::vector<std::byte> heap_buffer_storage;  // Heap fallback buffer (persists for iteration)
 
             if (use_shared_grid) {
                 // Shared grid: reuse thread grid and buffer
                 grid = thread_grid;
-                if (grid && !thread_buffer.empty()) {
-                    auto workspace_result = PDEWorkspace::from_buffer(thread_buffer, shared_n_space);
-                    if (workspace_result.has_value()) {
-                        workspace_storage = workspace_result.value();
-                        workspace_ptr = &workspace_storage.value();
+                if (grid) {
+                    auto ws_result = AmericanPDEWorkspace::from_bytes(buffer.bytes(), shared_n_space);
+                    if (ws_result.has_value()) {
+                        workspace_storage = std::move(ws_result.value());
+                        workspace_ptr = &workspace_storage->workspace();
                     }
                 }
             } else {
@@ -521,22 +512,19 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 if (grid_result.has_value()) {
                     grid = grid_result.value();
 
-                    // Allocate buffer and create workspace
+                    // Create workspace from buffer (zero allocations)
                     size_t n = grid_spec.n_points();
-                    buffer.resize(PDEWorkspace::required_size(n));
-                    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-                    if (workspace_result.has_value()) {
-                        workspace_storage = workspace_result.value();
-                        workspace_ptr = &workspace_storage.value();
+                    auto ws_result = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n);
+                    if (ws_result.has_value()) {
+                        workspace_storage = std::move(ws_result.value());
+                        workspace_ptr = &workspace_storage->workspace();
                     }
                 }
             }
 
-            // Fallback to heap if PMR pool allocation failed
+            // Fallback to heap if buffer allocation failed
             if (!grid || !workspace_ptr) {
                 // Try allocating from default resource (heap) as fallback
-                std::pmr::vector<double> heap_buffer(std::pmr::get_default_resource());
-
                 // Determine grid to use
                 auto [grid_spec, time_domain] = use_shared_grid && shared_grid.has_value()
                     ? shared_grid.value()
@@ -549,11 +537,12 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                     grid = grid_result.value();
 
                     size_t n = grid_spec.n_points();
-                    heap_buffer.resize(PDEWorkspace::required_size(n));
-                    auto workspace_result = PDEWorkspace::from_buffer(heap_buffer, n);
-                    if (workspace_result.has_value()) {
-                        workspace_storage = workspace_result.value();
-                        workspace_ptr = &workspace_storage.value();
+                    // Allocate heap buffer that persists for the entire iteration
+                    heap_buffer_storage.resize(AmericanPDEWorkspace::required_bytes(n));
+                    auto ws_result = AmericanPDEWorkspace::from_bytes(heap_buffer_storage, n);
+                    if (ws_result.has_value()) {
+                        workspace_storage = std::move(ws_result.value());
+                        workspace_ptr = &workspace_storage->workspace();
                     }
                 }
 
@@ -593,13 +582,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 ++failed_count;
             }
 
-            // Release monotonic buffer for next iteration (per-option grid only)
-            // For shared grid, thread_buffer stays alive across all iterations
-            // For per-option grid, release() resets the allocation offset,
-            // allowing efficient reuse across loop iterations
-            if (!use_shared_grid) {
-                thread_pool.release();
-            }
+            // ThreadWorkspaceBuffer handles memory automatically - no release() needed
         }
     }
 

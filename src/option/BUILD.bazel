@@ -80,8 +80,10 @@ cc_library(
     deps = [
         ":american_option",
         "//src/pde/core:pde_workspace",
+        "//src/pde/core:american_pde_workspace",
         "//src/pde/core:grid",
         "//src/support:ivcalc_trace_hdr",
+        "//src/support:thread_workspace",
         "//src/math:cubic_spline_solver",
         "//src/support:error_types",
         "//src/support:parallel",

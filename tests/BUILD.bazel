@@ -57,6 +57,20 @@ cc_test(
 )
 
 cc_test(
+    name = "bspline_nd_workspace_integration_test",
+    size = "small",
+    srcs = ["bspline_nd_workspace_integration_test.cc"],
+    deps = [
+        "//src/math:bspline_nd_separable",
+        "//src/support:thread_workspace",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+)
+
+cc_test(
     name = "aligned_arena_test",
     size = "small",
     srcs = ["aligned_arena_test.cc"],
@@ -336,6 +350,18 @@ cc_test(
     srcs = ["pde_workspace_test.cc"],
     deps = [
         "//src/pde/core:pde_workspace",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "american_pde_workspace_test",
+    size = "small",
+    srcs = ["american_pde_workspace_test.cc"],
+    deps = [
+        "//src/pde/core:american_pde_workspace",
+        "//src/support:thread_workspace",
+        "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )
@@ -631,6 +657,7 @@ cc_test(
     srcs = ["bspline_fitter_4d_separable_test.cc"],
     deps = [
         "//src/math:bspline_nd_separable",
+        "//src/support:thread_workspace",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -860,6 +887,20 @@ cc_test(
     name = "american_option_batch_test",
     size = "small",
     srcs = ["american_option_batch_test.cc"],
+    deps = [
+        "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+)
+
+cc_test(
+    name = "american_option_batch_workspace_test",
+    size = "small",
+    srcs = ["american_option_batch_workspace_test.cc"],
     deps = [
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
