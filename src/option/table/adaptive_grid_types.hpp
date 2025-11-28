@@ -27,9 +27,6 @@ struct AdaptiveGridParams {
     /// Grid growth factor per refinement (default: 1.3)
     double refinement_factor = 1.3;
 
-    /// Number of bins per dimension for error attribution (default: 5)
-    size_t bins_per_dim = 5;
-
     /// Random seed for Latin Hypercube sampling (default: 42)
     uint64_t lhs_seed = 42;
 

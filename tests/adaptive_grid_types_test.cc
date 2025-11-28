@@ -12,7 +12,6 @@ TEST(AdaptiveGridParamsTest, DefaultValues) {
     EXPECT_EQ(params.max_points_per_dim, 50);
     EXPECT_EQ(params.validation_samples, 64);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.3);
-    EXPECT_EQ(params.bins_per_dim, 5);
     EXPECT_EQ(params.lhs_seed, 42);
     EXPECT_DOUBLE_EQ(params.vega_floor, 1e-4);
 }
@@ -24,7 +23,6 @@ TEST(AdaptiveGridParamsTest, CustomValues) {
     params.max_points_per_dim = 100;
     params.validation_samples = 128;
     params.refinement_factor = 1.5;
-    params.bins_per_dim = 10;
     params.lhs_seed = 12345;
     params.vega_floor = 1e-3;
 
@@ -33,7 +31,6 @@ TEST(AdaptiveGridParamsTest, CustomValues) {
     EXPECT_EQ(params.max_points_per_dim, 100);
     EXPECT_EQ(params.validation_samples, 128);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.5);
-    EXPECT_EQ(params.bins_per_dim, 10);
     EXPECT_EQ(params.lhs_seed, 12345);
     EXPECT_DOUBLE_EQ(params.vega_floor, 1e-3);
 }

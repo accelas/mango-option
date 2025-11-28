@@ -316,7 +316,7 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
 
     AdaptiveGridParams params;
     params.max_iterations = 1;
-    params.validation_samples = 0;  // Skip validation for speed
+    params.validation_samples = 1;  // Minimum to satisfy validation guard
 
     AdaptiveGridBuilder builder(params);
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
