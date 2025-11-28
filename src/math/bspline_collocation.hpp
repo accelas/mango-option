@@ -24,6 +24,7 @@
 
 #include "src/math/banded_matrix_solver.hpp"
 #include "src/math/bspline_basis.hpp"
+#include "src/math/bspline_collocation_workspace.hpp"
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
 #include <expected>
@@ -34,6 +35,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <lapacke.h>
 
 namespace mango {
 
@@ -301,6 +303,81 @@ public:
         };
     }
 
+    /// Fit with external workspace (zero-allocation variant)
+    ///
+    /// Uses BSplineCollocationWorkspace for all temporary storage.
+    /// Coefficients are written to ws.coeffs().
+    ///
+    /// @param values Function values at grid points (size n_)
+    /// @param ws Pre-allocated workspace (must have size() == n_)
+    /// @param config Solver configuration
+    /// @return Fit result (coefficients are in ws.coeffs(), not in result)
+    [[nodiscard]] std::expected<BSplineCollocationResult<T>, InterpolationError>
+    fit_with_workspace(
+        std::span<const T> values,
+        BSplineCollocationWorkspace<T>& ws,
+        const BSplineCollocationConfig<T>& config = {})
+    {
+        if (values.size() != n_) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::ValueSizeMismatch,
+                values.size()});
+        }
+        if (ws.size() != n_) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::BufferSizeMismatch,
+                ws.size()});
+        }
+
+        // Validate input values
+        for (size_t i = 0; i < n_; ++i) {
+            if (std::isnan(values[i])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput, n_, i});
+            }
+            if (std::isinf(values[i])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::InfInput, n_, i});
+            }
+        }
+
+        // Build collocation matrix into workspace band_storage
+        build_collocation_matrix_to_workspace(ws);
+
+        // Factorize using workspace lapack_storage and pivots
+        auto factor_result = factorize_banded_workspace(ws);
+        if (!factor_result.ok()) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed, n_});
+        }
+
+        // Solve into ws.coeffs()
+        auto solve_result = solve_banded_workspace(ws, values);
+        if (!solve_result.ok()) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed, n_});
+        }
+
+        // Compute residuals
+        const T max_residual = compute_residual_from_span(ws.coeffs(), values);
+
+        if (max_residual > config.tolerance) {
+            return std::unexpected(InterpolationError{
+                InterpolationErrorCode::FittingFailed, n_, 0,
+                static_cast<double>(max_residual)});
+        }
+
+        // Estimate condition number
+        const T norm_A = compute_matrix_norm1();
+        const T cond_est = estimate_banded_condition_workspace(ws, norm_A);
+
+        return BSplineCollocationResult<T>{
+            .coefficients = {},  // Caller uses ws.coeffs()
+            .max_residual = max_residual,
+            .condition_estimate = cond_est
+        };
+    }
+
     /// Get grid size
     [[nodiscard]] size_t size() const noexcept { return n_; }
 
@@ -422,6 +499,162 @@ private:
         }
 
         return *std::max_element(col_sums.begin(), col_sums.end());
+    }
+
+    /// Build collocation matrix into workspace band storage
+    ///
+    /// Writes matrix directly to workspace in LAPACK banded format.
+    /// For bandwidth=4 cubic B-splines, LAPACK uses ldab=10 storage.
+    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T>& ws) {
+        // First build into internal storage (same as regular method)
+        build_collocation_matrix();
+
+        // Copy to workspace in LAPACK banded format
+        auto band_storage = ws.band_storage();
+        const size_t ldab = BSplineCollocationWorkspace<T>::LDAB;
+
+        // Zero the workspace band storage
+        std::fill(band_storage.begin(), band_storage.end(), T{0});
+
+        // Convert from our format to LAPACK column-major banded format
+        // LAPACK stores column j in band_storage[ldab*j : ldab*(j+1)]
+        // For element A(i,j), it goes in band_storage[kl + ku + i - j + ldab*j]
+        const lapack_int kl = 3;  // bandwidth - 1
+        const lapack_int ku = 3;  // bandwidth - 1
+
+        for (size_t i = 0; i < n_; ++i) {
+            const int col_start = band_col_start_[i];
+            const int col_end = std::min(col_start + 4, static_cast<int>(n_));
+
+            for (int j = col_start; j < col_end; ++j) {
+                const int band_idx = j - col_start;
+                const T value = band_values_[i * 4 + band_idx];
+
+                // LAPACK banded format position
+                const size_t lapack_offset = static_cast<size_t>(kl + ku + static_cast<int>(i) - j) +
+                                            ldab * static_cast<size_t>(j);
+                band_storage[lapack_offset] = value;
+            }
+        }
+    }
+
+    /// Factorize banded matrix using workspace storage
+    ///
+    /// Performs LU factorization using LAPACK dgbtrf directly on workspace.
+    [[nodiscard]] BandedResult<T> factorize_banded_workspace(BSplineCollocationWorkspace<T>& ws) {
+        static_assert(std::same_as<T, double>,
+                     "LAPACKE banded solvers currently only support double precision");
+
+        using Result = BandedResult<T>;
+
+        const lapack_int n = static_cast<lapack_int>(n_);
+        const lapack_int kl = 3;  // bandwidth - 1
+        const lapack_int ku = 3;  // bandwidth - 1
+        const lapack_int ldab = static_cast<lapack_int>(BSplineCollocationWorkspace<T>::LDAB);
+
+        // Copy band_storage to lapack_storage (dgbtrf modifies in-place)
+        auto band_storage = ws.band_storage();
+        auto lapack_storage = ws.lapack_storage();
+        std::copy(band_storage.begin(), band_storage.end(), lapack_storage.begin());
+
+        // Perform LU factorization
+        const lapack_int info = LAPACKE_dgbtrf(
+            LAPACK_COL_MAJOR,
+            n, n, kl, ku,
+            lapack_storage.data(),
+            ldab,
+            ws.pivots().data()
+        );
+
+        if (info < 0) {
+            return Result::error_result("LAPACKE_dgbtrf: invalid argument");
+        }
+        if (info > 0) {
+            return Result::error_result("Matrix is singular");
+        }
+
+        return Result::ok_result();
+    }
+
+    /// Solve banded system using workspace storage
+    ///
+    /// Solves LU·x = b using pre-computed factorization in workspace.
+    [[nodiscard]] BandedResult<T> solve_banded_workspace(
+        BSplineCollocationWorkspace<T>& ws,
+        std::span<const T> b)
+    {
+        using Result = BandedResult<T>;
+
+        if (b.size() != n_) {
+            return Result::error_result("Dimension mismatch");
+        }
+
+        const lapack_int n = static_cast<lapack_int>(n_);
+        const lapack_int kl = 3;
+        const lapack_int ku = 3;
+        const lapack_int ldab = static_cast<lapack_int>(BSplineCollocationWorkspace<T>::LDAB);
+        const lapack_int nrhs = 1;
+
+        // Copy b into ws.coeffs() (dgbtrs solves in-place)
+        auto coeffs = ws.coeffs();
+        std::copy(b.begin(), b.end(), coeffs.begin());
+
+        // Solve using LU factors in lapack_storage
+        const lapack_int info = LAPACKE_dgbtrs(
+            LAPACK_COL_MAJOR,
+            'N',  // No transpose
+            n, kl, ku, nrhs,
+            ws.lapack_storage().data(),
+            ldab,
+            ws.pivots().data(),
+            coeffs.data(),
+            n
+        );
+
+        if (info < 0) {
+            return Result::error_result("LAPACKE_dgbtrs: invalid argument");
+        }
+        if (info > 0) {
+            return Result::error_result("LAPACKE_dgbtrs: zero pivot");
+        }
+
+        return Result::ok_result();
+    }
+
+    /// Estimate condition number using workspace storage
+    ///
+    /// Uses LAPACK dgbcon to estimate condition number from LU factors.
+    [[nodiscard]] T estimate_banded_condition_workspace(
+        const BSplineCollocationWorkspace<T>& ws,
+        T norm_A) const
+    {
+        if (norm_A == T{0}) {
+            return std::numeric_limits<T>::infinity();
+        }
+
+        const lapack_int n = static_cast<lapack_int>(n_);
+        const lapack_int kl = 3;
+        const lapack_int ku = 3;
+        const lapack_int ldab = static_cast<lapack_int>(BSplineCollocationWorkspace<T>::LDAB);
+
+        double rcond = 0.0;  // Reciprocal condition number (output)
+
+        const lapack_int info = LAPACKE_dgbcon(
+            LAPACK_COL_MAJOR,
+            '1',  // 1-norm
+            n, kl, ku,
+            ws.lapack_storage().data(),
+            ldab,
+            ws.pivots().data(),
+            norm_A,
+            &rcond
+        );
+
+        if (info != 0 || rcond == 0.0) {
+            return std::numeric_limits<T>::infinity();
+        }
+
+        return static_cast<T>(1.0 / rcond);
     }
 };
 

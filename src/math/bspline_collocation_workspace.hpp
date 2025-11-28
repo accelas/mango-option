@@ -113,6 +113,12 @@ struct BSplineCollocationWorkspace {
     std::span<int> pivots() { return pivots_; }  // Properly typed int span
     std::span<T> coeffs() { return coeffs_; }
 
+    // Const accessors
+    std::span<const T> band_storage() const { return band_storage_; }
+    std::span<const T> lapack_storage() const { return lapack_storage_; }
+    std::span<const int> pivots() const { return pivots_; }
+    std::span<const T> coeffs() const { return coeffs_; }
+
     size_t size() const { return n_; }
 
 private:
