@@ -325,7 +325,7 @@ public:
     [[nodiscard]] std::expected<BSplineCollocationResult<T>, InterpolationError>
     fit_with_workspace(
         std::span<const T> values,
-        BSplineCollocationWorkspace<T>& ws,
+        BSplineCollocationWorkspace<T, BANDWIDTH>& ws,
         const BSplineCollocationConfig<T>& config = {})
     {
         if (values.size() != n_) {
@@ -529,7 +529,7 @@ private:
     ///
     /// Writes matrix directly to workspace in LAPACK banded format.
     /// For bandwidth=4 cubic B-splines, LAPACK uses ldab=10 storage.
-    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T>& ws) {
+    void build_collocation_matrix_to_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) {
         // First build into internal storage (same as regular method)
         build_collocation_matrix();
 
@@ -559,12 +559,12 @@ private:
     /// Factorize banded matrix using workspace storage
     ///
     /// Performs LU factorization using LAPACK dgbtrf directly on workspace.
-    [[nodiscard]] BandedResult<T> factorize_banded_workspace(BSplineCollocationWorkspace<T>& ws) {
+    [[nodiscard]] BandedResult<T> factorize_banded_workspace(BSplineCollocationWorkspace<T, BANDWIDTH>& ws) {
         static_assert(std::same_as<T, double>,
                      "LAPACKE banded solvers currently only support double precision");
 
         using Result = BandedResult<T>;
-        using Workspace = BSplineCollocationWorkspace<T>;
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
 
         const lapack_int n = static_cast<lapack_int>(n_);
         const lapack_int kl = Workspace::KL;
@@ -599,11 +599,11 @@ private:
     ///
     /// Solves LU·x = b using pre-computed factorization in workspace.
     [[nodiscard]] BandedResult<T> solve_banded_workspace(
-        BSplineCollocationWorkspace<T>& ws,
+        BSplineCollocationWorkspace<T, BANDWIDTH>& ws,
         std::span<const T> b)
     {
         using Result = BandedResult<T>;
-        using Workspace = BSplineCollocationWorkspace<T>;
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
 
         if (b.size() != n_) {
             return Result::error_result("Dimension mismatch");
@@ -645,10 +645,10 @@ private:
     ///
     /// Uses LAPACK dgbcon to estimate condition number from LU factors.
     [[nodiscard]] T estimate_banded_condition_workspace(
-        const BSplineCollocationWorkspace<T>& ws,
+        const BSplineCollocationWorkspace<T, BANDWIDTH>& ws,
         T norm_A) const
     {
-        using Workspace = BSplineCollocationWorkspace<T>;
+        using Workspace = BSplineCollocationWorkspace<T, BANDWIDTH>;
 
         if (norm_A == T{0}) {
             return std::numeric_limits<T>::infinity();

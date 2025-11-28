@@ -19,21 +19,25 @@ namespace mango {
 /// Slices external BYTE buffer into typed spans with proper alignment.
 /// Uses start_array_lifetime to start object lifetimes, avoiding strict-aliasing UB.
 ///
-/// Required arrays for bandwidth=4 (cubic B-splines):
-/// - band_storage: 10n doubles (LAPACK banded format: ldab=10)
-/// - lapack_storage: 10n doubles (LU factorization copy)
-/// - pivots: n integers (pivot indices) - separate int storage
-/// - coeffs: n doubles (result buffer)
+/// Template parameters:
+/// - T: Floating point type (double, float)
+/// - Bandwidth: Number of non-zero entries per row (default 4 for cubic B-splines)
+///
+/// Required arrays (derived from bandwidth):
+/// - band_storage: LDAB*n elements (LAPACK banded format)
+/// - lapack_storage: LDAB*n elements (LU factorization copy)
+/// - pivots: n integers (pivot indices)
+/// - coeffs: n elements (result buffer)
 ///
 /// All storage regions are aligned to 64-byte boundaries for SIMD.
 ///
-template<typename T>
+template<typename T, size_t Bandwidth = 4>
 struct BSplineCollocationWorkspace {
     static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
-    static constexpr size_t BANDWIDTH = 4;
-    static constexpr size_t LDAB = 10;  // 2*kl + ku + 1 for bandwidth=4
-    static constexpr int KL = 3;        // bandwidth - 1 (sub-diagonals)
-    static constexpr int KU = 3;        // bandwidth - 1 (super-diagonals)
+    static constexpr size_t BANDWIDTH = Bandwidth;
+    static constexpr int KL = static_cast<int>(Bandwidth - 1);  // sub-diagonals
+    static constexpr int KU = static_cast<int>(Bandwidth - 1);  // super-diagonals
+    static constexpr size_t LDAB = 2 * KL + KU + 1;             // LAPACK leading dimension
 
     /// mdspan type for LAPACK banded matrix view
     using extents_type = std::experimental::dextents<size_t, 2>;
@@ -52,11 +56,11 @@ struct BSplineCollocationWorkspace {
     static size_t required_bytes(size_t n) {
         size_t offset = 0;
 
-        // band_storage: 10n × sizeof(T), 64-byte aligned
+        // band_storage: LDAB*n × sizeof(T), 64-byte aligned
         offset = align_up(offset, block_alignment_T);
         offset += LDAB * n * sizeof(T);
 
-        // lapack_storage: 10n × sizeof(T), 64-byte aligned
+        // lapack_storage: LDAB*n × sizeof(T), 64-byte aligned
         offset = align_up(offset, block_alignment_T);
         offset += LDAB * n * sizeof(T);
 
