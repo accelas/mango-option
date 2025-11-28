@@ -59,6 +59,16 @@ private:
     std::vector<double> refine_dimension(const std::vector<double>& current_grid,
                                          const std::vector<size_t>& problematic_bins,
                                          size_t dim) const;
+
+    /// Build BatchAmericanOptionResult by merging cached and fresh results
+    /// @param all_params All (σ,r) parameter combos in full batch order
+    /// @param fresh_indices Indices into all_params that were freshly solved
+    /// @param fresh_results Fresh solve results (parallel to fresh_indices)
+    /// @return Merged batch result with all_params.size() entries
+    BatchAmericanOptionResult merge_results(
+        const std::vector<AmericanOptionParams>& all_params,
+        const std::vector<size_t>& fresh_indices,
+        const BatchAmericanOptionResult& fresh_results) const;
 };
 
 }  // namespace mango

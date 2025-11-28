@@ -2,10 +2,12 @@
 #include "src/math/black_scholes_analytics.hpp"
 #include "src/math/latin_hypercube.hpp"
 #include "src/option/american_option_batch.hpp"
+#include "src/option/table/price_table_surface.hpp"
 #include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <map>
 
 namespace mango {
 
@@ -94,13 +96,100 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
 
         auto& [builder, axes] = builder_result.value();
 
-        auto table_result = builder.build(axes);
-        if (!table_result.has_value()) {
-            return std::unexpected(table_result.error());
+        // Check if τ grid changed - if so, invalidate cache
+        cache_.invalidate_if_tau_changed(maturity_grid);
+
+        // Generate all (σ,r) parameter combinations
+        auto all_params = builder.make_batch_internal(axes);
+
+        // Extract (σ,r) pairs from all_params
+        std::vector<std::pair<double, double>> all_pairs;
+        all_pairs.reserve(all_params.size());
+        for (const auto& p : all_params) {
+            // Extract scalar rate from RateSpec
+            double rate = get_zero_rate(p.rate, p.maturity);
+            all_pairs.emplace_back(p.volatility, rate);
         }
 
-        auto surface = table_result->surface;
-        stats.pde_solves_table = table_result->n_pde_solves;
+        // Find which pairs are missing from cache
+        auto missing_indices = cache_.get_missing_indices(all_pairs);
+
+        // Build batch of params for missing pairs only
+        std::vector<AmericanOptionParams> missing_params;
+        missing_params.reserve(missing_indices.size());
+        for (size_t idx : missing_indices) {
+            missing_params.push_back(all_params[idx]);
+        }
+
+        // Solve missing pairs
+        BatchAmericanOptionResult fresh_results;
+        if (!missing_params.empty()) {
+            BatchAmericanOptionSolver batch_solver;
+            batch_solver.set_grid_accuracy(GridAccuracyParams{})
+                        .set_snapshot_times(std::span{maturity_grid});
+            fresh_results = batch_solver.solve_batch(missing_params, true);
+
+            // Add fresh results to cache (share grids, don't move results)
+            for (size_t i = 0; i < fresh_results.results.size(); ++i) {
+                if (fresh_results.results[i].has_value()) {
+                    double sigma = missing_params[i].volatility;
+                    double rate = get_zero_rate(missing_params[i].rate, missing_params[i].maturity);
+                    // Store a new AmericanOptionResult that shares the grid
+                    auto result_ptr = std::make_shared<AmericanOptionResult>(
+                        fresh_results.results[i].value().grid(),
+                        missing_params[i]);
+                    cache_.add(sigma, rate, std::move(result_ptr));
+                }
+            }
+        } else {
+            // All results cached - no fresh solves needed
+            fresh_results.failed_count = 0;
+        }
+
+        // Merge cached + fresh results into full batch
+        auto merged_results = merge_results(all_params, missing_indices, fresh_results);
+
+        // Extract tensor from merged results
+        auto tensor_result = builder.extract_tensor_internal(merged_results, axes);
+        if (!tensor_result.has_value()) {
+            return std::unexpected(tensor_result.error());
+        }
+
+        auto& extraction = tensor_result.value();
+
+        // Repair failed slices if needed
+        RepairStats repair_stats{0, 0};
+        if (!extraction.failed_pde.empty() || !extraction.failed_spline.empty()) {
+            auto repair_result = builder.repair_failed_slices_internal(
+                extraction.tensor, extraction.failed_pde,
+                extraction.failed_spline, axes);
+            if (!repair_result.has_value()) {
+                return std::unexpected(repair_result.error());
+            }
+            repair_stats = repair_result.value();
+        }
+
+        // Fit coefficients
+        auto coeffs_result = builder.fit_coeffs_internal(extraction.tensor, axes);
+        if (!coeffs_result.has_value()) {
+            return std::unexpected(coeffs_result.error());
+        }
+
+        // Build metadata
+        PriceTableMetadata metadata;
+        metadata.K_ref = chain.spot;
+        metadata.dividend_yield = chain.dividend_yield;
+        metadata.m_min = moneyness_grid.front();
+        metadata.m_max = moneyness_grid.back();
+        metadata.discrete_dividends = {};
+
+        // Build surface
+        auto surface = PriceTableSurface<4>::build(axes, coeffs_result.value(), metadata);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
+        }
+
+        stats.pde_solves_table = missing_params.size();  // Only count fresh solves
 
         // b. GENERATE VALIDATION SAMPLE
         auto unit_samples = latin_hypercube_4d(params_.validation_samples,
@@ -127,7 +216,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             double rate = sample[3];
 
             // Interpolated price from surface
-            double interp_price = surface->value({m, tau, sigma, rate});
+            double interp_price = surface.value()->value({m, tau, sigma, rate});
 
             // Fresh FD solve for reference
             double strike = chain.spot / m;
@@ -185,7 +274,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             // Final iteration - save results
             stats.refined_dim = -1;  // No refinement on final iteration
             result.iterations.push_back(stats);
-            result.surface = surface;
+            result.surface = surface.value();
             result.axes = axes;
             result.achieved_max_error = max_error;
             result.achieved_avg_error = avg_error;
@@ -290,6 +379,71 @@ std::vector<double> AdaptiveGridBuilder::refine_dimension(
                   new_grid.end());
 
     return new_grid;
+}
+
+BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
+    const std::vector<AmericanOptionParams>& all_params,
+    const std::vector<size_t>& fresh_indices,
+    const BatchAmericanOptionResult& fresh_results) const
+{
+    BatchAmericanOptionResult merged;
+    merged.results.reserve(all_params.size());
+    merged.failed_count = 0;
+
+    // Create a map from fresh_indices to fresh_results for fast lookup
+    std::map<size_t, size_t> fresh_map;
+    for (size_t i = 0; i < fresh_indices.size(); ++i) {
+        fresh_map[fresh_indices[i]] = i;
+    }
+
+    // Build merged result vector
+    for (size_t i = 0; i < all_params.size(); ++i) {
+        auto fresh_it = fresh_map.find(i);
+        if (fresh_it != fresh_map.end()) {
+            // Use fresh result
+            size_t fresh_idx = fresh_it->second;
+            if (fresh_idx < fresh_results.results.size()) {
+                const auto& fresh = fresh_results.results[fresh_idx];
+                if (fresh.has_value()) {
+                    // Create new AmericanOptionResult sharing the same grid
+                    merged.results.push_back(AmericanOptionResult(
+                        fresh.value().grid(), all_params[i]));
+                } else {
+                    // Copy the error
+                    merged.results.push_back(std::unexpected(fresh.error()));
+                    merged.failed_count++;
+                }
+            } else {
+                // Should never happen, but handle gracefully
+                merged.results.push_back(std::unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .iterations = 0
+                }));
+                merged.failed_count++;
+            }
+        } else {
+            // Use cached result
+            double sigma = all_params[i].volatility;
+            double rate = get_zero_rate(all_params[i].rate, all_params[i].maturity);
+            auto cached = cache_.get(sigma, rate);
+            if (cached) {
+                // Cache stores shared_ptr<AmericanOptionResult>
+                // We can create a new AmericanOptionResult that shares the same grid
+                // AmericanOptionParams is an alias for PricingParams, so we can pass it directly
+                merged.results.push_back(AmericanOptionResult(
+                    cached->grid(), all_params[i]));
+            } else {
+                // Cache miss - should never happen
+                merged.results.push_back(std::unexpected(SolverError{
+                    .code = SolverErrorCode::InvalidConfiguration,
+                    .iterations = 0
+                }));
+                merged.failed_count++;
+            }
+        }
+    }
+
+    return merged;
 }
 
 }  // namespace mango
