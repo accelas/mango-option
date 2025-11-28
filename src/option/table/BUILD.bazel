@@ -136,3 +136,12 @@ cc_library(
     hdrs = ["error_attribution.hpp"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "slice_cache",
+    hdrs = ["slice_cache.hpp"],
+    deps = [
+        "//src/option:american_option_result",
+    ],
+    visibility = ["//visibility:public"],
+)
