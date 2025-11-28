@@ -66,6 +66,20 @@ cc_library(
 )
 
 cc_library(
+    name = "american_pde_workspace",
+    hdrs = ["american_pde_workspace.hpp"],
+    deps = [
+        ":pde_workspace",
+        "//src/support:lifetime",
+    ],
+    copts = [
+        "-Wall",
+        "-Wextra",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pde_solver",
     hdrs = ["pde_solver.hpp"],
     deps = [
