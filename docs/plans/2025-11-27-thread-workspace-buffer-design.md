@@ -2,7 +2,7 @@
 
 ## Overview
 
-Introduce `ThreadWorkspaceBuffer` as a reusable per-thread raw byte buffer for parallel algorithms, with two primary consumers:
+Introduce `ThreadWorkspaceBuffer` as a reusable per-thread raw byte buffer for parallel algorithms, with two primary consumers. **All design decisions target Linux/glibc only** for this release (no Windows/macOS support needed) and assume a C++23 standard library (GCC 14+ / Clang 18+) so `std::start_lifetime_as_array` and `std::format` are available. We rely solely on `std::aligned_alloc(64, …)` + `std::free` for aligned storage; other allocators are out of scope.
 
 1. **BSplineCollocationWorkspace<T>** (Phase 1): Zero-allocation B-spline fitting, reducing 24,000 allocations to N (thread count) for 4D price table construction.
 
@@ -43,14 +43,17 @@ For American batch pricing:
 
 ## Design
 
-### 1. ThreadWorkspaceBuffer (Byte-Based)
+### 1. ThreadWorkspaceBuffer (Byte-Based + PMR)
 
-A lightweight RAII wrapper for per-thread raw byte storage with automatic fallback.
+A lightweight RAII wrapper that provides a **64-byte-aligned raw byte span** and exposes the same memory through a `std::pmr::monotonic_buffer_resource`. This keeps the familiar PMR workflow (cheap rebinding, pooled fallback) while guaranteeing alignment for SIMD workspaces.
 
-**Key design decisions:**
-- Uses `std::byte` storage to avoid strict-aliasing issues when slicing into typed spans
-- No `release()` method - buffer is allocated once and reused across iterations
-- Workspace consumers create typed views via placement or `std::start_lifetime_as`
+-**Target platform:** We only target Linux for this release, so we rely on `std::aligned_alloc` (glibc 2.28+) and `std::free`.
+
+**Key design decisions (Linux + C++23 only):**
+- Backing storage is allocated via `std::aligned_alloc(64, n)` (size already rounded up) so the base pointer is cache-line aligned.
+- A `std::pmr::monotonic_buffer_resource` is constructed over that block; spill-over goes to a thread-local `std::pmr::synchronized_pool_resource` just like the previous design.
+- `bytes()` returns a stable `std::span<std::byte>` for workspace slicing; `resource()` exposes the PMR allocator for legacy callers that still expect a `memory_resource`.
+- No `release()` method by default (callers hold on to the buffer for the whole parallel region), but `reset()` can be added later to call `monotonic_buffer_resource::release()` without freeing the aligned block.
 
 ```cpp
 // src/support/thread_workspace.hpp
@@ -61,26 +64,29 @@ A lightweight RAII wrapper for per-thread raw byte storage with automatic fallba
 #include <span>
 #include <cstddef>
 #include <cstdlib>   // std::aligned_alloc, std::free
+#include <cassert>
 #include <memory>    // std::unique_ptr
 
 namespace mango {
 
 /// Per-thread workspace buffer with 64-byte alignment guarantee
 ///
-/// Primary: monotonic_buffer_resource over 64-byte aligned storage
-/// Fallback: thread-local synchronized_pool_resource (if exhausted)
+/// Primary: pmr::monotonic_buffer_resource over 64-byte aligned storage (Linux/glibc via std::aligned_alloc)
+/// Fallback: thread-local pmr::synchronized_pool_resource (if exhausted)
 ///
 /// Design principles:
 /// - Buffer provides raw byte storage (std::byte) with 64-byte alignment
 /// - Workspace consumers handle typed access; alignment is guaranteed by buffer
+/// - pmr::memory_resource access is still available for callers that expect PMR
 /// - Buffer is allocated once per thread, reused across iterations
 /// - No release() - memory stays valid for parallel region lifetime
 ///
 /// IMPORTANT: Alignment guarantee
-/// The underlying storage is allocated with std::aligned_alloc(64, ...) to ensure
-/// the base pointer is 64-byte aligned. This is required for AVX-512 aligned loads
-/// and cache-line optimization. std::pmr::vector only guarantees alignof(max_align_t)
-/// which is typically 16 bytes - insufficient for our SIMD requirements.
+/// The underlying storage is allocated with a 64-byte-aligned helper (std::aligned_alloc,
+/// posix_memalign, or _aligned_malloc) to ensure the base pointer is cache-line aligned.
+/// This is required for AVX-512 aligned loads and cache-line optimization. `std::pmr::vector`
+/// only guarantees `alignof(max_align_t)` which is typically 16 bytes - insufficient for
+/// our SIMD requirements.
 ///
 /// Example:
 ///   MANGO_PRAGMA_PARALLEL
@@ -112,38 +118,40 @@ public:
     /// Construct with expected byte count (64-byte aligned)
     explicit ThreadWorkspaceBuffer(size_t byte_count)
         : size_(align_up(byte_count, ALIGNMENT))
-        , storage_(allocate_aligned(size_), &std::free)
+        , storage_(allocate_aligned(size_), &ThreadWorkspaceBuffer::free_aligned)
+        , fallback_(get_fallback_pool())
+        , resource_(storage_.get(), size_, fallback_)
+        , byte_view_(static_cast<std::byte*>(storage_.get()), size_)
     {
-        // Verify alignment (should always succeed with aligned_alloc)
+        if (!storage_) {
+            throw std::bad_alloc{};
+        }
+        // Verify alignment (should always succeed with aligned allocation helper)
         assert(reinterpret_cast<std::uintptr_t>(storage_.get()) % ALIGNMENT == 0);
     }
 
     /// Get byte span view of buffer (stable for lifetime of object)
-    ///
-    /// The returned span is valid until the ThreadWorkspaceBuffer is destroyed.
-    /// All workspace objects created from this span remain valid for the same duration.
-    /// GUARANTEE: The base pointer is 64-byte aligned.
-    std::span<std::byte> bytes() noexcept {
-        return {static_cast<std::byte*>(storage_.get()), size_};
-    }
-    std::span<const std::byte> bytes() const noexcept {
-        return {static_cast<const std::byte*>(storage_.get()), size_};
-    }
+    std::span<std::byte> bytes() noexcept { return byte_view_; }
+    std::span<const std::byte> bytes() const noexcept { return byte_view_; }
+
+    /// Access underlying pmr resource (for legacy callers still using pmr::vector)
+    std::pmr::memory_resource& resource() noexcept { return resource_; }
 
     size_t size() const noexcept { return size_; }
-
-    // Note: No resize() method. Callers must know the required size upfront.
-    // This ensures bytes() spans remain stable for the buffer's lifetime.
 
 private:
     static constexpr size_t align_up(size_t n, size_t alignment) {
         return (n + alignment - 1) & ~(alignment - 1);
     }
 
+    static std::pmr::memory_resource* get_fallback_pool() {
+        thread_local std::pmr::synchronized_pool_resource pool;
+        return &pool;
+    }
+
     /// Allocate 64-byte aligned storage
-    /// Falls back to over-allocation + manual alignment if aligned_alloc unavailable
     static void* allocate_aligned(size_t byte_count) {
-        // std::aligned_alloc requires size to be multiple of alignment
+        byte_count = align_up(byte_count, ALIGNMENT);
         void* ptr = std::aligned_alloc(ALIGNMENT, byte_count);
         if (!ptr) {
             throw std::bad_alloc{};
@@ -151,8 +159,13 @@ private:
         return ptr;
     }
 
+    static void free_aligned(void* ptr) { std::free(ptr); }
+
     size_t size_;
     std::unique_ptr<void, decltype(&std::free)> storage_;
+    std::pmr::memory_resource* fallback_;  // Non-owning
+    std::pmr::monotonic_buffer_resource resource_;
+    std::span<std::byte> byte_view_;
 };
 
 } // namespace mango
@@ -185,50 +198,17 @@ Workspace that slices a byte buffer into properly-aligned typed spans for B-spli
 #include <string>
 #include <cstddef>
 #include <algorithm>    // for std::max
-#include <memory>       // for std::start_lifetime_as_array (C++23), uninitialized_default_construct_n
-#include <type_traits>  // for std::is_trivially_default_constructible_v
-#include <new>          // for std::construct_at
+#include <memory>       // for std::start_lifetime_as_array (C++23)
 
 namespace mango {
 
-// C++23 feature detection and fallback
-// std::start_lifetime_as_array is P2590R2, available in GCC 14+, Clang 18+
-#ifdef __cpp_lib_start_lifetime_as
-    // C++23: Use standard library function
-    template<typename T>
-    T* start_array_lifetime(void* p, [[maybe_unused]] size_t n) {
-        return std::start_lifetime_as_array<T>(p, n);
-    }
-#else
-    // Fallback: Start object lifetime without C++23 facility
-    // IMPORTANT: Even trivial types need explicit lifetime start per [basic.life].
-    // We use std::construct_at which is guaranteed to begin object lifetime.
-    //
-    // CONSTRAINT: T must be trivially destructible because we never call destructors.
-    // The workspace's byte buffer outlives all typed views, and we rely on trivial
-    // destruction to avoid needing explicit cleanup. This is enforced at compile time.
-    template<typename T>
-    T* start_array_lifetime(void* p, size_t n) {
-        static_assert(std::is_trivially_destructible_v<T>,
-            "start_array_lifetime requires trivially destructible types because "
-            "no destructor is called when the workspace goes out of scope");
-
-        // void* -> T* requires reinterpret_cast (static_cast is UB for unrelated types)
-        auto* typed = reinterpret_cast<T*>(p);
-        if constexpr (std::is_trivially_default_constructible_v<T>) {
-            // Trivial types: construct_at is required to start lifetime but
-            // doesn't actually write anything for trivial default constructors.
-            // This is the minimal correct way to start lifetime pre-C++23.
-            for (size_t i = 0; i < n; ++i) {
-                std::construct_at(typed + i);
-            }
-        } else {
-            // Non-trivial types: must explicitly construct
-            std::uninitialized_default_construct_n(typed, n);
-        }
-        return typed;
-    }
-#endif
+template<typename T>
+T* start_array_lifetime(void* p, size_t n) {
+    static_assert(std::is_trivially_destructible_v<T>,
+        "start_array_lifetime requires trivially destructible types because "
+        "no destructor is called when the workspace goes out of scope");
+    return std::start_lifetime_as_array<T>(p, n);
+}
 
 /// Workspace for B-spline collocation solver
 ///
@@ -250,11 +230,6 @@ struct BSplineCollocationWorkspace {
     static constexpr size_t BANDWIDTH = 4;
     static constexpr size_t LDAB = 10;  // 2*kl + ku + 1 for bandwidth=4
 
-    // CONSTRAINT: T must be trivially destructible because workspace never
-    // calls destructors. The byte buffer outlives typed views, and we rely
-    // on trivial destruction. This fires at template instantiation, catching
-    // violations early (e.g., BSplineCollocationWorkspace<std::vector<double>>
-    // would fail to compile).
     static_assert(std::is_trivially_destructible_v<T>,
         "BSplineCollocationWorkspace<T> requires trivially destructible T "
         "because no destructor is called when the workspace goes out of scope");
@@ -437,7 +412,7 @@ The existing `PDEWorkspace` takes `std::span<double>`, requiring callers to mana
 #include <expected>
 #include <string>
 #include <cstddef>
-#include <format>      // C++20: std::format (GCC 13+, Clang 14+, MSVC 19.29+)
+#include <format>      // C++23 baseline (std::format)
 
 namespace mango {
 
