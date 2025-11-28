@@ -72,7 +72,7 @@ namespace mango {
 /// Per-thread workspace buffer with 64-byte alignment guarantee
 ///
 /// Primary: pmr::monotonic_buffer_resource over 64-byte aligned storage (Linux/glibc via std::aligned_alloc)
-/// Fallback: thread-local pmr::synchronized_pool_resource (if exhausted)
+/// Fallback: thread-local pmr::unsynchronized_pool_resource (if exhausted)
 ///
 /// Design principles:
 /// - Buffer provides raw byte storage (std::byte) with 64-byte alignment
@@ -145,7 +145,9 @@ private:
     }
 
     static std::pmr::memory_resource* get_fallback_pool() {
-        thread_local std::pmr::synchronized_pool_resource pool;
+        // unsynchronized_pool_resource is safe here because the pool is thread_local
+        // No synchronization overhead needed for single-threaded access
+        thread_local std::pmr::unsynchronized_pool_resource pool;
         return &pool;
     }
 
