@@ -1,7 +1,7 @@
 # Adaptive Grid Builder Design
 
 **Date:** 2025-11-27
-**Status:** Approved (rev 2)
+**Status:** Approved (rev 3)
 **Author:** Claude + Kai
 
 ## Overview
@@ -34,6 +34,8 @@ A goal-seeking controller that:
 | σ/r refinement | Incremental slice computation | Reuses existing PDE solves when only σ/r grid changes |
 | m/τ refinement | Full rebuild required | Current builder doesn't store time lattice; future optimization possible |
 | API | Separate `AdaptiveGridBuilder` class | Keeps `PriceTableBuilder` simple, enables rich diagnostics |
+| Builder integration | Use exposed `_for_testing` methods | Avoids reimplementing pipeline; promotes to internal API |
+| Error metric | Price-based with vega scaling | Avoids expensive IV root-solve; equivalent accuracy |
 
 ## Critical Design Notes
 
@@ -60,6 +62,62 @@ The `target_met` flag and `achieved_max_error` tell callers whether the toleranc
 - Fall back to manual grid specification
 
 But the builder never silently skips verification.
+
+### Integration with PriceTableBuilder
+
+`PriceTableBuilder` exposes internal methods via `*_for_testing()` suffixes:
+- `make_batch_for_testing(axes)` → `vector<AmericanOptionParams>`
+- `solve_batch_for_testing(batch, axes)` → `BatchAmericanOptionResult`
+- `extract_tensor_for_testing(batch_result, axes)` → `ExtractionResult<N>`
+- `fit_coeffs_for_testing(tensor, axes)` → `vector<double>` coefficients
+
+`AdaptiveGridBuilder` will use these directly, bypassing the monolithic `build()`:
+
+```cpp
+// Pseudocode for incremental build
+BatchAmericanOptionResult merged_batch = merge(cached_results, new_solve_results);
+auto extraction = builder.extract_tensor_for_testing(merged_batch, current_axes);
+auto coeffs = builder.fit_coeffs_for_testing(extraction.tensor, current_axes);
+auto surface = PriceTableSurface<4>::build(current_axes, coeffs, metadata);
+```
+
+This requires promoting `_for_testing` methods to a stable internal API (rename to `_internal` or document as supported for advanced use).
+
+### Error Metric: Price-Based with Vega Scaling
+
+Computing IV error directly requires an expensive root-solve for each sample point. Instead:
+
+```cpp
+// Price error → IV error conversion
+double price_error = std::abs(interpolated_price - reference_price);
+double approx_vega = black_scholes_vega(m, τ, σ, r);  // O(1) computation
+double iv_error_approx = price_error / approx_vega;
+```
+
+This is accurate because `dP/dσ = vega`, so `ΔIV ≈ ΔP / vega` for small errors. Black-Scholes vega is a good approximation even for American options (early exercise has minimal impact on vega).
+
+### Cache Stores Raw PDE Data
+
+The cache stores raw PDE outputs in the solver's native grid (log-moneyness), not the user-specified axes grid:
+
+```cpp
+struct SliceData {
+    double sigma;
+    double rate;
+    // Raw PDE output - stored in solver's log-moneyness grid
+    std::vector<double> pde_log_moneyness;  // e.g., 101 points from -3 to +3
+    std::vector<double> pde_time_points;    // snapshot times
+    std::vector<std::vector<double>> pde_prices;  // [time_idx][x_idx]
+};
+```
+
+When building the tensor, we must interpolate from PDE grid to axes grid. This is handled by `extract_tensor_for_testing()`, which takes `BatchAmericanOptionResult` and interpolates each slice onto the requested `PriceTableAxes`.
+
+**Cache workflow:**
+1. Cache stores raw `AmericanOptionResult` (which contains PDE snapshots)
+2. When axes change, construct synthetic `BatchAmericanOptionResult` from cached + new results
+3. Call `extract_tensor_for_testing()` to interpolate onto current axes
+4. Proceed with `fit_coeffs_for_testing()`
 
 ## Data Structures
 
@@ -105,15 +163,19 @@ AdaptiveGridBuilder::build(chain, grid_spec, n_time, type):
 
 1. SEED ESTIMATE
    - Use existing estimate_grid_from_chain_bounds() with initial params
-   - Initialize slice_cache as map<(σ, r), SliceData> (keyed by actual values, not indices)
+   - Initialize result_cache as map<(σ, r), AmericanOptionResult>
 
 2. MAIN LOOP (iteration = 0..max_iterations)
    a. BUILD/UPDATE TABLE
-      - Identify (σ, r) pairs not in slice_cache
-      - If m or τ grid changed since last iteration: clear cache, rebuild all
-      - Solve PDE for missing pairs, add to slice_cache
-      - Extract tensor from all cached slices
-      - Fit B-spline coefficients → current_surface
+      - Create PriceTableBuilder with current config
+      - Compute batch params: builder.make_batch_for_testing(axes)
+      - Identify (σ, r) pairs not in result_cache
+      - If m or τ grid changed: clear cache (results tied to old maturity)
+      - Solve only new pairs via BatchAmericanOptionSolver
+      - Merge cached + new results into BatchAmericanOptionResult
+      - Extract tensor: builder.extract_tensor_for_testing(merged, axes)
+      - Fit coeffs: builder.fit_coeffs_for_testing(tensor, axes)
+      - Build surface: PriceTableSurface<4>::build(axes, coeffs, metadata)
 
    b. GENERATE VALIDATION SAMPLE
       - Latin hypercube over [m, τ, σ, r] domain (validation_samples points)
@@ -123,7 +185,8 @@ AdaptiveGridBuilder::build(chain, grid_spec, n_time, type):
       - For each sample point (m, τ, σ, r):
           interpolated_price = current_surface.value(m, τ, σ, r)
           reference_price = solve_american_fd(m, τ, σ, r)  // Fresh solve
-          iv_error = |implied_vol(interpolated) - implied_vol(reference)|
+          vega = black_scholes_vega(m, τ, σ, r)
+          iv_error = |interpolated_price - reference_price| / vega
       - Record max_error, avg_error
 
    d. CHECK CONVERGENCE
@@ -134,7 +197,7 @@ AdaptiveGridBuilder::build(chain, grid_spec, n_time, type):
       - Bin each high-error sample by position in each dimension
       - Identify dimension with most concentrated errors
       - Insert midpoints in problematic bins for that dimension
-      - Note: if m or τ changed, next iteration rebuilds all slices
+      - Note: if m or τ changed, next iteration clears cache
 
 3. RETURN AdaptiveResult
    - target_met = (achieved_max_error <= target_iv_error)
@@ -144,33 +207,31 @@ AdaptiveGridBuilder::build(chain, grid_spec, n_time, type):
 ## Slice Caching
 
 ```cpp
-/// Cached PDE solution for a (σ, r) slice
-/// Keyed by actual (sigma, rate) values to survive grid remapping
-struct SliceData {
-    double sigma;
-    double rate;
-    std::vector<double> log_moneyness_grid;  // From PDE spatial grid
-    std::vector<double> maturity_grid;       // τ points where we have data
-    std::vector<std::vector<double>> prices; // prices[tau_idx][m_idx]
-};
+/// Cache keyed by (σ, r) values
+/// Stores raw AmericanOptionResult which contains PDE snapshots
+class SliceCache {
+    std::map<std::pair<double, double>, AmericanOptionResult> results_;
 
-class AdaptiveGridBuilder {
-private:
-    // Cache keyed by (σ, r) values with tolerance for floating-point matching
-    std::map<std::pair<double, double>, SliceData> slice_cache_;
-
-    // Track current m/τ grids to detect when cache must be invalidated
-    std::vector<double> current_m_grid_;
+    // Track current m/τ grids - cache invalid if these change
     std::vector<double> current_tau_grid_;
 
-    bool grids_changed(const PriceTableAxes<4>& new_axes) const;
-    void invalidate_cache();
+public:
+    void add(double sigma, double rate, AmericanOptionResult result);
+    std::optional<AmericanOptionResult> get(double sigma, double rate) const;
+    void invalidate_if_tau_changed(const std::vector<double>& new_tau);
+
+    // Build BatchAmericanOptionResult from cached + new results
+    BatchAmericanOptionResult merge_with_new(
+        const std::vector<std::pair<double, double>>& all_pairs,
+        const BatchAmericanOptionResult& new_results,
+        const std::vector<size_t>& new_indices);
 };
 ```
 
 **Cache invalidation rules:**
-- σ or r grid change: Keep slices for (σ, r) pairs that still exist; compute new pairs
-- m or τ grid change: Invalidate entire cache; rebuild all slices
+- σ or r grid change: Keep results for (σ, r) pairs that still exist; solve new pairs
+- m grid change: Cache remains valid (extract_tensor handles interpolation)
+- τ grid change: Invalidate entire cache (PDE solve is τ-dependent)
 
 ## Error Attribution
 
@@ -196,6 +257,7 @@ src/option/table/
 ├── adaptive_grid_builder.hpp      # AdaptiveGridBuilder class, params, result structs
 ├── adaptive_grid_builder.cpp      # Implementation
 ├── error_attribution.hpp          # ErrorBins, refinement helpers (header-only)
+├── slice_cache.hpp                # SliceCache class (header-only)
 
 tests/
 ├── adaptive_grid_builder_test.cc  # Unit tests
@@ -207,9 +269,11 @@ tests/
 1. **Convergence test** - Given chain data and 5 bps target, verify `target_met == true` within max_iterations
 2. **Cache reuse test** - After σ-only refinement, verify existing slices not recomputed
 3. **Cache invalidation test** - After τ refinement, verify all slices recomputed
-4. **Error attribution test** - Inject artificial error at specific region, verify correct dimension/bin identified
-5. **Fallback test** - With impossible target, verify `target_met == false` with best-effort result
-6. **Determinism test** - Same inputs produce same output (Latin hypercube seeded)
+4. **m refinement cache test** - After m-only refinement, verify cache NOT invalidated (only extract_tensor re-runs)
+5. **Error attribution test** - Inject artificial error at specific region, verify correct dimension/bin identified
+6. **Fallback test** - With impossible target, verify `target_met == false` with best-effort result
+7. **Determinism test** - Same inputs produce same output (Latin hypercube seeded)
+8. **Vega scaling test** - Verify price_error/vega ≈ true IV error for known cases
 
 ## Public API
 
@@ -235,8 +299,10 @@ public:
 
 ## Dependencies
 
-- Uses `PriceTableBuilder` internally (composition)
+- Uses `PriceTableBuilder` internal methods (promote `_for_testing` to `_internal`)
+- Uses `BatchAmericanOptionSolver` for incremental PDE solves
 - Uses `AmericanOptionSolver` for validation FD solves
+- Uses Black-Scholes vega for error scaling (existing `src/math/black_scholes.hpp`)
 - Needs Latin hypercube sampling utility (may add `src/math/latin_hypercube.hpp`)
 - No new external dependencies
 
