@@ -509,19 +509,14 @@ private:
         // First build into internal storage (same as regular method)
         build_collocation_matrix();
 
-        // Copy to workspace in LAPACK banded format
-        auto band_storage = ws.band_storage();
-        const size_t ldab = BSplineCollocationWorkspace<T>::LDAB;
-
         // Zero the workspace band storage
+        auto band_storage = ws.band_storage();
         std::fill(band_storage.begin(), band_storage.end(), T{0});
 
-        // Convert from our format to LAPACK column-major banded format
-        // LAPACK stores column j in band_storage[ldab*j : ldab*(j+1)]
-        // For element A(i,j), it goes in band_storage[kl + ku + i - j + ldab*j]
-        const lapack_int kl = 3;  // bandwidth - 1
-        const lapack_int ku = 3;  // bandwidth - 1
+        // Get mdspan view for clean indexing (handles LAPACK layout internally)
+        auto band_view = ws.band_view();
 
+        // Copy from internal format to LAPACK banded format via mdspan
         for (size_t i = 0; i < n_; ++i) {
             const int col_start = band_col_start_[i];
             const int col_end = std::min(col_start + 4, static_cast<int>(n_));
@@ -530,10 +525,8 @@ private:
                 const int band_idx = j - col_start;
                 const T value = band_values_[i * 4 + band_idx];
 
-                // LAPACK banded format position
-                const size_t lapack_offset = static_cast<size_t>(kl + ku + static_cast<int>(i) - j) +
-                                            ldab * static_cast<size_t>(j);
-                band_storage[lapack_offset] = value;
+                // mdspan handles LAPACK banded format offset calculation
+                band_view[i, static_cast<size_t>(j)] = value;
             }
         }
     }
@@ -546,11 +539,12 @@ private:
                      "LAPACKE banded solvers currently only support double precision");
 
         using Result = BandedResult<T>;
+        using Workspace = BSplineCollocationWorkspace<T>;
 
         const lapack_int n = static_cast<lapack_int>(n_);
-        const lapack_int kl = 3;  // bandwidth - 1
-        const lapack_int ku = 3;  // bandwidth - 1
-        const lapack_int ldab = static_cast<lapack_int>(BSplineCollocationWorkspace<T>::LDAB);
+        const lapack_int kl = Workspace::KL;
+        const lapack_int ku = Workspace::KU;
+        const lapack_int ldab = static_cast<lapack_int>(Workspace::LDAB);
 
         // Copy band_storage to lapack_storage (dgbtrf modifies in-place)
         auto band_storage = ws.band_storage();
@@ -584,15 +578,16 @@ private:
         std::span<const T> b)
     {
         using Result = BandedResult<T>;
+        using Workspace = BSplineCollocationWorkspace<T>;
 
         if (b.size() != n_) {
             return Result::error_result("Dimension mismatch");
         }
 
         const lapack_int n = static_cast<lapack_int>(n_);
-        const lapack_int kl = 3;
-        const lapack_int ku = 3;
-        const lapack_int ldab = static_cast<lapack_int>(BSplineCollocationWorkspace<T>::LDAB);
+        const lapack_int kl = Workspace::KL;
+        const lapack_int ku = Workspace::KU;
+        const lapack_int ldab = static_cast<lapack_int>(Workspace::LDAB);
         const lapack_int nrhs = 1;
 
         // Copy b into ws.coeffs() (dgbtrs solves in-place)
@@ -628,14 +623,16 @@ private:
         const BSplineCollocationWorkspace<T>& ws,
         T norm_A) const
     {
+        using Workspace = BSplineCollocationWorkspace<T>;
+
         if (norm_A == T{0}) {
             return std::numeric_limits<T>::infinity();
         }
 
         const lapack_int n = static_cast<lapack_int>(n_);
-        const lapack_int kl = 3;
-        const lapack_int ku = 3;
-        const lapack_int ldab = static_cast<lapack_int>(BSplineCollocationWorkspace<T>::LDAB);
+        const lapack_int kl = Workspace::KL;
+        const lapack_int ku = Workspace::KU;
+        const lapack_int ldab = static_cast<lapack_int>(Workspace::LDAB);
 
         double rcond = 0.0;  // Reciprocal condition number (output)
 

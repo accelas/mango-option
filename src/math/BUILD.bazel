@@ -92,8 +92,10 @@ cc_library(
     name = "bspline_collocation_workspace",
     hdrs = ["bspline_collocation_workspace.hpp"],
     deps = [
+        ":lapack_banded_layout",
         "//src/support:lifetime",
         "//src/support:error_types",
+        "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
 )

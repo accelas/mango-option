@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include "src/math/lapack_banded_layout.hpp"
 #include "src/support/lifetime.hpp"
+#include <experimental/mdspan>
 #include <span>
 #include <expected>
 #include <string>
@@ -30,6 +32,13 @@ struct BSplineCollocationWorkspace {
     static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
     static constexpr size_t BANDWIDTH = 4;
     static constexpr size_t LDAB = 10;  // 2*kl + ku + 1 for bandwidth=4
+    static constexpr int KL = 3;        // bandwidth - 1 (sub-diagonals)
+    static constexpr int KU = 3;        // bandwidth - 1 (super-diagonals)
+
+    /// mdspan type for LAPACK banded matrix view
+    using extents_type = std::experimental::dextents<size_t, 2>;
+    using band_view_type = std::experimental::mdspan<T, extents_type, lapack_banded_layout>;
+    using const_band_view_type = std::experimental::mdspan<const T, extents_type, lapack_banded_layout>;
 
     static_assert(std::is_trivially_destructible_v<T>,
         "BSplineCollocationWorkspace<T> requires trivially destructible T "
@@ -118,6 +127,29 @@ struct BSplineCollocationWorkspace {
     std::span<const T> lapack_storage() const { return lapack_storage_; }
     std::span<const int> pivots() const { return pivots_; }
     std::span<const T> coeffs() const { return coeffs_; }
+
+    /// mdspan view of band storage in LAPACK banded format
+    ///
+    /// Provides clean indexing: band_view()[i, j] = A(i,j) where A is
+    /// the logical n×n matrix. The layout handles the LAPACK banded
+    /// storage offset calculation internally.
+    ///
+    /// Example:
+    ///   auto view = ws.band_view();
+    ///   view[i, j] = value;  // Instead of manual offset calculation
+    [[nodiscard]] band_view_type band_view() {
+        using mapping_type = lapack_banded_layout::mapping<extents_type>;
+        return band_view_type(
+            band_storage_.data(),
+            mapping_type(extents_type{n_, n_}, KL, KU));
+    }
+
+    [[nodiscard]] const_band_view_type band_view() const {
+        using mapping_type = lapack_banded_layout::mapping<extents_type>;
+        return const_band_view_type(
+            band_storage_.data(),
+            mapping_type(extents_type{n_, n_}, KL, KU));
+    }
 
     size_t size() const { return n_; }
 
