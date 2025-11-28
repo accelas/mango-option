@@ -36,6 +36,10 @@ struct AdaptiveGridParams {
     /// Vega floor for error metric (default: 1e-4)
     /// When vega < floor, fall back to price-based tolerance
     double vega_floor = 1e-4;
+
+    /// Maximum tolerable PDE solve failure rate (default: 0.5 = 50%)
+    /// Some solves may fail at extreme parameter combinations
+    double max_failure_rate = 0.5;
 };
 
 /// Per-iteration diagnostics
