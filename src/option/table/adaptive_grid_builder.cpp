@@ -9,6 +9,7 @@
 #include <chrono>
 #include <limits>
 #include <map>
+#include <random>
 #include <ranges>
 
 namespace mango {
@@ -126,6 +127,9 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             PriceTableErrorCode::InvalidConfig
         });
     }
+
+    std::array<std::vector<size_t>, 4> focus_bins;
+    bool focus_active = false;
 
     for (size_t iteration = 0; iteration < params_.max_iterations; ++iteration) {
         auto iter_start = std::chrono::steady_clock::now();
@@ -325,8 +329,20 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         stats.pde_solves_table = missing_params.size();  // Only count fresh solves
 
         // b. GENERATE VALIDATION SAMPLE
-        auto unit_samples = latin_hypercube_4d(params_.validation_samples,
-                                              params_.lhs_seed + iteration);
+        const size_t total_samples = params_.validation_samples;
+        bool has_focus_bins = focus_active;
+        if (focus_active) {
+            has_focus_bins = std::any_of(focus_bins.begin(), focus_bins.end(),
+                                         [](const std::vector<size_t>& bins) { return !bins.empty(); });
+        }
+
+        size_t base_samples = (has_focus_bins && total_samples > 1)
+            ? std::max<size_t>(total_samples / 2, 1)
+            : total_samples;
+        size_t targeted_samples = has_focus_bins ? total_samples - base_samples : 0;
+
+        auto base_unit_samples = latin_hypercube_4d(base_samples,
+                                                    params_.lhs_seed + iteration);
 
         std::array<std::pair<double, double>, 4> bounds = {{
             {min_moneyness, max_moneyness},
@@ -334,7 +350,36 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             {min_vol, max_vol},
             {min_rate, max_rate}
         }};
-        auto samples = scale_lhs_samples(unit_samples, bounds);
+        std::vector<std::array<double, 4>> samples = scale_lhs_samples(base_unit_samples, bounds);
+
+        if (targeted_samples > 0 && has_focus_bins) {
+            std::mt19937_64 targeted_rng(params_.lhs_seed ^ (iteration * 1315423911ULL + 0x9e3779b97f4a7c15ULL));
+            std::uniform_real_distribution<double> uniform(0.0, 1.0);
+
+            std::vector<std::array<double, 4>> targeted_unit;
+            targeted_unit.reserve(targeted_samples);
+
+            for (size_t i = 0; i < targeted_samples; ++i) {
+                std::array<double, 4> point{};
+                for (size_t d = 0; d < 4; ++d) {
+                    double u = uniform(targeted_rng);
+                    if (!focus_bins[d].empty()) {
+                        const auto& dim_bins = focus_bins[d];
+                        size_t bin = dim_bins[i % dim_bins.size()];
+                        double bin_lo = static_cast<double>(bin) / ErrorBins::N_BINS;
+                        double bin_hi = static_cast<double>(bin + 1) / ErrorBins::N_BINS;
+                        double span = bin_hi - bin_lo;
+                        point[d] = bin_lo + u * span;
+                    } else {
+                        point[d] = u;
+                    }
+                }
+                targeted_unit.push_back(point);
+            }
+
+            auto targeted_scaled = scale_lhs_samples(targeted_unit, bounds);
+            samples.insert(samples.end(), targeted_scaled.begin(), targeted_scaled.end());
+        }
 
         // c. VALIDATE AGAINST FRESH FD SOLVES
         double max_error = 0.0;
@@ -499,6 +544,14 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             case 1: refine_grid_targeted(maturity_grid, min_tau, max_tau); break;
             case 2: refine_grid_targeted(vol_grid, min_vol, max_vol); break;
             case 3: refine_grid_targeted(rate_grid, min_rate, max_rate); break;
+        }
+
+        focus_active = false;
+        for (size_t d = 0; d < focus_bins.size(); ++d) {
+            focus_bins[d] = error_bins.problematic_bins(d);
+            if (!focus_bins[d].empty()) {
+                focus_active = true;
+            }
         }
 
         stats.refined_dim = static_cast<int>(worst_dim);
