@@ -89,6 +89,16 @@ cc_library(
 )
 
 cc_library(
+    name = "bspline_collocation_workspace",
+    hdrs = ["bspline_collocation_workspace.hpp"],
+    deps = [
+        "//src/support:lifetime",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "bspline_collocation",
     hdrs = ["bspline_collocation.hpp"],
     deps = [
