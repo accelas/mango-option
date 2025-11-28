@@ -334,12 +334,30 @@ double AdaptiveGridBuilder::compute_error_metric(
     double dividend_yield) const
 {
     double price_error = std::abs(interpolated_price - reference_price);
+
+    // Use European Black-Scholes vega as an approximation for American vega.
+    //
+    // Limitation: For deep ITM American puts, true American vega is smaller
+    // than European vega because part of the option value is intrinsic (not
+    // sensitive to vol). Using European vega here underestimates the IV error,
+    // which may cause under-refinement in those regions.
+    //
+    // This is acceptable because:
+    // 1. For ATM/OTM options (most common), the vegas are nearly identical
+    // 2. Deep ITM puts have small vega anyway, so the vega_floor kicks in
+    // 3. Computing true American vega would require 2 extra PDE solves per
+    //    validation point, which is expensive
+    //
+    // Future: Could use Barone-Adesi-Whaley or finite-difference vega if
+    // higher accuracy is needed for deep ITM regions.
     double vega = bs_vega(spot, strike, tau, sigma, rate, dividend_yield);
 
     if (vega >= params_.vega_floor) {
+        // ΔIV ≈ ΔP / vega (first-order Taylor approximation)
         return price_error / vega;
     } else {
-        // Fallback: treat vega_floor as minimum vega
+        // Vega too small (deep ITM/OTM or very short τ): use floor to avoid
+        // division by near-zero and cap noise in regions where IV is ill-defined
         return price_error / params_.vega_floor;
     }
 }
