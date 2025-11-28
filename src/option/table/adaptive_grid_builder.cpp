@@ -176,9 +176,13 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         // Solve missing pairs
         BatchAmericanOptionResult fresh_results;
         if (!missing_params.empty()) {
-            // Configure grid accuracy from user's grid_spec
-            // Use min/max bounds that incorporate the user's grid size while allowing
-            // the solver flexibility for challenging options (deep ITM/OTM, short τ)
+            // Configure grid accuracy - allow solver flexibility for challenging options
+            // but ensure adequate domain coverage for spline interpolation.
+            //
+            // The solver's spatial grid may differ from grid_spec, but extract_tensor
+            // uses cubic spline interpolation to resample onto the target moneyness grid.
+            // This decouples solver resolution from output resolution - the solver can
+            // use whatever points it needs for numerical stability.
             GridAccuracyParams accuracy;
             const size_t n_points = grid_spec.n_points();
             accuracy.min_spatial_points = std::min(n_points, size_t{100});
@@ -364,12 +368,17 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         // Bins map to normalized [0,1] positions: bin i covers [i/N_BINS, (i+1)/N_BINS)
         auto refine_grid_targeted = [this, &problematic](std::vector<double>& grid,
                                                          double lo, double hi) {
-            size_t max_new_points = std::min(
+            // Bug fix: Compute target size first, then check if we've hit the ceiling
+            // to avoid size_t underflow when params_.max_points_per_dim <= grid.size()
+            size_t target_size = std::min(
                 static_cast<size_t>(grid.size() * params_.refinement_factor),
                 params_.max_points_per_dim
-            ) - grid.size();
+            );
 
-            if (max_new_points == 0) return;
+            // Already at or beyond the limit - no refinement possible
+            if (target_size <= grid.size()) return;
+
+            size_t max_new_points = target_size - grid.size();
 
             // Build set of intervals to refine based on problematic bins
             std::vector<std::pair<double, double>> refine_intervals;

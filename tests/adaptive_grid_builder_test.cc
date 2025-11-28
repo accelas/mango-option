@@ -264,36 +264,6 @@ TEST(ErrorBinsTest, ProblematicBins) {
 // Regression tests for bugs found during code review
 // ===========================================================================
 
-// Regression: Cache must be initialized before checking for changes
-// Bug: invalidate_if_tau_changed was called before set_tau_grid, so
-// current_tau_grid_ was always empty, causing cache wipe every iteration
-TEST(SliceCacheTest, RegressionCacheInitializationOrder) {
-    SliceCache cache;
-
-    auto dummy = make_dummy_result();
-    ASSERT_NE(dummy, nullptr);
-    cache.add(0.20, 0.05, dummy);
-    cache.add(0.25, 0.05, dummy);
-
-    EXPECT_EQ(cache.size(), 2);
-
-    // Without calling set_tau_grid first, invalidate_if_tau_changed
-    // would see an empty current grid and clear the cache
-    std::vector<double> tau = {0.25, 0.5, 1.0};
-
-    // CORRECT: Set tau grid first on iteration 0
-    cache.set_tau_grid(tau);
-
-    // Now invalidate_if_tau_changed should NOT clear (grids match)
-    cache.invalidate_if_tau_changed(tau);
-    EXPECT_EQ(cache.size(), 2) << "Cache should be preserved when tau grid unchanged";
-
-    // Different tau grid SHOULD clear
-    std::vector<double> tau2 = {0.1, 0.5, 1.0};
-    cache.invalidate_if_tau_changed(tau2);
-    EXPECT_EQ(cache.size(), 0) << "Cache should clear when tau grid changes";
-}
-
 // Regression: Single-value axes must be expanded to provide distinct grid points
 // Bug: linspace(x, x, 5) produces {x, x, x, x, x} which dedupes to 1 point,
 // causing B-spline fitting failure (requires >= 4 points)
@@ -328,6 +298,38 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
 
     // Surface should be usable
     EXPECT_NE(result->surface, nullptr);
+}
+
+// Regression: Cache should clear on new build
+// Bug: reuse of AdaptiveGridBuilder re-used previous slices because cache wasn't cleared
+TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
+    OptionChain chain1;
+    chain1.spot = 100.0;
+    chain1.dividend_yield = 0.0;
+    chain1.strikes = {90.0, 100.0, 110.0};
+    chain1.maturities = {0.25, 0.5, 1.0};
+    chain1.implied_vols = {0.18, 0.22};
+    chain1.rates = {0.04, 0.05};
+
+    OptionChain chain2 = chain1;
+    chain2.spot = 50.0;  // Different spot => cache must not reuse chain1 slices
+
+    AdaptiveGridParams params;
+    params.max_iterations = 1;
+    params.validation_samples = 0;  // Skip validation for speed
+
+    AdaptiveGridBuilder builder(params);
+    auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 31).value();
+
+    auto result1 = builder.build(chain1, grid_spec, 100, OptionType::PUT);
+    ASSERT_TRUE(result1.has_value());
+    size_t solves1 = result1->iterations[0].pde_solves_table;
+
+    auto result2 = builder.build(chain2, grid_spec, 100, OptionType::PUT);
+    ASSERT_TRUE(result2.has_value());
+    size_t solves2 = result2->iterations[0].pde_solves_table;
+
+    EXPECT_EQ(solves1, solves2) << "Second build should recompute all slices for new chain";
 }
 
 }  // namespace
