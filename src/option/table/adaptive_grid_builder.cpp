@@ -1,8 +1,11 @@
 #include "src/option/table/adaptive_grid_builder.hpp"
 #include "src/math/black_scholes_analytics.hpp"
 #include "src/math/latin_hypercube.hpp"
+#include "src/option/american_option_batch.hpp"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <limits>
 
 namespace mango {
 
@@ -16,10 +19,223 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
                            size_t n_time,
                            OptionType type)
 {
-    // TODO: Implement main loop in Task 8
-    return std::unexpected(PriceTableError(
-        PriceTableErrorCode::InvalidConfig
-    ));
+    // ========================================================================
+    // 1. SEED ESTIMATE - Extract grid bounds from chain
+    // ========================================================================
+
+    if (chain.strikes.empty() || chain.maturities.empty()) {
+        return std::unexpected(PriceTableError(
+            PriceTableErrorCode::InvalidConfig
+        ));
+    }
+
+    double min_moneyness = std::numeric_limits<double>::max();
+    double max_moneyness = std::numeric_limits<double>::lowest();
+
+    for (double strike : chain.strikes) {
+        double m = chain.spot / strike;
+        min_moneyness = std::min(min_moneyness, m);
+        max_moneyness = std::max(max_moneyness, m);
+    }
+
+    double min_tau = *std::min_element(chain.maturities.begin(), chain.maturities.end());
+    double max_tau = *std::max_element(chain.maturities.begin(), chain.maturities.end());
+
+    double min_vol = *std::min_element(chain.implied_vols.begin(), chain.implied_vols.end());
+    double max_vol = *std::max_element(chain.implied_vols.begin(), chain.implied_vols.end());
+
+    double min_rate = *std::min_element(chain.rates.begin(), chain.rates.end());
+    double max_rate = *std::max_element(chain.rates.begin(), chain.rates.end());
+
+    // Helper to create evenly spaced grid
+    auto linspace = [](double lo, double hi, size_t n) {
+        std::vector<double> v(n);
+        for (size_t i = 0; i < n; ++i) {
+            v[i] = lo + (hi - lo) * i / (n - 1);
+        }
+        return v;
+    };
+
+    // Start with ~5-7 points per dimension (minimum 4 for B-splines)
+    std::vector<double> moneyness_grid = linspace(min_moneyness, max_moneyness, 5);
+    std::vector<double> maturity_grid = linspace(min_tau, max_tau, 5);
+    std::vector<double> vol_grid = linspace(min_vol, max_vol, 5);
+    std::vector<double> rate_grid = linspace(min_rate, max_rate, 4);  // Need at least 4
+
+    AdaptiveResult result;
+    result.iterations.reserve(params_.max_iterations);
+
+    // ========================================================================
+    // 2. MAIN LOOP - Iterative refinement
+    // ========================================================================
+
+    for (size_t iteration = 0; iteration < params_.max_iterations; ++iteration) {
+        auto iter_start = std::chrono::steady_clock::now();
+
+        IterationStats stats;
+        stats.iteration = iteration;
+        stats.grid_sizes = {
+            moneyness_grid.size(),
+            maturity_grid.size(),
+            vol_grid.size(),
+            rate_grid.size()
+        };
+
+        // a. BUILD/UPDATE TABLE
+        auto builder_result = PriceTableBuilder<4>::from_vectors(
+            moneyness_grid, maturity_grid, vol_grid, rate_grid,
+            chain.spot,  // K_ref = spot as reference strike
+            grid_spec, n_time, type, chain.dividend_yield);
+
+        if (!builder_result.has_value()) {
+            return std::unexpected(builder_result.error());
+        }
+
+        auto& [builder, axes] = builder_result.value();
+
+        auto table_result = builder.build(axes);
+        if (!table_result.has_value()) {
+            return std::unexpected(table_result.error());
+        }
+
+        auto surface = table_result->surface;
+        stats.pde_solves_table = table_result->n_pde_solves;
+
+        // b. GENERATE VALIDATION SAMPLE
+        auto unit_samples = latin_hypercube_4d(params_.validation_samples,
+                                              params_.lhs_seed + iteration);
+
+        std::array<std::pair<double, double>, 4> bounds = {{
+            {min_moneyness, max_moneyness},
+            {min_tau, max_tau},
+            {min_vol, max_vol},
+            {min_rate, max_rate}
+        }};
+        auto samples = scale_lhs_samples(unit_samples, bounds);
+
+        // c. VALIDATE AGAINST FRESH FD SOLVES
+        double max_error = 0.0;
+        double sum_error = 0.0;
+        size_t valid_samples = 0;
+        ErrorBins error_bins;
+
+        for (const auto& sample : samples) {
+            double m = sample[0];
+            double tau = sample[1];
+            double sigma = sample[2];
+            double rate = sample[3];
+
+            // Interpolated price from surface
+            double interp_price = surface->value({m, tau, sigma, rate});
+
+            // Fresh FD solve for reference
+            double strike = chain.spot / m;
+
+            // Create PricingParams using constructor
+            PricingParams params;
+            params.spot = chain.spot;
+            params.strike = strike;
+            params.maturity = tau;
+            params.rate = rate;
+            params.dividend_yield = chain.dividend_yield;
+            params.type = type;
+            params.volatility = sigma;
+
+            auto fd_result = solve_american_option_auto(params);
+
+            if (!fd_result.has_value()) {
+                continue;  // Skip failed solves
+            }
+
+            stats.pde_solves_validation++;
+
+            double ref_price = fd_result->value();
+            double iv_error = compute_error_metric(
+                interp_price, ref_price,
+                chain.spot, strike, tau, sigma, rate,
+                chain.dividend_yield);
+
+            max_error = std::max(max_error, iv_error);
+            sum_error += iv_error;
+            valid_samples++;
+
+            // Normalize position for error bins
+            std::array<double, 4> norm_pos = {{
+                (m - min_moneyness) / (max_moneyness - min_moneyness),
+                (tau - min_tau) / (max_tau - min_tau),
+                (sigma - min_vol) / (max_vol - min_vol),
+                (rate - min_rate) / (max_rate - min_rate)
+            }};
+            error_bins.record_error(norm_pos, iv_error, params_.target_iv_error);
+        }
+
+        double avg_error = valid_samples > 0 ? sum_error / valid_samples : 0.0;
+
+        stats.max_error = max_error;
+        stats.avg_error = avg_error;
+
+        auto iter_end = std::chrono::steady_clock::now();
+        stats.elapsed_seconds = std::chrono::duration<double>(iter_end - iter_start).count();
+
+        // d. CHECK CONVERGENCE
+        bool converged = (max_error <= params_.target_iv_error);
+
+        if (converged || iteration == params_.max_iterations - 1) {
+            // Final iteration - save results
+            stats.refined_dim = -1;  // No refinement on final iteration
+            result.iterations.push_back(stats);
+            result.surface = surface;
+            result.axes = axes;
+            result.achieved_max_error = max_error;
+            result.achieved_avg_error = avg_error;
+            result.target_met = converged;
+            result.total_pde_solves = 0;
+            for (const auto& it : result.iterations) {
+                result.total_pde_solves += it.pde_solves_table + it.pde_solves_validation;
+            }
+            break;
+        }
+
+        // e. DIAGNOSE & REFINE
+        size_t worst_dim = error_bins.worst_dimension();
+        auto problematic = error_bins.problematic_bins(worst_dim);
+
+        // Refine the worst dimension
+        auto refine_grid = [this](std::vector<double>& grid) {
+            size_t new_size = std::min(
+                static_cast<size_t>(grid.size() * params_.refinement_factor),
+                params_.max_points_per_dim
+            );
+            if (new_size > grid.size()) {
+                // Insert midpoints to increase density
+                std::vector<double> new_grid;
+                new_grid.reserve(new_size);
+                for (size_t i = 0; i < grid.size() - 1; ++i) {
+                    new_grid.push_back(grid[i]);
+                    if (new_grid.size() < new_size) {
+                        new_grid.push_back((grid[i] + grid[i+1]) / 2.0);
+                    }
+                }
+                new_grid.push_back(grid.back());
+                std::sort(new_grid.begin(), new_grid.end());
+                new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
+                              new_grid.end());
+                grid = std::move(new_grid);
+            }
+        };
+
+        switch (worst_dim) {
+            case 0: refine_grid(moneyness_grid); break;
+            case 1: refine_grid(maturity_grid); break;
+            case 2: refine_grid(vol_grid); break;
+            case 3: refine_grid(rate_grid); break;
+        }
+
+        stats.refined_dim = static_cast<int>(worst_dim);
+        result.iterations.push_back(stats);
+    }
+
+    return result;
 }
 
 double AdaptiveGridBuilder::compute_error_metric(
@@ -43,8 +259,36 @@ std::vector<double> AdaptiveGridBuilder::refine_dimension(
     const std::vector<size_t>& problematic_bins,
     size_t dim) const
 {
-    // TODO: Implement refinement in Task 8
-    return current_grid;
+    // Calculate new size based on refinement factor
+    size_t new_size = std::min(
+        static_cast<size_t>(current_grid.size() * params_.refinement_factor),
+        params_.max_points_per_dim
+    );
+
+    if (new_size <= current_grid.size()) {
+        // Already at max density, cannot refine further
+        return current_grid;
+    }
+
+    // Insert midpoints to increase density
+    std::vector<double> new_grid;
+    new_grid.reserve(new_size);
+
+    for (size_t i = 0; i < current_grid.size() - 1; ++i) {
+        new_grid.push_back(current_grid[i]);
+        if (new_grid.size() < new_size) {
+            // Insert midpoint
+            new_grid.push_back((current_grid[i] + current_grid[i+1]) / 2.0);
+        }
+    }
+    new_grid.push_back(current_grid.back());
+
+    // Sort and remove duplicates (should already be sorted, but be safe)
+    std::sort(new_grid.begin(), new_grid.end());
+    new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
+                  new_grid.end());
+
+    return new_grid;
 }
 
 }  // namespace mango
