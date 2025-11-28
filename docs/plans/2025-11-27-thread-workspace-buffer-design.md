@@ -226,6 +226,15 @@ struct BSplineCollocationWorkspace {
     static constexpr size_t BANDWIDTH = 4;
     static constexpr size_t LDAB = 10;  // 2*kl + ku + 1 for bandwidth=4
 
+    // CONSTRAINT: T must be trivially destructible because workspace never
+    // calls destructors. The byte buffer outlives typed views, and we rely
+    // on trivial destruction. This fires at template instantiation, catching
+    // violations early (e.g., BSplineCollocationWorkspace<std::vector<double>>
+    // would fail to compile).
+    static_assert(std::is_trivially_destructible_v<T>,
+        "BSplineCollocationWorkspace<T> requires trivially destructible T "
+        "because no destructor is called when the workspace goes out of scope");
+
     /// Align byte offset to specified alignment
     static constexpr size_t align_up(size_t offset, size_t alignment) {
         return (offset + alignment - 1) & ~(alignment - 1);
@@ -409,26 +418,14 @@ namespace mango {
 
 /// Workspace for American option PDE solver (byte-buffer variant)
 ///
-/// Mirrors PDEWorkspace but accepts std::byte buffer instead of double buffer.
-/// Uses start_array_lifetime to properly start object lifetimes.
+/// Thin wrapper that accepts std::byte buffer, calls start_array_lifetime<double>
+/// to start object lifetimes, then delegates to PDEWorkspace::from_buffer.
 ///
-/// Arrays (all doubles, SIMD-padded to 8-element boundaries):
-/// - dx (n-1): Grid spacing
-/// - u_stage (n): TR-BDF2 stage buffer
-/// - rhs (n): Right-hand side vector
-/// - lu (n): Spatial operator output
-/// - psi (n): Obstacle constraint (exercise boundary)
-/// - jacobian_diag (n): Jacobian main diagonal
-/// - jacobian_upper (n-1): Jacobian upper diagonal
-/// - jacobian_lower (n-1): Jacobian lower diagonal
-/// - residual (n): Newton residual
-/// - delta_u (n): Newton correction
-/// - newton_u_old (n): Previous Newton iterate
-/// - u_next (n): Next solution buffer
-/// - reserved1-3 (3 × n): Future expansion
-/// - tridiag_workspace (2n): Thomas solver workspace
+/// Memory layout and array definitions are owned by PDEWorkspace (single source
+/// of truth). See src/pde/core/pde_workspace.hpp for the authoritative list.
+/// Do not duplicate the array enumeration here as it becomes stale.
 ///
-/// Total: 12n + 3(n-1) + 2n = 17n - 3 elements (padded)
+/// Key invariant: required_bytes(n) == PDEWorkspace::required_size(n) * sizeof(double)
 ///
 struct AmericanPDEWorkspace {
     static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
@@ -516,27 +513,17 @@ private:
 
 **Memory layout:**
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ AmericanPDEWorkspace byte buffer (n=101, typical grid)              │
-├─────────────────────────────────────────────────────────────────────┤
-│ dx[104]        │ 104 × 8 = 832 bytes (100 used, padded to 104)      │
-│ u_stage[104]   │ 104 × 8 = 832 bytes                                │
-│ rhs[104]       │ 104 × 8 = 832 bytes                                │
-│ lu[104]        │ 104 × 8 = 832 bytes                                │
-│ psi[104]       │ 104 × 8 = 832 bytes                                │
-│ jacobian_diag  │ 104 × 8 = 832 bytes                                │
-│ jacobian_upper │ 104 × 8 = 832 bytes (100 used)                     │
-│ jacobian_lower │ 104 × 8 = 832 bytes (100 used)                     │
-│ residual[104]  │ 104 × 8 = 832 bytes                                │
-│ delta_u[104]   │ 104 × 8 = 832 bytes                                │
-│ newton_u_old   │ 104 × 8 = 832 bytes                                │
-│ u_next[104]    │ 104 × 8 = 832 bytes                                │
-│ reserved1-3    │ 3 × 832 = 2496 bytes                               │
-│ tridiag_ws[208]│ 208 × 8 = 1664 bytes                               │
-├─────────────────────────────────────────────────────────────────────┤
-│ Total: ~15 KB per thread (for n=101)                                │
-└─────────────────────────────────────────────────────────────────────┘
+The exact layout is defined by `PDEWorkspace::from_buffer()` in `src/pde/core/pde_workspace.hpp`.
+Do not duplicate the array list here as it becomes stale when PDEWorkspace changes.
+
+Key points:
+- All arrays are SIMD-padded to 8-double boundaries
+- Total size is `PDEWorkspace::required_size(n) * sizeof(double)` bytes
+- For n=101 (typical grid): approximately 15 KB per thread
+
+```cpp
+// To query actual byte requirement for a given grid size:
+size_t bytes = AmericanPDEWorkspace::required_bytes(n);  // Derives from PDEWorkspace
 ```
 
 **Usage in american_option_batch.cpp (Phase 3):**
@@ -593,7 +580,8 @@ template<size_t Axis>
 
     // Track workspace creation errors (atomic flag + first error message)
     std::atomic<bool> workspace_error{false};
-    std::string first_workspace_error;  // Protected by critical section
+    bool error_message_captured{false};  // Protected by error_mutex
+    std::string first_workspace_error{"(workspace error with no message captured)"};
     std::mutex error_mutex;
 
     MANGO_PRAGMA_PARALLEL
@@ -618,8 +606,9 @@ template<size_t Axis>
             // Capture first error for debugging (thread-safe)
             {
                 std::lock_guard<std::mutex> lock(error_mutex);
-                if (first_workspace_error.empty()) {
+                if (!error_message_captured) {
                     first_workspace_error = ws_result.error();
+                    error_message_captured = true;
                 }
             }
             workspace_error.store(true, std::memory_order_relaxed);
