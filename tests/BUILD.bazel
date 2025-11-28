@@ -1190,3 +1190,16 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "adaptive_grid_builder_test",
+    size = "small",
+    srcs = ["adaptive_grid_builder_test.cc"],
+    deps = [
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option:option_chain",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

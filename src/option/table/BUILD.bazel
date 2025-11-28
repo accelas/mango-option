@@ -155,3 +155,29 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "adaptive_grid_builder",
+    srcs = ["adaptive_grid_builder.cpp"],
+    hdrs = ["adaptive_grid_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":adaptive_grid_types",
+        ":error_attribution",
+        ":price_table_builder",
+        ":slice_cache",
+        "//src/math:black_scholes_analytics",
+        "//src/math:latin_hypercube",
+        "//src/option:option_chain",
+        "//src/pde/core:grid",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
