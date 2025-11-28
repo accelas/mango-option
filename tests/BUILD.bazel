@@ -1142,3 +1142,14 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "latin_hypercube_test",
+    size = "small",
+    srcs = ["latin_hypercube_test.cc"],
+    deps = [
+        "//src/math:latin_hypercube",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

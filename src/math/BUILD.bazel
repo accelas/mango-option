@@ -153,3 +153,9 @@ cc_library(
     linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "latin_hypercube",
+    hdrs = ["latin_hypercube.hpp"],
+    visibility = ["//visibility:public"],
+)
