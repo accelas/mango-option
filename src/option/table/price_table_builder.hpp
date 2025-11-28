@@ -8,6 +8,7 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/option_chain.hpp"
+#include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/support/error_types.hpp"
 #include <expected>
 #include <memory>
@@ -146,6 +147,26 @@ public:
         size_t n_time,
         OptionType type = OptionType::PUT,
         double max_failure_rate = 0.0);
+
+    /// Factory from option chain with automatic grid estimation
+    ///
+    /// Creates a PriceTableBuilder with optimal grids estimated from target accuracy.
+    /// Uses curvature-based budget allocation to minimize PDE solves while achieving
+    /// the specified IV error tolerance.
+    ///
+    /// @param chain Option chain (provides domain bounds from strikes, maturities, vols, rates)
+    /// @param grid_spec PDE spatial grid specification
+    /// @param n_time Number of time steps
+    /// @param type Option type (PUT or CALL)
+    /// @param accuracy Grid accuracy parameters (controls target error and point allocation)
+    /// @return Pair of (builder, axes) or error
+    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    from_chain_auto(
+        const OptionChain& chain,
+        GridSpec<double> grid_spec,
+        size_t n_time,
+        OptionType type = OptionType::PUT,
+        const PriceTableGridAccuracyParams<4>& accuracy = {});
 
     /// For testing: expose make_batch method
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch_for_testing(

@@ -74,6 +74,7 @@ cc_library(
         ":price_table_axes",
         ":price_table_surface",
         ":price_tensor",
+        ":price_table_grid_estimator",
         ":recursion_helpers",
         "//src/option:option_chain",
         "//src/option:american_option",
@@ -114,6 +115,12 @@ cc_library(
 cc_library(
     name = "price_table_grid",
     hdrs = ["price_table_grid.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "price_table_grid_estimator",
+    hdrs = ["price_table_grid_estimator.hpp"],
     visibility = ["//visibility:public"],
 )
 
