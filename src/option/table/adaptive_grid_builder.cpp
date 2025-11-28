@@ -25,7 +25,18 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
     // 1. SEED ESTIMATE - Extract grid bounds from chain
     // ========================================================================
 
+    // Clear cache to prevent stale slices from previous builds leaking into this one
+    // (each build may have different spot/dividend parameters)
+    cache_.clear();
+
     if (chain.strikes.empty() || chain.maturities.empty()) {
+        return std::unexpected(PriceTableError(
+            PriceTableErrorCode::InvalidConfig
+        ));
+    }
+
+    // Bug fix: Check implied_vols and rates are non-empty before dereferencing
+    if (chain.implied_vols.empty() || chain.rates.empty()) {
         return std::unexpected(PriceTableError(
             PriceTableErrorCode::InvalidConfig
         ));
@@ -52,6 +63,26 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
     // Expand bounds when min == max (or close) to ensure linspace produces distinct points
     // Without this, linspace(x, x, 5) yields {x, x, x, x, x} which dedupes to 1 point,
     // failing B-spline fitting that requires >= 4 points per dimension.
+    //
+    // Bug fix: Clamp lower bounds to positive epsilon for moneyness, tau, vol
+    // to avoid negative values that PriceTableBuilder rejects.
+    constexpr double kMinPositive = 1e-6;
+
+    auto expand_bounds_positive = [kMinPositive](double& lo, double& hi, double min_spread) {
+        if (hi - lo < min_spread) {
+            double mid = (lo + hi) / 2.0;
+            lo = mid - min_spread / 2.0;
+            hi = mid + min_spread / 2.0;
+        }
+        // Clamp lower bound to positive and adjust upper if needed
+        if (lo < kMinPositive) {
+            double shift = kMinPositive - lo;
+            lo = kMinPositive;
+            hi += shift;
+        }
+    };
+
+    // Rate can be negative (though unusual), so use original expand for rate
     auto expand_bounds = [](double& lo, double& hi, double min_spread) {
         if (hi - lo < min_spread) {
             double mid = (lo + hi) / 2.0;
@@ -59,10 +90,11 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
             hi = mid + min_spread / 2.0;
         }
     };
-    expand_bounds(min_moneyness, max_moneyness, 0.10);  // ±5% around ATM
-    expand_bounds(min_tau, max_tau, 0.5);               // ±0.25 years
-    expand_bounds(min_vol, max_vol, 0.10);              // ±5% vol
-    expand_bounds(min_rate, max_rate, 0.04);            // ±2% rate
+
+    expand_bounds_positive(min_moneyness, max_moneyness, 0.10);  // ±5% around ATM
+    expand_bounds_positive(min_tau, max_tau, 0.5);               // ±0.25 years
+    expand_bounds_positive(min_vol, max_vol, 0.10);              // ±5% vol
+    expand_bounds(min_rate, max_rate, 0.04);                     // ±2% rate (can be negative)
 
     // Helper to create evenly spaced grid
     auto linspace = [](double lo, double hi, size_t n) {
@@ -145,7 +177,8 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         BatchAmericanOptionResult fresh_results;
         if (!missing_params.empty()) {
             // Configure grid accuracy from user's grid_spec
-            // This influences the solver's grid generation while letting it handle bounds
+            // Use min/max bounds that incorporate the user's grid size while allowing
+            // the solver flexibility for challenging options (deep ITM/OTM, short τ)
             GridAccuracyParams accuracy;
             const size_t n_points = grid_spec.n_points();
             accuracy.min_spatial_points = std::min(n_points, size_t{100});
@@ -327,35 +360,65 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         size_t worst_dim = error_bins.worst_dimension();
         auto problematic = error_bins.problematic_bins(worst_dim);
 
-        // Refine the worst dimension
-        auto refine_grid = [this](std::vector<double>& grid) {
-            size_t new_size = std::min(
+        // Refine the worst dimension, focusing on problematic bins
+        // Bins map to normalized [0,1] positions: bin i covers [i/N_BINS, (i+1)/N_BINS)
+        auto refine_grid_targeted = [this, &problematic](std::vector<double>& grid,
+                                                         double lo, double hi) {
+            size_t max_new_points = std::min(
                 static_cast<size_t>(grid.size() * params_.refinement_factor),
                 params_.max_points_per_dim
-            );
-            if (new_size > grid.size()) {
-                // Insert midpoints to increase density
-                std::vector<double> new_grid;
-                new_grid.reserve(new_size);
-                for (size_t i = 0; i < grid.size() - 1; ++i) {
-                    new_grid.push_back(grid[i]);
-                    if (new_grid.size() < new_size) {
-                        new_grid.push_back((grid[i] + grid[i+1]) / 2.0);
+            ) - grid.size();
+
+            if (max_new_points == 0) return;
+
+            // Build set of intervals to refine based on problematic bins
+            std::vector<std::pair<double, double>> refine_intervals;
+            if (problematic.empty()) {
+                // No concentrated errors - uniform refinement
+                refine_intervals.push_back({lo, hi});
+            } else {
+                // Only refine within problematic bins
+                constexpr double N_BINS = static_cast<double>(ErrorBins::N_BINS);
+                for (size_t bin : problematic) {
+                    double bin_lo = lo + (hi - lo) * bin / N_BINS;
+                    double bin_hi = lo + (hi - lo) * (bin + 1) / N_BINS;
+                    refine_intervals.push_back({bin_lo, bin_hi});
+                }
+            }
+
+            // Insert midpoints only in intervals that need refinement
+            std::vector<double> new_grid = grid;
+            size_t points_added = 0;
+
+            for (size_t i = 0; i + 1 < grid.size() && points_added < max_new_points; ++i) {
+                double midpoint = (grid[i] + grid[i + 1]) / 2.0;
+
+                // Check if midpoint falls in a refine interval
+                bool should_refine = false;
+                for (const auto& [int_lo, int_hi] : refine_intervals) {
+                    if (midpoint >= int_lo && midpoint <= int_hi) {
+                        should_refine = true;
+                        break;
                     }
                 }
-                new_grid.push_back(grid.back());
-                std::sort(new_grid.begin(), new_grid.end());
-                new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
-                              new_grid.end());
-                grid = std::move(new_grid);
+
+                if (should_refine) {
+                    new_grid.push_back(midpoint);
+                    points_added++;
+                }
             }
+
+            std::sort(new_grid.begin(), new_grid.end());
+            new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
+                          new_grid.end());
+            grid = std::move(new_grid);
         };
 
         switch (worst_dim) {
-            case 0: refine_grid(moneyness_grid); break;
-            case 1: refine_grid(maturity_grid); break;
-            case 2: refine_grid(vol_grid); break;
-            case 3: refine_grid(rate_grid); break;
+            case 0: refine_grid_targeted(moneyness_grid, min_moneyness, max_moneyness); break;
+            case 1: refine_grid_targeted(maturity_grid, min_tau, max_tau); break;
+            case 2: refine_grid_targeted(vol_grid, min_vol, max_vol); break;
+            case 3: refine_grid_targeted(rate_grid, min_rate, max_rate); break;
         }
 
         stats.refined_dim = static_cast<int>(worst_dim);
