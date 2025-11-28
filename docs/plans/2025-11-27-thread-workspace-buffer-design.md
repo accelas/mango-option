@@ -2,7 +2,11 @@
 
 ## Overview
 
-Introduce `ThreadWorkspaceBuffer` as a reusable per-thread raw byte buffer for parallel algorithms, and add `BSplineCollocationWorkspace<T>` for zero-allocation B-spline fitting.
+Introduce `ThreadWorkspaceBuffer` as a reusable per-thread raw byte buffer for parallel algorithms, with two primary consumers:
+
+1. **BSplineCollocationWorkspace<T>** (Phase 1): Zero-allocation B-spline fitting, reducing 24,000 allocations to N (thread count) for 4D price table construction.
+
+2. **AmericanPDEWorkspace** (Phase 2-3): Unified byte-buffer interface for American option batch pricing, replacing ad-hoc PMR patterns with consistent workspace semantics.
 
 ## Problem Statement
 
@@ -32,6 +36,10 @@ For a 4D price table with dimensions (20, 10, 20, 10):
 - Axis 3: 4,000 fits × 2 allocations = 8,000 allocations
 - Axis 2: 2,000 fits × 2 allocations = 4,000 allocations
 - Total: ~24,000 allocations during B-spline fitting
+
+For American batch pricing:
+- Per-thread PMR pools with redundant setup
+- Pattern inconsistent with B-spline workspace approach
 
 ## Design
 
@@ -379,6 +387,185 @@ auto result = solver.fit_with_workspace(values, ws.value(), config);
 2. Adequate for moderate parallelism where workspace overhead is acceptable
 3. Existing callers shouldn't be forced to migrate
 
+### 3b. AmericanPDEWorkspace (Phase 2)
+
+Byte-buffer interface for PDE solver workspace, paralleling BSplineCollocationWorkspace.
+
+The existing `PDEWorkspace` takes `std::span<double>`, requiring callers to manage typed allocation.
+`AmericanPDEWorkspace` adds `from_bytes()` to accept raw byte buffers from `ThreadWorkspaceBuffer`.
+
+```cpp
+// src/pde/core/american_pde_workspace.hpp
+
+#pragma once
+
+#include "src/pde/core/pde_workspace.hpp"
+#include <span>
+#include <expected>
+#include <string>
+#include <cstddef>
+
+namespace mango {
+
+/// Workspace for American option PDE solver (byte-buffer variant)
+///
+/// Mirrors PDEWorkspace but accepts std::byte buffer instead of double buffer.
+/// Uses start_array_lifetime to properly start object lifetimes.
+///
+/// Arrays (all doubles, SIMD-padded to 8-element boundaries):
+/// - dx (n-1): Grid spacing
+/// - u_stage (n): TR-BDF2 stage buffer
+/// - rhs (n): Right-hand side vector
+/// - lu (n): Spatial operator output
+/// - psi (n): Obstacle constraint (exercise boundary)
+/// - jacobian_diag (n): Jacobian main diagonal
+/// - jacobian_upper (n-1): Jacobian upper diagonal
+/// - jacobian_lower (n-1): Jacobian lower diagonal
+/// - residual (n): Newton residual
+/// - delta_u (n): Newton correction
+/// - newton_u_old (n): Previous Newton iterate
+/// - u_next (n): Next solution buffer
+/// - reserved1-3 (3 × n): Future expansion
+/// - tridiag_workspace (2n): Thomas solver workspace
+///
+/// Total: 12n + 3(n-1) + 2n = 17n - 3 elements (padded)
+///
+struct AmericanPDEWorkspace {
+    static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
+    static constexpr size_t SIMD_WIDTH = 8;
+
+    static constexpr size_t pad_to_simd(size_t n) {
+        return ((n + SIMD_WIDTH - 1) / SIMD_WIDTH) * SIMD_WIDTH;
+    }
+
+    static constexpr size_t align_up(size_t offset, size_t alignment) {
+        return (offset + alignment - 1) & ~(alignment - 1);
+    }
+
+    /// Calculate required buffer size in BYTES
+    static size_t required_bytes(size_t n) {
+        size_t n_padded = pad_to_simd(n);
+        size_t n_minus_1_padded = pad_to_simd(n - 1);
+
+        // 12 arrays @ n (padded) + 3 arrays @ (n-1) (padded) + tridiag @ 2n (padded)
+        size_t total_doubles = 12 * n_padded + 3 * n_minus_1_padded + pad_to_simd(2 * n);
+
+        // Convert to bytes with alignment padding
+        size_t bytes = total_doubles * sizeof(double);
+        return align_up(bytes, ALIGNMENT);
+    }
+
+    /// Create workspace from external BYTE buffer
+    static std::expected<AmericanPDEWorkspace, std::string>
+    from_bytes(std::span<std::byte> buffer, size_t n) {
+        if (n < 2) {
+            return std::unexpected("Grid size must be at least 2");
+        }
+
+        size_t required = required_bytes(n);
+        if (buffer.size() < required) {
+            return std::unexpected(std::format(
+                "Buffer too small for AmericanPDEWorkspace: {} < {} required for n={}",
+                buffer.size(), required, n));
+        }
+
+        // Start lifetime of double array over entire buffer
+        size_t n_doubles = buffer.size() / sizeof(double);
+        double* typed = start_array_lifetime<double>(buffer.data(), n_doubles);
+
+        // Delegate to existing PDEWorkspace::from_buffer
+        std::span<double> double_span(typed, n_doubles);
+        auto ws_result = PDEWorkspace::from_buffer(double_span, n);
+
+        if (!ws_result.has_value()) {
+            return std::unexpected(ws_result.error());
+        }
+
+        AmericanPDEWorkspace aws;
+        aws.inner_ = ws_result.value();
+        return aws;
+    }
+
+    // Delegate all accessors to inner PDEWorkspace
+    std::span<double> dx() { return inner_.dx(); }
+    std::span<double> u_stage() { return inner_.u_stage(); }
+    std::span<double> rhs() { return inner_.rhs(); }
+    std::span<double> lu() { return inner_.lu(); }
+    std::span<double> psi() { return inner_.psi(); }
+    std::span<double> jacobian_diag() { return inner_.jacobian_diag(); }
+    std::span<double> jacobian_upper() { return inner_.jacobian_upper(); }
+    std::span<double> jacobian_lower() { return inner_.jacobian_lower(); }
+    std::span<double> residual() { return inner_.residual(); }
+    std::span<double> delta_u() { return inner_.delta_u(); }
+    std::span<double> newton_u_old() { return inner_.newton_u_old(); }
+    std::span<double> u_next() { return inner_.u_next(); }
+    std::span<double> tridiag_workspace() { return inner_.tridiag_workspace(); }
+
+    TridiagonalMatrixView jacobian() { return inner_.jacobian(); }
+    size_t size() const { return inner_.size(); }
+
+private:
+    PDEWorkspace inner_;
+};
+
+} // namespace mango
+```
+
+**Memory layout:**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ AmericanPDEWorkspace byte buffer (n=101, typical grid)              │
+├─────────────────────────────────────────────────────────────────────┤
+│ dx[104]        │ 104 × 8 = 832 bytes (100 used, padded to 104)      │
+│ u_stage[104]   │ 104 × 8 = 832 bytes                                │
+│ rhs[104]       │ 104 × 8 = 832 bytes                                │
+│ lu[104]        │ 104 × 8 = 832 bytes                                │
+│ psi[104]       │ 104 × 8 = 832 bytes                                │
+│ jacobian_diag  │ 104 × 8 = 832 bytes                                │
+│ jacobian_upper │ 104 × 8 = 832 bytes (100 used)                     │
+│ jacobian_lower │ 104 × 8 = 832 bytes (100 used)                     │
+│ residual[104]  │ 104 × 8 = 832 bytes                                │
+│ delta_u[104]   │ 104 × 8 = 832 bytes                                │
+│ newton_u_old   │ 104 × 8 = 832 bytes                                │
+│ u_next[104]    │ 104 × 8 = 832 bytes                                │
+│ reserved1-3    │ 3 × 832 = 2496 bytes                               │
+│ tridiag_ws[208]│ 208 × 8 = 1664 bytes                               │
+├─────────────────────────────────────────────────────────────────────┤
+│ Total: ~15 KB per thread (for n=101)                                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Usage in american_option_batch.cpp (Phase 3):**
+
+```cpp
+// Before (current PMR pattern):
+MANGO_PRAGMA_PARALLEL
+{
+    std::pmr::monotonic_buffer_resource thread_pool(buffer_size);
+    std::pmr::vector<double> thread_buffer(&thread_pool);
+    thread_buffer.resize(PDEWorkspace::required_size(n_space));
+
+    auto ws = PDEWorkspace::from_buffer(thread_buffer, n_space).value();
+    // ...
+}
+
+// After (ThreadWorkspaceBuffer pattern):
+MANGO_PRAGMA_PARALLEL
+{
+    ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(n_space));
+
+    // Create workspace ONCE per thread
+    auto ws = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n_space).value();
+
+    MANGO_PRAGMA_FOR_STATIC
+    for (size_t i = 0; i < batch_size; ++i) {
+        // Reuse ws - solver overwrites arrays each iteration
+        solver.solve_with_workspace(options[i], ws);
+    }
+}
+```
+
 ### 4. Modified BSplineNDSeparable
 
 Use ThreadWorkspaceBuffer and parallelize slice iteration.
@@ -401,8 +588,10 @@ template<size_t Axis>
     T global_max_condition = T{0};
     size_t global_failed = 0;
 
-    // Track workspace creation errors (atomic for thread safety)
+    // Track workspace creation errors (atomic flag + first error message)
     std::atomic<bool> workspace_error{false};
+    std::string first_workspace_error;  // Protected by critical section
+    std::mutex error_mutex;
 
     MANGO_PRAGMA_PARALLEL
     {
@@ -423,6 +612,13 @@ template<size_t Axis>
         // The workspace's spans point into buffer.bytes() which is stable.
         auto ws_result = BSplineCollocationWorkspace<T>::from_bytes(buffer.bytes(), n_axis);
         if (!ws_result.has_value()) {
+            // Capture first error for debugging (thread-safe)
+            {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (first_workspace_error.empty()) {
+                    first_workspace_error = ws_result.error();
+                }
+            }
             workspace_error.store(true, std::memory_order_relaxed);
             local_ws_error = true;
         }
@@ -475,12 +671,42 @@ template<size_t Axis>
 
     // Return error if any workspace creation failed
     if (workspace_error.load()) {
-        return std::unexpected(InterpolationError::AllocationFailed);
+        // Include actual error message for debugging buffer-size issues
+        return std::unexpected(InterpolationError{
+            InterpolationErrorCode::WorkspaceCreationFailed,
+            first_workspace_error  // e.g., "Buffer too small: 1000 < 2048 required"
+        });
     }
 
     return {};  // Success
 }
 ```
+
+**Error handling note:**
+
+The `InterpolationError` type needs extension to carry workspace creation details:
+
+```cpp
+// Extend InterpolationErrorCode enum
+enum class InterpolationErrorCode {
+    // ... existing codes ...
+    WorkspaceCreationFailed,  // NEW: from_bytes() failed
+};
+
+// InterpolationError with optional message
+struct InterpolationError {
+    InterpolationErrorCode code;
+    std::string message;  // Empty for most errors, populated for workspace failures
+
+    // Convenience constructors
+    InterpolationError(InterpolationErrorCode c) : code(c) {}
+    InterpolationError(InterpolationErrorCode c, std::string msg)
+        : code(c), message(std::move(msg)) {}
+};
+```
+
+This preserves debuggability for buffer-sizing bugs (e.g., "Buffer too small: 1000 < 2048 required for n=20")
+while maintaining backward compatibility with existing error handling code.
 
 ## Dispatch Mechanism
 
