@@ -1,5 +1,5 @@
 // Auto-generated real market data for benchmarks
-// Generated: 2025-11-27T12:07:03.758086
+// Generated: 2025-11-27T21:02:07.970683
 // Symbol: SPY
 // DO NOT EDIT - regenerate with: python scripts/download_benchmark_data.py SPY
 
@@ -90,7 +90,7 @@ constexpr std::array<RealOptionData, 64> REAL_PUTS = {{
     {688.00, 0.038356, 10.9350, false},
     {694.00, 0.038356, 14.9700, false},
     {700.00, 0.038356, 19.9650, false}
-}}};
+}};
 
 // Sample ATM put for single option benchmark
 constexpr RealOptionData ATM_PUT = {675.00, 0.090411, 9.5400, false};
@@ -113,6 +113,6 @@ constexpr std::array<RealOptionData, 16> REAL_CALLS = {{
     {660.00, 0.027397, 22.1800, true},
     {682.00, 0.027397, 4.8700, true},
     {720.00, 0.027397, 0.0350, true}
-}}};
+}};
 
-}}  // namespace mango::benchmark_data
+}  // namespace mango::benchmark_data

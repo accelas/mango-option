@@ -185,7 +185,7 @@ constexpr std::array<RealOptionData, {len(selected_puts)}> REAL_PUTS = {{{{
         comma = "," if i < len(selected_puts) - 1 else ""
         header += f'    {{{opt["strike"]:.2f}, {opt["maturity"]:.6f}, {opt["market_price"]:.4f}, false}}{comma}\n'
 
-    header += '''}}};
+    header += '''}};
 
 // Sample ATM put for single option benchmark
 '''
@@ -219,9 +219,9 @@ constexpr std::array<RealOptionData, {len(selected_calls)}> REAL_CALLS = {{{{
         comma = "," if i < len(selected_calls) - 1 else ""
         header += f'    {{{opt["strike"]:.2f}, {opt["maturity"]:.6f}, {opt["market_price"]:.4f}, true}}{comma}\n'
 
-    header += '''}}};
+    header += '''}};
 
-}}  // namespace mango::benchmark_data
+}  // namespace mango::benchmark_data
 '''
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

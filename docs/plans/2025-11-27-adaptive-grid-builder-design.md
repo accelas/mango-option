@@ -34,8 +34,8 @@ A goal-seeking controller that:
 | σ/r refinement | Incremental slice computation | Reuses existing PDE solves when only σ/r grid changes |
 | m/τ refinement | Full rebuild required | Current builder doesn't store time lattice; future optimization possible |
 | API | Separate `AdaptiveGridBuilder` class | Keeps `PriceTableBuilder` simple, enables rich diagnostics |
-| Builder integration | Use exposed `_for_testing` methods | Avoids reimplementing pipeline; promotes to internal API |
-| Error metric | Price-based with vega scaling | Avoids expensive IV root-solve; equivalent accuracy |
+| Builder integration | Reuse axes/extraction helpers, manage PDE solves ourselves | `AdaptiveGridBuilder` enumerates σ/r pairs via builder helpers but runs subset solves directly so cache is effective |
+| Error metric | Hybrid IV/price metric with vega floor | Uses vega-scaled IV approximation when safe, falls back to price bounds when vega is tiny |
 
 ## Critical Design Notes
 
@@ -65,36 +65,44 @@ But the builder never silently skips verification.
 
 ### Integration with PriceTableBuilder
 
-`PriceTableBuilder` exposes internal methods via `*_for_testing()` suffixes:
-- `make_batch_for_testing(axes)` → `vector<AmericanOptionParams>`
-- `solve_batch_for_testing(batch, axes)` → `BatchAmericanOptionResult`
-- `extract_tensor_for_testing(batch_result, axes)` → `ExtractionResult<N>`
-- `fit_coeffs_for_testing(tensor, axes)` → `vector<double>` coefficients
+`PriceTableBuilder` exposes internal helpers via `*_for_testing()` suffixes. We promote these to an `_internal` API and use them as follows:
 
-`AdaptiveGridBuilder` will use these directly, bypassing the monolithic `build()`:
+- `make_batch_internal(axes)` – enumerate all `(σ, r)` combinations in deterministic order.
+- `extract_tensor_internal(merged_batch, axes)` – interpolate cached PDE slices onto the requested axes.
+- `fit_coeffs_internal(tensor, axes)` – run the B-spline fit.
 
-```cpp
-// Pseudocode for incremental build
-BatchAmericanOptionResult merged_batch = merge(cached_results, new_solve_results);
-auto extraction = builder.extract_tensor_for_testing(merged_batch, current_axes);
-auto coeffs = builder.fit_coeffs_for_testing(extraction.tensor, current_axes);
-auto surface = PriceTableSurface<4>::build(current_axes, coeffs, metadata);
-```
+Key point: we **do not** call `solve_batch_for_testing()`, because that always solves the entire batch and would defeat caching. Instead, `AdaptiveGridBuilder` maps each `(σ, r)` pair to the corresponding `AmericanOptionParams` using `make_batch_internal()`, runs `BatchAmericanOptionSolver` only on the subset of pairs that are missing from the cache, and constructs a synthetic `BatchAmericanOptionResult` by ordering cached + new `AmericanOptionResult`s to match the axes layout before feeding them into `extract_tensor_internal()`.
 
-This requires promoting `_for_testing` methods to a stable internal API (rename to `_internal` or document as supported for advanced use).
+### Error Metric: Hybrid IV / Price with Vega Floor
 
-### Error Metric: Price-Based with Vega Scaling
-
-Computing IV error directly requires an expensive root-solve for each sample point. Instead:
+We still report errors in IV basis points, but avoid dividing by near-zero vegas:
 
 ```cpp
-// Price error → IV error conversion
 double price_error = std::abs(interpolated_price - reference_price);
-double approx_vega = black_scholes_vega(m, τ, σ, r);  // O(1) computation
-double iv_error_approx = price_error / approx_vega;
+double bs_vega = black_scholes_vega(spot, strike, m, τ, σ, r);
+constexpr double kVegaFloor = 1e-4;  // price per 1% IV
+
+double iv_error;
+if (bs_vega >= kVegaFloor) {
+    iv_error = price_error / bs_vega;           // ΔIV ≈ ΔP / vega
+} else {
+    // Vega too small: fall back to price tolerance derived from target IV
+    double price_tol = target_iv_error * kVegaFloor;
+    iv_error = price_error / kVegaFloor;        // reports worst-case IV deviation
+    if (price_error <= price_tol) continue;     // treat as within tolerance
+}
 ```
 
-This is accurate because `dP/dσ = vega`, so `ΔIV ≈ ΔP / vega` for small errors. Black-Scholes vega is a good approximation even for American options (early exercise has minimal impact on vega).
+For low-vega regions (deep ITM/OTM, very short τ) IV itself is ill-defined; this fallback caps noise while still tracking whether price accuracy is within the implied tolerance. We additionally log raw price errors so future enhancements can swap in a true IV root-solve if needed.
+
+### Mapping Validation Samples to Option Params
+
+Validation points are sampled as `(m, τ, σ, r)` tuples. To run the fresh FD solve we convert them into `AmericanOptionParams` consistent with the table normalization:
+
+- Use chain spot `S` as the anchor.
+- Strike = `S / m` because table moneyness is defined as `spot / strike` (see `from_strikes`).
+- Maturity = `τ`, volatility = `σ`, rate = `r`, option type/dividend = chain defaults.
+- The option price returned by the FD solver is therefore directly comparable to the surface value at `(m, τ, σ, r)`.
 
 ### Cache Stores Raw PDE Data
 
@@ -167,15 +175,15 @@ AdaptiveGridBuilder::build(chain, grid_spec, n_time, type):
 
 2. MAIN LOOP (iteration = 0..max_iterations)
    a. BUILD/UPDATE TABLE
-      - Create PriceTableBuilder with current config
-      - Compute batch params: builder.make_batch_for_testing(axes)
-      - Identify (σ, r) pairs not in result_cache
-      - If m or τ grid changed: clear cache (results tied to old maturity)
-      - Solve only new pairs via BatchAmericanOptionSolver
-      - Merge cached + new results into BatchAmericanOptionResult
-      - Extract tensor: builder.extract_tensor_for_testing(merged, axes)
-      - Fit coeffs: builder.fit_coeffs_for_testing(tensor, axes)
-      - Build surface: PriceTableSurface<4>::build(axes, coeffs, metadata)
+      - Create PriceTableBuilder with current config (used for axes/extraction/fitting)
+      - Enumerate `(σ, r)` combos via `make_batch_internal(axes)` and map each to an index
+      - Detect which combos are missing in the cache (or invalidated)
+      - If m or τ grid changed: clear entire cache (results tied to old maturity)
+      - Build a vector of `AmericanOptionParams` for missing combos and run `BatchAmericanOptionSolver` on that subset only (solver configured identically to builder)
+      - Merge cached + new `AmericanOptionResult`s into a `BatchAmericanOptionResult` ordered exactly like the full batch
+      - Extract tensor: `builder.extract_tensor_internal(merged, axes)`
+      - Fit coeffs: `builder.fit_coeffs_internal(tensor, axes)`
+      - Build surface: `PriceTableSurface<4>::build(axes, coeffs, metadata)`
 
    b. GENERATE VALIDATION SAMPLE
       - Latin hypercube over [m, τ, σ, r] domain (validation_samples points)
@@ -183,10 +191,10 @@ AdaptiveGridBuilder::build(chain, grid_spec, n_time, type):
 
    c. VALIDATE AGAINST FRESH FD SOLVES
       - For each sample point (m, τ, σ, r):
-          interpolated_price = current_surface.value(m, τ, σ, r)
-          reference_price = solve_american_fd(m, τ, σ, r)  // Fresh solve
-          vega = black_scholes_vega(m, τ, σ, r)
-          iv_error = |interpolated_price - reference_price| / vega
+          * Convert to option params: `spot = chain.spot`, `strike = spot / m`
+          * interpolated_price = current_surface.value(...)
+          * reference_price = solve_american_fd(spot, strike, τ, σ, r)
+          * iv_error = hybrid_metric(interpolated_price, reference_price, spot, strike, τ, σ, r)
       - Record max_error, avg_error
 
    d. CHECK CONVERGENCE
