@@ -1,40 +1,39 @@
 #pragma once
 
-#include "src/support/memory/aligned_arena.hpp"
+#include "src/support/aligned_allocator.hpp"
 #include "src/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <memory>
 #include <expected>
 #include <string>
 #include <array>
+#include <vector>
 
 namespace mango {
 
-/// N-dimensional tensor with arena ownership and mdspan view
+/// N-dimensional tensor with aligned storage and mdspan view
 ///
-/// Wraps aligned memory allocation with type-safe mdspan access.
-/// The arena keeps memory alive via shared_ptr ownership.
+/// Uses AlignedVector (64-byte aligned) for SIMD-friendly memory layout.
+/// The tensor owns its storage via shared_ptr for safe sharing.
 ///
 /// @tparam N Number of dimensions
 template <size_t N>
 struct PriceTensor {
-    std::shared_ptr<memory::AlignedArena> arena;  ///< Owns the memory
+    std::shared_ptr<AlignedVector<double>> storage;  ///< Owns the memory
     std::experimental::mdspan<double, std::experimental::dextents<size_t, N>> view;  ///< Type-safe view
 
-    /// Create tensor with given shape, allocating from arena
+    /// Create tensor with given shape
     ///
     /// Allocated memory is uninitialized. Caller must initialize all elements
-    /// before use. The tensor owns a shared reference to the arena, keeping
+    /// before use. The tensor owns a shared reference to the storage, keeping
     /// memory alive until all references are destroyed.
     ///
     /// @param shape Number of elements per dimension
-    /// @param arena_ptr Shared pointer to memory arena
     /// @return PriceTensor on success, or error message on failure
     ///         Error conditions:
-    ///         - Insufficient arena capacity for requested size
-    ///         - Arena allocation failure (returns nullptr)
+    ///         - Shape overflow (product of dimensions exceeds SIZE_MAX)
     [[nodiscard]] static std::expected<PriceTensor, std::string>
-    create(std::array<size_t, N> shape, std::shared_ptr<memory::AlignedArena> arena_ptr) {
+    create(std::array<size_t, N> shape) {
         // Calculate total elements with overflow check
         auto total_result = safe_product(shape);
         if (!total_result.has_value()) {
@@ -42,16 +41,12 @@ struct PriceTensor {
         }
         size_t total = total_result.value();
 
-        // Allocate from arena
-        double* data = arena_ptr->allocate(total);
-        if (!data) {
-            return std::unexpected("Insufficient arena memory for tensor of size " +
-                                 std::to_string(total * sizeof(double)) + " bytes");
-        }
+        // Allocate aligned storage
+        auto storage_ptr = std::make_shared<AlignedVector<double>>(total);
 
         // Create mdspan view
         PriceTensor tensor;
-        tensor.arena = arena_ptr;
+        tensor.storage = storage_ptr;
 
         // Construct mdspan with dextents
         std::experimental::dextents<size_t, N> extents;
@@ -69,7 +64,8 @@ struct PriceTensor {
             static_assert(N <= 5, "PriceTensor supports up to 5 dimensions");
         }
 
-        tensor.view = std::experimental::mdspan<double, std::experimental::dextents<size_t, N>>(data, extents);
+        tensor.view = std::experimental::mdspan<double, std::experimental::dextents<size_t, N>>(
+            storage_ptr->data(), extents);
 
         return tensor;
     }

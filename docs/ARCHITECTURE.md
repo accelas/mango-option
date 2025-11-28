@@ -269,7 +269,8 @@ auto result = solver.solve();
 - Zero allocation during solve (all buffers pre-allocated)
 - Memory reuse across batches
 - Thread-safe via `synchronized_pool_resource`
-- Custom arenas for advanced use cases (`SolverMemoryArena`)
+
+**Note:** For parallel workloads, prefer `ThreadWorkspaceBuffer` which provides 64-byte alignment and C++23 lifetime semantics. See [Memory Management](#memory-management).
 
 ---
 
@@ -314,26 +315,57 @@ create(const GridSpec<T>& spec, std::pmr::memory_resource* resource);
 std::span<double> u_current() { return {u_current_.data(), n_}; }
 ```
 
-### SolverMemoryArena
+### ThreadWorkspaceBuffer
 
-**Purpose:** Arena allocation for batch operations
+**Purpose:** Per-thread byte buffer for zero-allocation parallel workloads
 
 ```cpp
-// Create arena once for batch
-auto arena = SolverMemoryArena::create(1024 * 1024).value();
+MANGO_PRAGMA_PARALLEL
+{
+    // Allocate once per thread (64-byte aligned for AVX-512)
+    ThreadWorkspaceBuffer buffer(BSplineCollocationWorkspace<double>::required_bytes(n));
 
-for (const auto& problem : batch) {
-    arena->increment_active();
-    auto workspace = PDEWorkspace::create(spec, arena->resource()).value();
-    auto result = solve(workspace);
-    arena->decrement_active();
+    // Create workspace once per thread (starts object lifetimes)
+    auto ws = BSplineCollocationWorkspace<double>::from_bytes(buffer.bytes(), n).value();
 
-    // Zero-cost reset when active count reaches 0
-    arena->try_reset();
+    MANGO_PRAGMA_FOR_STATIC
+    for (size_t i = 0; i < count; ++i) {
+        // Reuse workspace - solver overwrites arrays each iteration
+        solver.fit_with_workspace(values[i], ws, config);
+    }
 }
 ```
 
-**Reference Counting:** Tracks active workspaces to prevent premature reset
+**Key Features:**
+- 64-byte aligned storage via `std::aligned_alloc`
+- PMR fallback (`unsynchronized_pool_resource`) if buffer exhausted
+- C++23 `std::start_lifetime_as_array` for strict-aliasing compliance
+- Reduces B-spline fitting allocations from 24,000 to N (thread count)
+
+**Workspace Types:**
+- `BSplineCollocationWorkspace<T>` - B-spline fitting (band matrix, LU workspace, pivots)
+- `AmericanPDEWorkspace` - PDE solver (byte-buffer wrapper around PDEWorkspace)
+
+### AlignedVector for Persistent Output
+
+**Purpose:** 64-byte aligned `std::vector` for SIMD-optimized persistent storage
+
+```cpp
+// Used by PriceTensor and Grid for output buffers
+template<typename T, size_t Alignment = 64>
+using AlignedVector = std::vector<T, AlignedAllocator<T, Alignment>>;
+```
+
+**Usage in PriceTensor:**
+```cpp
+auto tensor = PriceTensor<4>::create({20, 30, 20, 10});  // ~480K doubles
+// Storage is 64-byte aligned for AVX-512 loads/stores
+```
+
+**Why Not PMR:**
+- Persistent output buffers outlive solver lifetime
+- Need guaranteed 64-byte alignment (PMR only guarantees `alignof(max_align_t)` = 16 bytes)
+- Shared ownership via `std::shared_ptr<AlignedVector<double>>`
 
 ---
 
@@ -440,11 +472,13 @@ public:
 
 ### Memory Usage
 
-| Component | Size (n=141) | Notes |
+| Component | Size (n=101) | Notes |
 |---|---|---|
-| PDEWorkspace | ~13n doubles (~14 KB) | Includes Newton arrays |
-| Grid + Solution | ~3n doubles (~3 KB) | u_current, u_prev, x |
-| B-Spline 4D | ~2.4 MB | 50×30×20×10 coefficients |
+| PDEWorkspace | ~13n doubles (~10 KB) | Includes Newton arrays |
+| Grid + Solution | ~3n doubles (~2.4 KB) | u_current, u_prev, x |
+| BSplineCollocationWorkspace | ~21n doubles (~17 KB) | Band matrix, LU, pivots |
+| PriceTensor 4D | ~3.8 MB | 50×30×20×10 doubles (AlignedVector) |
+| ThreadWorkspaceBuffer | Per-thread | 64-byte aligned byte buffer |
 
 ---
 
@@ -509,9 +543,20 @@ public:
 - Workspace allocation once, reused across solves
 - Thread-safe via `synchronized_pool_resource`
 - Zero allocation during solve (performance critical)
-- Custom arenas for advanced batching
 
 **Tradeoff:** Caller must manage memory resource lifetime
+
+### Why ThreadWorkspaceBuffer for Parallel Workloads?
+
+**Problem:** PMR only guarantees 16-byte alignment; B-spline fitting needs 24,000+ allocations
+
+**Benefits:**
+- 64-byte alignment (AVX-512 safe) via `std::aligned_alloc`
+- C++23 `std::start_lifetime_as_array` for strict-aliasing compliance
+- Reduces allocations from O(work items) to O(thread count)
+- PMR fallback if buffer exhausted
+
+**Tradeoff:** Requires C++23 for proper lifetime semantics
 
 ### Why OpenMP SIMD Over Explicit SIMD?
 

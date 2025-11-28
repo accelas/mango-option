@@ -28,7 +28,7 @@ Introduce `ThreadWorkspaceBuffer` as a reusable per-thread raw byte buffer for p
    }
    ```
 
-3. **Two arena classes with overlapping purpose**: `AlignedArena` and the ad-hoc PMR pattern both provide bump-pointer allocation.
+3. **Duplicated workspace patterns**: The ad-hoc PMR pattern provides bump-pointer allocation but is inconsistent across consumers.
 
 ### Impact
 
@@ -1090,7 +1090,8 @@ Lower-priority migrations for completeness:
 
 1. **IVSolverFDM** (optional): Replace thread_local cache with ThreadWorkspaceBuffer
 2. **PriceTableBuilder/Extraction** (optional): Add CubicSpline workspace API
-3. **AlignedArena**: Keep for PriceTensor (SIMD alignment at base address may be needed)
+
+Note: AlignedArena was removed and replaced with AlignedVector (std::vector with aligned allocator) for persistent output buffers like PriceTensor and Grid's solution buffer.
 
 ## Performance Impact
 

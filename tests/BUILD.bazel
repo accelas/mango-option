@@ -71,11 +71,11 @@ cc_test(
 )
 
 cc_test(
-    name = "aligned_arena_test",
+    name = "aligned_allocator_test",
     size = "small",
-    srcs = ["aligned_arena_test.cc"],
+    srcs = ["aligned_allocator_test.cc"],
     deps = [
-        "//src/support:aligned_arena",
+        "//src/support:aligned_allocator",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -144,7 +144,6 @@ cc_test(
     srcs = ["price_tensor_test.cc"],
     deps = [
         "//src/option/table:price_tensor",
-        "//src/support:aligned_arena",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
@@ -167,7 +166,6 @@ cc_test(
     srcs = ["price_table_surface_test.cc"],
     deps = [
         "//src/option/table:price_table_surface",
-        "//src/support:aligned_arena",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

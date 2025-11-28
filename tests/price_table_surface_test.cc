@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_surface.hpp"
-#include "src/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace {

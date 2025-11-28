@@ -653,34 +653,54 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 
 ## Advanced Topics
 
-### PMR Arena for Batch Operations
+### ThreadWorkspaceBuffer for Parallel Operations
 
-**Reuse memory across multiple solves:**
+**Zero-allocation parallel workloads with 64-byte alignment:**
 
 ```cpp
-#include "src/support/memory/solver_memory_arena.hpp"
+#include "src/support/thread_workspace.hpp"
+#include "src/math/bspline_collocation_workspace.hpp"
 
-// Create arena once
-auto arena = mango::memory::SolverMemoryArena::create(1024 * 1024).value();
+// Example: Parallel B-spline fitting with zero allocations per iteration
+const size_t n_axis = 100;
+const size_t n_slices = 1000;
 
-for (const auto& params : batch_problems) {
-    arena->increment_active();
+MANGO_PRAGMA_PARALLEL
+{
+    // Allocate once per thread (64-byte aligned for AVX-512)
+    mango::ThreadWorkspaceBuffer buffer(
+        mango::BSplineCollocationWorkspace<double>::required_bytes(n_axis));
 
-    // Allocate workspace from arena
-    auto workspace = mango::PDEWorkspace::create(grid_spec, arena->resource()).value();
+    // Create workspace once per thread
+    auto ws = mango::BSplineCollocationWorkspace<double>::from_bytes(
+        buffer.bytes(), n_axis).value();
 
-    mango::AmericanOptionSolver solver(params, workspace);
-    auto result = solver.solve();
+    MANGO_PRAGMA_FOR_STATIC
+    for (size_t i = 0; i < n_slices; ++i) {
+        // Reuse workspace - solver overwrites arrays each iteration
+        // Zero allocations in this hot path
+        solver.fit_with_workspace(values[i], ws, config);
+    }
+}
+```
 
-    // Process result
-    process(result);
+**For PDE solving in parallel:**
 
-    arena->decrement_active();
+```cpp
+#include "src/pde/core/american_pde_workspace.hpp"
 
-    // Zero-cost reset when active count reaches 0
-    auto reset_result = arena->try_reset();
-    if (!reset_result.has_value()) {
-        std::cerr << "Cannot reset: " << reset_result.error() << "\n";
+MANGO_PRAGMA_PARALLEL
+{
+    // Per-thread buffer for PDE workspace
+    mango::ThreadWorkspaceBuffer buffer(
+        mango::AmericanPDEWorkspace::required_bytes(n_space));
+
+    auto ws = mango::AmericanPDEWorkspace::from_bytes(
+        buffer.bytes(), n_space).value();
+
+    MANGO_PRAGMA_FOR_STATIC
+    for (size_t i = 0; i < batch_size; ++i) {
+        solver.solve_with_workspace(options[i], ws);
     }
 }
 ```

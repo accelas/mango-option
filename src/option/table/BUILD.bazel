@@ -21,7 +21,7 @@ cc_library(
     name = "price_tensor",
     hdrs = ["price_tensor.hpp"],
     deps = [
-        "//src/support:aligned_arena",
+        "//src/support:aligned_allocator",
         "//src/math:safe_math",
         "@mdspan//:mdspan",
     ],
@@ -81,7 +81,6 @@ cc_library(
         "//src/math:cubic_spline_solver",
         "//src/math:bspline_nd_separable",
         "//src/math:bspline_collocation_workspace",
-        "//src/support:aligned_arena",
         "//src/support:thread_workspace",
         "//src/support:ivcalc_trace_hdr",
         "//src/support:parallel",
