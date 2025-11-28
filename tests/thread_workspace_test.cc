@@ -30,17 +30,6 @@ TEST(ThreadWorkspaceBufferTest, ByteSpanStability) {
     EXPECT_EQ(span1.size(), span2.size());
 }
 
-TEST(ThreadWorkspaceBufferTest, PMRResourceAccessible) {
-    ThreadWorkspaceBuffer buffer(1024);
-
-    std::pmr::memory_resource& resource = buffer.resource();
-
-    // Should be able to allocate from the resource
-    void* p = resource.allocate(64, 8);
-    EXPECT_NE(p, nullptr);
-    resource.deallocate(p, 64, 8);
-}
-
 TEST(ThreadWorkspaceBufferTest, MoveSemantics) {
     ThreadWorkspaceBuffer buffer1(512);
     auto* original_data = buffer1.bytes().data();
@@ -48,21 +37,4 @@ TEST(ThreadWorkspaceBufferTest, MoveSemantics) {
     ThreadWorkspaceBuffer buffer2(std::move(buffer1));
 
     EXPECT_EQ(buffer2.bytes().data(), original_data);
-}
-
-TEST(ThreadWorkspaceBufferTest, FallbackAllocation) {
-    // Small buffer to trigger fallback
-    ThreadWorkspaceBuffer buffer(128);
-
-    std::pmr::memory_resource& resource = buffer.resource();
-
-    // Allocate beyond buffer capacity to trigger fallback to unsynchronized_pool
-    void* p1 = resource.allocate(100, 8);  // Fits in buffer
-    void* p2 = resource.allocate(100, 8);  // Should trigger fallback
-
-    EXPECT_NE(p1, nullptr);
-    EXPECT_NE(p2, nullptr);
-
-    // Note: Don't deallocate - monotonic_buffer_resource doesn't support it
-    // and we're testing that fallback works, not deallocation
 }

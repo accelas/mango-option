@@ -29,9 +29,9 @@ TEST(AmericanPDEWorkspaceTest, FromBytesSuccess) {
     auto& ws = result.value();
 
     EXPECT_EQ(ws.size(), n);
-    EXPECT_EQ(ws.dx().size(), n - 1);
-    EXPECT_EQ(ws.u_stage().size(), n);
-    EXPECT_EQ(ws.rhs().size(), n);
+    EXPECT_EQ(ws.workspace().dx().size(), n - 1);
+    EXPECT_EQ(ws.workspace().u_stage().size(), n);
+    EXPECT_EQ(ws.workspace().rhs().size(), n);
 }
 
 TEST(AmericanPDEWorkspaceTest, BufferTooSmall) {
@@ -53,103 +53,6 @@ TEST(AmericanPDEWorkspaceTest, GridSizeTooSmall) {
     EXPECT_NE(result.error().find("Grid size must be at least 2"), std::string::npos);
 }
 
-TEST(AmericanPDEWorkspaceTest, AccessorsWorkCorrectly) {
-    const size_t n = 50;
-    ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(n));
-
-    auto ws = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n).value();
-
-    // Write to spans
-    for (size_t i = 0; i < n; ++i) {
-        ws.u_stage()[i] = static_cast<double>(i);
-        ws.rhs()[i] = static_cast<double>(i * 2);
-    }
-
-    // Read back
-    for (size_t i = 0; i < n; ++i) {
-        EXPECT_DOUBLE_EQ(ws.u_stage()[i], static_cast<double>(i));
-        EXPECT_DOUBLE_EQ(ws.rhs()[i], static_cast<double>(i * 2));
-    }
-}
-
-TEST(AmericanPDEWorkspaceTest, AllAccessorsSizesCorrect) {
-    const size_t n = 75;
-    ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(n));
-
-    auto ws = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n).value();
-
-    // Arrays with size n
-    EXPECT_EQ(ws.u_stage().size(), n);
-    EXPECT_EQ(ws.rhs().size(), n);
-    EXPECT_EQ(ws.lu().size(), n);
-    EXPECT_EQ(ws.psi().size(), n);
-    EXPECT_EQ(ws.jacobian_diag().size(), n);
-    EXPECT_EQ(ws.residual().size(), n);
-    EXPECT_EQ(ws.delta_u().size(), n);
-    EXPECT_EQ(ws.newton_u_old().size(), n);
-    EXPECT_EQ(ws.u_next().size(), n);
-
-    // Arrays with size n-1
-    EXPECT_EQ(ws.dx().size(), n - 1);
-    EXPECT_EQ(ws.jacobian_upper().size(), n - 1);
-    EXPECT_EQ(ws.jacobian_lower().size(), n - 1);
-
-    // tridiag_workspace with size 2n
-    EXPECT_EQ(ws.tridiag_workspace().size(), 2 * n);
-}
-
-TEST(AmericanPDEWorkspaceTest, JacobianAccessorWorks) {
-    const size_t n = 50;
-    ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(n));
-
-    auto ws = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n).value();
-
-    // Get Jacobian view
-    auto J = ws.jacobian();
-
-    // Verify it references the correct spans
-    EXPECT_EQ(J.lower().size(), n - 1);
-    EXPECT_EQ(J.diag().size(), n);
-    EXPECT_EQ(J.upper().size(), n - 1);
-
-    // Write through Jacobian view
-    for (size_t i = 0; i < n; ++i) {
-        J.diag()[i] = static_cast<double>(i);
-    }
-    for (size_t i = 0; i < n - 1; ++i) {
-        J.lower()[i] = static_cast<double>(i + 100);
-        J.upper()[i] = static_cast<double>(i + 200);
-    }
-
-    // Read back through workspace accessors
-    for (size_t i = 0; i < n; ++i) {
-        EXPECT_DOUBLE_EQ(ws.jacobian_diag()[i], static_cast<double>(i));
-    }
-    for (size_t i = 0; i < n - 1; ++i) {
-        EXPECT_DOUBLE_EQ(ws.jacobian_lower()[i], static_cast<double>(i + 100));
-        EXPECT_DOUBLE_EQ(ws.jacobian_upper()[i], static_cast<double>(i + 200));
-    }
-}
-
-TEST(AmericanPDEWorkspaceTest, ConstAccessorsWork) {
-    const size_t n = 40;
-    ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(n));
-
-    auto ws = AmericanPDEWorkspace::from_bytes(buffer.bytes(), n).value();
-
-    // Write some data
-    for (size_t i = 0; i < n; ++i) {
-        ws.u_stage()[i] = static_cast<double>(i * 3);
-    }
-
-    // Read through const reference
-    const auto& const_ws = ws;
-    for (size_t i = 0; i < n; ++i) {
-        EXPECT_DOUBLE_EQ(const_ws.u_stage()[i], static_cast<double>(i * 3));
-    }
-    EXPECT_EQ(const_ws.size(), n);
-}
-
 TEST(AmericanPDEWorkspaceTest, WorkspaceAccessorReturnsInner) {
     const size_t n = 30;
     ThreadWorkspaceBuffer buffer(AmericanPDEWorkspace::required_bytes(n));
@@ -163,12 +66,12 @@ TEST(AmericanPDEWorkspaceTest, WorkspaceAccessorReturnsInner) {
     EXPECT_EQ(inner.size(), n);
     EXPECT_EQ(const_inner.size(), n);
 
-    // Modifications through inner should be visible through wrapper
+    // Write and read through inner workspace
     for (size_t i = 0; i < n; ++i) {
         inner.rhs()[i] = static_cast<double>(i * 5);
     }
     for (size_t i = 0; i < n; ++i) {
-        EXPECT_DOUBLE_EQ(ws.rhs()[i], static_cast<double>(i * 5));
+        EXPECT_DOUBLE_EQ(inner.rhs()[i], static_cast<double>(i * 5));
     }
 }
 
@@ -185,20 +88,20 @@ TEST(AmericanPDEWorkspaceTest, MultipleWorkspacesFromDifferentBuffers) {
     EXPECT_EQ(ws1.size(), n1);
     EXPECT_EQ(ws2.size(), n2);
 
-    // Write to both
+    // Write to both through inner workspace
     for (size_t i = 0; i < n1; ++i) {
-        ws1.u_stage()[i] = static_cast<double>(i);
+        ws1.workspace().u_stage()[i] = static_cast<double>(i);
     }
     for (size_t i = 0; i < n2; ++i) {
-        ws2.u_stage()[i] = static_cast<double>(i * 2);
+        ws2.workspace().u_stage()[i] = static_cast<double>(i * 2);
     }
 
     // Verify independent
     for (size_t i = 0; i < n1; ++i) {
-        EXPECT_DOUBLE_EQ(ws1.u_stage()[i], static_cast<double>(i));
+        EXPECT_DOUBLE_EQ(ws1.workspace().u_stage()[i], static_cast<double>(i));
     }
     for (size_t i = 0; i < n2; ++i) {
-        EXPECT_DOUBLE_EQ(ws2.u_stage()[i], static_cast<double>(i * 2));
+        EXPECT_DOUBLE_EQ(ws2.workspace().u_stage()[i], static_cast<double>(i * 2));
     }
 }
 
