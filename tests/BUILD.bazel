@@ -1197,6 +1197,7 @@ cc_test(
     srcs = ["adaptive_grid_builder_test.cc"],
     deps = [
         "//src/option/table:adaptive_grid_builder",
+        "//src/option:american_option_batch",
         "//src/option:option_chain",
         "//src/pde/core:grid",
         "@googletest//:gtest",

@@ -1,9 +1,29 @@
 #include <gtest/gtest.h>
 #include "src/option/table/adaptive_grid_builder.hpp"
+#include "src/option/american_option_batch.hpp"
+#include <algorithm>
 #include <iostream>
 
 namespace mango {
 namespace {
+
+// Helper to create a dummy AmericanOptionResult for cache testing
+std::shared_ptr<AmericanOptionResult> make_dummy_result() {
+    PricingParams params;
+    params.spot = 100.0;
+    params.strike = 100.0;
+    params.maturity = 1.0;
+    params.volatility = 0.20;
+    params.rate = 0.05;
+    params.dividend_yield = 0.0;
+    params.type = OptionType::PUT;
+
+    auto result = solve_american_option_auto(params);
+    if (result.has_value()) {
+        return std::make_shared<AmericanOptionResult>(std::move(result.value()));
+    }
+    return nullptr;
+}
 
 TEST(AdaptiveGridBuilderTest, ConstructWithDefaultParams) {
     AdaptiveGridParams params;
@@ -75,6 +95,169 @@ TEST(AdaptiveGridBuilderTest, EmptyChainReturnsError) {
     // Should return error for empty chain
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// ===========================================================================
+// SliceCache unit tests
+// ===========================================================================
+
+TEST(SliceCacheTest, AddAndRetrieve) {
+    SliceCache cache;
+
+    // Create a result using the auto solver
+    auto result_ptr = make_dummy_result();
+    ASSERT_NE(result_ptr, nullptr);
+    cache.add(0.20, 0.05, result_ptr);
+
+    // Retrieve
+    auto retrieved = cache.get(0.20, 0.05);
+    EXPECT_NE(retrieved, nullptr);
+
+    // Miss on different key
+    auto missed = cache.get(0.25, 0.05);
+    EXPECT_EQ(missed, nullptr);
+}
+
+TEST(SliceCacheTest, ContainsCheck) {
+    SliceCache cache;
+
+    EXPECT_FALSE(cache.contains(0.20, 0.05));
+
+    auto result_ptr = make_dummy_result();
+    ASSERT_NE(result_ptr, nullptr);
+    cache.add(0.20, 0.05, result_ptr);
+
+    EXPECT_TRUE(cache.contains(0.20, 0.05));
+    EXPECT_FALSE(cache.contains(0.25, 0.05));
+}
+
+TEST(SliceCacheTest, GetMissingIndices) {
+    SliceCache cache;
+
+    // Add some pairs
+    auto dummy = make_dummy_result();
+    ASSERT_NE(dummy, nullptr);
+    cache.add(0.20, 0.05, dummy);
+    cache.add(0.25, 0.05, dummy);
+
+    std::vector<std::pair<double, double>> all_pairs = {
+        {0.20, 0.05},  // cached
+        {0.25, 0.05},  // cached
+        {0.30, 0.05},  // missing
+        {0.20, 0.06},  // missing (different rate)
+    };
+
+    auto missing = cache.get_missing_indices(all_pairs);
+
+    EXPECT_EQ(missing.size(), 2);
+    EXPECT_EQ(missing[0], 2);  // Index of (0.30, 0.05)
+    EXPECT_EQ(missing[1], 3);  // Index of (0.20, 0.06)
+}
+
+TEST(SliceCacheTest, InvalidateOnTauChange) {
+    SliceCache cache;
+
+    auto dummy = make_dummy_result();
+    ASSERT_NE(dummy, nullptr);
+    cache.add(0.20, 0.05, dummy);
+    cache.add(0.25, 0.05, dummy);
+
+    EXPECT_EQ(cache.size(), 2);
+
+    // Set initial tau grid
+    std::vector<double> tau1 = {0.25, 0.5, 1.0};
+    cache.set_tau_grid(tau1);
+
+    // Same tau grid - should NOT invalidate
+    cache.invalidate_if_tau_changed(tau1);
+    EXPECT_EQ(cache.size(), 2);
+
+    // Different tau grid - should invalidate
+    std::vector<double> tau2 = {0.25, 0.5, 0.75, 1.0};
+    cache.invalidate_if_tau_changed(tau2);
+    EXPECT_EQ(cache.size(), 0);
+}
+
+TEST(SliceCacheTest, CachePreservedOnMChange) {
+    SliceCache cache;
+
+    auto dummy = make_dummy_result();
+    ASSERT_NE(dummy, nullptr);
+    cache.add(0.20, 0.05, dummy);
+    cache.add(0.25, 0.05, dummy);
+
+    // Set tau grid
+    std::vector<double> tau = {0.25, 0.5, 1.0};
+    cache.set_tau_grid(tau);
+
+    EXPECT_EQ(cache.size(), 2);
+
+    // Moneyness grid changes don't affect cache directly
+    // (m changes are handled by extract_tensor interpolation)
+    // Cache should still contain the (σ,r) pairs
+    EXPECT_TRUE(cache.contains(0.20, 0.05));
+    EXPECT_TRUE(cache.contains(0.25, 0.05));
+}
+
+TEST(SliceCacheTest, Clear) {
+    SliceCache cache;
+
+    auto dummy = make_dummy_result();
+    ASSERT_NE(dummy, nullptr);
+    cache.add(0.20, 0.05, dummy);
+
+    EXPECT_EQ(cache.size(), 1);
+
+    cache.clear();
+
+    EXPECT_EQ(cache.size(), 0);
+    EXPECT_FALSE(cache.contains(0.20, 0.05));
+}
+
+// ===========================================================================
+// ErrorBins unit tests
+// ===========================================================================
+
+TEST(ErrorBinsTest, RecordAndWorstDimension) {
+    ErrorBins bins;
+
+    // Record errors concentrated ONLY in dimension 0 (moneyness)
+    // For dim 0: all in bin 0 (concentration 1.0)
+    // For dims 1-3: scattered across different bins
+    std::array<double, 4> pos1 = {{0.05, 0.1, 0.3, 0.7}};
+    std::array<double, 4> pos2 = {{0.08, 0.5, 0.6, 0.2}};
+    std::array<double, 4> pos3 = {{0.03, 0.9, 0.8, 0.4}};
+
+    double threshold = 0.001;
+    bins.record_error(pos1, 0.005, threshold);
+    bins.record_error(pos2, 0.004, threshold);
+    bins.record_error(pos3, 0.003, threshold);
+
+    // Dimension 0 has all errors in bin 0 (concentration 1.0)
+    // Other dimensions have errors scattered (concentration ~0.33-0.67)
+    // So dimension 0 should have highest score
+    size_t worst = bins.worst_dimension();
+    EXPECT_EQ(worst, 0);
+}
+
+TEST(ErrorBinsTest, ProblematicBins) {
+    ErrorBins bins;
+
+    // Record multiple errors in bin 0 of dimension 1 (tau)
+    double threshold = 0.001;
+    std::array<double, 4> pos1 = {{0.5, 0.05, 0.5, 0.5}};  // Low tau (bin 0)
+    std::array<double, 4> pos2 = {{0.5, 0.08, 0.5, 0.5}};  // Low tau (bin 0)
+    std::array<double, 4> pos3 = {{0.5, 0.95, 0.5, 0.5}};  // High tau (bin 4)
+
+    bins.record_error(pos1, 0.005, threshold);
+    bins.record_error(pos2, 0.004, threshold);
+    bins.record_error(pos3, 0.003, threshold);
+
+    auto problematic = bins.problematic_bins(1, 2);  // dim 1, min_count 2
+
+    // Bin 0 should be problematic (2 errors)
+    bool found_bin0 = std::find(problematic.begin(), problematic.end(), 0) != problematic.end();
+    EXPECT_TRUE(found_bin0);
 }
 
 }  // namespace

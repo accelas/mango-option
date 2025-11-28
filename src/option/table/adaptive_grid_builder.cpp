@@ -344,43 +344,6 @@ double AdaptiveGridBuilder::compute_error_metric(
     }
 }
 
-std::vector<double> AdaptiveGridBuilder::refine_dimension(
-    const std::vector<double>& current_grid,
-    const std::vector<size_t>& problematic_bins,
-    size_t dim) const
-{
-    // Calculate new size based on refinement factor
-    size_t new_size = std::min(
-        static_cast<size_t>(current_grid.size() * params_.refinement_factor),
-        params_.max_points_per_dim
-    );
-
-    if (new_size <= current_grid.size()) {
-        // Already at max density, cannot refine further
-        return current_grid;
-    }
-
-    // Insert midpoints to increase density
-    std::vector<double> new_grid;
-    new_grid.reserve(new_size);
-
-    for (size_t i = 0; i < current_grid.size() - 1; ++i) {
-        new_grid.push_back(current_grid[i]);
-        if (new_grid.size() < new_size) {
-            // Insert midpoint
-            new_grid.push_back((current_grid[i] + current_grid[i+1]) / 2.0);
-        }
-    }
-    new_grid.push_back(current_grid.back());
-
-    // Sort and remove duplicates (should already be sorted, but be safe)
-    std::sort(new_grid.begin(), new_grid.end());
-    new_grid.erase(std::unique(new_grid.begin(), new_grid.end()),
-                  new_grid.end());
-
-    return new_grid;
-}
-
 BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
     const std::vector<AmericanOptionParams>& all_params,
     const std::vector<size_t>& fresh_indices,

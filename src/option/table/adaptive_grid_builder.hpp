@@ -55,11 +55,6 @@ private:
                                 double spot, double strike, double tau,
                                 double sigma, double rate, double dividend_yield) const;
 
-    /// Refine grid in the specified dimension
-    std::vector<double> refine_dimension(const std::vector<double>& current_grid,
-                                         const std::vector<size_t>& problematic_bins,
-                                         size_t dim) const;
-
     /// Build BatchAmericanOptionResult by merging cached and fresh results
     /// @param all_params All (σ,r) parameter combos in full batch order
     /// @param fresh_indices Indices into all_params that were freshly solved
