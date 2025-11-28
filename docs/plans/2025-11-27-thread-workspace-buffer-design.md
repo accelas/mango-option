@@ -432,27 +432,30 @@ namespace mango {
 ///
 struct AmericanPDEWorkspace {
     static constexpr size_t ALIGNMENT = 64;  // Cache line / AVX-512
-    static constexpr size_t SIMD_WIDTH = 8;
 
-    static constexpr size_t pad_to_simd(size_t n) {
-        return ((n + SIMD_WIDTH - 1) / SIMD_WIDTH) * SIMD_WIDTH;
+    // CONSTRAINT: PDEWorkspace stores only double spans. We rely on trivial
+    // destruction because start_array_lifetime never runs destructors.
+    // If PDEWorkspace ever adds non-trivial members (std::vector, structs
+    // with destructors), this will fail to compile - catching the issue early.
+    static_assert(std::is_trivially_destructible_v<double>,
+        "AmericanPDEWorkspace requires trivially destructible element type");
+
+    /// Calculate required buffer size in BYTES
+    ///
+    /// IMPORTANT: Derives from PDEWorkspace::required_size to ensure single
+    /// source of truth. Any changes to PDEWorkspace layout are automatically
+    /// reflected here.
+    static size_t required_bytes(size_t n) {
+        // PDEWorkspace::required_size returns count of doubles needed
+        size_t n_doubles = PDEWorkspace::required_size(n);
+
+        // Convert to bytes with alignment padding
+        size_t bytes = n_doubles * sizeof(double);
+        return align_up(bytes, ALIGNMENT);
     }
 
     static constexpr size_t align_up(size_t offset, size_t alignment) {
         return (offset + alignment - 1) & ~(alignment - 1);
-    }
-
-    /// Calculate required buffer size in BYTES
-    static size_t required_bytes(size_t n) {
-        size_t n_padded = pad_to_simd(n);
-        size_t n_minus_1_padded = pad_to_simd(n - 1);
-
-        // 12 arrays @ n (padded) + 3 arrays @ (n-1) (padded) + tridiag @ 2n (padded)
-        size_t total_doubles = 12 * n_padded + 3 * n_minus_1_padded + pad_to_simd(2 * n);
-
-        // Convert to bytes with alignment padding
-        size_t bytes = total_doubles * sizeof(double);
-        return align_up(bytes, ALIGNMENT);
     }
 
     /// Create workspace from external BYTE buffer
@@ -684,29 +687,80 @@ template<size_t Axis>
 
 **Error handling note:**
 
-The `InterpolationError` type needs extension to carry workspace creation details:
+The existing `InterpolationError` in `src/support/error_types.hpp` is a struct with numeric fields:
 
 ```cpp
-// Extend InterpolationErrorCode enum
+// Current definition (cannot compile with string message)
+struct InterpolationError {
+    InterpolationErrorCode code;
+    size_t grid_size;      ///< Grid size involved
+    size_t index;          ///< Index or axis where error occurred
+    double max_residual;   ///< Maximum residual for fitting errors
+};
+```
+
+**Required changes to error_types.hpp (Phase 1 prerequisite):**
+
+1. Add new enum value:
+```cpp
 enum class InterpolationErrorCode {
     // ... existing codes ...
     WorkspaceCreationFailed,  // NEW: from_bytes() failed
 };
+```
 
-// InterpolationError with optional message
+2. Add optional message field with backward-compatible constructors:
+```cpp
 struct InterpolationError {
     InterpolationErrorCode code;
-    std::string message;  // Empty for most errors, populated for workspace failures
+    size_t grid_size;
+    size_t index;
+    double max_residual;
+    std::string message;  // NEW: empty for most errors, populated for workspace failures
 
-    // Convenience constructors
-    InterpolationError(InterpolationErrorCode c) : code(c) {}
-    InterpolationError(InterpolationErrorCode c, std::string msg)
-        : code(c), message(std::move(msg)) {}
+    // Existing constructor (backward compatible)
+    InterpolationError(InterpolationErrorCode code,
+                      size_t grid_size = 0,
+                      size_t index = 0,
+                      double max_residual = 0.0)
+        : code(code), grid_size(grid_size), index(index), max_residual(max_residual) {}
+
+    // NEW: Constructor with message for workspace errors
+    InterpolationError(InterpolationErrorCode code, std::string msg)
+        : code(code), grid_size(0), index(0), max_residual(0.0), message(std::move(msg)) {}
 };
 ```
 
-This preserves debuggability for buffer-sizing bugs (e.g., "Buffer too small: 1000 < 2048 required for n=20")
-while maintaining backward compatibility with existing error handling code.
+3. Update `operator<<` to output message if non-empty:
+```cpp
+inline std::ostream& operator<<(std::ostream& os, const InterpolationError& err) {
+    os << "InterpolationError{code=" << static_cast<int>(err.code)
+       << ", grid_size=" << err.grid_size
+       << ", index=" << err.index
+       << ", max_residual=" << err.max_residual;
+    if (!err.message.empty()) {
+        os << ", message=\"" << err.message << "\"";
+    }
+    os << "}";
+    return os;
+}
+```
+
+4. Update `convert_to_price_table_error()` to handle new code:
+```cpp
+case InterpolationErrorCode::WorkspaceCreationFailed:
+    code = PriceTableErrorCode::ArenaAllocationFailed;  // Most appropriate existing code
+    break;
+```
+
+**Migration checklist:**
+- [ ] Update InterpolationErrorCode enum
+- [ ] Add message field to InterpolationError struct
+- [ ] Add new constructor overload
+- [ ] Update operator<< for new field
+- [ ] Update convert_to_price_table_error switch
+- [ ] Add test for new error code
+- [ ] Verify all pattern-matching switch statements are exhaustive (compiler warnings)
 
 ## Dispatch Mechanism
 
