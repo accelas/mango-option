@@ -1,4 +1,15 @@
 cc_test(
+    name = "parallel_critical_test",
+    size = "small",
+    srcs = ["parallel_critical_test.cc"],
+    deps = [
+        "//src/support:parallel",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "aligned_arena_test",
     size = "small",
     srcs = ["aligned_arena_test.cc"],

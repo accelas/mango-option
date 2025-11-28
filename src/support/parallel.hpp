@@ -30,6 +30,7 @@
     #define MANGO_PRAGMA_FOR_COLLAPSE2                  // SYCL nested parallel loops
     #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC          // SYCL nested parallel loops with scheduling
     #define MANGO_PRAGMA_ATOMIC                         // SYCL atomic operations
+    #define MANGO_PRAGMA_CRITICAL                       // SYCL critical section
     #warning "SYCL backend not yet implemented"
 #elif defined(_OPENMP)
     // OpenMP parallel constructs (current implementation)
@@ -41,6 +42,7 @@
     #define MANGO_PRAGMA_FOR_COLLAPSE2                  _Pragma("omp for collapse(2)")
     #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC          _Pragma("omp for collapse(2) schedule(dynamic, 1)")
     #define MANGO_PRAGMA_ATOMIC                         _Pragma("omp atomic")
+    #define MANGO_PRAGMA_CRITICAL                       _Pragma("omp critical")
 #else
     // Sequential execution (no parallelization)
     #define MANGO_PRAGMA_SIMD
@@ -51,6 +53,7 @@
     #define MANGO_PRAGMA_FOR_COLLAPSE2
     #define MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC
     #define MANGO_PRAGMA_ATOMIC
+    #define MANGO_PRAGMA_CRITICAL
 #endif
 
 /**
@@ -76,4 +79,5 @@
  * - MANGO_PRAGMA_FOR_COLLAPSE2: Collapse 2 nested loops (inside parallel region)
  * - MANGO_PRAGMA_FOR_COLLAPSE2_DYNAMIC: Collapse 2 loops with dynamic scheduling
  * - MANGO_PRAGMA_ATOMIC: Atomic operation (increment, etc.)
+ * - MANGO_PRAGMA_CRITICAL: Critical section (only one thread executes at a time)
  */
