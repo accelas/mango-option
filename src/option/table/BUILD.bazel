@@ -145,3 +145,13 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "adaptive_grid_types",
+    hdrs = ["adaptive_grid_types.hpp"],
+    deps = [
+        ":price_table_axes",
+        ":price_table_surface",
+    ],
+    visibility = ["//visibility:public"],
+)
