@@ -129,8 +129,10 @@ cc_library(
     hdrs = ["bspline_nd_separable.hpp"],
     deps = [
         ":bspline_collocation",
+        ":bspline_collocation_workspace",
         ":safe_math",
         "//src/support:parallel",
+        "//src/support:thread_workspace",
         "@mdspan//:mdspan",
     ],
     copts = [
