@@ -25,6 +25,7 @@
 #include <format>
 #include <iomanip>
 #include <memory>
+#include <memory_resource>
 #include <set>
 #include <string>
 #include <vector>

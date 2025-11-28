@@ -183,6 +183,17 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_grid_estimator_test",
+    size = "small",
+    srcs = ["price_table_grid_estimator_test.cc"],
+    deps = [
+        "//src/option/table:price_table_grid_estimator",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_builder_test",
     size = "small",
     srcs = ["price_table_builder_test.cc"],
@@ -607,15 +618,17 @@ cc_test(
 )
 
 cc_test(
-    name = "real_option_data_test",
-    srcs = ["real_option_data_test.cc"],
+    name = "real_market_data_test",
+    srcs = ["real_market_data_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
     deps = [
+        "//benchmarks:real_market_data",
         "//src/option:american_option",
-        "//third_party/arrow",
+        "//src/option:american_option_batch",
+        "//src/option:iv_solver_fdm",
         "@googletest//:gtest_main",
     ],
-    data = ["//data:real_option_chain.arrow"],
-    tags = ["manual"],  # Disabled: test data incompatible with post-CRTP solver
 )
 
 cc_test(
@@ -1095,14 +1108,6 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "simple_option_chain_test",
-    srcs = ["simple_option_chain_test.cc"],
-    deps = [
-        "//src/simple:option_chain",
-        "@googletest//:gtest_main",
-    ],
-)
 
 cc_test(
     name = "simple_converter_test",

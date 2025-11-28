@@ -226,13 +226,18 @@ inline PriceTableGridEstimate<4> estimate_grid_for_price_table(
  *
  * Convenience overload that extracts bounds from min/max of input vectors.
  *
+ * IMPORTANT: All input vectors must be non-empty. Callers should validate
+ * inputs before calling this function. The function includes assertions
+ * for debug builds but returns empty grids in release builds if inputs
+ * are invalid (for safety).
+ *
  * @param strikes Strike prices (used with spot to compute moneyness bounds)
- * @param spot Current underlying price
- * @param maturities Available maturities
- * @param vols Implied volatility range
- * @param rates Interest rate range
+ * @param spot Current underlying price (must be > 0)
+ * @param maturities Available maturities (must be non-empty, all > 0)
+ * @param vols Implied volatility range (must be non-empty, all > 0)
+ * @param rates Interest rate range (must be non-empty)
  * @param params Accuracy parameters
- * @return Grid estimate
+ * @return Grid estimate, or empty grids if inputs are invalid
  */
 inline PriceTableGridEstimate<4> estimate_grid_from_chain_bounds(
     const std::vector<double>& strikes,
@@ -242,6 +247,15 @@ inline PriceTableGridEstimate<4> estimate_grid_from_chain_bounds(
     const std::vector<double>& rates,
     const PriceTableGridAccuracyParams<4>& params = {})
 {
+    // Validate inputs - return empty estimate if invalid
+    // Caller is responsible for pre-validation, but we guard against UB
+    if (strikes.empty() || maturities.empty() || vols.empty() || rates.empty()) {
+        return PriceTableGridEstimate<4>{};  // Empty grids signal error
+    }
+    if (spot <= 0.0) {
+        return PriceTableGridEstimate<4>{};
+    }
+
     // Compute moneyness bounds from strikes
     double m_min = spot / *std::max_element(strikes.begin(), strikes.end());
     double m_max = spot / *std::min_element(strikes.begin(), strikes.end());

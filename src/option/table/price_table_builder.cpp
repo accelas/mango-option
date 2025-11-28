@@ -617,6 +617,23 @@ PriceTableBuilder<4>::from_chain_auto(
     OptionType type,
     const PriceTableGridAccuracyParams<4>& accuracy)
 {
+    // Validate chain inputs before calling estimator
+    if (chain.spot <= 0.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
+    }
+    if (chain.strikes.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0, 0});
+    }
+    if (chain.maturities.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 1, 0});
+    }
+    if (chain.implied_vols.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 2, 0});
+    }
+    if (chain.rates.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 3, 0});
+    }
+
     // Estimate optimal grids based on target accuracy
     auto estimate = estimate_grid_from_chain_bounds(
         chain.strikes,
@@ -626,6 +643,11 @@ PriceTableBuilder<4>::from_chain_auto(
         chain.rates,
         accuracy
     );
+
+    // Check for empty grids (indicates estimation failure)
+    if (estimate.grids[0].empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
 
     // Use estimated grids with from_vectors
     // grids[0] = moneyness, grids[1] = maturity, grids[2] = volatility, grids[3] = rate
