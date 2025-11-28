@@ -1,25 +1,20 @@
 #include <gtest/gtest.h>
 #include "src/option/table/price_tensor.hpp"
-#include "src/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace {
 
 TEST(PriceTensorTest, Create2DTensor) {
-    auto arena = memory::AlignedArena::create(1024).value();
-
-    auto result = PriceTensor<2>::create({3, 4}, arena);
+    auto result = PriceTensor<2>::create({3, 4});
     ASSERT_TRUE(result.has_value());
 
     auto tensor = result.value();
     EXPECT_EQ(tensor.view.extent(0), 3);
     EXPECT_EQ(tensor.view.extent(1), 4);
-    EXPECT_EQ(tensor.arena, arena);
 }
 
 TEST(PriceTensorTest, AccessElements) {
-    auto arena = memory::AlignedArena::create(1024).value();
-    auto tensor = PriceTensor<2>::create({2, 3}, arena).value();
+    auto tensor = PriceTensor<2>::create({2, 3}).value();
 
     // Write via mdspan
     tensor.view[0, 0] = 1.0;
@@ -33,9 +28,7 @@ TEST(PriceTensorTest, AccessElements) {
 }
 
 TEST(PriceTensorTest, Create4DTensor) {
-    auto arena = memory::AlignedArena::create(10000).value();
-
-    auto result = PriceTensor<4>::create({5, 4, 3, 2}, arena);
+    auto result = PriceTensor<4>::create({5, 4, 3, 2});
     ASSERT_TRUE(result.has_value());
 
     auto tensor = result.value();
@@ -52,18 +45,15 @@ TEST(PriceTensorTest, Create4DTensor) {
     EXPECT_EQ(total, 120);
 }
 
-TEST(PriceTensorTest, ArenaOutOfMemory) {
-    auto arena = memory::AlignedArena::create(100).value();  // Too small
-
-    auto result = PriceTensor<3>::create({100, 100, 100}, arena);  // Needs 100*100*100*8 bytes
+TEST(PriceTensorTest, ShapeOverflow) {
+    // Request a shape that would overflow size_t
+    auto result = PriceTensor<3>::create({SIZE_MAX, SIZE_MAX, SIZE_MAX});
     EXPECT_FALSE(result.has_value());
-    EXPECT_NE(result.error().find("memory"), std::string::npos);
+    EXPECT_NE(result.error().find("overflow"), std::string::npos);
 }
 
 TEST(PriceTensorTest, Create1DTensor) {
-    auto arena = memory::AlignedArena::create(1024).value();
-
-    auto result = PriceTensor<1>::create({10}, arena);
+    auto result = PriceTensor<1>::create({10});
     ASSERT_TRUE(result.has_value());
 
     auto tensor = result.value();
@@ -75,9 +65,7 @@ TEST(PriceTensorTest, Create1DTensor) {
 }
 
 TEST(PriceTensorTest, Create5DTensor) {
-    auto arena = memory::AlignedArena::create(10000).value();
-
-    auto result = PriceTensor<5>::create({2, 3, 4, 5, 6}, arena);
+    auto result = PriceTensor<5>::create({2, 3, 4, 5, 6});
     ASSERT_TRUE(result.has_value());
 
     auto tensor = result.value();
@@ -103,8 +91,7 @@ TEST(PriceTensorTest, Create5DTensor) {
 // Issue: Missing @mdspan//:mdspan dependency in BUILD.bazel would cause compile failure
 TEST(PriceTensorTest, MdspanTypesCompile) {
     // This test verifies that mdspan types are available and work correctly
-    auto arena = memory::AlignedArena::create(1024).value();
-    auto tensor = PriceTensor<2>::create({3, 4}, arena).value();
+    auto tensor = PriceTensor<2>::create({3, 4}).value();
 
     // Verify mdspan types are accessible
     using MdspanType = decltype(tensor.view);
@@ -127,8 +114,7 @@ TEST(PriceTensorTest, MdspanTypesCompile) {
 
 // REGRESSION TEST: Verify mdspan works for higher dimensions
 TEST(PriceTensorTest, Mdspan4DTypesCompile) {
-    auto arena = memory::AlignedArena::create(10000).value();
-    auto tensor = PriceTensor<4>::create({2, 3, 4, 5}, arena).value();
+    auto tensor = PriceTensor<4>::create({2, 3, 4, 5}).value();
 
     // Verify 4D indexing compiles and works
     tensor.view[0, 1, 2, 3] = 42.0;
@@ -142,6 +128,37 @@ TEST(PriceTensorTest, Mdspan4DTypesCompile) {
     EXPECT_EQ(tensor.view.extent(1), 3);
     EXPECT_EQ(tensor.view.extent(2), 4);
     EXPECT_EQ(tensor.view.extent(3), 5);
+}
+
+// REGRESSION TEST: Verify storage is 64-byte aligned for SIMD operations
+TEST(PriceTensorTest, StorageIsAligned) {
+    auto tensor = PriceTensor<2>::create({10, 10}).value();
+
+    // Verify the storage pointer is 64-byte aligned
+    uintptr_t addr = reinterpret_cast<uintptr_t>(tensor.storage->data());
+    EXPECT_EQ(addr % 64, 0) << "Storage should be 64-byte aligned for AVX-512";
+}
+
+// REGRESSION TEST: Verify shared_ptr semantics work correctly
+TEST(PriceTensorTest, SharedOwnership) {
+    auto tensor1 = PriceTensor<2>::create({5, 5}).value();
+
+    // Write a value
+    tensor1.view[2, 2] = 42.0;
+
+    // Copy the tensor (shared_ptr semantics)
+    auto tensor2 = tensor1;
+
+    // Both should see the same data
+    EXPECT_DOUBLE_EQ((tensor1.view[2, 2]), 42.0);
+    EXPECT_DOUBLE_EQ((tensor2.view[2, 2]), 42.0);
+
+    // Modify through one, visible in other
+    tensor2.view[2, 2] = 99.0;
+    EXPECT_DOUBLE_EQ((tensor1.view[2, 2]), 99.0);
+
+    // They share the same storage
+    EXPECT_EQ(tensor1.storage.get(), tensor2.storage.get());
 }
 
 } // namespace
