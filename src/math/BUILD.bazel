@@ -8,6 +8,12 @@ filegroup(
 )
 
 cc_library(
+    name = "black_scholes_analytics",
+    hdrs = ["black_scholes_analytics.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "safe_math",
     hdrs = ["safe_math.hpp"],
     deps = ["//src/support:error_types"],

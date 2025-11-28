@@ -1,4 +1,15 @@
 cc_test(
+    name = "black_scholes_analytics_test",
+    size = "small",
+    srcs = ["black_scholes_analytics_test.cc"],
+    deps = [
+        "//src/math:black_scholes_analytics",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "parallel_critical_test",
     size = "small",
     srcs = ["parallel_critical_test.cc"],
