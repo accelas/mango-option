@@ -130,3 +130,9 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "error_attribution",
+    hdrs = ["error_attribution.hpp"],
+    visibility = ["//visibility:public"],
+)
