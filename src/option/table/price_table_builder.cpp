@@ -608,6 +608,63 @@ PriceTableBuilder<4>::from_chain(
     );
 }
 
+template <>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::from_chain_auto(
+    const OptionChain& chain,
+    GridSpec<double> grid_spec,
+    size_t n_time,
+    OptionType type,
+    const PriceTableGridAccuracyParams<4>& accuracy)
+{
+    // Validate chain inputs before calling estimator
+    if (chain.spot <= 0.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
+    }
+    if (chain.strikes.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0, 0});
+    }
+    if (chain.maturities.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 1, 0});
+    }
+    if (chain.implied_vols.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 2, 0});
+    }
+    if (chain.rates.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 3, 0});
+    }
+
+    // Estimate optimal grids based on target accuracy
+    auto estimate = estimate_grid_from_chain_bounds(
+        chain.strikes,
+        chain.spot,
+        chain.maturities,
+        chain.implied_vols,
+        chain.rates,
+        accuracy
+    );
+
+    // Check for empty grids (indicates estimation failure)
+    if (estimate.grids[0].empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    // Use estimated grids with from_vectors
+    // grids[0] = moneyness, grids[1] = maturity, grids[2] = volatility, grids[3] = rate
+    return from_vectors(
+        std::move(estimate.grids[0]),
+        std::move(estimate.grids[1]),
+        std::move(estimate.grids[2]),
+        std::move(estimate.grids[3]),
+        chain.spot,  // K_ref = spot
+        grid_spec,
+        n_time,
+        type,
+        chain.dividend_yield,
+        0.0  // max_failure_rate = 0 (strict)
+    );
+}
+
 template <size_t N>
 std::optional<std::pair<size_t, size_t>>
 PriceTableBuilder<N>::find_nearest_valid_neighbor(

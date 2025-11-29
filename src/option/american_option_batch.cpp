@@ -491,9 +491,13 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
             std::optional<AmericanPDEWorkspace> workspace_storage;
             std::vector<std::byte> heap_buffer_storage;  // Heap fallback buffer (persists for iteration)
 
+            // Track the grid config used for this solve (to pass to solver)
+            std::optional<std::pair<GridSpec<double>, TimeDomain>> solver_grid_config;
+
             if (use_shared_grid) {
                 // Shared grid: reuse thread grid and buffer
                 grid = thread_grid;
+                solver_grid_config = shared_grid;  // Use shared grid config
                 if (grid) {
                     auto ws_result = AmericanPDEWorkspace::from_bytes(buffer.bytes(), shared_n_space);
                     if (ws_result.has_value()) {
@@ -506,6 +510,8 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 auto [grid_spec, time_domain] = custom_grid.has_value()
                     ? custom_grid.value()
                     : estimate_grid_for_option(params[i], grid_accuracy_);
+
+                solver_grid_config = std::make_pair(grid_spec, time_domain);
 
                 // Create Grid with solution storage
                 auto grid_result = Grid<double>::create(grid_spec, time_domain);
@@ -531,6 +537,9 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                     : (custom_grid.has_value()
                         ? custom_grid.value()
                         : estimate_grid_for_option(params[i], grid_accuracy_));
+
+                // Update solver_grid_config for fallback path
+                solver_grid_config = std::make_pair(grid_spec, time_domain);
 
                 auto grid_result = Grid<double>::create(grid_spec, time_domain);
                 if (grid_result.has_value()) {
@@ -559,8 +568,9 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 }
             }
 
-            // Create solver using PDEWorkspace API
-            AmericanOptionSolver solver(params[i], *workspace_ptr);
+            // Create solver using PDEWorkspace API with explicit grid config
+            // This ensures workspace size matches the grid that will be used
+            AmericanOptionSolver solver(params[i], *workspace_ptr, std::nullopt, solver_grid_config);
 
             // Register snapshot times if configured (preserves normalized optimization)
             if (!snapshot_times_.empty()) {
