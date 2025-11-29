@@ -102,13 +102,14 @@ double PriceTableSurface<N>::partial(size_t axis, const std::array<double, N>& c
         internal_coords[0] = std::log(coords[0]);
     }
 
-    // Use analytic B-spline derivative (single evaluation, no finite difference noise)
+    // Use analytic B-spline derivative
     double raw_partial = spline_->eval_partial(axis, internal_coords);
 
-    // For axis 0 (moneyness), apply chain rule: ∂V/∂m = (∂V/∂x) * (∂x/∂m) = (∂V/∂x) / m
-    // where x = ln(m), so dx/dm = 1/m
-    if (axis == 0) {
-        return raw_partial / coords[0];
+    // Chain rule for moneyness axis: ∂f/∂m = (∂f/∂x) * (dx/dm) = (∂f/∂x) / m
+    if constexpr (N >= 1) {
+        if (axis == 0) {
+            return raw_partial / coords[0];
+        }
     }
     return raw_partial;
 }
