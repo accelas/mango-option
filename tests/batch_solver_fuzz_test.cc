@@ -19,6 +19,7 @@
 #include "gtest/gtest.h"
 #include "src/option/american_option_batch.hpp"
 #include "src/pde/core/grid.hpp"
+#include <cmath>
 
 using namespace mango;
 
@@ -564,23 +565,379 @@ FUZZ_TEST(BatchSolverFuzz, ExtremeParametersNoExceptions)
     );
 
 // ============================================================================
-// Standard unit test to verify fuzz test setup works
+// Normalized Chain Solver Invariant Tests
 // ============================================================================
+// The normalized chain solver is an optimization that solves a single PDE
+// with S=K=1 and interpolates results for all options in the batch.
+// These tests stress-test PDE invariants that the solver must maintain.
 
-TEST(BatchSolverFuzz, SmokeTest) {
-    // Simple test to verify the fuzz test infrastructure compiles and runs
-    BatchSolverNeverCrashes(101, 5, 100.0, 100.0, 1.0, 0.20, 0.05, true);
-    OptionPricesNonNegative(100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false);
-    AmericanOptionLowerBounds(100.0, 100.0, 1.0, 0.20, 0.05, false);
-    GridSizeConsistency(101, 5, true);
-    PutPriceMonotonicInStrike(100.0, 90.0, 110.0, 1.0, 0.20, 0.05);
-    CallPriceMonotonicInStrike(100.0, 90.0, 110.0, 1.0, 0.20, 0.05);
-    PriceIncreasesWithVolatility(100.0, 100.0, 1.0, 0.15, 0.30, 0.05, true);
-    PriceIncreasesWithMaturity(100.0, 100.0, 0.5, 1.5, 0.20, 0.05, false);
-    DeltaWithinBounds(100.0, 100.0, 1.0, 0.20, 0.05, true);
-    GammaNonNegative(100.0, 100.0, 1.0, 0.20, 0.05, false);
-    ExtremeParametersNoExceptions(100.0, 100.0, 1.0, 0.20, 0.05);
+// ============================================================================
+// Property: Normalized and regular batch produce consistent results
+// ============================================================================
+// The normalized chain solver should produce the same prices (within tolerance)
+// as the regular batch solver.
+
+void NormalizedVsRegularConsistency(
+    double spot,
+    double strike_base,
+    size_t batch_size,
+    double maturity,
+    double volatility,
+    double rate,
+    bool is_call)
+{
+    if (spot <= 0 || strike_base <= 0 || maturity < 0.01 || volatility < 0.05) return;
+    if (batch_size < 2 || batch_size > 20) return;
+
+    // Create batch with varying strikes (normalized chain eligible)
+    std::vector<AmericanOptionParams> params;
+    for (size_t i = 0; i < batch_size; ++i) {
+        double K = strike_base + i * 2.0;
+        if (K <= 0) continue;
+        params.push_back(PricingParams(spot, K, maturity, rate, 0.0,
+                                       is_call ? OptionType::CALL : OptionType::PUT,
+                                       volatility, {}));
+    }
+
+    if (params.size() < 2) return;
+
+    // Solve with normalized chain (fast path)
+    BatchAmericanOptionSolver normalized_solver;
+    normalized_solver.set_use_normalized(true);
+    auto normalized_results = normalized_solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    // Solve with regular batch (reference)
+    BatchAmericanOptionSolver regular_solver;
+    regular_solver.set_use_normalized(false);
+    auto regular_results = regular_solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    // Compare results
+    ASSERT_EQ(normalized_results.results.size(), regular_results.results.size());
+
+    for (size_t i = 0; i < params.size(); ++i) {
+        if (!normalized_results.results[i].has_value() ||
+            !regular_results.results[i].has_value()) {
+            continue;  // Skip failed solves
+        }
+
+        double norm_price = normalized_results.results[i]->value();
+        double reg_price = regular_results.results[i]->value();
+
+        // Allow small relative tolerance (interpolation error)
+        double rel_diff = std::abs(norm_price - reg_price) / std::max(1.0, reg_price);
+        EXPECT_LT(rel_diff, 0.02)
+            << "Normalized vs regular mismatch at K=" << params[i].strike
+            << ": normalized=" << norm_price << ", regular=" << reg_price;
+    }
 }
+
+FUZZ_TEST(BatchSolverFuzz, NormalizedVsRegularConsistency)
+    .WithDomains(
+        fuzztest::InRange(80.0, 120.0),         // spot
+        fuzztest::InRange(70.0, 110.0),         // strike_base
+        fuzztest::InRange<size_t>(2, 10),       // batch_size
+        fuzztest::InRange(0.1, 2.0),            // maturity
+        fuzztest::InRange(0.10, 0.50),          // volatility
+        fuzztest::InRange(0.0, 0.10),           // rate
+        fuzztest::Arbitrary<bool>()             // is_call
+    );
+
+// ============================================================================
+// Property: Scale invariance of normalized solution
+// ============================================================================
+// The normalized chain solver exploits scale invariance: V(S,K,σ,r,T) = K * u(S/K,σ,r,T)
+// where u is the normalized solution with S=K=1.
+
+void ScaleInvarianceProperty(
+    double spot,
+    double strike,
+    double scale_factor,
+    double maturity,
+    double volatility,
+    double rate,
+    bool is_call)
+{
+    if (spot <= 0 || strike <= 0 || maturity < 0.01 || volatility < 0.05) return;
+    if (scale_factor < 0.5 || scale_factor > 2.0) return;
+
+    // Original option
+    std::vector<AmericanOptionParams> params1;
+    params1.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
+                                    is_call ? OptionType::CALL : OptionType::PUT,
+                                    volatility, {}));
+
+    // Scaled option (multiply spot and strike by scale_factor)
+    std::vector<AmericanOptionParams> params2;
+    params2.push_back(PricingParams(spot * scale_factor, strike * scale_factor,
+                                    maturity, rate, 0.0,
+                                    is_call ? OptionType::CALL : OptionType::PUT,
+                                    volatility, {}));
+
+    BatchAmericanOptionSolver solver;
+    auto results1 = solver.solve_batch(params1, false);
+    auto results2 = solver.solve_batch(params2, false);
+
+    if (!results1.results[0].has_value() || !results2.results[0].has_value()) return;
+
+    double price1 = results1.results[0]->value();
+    double price2 = results2.results[0]->value();
+
+    // V(λS, λK) = λ * V(S, K) (price scales with strike)
+    double expected_price2 = price1 * scale_factor;
+    double rel_diff = std::abs(price2 - expected_price2) / std::max(1.0, expected_price2);
+
+    // Allow for numerical tolerance due to grid discretization
+    EXPECT_LT(rel_diff, 0.03)
+        << "Scale invariance violated: V(" << spot << "," << strike << ")=" << price1
+        << ", V(" << spot*scale_factor << "," << strike*scale_factor << ")=" << price2
+        << ", expected=" << expected_price2;
+}
+
+FUZZ_TEST(BatchSolverFuzz, ScaleInvarianceProperty)
+    .WithDomains(
+        fuzztest::InRange(80.0, 120.0),         // spot
+        fuzztest::InRange(80.0, 120.0),         // strike
+        fuzztest::InRange(0.5, 2.0),            // scale_factor
+        fuzztest::InRange(0.1, 2.0),            // maturity
+        fuzztest::InRange(0.10, 0.50),          // volatility
+        fuzztest::InRange(0.0, 0.10),           // rate
+        fuzztest::Arbitrary<bool>()             // is_call
+    );
+
+// ============================================================================
+// Property: PDE parameter grouping consistency
+// ============================================================================
+// Options with same (σ, r, q, type, maturity) but different strikes
+// should all succeed or all fail together in normalized mode.
+
+void PDEGroupingConsistency(
+    double spot_base,
+    size_t batch_size,
+    double maturity,
+    double volatility,
+    double rate,
+    bool is_call)
+{
+    if (spot_base <= 0 || maturity < 0.01 || volatility < 0.05) return;
+    if (batch_size < 3 || batch_size > 15) return;
+
+    // Create batch with varying spot/strike ratios but same PDE parameters
+    std::vector<AmericanOptionParams> params;
+    for (size_t i = 0; i < batch_size; ++i) {
+        double spot = spot_base + i * 3.0;
+        double strike = 100.0;  // Fixed strike for all
+        if (spot <= 0) continue;
+        params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
+                                       is_call ? OptionType::CALL : OptionType::PUT,
+                                       volatility, {}));
+    }
+
+    if (params.size() < 3) return;
+
+    BatchAmericanOptionSolver solver;
+    solver.set_use_normalized(true);
+    auto results = solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    // All options should succeed or fail together (same PDE group)
+    size_t success_count = 0;
+    for (const auto& result : results.results) {
+        if (result.has_value()) ++success_count;
+    }
+
+    EXPECT_TRUE(success_count == 0 || success_count == results.results.size())
+        << "PDE grouping inconsistency: " << success_count << "/" << results.results.size()
+        << " succeeded (should be all or none)";
+}
+
+FUZZ_TEST(BatchSolverFuzz, PDEGroupingConsistency)
+    .WithDomains(
+        fuzztest::InRange(80.0, 100.0),         // spot_base
+        fuzztest::InRange<size_t>(3, 10),       // batch_size
+        fuzztest::InRange(0.1, 2.0),            // maturity
+        fuzztest::InRange(0.10, 0.50),          // volatility
+        fuzztest::InRange(0.0, 0.10),           // rate
+        fuzztest::Arbitrary<bool>()             // is_call
+    );
+
+// ============================================================================
+// Property: Grid coverage for extreme moneyness in normalized chain
+// ============================================================================
+// The normalized chain solver must handle wide strike ranges where
+// moneyness (S/K) varies significantly across the batch.
+
+void WideMoneynessCoverage(
+    double spot,
+    double strike_min,
+    double strike_max,
+    size_t batch_size,
+    double maturity,
+    double volatility,
+    double rate)
+{
+    if (spot <= 0 || strike_min <= 0 || strike_max <= strike_min) return;
+    if (maturity < 0.01 || volatility < 0.05) return;
+    if (batch_size < 3 || batch_size > 20) return;
+
+    // Create batch spanning wide moneyness range
+    std::vector<AmericanOptionParams> params;
+    double strike_step = (strike_max - strike_min) / (batch_size - 1);
+    for (size_t i = 0; i < batch_size; ++i) {
+        double K = strike_min + i * strike_step;
+        if (K <= 0) continue;
+        params.push_back(PricingParams(spot, K, maturity, rate, 0.0,
+                                       OptionType::PUT, volatility, {}));
+    }
+
+    if (params.size() < 3) return;
+
+    BatchAmericanOptionSolver solver;
+    solver.set_use_normalized(true);
+    auto results = solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    // Verify monotonicity across the range (put prices increase with strike)
+    std::vector<double> prices;
+    for (size_t i = 0; i < results.results.size(); ++i) {
+        if (results.results[i].has_value()) {
+            prices.push_back(results.results[i]->value());
+        }
+    }
+
+    // Check monotonicity if we have enough valid results
+    if (prices.size() >= 3) {
+        for (size_t i = 1; i < prices.size(); ++i) {
+            EXPECT_GE(prices[i], prices[i-1] - 0.01)
+                << "Put monotonicity violated in normalized chain at index " << i;
+        }
+    }
+}
+
+FUZZ_TEST(BatchSolverFuzz, WideMoneynessCoverage)
+    .WithDomains(
+        fuzztest::InRange(90.0, 110.0),         // spot
+        fuzztest::InRange(70.0, 90.0),          // strike_min
+        fuzztest::InRange(110.0, 130.0),        // strike_max
+        fuzztest::InRange<size_t>(3, 15),       // batch_size
+        fuzztest::InRange(0.1, 2.0),            // maturity
+        fuzztest::InRange(0.10, 0.50),          // volatility
+        fuzztest::InRange(0.0, 0.10)            // rate
+    );
+
+// ============================================================================
+// Property: Mixed PDE parameters force separate groups
+// ============================================================================
+// When options have different volatilities, rates, or maturities, they cannot
+// share the same normalized PDE solution.
+
+void MixedPDEParametersHandled(
+    double spot,
+    double strike,
+    double vol1,
+    double vol2,
+    double maturity,
+    double rate)
+{
+    if (spot <= 0 || strike <= 0 || maturity < 0.01) return;
+    if (vol1 < 0.05 || vol2 < 0.05) return;
+    if (std::abs(vol1 - vol2) < 0.05) return;  // Need different vols
+
+    // Create batch with different volatilities (cannot share PDE)
+    std::vector<AmericanOptionParams> params;
+    params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
+                                   OptionType::PUT, vol1, {}));
+    params.push_back(PricingParams(spot, strike * 1.05, maturity, rate, 0.0,
+                                   OptionType::PUT, vol2, {}));
+
+    BatchAmericanOptionSolver solver;
+    solver.set_use_normalized(true);
+    auto results = solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    // Both should solve successfully despite different vol groups
+    ASSERT_EQ(results.results.size(), 2);
+
+    if (results.results[0].has_value() && results.results[1].has_value()) {
+        double price1 = results.results[0]->value();
+        double price2 = results.results[1]->value();
+
+        // Higher vol should give higher price
+        if (vol2 > vol1) {
+            // Price2 (higher vol, higher strike) vs Price1 (lower vol, lower strike)
+            // Can't directly compare due to both vol and strike differing
+            // Just verify both are positive and reasonable
+            EXPECT_GT(price1, 0.0);
+            EXPECT_GT(price2, 0.0);
+        }
+    }
+}
+
+FUZZ_TEST(BatchSolverFuzz, MixedPDEParametersHandled)
+    .WithDomains(
+        fuzztest::InRange(90.0, 110.0),         // spot
+        fuzztest::InRange(90.0, 110.0),         // strike
+        fuzztest::InRange(0.10, 0.40),          // vol1
+        fuzztest::InRange(0.10, 0.40),          // vol2
+        fuzztest::InRange(0.1, 2.0),            // maturity
+        fuzztest::InRange(0.0, 0.10)            // rate
+    );
+
+// ============================================================================
+// Property: Normalized chain never produces NaN/Inf
+// ============================================================================
+// The normalized chain solver must handle all valid inputs without
+// producing NaN or Inf values in prices or Greeks.
+
+void NormalizedChainNoNaNInf(
+    double spot,
+    double strike_base,
+    size_t batch_size,
+    double maturity,
+    double volatility,
+    double rate,
+    double dividend)
+{
+    if (spot <= 0 || strike_base <= 0 || maturity < 0.01 || volatility < 0.01) return;
+    if (batch_size < 1 || batch_size > 20) return;
+    if (dividend < 0 || dividend > 0.15) return;
+
+    std::vector<AmericanOptionParams> params;
+    for (size_t i = 0; i < batch_size; ++i) {
+        double K = strike_base + i * 2.0;
+        if (K <= 0) continue;
+        params.push_back(PricingParams(spot, K, maturity, rate, dividend,
+                                       OptionType::PUT, volatility, {}));
+    }
+
+    if (params.empty()) return;
+
+    BatchAmericanOptionSolver solver;
+    solver.set_use_normalized(true);
+    auto results = solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    for (size_t i = 0; i < results.results.size(); ++i) {
+        if (!results.results[i].has_value()) continue;
+
+        double price = results.results[i]->value();
+        double delta = results.results[i]->delta();
+        double gamma = results.results[i]->gamma();
+
+        EXPECT_FALSE(std::isnan(price)) << "NaN price at index " << i;
+        EXPECT_FALSE(std::isinf(price)) << "Inf price at index " << i;
+        EXPECT_FALSE(std::isnan(delta)) << "NaN delta at index " << i;
+        EXPECT_FALSE(std::isinf(delta)) << "Inf delta at index " << i;
+        EXPECT_FALSE(std::isnan(gamma)) << "NaN gamma at index " << i;
+        EXPECT_FALSE(std::isinf(gamma)) << "Inf gamma at index " << i;
+    }
+}
+
+FUZZ_TEST(BatchSolverFuzz, NormalizedChainNoNaNInf)
+    .WithDomains(
+        fuzztest::InRange(50.0, 200.0),         // spot
+        fuzztest::InRange(50.0, 150.0),         // strike_base
+        fuzztest::InRange<size_t>(1, 15),       // batch_size
+        fuzztest::InRange(0.01, 3.0),           // maturity
+        fuzztest::InRange(0.05, 1.0),           // volatility
+        fuzztest::InRange(-0.05, 0.20),         // rate
+        fuzztest::InRange(0.0, 0.10)            // dividend
+    );
 
 // ============================================================================
 // Regression tests for bugs found by fuzzing
@@ -615,4 +972,31 @@ TEST(BatchSolverFuzz, RegressionDeepITMCallNegativeGamma) {
     // The magnitude should be small (< 0.01)
     EXPECT_GT(gamma, -0.01)
         << "Deep ITM gamma too negative - may indicate regression";
+}
+
+// ============================================================================
+// Standard unit test to verify fuzz test setup works
+// ============================================================================
+
+TEST(BatchSolverFuzz, SmokeTest) {
+    // Simple test to verify the fuzz test infrastructure compiles and runs
+    BatchSolverNeverCrashes(101, 5, 100.0, 100.0, 1.0, 0.20, 0.05, true);
+    OptionPricesNonNegative(100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false);
+    AmericanOptionLowerBounds(100.0, 100.0, 1.0, 0.20, 0.05, false);
+    GridSizeConsistency(101, 5, true);
+    PutPriceMonotonicInStrike(100.0, 90.0, 110.0, 1.0, 0.20, 0.05);
+    CallPriceMonotonicInStrike(100.0, 90.0, 110.0, 1.0, 0.20, 0.05);
+    PriceIncreasesWithVolatility(100.0, 100.0, 1.0, 0.15, 0.30, 0.05, true);
+    PriceIncreasesWithMaturity(100.0, 100.0, 0.5, 1.5, 0.20, 0.05, false);
+    DeltaWithinBounds(100.0, 100.0, 1.0, 0.20, 0.05, true);
+    GammaNonNegative(100.0, 100.0, 1.0, 0.20, 0.05, false);
+    ExtremeParametersNoExceptions(100.0, 100.0, 1.0, 0.20, 0.05);
+
+    // Normalized chain solver invariant tests
+    NormalizedVsRegularConsistency(100.0, 90.0, 5, 1.0, 0.20, 0.05, false);
+    ScaleInvarianceProperty(100.0, 100.0, 1.5, 1.0, 0.20, 0.05, false);
+    PDEGroupingConsistency(90.0, 5, 1.0, 0.20, 0.05, false);
+    WideMoneynessCoverage(100.0, 80.0, 120.0, 5, 1.0, 0.20, 0.05);
+    MixedPDEParametersHandled(100.0, 100.0, 0.15, 0.30, 1.0, 0.05);
+    NormalizedChainNoNaNInf(100.0, 90.0, 5, 1.0, 0.20, 0.05, 0.02);
 }
