@@ -162,6 +162,7 @@ public:
     double price() const;          // Interpolate at spot
     double delta() const;          // ∂V/∂S via CenteredDifference
     double gamma() const;          // ∂²V/∂S²
+    double theta() const;          // ∂V/∂t via backward difference
 
     std::span<const double> snapshot(size_t idx) const;  // Recorded solution
 
@@ -171,7 +172,9 @@ private:
 };
 ```
 
-**Lazy Greeks:** Delta and gamma computed on first access using `CenteredDifference` operator (cached afterward)
+**Lazy Greeks:** Delta, gamma, and theta computed on first access (cached afterward):
+- Delta/gamma: `CenteredDifference` spatial derivatives
+- Theta: Backward difference `(V_prev - V_current) / dt` from stored snapshots
 
 ---
 
@@ -469,6 +472,32 @@ public:
 **Query:**
 - 4D B-spline evaluation: ~193ns (price)
 - Greeks: ~952ns (vega + gamma)
+
+**Automatic Grid Estimation:**
+
+Use `from_chain_auto()` to automatically estimate optimal grid density:
+```cpp
+auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto(
+    chain, grid_spec, n_time, OptionType::PUT,
+    PriceTableGridAccuracyParams<4>{.target_iv_error = 0.0005}  // 5 bps
+).value();
+```
+
+Grid density is determined by curvature-based budget allocation:
+- σ (volatility): 1.5× weight (highest curvature, vega non-linearity)
+- m (moneyness): 1.0× (ATM gamma peak handled by log-transform)
+- τ (maturity): 1.0× (baseline, sqrt-tau behavior)
+- r (rate): 0.6× (nearly linear discounting)
+
+**Adaptive Grid Refinement:**
+
+For production accuracy, use `AdaptiveGridBuilder` for iterative refinement:
+```cpp
+AdaptiveGridParams params{.target_iv_error = 0.0005, .max_iterations = 5};
+AdaptiveGridBuilder builder(params);
+auto result = builder.build(chain, grid_spec, n_time, OptionType::PUT);
+// result->achieved_max_error <= params.target_iv_error when target_met
+```
 
 ### Memory Usage
 
