@@ -57,6 +57,24 @@
 #endif
 
 /**
+ * Multi-ISA dispatch via function multi-versioning
+ *
+ * MANGO_TARGET_CLONES enables [[gnu::target_clones]] for automatic ISA
+ * selection at runtime. This generates multiple function versions for
+ * different CPU feature levels (SSE2, AVX2, AVX-512).
+ *
+ * Disable with -DMANGO_DISABLE_TARGET_CLONES=1 for:
+ * - Fuzz testing (avoids ABI issues with Clang + libc++)
+ * - Debugging (simpler code with single version)
+ * - Platforms without multi-versioning support
+ */
+#if !defined(MANGO_DISABLE_TARGET_CLONES) && (defined(__GNUC__) || defined(__clang__))
+    #define MANGO_TARGET_CLONES(...) [[gnu::target_clones(__VA_ARGS__)]]
+#else
+    #define MANGO_TARGET_CLONES(...)
+#endif
+
+/**
  * Design notes:
  *
  * 1. OpenMP: Uses `#pragma omp simd` for vectorization and `#pragma omp parallel for`

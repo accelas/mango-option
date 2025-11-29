@@ -56,6 +56,9 @@ def _impl(ctx):
                             "-std=c++23",
                             "-stdlib=libc++",
                             "-DMDSPAN_USE_BRACKET_OPERATOR=1",
+                            # Disable target_clones to avoid mixed ISA code with
+                            # different std::span instantiations
+                            "-DMANGO_DISABLE_TARGET_CLONES=1",
                         ],
                     ),
                 ],
