@@ -459,3 +459,104 @@ TEST(ProductionConfig, BatchSolver_NegativeRate) {
 
     EXPECT_EQ(results.failed_count, 0);
 }
+
+// ============================================================================
+// Benchmark-as-Test: Full E2E Workflow
+// ============================================================================
+// These tests mirror the benchmark setup to catch regressions that benchmarks
+// would expose but aren't run in CI.
+
+TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
+    // Mirrors BM_API_BuildPriceTable from market_iv_e2e_benchmark.cc
+    auto grid = generate_market_grid();
+
+    auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
+    ASSERT_TRUE(grid_spec_result.has_value());
+
+    auto builder_result = PriceTableBuilder<4>::from_vectors(
+        grid.moneyness,
+        grid.maturities,
+        grid.volatilities,
+        grid.rates,
+        grid.K_ref,
+        grid_spec_result.value(),
+        500,
+        OptionType::PUT,
+        grid.dividend);
+
+    ASSERT_TRUE(builder_result.has_value())
+        << "PriceTableBuilder::from_vectors failed";
+
+    auto [builder, axes] = std::move(builder_result.value());
+    auto result = builder.build(axes);
+
+    ASSERT_TRUE(result.has_value())
+        << "PriceTableBuilder::build failed with error code "
+        << static_cast<int>(result.error().code);
+
+    // Verify result structure
+    EXPECT_NE(result->surface, nullptr);
+    EXPECT_GT(result->n_pde_solves, 0);
+    EXPECT_EQ(result->failed_pde_slices, 0)
+        << "PDE slices failed - indicates solver configuration issue";
+}
+
+TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
+    // Build price table first
+    auto grid = generate_market_grid();
+
+    auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
+    ASSERT_TRUE(grid_spec_result.has_value());
+
+    auto builder_result = PriceTableBuilder<4>::from_vectors(
+        grid.moneyness,
+        grid.maturities,
+        grid.volatilities,
+        grid.rates,
+        grid.K_ref,
+        grid_spec_result.value(),
+        500,
+        OptionType::PUT,
+        grid.dividend);
+
+    ASSERT_TRUE(builder_result.has_value());
+    auto [builder, axes] = std::move(builder_result.value());
+    auto table_result = builder.build(axes);
+    ASSERT_TRUE(table_result.has_value());
+
+    // Create IV solver from surface
+    IVSolverInterpolatedConfig solver_config;
+    solver_config.max_iterations = 50;
+    solver_config.tolerance = 1e-6;
+
+    auto iv_solver_result = IVSolverInterpolated::create(
+        table_result->surface, solver_config);
+
+    ASSERT_TRUE(iv_solver_result.has_value())
+        << "IVSolverInterpolated::create failed";
+
+    // Test IV solve at a sample point
+    const auto& iv_solver = iv_solver_result.value();
+    double spot = grid.spot;
+    double strike = spot / 1.0;  // ATM
+    double maturity = 0.5;
+    double rate = 0.04;
+    double vol = 0.20;
+
+    // Get price from surface
+    double m = spot / strike;
+    double price = table_result->surface->value({m, maturity, vol, rate});
+    EXPECT_GT(price, 0.0);
+
+    // Solve for IV
+    IVQuery query{spot, strike, maturity, rate, grid.dividend,
+                  OptionType::PUT, price};
+    auto iv_result = iv_solver.solve_impl(query);
+
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solve failed for ATM option";
+
+    // Should recover approximately the input volatility
+    EXPECT_NEAR(iv_result->implied_vol, vol, 0.01)
+        << "IV solve did not recover input volatility";
+}

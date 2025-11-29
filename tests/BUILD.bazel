@@ -1243,3 +1243,24 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# FuzzTest disabled due to GCC 14 + C++23 compatibility issues
+# See MODULE.bazel for details. To enable:
+# 1. Uncomment fuzztest in MODULE.bazel
+# 2. Add warning suppressions to toolchain/cc_toolchain_config.bzl
+# 3. Uncomment this target
+#
+# cc_test(
+#     name = "batch_solver_fuzz_test",
+#     size = "medium",
+#     timeout = "moderate",
+#     srcs = ["batch_solver_fuzz_test.cc"],
+#     copts = ["-fopenmp"],
+#     linkopts = ["-fopenmp"],
+#     deps = [
+#         "//src/option:american_option_batch",
+#         "//src/pde/core:grid",
+#         "@fuzztest//fuzztest",
+#         "@fuzztest//fuzztest:fuzztest_gtest_main",
+#     ],
+# )
