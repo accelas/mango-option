@@ -64,7 +64,7 @@ void BatchSolverNeverCrashes(
     EXPECT_EQ(results.results.size(), params.size());
 }
 
-FUZZ_TEST(BatchSolverFuzz, NeverCrashes)
+FUZZ_TEST(BatchSolverFuzz, BatchSolverNeverCrashes)
     .WithDomains(
         fuzztest::InRange<size_t>(11, 501),     // n_points
         fuzztest::InRange<size_t>(1, 50),       // batch_size
@@ -107,7 +107,7 @@ void OptionPricesNonNegative(
     }
 }
 
-FUZZ_TEST(BatchSolverFuzz, PricesNonNegative)
+FUZZ_TEST(BatchSolverFuzz, OptionPricesNonNegative)
     .WithDomains(
         fuzztest::InRange(10.0, 500.0),         // spot
         fuzztest::InRange(10.0, 500.0),         // strike
@@ -161,7 +161,7 @@ void AmericanOptionLowerBounds(
     }
 }
 
-FUZZ_TEST(BatchSolverFuzz, LowerBounds)
+FUZZ_TEST(BatchSolverFuzz, AmericanOptionLowerBounds)
     .WithDomains(
         fuzztest::InRange(50.0, 150.0),         // spot
         fuzztest::InRange(50.0, 150.0),         // strike

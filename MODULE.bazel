@@ -3,11 +3,11 @@
 bazel_dep(name = "googletest", version = "1.14.0")
 bazel_dep(name = "google_benchmark", version = "1.9.4")
 
-# FuzzTest for property-based fuzz testing
-# NOTE: Disabled due to GCC 14 + C++23 compatibility issues with dependencies
-# (protobuf, abseil, riegeli). See issue #274 for tracking.
-# To enable, uncomment and add warning suppressions to toolchain config:
-#   -Wno-missing-requires, -Wno-attributes, -Wno-sign-compare, -Wno-array-bounds
+# FuzzTest for property-based fuzz testing (DISABLED)
+# NOTE: Currently disabled due to C++23 ABI compatibility issues:
+# - GCC 14: FuzzTest dependencies have -Werror failures
+# - Clang 19 + libstdc++: std::span ODR violations
+# See tests/BUILD.bazel for details and re-enable instructions.
 # bazel_dep(name = "fuzztest", version = "20241028.0")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "rules_python", version = "0.34.0")

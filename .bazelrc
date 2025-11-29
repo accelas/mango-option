@@ -24,3 +24,12 @@ build --define=enable_arrow=true
 # All C++ flags (std, warnings, ISA) are configured in //toolchain:cc_toolchain_config.bzl
 # To use the custom toolchain: --extra_toolchains=//toolchain:cc_toolchain_for_k8
 # Or it's registered by default in MODULE.bazel
+
+# Clang toolchain configuration
+# Use --config=clang to build with Clang instead of GCC
+# NOTE: Clang + libstdc++ has C++23 ABI issues (std::span ODR violations)
+# Currently only useful for building external dependencies that require Clang.
+# See toolchain/cc_toolchain_config_clang.bzl for details.
+build:clang --extra_toolchains=//toolchain:cc_toolchain_clang_for_k8
+build:clang --action_env=CC=clang
+build:clang --action_env=CXX=clang++
