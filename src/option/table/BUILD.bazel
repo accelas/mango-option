@@ -130,3 +130,54 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "error_attribution",
+    hdrs = ["error_attribution.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "slice_cache",
+    hdrs = ["slice_cache.hpp"],
+    deps = [
+        "//src/option:american_option_result",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "adaptive_grid_types",
+    hdrs = ["adaptive_grid_types.hpp"],
+    deps = [
+        ":price_table_axes",
+        ":price_table_surface",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "adaptive_grid_builder",
+    srcs = ["adaptive_grid_builder.cpp"],
+    hdrs = ["adaptive_grid_builder.hpp"],
+    copts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-pthread",
+    ],
+    deps = [
+        ":adaptive_grid_types",
+        ":error_attribution",
+        ":price_table_builder",
+        ":slice_cache",
+        "//src/math:black_scholes_analytics",
+        "//src/math:latin_hypercube",
+        "//src/option:option_chain",
+        "//src/pde/core:grid",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
