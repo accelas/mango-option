@@ -3,14 +3,12 @@
 bazel_dep(name = "googletest", version = "1.14.0")
 bazel_dep(name = "google_benchmark", version = "1.9.4")
 
-# FuzzTest for property-based fuzz testing (DISABLED)
-# Blocked by C++23 ABI incompatibilities:
-# - GCC 14: FuzzTest dependencies (protobuf, abseil) fail with -Werror
-# - Clang + libstdc++: std::span ODR violations (can't fix with extern template
-#   without modifying every source file that uses std::span)
-# - Clang + libc++: Incompatible with pybind11 Python bindings
-# See tests/BUILD.bazel for details. Preserved for future re-enablement.
-# bazel_dep(name = "fuzztest", version = "20241028.0")
+# FuzzTest for property-based fuzz testing
+# NOTE: Requires Earthly container with Clang + libc++ due to ABI issues:
+# - GCC 14: FuzzTest dependencies fail with -Werror
+# - Clang + libstdc++: std::span ODR violations
+# Run fuzz tests via: earthly +fuzz-test
+bazel_dep(name = "fuzztest", version = "20241028.0")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "rules_python", version = "0.34.0")
 bazel_dep(name = "rules_pkg", version = "1.1.0")

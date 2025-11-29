@@ -25,11 +25,18 @@ build --define=enable_arrow=true
 # To use the custom toolchain: --extra_toolchains=//toolchain:cc_toolchain_for_k8
 # Or it's registered by default in MODULE.bazel
 
-# Clang toolchain configuration
+# Clang + libstdc++ toolchain configuration
 # Use --config=clang to build with Clang instead of GCC
-# NOTE: Clang + libstdc++ has C++23 ABI issues (std::span ODR violations)
-# Currently only useful for building external dependencies that require Clang.
+# NOTE: Has C++23 ABI issues (std::span ODR violations) - not recommended.
 # See toolchain/cc_toolchain_config_clang.bzl for details.
 build:clang --extra_toolchains=//toolchain:cc_toolchain_clang_for_k8
 build:clang --action_env=CC=clang
 build:clang --action_env=CXX=clang++
+
+# Clang + libc++ toolchain configuration for fuzz testing
+# Use --config=fuzz for FuzzTest (requires Earthly container with libc++)
+# Run via: earthly +fuzz-test
+# NOTE: Incompatible with Python bindings (pybind11), so only for fuzz tests.
+build:fuzz --extra_toolchains=//toolchain:cc_toolchain_fuzz_for_k8
+build:fuzz --action_env=CC=clang-19
+build:fuzz --action_env=CXX=clang++-19

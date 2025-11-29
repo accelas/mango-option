@@ -1244,34 +1244,25 @@ cc_test(
     ],
 )
 
-# FuzzTest is DISABLED due to C++23 ABI incompatibilities that cannot be
-# easily worked around:
+# FuzzTest requires Earthly container with Clang + libc++ due to C++23 ABI issues:
+# - GCC 14: FuzzTest dependencies have -Werror failures
+# - Clang + libstdc++: std::span ODR violations
+# - Clang + libc++: Works but incompatible with pybind11 (Python bindings)
 #
-# 1. GCC 14: FuzzTest dependencies (protobuf, abseil, riegeli) have -Werror
-#    failures with C++23 mode
-#
-# 2. Clang + libstdc++: std::span template instantiation ODR violations
-#    - Different TUs get different inlining decisions for std::span members
-#    - Can't fix with extern template without modifying every source file
-#    - See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105651
-#
-# 3. Clang + libc++: Incompatible with pybind11 Python bindings
-#
-# The fuzz test source file (batch_solver_fuzz_test.cc) is preserved for
-# future use when upstream fixes become available.
-#
-# cc_test(
-#     name = "batch_solver_fuzz_test",
-#     size = "medium",
-#     timeout = "moderate",
-#     srcs = ["batch_solver_fuzz_test.cc"],
-#     copts = ["-fopenmp"],
-#     linkopts = ["-fopenmp"],
-#     tags = ["clang-only", "manual"],
-#     deps = [
-#         "//src/option:american_option_batch",
-#         "//src/pde/core:grid",
-#         "@fuzztest//fuzztest",
-#         "@fuzztest//fuzztest:fuzztest_gtest_main",
-#     ],
-# )
+# Run via: earthly +fuzz-test
+# Or manually in a libc++ environment: bazel test --config=fuzz //tests:batch_solver_fuzz_test
+cc_test(
+    name = "batch_solver_fuzz_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["batch_solver_fuzz_test.cc"],
+    tags = [
+        "manual",  # Don't run with bazel test //... (requires Earthly)
+    ],
+    deps = [
+        "//src/option:american_option_batch",
+        "//src/pde/core:grid",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+    ],
+)

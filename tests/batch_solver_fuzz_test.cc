@@ -6,11 +6,13 @@
  * hand-written tests miss. FuzzTest generates random valid inputs and
  * verifies that invariants hold.
  *
- * CURRENTLY DISABLED due to C++23 ABI incompatibilities.
- * See tests/BUILD.bazel for details.
+ * Requires Earthly container with Clang + libc++ due to C++23 ABI issues.
  *
- * To run when re-enabled:
- *   bazel test --config=clang //tests:batch_solver_fuzz_test
+ * Run via:
+ *   earthly +fuzz-test
+ *
+ * Or manually in a libc++ environment:
+ *   bazel test --config=fuzz //tests:batch_solver_fuzz_test
  */
 
 #include "fuzztest/fuzztest.h"
