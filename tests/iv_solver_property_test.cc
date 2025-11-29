@@ -29,7 +29,6 @@ using namespace mango;
 
 class IVSolverPropertyTest : public ::testing::Test {
 protected:
-    BatchAmericanOptionSolver pricer_;
     IVSolverFDMConfig config_;
 
     void SetUp() override {
@@ -37,14 +36,15 @@ protected:
         config_.root_config.tolerance = 1e-6;
     }
 
-    // Helper to price an option
+    // Helper to price an option - creates solver locally to avoid static init issues
     std::optional<double> price_option(double spot, double strike, double maturity,
                                        double rate, double dividend, double vol,
                                        OptionType type) {
+        BatchAmericanOptionSolver pricer;
         std::vector<AmericanOptionParams> params;
         params.push_back(PricingParams(spot, strike, maturity, rate, dividend,
                                        type, vol, {}));
-        auto results = pricer_.solve_batch(params, false);
+        auto results = pricer.solve_batch(params, false);
         if (results.results[0].has_value()) {
             return results.results[0]->value();
         }
