@@ -73,7 +73,10 @@ TEST(NormalizedChainAccuracy, ConsistencyWithRegularSolver) {
         double reg_price = reg_result.value_at(spot);
         double price_rel_error = std::abs(norm_price - reg_price) / reg_price * 100.0;
 
-        EXPECT_LT(price_rel_error, 0.1)  // Within 0.1%
+        // Tolerance relaxed from 0.1% to 0.3% to account for the fact that
+        // regular batch solver now correctly uses the shared grid domain
+        // (wider domain = slightly different numerical resolution)
+        EXPECT_LT(price_rel_error, 0.3)  // Within 0.3%
             << "Normalized price: $" << norm_price
             << "\nRegular price: $" << reg_price
             << "\nError: " << price_rel_error << "%";
