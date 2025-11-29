@@ -4,11 +4,12 @@ bazel_dep(name = "googletest", version = "1.14.0")
 bazel_dep(name = "google_benchmark", version = "1.9.4")
 
 # FuzzTest for property-based fuzz testing (DISABLED)
-# NOTE: Currently disabled due to C++23 ABI compatibility issues:
-# - GCC 14: FuzzTest dependencies have -Werror failures
-# - Clang 19 + libstdc++: std::span ODR violations
-# - Clang 19 + libc++: Incompatible with Python bindings (pybind11)
-# See tests/BUILD.bazel for details and re-enable instructions.
+# Blocked by C++23 ABI incompatibilities:
+# - GCC 14: FuzzTest dependencies (protobuf, abseil) fail with -Werror
+# - Clang + libstdc++: std::span ODR violations (can't fix with extern template
+#   without modifying every source file that uses std::span)
+# - Clang + libc++: Incompatible with pybind11 Python bindings
+# See tests/BUILD.bazel for details. Preserved for future re-enablement.
 # bazel_dep(name = "fuzztest", version = "20241028.0")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "rules_python", version = "0.34.0")

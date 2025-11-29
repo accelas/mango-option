@@ -1244,18 +1244,21 @@ cc_test(
     ],
 )
 
-# FuzzTest is currently DISABLED due to C++23 ABI compatibility issues:
-# - GCC 14: FuzzTest dependencies (protobuf, abseil, riegeli) have -Werror failures
-# - Clang 19 + libstdc++: std::span template instantiation ODR violations
-#   (undefined symbol: std::span<double const>::span<double const*>)
-# - Clang 19 + libc++: Incompatible with Python bindings (pybind11)
+# FuzzTest is DISABLED due to C++23 ABI incompatibilities that cannot be
+# easily worked around:
 #
-# To re-enable FuzzTest, one of these approaches is needed:
-# 1. Wait for FuzzTest to update dependencies for GCC 14 + C++23 compatibility
-# 2. Add explicit std::span template instantiations in project code
+# 1. GCC 14: FuzzTest dependencies (protobuf, abseil, riegeli) have -Werror
+#    failures with C++23 mode
 #
-# The fuzz test source file is preserved for future use.
-# See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105651
+# 2. Clang + libstdc++: std::span template instantiation ODR violations
+#    - Different TUs get different inlining decisions for std::span members
+#    - Can't fix with extern template without modifying every source file
+#    - See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105651
+#
+# 3. Clang + libc++: Incompatible with pybind11 Python bindings
+#
+# The fuzz test source file (batch_solver_fuzz_test.cc) is preserved for
+# future use when upstream fixes become available.
 #
 # cc_test(
 #     name = "batch_solver_fuzz_test",
@@ -1264,7 +1267,7 @@ cc_test(
 #     srcs = ["batch_solver_fuzz_test.cc"],
 #     copts = ["-fopenmp"],
 #     linkopts = ["-fopenmp"],
-#     tags = ["clang-only"],
+#     tags = ["clang-only", "manual"],
 #     deps = [
 #         "//src/option:american_option_batch",
 #         "//src/pde/core:grid",
