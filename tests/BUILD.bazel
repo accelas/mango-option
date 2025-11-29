@@ -526,18 +526,13 @@ cc_test(
 
 cc_test(
     name = "iv_solver_property_test",
-    size = "large",
-    timeout = "moderate",
+    size = "medium",
     srcs = ["iv_solver_property_test.cc"],
     deps = [
         "//src/option:american_option_batch",
         "//src/option:iv_solver_fdm",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
     ],
 )
 
