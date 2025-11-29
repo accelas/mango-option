@@ -289,6 +289,7 @@ def _impl(ctx):
         ],
         cxx_builtin_include_directories = [
             "/usr/lib/llvm-19/lib/clang/19/include",
+            "/usr/lib/llvm-19/include/c++/v1",
             "/usr/include/c++/v1",
             "/usr/local/include",
             "/usr/include/x86_64-linux-gnu",
