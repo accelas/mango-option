@@ -42,7 +42,8 @@ TEST(PriceTableSurfaceTest, ValueInterpolation) {
     PriceTableMetadata meta{.K_ref = 100.0};
     auto surface = PriceTableSurface<2>::build(std::move(axes), std::move(coeffs), meta).value();
 
-    // Query at grid point (should match coefficient)
+    // Query at grid point: value() returns raw B-spline value
+    // At (m=0.8, tau=0.1), the spline value is 1.0 (first coefficient)
     double val = surface->value({0.8, 0.1});
     EXPECT_NEAR(val, 1.0, 1e-10);
 }
@@ -103,6 +104,7 @@ TEST(PriceTableSurfaceTest, Build3DReturnsCorrectTemplateType) {
     std::shared_ptr<const PriceTableSurface<3>> surface = result.value();
     EXPECT_NE(surface, nullptr);
 }
+
 
 } // namespace
 } // namespace mango

@@ -215,6 +215,56 @@ public:
         return repair_failed_slices(tensor, failed_pde, failed_spline, axes);
     }
 
+    // =========================================================================
+    // Internal API for AdaptiveGridBuilder
+    // These methods expose internal functionality for incremental builds.
+    // =========================================================================
+
+    /// Internal API: generate batch of AmericanOptionParams from axes
+    /// Used by AdaptiveGridBuilder for incremental builds
+    [[nodiscard]] std::vector<AmericanOptionParams> make_batch_internal(
+        const PriceTableAxes<N>& axes) const {
+        return make_batch(axes);
+    }
+
+    /// Internal API: solve batch of options
+    /// Used by AdaptiveGridBuilder for incremental builds
+    [[nodiscard]] BatchAmericanOptionResult solve_batch_internal(
+        const std::vector<AmericanOptionParams>& batch,
+        const PriceTableAxes<N>& axes) const {
+        return solve_batch(batch, axes);
+    }
+
+    /// Internal API: extract tensor from batch results
+    /// Used by AdaptiveGridBuilder for incremental builds
+    [[nodiscard]] std::expected<ExtractionResult<N>, PriceTableError> extract_tensor_internal(
+        const BatchAmericanOptionResult& batch,
+        const PriceTableAxes<N>& axes) const {
+        return extract_tensor(batch, axes);
+    }
+
+    /// Internal API: fit B-spline coefficients from tensor
+    /// Used by AdaptiveGridBuilder for incremental builds
+    [[nodiscard]] std::expected<std::vector<double>, PriceTableError> fit_coeffs_internal(
+        const PriceTensor<N>& tensor,
+        const PriceTableAxes<N>& axes) const {
+        auto result = fit_coeffs(tensor, axes);
+        if (!result.has_value()) {
+            return std::unexpected(result.error());
+        }
+        return std::move(result.value().coefficients);
+    }
+
+    /// Internal API: repair failed slices using neighbor interpolation
+    /// Used by AdaptiveGridBuilder for incremental builds
+    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_failed_slices_internal(
+        PriceTensor<N>& tensor,
+        const std::vector<size_t>& failed_pde,
+        const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
+        const PriceTableAxes<N>& axes) const {
+        return repair_failed_slices(tensor, failed_pde, failed_spline, axes);
+    }
+
 private:
     /// Internal result from B-spline coefficient fitting
     struct FitCoeffsResult {

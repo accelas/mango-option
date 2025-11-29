@@ -88,3 +88,13 @@ cc_binary(
         "//src/simple",
     ],
 )
+
+cc_binary(
+    name = "test_cache_example",
+    srcs = ["test_cache_example.cpp"],
+    deps = [
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option:option_chain",
+        "//src/pde/core:grid",
+    ],
+)
