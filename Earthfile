@@ -18,11 +18,12 @@ VERSION 0.8
 fuzz-base:
     FROM ubuntu:24.04
 
-    # Install Clang, libc++, and build tools
+    # Install Clang, libc++, OpenMP, and build tools
     RUN apt-get update && apt-get install -y \
         clang-19 \
         libc++-19-dev \
         libc++abi-19-dev \
+        libomp-19-dev \
         lld-19 \
         curl \
         git \

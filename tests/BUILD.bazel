@@ -1256,6 +1256,7 @@ cc_test(
     size = "medium",
     timeout = "moderate",
     srcs = ["batch_solver_fuzz_test.cc"],
+    # No OpenMP flags - libomp not available in Earthly container
     tags = [
         "manual",  # Don't run with bazel test //... (requires Earthly)
     ],
