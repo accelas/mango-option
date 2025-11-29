@@ -4,6 +4,8 @@
 #include <vector>
 #include <algorithm>
 #include <cstddef>
+#include <numeric>
+#include <ranges>
 
 namespace mango {
 
@@ -53,12 +55,8 @@ struct ErrorBins {
 
         for (size_t d = 0; d < N_DIMS; ++d) {
             // Find max bin count for this dimension
-            size_t max_count = *std::max_element(
-                bin_counts[d].begin(), bin_counts[d].end());
-            size_t total_count = 0;
-            for (size_t b = 0; b < N_BINS; ++b) {
-                total_count += bin_counts[d][b];
-            }
+            size_t max_count = std::ranges::max(bin_counts[d]);
+            size_t total_count = std::reduce(bin_counts[d].begin(), bin_counts[d].end());
 
             if (total_count == 0) continue;
 
@@ -78,13 +76,9 @@ struct ErrorBins {
 
     /// Get bins with error count >= min_count for a dimension
     [[nodiscard]] std::vector<size_t> problematic_bins(size_t dim, size_t min_count = 2) const {
-        std::vector<size_t> result;
-        for (size_t b = 0; b < N_BINS; ++b) {
-            if (bin_counts[dim][b] >= min_count) {
-                result.push_back(b);
-            }
-        }
-        return result;
+        auto indices = std::views::iota(size_t{0}, N_BINS)
+                     | std::views::filter([&](size_t b) { return bin_counts[dim][b] >= min_count; });
+        return std::ranges::to<std::vector<size_t>>(indices);
     }
 
     /// Clear all bins
