@@ -1225,3 +1225,45 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "production_config_integration_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["production_config_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table:price_table_builder",
+        "//src/option/table:price_table_surface",
+        "//src/option:american_option_batch",
+        "//src/option:iv_solver_interpolated",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# FuzzTest requires Earthly container with Clang + libc++ due to C++23 ABI issues:
+# - GCC 14: FuzzTest dependencies have -Werror failures
+# - Clang + libstdc++: std::span ODR violations
+# - Clang + libc++: Works but incompatible with pybind11 (Python bindings)
+#
+# Run via: earthly +fuzz-test
+# Or manually in a libc++ environment: bazel test --config=fuzz //tests:batch_solver_fuzz_test
+cc_test(
+    name = "batch_solver_fuzz_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["batch_solver_fuzz_test.cc"],
+    # No OpenMP flags - libomp not available in Earthly container
+    tags = [
+        "manual",  # Don't run with bazel test //... (requires Earthly)
+    ],
+    deps = [
+        "//src/option:american_option_batch",
+        "//src/pde/core:grid",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+    ],
+)

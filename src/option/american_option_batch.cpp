@@ -376,7 +376,6 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
         // Extract normalized surface u(x,τ)
         const auto& normalized_result = solve_result.results[0].value();
         auto grid = normalized_result.grid();
-        auto x_grid = grid->x();
 
         // For each option in this group, create result with actual params
         // The AmericanOptionResult will interpolate using the normalized grid
