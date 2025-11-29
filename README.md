@@ -21,8 +21,10 @@ Designed for research, prototyping, and production use with a focus on **correct
 - **Implied Volatility** – FDM-based (~19ms) or interpolation-based (~3.5µs)
 - **Price Tables** – Pre-compute 4D B-spline surfaces for sub-microsecond queries (~470ns)
 - **Modern C++23** – std::expected error handling, PMR memory management, SIMD vectorization
+- **Full Greeks** – Delta, gamma, theta, vega from PDE solver
 - **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
 - **Production Ready** – OpenMP batching (15× speedup), USDT tracing, zero-allocation parallel workloads
+- **IV Surface Web App** – Interactive 3D visualization with yfinance data
 
 ---
 
@@ -173,6 +175,8 @@ std::cout << "Price: " << result->value_at(params.spot) << "\n";
 - **Query:** ~470ns (price), ~2.4µs (vega+gamma)
 - **Speedup:** 40,000× vs FDM
 
+**Automatic grid estimation:** Use `from_chain_auto()` to automatically estimate optimal grid density based on target IV error (default: 10 bps)
+
 ---
 
 ## Project Structure
@@ -186,9 +190,11 @@ mango-option/
 │   ├── option/            # American option pricing, IV solvers, price tables
 │   ├── math/              # Root finding, B-splines, tridiagonal solvers
 │   └── support/           # Memory management, CPU features, utilities
-├── tests/                 # 86+ test files with GoogleTest
+├── tests/                 # 100+ test files with GoogleTest
 ├── examples/              # Example programs
 ├── benchmarks/            # Performance benchmarks
+├── apps/                  # Applications
+│   └── iv_surface/        # IV Surface web app (FastAPI + Plotly)
 └── docs/                  # Documentation
 ```
 
@@ -209,7 +215,24 @@ bazel test //tests:iv_solver_test
 bazel test //tests:pde_solver_test --test_output=all
 ```
 
-**Test coverage:** 86+ test files
+**Test coverage:** 100+ test files, plus property-based fuzz tests via Earthly
+
+### Fuzz Testing
+
+Property-based fuzz tests validate mathematical invariants:
+
+```bash
+# Requires Earthly: https://earthly.dev/get-earthly
+earthly +fuzz-test           # Quick run (unit test mode)
+earthly +fuzz-test-extended  # Extended fuzzing (100K iterations)
+```
+
+**Properties tested:**
+- Put/call price monotonicity in strike
+- Vega positivity (price increases with volatility)
+- Delta bounds ([0,1] for calls, [-1,0] for puts)
+- Gamma non-negativity
+- No crashes on extreme parameters
 
 ---
 
