@@ -1,4 +1,15 @@
 cc_test(
+    name = "black_scholes_analytics_test",
+    size = "small",
+    srcs = ["black_scholes_analytics_test.cc"],
+    deps = [
+        "//src/math:black_scholes_analytics",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "parallel_critical_test",
     size = "small",
     srcs = ["parallel_critical_test.cc"],
@@ -1128,6 +1139,84 @@ cc_test(
     deps = [
         "//src/simple:vol_surface",
         "//src/simple:chain_builder",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "latin_hypercube_test",
+    size = "small",
+    srcs = ["latin_hypercube_test.cc"],
+    deps = [
+        "//src/math:latin_hypercube",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "error_attribution_test",
+    size = "small",
+    srcs = ["error_attribution_test.cc"],
+    deps = [
+        "//src/option/table:error_attribution",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "slice_cache_test",
+    size = "small",
+    srcs = ["slice_cache_test.cc"],
+    deps = [
+        "//src/option/table:slice_cache",
+        "//src/option:american_option_result",
+        "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
+        "//src/option:option_spec",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "adaptive_grid_types_test",
+    size = "small",
+    srcs = ["adaptive_grid_types_test.cc"],
+    deps = [
+        "//src/option/table:adaptive_grid_types",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "adaptive_grid_builder_test",
+    size = "small",
+    srcs = ["adaptive_grid_builder_test.cc"],
+    deps = [
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option:american_option_batch",
+        "//src/option:option_chain",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "adaptive_grid_builder_integration_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["adaptive_grid_builder_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option:option_chain",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )
