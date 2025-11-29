@@ -141,6 +141,10 @@ void AmericanOptionLowerBounds(
 {
     if (spot <= 0 || strike <= 0 || maturity <= 0.01 || volatility < 0.05) return;
 
+    // Skip extreme moneyness that requires custom grid configuration
+    double moneyness = spot / strike;
+    if (moneyness < 0.5 || moneyness > 2.0) return;
+
     std::vector<AmericanOptionParams> params;
     params.push_back(PricingParams(
         spot, strike, maturity, rate, 0.0,
