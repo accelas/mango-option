@@ -11,6 +11,8 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 2. [TR-BDF2 Time Stepping](#tr-bdf2-time-stepping)
 3. [American Option Constraints](#american-option-constraints)
 4. [Grid Generation Strategies](#grid-generation-strategies)
+   - [Automatic Grid Estimation](#automatic-grid-estimation)
+   - [Adaptive Grid Refinement](#adaptive-grid-refinement)
 5. [B-Spline Interpolation](#b-spline-interpolation)
 6. [Root Finding Methods](#root-finding-methods)
 7. [Convergence Analysis](#convergence-analysis)
@@ -230,6 +232,88 @@ Automatically merges clusters closer than 0.3/α_avg to prevent wasted resolutio
 - Use single sinh unless strikes differ by >20% (Δx ≥ 0.18)
 - Each additional cluster adds ~10% computational cost
 - Validate spacing via monotonicity checks
+
+### Automatic Grid Estimation
+
+For price table pre-computation, grid density directly impacts IV accuracy. The library provides automatic estimation based on B-spline interpolation error theory.
+
+**Theoretical basis:**
+Cubic B-spline interpolation error is O(h⁴ · f''''(x)), where h is grid spacing and f'''' is the fourth derivative (curvature). Dimensions with higher curvature require finer grids.
+
+**Curvature-based budget allocation:**
+Each dimension receives points proportional to its curvature weight:
+
+| Dimension | Weight | Rationale |
+|-----------|--------|-----------|
+| Volatility (σ) | 1.5 | Highest curvature—vega non-linearity |
+| Moneyness (m) | 1.0 | Moderate—log-transform handles ATM peak |
+| Maturity (τ) | 1.0 | Baseline—moderate √τ behavior |
+| Rate (r) | 0.6 | Lowest—nearly linear discounting |
+
+**Grid density formula:**
+```
+base_points = (scale_factor / target_error)^(1/4)
+n_dim = clamp(base_points × weight_dim, min_points, max_points)
+```
+
+Where:
+- scale_factor ≈ 2.0 (calibrated empirically)
+- target_error = desired IV accuracy (e.g., 0.001 for 10 bps)
+- min_points = 4 (B-spline minimum)
+- max_points = 50 (cost ceiling)
+
+**Grid spacing strategies by dimension:**
+- **Moneyness:** Log-uniform (matches internal storage)
+- **Maturity:** √τ-uniform (concentrates near short expiries)
+- **Volatility:** Uniform (highest curvature needs regular spacing)
+- **Rate:** Uniform (nearly linear response)
+
+**Empirical calibration:**
+A 13×18×8 grid achieves ~4 bps average IV error across typical parameter ranges, which validates the scale_factor and weight choices.
+
+### Adaptive Grid Refinement
+
+When initial estimates are insufficient, iterative refinement improves accuracy:
+
+**Algorithm:**
+```
+1. Build initial grid from curvature-based estimate
+2. Sample N validation points via Latin Hypercube
+3. For each sample:
+   a. Evaluate price from B-spline surface
+   b. Solve fresh FD problem for reference price
+   c. Compute IV error metric
+4. If max(error) ≤ target: done
+5. Else: refine dimension with highest error attribution
+6. Repeat until target met or max_iterations reached
+```
+
+**Error attribution:**
+For each dimension, compute error contribution via partial derivative sensitivity analysis. The dimension causing largest error increase gets refined.
+
+**Refinement strategy:**
+```
+n_dim_new = ceil(n_dim × refinement_factor)
+```
+
+Where refinement_factor ≈ 1.3 provides geometric growth.
+
+**Convergence:**
+- Typical: 2-3 iterations for 5 bps target
+- Maximum: 5 iterations before declaring failure
+- Validation: Fresh FD solves (not self-referential spline comparison)
+
+**Hybrid error metric:**
+For numerical stability, the error metric handles low-vega regions specially:
+
+```
+if vega > vega_floor:
+    error = |IV_interpolated - IV_reference|  # Direct IV error
+else:
+    error = |price_interpolated - price_reference| / vega_floor  # Price-scaled
+```
+
+This prevents numerical instability when vega approaches zero (deep ITM/OTM).
 
 ---
 
