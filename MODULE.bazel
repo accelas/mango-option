@@ -7,6 +7,7 @@ bazel_dep(name = "google_benchmark", version = "1.9.4")
 # NOTE: Currently disabled due to C++23 ABI compatibility issues:
 # - GCC 14: FuzzTest dependencies have -Werror failures
 # - Clang 19 + libstdc++: std::span ODR violations
+# - Clang 19 + libc++: Incompatible with Python bindings (pybind11)
 # See tests/BUILD.bazel for details and re-enable instructions.
 # bazel_dep(name = "fuzztest", version = "20241028.0")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")

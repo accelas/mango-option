@@ -1248,11 +1248,11 @@ cc_test(
 # - GCC 14: FuzzTest dependencies (protobuf, abseil, riegeli) have -Werror failures
 # - Clang 19 + libstdc++: std::span template instantiation ODR violations
 #   (undefined symbol: std::span<double const>::span<double const*>)
+# - Clang 19 + libc++: Incompatible with Python bindings (pybind11)
 #
 # To re-enable FuzzTest, one of these approaches is needed:
 # 1. Wait for FuzzTest to update dependencies for GCC 14 + C++23 compatibility
-# 2. Use Clang + libc++ (requires rebuilding all system libraries)
-# 3. Add explicit std::span template instantiations in project code
+# 2. Add explicit std::span template instantiations in project code
 #
 # The fuzz test source file is preserved for future use.
 # See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105651
