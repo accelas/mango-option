@@ -1225,3 +1225,21 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "production_config_integration_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["production_config_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table:price_table_builder",
+        "//src/option/table:price_table_surface",
+        "//src/option:american_option_batch",
+        "//src/option:iv_solver_interpolated",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
