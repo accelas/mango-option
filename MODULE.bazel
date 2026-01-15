@@ -1,4 +1,7 @@
-# This is a MODULE.bazel file
+module(
+    name = "mango-option",
+    version = "0.1.0",
+)
 
 bazel_dep(name = "googletest", version = "1.14.0")
 bazel_dep(name = "google_benchmark", version = "1.9.4")
