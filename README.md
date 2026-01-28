@@ -164,7 +164,7 @@ std::cout << "Price: " << result->value_at(params.spot) << "\n";
 | Method | Grid | Time/IV | Accuracy |
 |---|---|---|---|
 | FDM-based (auto) | 101×498 | ~19ms | Ground truth |
-| Interpolated (B-spline) | — | ~3.5µs | <1bp error (95%) |
+| Interpolated (B-spline) | — | ~3.5µs | 10–60 bps (profile-dependent) |
 
 **Speedup:** 5,400× for interpolated vs FDM
 

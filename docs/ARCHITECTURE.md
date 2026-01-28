@@ -446,7 +446,7 @@ public:
 |---|---|---|---|
 | FDM-based (101×1k) | ~15ms | Ground truth | Validation, moderate queries |
 | FDM-based (201×2k) | ~61ms | High accuracy | Validation, few queries |
-| Interpolated | ~2.1µs | <1bp error (95%) | Production, many queries |
+| Interpolated | ~2.1µs | 10–60 bps (profile-dependent) | Production, many queries |
 
 **FDM Breakdown (101×1k grid):**
 - 5-8 Brent iterations
