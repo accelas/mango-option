@@ -22,6 +22,12 @@
 
 namespace mango {
 
+enum class PriceTableGridProfile {
+    Fast,
+    Medium,
+    Accurate
+};
+
 /**
  * @brief Grid estimation accuracy parameters for N-dimensional price table
  *
@@ -285,6 +291,33 @@ inline PriceTableGridEstimate<4> estimate_grid_from_chain_bounds(
         sigma_min, sigma_max,
         r_min, r_max,
         params);
+}
+
+inline PriceTableGridAccuracyParams<4> grid_accuracy_profile(
+    PriceTableGridProfile profile)
+{
+    PriceTableGridAccuracyParams<4> params;
+    switch (profile) {
+        case PriceTableGridProfile::Fast:
+            params.target_iv_error = 0.001;  // 10 bps target
+            params.min_points = 4;
+            params.max_points = 50;
+            params.curvature_weights = {1.0, 1.0, 1.5, 0.6};
+            break;
+        case PriceTableGridProfile::Medium:
+            params.target_iv_error = 0.0005;  // 5 bps target
+            params.min_points = 6;
+            params.max_points = 80;
+            params.curvature_weights = {1.0, 1.0, 1.7, 0.6};
+            break;
+        case PriceTableGridProfile::Accurate:
+            params.target_iv_error = 0.0002;  // 2 bps target
+            params.min_points = 8;
+            params.max_points = 120;
+            params.curvature_weights = {1.0, 1.0, 2.0, 0.6};
+            break;
+    }
+    return params;
 }
 
 }  // namespace mango

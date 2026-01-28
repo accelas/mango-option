@@ -7,6 +7,8 @@ pybind_extension(
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
         "//src/option:american_option",
+        "//src/option:option_chain",
+        "//src/option/table:price_table_builder",
         "//src/option/table:price_table_workspace",
         "//src/option/table:price_table_surface",
         "//src/math:root_finding",

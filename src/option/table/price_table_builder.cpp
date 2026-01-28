@@ -665,6 +665,97 @@ PriceTableBuilder<4>::from_chain_auto(
     );
 }
 
+template <>
+std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::from_chain_auto_profile(
+    const OptionChain& chain,
+    PriceTableGridProfile grid_profile,
+    GridAccuracyProfile pde_profile,
+    OptionType type)
+{
+    // Validate chain inputs before calling estimator
+    if (chain.spot <= 0.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
+    }
+    if (chain.strikes.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0, 0});
+    }
+    if (chain.maturities.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 1, 0});
+    }
+    if (chain.implied_vols.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 2, 0});
+    }
+    if (chain.rates.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 3, 0});
+    }
+
+    // Estimate optimal grids based on target accuracy profile
+    auto grid_params = grid_accuracy_profile(grid_profile);
+    auto estimate = estimate_grid_from_chain_bounds(
+        chain.strikes,
+        chain.spot,
+        chain.maturities,
+        chain.implied_vols,
+        chain.rates,
+        grid_params
+    );
+
+    // Check for empty grids (indicates estimation failure)
+    if (estimate.grids[0].empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    // Build PDE grid/time domain from profile using extreme bounds
+    const double strike_min = *std::min_element(chain.strikes.begin(), chain.strikes.end());
+    const double strike_max = *std::max_element(chain.strikes.begin(), chain.strikes.end());
+    const double maturity_max = *std::max_element(chain.maturities.begin(), chain.maturities.end());
+    const double vol_max = *std::max_element(chain.implied_vols.begin(), chain.implied_vols.end());
+    const double rate_max = *std::max_element(chain.rates.begin(), chain.rates.end());
+
+    if (strike_min <= 0.0 || maturity_max <= 0.0 || vol_max <= 0.0) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
+    }
+
+    std::vector<PricingParams> params;
+    params.reserve(2);
+    params.emplace_back(PricingParams{
+        chain.spot,
+        strike_min,
+        maturity_max,
+        rate_max,
+        chain.dividend_yield,
+        type,
+        vol_max
+    });
+    params.emplace_back(PricingParams{
+        chain.spot,
+        strike_max,
+        maturity_max,
+        rate_max,
+        chain.dividend_yield,
+        type,
+        vol_max
+    });
+
+    auto pde_accuracy = grid_accuracy_profile(pde_profile);
+    auto [grid_spec, time_domain] = compute_global_grid_for_batch(params, pde_accuracy);
+
+    // Use estimated grids with from_vectors
+    return from_vectors(
+        std::move(estimate.grids[0]),
+        std::move(estimate.grids[1]),
+        std::move(estimate.grids[2]),
+        std::move(estimate.grids[3]),
+        chain.spot,  // K_ref = spot
+        grid_spec,
+        time_domain.n_steps(),
+        type,
+        chain.dividend_yield,
+        0.0  // max_failure_rate = 0 (strict)
+    );
+}
+
 template <size_t N>
 std::optional<std::pair<size_t, size_t>>
 PriceTableBuilder<N>::find_nearest_valid_neighbor(

@@ -399,6 +399,42 @@ auto result3 = mango::PriceTableBuilder<4>::from_chain(
 // All return std::expected<std::pair<builder, axes>, std::string>
 ```
 
+### Automatic Grid Profiles
+
+**Use profiles to auto-estimate both table grids and PDE grid/time steps:**
+
+```cpp
+auto result = mango::PriceTableBuilder<4>::from_chain_auto_profile(
+    option_chain,
+    mango::PriceTableGridProfile::Medium,
+    mango::GridAccuracyProfile::Medium,
+    mango::OptionType::PUT);
+
+auto [builder, axes] = result.value();
+auto surface_result = builder.build(axes);
+```
+
+**Python convenience wrapper:**
+
+```python
+import mango_option as mo
+
+chain = mo.OptionChain()
+chain.spot = 100.0
+chain.strikes = [90, 95, 100, 105, 110]
+chain.maturities = [0.25, 0.5, 1.0]
+chain.implied_vols = [0.15, 0.20, 0.25]
+chain.rates = [0.02, 0.03]
+chain.dividend_yield = 0.0
+
+surface = mo.build_price_table_surface_from_chain(
+    chain,
+    option_type=mo.OptionType.PUT,
+    grid_profile=mo.PriceTableGridProfile.MEDIUM,
+    pde_profile=mo.GridAccuracyProfile.MEDIUM,
+)
+```
+
 ### Batch Queries on Price Surface
 
 **Evaluate many points efficiently:**

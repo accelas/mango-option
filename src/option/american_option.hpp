@@ -61,6 +61,37 @@ struct GridAccuracyParams {
     size_t max_time_steps = 5000;
 };
 
+enum class GridAccuracyProfile {
+    Fast,
+    Medium,
+    Accurate
+};
+
+inline GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile) {
+    GridAccuracyParams params;
+    switch (profile) {
+        case GridAccuracyProfile::Fast:
+            params.tol = 1e-2;
+            params.min_spatial_points = 100;
+            params.max_spatial_points = 800;
+            params.max_time_steps = 3000;
+            break;
+        case GridAccuracyProfile::Medium:
+            params.tol = 5e-3;
+            params.min_spatial_points = 150;
+            params.max_spatial_points = 1500;
+            params.max_time_steps = 6000;
+            break;
+        case GridAccuracyProfile::Accurate:
+            params.tol = 5e-5;
+            params.min_spatial_points = 201;
+            params.max_spatial_points = 2500;
+            params.max_time_steps = 12000;
+            break;
+    }
+    return params;
+}
+
 /**
  * Estimate grid specification from option parameters.
  *

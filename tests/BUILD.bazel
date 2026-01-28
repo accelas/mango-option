@@ -199,6 +199,7 @@ cc_test(
     srcs = ["price_table_grid_estimator_test.cc"],
     deps = [
         "//src/option/table:price_table_grid_estimator",
+        "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
