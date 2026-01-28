@@ -72,7 +72,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     r_min -= 0.01;
     r_max += 0.01;
 
-    auto grid_params = grid_accuracy_profile(PriceTableGridProfile::Accurate);
+    auto grid_params = grid_accuracy_profile(PriceTableGridProfile::High);
 
     auto grid_estimate = estimate_grid_for_price_table(
         m_min, m_max, tau_min, tau_max, sigma_min, sigma_max, r_min, r_max, grid_params);
@@ -97,7 +97,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         });
     }
 
-    auto pde_accuracy = grid_accuracy_profile(GridAccuracyProfile::Accurate);
+    auto pde_accuracy = grid_accuracy_profile(GridAccuracyProfile::High);
 
     auto [grid_spec, time_domain] = compute_global_grid_for_batch(pde_params, pde_accuracy);
 
