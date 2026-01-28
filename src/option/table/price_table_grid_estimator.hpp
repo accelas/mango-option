@@ -25,7 +25,8 @@ namespace mango {
 enum class PriceTableGridProfile {
     Low,
     Medium,
-    High
+    High,
+    Ultra
 };
 
 /**
@@ -315,6 +316,12 @@ inline PriceTableGridAccuracyParams<4> grid_accuracy_profile(
             params.min_points = 10;
             params.max_points = 160;
             params.curvature_weights = {1.0, 1.0, 2.5, 0.6};
+            break;
+        case PriceTableGridProfile::Ultra:
+            params.target_iv_error = 0.00005;  // 0.5 bps target
+            params.min_points = 12;
+            params.max_points = 200;
+            params.curvature_weights = {1.0, 1.0, 3.0, 0.6};
             break;
     }
     return params;

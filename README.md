@@ -175,7 +175,7 @@ std::cout << "Price: " << result->value_at(params.spot) << "\n";
 - **Query:** ~470ns (price), ~2.4µs (vega+gamma)
 - **Speedup:** 40,000× vs FDM
 
-**Automatic grid estimation:** Use `from_chain_auto()` to estimate optimal grid density based on target IV error (default: 10 bps). For a one-shot wrapper that estimates both table grids and PDE grid/time steps, use `from_chain_auto_profile()` with Low/Medium/High profiles (default: High).
+**Automatic grid estimation:** Use `from_chain_auto()` to estimate optimal grid density based on target IV error (default: 10 bps). For a one-shot wrapper that estimates both table grids and PDE grid/time steps, use `from_chain_auto_profile()` with Low/Medium/High/Ultra profiles (default: High).
 
 **Real data benchmark (SPY, auto-grid profiles, interpolation-only timing):**
 
@@ -184,6 +184,7 @@ std::cout << "Price: " << result->value_at(params.spot) << "\n";
 | Low | 8×8×14×6 | 84 | 4.68 | 214k | 5275 | 190 | 90.5 | 52.5 |
 | Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
 | High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
+| Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
 
 ---
 

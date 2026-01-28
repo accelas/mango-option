@@ -69,12 +69,14 @@ PYBIND11_MODULE(mango_option, m) {
     py::enum_<mango::PriceTableGridProfile>(m, "PriceTableGridProfile")
         .value("LOW", mango::PriceTableGridProfile::Low)
         .value("MEDIUM", mango::PriceTableGridProfile::Medium)
-        .value("HIGH", mango::PriceTableGridProfile::High);
+        .value("HIGH", mango::PriceTableGridProfile::High)
+        .value("ULTRA", mango::PriceTableGridProfile::Ultra);
 
     py::enum_<mango::GridAccuracyProfile>(m, "GridAccuracyProfile")
         .value("LOW", mango::GridAccuracyProfile::Low)
         .value("MEDIUM", mango::GridAccuracyProfile::Medium)
-        .value("HIGH", mango::GridAccuracyProfile::High);
+        .value("HIGH", mango::GridAccuracyProfile::High)
+        .value("ULTRA", mango::GridAccuracyProfile::Ultra);
 
     // OptionChain data container
     py::class_<mango::OptionChain>(m, "OptionChain")
@@ -705,7 +707,7 @@ PYBIND11_MODULE(mango_option, m) {
                 rates: Risk-free rates
                 dividend_yield: Continuous dividend yield (default 0.0)
                 option_type: OptionType.PUT or OptionType.CALL
-                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH)
+                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
 
             Returns:
@@ -745,7 +747,7 @@ PYBIND11_MODULE(mango_option, m) {
             Args:
                 chain: OptionChain with spot, strikes, maturities, implied_vols, rates
                 option_type: OptionType.PUT or OptionType.CALL
-                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH)
+                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
 
             Returns:

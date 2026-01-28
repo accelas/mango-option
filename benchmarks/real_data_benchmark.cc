@@ -1045,10 +1045,12 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     const int profile = static_cast<int>(state.range(0));
     const auto grid_profile = (profile == 0)
         ? PriceTableGridProfile::Low
-        : (profile == 1 ? PriceTableGridProfile::Medium : PriceTableGridProfile::High);
+        : (profile == 1 ? PriceTableGridProfile::Medium
+                        : (profile == 2 ? PriceTableGridProfile::High : PriceTableGridProfile::Ultra));
     const auto pde_profile = (profile == 0)
         ? GridAccuracyProfile::Low
-        : (profile == 1 ? GridAccuracyProfile::Medium : GridAccuracyProfile::High);
+        : (profile == 1 ? GridAccuracyProfile::Medium
+                        : (profile == 2 ? GridAccuracyProfile::High : GridAccuracyProfile::Ultra));
 
     const auto& iv_fixture = GetIVSmileFixture();
 
@@ -1146,7 +1148,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     size_t n_sigma = axes.grids[2].size();
     size_t n_rate = axes.grids[3].size();
 
-    const double target_bps = (profile == 0) ? 200.0 : (profile == 1 ? 150.0 : 100.0);
+    const double target_bps = (profile == 0) ? 200.0 : (profile == 1 ? 150.0 : (profile == 2 ? 100.0 : 75.0));
     const double max_err_bps = max_abs_error * 10000.0;
     const double avg_err_bps = (valid_count > 0 ? sum_abs_error / valid_count : 0.0) * 10000.0;
     const bool achieved = (max_err_bps <= target_bps);
@@ -1176,7 +1178,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         state.counters["fdm_iv_us"] = fdm_iv_us;
     }
 
-    const char* label = (profile == 0) ? "low" : (profile == 1 ? "medium" : "high");
+    const char* label = (profile == 0) ? "low" : (profile == 1 ? "medium" : (profile == 2 ? "high" : "ultra"));
     state.SetLabel(std::format("{} profile, grid={}×{}×{}×{}, {} solves, interp_iv={:.2f}us, fdm_iv={:.2f}us, max={:.1f}bps, avg={:.1f}bps (target {:.1f}bps) {}",
         label,
         n_m, n_tau, n_sigma, n_rate,
@@ -1198,6 +1200,7 @@ BENCHMARK(BM_RealData_GridProfiles)
     ->Arg(0)  // low
     ->Arg(1)  // medium
     ->Arg(2)  // high
+    ->Arg(3)  // ultra
     ->MinTime(kMinBenchmarkTimeSec);
 
 // ============================================================================

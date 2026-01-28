@@ -64,7 +64,8 @@ struct GridAccuracyParams {
 enum class GridAccuracyProfile {
     Low,
     Medium,
-    High
+    High,
+    Ultra
 };
 
 inline GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile) {
@@ -87,6 +88,12 @@ inline GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile) {
             params.min_spatial_points = 301;
             params.max_spatial_points = 3500;
             params.max_time_steps = 16000;
+            break;
+        case GridAccuracyProfile::Ultra:
+            params.tol = 5e-6;
+            params.min_spatial_points = 401;
+            params.max_spatial_points = 5000;
+            params.max_time_steps = 20000;
             break;
     }
     return params;
