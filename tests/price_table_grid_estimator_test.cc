@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_grid_estimator.hpp"
+#include "src/option/american_option.hpp"
 
 namespace mango {
 namespace {
@@ -18,6 +19,36 @@ TEST(PriceTableGridEstimatorTest, DefaultParamsAre4D) {
     EXPECT_DOUBLE_EQ(params.curvature_weights[1], 1.0);   // maturity
     EXPECT_DOUBLE_EQ(params.curvature_weights[2], 1.5);   // volatility (highest)
     EXPECT_DOUBLE_EQ(params.curvature_weights[3], 0.6);   // rate (lowest)
+}
+
+TEST(PriceTableGridEstimatorTest, ProfileOrdering) {
+    auto fast = grid_accuracy_profile(PriceTableGridProfile::Fast);
+    auto medium = grid_accuracy_profile(PriceTableGridProfile::Medium);
+    auto accurate = grid_accuracy_profile(PriceTableGridProfile::Accurate);
+
+    EXPECT_GT(fast.target_iv_error, medium.target_iv_error);
+    EXPECT_GT(medium.target_iv_error, accurate.target_iv_error);
+
+    EXPECT_LT(fast.min_points, medium.min_points);
+    EXPECT_LT(medium.min_points, accurate.min_points);
+
+    EXPECT_LT(fast.max_points, medium.max_points);
+    EXPECT_LT(medium.max_points, accurate.max_points);
+}
+
+TEST(PriceTableGridEstimatorTest, PdeProfileOrdering) {
+    auto fast = grid_accuracy_profile(GridAccuracyProfile::Fast);
+    auto medium = grid_accuracy_profile(GridAccuracyProfile::Medium);
+    auto accurate = grid_accuracy_profile(GridAccuracyProfile::Accurate);
+
+    EXPECT_GT(fast.tol, medium.tol);
+    EXPECT_GT(medium.tol, accurate.tol);
+
+    EXPECT_LT(fast.min_spatial_points, medium.min_spatial_points);
+    EXPECT_LT(medium.min_spatial_points, accurate.min_spatial_points);
+
+    EXPECT_LT(fast.max_spatial_points, medium.max_spatial_points);
+    EXPECT_LT(medium.max_spatial_points, accurate.max_spatial_points);
 }
 
 TEST(PriceTableGridEstimatorTest, EstimateGridForPriceTable_DefaultParams) {

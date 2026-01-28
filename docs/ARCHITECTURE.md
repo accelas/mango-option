@@ -483,6 +483,36 @@ auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto(
 ).value();
 ```
 
+Or use the top-level wrapper that estimates both table grids and PDE grid/time steps:
+```cpp
+auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto_profile(
+    chain,
+    PriceTableGridProfile::Medium,
+    GridAccuracyProfile::Medium,
+    OptionType::PUT
+).value();
+```
+
+Python helper (builds the surface directly):
+```python
+import mango_option as mo
+
+chain = mo.OptionChain()
+chain.spot = 100.0
+chain.strikes = [90, 95, 100, 105, 110]
+chain.maturities = [0.25, 0.5, 1.0]
+chain.implied_vols = [0.15, 0.20, 0.25]
+chain.rates = [0.02, 0.03]
+chain.dividend_yield = 0.0
+
+surface = mo.build_price_table_surface_from_chain(
+    chain,
+    option_type=mo.OptionType.PUT,
+    grid_profile=mo.PriceTableGridProfile.MEDIUM,
+    pde_profile=mo.GridAccuracyProfile.MEDIUM,
+)
+```
+
 Grid density is determined by curvature-based budget allocation:
 - σ (volatility): 1.5× weight (highest curvature, vega non-linearity)
 - m (moneyness): 1.0× (ATM gamma peak handled by log-transform)
