@@ -406,8 +406,8 @@ auto result3 = mango::PriceTableBuilder<4>::from_chain(
 ```cpp
 auto result = mango::PriceTableBuilder<4>::from_chain_auto_profile(
     option_chain,
-    mango::PriceTableGridProfile::Medium,
-    mango::GridAccuracyProfile::Medium,
+    mango::PriceTableGridProfile::High,
+    mango::GridAccuracyProfile::High,
     mango::OptionType::PUT);
 
 auto [builder, axes] = result.value();
@@ -430,10 +430,18 @@ chain.dividend_yield = 0.0
 surface = mo.build_price_table_surface_from_chain(
     chain,
     option_type=mo.OptionType.PUT,
-    grid_profile=mo.PriceTableGridProfile.MEDIUM,
-    pde_profile=mo.GridAccuracyProfile.MEDIUM,
+    grid_profile=mo.PriceTableGridProfile.HIGH,
+    pde_profile=mo.GridAccuracyProfile.HIGH,
 )
 ```
+
+**Real data benchmark (SPY, auto-grid profiles, interpolation-only timing):**
+
+| Profile | Grid (m×τ×σ×r) | PDE solves | interp IV (µs) | interp IV/s | FDM IV (µs) | FDM IV/s | max err (bps) | avg err (bps) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Low | 8×8×14×6 | 84 | 4.68 | 214k | 5275 | 190 | 90.5 | 52.5 |
+| Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
+| High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
 
 ### Batch Queries on Price Surface
 

@@ -181,8 +181,8 @@ public:
     static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
     from_chain_auto_profile(
         const OptionChain& chain,
-        PriceTableGridProfile grid_profile = PriceTableGridProfile::Medium,
-        GridAccuracyProfile pde_profile = GridAccuracyProfile::Medium,
+        PriceTableGridProfile grid_profile = PriceTableGridProfile::High,
+        GridAccuracyProfile pde_profile = GridAccuracyProfile::High,
         OptionType type = OptionType::PUT);
 
     /// For testing: expose make_batch method

@@ -22,33 +22,33 @@ TEST(PriceTableGridEstimatorTest, DefaultParamsAre4D) {
 }
 
 TEST(PriceTableGridEstimatorTest, ProfileOrdering) {
-    auto fast = grid_accuracy_profile(PriceTableGridProfile::Fast);
+    auto low = grid_accuracy_profile(PriceTableGridProfile::Low);
     auto medium = grid_accuracy_profile(PriceTableGridProfile::Medium);
-    auto accurate = grid_accuracy_profile(PriceTableGridProfile::Accurate);
+    auto high = grid_accuracy_profile(PriceTableGridProfile::High);
 
-    EXPECT_GT(fast.target_iv_error, medium.target_iv_error);
-    EXPECT_GT(medium.target_iv_error, accurate.target_iv_error);
+    EXPECT_GT(low.target_iv_error, medium.target_iv_error);
+    EXPECT_GT(medium.target_iv_error, high.target_iv_error);
 
-    EXPECT_LT(fast.min_points, medium.min_points);
-    EXPECT_LT(medium.min_points, accurate.min_points);
+    EXPECT_LT(low.min_points, medium.min_points);
+    EXPECT_LT(medium.min_points, high.min_points);
 
-    EXPECT_LT(fast.max_points, medium.max_points);
-    EXPECT_LT(medium.max_points, accurate.max_points);
+    EXPECT_LT(low.max_points, medium.max_points);
+    EXPECT_LT(medium.max_points, high.max_points);
 }
 
 TEST(PriceTableGridEstimatorTest, PdeProfileOrdering) {
-    auto fast = grid_accuracy_profile(GridAccuracyProfile::Fast);
+    auto low = grid_accuracy_profile(GridAccuracyProfile::Low);
     auto medium = grid_accuracy_profile(GridAccuracyProfile::Medium);
-    auto accurate = grid_accuracy_profile(GridAccuracyProfile::Accurate);
+    auto high = grid_accuracy_profile(GridAccuracyProfile::High);
 
-    EXPECT_GT(fast.tol, medium.tol);
-    EXPECT_GT(medium.tol, accurate.tol);
+    EXPECT_GT(low.tol, medium.tol);
+    EXPECT_GT(medium.tol, high.tol);
 
-    EXPECT_LT(fast.min_spatial_points, medium.min_spatial_points);
-    EXPECT_LT(medium.min_spatial_points, accurate.min_spatial_points);
+    EXPECT_LT(low.min_spatial_points, medium.min_spatial_points);
+    EXPECT_LT(medium.min_spatial_points, high.min_spatial_points);
 
-    EXPECT_LT(fast.max_spatial_points, medium.max_spatial_points);
-    EXPECT_LT(medium.max_spatial_points, accurate.max_spatial_points);
+    EXPECT_LT(low.max_spatial_points, medium.max_spatial_points);
+    EXPECT_LT(medium.max_spatial_points, high.max_spatial_points);
 }
 
 TEST(PriceTableGridEstimatorTest, EstimateGridForPriceTable_DefaultParams) {

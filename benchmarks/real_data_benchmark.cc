@@ -977,7 +977,6 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
             opt.market_price
         ));
     }
-
     // Track accuracy
     double max_abs_error = 0.0;
     double sum_abs_error = 0.0;
@@ -1036,6 +1035,169 @@ BENCHMARK(BM_RealData_GridEstimator)
     ->Arg(10)    // 10 bps = 0.1% (default)
     ->Arg(5)     // 5 bps = 0.05%
     ->Arg(1)     // 1 bps = 0.01% (high accuracy)
+    ->MinTime(kMinBenchmarkTimeSec);
+
+// ============================================================================
+// Automatic Grid Profiles (end-to-end)
+// ============================================================================
+
+static void BM_RealData_GridProfiles(benchmark::State& state) {
+    const int profile = static_cast<int>(state.range(0));
+    const auto grid_profile = (profile == 0)
+        ? PriceTableGridProfile::Low
+        : (profile == 1 ? PriceTableGridProfile::Medium : PriceTableGridProfile::High);
+    const auto pde_profile = (profile == 0)
+        ? GridAccuracyProfile::Low
+        : (profile == 1 ? GridAccuracyProfile::Medium : GridAccuracyProfile::High);
+
+    const auto& iv_fixture = GetIVSmileFixture();
+
+    auto builder_result = PriceTableBuilder<4>::from_chain_auto_profile(
+        iv_fixture.chain,
+        grid_profile,
+        pde_profile,
+        OptionType::PUT);
+    if (!builder_result) {
+        state.SkipWithError("Failed to create price table builder");
+        return;
+    }
+
+    auto& [builder, axes] = builder_result.value();
+    auto table_result = builder.build(axes);
+    if (!table_result) {
+        state.SkipWithError("Failed to build price table");
+        return;
+    }
+
+    auto iv_solver_result = IVSolverInterpolated::create(table_result->surface);
+    if (!iv_solver_result) {
+        state.SkipWithError("Failed to create IV solver");
+        return;
+    }
+    const auto& interp_solver = iv_solver_result.value();
+
+    IVSolverFDMConfig config;
+    config.root_config.max_iter = 100;
+    config.root_config.tolerance = 1e-6;
+    IVSolverFDM fdm_solver(config);
+
+    std::vector<IVQuery> queries;
+    for (const auto& opt : iv_fixture.smile_options) {
+        queries.push_back(IVQuery(
+            SPOT,
+            opt.strike,
+            iv_fixture.target_maturity,
+            RISK_FREE_RATE,
+            DIVIDEND_YIELD,
+            OptionType::PUT,
+            opt.market_price
+        ));
+    }
+
+    double max_abs_error = 0.0;
+    double sum_abs_error = 0.0;
+    size_t valid_count = 0;
+    double last_iter_seconds = 0.0;
+    double last_iter_iv_us = 0.0;
+    double fdm_iter_seconds = 0.0;
+    double fdm_iv_us = 0.0;
+
+    // Compute accuracy once (outside timed loop)
+    for (const auto& query : queries) {
+        auto fdm_result = fdm_solver.solve_impl(query);
+        auto interp_result = interp_solver.solve_impl(query);
+
+        if (fdm_result.has_value() && interp_result.has_value()) {
+            double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
+            max_abs_error = std::max(max_abs_error, abs_error);
+            sum_abs_error += abs_error;
+            valid_count++;
+        }
+    }
+
+    // Measure FDM-only time once (auto-grid per query)
+    if (!queries.empty()) {
+        auto t0 = std::chrono::steady_clock::now();
+        for (const auto& query : queries) {
+            auto fdm_result = fdm_solver.solve_impl(query);
+            benchmark::DoNotOptimize(fdm_result);
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        fdm_iter_seconds = std::chrono::duration<double>(t1 - t0).count();
+        fdm_iv_us = (fdm_iter_seconds / static_cast<double>(queries.size())) * 1e6;
+    }
+
+    // Timed loop: interpolation only
+    for (auto _ : state) {
+        auto t0 = std::chrono::steady_clock::now();
+        for (const auto& query : queries) {
+            auto interp_result = interp_solver.solve_impl(query);
+            benchmark::DoNotOptimize(interp_result);
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        last_iter_seconds = std::chrono::duration<double>(t1 - t0).count();
+        if (!queries.empty()) {
+            last_iter_iv_us = (last_iter_seconds / static_cast<double>(queries.size())) * 1e6;
+        }
+    }
+
+    size_t n_m = axes.grids[0].size();
+    size_t n_tau = axes.grids[1].size();
+    size_t n_sigma = axes.grids[2].size();
+    size_t n_rate = axes.grids[3].size();
+
+    const double target_bps = (profile == 0) ? 200.0 : (profile == 1 ? 150.0 : 100.0);
+    const double max_err_bps = max_abs_error * 10000.0;
+    const double avg_err_bps = (valid_count > 0 ? sum_abs_error / valid_count : 0.0) * 10000.0;
+    const bool achieved = (max_err_bps <= target_bps);
+
+    state.counters["profile"] = static_cast<double>(profile);
+    state.counters["target_bps"] = target_bps;
+    state.counters["max_err_bps"] = max_err_bps;
+    state.counters["avg_err_bps"] = avg_err_bps;
+    state.counters["achieved"] = achieved ? 1.0 : 0.0;
+    state.counters["n_m"] = static_cast<double>(n_m);
+    state.counters["n_tau"] = static_cast<double>(n_tau);
+    state.counters["n_sigma"] = static_cast<double>(n_sigma);
+    state.counters["n_rate"] = static_cast<double>(n_rate);
+    state.counters["pde_solves"] = static_cast<double>(table_result->n_pde_solves);
+    if (last_iter_seconds > 0.0) {
+        state.counters["interp_ivs_per_sec"] =
+            static_cast<double>(queries.size()) / last_iter_seconds;
+    }
+    if (last_iter_iv_us > 0.0) {
+        state.counters["interp_iv_us"] = last_iter_iv_us;
+    }
+    if (fdm_iter_seconds > 0.0) {
+        state.counters["fdm_ivs_per_sec"] =
+            static_cast<double>(queries.size()) / fdm_iter_seconds;
+    }
+    if (fdm_iv_us > 0.0) {
+        state.counters["fdm_iv_us"] = fdm_iv_us;
+    }
+
+    const char* label = (profile == 0) ? "low" : (profile == 1 ? "medium" : "high");
+    state.SetLabel(std::format("{} profile, grid={}×{}×{}×{}, {} solves, interp_iv={:.2f}us, fdm_iv={:.2f}us, max={:.1f}bps, avg={:.1f}bps (target {:.1f}bps) {}",
+        label,
+        n_m, n_tau, n_sigma, n_rate,
+        table_result->n_pde_solves,
+        last_iter_iv_us,
+        fdm_iv_us,
+        max_err_bps,
+        avg_err_bps,
+        target_bps,
+        achieved ? "✓" : "✗"));
+
+
+    if (!achieved) {
+        state.SkipWithError("accuracy target not met");
+    }
+}
+
+BENCHMARK(BM_RealData_GridProfiles)
+    ->Arg(0)  // low
+    ->Arg(1)  // medium
+    ->Arg(2)  // high
     ->MinTime(kMinBenchmarkTimeSec);
 
 // ============================================================================
