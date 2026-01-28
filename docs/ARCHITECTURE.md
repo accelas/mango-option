@@ -446,7 +446,7 @@ public:
 |---|---|---|---|
 | FDM-based (101×1k) | ~15ms | Ground truth | Validation, moderate queries |
 | FDM-based (201×2k) | ~61ms | High accuracy | Validation, few queries |
-| Interpolated | ~2.1µs | <1bp error (95%) | Production, many queries |
+| Interpolated | ~2.1µs | 10–60 bps (profile-dependent) | Production, many queries |
 
 **FDM Breakdown (101×1k grid):**
 - 5-8 Brent iterations
@@ -487,8 +487,8 @@ Or use the top-level wrapper that estimates both table grids and PDE grid/time s
 ```cpp
 auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto_profile(
     chain,
-    PriceTableGridProfile::Medium,
-    GridAccuracyProfile::Medium,
+    PriceTableGridProfile::High,
+    GridAccuracyProfile::High,
     OptionType::PUT
 ).value();
 ```
@@ -508,10 +508,19 @@ chain.dividend_yield = 0.0
 surface = mo.build_price_table_surface_from_chain(
     chain,
     option_type=mo.OptionType.PUT,
-    grid_profile=mo.PriceTableGridProfile.MEDIUM,
-    pde_profile=mo.GridAccuracyProfile.MEDIUM,
+    grid_profile=mo.PriceTableGridProfile.HIGH,
+    pde_profile=mo.GridAccuracyProfile.HIGH,
 )
 ```
+
+Real data benchmark (SPY, auto-grid profiles, interpolation-only timing):
+
+| Profile | Grid (m×τ×σ×r) | PDE solves | interp IV (µs) | interp IV/s | FDM IV (µs) | FDM IV/s | max err (bps) | avg err (bps) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Low | 8×8×14×6 | 84 | 4.68 | 214k | 5275 | 190 | 90.5 | 52.5 |
+| Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
+| High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
+| Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
 
 Grid density is determined by curvature-based budget allocation:
 - σ (volatility): 1.5× weight (highest curvature, vega non-linearity)

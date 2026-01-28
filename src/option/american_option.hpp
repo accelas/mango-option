@@ -62,31 +62,38 @@ struct GridAccuracyParams {
 };
 
 enum class GridAccuracyProfile {
-    Fast,
+    Low,
     Medium,
-    Accurate
+    High,
+    Ultra
 };
 
 inline GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile) {
     GridAccuracyParams params;
     switch (profile) {
-        case GridAccuracyProfile::Fast:
-            params.tol = 1e-2;
-            params.min_spatial_points = 100;
-            params.max_spatial_points = 800;
-            params.max_time_steps = 3000;
-            break;
-        case GridAccuracyProfile::Medium:
+        case GridAccuracyProfile::Low:
             params.tol = 5e-3;
             params.min_spatial_points = 150;
             params.max_spatial_points = 1500;
             params.max_time_steps = 6000;
             break;
-        case GridAccuracyProfile::Accurate:
+        case GridAccuracyProfile::Medium:
             params.tol = 5e-5;
             params.min_spatial_points = 201;
             params.max_spatial_points = 2500;
             params.max_time_steps = 12000;
+            break;
+        case GridAccuracyProfile::High:
+            params.tol = 1e-5;
+            params.min_spatial_points = 301;
+            params.max_spatial_points = 3500;
+            params.max_time_steps = 16000;
+            break;
+        case GridAccuracyProfile::Ultra:
+            params.tol = 5e-6;
+            params.min_spatial_points = 401;
+            params.max_spatial_points = 5000;
+            params.max_time_steps = 20000;
             break;
     }
     return params;

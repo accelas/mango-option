@@ -67,14 +67,16 @@ PYBIND11_MODULE(mango_option, m) {
 
     // Price table grid profile enums
     py::enum_<mango::PriceTableGridProfile>(m, "PriceTableGridProfile")
-        .value("FAST", mango::PriceTableGridProfile::Fast)
+        .value("LOW", mango::PriceTableGridProfile::Low)
         .value("MEDIUM", mango::PriceTableGridProfile::Medium)
-        .value("ACCURATE", mango::PriceTableGridProfile::Accurate);
+        .value("HIGH", mango::PriceTableGridProfile::High)
+        .value("ULTRA", mango::PriceTableGridProfile::Ultra);
 
     py::enum_<mango::GridAccuracyProfile>(m, "GridAccuracyProfile")
-        .value("FAST", mango::GridAccuracyProfile::Fast)
+        .value("LOW", mango::GridAccuracyProfile::Low)
         .value("MEDIUM", mango::GridAccuracyProfile::Medium)
-        .value("ACCURATE", mango::GridAccuracyProfile::Accurate);
+        .value("HIGH", mango::GridAccuracyProfile::High)
+        .value("ULTRA", mango::GridAccuracyProfile::Ultra);
 
     // OptionChain data container
     py::class_<mango::OptionChain>(m, "OptionChain")
@@ -692,8 +694,8 @@ PYBIND11_MODULE(mango_option, m) {
         py::arg("rates"),
         py::arg("dividend_yield") = 0.0,
         py::arg("option_type") = mango::OptionType::PUT,
-        py::arg("grid_profile") = mango::PriceTableGridProfile::Medium,
-        py::arg("pde_profile") = mango::GridAccuracyProfile::Medium,
+        py::arg("grid_profile") = mango::PriceTableGridProfile::High,
+        py::arg("pde_profile") = mango::GridAccuracyProfile::High,
         R"pbdoc(
             Build a 4D price table surface from an option chain using auto-grid profiles.
 
@@ -705,7 +707,7 @@ PYBIND11_MODULE(mango_option, m) {
                 rates: Risk-free rates
                 dividend_yield: Continuous dividend yield (default 0.0)
                 option_type: OptionType.PUT or OptionType.CALL
-                grid_profile: PriceTableGridProfile (FAST/MEDIUM/ACCURATE)
+                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
 
             Returns:
@@ -737,15 +739,15 @@ PYBIND11_MODULE(mango_option, m) {
         },
         py::arg("chain"),
         py::arg("option_type") = mango::OptionType::PUT,
-        py::arg("grid_profile") = mango::PriceTableGridProfile::Medium,
-        py::arg("pde_profile") = mango::GridAccuracyProfile::Medium,
+        py::arg("grid_profile") = mango::PriceTableGridProfile::High,
+        py::arg("pde_profile") = mango::GridAccuracyProfile::High,
         R"pbdoc(
             Build a 4D price table surface from an OptionChain using auto-grid profiles.
 
             Args:
                 chain: OptionChain with spot, strikes, maturities, implied_vols, rates
                 option_type: OptionType.PUT or OptionType.CALL
-                grid_profile: PriceTableGridProfile (FAST/MEDIUM/ACCURATE)
+                grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
 
             Returns:
