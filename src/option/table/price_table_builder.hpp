@@ -168,6 +168,23 @@ public:
         OptionType type = OptionType::PUT,
         const PriceTableGridAccuracyParams<4>& accuracy = {});
 
+    /// Top-level wrapper: estimate both price table grids and PDE grid from profiles
+    ///
+    /// Uses grid estimation for table axes (m, tau, sigma, r) and
+    /// computes a PDE grid/time domain via compute_global_grid_for_batch().
+    ///
+    /// @param chain Option chain (provides domain bounds)
+    /// @param grid_profile Accuracy profile for price table grid estimation
+    /// @param pde_profile Accuracy profile for PDE grid/time domain estimation
+    /// @param type Option type (PUT or CALL)
+    /// @return Pair of (builder, axes) or error
+    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    from_chain_auto_profile(
+        const OptionChain& chain,
+        PriceTableGridProfile grid_profile = PriceTableGridProfile::Medium,
+        GridAccuracyProfile pde_profile = GridAccuracyProfile::Medium,
+        OptionType type = OptionType::PUT);
+
     /// For testing: expose make_batch method
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch_for_testing(
         const PriceTableAxes<N>& axes) const {

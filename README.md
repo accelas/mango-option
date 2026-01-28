@@ -175,7 +175,7 @@ std::cout << "Price: " << result->value_at(params.spot) << "\n";
 - **Query:** ~470ns (price), ~2.4µs (vega+gamma)
 - **Speedup:** 40,000× vs FDM
 
-**Automatic grid estimation:** Use `from_chain_auto()` to automatically estimate optimal grid density based on target IV error (default: 10 bps)
+**Automatic grid estimation:** Use `from_chain_auto()` to estimate optimal grid density based on target IV error (default: 10 bps). For a one-shot wrapper that estimates both table grids and PDE grid/time steps, use `from_chain_auto_profile()` with Fast/Medium/Accurate profiles.
 
 ---
 
@@ -213,6 +213,33 @@ bazel test //tests:iv_solver_test
 
 # Run with verbose output
 bazel test //tests:pde_solver_test --test_output=all
+```
+
+# Python quickstart
+
+```python
+import mango_option as mo
+
+chain = mo.OptionChain()
+chain.spot = 100.0
+chain.strikes = [90, 95, 100, 105, 110]
+chain.maturities = [0.25, 0.5, 1.0]
+chain.implied_vols = [0.15, 0.20, 0.25]
+chain.rates = [0.02, 0.03]
+chain.dividend_yield = 0.0
+
+surface = mo.build_price_table_surface_from_chain(
+    chain,
+    option_type=mo.OptionType.PUT,
+    grid_profile=mo.PriceTableGridProfile.MEDIUM,
+    pde_profile=mo.GridAccuracyProfile.MEDIUM,
+)
+
+solver = mo.IVSolverInterpolated.create(surface)
+ok, result, err = solver.solve_impl(
+    mo.IVQuery(spot=100.0, strike=100.0, maturity=1.0, rate=0.02,
+               dividend_yield=0.0, type=mo.OptionType.PUT, market_price=8.0)
+)
 ```
 
 **Test coverage:** 100+ test files, plus property-based fuzz tests via Earthly
