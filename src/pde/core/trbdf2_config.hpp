@@ -47,7 +47,7 @@ struct TRBDF2Config {
     ObstacleMethod obstacle_method = ObstacleMethod::ProjectedThomas;
 
     /// Rannacher startup: replace first TR-BDF2 step with two half-step implicit Euler solves
-    bool rannacher_startup = false;
+    bool rannacher_startup = true;
 
     /// Compute weight for Stage 1 update
     ///
