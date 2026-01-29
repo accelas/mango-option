@@ -296,6 +296,34 @@ PYBIND11_MODULE(mango_option, m) {
         "american_option_price",
         [](const mango::AmericanOptionParams& params,
            std::optional<mango::GridAccuracyProfile> accuracy_profile) {
+            // Validate parameters before grid estimation to avoid
+            // division-by-zero or extreme allocations
+            auto validation = mango::validate_pricing_params(params);
+            if (!validation.has_value()) {
+                auto err = validation.error();
+                std::string msg = "Invalid pricing parameters: ";
+                switch (err.code) {
+                    case mango::ValidationErrorCode::InvalidSpotPrice:
+                        msg += "spot price must be positive"; break;
+                    case mango::ValidationErrorCode::InvalidStrike:
+                        msg += "strike must be positive"; break;
+                    case mango::ValidationErrorCode::InvalidMaturity:
+                        msg += "maturity must be positive"; break;
+                    case mango::ValidationErrorCode::InvalidVolatility:
+                        msg += "volatility must be positive"; break;
+                    case mango::ValidationErrorCode::InvalidRate:
+                        msg += "invalid rate"; break;
+                    case mango::ValidationErrorCode::InvalidDividend:
+                        msg += "invalid dividend yield"; break;
+                    default:
+                        msg += "validation error code " +
+                            std::to_string(static_cast<int>(err.code));
+                        break;
+                }
+                msg += " (value=" + std::to_string(err.value) + ")";
+                throw py::value_error(msg);
+            }
+
             mango::GridAccuracyParams accuracy;
             if (accuracy_profile.has_value()) {
                 accuracy = mango::grid_accuracy_profile(accuracy_profile.value());
