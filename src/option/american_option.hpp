@@ -243,6 +243,11 @@ public:
         snapshot_times_.assign(times.begin(), times.end());
     }
 
+    /// Set TR-BDF2 configuration (e.g., enable Rannacher startup)
+    void set_trbdf2_config(const TRBDF2Config& config) {
+        trbdf2_config_ = config;
+    }
+
     /**
      * Solve for option value.
      *
@@ -267,6 +272,9 @@ private:
     // Optional custom grid configuration (bypasses auto-estimation)
     // Both GridSpec and TimeDomain must be provided together for consistent discretization
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config_;
+
+    // TR-BDF2 configuration for the PDE solver
+    TRBDF2Config trbdf2_config_;
 };
 
 }  // namespace mango
