@@ -155,6 +155,12 @@ public:
         return *this;
     }
 
+    /// Set TR-BDF2 configuration for all solvers in the batch
+    BatchAmericanOptionSolver& set_trbdf2_config(const TRBDF2Config& config) {
+        trbdf2_config_ = config;
+        return *this;
+    }
+
     /// Clear snapshot times
     /// @return Reference to this solver for method chaining
     BatchAmericanOptionSolver& clear_snapshot_times() {
@@ -206,6 +212,7 @@ public:
 private:
     GridAccuracyParams grid_accuracy_;  ///< Grid accuracy parameters for automatic estimation
     std::vector<double> snapshot_times_;  ///< Snapshot times for all solvers (preserves normalized optimization)
+    std::optional<TRBDF2Config> trbdf2_config_;
 
     // Normalized chain solver eligibility constants
     static constexpr double MAX_WIDTH = 5.8;       ///< Convergence limit (log-units)

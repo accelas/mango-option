@@ -576,6 +576,11 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 solver.set_snapshot_times(std::span{snapshot_times_});
             }
 
+            // Apply TR-BDF2 configuration if provided
+            if (trbdf2_config_.has_value()) {
+                solver.set_trbdf2_config(trbdf2_config_.value());
+            }
+
             // Invoke setup callback if provided
             if (setup) {
                 setup(i, solver);

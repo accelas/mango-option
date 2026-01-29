@@ -138,25 +138,51 @@ public:
             // Copy u_current to u_prev for next iteration
             std::copy(u_current.begin(), u_current.end(), u_prev.begin());
 
-            // Stage 1: Trapezoidal rule to t_n + γ·dt
-            double t_stage1 = t + config_.gamma * dt;
-            auto stage1_ok = solve_stage1(t, t_stage1, dt, u_current, u_prev);
-            if (!stage1_ok) {
-                return std::unexpected(stage1_ok.error());
-            }
-
-            // Stage 2: BDF2 from t_n to t_n+1
             double t_next = t + dt;
-            auto stage2_ok = solve_stage2(t_stage1, t_next, dt, u_current, u_prev);
-            if (!stage2_ok) {
-                return std::unexpected(stage2_ok.error());
+            if (config_.rannacher_startup && step == 0) {
+                const double half_dt = 0.5 * dt;
+                const double t_mid = t + half_dt;
+
+                // First half-step: implicit Euler to t_mid
+                auto euler1_ok = solve_implicit_euler(t, t_mid, half_dt, u_current, u_prev);
+                if (!euler1_ok) {
+                    return std::unexpected(euler1_ok.error());
+                }
+
+                // Process temporal events in (t, t_mid]
+                process_temporal_events(t_old, t_mid, step, u_current);
+
+                // Prepare for second half-step
+                std::copy(u_current.begin(), u_current.end(), u_prev.begin());
+
+                // Second half-step: implicit Euler to t_next
+                auto euler2_ok = solve_implicit_euler(t_mid, t_next, half_dt, u_current, u_prev);
+                if (!euler2_ok) {
+                    return std::unexpected(euler2_ok.error());
+                }
+
+                // Process temporal events in (t_mid, t_next]
+                process_temporal_events(t_mid, t_next, step, u_current);
+            } else {
+                // Stage 1: Trapezoidal rule to t_n + γ·dt
+                double t_stage1 = t + config_.gamma * dt;
+                auto stage1_ok = solve_stage1(t, t_stage1, dt, u_current, u_prev);
+                if (!stage1_ok) {
+                    return std::unexpected(stage1_ok.error());
+                }
+
+                // Stage 2: BDF2 from t_n to t_n+1
+                auto stage2_ok = solve_stage2(t_stage1, t_next, dt, u_current, u_prev);
+                if (!stage2_ok) {
+                    return std::unexpected(stage2_ok.error());
+                }
+
+                // Process temporal events AFTER completing the step
+                process_temporal_events(t_old, t_next, step, u_current);
             }
 
             // Update time
             t = t_next;
-
-            // Process temporal events AFTER completing the step
-            process_temporal_events(t_old, t_next, step, u_current);
 
             // Record snapshot AFTER events
             if (grid_->should_record(step + 1)) {
@@ -418,6 +444,38 @@ private:
                                     : SolverErrorCode::Stage2ConvergenceFailure,
                 .iterations = result.iterations,
                 .residual = 0.0  // residual not available in NewtonResult
+            };
+
+            return std::unexpected(error);
+        }
+
+        return {};
+    }
+
+    /// Implicit Euler step (used for Rannacher startup)
+    ///
+    /// u^{n+1} - dt·L(u^{n+1}) = u^n
+    std::expected<void, SolverError> solve_implicit_euler([[maybe_unused]] double t_n, double t_next, double dt,
+                                                          std::span<double> u_current,
+                                                          std::span<const double> u_prev) {
+        auto rhs = workspace_.rhs();
+        for (size_t i = 0; i < n_; ++i) {
+            rhs[i] = u_prev[i];
+        }
+
+        // Initial guess: u^{n+1} = u^n
+        std::copy(u_prev.begin(), u_prev.end(), u_current.begin());
+
+        auto result = solve_implicit_stage_dispatch(t_next, dt, u_current, rhs);
+        if (!result.converged) {
+            bool is_singular = result.failure_reason &&
+                              result.failure_reason.value() == "Singular Jacobian";
+
+            SolverError error{
+                .code = is_singular ? SolverErrorCode::LinearSolveFailure
+                                    : SolverErrorCode::Stage1ConvergenceFailure,
+                .iterations = result.iterations,
+                .residual = 0.0
             };
 
             return std::unexpected(error);

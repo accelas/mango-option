@@ -45,6 +45,8 @@ AmericanOptionSolver::AmericanOptionSolver(
     , workspace_(workspace)
     , custom_grid_config_(custom_grid_config)
 {
+    trbdf2_config_.rannacher_startup = true;
+
     // Store snapshot times if provided
     if (snapshot_times.has_value()) {
         snapshot_times_.assign(snapshot_times->begin(), snapshot_times->end());
@@ -106,10 +108,12 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     if (params_.type == OptionType::PUT) {
         AmericanPutSolver pde_solver(params_, grid, workspace_);
         pde_solver.initialize(AmericanPutSolver::payoff);
+        pde_solver.set_config(trbdf2_config_);
         solve_result = pde_solver.solve();
     } else {
         AmericanCallSolver pde_solver(params_, grid, workspace_);
         pde_solver.initialize(AmericanCallSolver::payoff);
+        pde_solver.set_config(trbdf2_config_);
         solve_result = pde_solver.solve();
     }
 
