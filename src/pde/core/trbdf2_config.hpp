@@ -46,6 +46,9 @@ struct TRBDF2Config {
     /// Obstacle constraint method (default: ProjectedThomas for robust LCP solving)
     ObstacleMethod obstacle_method = ObstacleMethod::ProjectedThomas;
 
+    /// Rannacher startup: replace first TR-BDF2 step with two half-step implicit Euler solves
+    bool rannacher_startup = true;
+
     /// Compute weight for Stage 1 update
     ///
     /// Stage 1: u^{n+γ} = u^n + w1 * [L(u^n) + L(u^{n+γ})]

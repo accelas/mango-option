@@ -614,6 +614,17 @@ cc_test(
 )
 
 cc_test(
+    name = "american_option_gamma_oscillation_test",
+    size = "small",
+    srcs = ["american_option_gamma_oscillation_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/pde/operators:centered_difference_facade",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "american_option_test",
     size = "small",
     srcs = ["american_option_test.cc"],
