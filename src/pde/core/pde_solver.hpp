@@ -134,37 +134,13 @@ public:
 
         size_t step = 0;
         if (config_.rannacher_startup && time.n_steps() > 0) {
-            double t_old = t;
-            double t_next = t + dt;
-            const double half_dt = 0.5 * dt;
-            const double t_mid = t + half_dt;
-
-            // Copy u_current to u_prev for next iteration
-            std::copy(u_current.begin(), u_current.end(), u_prev.begin());
-
-            // First half-step: implicit Euler to t_mid
-            auto euler1_ok = solve_implicit_euler(t, t_mid, half_dt, u_current, u_prev);
-            if (!euler1_ok) {
-                return std::unexpected(euler1_ok.error());
+            auto rannacher_ok = solve_rannacher_startup(t, dt, u_current, u_prev);
+            if (!rannacher_ok) {
+                return std::unexpected(rannacher_ok.error());
             }
-
-            // Process temporal events in (t, t_mid]
-            process_temporal_events(t_old, t_mid, step, u_current);
-
-            // Prepare for second half-step
-            std::copy(u_current.begin(), u_current.end(), u_prev.begin());
-
-            // Second half-step: implicit Euler to t_next
-            auto euler2_ok = solve_implicit_euler(t_mid, t_next, half_dt, u_current, u_prev);
-            if (!euler2_ok) {
-                return std::unexpected(euler2_ok.error());
-            }
-
-            // Process temporal events in (t_mid, t_next]
-            process_temporal_events(t_mid, t_next, step, u_current);
 
             // Update time and record snapshot after step 0
-            t = t_next;
+            t += dt;
             if (grid_->should_record(step + 1)) {
                 grid_->record(step + 1, u_current);
             }
@@ -494,6 +470,43 @@ private:
 
             return std::unexpected(error);
         }
+
+        return {};
+    }
+
+    /// Rannacher startup: two half-step implicit Euler updates for step 0
+    std::expected<void, SolverError> solve_rannacher_startup(double t,
+                                                             double dt,
+                                                             std::span<double> u_current,
+                                                             std::span<double> u_prev) {
+        double t_old = t;
+        double t_next = t + dt;
+        const double half_dt = 0.5 * dt;
+        const double t_mid = t + half_dt;
+
+        // Copy u_current to u_prev for next iteration
+        std::copy(u_current.begin(), u_current.end(), u_prev.begin());
+
+        // First half-step: implicit Euler to t_mid
+        auto euler1_ok = solve_implicit_euler(t, t_mid, half_dt, u_current, u_prev);
+        if (!euler1_ok) {
+            return std::unexpected(euler1_ok.error());
+        }
+
+        // Process temporal events in (t, t_mid]
+        process_temporal_events(t_old, t_mid, 0, u_current);
+
+        // Prepare for second half-step
+        std::copy(u_current.begin(), u_current.end(), u_prev.begin());
+
+        // Second half-step: implicit Euler to t_next
+        auto euler2_ok = solve_implicit_euler(t_mid, t_next, half_dt, u_current, u_prev);
+        if (!euler2_ok) {
+            return std::unexpected(euler2_ok.error());
+        }
+
+        // Process temporal events in (t_mid, t_next]
+        process_temporal_events(t_mid, t_next, 0, u_current);
 
         return {};
     }
