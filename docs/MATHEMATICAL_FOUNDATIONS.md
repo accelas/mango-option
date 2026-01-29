@@ -9,9 +9,11 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 
 1. [Black-Scholes PDE](#black-scholes-pde)
 2. [TR-BDF2 Time Stepping](#tr-bdf2-time-stepping)
+   - [Rannacher Startup](#rannacher-startup)
 3. [American Option Constraints](#american-option-constraints)
 4. [Grid Generation Strategies](#grid-generation-strategies)
-   - [Automatic Grid Estimation](#automatic-grid-estimation)
+   - [PDE Grid Estimation](#pde-grid-estimation)
+   - [Price Table Grid Estimation](#price-table-grid-estimation)
    - [Adaptive Grid Refinement](#adaptive-grid-refinement)
 5. [B-Spline Interpolation](#b-spline-interpolation)
 6. [Root Finding Methods](#root-finding-methods)
@@ -111,6 +113,30 @@ Where γ = 2 - √2 ≈ 0.5858 (chosen for L-stability)
 - Each solve requires Newton iteration (~3-5 iterations typical)
 - Tridiagonal linear system per Newton iteration (O(n) via Thomas)
 
+### Rannacher Startup
+
+TR-BDF2's trapezoidal Stage 1 preserves high-frequency modes because it has no numerical dissipation at the Nyquist frequency (amplification factor |R(z)| → 1 as z → −∞ along the imaginary axis). For smooth initial data this is harmless. For option pricing, the terminal payoff has a discontinuous first derivative (kink at the strike), which excites all frequencies equally. The trapezoidal rule propagates these modes unchanged, producing **oscillations in gamma** near the strike during the first few time steps.
+
+Rannacher (1984) showed that replacing the first TR-BDF2 step with fully implicit backward Euler eliminates these oscillations. Backward Euler is L-stable with strong high-frequency damping: |R(z)| → 0 as z → −∞. One full step of backward Euler is sufficient to smooth the payoff kink before TR-BDF2 takes over.
+
+**Implementation.** The first time step is replaced by two half-steps of implicit Euler:
+
+```
+Step 0 (Rannacher):
+  u^{1/2} = u⁰ + (dt/2)·L(u^{1/2})     [implicit Euler, half-step]
+  u¹      = u^{1/2} + (dt/2)·L(u¹)      [implicit Euler, half-step]
+
+Steps 1 to N (standard TR-BDF2):
+  Stage 1: trapezoidal to t_n + γ·dt
+  Stage 2: BDF2 to t_{n+1}
+```
+
+Two half-steps rather than one full step provide better accuracy while retaining the damping properties of backward Euler. The half-step size matches the implicit Euler stability region more naturally to the problem's diffusion scale.
+
+**Effect on accuracy.** Backward Euler is first-order, so the startup step introduces O(dt) local error. Since it applies to only one step out of N, the global contribution is O(dt/N) = O(dt²), preserving the overall second-order convergence of TR-BDF2.
+
+**Configuration.** Rannacher startup is enabled by default (`TRBDF2Config::rannacher_startup = true`). The number of startup steps is fixed at one (two half-steps). Disabling it reverts to pure TR-BDF2 for all steps.
+
 ---
 
 ## American Option Constraints
@@ -166,6 +192,8 @@ S_exercise(τ) = sup{S : V(S,τ) > intrinsic(S)}
 ---
 
 ## Grid Generation Strategies
+
+The library provides three spatial grid types (uniform, sinh-spaced, multi-sinh) and two automatic estimation strategies: one for single-option PDE solves, one for 4D price table pre-computation.
 
 ### Uniform Grids
 
@@ -233,7 +261,56 @@ Automatically merges clusters closer than 0.3/α_avg to prevent wasted resolutio
 - Each additional cluster adds ~10% computational cost
 - Validate spacing via monotonicity checks
 
-### Automatic Grid Estimation
+### PDE Grid Estimation
+
+`estimate_grid_for_option()` constructs a sinh-spaced spatial grid and uniform time grid adapted to the option parameters. The goal is second-order accuracy in both space and time with minimal points.
+
+**Domain bounds.** The PDE is solved in log-moneyness coordinates x = log(S/K). The domain extends ±n_σ standard deviations from the current log-moneyness:
+
+```
+x₀ = log(S/K)
+x_min = x₀ - n_σ · σ√T
+x_max = x₀ + n_σ · σ√T
+```
+
+With n_σ = 5 (default), this covers >99.99997% of the terminal distribution. The domain width scales with σ√T, so higher volatility or longer maturity automatically produces a wider grid.
+
+**Spatial resolution.** Centered finite differences have truncation error O(Δx²). To achieve a target price error proportional to `tol`, the spacing must satisfy:
+
+```
+Δx_target = σ · √tol
+N_x = ⌈(x_max - x_min) / Δx_target⌉
+```
+
+Scaling Δx with σ ensures that the number of points adapts to volatility: higher σ widens the domain but also coarsens Δx proportionally, keeping N_x stable. The √tol relationship means reducing error by 10× requires ~3.2× more points. N_x is clamped to [min_spatial_points, max_spatial_points] and rounded to odd (for centered stencils).
+
+The N_x points are then placed via sinh spacing (see above), concentrating resolution near ATM where gamma is highest.
+
+**Temporal resolution.** TR-BDF2 is L-stable and unconditionally stable, so there is no strict CFL constraint. However, second-order temporal accuracy requires Δt ~ O(Δx). The time step is coupled to the minimum spatial spacing (at the sinh cluster center):
+
+```
+Δx_min ≈ Δx_avg · exp(-α)
+Δt = c_t · Δx_min
+N_t = ⌈T / Δt⌉
+```
+
+With c_t = 0.75 (default) and α = 2.0, this ensures the temporal error does not dominate the spatial error. Coupling to Δx_min rather than Δx_avg prevents accuracy loss in the clustered region where the solution has the steepest gradients.
+
+**Default parameters (`GridAccuracyParams`):**
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| n_sigma | 5.0 | Domain half-width in σ√T units |
+| alpha | 2.0 | Sinh clustering strength (~7× center-to-edge ratio) |
+| tol | 1e-2 | Spatial truncation error target |
+| c_t | 0.75 | Time-space coupling factor |
+| min_spatial_points | 100 | Lower bound on N_x |
+| max_spatial_points | 1200 | Upper bound on N_x |
+| max_time_steps | 5000 | Upper bound on N_t |
+
+For short-dated SPY options (σ ≈ 0.15, T ≈ 0.09), the defaults produce a 101 × 150 grid (15,150 elements).
+
+### Price Table Grid Estimation
 
 For price table pre-computation, grid density directly impacts IV accuracy. The library provides automatic estimation based on B-spline interpolation error theory.
 
