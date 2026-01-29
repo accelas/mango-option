@@ -61,7 +61,7 @@ public:
         , grid_(grid)
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
-        , spatial_op_(create_spatial_op())
+        , spatial_op_(create_spatial_op(workspace))
     {
         // Precondition: grid must not be null (comes from Grid::create which returns std::expected)
         // If callers check the std::expected, grid will never be null.
@@ -117,13 +117,13 @@ private:
         return DirichletBC(RightBCFunction{});
     }
 
-    SpatialOpType create_spatial_op() const {
+    SpatialOpType create_spatial_op(PDEWorkspace& workspace) const {
         auto pde = PDEType(
             params_.volatility,
             make_rate_fn(params_.rate, params_.maturity),
             params_.dividend_yield);
         auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
-        return operators::create_spatial_operator(std::move(pde), spacing_ptr);
+        return operators::create_spatial_operator(std::move(pde), spacing_ptr, workspace);
     }
 
     PricingParams params_;
@@ -157,7 +157,7 @@ public:
         , grid_(grid)
         , left_bc_(create_left_bc())
         , right_bc_(create_right_bc())
-        , spatial_op_(create_spatial_op())
+        , spatial_op_(create_spatial_op(workspace))
     {
         // Precondition: grid must not be null (comes from Grid::create which returns std::expected)
         // If callers check the std::expected, grid will never be null.
@@ -218,13 +218,13 @@ private:
         return DirichletBC(RightBCFunction{make_forward_discount_fn(params_.rate, params_.maturity)});
     }
 
-    SpatialOpType create_spatial_op() const {
+    SpatialOpType create_spatial_op(PDEWorkspace& workspace) const {
         auto pde = PDEType(
             params_.volatility,
             make_rate_fn(params_.rate, params_.maturity),
             params_.dividend_yield);
         auto spacing_ptr = std::make_shared<GridSpacing<double>>(grid_->spacing());
-        return operators::create_spatial_operator(std::move(pde), spacing_ptr);
+        return operators::create_spatial_operator(std::move(pde), spacing_ptr, workspace);
     }
 
     PricingParams params_;

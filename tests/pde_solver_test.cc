@@ -79,7 +79,7 @@ TEST(PDESolverTest, HeatEquationDirichletBC) {
     // Spatial operator: L(u) = D·d²u/dx²
     auto pde_heat_op = mango::operators::LaplacianPDE<double>(D);
     auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
-    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), spacing);
+    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), spacing, workspace);
 
     // Initial condition: u(x,0) = sin(π·x)
     auto ic = [pi](std::span<const double> x, std::span<double> u) {
@@ -155,7 +155,7 @@ TEST(PDESolverTest, DISABLED_HeatEquationNeumannBC) {
     // Spatial operator
     auto pde_heat_op = mango::operators::LaplacianPDE<double>(D);
     auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
-    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), spacing);
+    auto heat_op = mango::operators::create_spatial_operator(std::move(pde_heat_op), spacing, workspace);
 
     // Initial condition: u(x,0) = cos(π·x)
     auto ic = [pi](std::span<const double> x, std::span<double> u) {
@@ -216,7 +216,7 @@ TEST(PDESolverTest, SteadyStateConvergence) {
 
     auto pde_op = mango::operators::LaplacianPDE<double>(D);
     auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
-    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_op), spacing);
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde_op), spacing, workspace);
 
     // Initial condition: u(x,0) = 0 (away from steady state)
     auto ic = [](std::span<const double>, std::span<double> u) {

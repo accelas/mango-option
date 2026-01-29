@@ -189,7 +189,7 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `OptionType` | `CALL`, `PUT` |
 | `GridAccuracyProfile` | `LOW`, `MEDIUM`, `HIGH`, `ULTRA` |
 | `PriceTableGridProfile` | `LOW`, `MEDIUM`, `HIGH`, `ULTRA` |
-| `SolverErrorCode` | `Stage1ConvergenceFailure`, `Stage2ConvergenceFailure`, `LinearSolveFailure`, `InvalidConfiguration`, `InvalidState`, `Unknown` |
+| `SolverErrorCode` | `ConvergenceFailure`, `LinearSolveFailure`, `InvalidConfiguration`, `InvalidState`, `Unknown` |
 
 ### Classes
 

@@ -58,6 +58,7 @@ TEST(PDESolverSnapshotTest, RecordsInitialCondition) {
         grid->n_space()
     );
     ASSERT_TRUE(workspace_result.has_value());
+    auto workspace = workspace_result.value();
 
     // Boundary conditions
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
@@ -66,9 +67,9 @@ TEST(PDESolverSnapshotTest, RecordsInitialCondition) {
     // Spatial operator
     auto pde = mango::operators::LaplacianPDE<double>(0.1);
     auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
-    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), spacing);
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), spacing, workspace);
 
-    DiffusionSolver solver(grid, workspace_result.value(), left_bc, right_bc, spatial_op);
+    DiffusionSolver solver(grid, workspace, left_bc, right_bc, spatial_op);
 
     // Set initial condition: u = sin(pi*x)
     const double pi = std::numbers::pi;
@@ -103,14 +104,15 @@ TEST(PDESolverSnapshotTest, RecordsMultipleSnapshots) {
         grid->n_space()
     );
     ASSERT_TRUE(workspace_result.has_value());
+    auto workspace = workspace_result.value();
 
     auto left_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto right_bc = mango::DirichletBC([](double, double) { return 0.0; });
     auto pde = mango::operators::LaplacianPDE<double>(0.1);
     auto spacing = std::make_shared<mango::GridSpacing<double>>(grid->spacing());
-    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), spacing);
+    auto spatial_op = mango::operators::create_spatial_operator(std::move(pde), spacing, workspace);
 
-    DiffusionSolver solver(grid, workspace_result.value(), left_bc, right_bc, spatial_op);
+    DiffusionSolver solver(grid, workspace, left_bc, right_bc, spatial_op);
 
     const double pi = std::numbers::pi;
     solver.initialize([pi](std::span<const double> x, std::span<double> u) {
