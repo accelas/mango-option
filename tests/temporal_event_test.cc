@@ -78,16 +78,17 @@ TEST(TemporalEventTest, EventAppliedAfterStep) {
         n
     );
     ASSERT_TRUE(workspace_spans.has_value());
+    auto workspace = workspace_spans.value();
 
     // Zero spatial operator (no PDE evolution) - use LaplacianPDE with D=0
     auto pde = operators::LaplacianPDE<double>(0.0);
     auto grid_view = GridView<double>(grid_with_sol.value()->x());
-    auto spatial_op = operators::create_spatial_operator(std::move(pde), grid_view);
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), grid_view, workspace);
 
     DirichletBC left_bc{[](double t, double x) { return 0.0; }};
     DirichletBC right_bc{[](double t, double x) { return 0.0; }};
 
-    auto solver = make_test_solver(grid_with_sol.value(), workspace_spans.value(),
+    auto solver = make_test_solver(grid_with_sol.value(), workspace,
                                    left_bc, right_bc, spatial_op);
 
     // Initial condition: u = 1 everywhere

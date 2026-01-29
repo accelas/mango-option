@@ -71,7 +71,7 @@ TEST(ObstacleTest, ProjectionDuringNewtonIteration) {
     // Zero spatial operator (no PDE evolution) - isolates obstacle enforcement
     auto pde = operators::LaplacianPDE<double>(0.0);
     auto spacing = std::make_shared<GridSpacing<double>>(grid->spacing());
-    auto spatial_op = operators::create_spatial_operator(std::move(pde), spacing);
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), spacing, workspace);
 
     // BCs compatible with obstacle (both = 0.5)
     DirichletBC left_bc{[](double, double) { return 0.5; }};
@@ -133,7 +133,7 @@ TEST(ObstacleTest, DiffusionWithLowerBound) {
     // Diffusion operator
     auto pde = operators::LaplacianPDE<double>(0.1);
     auto spacing = std::make_shared<GridSpacing<double>>(grid->spacing());
-    auto spatial_op = operators::create_spatial_operator(std::move(pde), spacing);
+    auto spatial_op = operators::create_spatial_operator(std::move(pde), spacing, workspace);
 
     // Dirichlet BCs: u(0,t) = 0.2, u(1,t) = 0.2 (compatible with obstacle)
     DirichletBC left_bc{[](double, double) { return 0.2; }};

@@ -11,8 +11,7 @@ namespace mango {
 
 /// High-level solver error categories surfaced through expected results
 enum class SolverErrorCode {
-    Stage1ConvergenceFailure,
-    Stage2ConvergenceFailure,
+    ConvergenceFailure,
     LinearSolveFailure,
     InvalidConfiguration,
     InvalidState,
