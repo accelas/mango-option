@@ -106,6 +106,139 @@ def test_american_option_price():
     print(f"✓ American option price computed, delta = {delta:.4f}")
 
 
+def test_american_option_price_with_accuracy():
+    """Test american_option_price with accuracy profile"""
+    print("Testing american_option_price with accuracy profile...")
+
+    params = mango_option.AmericanOptionParams()
+    params.strike = 100.0
+    params.spot = 100.0
+    params.maturity = 1.0
+    params.volatility = 0.20
+    params.rate = 0.05
+    params.dividend_yield = 0.02
+    params.type = mango_option.OptionType.PUT
+
+    result = mango_option.american_option_price(
+        params, accuracy=mango_option.GridAccuracyProfile.HIGH)
+    price = result.value_at(100.0)
+    assert price > 0, f"Expected positive price, got {price}"
+    print(f"  Price (HIGH accuracy): {price:.6f}")
+    print(f"  Delta: {result.delta():.4f}")
+    print(f"  Gamma: {result.gamma():.4f}")
+    print(f"  Theta: {result.theta():.4f}")
+    print("✓ Accuracy profile works")
+
+
+def test_american_option_discrete_dividends():
+    """Test american_option_price with discrete dividends"""
+    print("Testing american_option_price with discrete dividends...")
+
+    params = mango_option.AmericanOptionParams()
+    params.strike = 100.0
+    params.spot = 100.0
+    params.maturity = 1.0
+    params.volatility = 0.20
+    params.rate = 0.05
+    params.dividend_yield = 0.0
+    params.type = mango_option.OptionType.PUT
+    params.discrete_dividends = [(0.25, 2.0), (0.75, 2.0)]
+
+    result = mango_option.american_option_price(params)
+    price_div = result.value_at(100.0)
+    assert price_div > 0, f"Expected positive price, got {price_div}"
+
+    # Compare with no dividends
+    params.discrete_dividends = []
+    result_no_div = mango_option.american_option_price(params)
+    price_no_div = result_no_div.value_at(100.0)
+
+    print(f"  Price with dividends: {price_div:.6f}")
+    print(f"  Price without dividends: {price_no_div:.6f}")
+    print("✓ Discrete dividends work")
+
+
+def test_american_option_yield_curve():
+    """Test american_option_price with yield curve rate"""
+    print("Testing american_option_price with yield curve...")
+
+    params = mango_option.AmericanOptionParams()
+    params.strike = 100.0
+    params.spot = 100.0
+    params.maturity = 1.0
+    params.volatility = 0.20
+    params.rate = mango_option.YieldCurve.flat(0.05)
+    params.dividend_yield = 0.02
+    params.type = mango_option.OptionType.PUT
+
+    result = mango_option.american_option_price(params)
+    price = result.value_at(100.0)
+    assert price > 0, f"Expected positive price, got {price}"
+    print(f"  Price with YieldCurve: {price:.6f}")
+    print("✓ Yield curve pricing works")
+
+
+def test_batch_solver():
+    """Test BatchAmericanOptionSolver"""
+    print("Testing BatchAmericanOptionSolver...")
+
+    batch = []
+    for K in [90.0, 95.0, 100.0, 105.0, 110.0]:
+        p = mango_option.AmericanOptionParams()
+        p.spot = 100.0
+        p.strike = K
+        p.maturity = 1.0
+        p.volatility = 0.20
+        p.rate = 0.05
+        p.dividend_yield = 0.02
+        p.type = mango_option.OptionType.PUT
+        batch.append(p)
+
+    solver = mango_option.BatchAmericanOptionSolver()
+    solver.set_grid_accuracy(mango_option.GridAccuracyProfile.LOW)
+
+    results, failed_count = solver.solve_batch(batch, use_shared_grid=True)
+    assert failed_count == 0, f"Expected 0 failures, got {failed_count}"
+    assert len(results) == 5, f"Expected 5 results, got {len(results)}"
+
+    for i, (success, result, error) in enumerate(results):
+        assert success, f"Option {i} failed: {error}"
+        price = result.value_at(100.0)
+        assert price > 0, f"Option {i}: expected positive price, got {price}"
+        print(f"  K={batch[i].strike}: price={price:.4f}, delta={result.delta():.4f}")
+
+    print(f"✓ Batch solver works ({len(results)} options, {failed_count} failed)")
+
+
+def test_batch_solver_per_option_grids():
+    """Test BatchAmericanOptionSolver with per-option grid estimation"""
+    print("Testing BatchAmericanOptionSolver with per-option grids...")
+
+    batch = []
+    for T in [0.25, 0.5, 1.0]:
+        p = mango_option.AmericanOptionParams()
+        p.spot = 100.0
+        p.strike = 100.0
+        p.maturity = T
+        p.volatility = 0.20
+        p.rate = 0.05
+        p.dividend_yield = 0.02
+        p.type = mango_option.OptionType.PUT
+        batch.append(p)
+
+    solver = mango_option.BatchAmericanOptionSolver()
+    results, failed_count = solver.solve_batch(batch, use_shared_grid=False)
+    assert failed_count == 0
+    assert len(results) == 3
+
+    for i, (success, result, error) in enumerate(results):
+        assert success
+        price = result.value_at(100.0)
+        print(f"  T={batch[i].maturity}: price={price:.4f}")
+
+    print("✓ Per-option grid batch works")
+
+
 def test_price_table_workspace():
     """Test PriceTableWorkspace create/save/load"""
     print("Testing PriceTableWorkspace...")
@@ -337,6 +470,11 @@ if __name__ == "__main__":
         test_iv_query,
         test_iv_solver_fdm,
         test_american_option_price,
+        test_american_option_price_with_accuracy,
+        test_american_option_discrete_dividends,
+        test_american_option_yield_curve,
+        test_batch_solver,
+        test_batch_solver_per_option_grids,
         test_price_table_workspace,
         test_price_table_surface,
         test_iv_solver_interpolated,
