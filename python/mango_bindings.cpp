@@ -19,6 +19,7 @@
 #include "src/option/table/price_table_axes.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/math/yield_curve.hpp"
+#include "src/option/american_option_batch.hpp"
 
 namespace py = pybind11;
 
@@ -77,6 +78,17 @@ PYBIND11_MODULE(mango_option, m) {
         .value("MEDIUM", mango::GridAccuracyProfile::Medium)
         .value("HIGH", mango::GridAccuracyProfile::High)
         .value("ULTRA", mango::GridAccuracyProfile::Ultra);
+
+    // GridAccuracyParams structure
+    py::class_<mango::GridAccuracyParams>(m, "GridAccuracyParams")
+        .def(py::init<>())
+        .def_readwrite("n_sigma", &mango::GridAccuracyParams::n_sigma)
+        .def_readwrite("alpha", &mango::GridAccuracyParams::alpha)
+        .def_readwrite("tol", &mango::GridAccuracyParams::tol)
+        .def_readwrite("c_t", &mango::GridAccuracyParams::c_t)
+        .def_readwrite("min_spatial_points", &mango::GridAccuracyParams::min_spatial_points)
+        .def_readwrite("max_spatial_points", &mango::GridAccuracyParams::max_spatial_points)
+        .def_readwrite("max_time_steps", &mango::GridAccuracyParams::max_time_steps);
 
     // OptionChain data container
     py::class_<mango::OptionChain>(m, "OptionChain")
@@ -331,6 +343,110 @@ PYBIND11_MODULE(mango_option, m) {
             Returns:
                 AmericanOptionResult with value and Greeks.
         )pbdoc");
+
+    // =========================================================================
+    // Batch American Option Solver (with normalized chain optimization)
+    // =========================================================================
+
+    // SolverErrorCode enum
+    py::enum_<mango::SolverErrorCode>(m, "SolverErrorCode")
+        .value("Stage1ConvergenceFailure", mango::SolverErrorCode::Stage1ConvergenceFailure)
+        .value("Stage2ConvergenceFailure", mango::SolverErrorCode::Stage2ConvergenceFailure)
+        .value("LinearSolveFailure", mango::SolverErrorCode::LinearSolveFailure)
+        .value("InvalidConfiguration", mango::SolverErrorCode::InvalidConfiguration)
+        .value("InvalidState", mango::SolverErrorCode::InvalidState)
+        .value("Unknown", mango::SolverErrorCode::Unknown)
+        .export_values();
+
+    // SolverError structure
+    py::class_<mango::SolverError>(m, "SolverError")
+        .def(py::init<>())
+        .def_readwrite("code", &mango::SolverError::code)
+        .def_readwrite("iterations", &mango::SolverError::iterations)
+        .def_readwrite("residual", &mango::SolverError::residual)
+        .def("__repr__", [](const mango::SolverError& e) {
+            return "<SolverError code=" + std::to_string(static_cast<int>(e.code)) +
+                   " iterations=" + std::to_string(e.iterations) +
+                   " residual=" + std::to_string(e.residual) + ">";
+        });
+
+    py::class_<mango::BatchAmericanOptionSolver>(m, "BatchAmericanOptionSolver")
+        .def(py::init<>())
+        .def("set_grid_accuracy",
+            [](mango::BatchAmericanOptionSolver& self, mango::GridAccuracyProfile profile) {
+                self.set_grid_accuracy(mango::grid_accuracy_profile(profile));
+                return &self;
+            },
+            py::arg("profile"),
+            py::return_value_policy::reference_internal,
+            R"pbdoc(
+                Set grid accuracy using a profile.
+
+                Args:
+                    profile: GridAccuracyProfile (LOW/MEDIUM/HIGH/ULTRA)
+
+                Returns:
+                    Self for method chaining
+            )pbdoc")
+        .def("set_grid_accuracy_params",
+            [](mango::BatchAmericanOptionSolver& self, const mango::GridAccuracyParams& params) {
+                self.set_grid_accuracy(params);
+                return &self;
+            },
+            py::arg("params"),
+            py::return_value_policy::reference_internal,
+            R"pbdoc(
+                Set grid accuracy using explicit parameters.
+
+                Args:
+                    params: GridAccuracyParams with fine-grained control
+
+                Returns:
+                    Self for method chaining
+            )pbdoc")
+        .def("set_use_normalized",
+            [](mango::BatchAmericanOptionSolver& self, bool enable) {
+                self.set_use_normalized(enable);
+                return &self;
+            },
+            py::arg("enable") = true,
+            py::return_value_policy::reference_internal,
+            "Enable/disable normalized chain optimization")
+        .def("solve_batch",
+            [](mango::BatchAmericanOptionSolver& self,
+               const std::vector<mango::AmericanOptionParams>& params,
+               bool use_shared_grid) {
+                auto batch_result = self.solve_batch(params, use_shared_grid);
+
+                py::list results;
+                for (auto& r : batch_result.results) {
+                    if (r.has_value()) {
+                        results.append(py::make_tuple(true, std::move(r.value()),
+                            mango::SolverError{}));
+                    } else {
+                        results.append(py::make_tuple(false, py::none(), r.error()));
+                    }
+                }
+                return py::make_tuple(results, batch_result.failed_count);
+            },
+            py::arg("params"),
+            py::arg("use_shared_grid") = false,
+            R"pbdoc(
+                Solve a batch of American options in parallel.
+
+                Automatically routes to the normalized chain solver when eligible
+                (same maturity, same type, no discrete dividends, use_shared_grid=True).
+                The normalized path solves one PDE and reuses it for all strikes.
+
+                Args:
+                    params: List of AmericanOptionParams
+                    use_shared_grid: If True, all options share one global grid
+                                     (required for normalized chain optimization)
+
+                Returns:
+                    Tuple of (results, failed_count) where results is a list of
+                    (success: bool, result: AmericanOptionResult|None, error: SolverError) tuples
+            )pbdoc");
 
     // =========================================================================
     // Price Table File Storage (Arrow IPC format)
