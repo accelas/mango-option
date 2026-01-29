@@ -310,6 +310,7 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 - **docs/ARCHITECTURE.md** - Software architecture, design patterns, performance
 - **docs/MATHEMATICAL_FOUNDATIONS.md** - PDE formulations, numerical methods
 - **docs/API_GUIDE.md** - Usage examples and patterns
+- **docs/PERF_ANALYSIS.md** - Instruction-level performance analysis
 - **docs/PYTHON_GUIDE.md** - Python bindings user guide
 - **docs/TRACING.md** - USDT probe documentation
 - **docs/TRACING_QUICKSTART.md** - 5-minute tracing guide

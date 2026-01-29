@@ -24,6 +24,7 @@ Designed for research, prototyping, and production use with a focus on **correct
 - **Full Greeks** – Delta, gamma, theta, vega from PDE solver
 - **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
 - **Production Ready** – OpenMP batching (15× speedup), USDT tracing, zero-allocation parallel workloads
+- **[Profiled](docs/PERF_ANALYSIS.md)** – IPC 1.94, 0.005% L1 miss rate, 2.1 insn/load op intensity
 - **IV Surface Web App** – Interactive 3D visualization with yfinance data
 
 ---
