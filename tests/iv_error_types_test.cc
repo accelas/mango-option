@@ -98,7 +98,7 @@ TEST(ErrorConversionTest, ValidationErrorToIVError) {
 
 TEST(ErrorConversionTest, SolverErrorToIVError) {
     SolverError solver_err{
-        .code = SolverErrorCode::Stage1ConvergenceFailure,
+        .code = SolverErrorCode::ConvergenceFailure,
         .iterations = 50,
         .residual = 1e-3
     };

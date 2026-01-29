@@ -45,49 +45,49 @@ Built with `bazel build -c opt` (O3, native).
 
 ### Raw perf counters
 
-**Single option (6,763 iterations x 3 reps, 8.88s wall):**
+**Single option (6,810 iterations x 3 reps, 8.83s wall):**
 
 | Counter | Value |
 |---------|-------|
-| Cycles | 44,686,901,251 |
-| Instructions | 85,896,059,833 |
-| L1-dcache-loads | 41,032,959,107 |
-| L1-dcache-load-misses | 2,141,162 |
-| LLC references | 8,305,151 |
-| LLC misses | 327,595 |
-| Stalled-cycles-frontend | 1,760,678,737 |
+| Cycles | 44,298,672,234 |
+| Instructions | 82,449,637,867 |
+| L1-dcache-loads | 39,173,090,917 |
+| L1-dcache-load-misses | 3,434,254 |
+| LLC references | 13,133,205 |
+| LLC misses | 484,929 |
+| Stalled-cycles-frontend | 1,200,292,340 |
 
-**Sequential 64-option batch (190 iterations x 3 reps, 10.53s wall):**
+**Sequential 64-option batch (191 iterations x 3 reps, 10.51s wall):**
 
 | Counter | Value |
 |---------|-------|
-| Cycles | 52,889,294,167 |
-| Instructions | 102,839,667,045 |
-| L1-dcache-loads | 48,958,724,505 |
-| L1-dcache-load-misses | 7,342,879 |
-| LLC references | 30,591,722 |
-| LLC misses | 571,363 |
-| Stalled-cycles-frontend | 1,486,541,338 |
+| Cycles | 52,751,552,933 |
+| Instructions | 98,567,359,543 |
+| L1-dcache-loads | 46,560,138,054 |
+| L1-dcache-load-misses | 5,767,383 |
+| LLC references | 27,055,591 |
+| LLC misses | 621,626 |
+| Stalled-cycles-frontend | 1,519,234,316 |
 
 ### Per-element metrics
 
 | Metric | Single (ATM) | Sequential (64 puts) |
 |--------|:------------:|:--------------------:|
-| **IPC** | 1.92 | 1.94 |
-| **Cycles/element** | 137.5 | 76.7 |
-| **Insn/element** | 264.3 | 149.0 |
-| **L1 loads/element** | 126.3 | 71.0 |
-| **L1 miss rate** | 0.005% | 0.015% |
-| **LLC miss rate** | 3.94% | 1.87% |
-| **Op intensity (insn/load)** | 2.09 | 2.10 |
-| **Frontend stall** | 3.94% | 2.81% |
+| **IPC** | 1.86 | 1.87 |
+| **Cycles/element** | 135.3 | 76.2 |
+| **Insn/element** | 252.0 | 142.4 |
+| **L1 loads/element** | 119.7 | 67.3 |
+| **L1 miss rate** | 0.009% | 0.012% |
+| **LLC miss rate** | 3.69% | 2.30% |
+| **Op intensity (insn/load)** | 2.11 | 2.12 |
+| **Frontend stall** | 2.71% | 2.88% |
 
 ### Solve timing
 
 | Benchmark | Time per solve | Throughput |
 |-----------|:--------------:|:----------:|
-| Single ATM put | 414 us | 2,415/s |
-| Sequential (per option) | 231 us | 4,325/s |
+| Single ATM put | 409 us | 2,447/s |
+| Sequential (per option) | 230 us | 4,348/s |
 
 ## Algorithmic Cost Breakdown
 
@@ -98,7 +98,7 @@ The measured per-element counts reflect the full TR-BDF2 + Brennan-Schwartz LCP 
 | Black-Scholes operator apply | ~10 | ~5 | **Yes** | 3-point stencil with σ², r, q coefficients; `target_clones` + `omp simd` |
 | Jacobian diagonal fill | ~3 | ~2 | Yes | Same coefficients, diagonal extraction |
 | Projected Thomas solver | ~8 | ~3 | **No** | Forward elimination + back substitution; sequential data dependency |
-| RHS assembly + vector copy | ~2 | ~1 | Partial | FMA for αu + (1−α)f, `rhs_with_bc` copy |
+| RHS assembly + BC fixup | ~2 | ~1 | Partial | FMA for αu + (1−α)f, workspace copy for BC correction |
 | Obstacle evaluation | ~2 | ~1 | No | `max(K − S·eˣ, 0)` with `std::exp` at exercise boundary |
 | Deep ITM lock scan | ~1 | ~1 | No | Sequential scan from boundary inward |
 | Boundary conditions | ~1 | ~1 | No | 2 endpoints per stage |
@@ -107,7 +107,7 @@ The measured per-element counts reflect the full TR-BDF2 + Brennan-Schwartz LCP 
 
 Over 150 time steps, the theoretical cost is ~54 × 150 / 150 = **54 insn/element** and **28 loads/element** when normalized per space-time point.
 
-The measured 264 insn/element (single) vs 149 insn/element (sequential) gap shows that per-solve overhead (grid estimation, PMR allocation, `GridSpec` construction) dominates the single-option case. The sequential benchmark amortizes this overhead across 64 solves, approaching the theoretical cost.
+The measured 252 insn/element (single) vs 142 insn/element (sequential) gap shows that per-solve overhead (grid estimation, PMR allocation, `GridSpec` construction) dominates the single-option case. The sequential benchmark amortizes this overhead across 64 solves, approaching the theoretical cost.
 
 ### Why op intensity is structurally ~2.1
 
@@ -142,13 +142,13 @@ The measured 15× speedup on 16 cores confirms near-linear scaling. Further opti
 
 ## Interpretation
 
-**IPC (1.92–1.94).** The pipeline is well-utilized for a tridiagonal solver workload. TR-BDF2 involves two sequential sweeps per time step (forward and backward Thomas algorithm), which limits instruction-level parallelism. An IPC near 2.0 on a superscalar core is close to the ceiling for this access pattern.
+**IPC (1.86–1.87).** The pipeline is well-utilized for a tridiagonal solver workload. TR-BDF2 involves two sequential sweeps per time step (forward and backward Thomas algorithm), which limits instruction-level parallelism. An IPC near 2.0 on a superscalar core is close to the ceiling for this access pattern.
 
-**L1 miss rate (0.005–0.015%).** The working set for a 101-point tridiagonal system is approximately 800 bytes per vector (101 doubles). With 5–6 vectors active during a Thomas sweep (~5 KiB), the data fits comfortably in L1 (48 KiB). Cache pressure is negligible.
+**L1 miss rate (0.009–0.012%).** The working set for a 101-point tridiagonal system is approximately 800 bytes per vector (101 doubles). With 5–6 vectors active during a Thomas sweep (~5 KiB), the data fits comfortably in L1 (48 KiB). Cache pressure is negligible.
 
 **Sequential is 1.8× cheaper per element.** The single-option benchmark pays proportionally more for grid estimation, PMR pool allocation, and `GridSpec` construction. In the sequential loop these costs amortize: the hot solve path dominates, and the solver reuses warm cache lines from the previous option's similar-sized grid.
 
-**LLC miss rate (1.87–3.94%).** The few LLC misses that occur come from cold-start allocation and benchmark framework overhead, not from the solver hot path. The entire solver working set lives in L1/L2.
+**LLC miss rate (2.30–3.69%).** The few LLC misses that occur come from cold-start allocation and benchmark framework overhead, not from the solver hot path. The entire solver working set lives in L1/L2.
 
 ## Reproducing
 

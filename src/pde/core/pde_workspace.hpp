@@ -199,6 +199,12 @@ struct PDEWorkspace {
     std::span<double> reserved1() { return reserved1_.subspan(0, n_); }
     std::span<const double> reserved1() const { return reserved1_.subspan(0, n_); }
 
+    std::span<double> reserved2() { return reserved2_.subspan(0, n_); }
+    std::span<const double> reserved2() const { return reserved2_.subspan(0, n_); }
+
+    std::span<double> reserved3() { return reserved3_.subspan(0, n_); }
+    std::span<const double> reserved3() const { return reserved3_.subspan(0, n_); }
+
     std::span<double> tridiag_workspace() { return tridiag_workspace_.subspan(0, 2 * n_); }
     std::span<const double> tridiag_workspace() const { return tridiag_workspace_.subspan(0, 2 * n_); }
 

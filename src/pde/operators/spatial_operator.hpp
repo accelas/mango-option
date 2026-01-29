@@ -45,10 +45,13 @@ concept HasJacobianCoefficients = requires(const PDE pde) {
 template<typename PDE, std::floating_point T = double>
 class SpatialOperator {
 public:
-    SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing)
+    SpatialOperator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing,
+                    std::span<T> d2u_scratch, std::span<T> du_scratch)
         : pde_(std::move(pde))
         , spacing_(std::move(spacing))
         , stencil_(std::make_shared<CenteredDifference<T>>(*spacing_))
+        , d2u_scratch_(d2u_scratch)
+        , du_scratch_(du_scratch)
     {}
 
     // Default copy/move (shared_ptr makes it copyable)
@@ -71,34 +74,26 @@ public:
     }
 
     /// Apply operator to interior points only [start, end)
-    /// Used by both full-grid and cache-blocked evaluation
+    /// Uses scratch buffers provided at construction time
     void apply_interior(double t,
                        std::span<const T> u,
                        std::span<T> Lu,
                        size_t start,
                        size_t end) const {
-        // Temporary buffers for derivatives
-        thread_local std::vector<T> d2u_dx2_buf;
-        thread_local std::vector<T> du_dx_buf;
-
-        const size_t n = u.size();
-        d2u_dx2_buf.resize(n);
-        du_dx_buf.resize(n);
-
-        // Zero only the active range to avoid stale values (optimization)
-        std::fill(d2u_dx2_buf.begin() + start, d2u_dx2_buf.begin() + end, T(0));
-        std::fill(du_dx_buf.begin() + start, du_dx_buf.begin() + end, T(0));
+        // Zero only the active range to avoid stale values
+        std::fill(d2u_scratch_.begin() + start, d2u_scratch_.begin() + end, T(0));
+        std::fill(du_scratch_.begin() + start, du_scratch_.begin() + end, T(0));
 
         // Compute derivatives using facade
-        stencil_->compute_second_derivative(u, std::span<T>(d2u_dx2_buf), start, end);
-        stencil_->compute_first_derivative(u, std::span<T>(du_dx_buf), start, end);
+        stencil_->compute_second_derivative(u, d2u_scratch_, start, end);
+        stencil_->compute_first_derivative(u, du_scratch_, start, end);
 
         // Apply PDE operator to combine derivatives
         for (size_t i = start; i < end; ++i) {
             if constexpr (TimeDependentPDE<PDE>) {
-                Lu[i] = pde_(t, d2u_dx2_buf[i], du_dx_buf[i], u[i]);
+                Lu[i] = pde_(t, d2u_scratch_[i], du_scratch_[i], u[i]);
             } else {
-                Lu[i] = pde_(d2u_dx2_buf[i], du_dx_buf[i], u[i]);
+                Lu[i] = pde_(d2u_scratch_[i], du_scratch_[i], u[i]);
             }
         }
     }
@@ -200,6 +195,8 @@ private:
     PDE pde_;  // Owned by value (PDEs are typically small)
     std::shared_ptr<GridSpacing<T>> spacing_;
     std::shared_ptr<CenteredDifference<T>> stencil_;  // Shared ownership of templated facade
+    std::span<T> d2u_scratch_;  // Caller-owned scratch for second derivatives
+    std::span<T> du_scratch_;   // Caller-owned scratch for first derivatives
 };
 
 } // namespace mango::operators

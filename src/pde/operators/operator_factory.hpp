@@ -2,6 +2,7 @@
 
 #include "spatial_operator.hpp"
 #include "src/pde/core/grid.hpp"
+#include "src/pde/core/pde_workspace.hpp"
 #include <memory>
 
 namespace mango::operators {
@@ -9,21 +10,18 @@ namespace mango::operators {
 /// Factory function to create spatial operator with appropriate stencil
 /// Returns operator with owned PDE and GridSpacing (safe lifetimes)
 template<typename PDE, typename T = double>
-auto create_spatial_operator(
-    PDE pde,  // Pass by value to allow perfect forwarding of temporaries
-    const GridView<T>& grid)
-{
+auto create_spatial_operator(PDE pde, const GridView<T>& grid, PDEWorkspace& workspace) {
     auto spacing = std::make_shared<GridSpacing<T>>(grid);
-    return SpatialOperator<PDE, T>(std::move(pde), spacing);
+    return SpatialOperator<PDE, T>(std::move(pde), spacing,
+                                   workspace.reserved2(), workspace.reserved3());
 }
 
 /// Overload with explicit spacing (for reuse across multiple operators)
 template<typename PDE, typename T = double>
-auto create_spatial_operator(
-    PDE pde,  // Pass by value
-    std::shared_ptr<GridSpacing<T>> spacing)
-{
-    return SpatialOperator<PDE, T>(std::move(pde), spacing);
+auto create_spatial_operator(PDE pde, std::shared_ptr<GridSpacing<T>> spacing,
+                             PDEWorkspace& workspace) {
+    return SpatialOperator<PDE, T>(std::move(pde), spacing,
+                                   workspace.reserved2(), workspace.reserved3());
 }
 
 } // namespace mango::operators

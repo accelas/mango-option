@@ -1,7 +1,6 @@
 #pragma once
 
 #include "src/pde/core/grid.hpp"
-#include "src/pde/core/grid.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/support/cpu/cpu_diagnostics.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
@@ -16,7 +15,6 @@
 #include <span>
 #include <vector>
 #include <functional>
-#include <optional>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -327,14 +325,8 @@ private:
         right_bc.apply(u[n_ - 1], x_right, t, dx_right, u_interior_right, 0.0, bc::BoundarySide::Right);
     }
 
-    /// Apply spatial operator (single-pass evaluation, CRTP version)
-    ///
-    /// Note: Cache blocking was previously attempted but removed because it was
-    /// ineffective. The blocked path still passed full arrays to the stencil,
-    /// defeating locality benefits while adding loop overhead. True blocking would
-    /// require materializing block-local buffers with halos, which adds complexity
-    /// without clear benefit on modern CPUs with large caches.
-    void apply_operator_with_blocking(double t,
+    /// Apply spatial operator and zero boundary values
+    void apply_spatial_operator(double t,
                                       std::span<const double> u,
                                       std::span<double> Lu) {
         const size_t n = grid_->x().size();
@@ -360,7 +352,7 @@ private:
         const double w1 = config_.stage1_weight(dt);  // γ·dt/2
 
         // Compute L(u^n)
-        apply_operator_with_blocking(t_n, u_prev, workspace_.lu());
+        apply_spatial_operator(t_n, u_prev, workspace_.lu());
 
         // RHS = u^n + w1·L(u^n)
         // Use FMA for SAXPY-style loop
@@ -372,25 +364,7 @@ private:
         // Initial guess: u* = u^n
         std::copy(u_prev.begin(), u_prev.end(), u_current.begin());
 
-        // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
-        auto result = solve_implicit_stage_dispatch(t_stage, w1, u_current, rhs);
-
-        if (!result.converged) {
-            // Check if failure was due to singular Jacobian
-            bool is_singular = result.failure_reason &&
-                              result.failure_reason.value() == "Singular Jacobian";
-
-            SolverError error{
-                .code = is_singular ? SolverErrorCode::LinearSolveFailure
-                                    : SolverErrorCode::Stage1ConvergenceFailure,
-                .iterations = result.iterations,
-                .residual = 0.0  // residual not available in NewtonResult
-            };
-
-            return std::unexpected(error);
-        }
-
-        return {};
+        return solve_implicit_stage(t_stage, w1, u_current, rhs);
     }
 
     /// TR-BDF2 Stage 2: BDF2
@@ -422,25 +396,7 @@ private:
         // Initial guess: u^{n+1} = u* (already in u_current)
         // (No need to copy, u_current already has u^{n+γ})
 
-        // Solve implicit stage (dispatches to ProjectedThomas or Newton based on config)
-        auto result = solve_implicit_stage_dispatch(t_next, w2, u_current, rhs);
-
-        if (!result.converged) {
-            // Check if failure was due to singular Jacobian
-            bool is_singular = result.failure_reason &&
-                              result.failure_reason.value() == "Singular Jacobian";
-
-            SolverError error{
-                .code = is_singular ? SolverErrorCode::LinearSolveFailure
-                                    : SolverErrorCode::Stage2ConvergenceFailure,
-                .iterations = result.iterations,
-                .residual = 0.0  // residual not available in NewtonResult
-            };
-
-            return std::unexpected(error);
-        }
-
-        return {};
+        return solve_implicit_stage(t_next, w2, u_current, rhs);
     }
 
     /// Implicit Euler step (used for Rannacher startup)
@@ -457,22 +413,7 @@ private:
         // Initial guess: u^{n+1} = u^n
         std::copy(u_prev.begin(), u_prev.end(), u_current.begin());
 
-        auto result = solve_implicit_stage_dispatch(t_next, dt, u_current, rhs);
-        if (!result.converged) {
-            bool is_singular = result.failure_reason &&
-                              result.failure_reason.value() == "Singular Jacobian";
-
-            SolverError error{
-                .code = is_singular ? SolverErrorCode::LinearSolveFailure
-                                    : SolverErrorCode::Stage1ConvergenceFailure,
-                .iterations = result.iterations,
-                .residual = 0.0
-            };
-
-            return std::unexpected(error);
-        }
-
-        return {};
+        return solve_implicit_stage(t_next, dt, u_current, rhs);
     }
 
     /// Rannacher startup: two half-step implicit Euler updates for step 0
@@ -531,34 +472,18 @@ private:
     // purpose. See PR #97 for the architectural discussion.
     // ========================================================================
 
-    /// Solve implicit stage equation via Newton-Raphson
+    /// Solve implicit stage equation: u = rhs + coeff_dt·L(u)
     ///
-    /// Solves: u = rhs + coeff_dt·L(u)
-    /// Equivalently: F(u) = u - rhs - coeff_dt·L(u) = 0
-    ///
-    /// @param t Time at which to evaluate operators
-    /// @param coeff_dt TR-BDF2 weight (stage1_weight or stage2_weight)
-    /// @param u Solution vector (input: initial guess, output: converged solution)
-    /// @param rhs Right-hand side from previous stage
-    /// @return Result with convergence status
-    /// Dispatch implicit stage solver based on obstacle presence
-    ///
-    /// Routes to appropriate solver:
-    /// - With obstacle → solve_implicit_stage_projected() (Brennan-Schwartz LCP)
-    /// - Without obstacle → solve_implicit_stage() (Standard Newton iteration)
-    ///
-    /// @param t Current time
-    /// @param coeff_dt Time step coefficient
-    /// @param u Solution vector (input: initial guess, output: solution)
-    /// @param rhs Right-hand side vector
-    /// @return Convergence result
-    NewtonResult solve_implicit_stage_dispatch(double t, double coeff_dt,
-                                               std::span<double> u,
-                                               std::span<const double> rhs) {
+    /// Dispatches at compile time based on obstacle presence:
+    /// - With obstacle → Projected Thomas (Brennan-Schwartz LCP, single pass)
+    /// - Without obstacle → Newton iteration (quasi-Newton, iterative)
+    std::expected<void, SolverError> solve_implicit_stage(double t, double coeff_dt,
+                                                          std::span<double> u,
+                                                          std::span<const double> rhs) {
         if constexpr (HasObstacle<Derived>) {
             return solve_implicit_stage_projected(t, coeff_dt, u, rhs);
         } else {
-            return solve_implicit_stage(t, coeff_dt, u, rhs);
+            return solve_implicit_stage_newton(t, coeff_dt, u, rhs);
         }
     }
 
@@ -603,10 +528,11 @@ private:
     /// @param coeff_dt Time step coefficient (w1 for stage 1, w2 for stage 2)
     /// @param u Solution vector (input: initial guess, output: solution)
     /// @param rhs Right-hand side computed by caller (interior formula)
-    /// @return Always converged=true (single-pass, no iteration)
-    NewtonResult solve_implicit_stage_projected(double t, double coeff_dt,
-                                                std::span<double> u,
-                                                std::span<const double> rhs) {
+    /// @return Success, or LinearSolveFailure if the tridiagonal system is singular
+    std::expected<void, SolverError> solve_implicit_stage_projected(
+            double t, double coeff_dt,
+            std::span<double> u,
+            std::span<const double> rhs) {
         // Apply boundary conditions to initial guess
         apply_boundary_conditions(u, t);
 
@@ -646,7 +572,8 @@ private:
         // Why this wasn't needed for Newton: In J·δu = -F(u), the BC rows
         // enforce δu[0] = 0 (no change), so rhs = 0 is correct.
         // But for A·u = rhs, we need rhs = g(t) to get u[0] = g(t).
-        std::vector<double> rhs_with_bc(rhs.begin(), rhs.end());
+        auto rhs_with_bc = workspace_.reserved1();
+        std::copy(rhs.begin(), rhs.end(), rhs_with_bc.begin());
 
         // Apply Dirichlet boundary values to RHS
         const auto& left_bc = derived().left_boundary();
@@ -764,31 +691,26 @@ private:
         );
 
         if (!result.ok()) {
-            // Projected Thomas should never fail for well-posed problems
-            // Possible causes: singular matrix, NaN/Inf in inputs
-            return {false, 1, std::numeric_limits<double>::infinity(),
-                   std::optional<std::string>("Projected Thomas solver failed")};
+            return std::unexpected(SolverError{
+                .code = SolverErrorCode::LinearSolveFailure,
+                .iterations = 1,
+                .residual = std::numeric_limits<double>::infinity()
+            });
         }
 
-        // ═══════════════════════════════════════════════════════════════════════
-        // STEP 3: Apply boundary conditions and return
-        // ═══════════════════════════════════════════════════════════════════════
         // No update step needed - u already contains the solution from Projected Thomas
         // (Unlike Newton where we'd do: u ← u + δu)
 
         // Re-apply boundary conditions to ensure exact satisfaction
-        // (Projected Thomas preserves BCs, but this is a safety measure)
         apply_boundary_conditions(u, t);
 
-        // Projected Thomas always converges in a single pass (no iteration)
-        // Convergence is guaranteed for M-matrices (which TR-BDF2 produces)
-        return {true, 1, 0.0, std::nullopt};
+        return {};
     }
 
-
-    NewtonResult solve_implicit_stage(double t, double coeff_dt,
-                                      std::span<double> u,
-                                      std::span<const double> rhs) {
+    std::expected<void, SolverError> solve_implicit_stage_newton(
+            double t, double coeff_dt,
+            std::span<double> u,
+            std::span<const double> rhs) {
         const double eps = config_.jacobian_fd_epsilon;
 
         // Apply BCs to initial guess
@@ -803,7 +725,7 @@ private:
         // Newton iteration
         for (size_t iter = 0; iter < config_.max_iter; ++iter) {
             // Evaluate L(u)
-            apply_operator_with_blocking(t, u, workspace_.lu());
+            apply_spatial_operator(t, u, workspace_.lu());
 
             // Compute residual: F(u) = u - rhs - coeff_dt·L(u)
             compute_residual(u, coeff_dt, workspace_.lu(), rhs,
@@ -827,8 +749,11 @@ private:
             );
 
             if (!result.ok()) {
-                return {false, iter, std::numeric_limits<double>::infinity(),
-                       "Singular Jacobian"};
+                return std::unexpected(SolverError{
+                    .code = SolverErrorCode::LinearSolveFailure,
+                    .iterations = iter,
+                    .residual = std::numeric_limits<double>::infinity()
+                });
             }
 
             // Update: u ← u + δu
@@ -848,16 +773,18 @@ private:
             double error = compute_step_delta_error(u, workspace_.newton_u_old());
 
             if (error < config_.tolerance) {
-                return {true, iter + 1, error, std::nullopt};
+                return {};
             }
 
             // Prepare for next iteration
             std::copy(u.begin(), u.end(), workspace_.newton_u_old().begin());
         }
 
-        return {false, config_.max_iter,
-               compute_step_delta_error(u, workspace_.newton_u_old()),
-               "Max iterations reached"};
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::ConvergenceFailure,
+            .iterations = config_.max_iter,
+            .residual = compute_step_delta_error(u, workspace_.newton_u_old())
+        });
     }
 
     void compute_residual(std::span<const double> u, double coeff_dt,
@@ -941,7 +868,7 @@ private:
                                           TridiagonalMatrixView jac) {
         // Initialize u_perturb and compute baseline L(u)
         std::copy(u.begin(), u.end(), workspace_.u_stage().begin());
-        apply_operator_with_blocking(t, u, workspace_.lu());
+        apply_spatial_operator(t, u, workspace_.lu());
 
         // Interior points: tridiagonal structure via finite differences
         // J = ∂F/∂u where F(u) = u - rhs - coeff_dt·L(u)
@@ -949,21 +876,21 @@ private:
         for (size_t i = 1; i < n_ - 1; ++i) {
             // Diagonal: ∂F/∂u_i = 1 - coeff_dt·∂L_i/∂u_i
             workspace_.u_stage()[i] = u[i] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             jac.diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];
 
             // Lower diagonal: ∂F_i/∂u_{i-1} = -coeff_dt·∂L_i/∂u_{i-1}
             workspace_.u_stage()[i - 1] = u[i - 1] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_duim1 = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             jac.lower()[i - 1] = -coeff_dt * dLi_duim1;
             workspace_.u_stage()[i - 1] = u[i - 1];
 
             // Upper diagonal: ∂F_i/∂u_{i+1} = -coeff_dt·∂L_i/∂u_{i+1}
             workspace_.u_stage()[i + 1] = u[i + 1] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_duip1 = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             jac.upper()[i] = -coeff_dt * dLi_duip1;
             workspace_.u_stage()[i + 1] = u[i + 1];
@@ -987,13 +914,13 @@ private:
         } else if constexpr (std::is_same_v<bc::boundary_tag_t<LeftBCType>, bc::neumann_tag>) {
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             workspace_.u_stage()[0] = u[0] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
             double dL0_du0 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
             jac.diag()[0] = 1.0 - coeff_dt * dL0_du0;
             workspace_.u_stage()[0] = u[0];
 
             workspace_.u_stage()[1] = u[1] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
             double dL0_du1 = (workspace_.reserved1()[0] - workspace_.lu()[0]) / eps;
             jac.upper()[0] = -coeff_dt * dL0_du1;
             workspace_.u_stage()[1] = u[1];
@@ -1007,7 +934,7 @@ private:
             // For Neumann: F(u) = u - rhs - coeff_dt·L(u)
             size_t i = n_ - 1;
             workspace_.u_stage()[i] = u[i] + eps;
-            apply_operator_with_blocking(t, workspace_.u_stage(), workspace_.reserved1());
+            apply_spatial_operator(t, workspace_.u_stage(), workspace_.reserved1());
             double dLi_dui = (workspace_.reserved1()[i] - workspace_.lu()[i]) / eps;
             jac.diag()[i] = 1.0 - coeff_dt * dLi_dui;
             workspace_.u_stage()[i] = u[i];

@@ -379,8 +379,7 @@ PYBIND11_MODULE(mango_option, m) {
 
     // SolverErrorCode enum
     py::enum_<mango::SolverErrorCode>(m, "SolverErrorCode")
-        .value("Stage1ConvergenceFailure", mango::SolverErrorCode::Stage1ConvergenceFailure)
-        .value("Stage2ConvergenceFailure", mango::SolverErrorCode::Stage2ConvergenceFailure)
+        .value("ConvergenceFailure", mango::SolverErrorCode::ConvergenceFailure)
         .value("LinearSolveFailure", mango::SolverErrorCode::LinearSolveFailure)
         .value("InvalidConfiguration", mango::SolverErrorCode::InvalidConfiguration)
         .value("InvalidState", mango::SolverErrorCode::InvalidState)
