@@ -134,17 +134,18 @@ public:
 
         size_t step = 0;
         if (config_.rannacher_startup && time.n_steps() > 0) {
-            auto rannacher_ok = solve_rannacher_startup(t, dt, u_current, u_prev);
+            auto rannacher_ok = solve_rannacher_startup(t, dt, u_current, u_prev)
+                .transform([&] {
+                    // Update time and record snapshot after step 0
+                    t += dt;
+                    if (grid_->should_record(step + 1)) {
+                        grid_->record(step + 1, u_current);
+                    }
+                    step = 1;
+                });
             if (!rannacher_ok) {
                 return std::unexpected(rannacher_ok.error());
             }
-
-            // Update time and record snapshot after step 0
-            t += dt;
-            if (grid_->should_record(step + 1)) {
-                grid_->record(step + 1, u_current);
-            }
-            step = 1;
         }
 
         for (; step < time.n_steps(); ++step) {
