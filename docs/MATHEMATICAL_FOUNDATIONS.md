@@ -9,6 +9,7 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 
 1. [Black-Scholes PDE](#black-scholes-pde)
 2. [TR-BDF2 Time Stepping](#tr-bdf2-time-stepping)
+   - [Rannacher Startup](#rannacher-startup)
 3. [American Option Constraints](#american-option-constraints)
 4. [Grid Generation Strategies](#grid-generation-strategies)
    - [PDE Grid Estimation](#pde-grid-estimation)
@@ -111,6 +112,30 @@ Where γ = 2 - √2 ≈ 0.5858 (chosen for L-stability)
 - 2 implicit solves per time step (Stage 1 + Stage 2)
 - Each solve requires Newton iteration (~3-5 iterations typical)
 - Tridiagonal linear system per Newton iteration (O(n) via Thomas)
+
+### Rannacher Startup
+
+TR-BDF2's trapezoidal Stage 1 preserves high-frequency modes because it has no numerical dissipation at the Nyquist frequency (amplification factor |R(z)| → 1 as z → −∞ along the imaginary axis). For smooth initial data this is harmless. For option pricing, the terminal payoff has a discontinuous first derivative (kink at the strike), which excites all frequencies equally. The trapezoidal rule propagates these modes unchanged, producing **oscillations in gamma** near the strike during the first few time steps.
+
+Rannacher (1984) showed that replacing the first TR-BDF2 step with fully implicit backward Euler eliminates these oscillations. Backward Euler is L-stable with strong high-frequency damping: |R(z)| → 0 as z → −∞. One full step of backward Euler is sufficient to smooth the payoff kink before TR-BDF2 takes over.
+
+**Implementation.** The first time step is replaced by two half-steps of implicit Euler:
+
+```
+Step 0 (Rannacher):
+  u^{1/2} = u⁰ + (dt/2)·L(u^{1/2})     [implicit Euler, half-step]
+  u¹      = u^{1/2} + (dt/2)·L(u¹)      [implicit Euler, half-step]
+
+Steps 1 to N (standard TR-BDF2):
+  Stage 1: trapezoidal to t_n + γ·dt
+  Stage 2: BDF2 to t_{n+1}
+```
+
+Two half-steps rather than one full step provide better accuracy while retaining the damping properties of backward Euler. The half-step size matches the implicit Euler stability region more naturally to the problem's diffusion scale.
+
+**Effect on accuracy.** Backward Euler is first-order, so the startup step introduces O(dt) local error. Since it applies to only one step out of N, the global contribution is O(dt/N) = O(dt²), preserving the overall second-order convergence of TR-BDF2.
+
+**Configuration.** Rannacher startup is enabled by default (`TRBDF2Config::rannacher_startup = true`). The number of startup steps is fixed at one (two half-steps). Disabling it reverts to pure TR-BDF2 for all steps.
 
 ---
 
