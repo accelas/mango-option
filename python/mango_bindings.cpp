@@ -382,7 +382,6 @@ PYBIND11_MODULE(mango_option, m) {
         .value("ConvergenceFailure", mango::SolverErrorCode::ConvergenceFailure)
         .value("LinearSolveFailure", mango::SolverErrorCode::LinearSolveFailure)
         .value("InvalidConfiguration", mango::SolverErrorCode::InvalidConfiguration)
-        .value("InvalidState", mango::SolverErrorCode::InvalidState)
         .value("Unknown", mango::SolverErrorCode::Unknown)
         .export_values();
 

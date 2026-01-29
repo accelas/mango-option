@@ -2,23 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
-#include <optional>
-#include <string>
-
 namespace mango {
-
-/// Method for handling obstacle constraints in American options
-enum class ObstacleMethod {
-    ProjectedThomas  ///< Projected Thomas (Brennan-Schwartz LCP solver)
-};
-
-/// Result from Newton-Raphson iteration for implicit PDE stages
-struct NewtonResult {
-    bool converged;                              ///< Convergence status
-    size_t iterations;                           ///< Number of iterations performed
-    double final_error;                          ///< Final error measure
-    std::optional<std::string> failure_reason;   ///< Optional failure diagnostic
-};
 
 /// TR-BDF2 time-stepping configuration
 ///
@@ -42,9 +26,6 @@ struct TRBDF2Config {
 
     /// Finite difference epsilon for Jacobian computation
     double jacobian_fd_epsilon = 1e-7;
-
-    /// Obstacle constraint method (default: ProjectedThomas for robust LCP solving)
-    ObstacleMethod obstacle_method = ObstacleMethod::ProjectedThomas;
 
     /// Rannacher startup: replace first TR-BDF2 step with two half-step implicit Euler solves
     bool rannacher_startup = true;

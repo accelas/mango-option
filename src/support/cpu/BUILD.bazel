@@ -1,5 +1,0 @@
-cc_library(
-    name = "cpu_diagnostics",
-    hdrs = ["cpu_diagnostics.hpp"],
-    visibility = ["//visibility:public"],
-)

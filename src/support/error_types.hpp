@@ -14,7 +14,6 @@ enum class SolverErrorCode {
     ConvergenceFailure,
     LinearSolveFailure,
     InvalidConfiguration,
-    InvalidState,
     Unknown
 };
 

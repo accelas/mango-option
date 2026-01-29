@@ -17,7 +17,6 @@
 #include "src/pde/core/pde_workspace.hpp"
 #include <vector>
 #include <memory>
-#include <stdexcept>
 #include <cmath>
 #include <functional>
 #include <optional>
