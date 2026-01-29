@@ -414,7 +414,7 @@ auto [builder, axes] = result.value();
 auto surface_result = builder.build(axes);
 ```
 
-**Python convenience wrapper:**
+**Python convenience wrapper** (see [PYTHON_GUIDE.md](PYTHON_GUIDE.md) for full API):
 
 ```python
 import mango_option as mo
