@@ -132,54 +132,68 @@ public:
             grid_->record(0, u_current);
         }
 
-        for (size_t step = 0; step < time.n_steps(); ++step) {
+        size_t step = 0;
+        if (config_.rannacher_startup && time.n_steps() > 0) {
+            double t_old = t;
+            double t_next = t + dt;
+            const double half_dt = 0.5 * dt;
+            const double t_mid = t + half_dt;
+
+            // Copy u_current to u_prev for next iteration
+            std::copy(u_current.begin(), u_current.end(), u_prev.begin());
+
+            // First half-step: implicit Euler to t_mid
+            auto euler1_ok = solve_implicit_euler(t, t_mid, half_dt, u_current, u_prev);
+            if (!euler1_ok) {
+                return std::unexpected(euler1_ok.error());
+            }
+
+            // Process temporal events in (t, t_mid]
+            process_temporal_events(t_old, t_mid, step, u_current);
+
+            // Prepare for second half-step
+            std::copy(u_current.begin(), u_current.end(), u_prev.begin());
+
+            // Second half-step: implicit Euler to t_next
+            auto euler2_ok = solve_implicit_euler(t_mid, t_next, half_dt, u_current, u_prev);
+            if (!euler2_ok) {
+                return std::unexpected(euler2_ok.error());
+            }
+
+            // Process temporal events in (t_mid, t_next]
+            process_temporal_events(t_mid, t_next, step, u_current);
+
+            // Update time and record snapshot after step 0
+            t = t_next;
+            if (grid_->should_record(step + 1)) {
+                grid_->record(step + 1, u_current);
+            }
+            step = 1;
+        }
+
+        for (; step < time.n_steps(); ++step) {
             double t_old = t;
 
             // Copy u_current to u_prev for next iteration
             std::copy(u_current.begin(), u_current.end(), u_prev.begin());
 
             double t_next = t + dt;
-            if (config_.rannacher_startup && step == 0) {
-                const double half_dt = 0.5 * dt;
-                const double t_mid = t + half_dt;
 
-                // First half-step: implicit Euler to t_mid
-                auto euler1_ok = solve_implicit_euler(t, t_mid, half_dt, u_current, u_prev);
-                if (!euler1_ok) {
-                    return std::unexpected(euler1_ok.error());
-                }
-
-                // Process temporal events in (t, t_mid]
-                process_temporal_events(t_old, t_mid, step, u_current);
-
-                // Prepare for second half-step
-                std::copy(u_current.begin(), u_current.end(), u_prev.begin());
-
-                // Second half-step: implicit Euler to t_next
-                auto euler2_ok = solve_implicit_euler(t_mid, t_next, half_dt, u_current, u_prev);
-                if (!euler2_ok) {
-                    return std::unexpected(euler2_ok.error());
-                }
-
-                // Process temporal events in (t_mid, t_next]
-                process_temporal_events(t_mid, t_next, step, u_current);
-            } else {
-                // Stage 1: Trapezoidal rule to t_n + γ·dt
-                double t_stage1 = t + config_.gamma * dt;
-                auto stage1_ok = solve_stage1(t, t_stage1, dt, u_current, u_prev);
-                if (!stage1_ok) {
-                    return std::unexpected(stage1_ok.error());
-                }
-
-                // Stage 2: BDF2 from t_n to t_n+1
-                auto stage2_ok = solve_stage2(t_stage1, t_next, dt, u_current, u_prev);
-                if (!stage2_ok) {
-                    return std::unexpected(stage2_ok.error());
-                }
-
-                // Process temporal events AFTER completing the step
-                process_temporal_events(t_old, t_next, step, u_current);
+            // Stage 1: Trapezoidal rule to t_n + γ·dt
+            double t_stage1 = t + config_.gamma * dt;
+            auto stage1_ok = solve_stage1(t, t_stage1, dt, u_current, u_prev);
+            if (!stage1_ok) {
+                return std::unexpected(stage1_ok.error());
             }
+
+            // Stage 2: BDF2 from t_n to t_n+1
+            auto stage2_ok = solve_stage2(t_stage1, t_next, dt, u_current, u_prev);
+            if (!stage2_ok) {
+                return std::unexpected(stage2_ok.error());
+            }
+
+            // Process temporal events AFTER completing the step
+            process_temporal_events(t_old, t_next, step, u_current);
 
             // Update time
             t = t_next;
