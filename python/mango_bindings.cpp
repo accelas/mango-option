@@ -295,19 +295,17 @@ PYBIND11_MODULE(mango_option, m) {
     m.def(
         "american_option_price",
         [](const mango::AmericanOptionParams& params,
-           double x_min,
-           double x_max,
-           size_t n_space,
-           [[maybe_unused]] size_t n_time) {
-            auto grid_spec_result = mango::GridSpec<double>::uniform(x_min, x_max, n_space);
-            if (!grid_spec_result.has_value()) {
-                auto err = grid_spec_result.error();
-                throw py::value_error(
-                    "Failed to create grid (error code " + std::to_string(static_cast<int>(err.code)) + ")");
+           std::optional<mango::GridAccuracyProfile> accuracy_profile) {
+            mango::GridAccuracyParams accuracy;
+            if (accuracy_profile.has_value()) {
+                accuracy = mango::grid_accuracy_profile(accuracy_profile.value());
             }
 
-            // Allocate workspace buffer (local, temporary)
-            size_t n = grid_spec_result.value().n_points();
+            // Estimate grid automatically (sinh-spaced, clustered near strike)
+            auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy);
+
+            // Allocate workspace buffer
+            size_t n = grid_spec.n_points();
             std::vector<double> buffer(mango::PDEWorkspace::required_size(n));
 
             auto workspace_result = mango::PDEWorkspace::from_buffer(buffer, n);
@@ -316,29 +314,32 @@ PYBIND11_MODULE(mango_option, m) {
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            mango::AmericanOptionSolver solver(params, workspace_result.value());
+            mango::AmericanOptionSolver solver(
+                params, workspace_result.value(), std::nullopt,
+                std::make_pair(grid_spec, time_domain));
             auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();
                 throw py::value_error(
-                    "American option solve failed (error code " + std::to_string(static_cast<int>(error.code)) + ")");
+                    "American option solve failed (error code " +
+                    std::to_string(static_cast<int>(error.code)) + ")");
             }
 
             return std::move(solve_result.value());
         },
         py::arg("params"),
-        py::arg("x_min") = -3.0,
-        py::arg("x_max") = 3.0,
-        py::arg("n_space") = 201,
-        py::arg("n_time") = 2000,
+        py::arg("accuracy") = py::none(),
         R"pbdoc(
-            Price an American option using the PDE solver.
+            Price an American option using the PDE solver with automatic grid estimation.
+
+            Uses sinh-spaced grids with clustering near the strike for optimal accuracy.
+            Supports yield curves (via params.rate) and discrete dividends
+            (via params.discrete_dividends).
 
             Args:
-                params: AmericanOptionParams with contract information.
-                x_min/x_max: Log-moneyness domain bounds.
-                n_space: Number of spatial grid points.
-                n_time: Number of time steps.
+                params: AmericanOptionParams with contract and market parameters.
+                accuracy: Optional GridAccuracyProfile (LOW/MEDIUM/HIGH/ULTRA).
+                          If not specified, uses default parameters.
 
             Returns:
                 AmericanOptionResult with value and Greeks.
