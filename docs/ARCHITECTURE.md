@@ -493,7 +493,7 @@ auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto_profile(
 ).value();
 ```
 
-Python helper (builds the surface directly):
+Python helper (builds the surface directly; see [PYTHON_GUIDE.md](PYTHON_GUIDE.md) for full API):
 ```python
 import mango_option as mo
 

@@ -230,6 +230,31 @@ bazel test //tests:pde_solver_test --test_output=all
 ```python
 import mango_option as mo
 
+# Price a single American put
+params = mo.AmericanOptionParams()
+params.spot = 100.0
+params.strike = 100.0
+params.maturity = 1.0
+params.volatility = 0.20
+params.rate = 0.05
+params.dividend_yield = 0.02
+params.type = mo.OptionType.PUT
+
+result = mo.american_option_price(params)
+print(result.value_at(100.0), result.delta(), result.gamma())
+
+# Batch-price a chain of puts (parallelized, normalized chain optimization)
+batch = [mo.AmericanOptionParams() for _ in range(5)]
+for p, K in zip(batch, [90, 95, 100, 105, 110]):
+    p.spot, p.strike, p.maturity = 100.0, K, 1.0
+    p.volatility, p.rate, p.dividend_yield = 0.20, 0.05, 0.02
+    p.type = mo.OptionType.PUT
+
+solver = mo.BatchAmericanOptionSolver()
+solver.set_grid_accuracy(mo.GridAccuracyProfile.LOW)
+results, failed = solver.solve_batch(batch, use_shared_grid=True)
+
+# Build price table for fast IV solving (~4us per query)
 chain = mo.OptionChain()
 chain.spot = 100.0
 chain.strikes = [90, 95, 100, 105, 110]
@@ -245,12 +270,14 @@ surface = mo.build_price_table_surface_from_chain(
     pde_profile=mo.GridAccuracyProfile.HIGH,
 )
 
-solver = mo.IVSolverInterpolated.create(surface)
-ok, result, err = solver.solve_impl(
+iv_solver = mo.IVSolverInterpolated.create(surface)
+ok, result, err = iv_solver.solve_impl(
     mo.IVQuery(spot=100.0, strike=100.0, maturity=1.0, rate=0.02,
                dividend_yield=0.0, type=mo.OptionType.PUT, market_price=8.0)
 )
 ```
+
+**See [docs/PYTHON_GUIDE.md](docs/PYTHON_GUIDE.md) for the full Python API guide.**
 
 **Test coverage:** 100+ test files, plus property-based fuzz tests via Earthly
 
