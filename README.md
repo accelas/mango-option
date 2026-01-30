@@ -53,9 +53,6 @@ bazel build //...
 
 # Run all tests
 bazel test //...
-
-# Run examples
-bazel run //examples:example_newton_solver
 ```
 
 ---

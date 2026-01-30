@@ -29,7 +29,7 @@ python.toolchain(
 use_repo(python, "python_3_11")
 
 # Non-BCR dependencies (mdspan, etc.)
-non_bcr_deps = use_extension("//:deps.bzl", "non_bcr_deps")
+non_bcr_deps = use_extension("//third_party:deps.bzl", "non_bcr_deps")
 use_repo(non_bcr_deps, "mdspan")
 
 # Apache Arrow C++ (required for price table persistence)
