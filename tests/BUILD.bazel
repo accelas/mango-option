@@ -719,15 +719,6 @@ cc_test(
 )
 
 cc_test(
-    name = "cpu_diagnostics_test",
-    srcs = ["cpu/cpu_diagnostics_test.cc"],
-    deps = [
-        "//src/support/cpu:cpu_diagnostics",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "centered_difference_facade_test",
     srcs = ["centered_difference_facade_test.cc"],
     deps = [
@@ -754,16 +745,6 @@ cc_test(
 # Fast tests: bazel test //tests/... --test_tag_filters=-manual,-slow
 # Slow tests: bazel test //tests/... --test_tag_filters=slow
 
-cc_test(
-    name = "pde_solver_simd_benchmark",
-    srcs = ["pde_solver_simd_benchmark.cc"],
-    deps = [
-        "//src/pde/core:pde_solver",
-        "//src/support/cpu:cpu_diagnostics",
-        "@googletest//:gtest_main",
-    ],
-    tags = ["manual"],  # Exclude from regular test runs (prints diagnostics)
-)
 
 # DISABLED: Failing tests (needs investigation)
 # cc_test(

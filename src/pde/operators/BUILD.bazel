@@ -60,7 +60,6 @@ cc_library(
     deps = [
         ":centered_difference_scalar",
         "//src/pde/core:grid",
-        "//src/support/cpu:cpu_diagnostics",
     ],
     visibility = ["//visibility:public"],
 )

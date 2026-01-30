@@ -86,7 +86,6 @@ cc_library(
     deps = [
         ":grid",
         ":pde_workspace",
-        "//src/support/cpu:cpu_diagnostics",
         "//src/pde/operators:centered_difference_facade",
         ":boundary_conditions",
         ":time_domain",
