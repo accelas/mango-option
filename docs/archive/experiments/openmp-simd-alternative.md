@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # OpenMP SIMD as Alternative to std::experimental::simd
 
 ## Current Situation

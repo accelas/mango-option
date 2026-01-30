@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # GitHub Actions CI Configuration
 
 ## Dependency Caching Strategy

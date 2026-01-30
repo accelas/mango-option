@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Adaptive Grid Builder Design
 
 **Date:** 2025-11-27

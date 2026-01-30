@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # American Option Pricing - C++20 Design
 
 **Date:** 2025-11-04

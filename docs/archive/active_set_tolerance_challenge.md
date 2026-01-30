@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Active Set Tolerance Calibration Challenge
 
 ## ✅ SOLVED - See Solution Document

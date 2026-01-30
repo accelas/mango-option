@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Log-Moneyness Storage for Price Table
 
 ## Problem

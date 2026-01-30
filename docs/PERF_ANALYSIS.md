@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Instruction-Level Performance Analysis
 
 Microarchitectural profiling of the American option PDE solver using `perf stat` on real market data with auto-estimated grids.

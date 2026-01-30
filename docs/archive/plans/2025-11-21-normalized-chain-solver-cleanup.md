@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Normalized Chain Solver Cleanup
 
 **Date:** 2025-11-21

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Interpolation-Based Option Pricing Engine: Design Document
 
 ## Executive Summary

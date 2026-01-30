@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # API Ergonomics: Next Steps
 
 ## Current Branch Status

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Batch Option Chain Enhancement Design
 
 **Date:** 2025-01-12

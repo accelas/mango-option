@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Adaptive Grid Refinement for American Option Price Interpolation
 
 ## Problem Statement

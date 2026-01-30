@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Kokkos Migration Design
 
 **Date:** 2025-11-25

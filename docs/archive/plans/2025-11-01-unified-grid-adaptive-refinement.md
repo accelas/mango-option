@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Unified Grid Architecture with Adaptive Refinement (P6)
 
 **Date:** 2025-11-01

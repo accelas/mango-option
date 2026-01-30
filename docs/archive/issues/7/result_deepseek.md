@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 Looking at your TR-BDF2 stagnation problem, I can identify several issues. Let me provide a comprehensive analysis and solution:
 
 ## Issue 1: Incorrect Stage 2 Formulation

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # IV Interpolation Profiling Results
 
 **Date:** 2025-01-13

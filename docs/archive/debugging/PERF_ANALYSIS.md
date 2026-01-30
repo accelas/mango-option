@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # B-spline 4D Performance: Real Profiling Data
 
 **Date:** 2025-01-16

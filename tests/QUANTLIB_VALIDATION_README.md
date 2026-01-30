@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # QuantLib Validation Framework
 
 Unified testing framework for validating mango-option pricing and implied volatility solvers against QuantLib reference implementation.

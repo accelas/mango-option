@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Implied Volatility Solver Implementation Summary
 
 **Date:** 2025-11-05

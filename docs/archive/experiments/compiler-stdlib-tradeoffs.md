@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Compiler and Standard Library Trade-offs
 
 ## Investigation Summary

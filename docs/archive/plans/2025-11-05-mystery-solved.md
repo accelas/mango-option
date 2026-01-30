@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Performance Mystery SOLVED: Uniform vs Non-Uniform Grid
 
 ## The Root Cause

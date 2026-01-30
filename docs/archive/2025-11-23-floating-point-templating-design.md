@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Floating-Point Templating Design
 
 **Date:** 2025-11-23

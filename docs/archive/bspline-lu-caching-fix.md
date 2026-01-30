@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # B-Spline Banded Solver: LU Caching and Pivot Detection Fixes
 
 **Date:** 2025-01-14

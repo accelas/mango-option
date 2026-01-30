@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Cox-de Boor SIMD Vectorization Implementation Plan
 
 **Date**: 2025-01-16

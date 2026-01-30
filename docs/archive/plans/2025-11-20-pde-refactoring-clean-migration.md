@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # PDE Workspace Refactoring - Clean Migration (No Dual Paths)
 
 **Date:** 2025-11-20

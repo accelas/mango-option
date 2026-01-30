@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # API Usage Guide
 
 Practical examples and common usage patterns for the mango-option library.

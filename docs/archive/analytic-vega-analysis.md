@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Analytic B-spline Vega Analysis
 
 **Date:** 2025-01-13

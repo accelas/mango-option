@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Cache Locality and Coordinate Transform Optimization
 
 **Date:** 2025-10-30

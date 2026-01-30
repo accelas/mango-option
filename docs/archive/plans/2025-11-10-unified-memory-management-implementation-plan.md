@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Unified Memory Management C++23 Refactor Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

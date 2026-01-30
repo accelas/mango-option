@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Uniform Grid Optimization Results - SUCCESS!
 
 ## Summary

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 ## Analysis and Solution to the Neumann Boundary Condition Mass Conservation Problem
 
 After thorough analysis of your problem, I've identified the root cause and provide several solutions to fix the mass conservation issue.

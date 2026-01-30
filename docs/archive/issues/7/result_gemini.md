@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 This is a classic and subtle numerical methods problem. Your analysis and detailed debugging are excellent.
 
 The root cause of the stagnation is a **fundamental inconsistency in your Stage 2 (BDF2) formulation**. The specific equation you are using is only consistent for problems whose steady-state solution is $u_{\infty} = 0$. Your problem has a non-zero steady state, which this scheme cannot represent.

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Compiler Performance Comparison: Clang vs GCC
 
 **Configuration:** Both with Scalar backend only (SIMD disabled)

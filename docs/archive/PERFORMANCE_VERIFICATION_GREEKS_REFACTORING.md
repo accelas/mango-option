@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Performance Verification: Greeks Refactoring
 
 **Date:** 2025-11-20

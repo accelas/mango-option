@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Non-Uniform Grid Spacing for Option Price Tables (P5)
 
 **Date:** 2025-11-01

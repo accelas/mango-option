@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Price Table Phases 8-10 Implementation Plan (Corrected)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 ## 1D Cubic B-Spline Collocation: Problem, Algorithm, Expected Output
 
 ### Problem Statement

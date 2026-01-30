@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # USDT Tracing Guide for mango
 
 This document provides comprehensive documentation for using USDT (User Statically-Defined Tracing) probes in the mango library.

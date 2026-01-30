@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Snapshot Collection API Design (Revised)
 
 **Date:** 2025-11-04

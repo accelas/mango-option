@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # std::span Is Zero-Overhead - Empirical Proof
 
 ## Summary

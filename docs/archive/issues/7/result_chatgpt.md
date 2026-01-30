@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 Nice, this is an excellent and detailed bug report — thank you. I read everything carefully. I don't think this is a mysterious property of TR-BDF2; the behavior you show (Stage-1 advances, Stage-2 immediately pulls back to essentially (u^n), yet your Newton iterations report tiny residuals) is exactly the sort of symptom produced by one (or more) of these problems:
 
 * **an algebra / sign / coefficient error in the Stage-2 (BDF2) coupling**,

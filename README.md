@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # mango-option
 
 American option pricing and implied volatility in C++23, with Python bindings.

@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Greeks Refactoring - Completion Summary
 
 **Date:** 2025-11-20

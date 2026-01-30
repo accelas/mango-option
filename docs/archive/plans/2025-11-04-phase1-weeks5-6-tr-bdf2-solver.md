@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Phase 1 Weeks 5-6: TR-BDF2 Solver + Cache Blocking Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

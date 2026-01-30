@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Cox-de Boor SIMD Performance Investigation
 
 **Date:** 2025-01-16

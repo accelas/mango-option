@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # mdspan Adoption Strategy for mango-option
 
 **Date:** 2025-11-22

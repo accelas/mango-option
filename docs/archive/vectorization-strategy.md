@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Vectorization Strategy
 
 **Date:** 2025-11-21

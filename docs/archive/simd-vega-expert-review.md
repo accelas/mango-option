@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Expert Review: SIMD Vega Optimization Analysis
 
 **Date:** 2025-01-13

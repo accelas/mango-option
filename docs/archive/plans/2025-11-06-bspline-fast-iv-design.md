@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # BSpline Interpolation & Fast IV Solver – Consolidated Design
 
 **Date:** 2025‑11‑06 (updated 2025‑11‑07)  

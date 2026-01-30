@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # B-spline Banded Solver Implementation Plan (Phase 0)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

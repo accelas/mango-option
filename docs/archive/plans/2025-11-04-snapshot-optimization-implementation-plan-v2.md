@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Snapshot Optimization Implementation Plan (REVISED v2)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

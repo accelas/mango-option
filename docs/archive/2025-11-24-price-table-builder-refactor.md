@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Price Table Builder Refactor - Two-Phase Design
 
 **Date:** 2025-11-24 (Revised: 2025-11-24)

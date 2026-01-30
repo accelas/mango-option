@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # PMR Workspace Optimization Summary
 
 **Date**: 2025-01-16

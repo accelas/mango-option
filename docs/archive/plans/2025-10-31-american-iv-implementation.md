@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # American Option Implied Volatility Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

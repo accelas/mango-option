@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Current Implementation Analysis
 
 **Date**: 2025-01-14

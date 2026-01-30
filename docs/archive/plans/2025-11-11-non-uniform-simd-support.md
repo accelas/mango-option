@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Non-Uniform Grid Support for CenteredDifferenceSIMD
 
 **Date**: 2025-11-11

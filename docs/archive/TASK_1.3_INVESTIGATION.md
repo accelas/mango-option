@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Task 1.3 Investigation: Remove storage conversion from factorize_banded()
 
 ## Summary

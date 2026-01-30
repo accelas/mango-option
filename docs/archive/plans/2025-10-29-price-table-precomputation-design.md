@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Price Table Pre-computation Design
 
 **Date:** 2025-10-29

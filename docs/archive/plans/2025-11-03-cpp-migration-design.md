@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # C++20 Migration Design: mango-option
 
 **Date:** 2025-11-03

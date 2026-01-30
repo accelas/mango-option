@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # PDE Workspace Refactoring - Progress Update
 
 **Date:** 2025-11-20

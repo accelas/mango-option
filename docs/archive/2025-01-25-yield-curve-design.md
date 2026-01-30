@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Yield Curve Support Design
 
 ## Overview

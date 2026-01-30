@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Interpolation Engine: Design Summary & Trade-offs
 
 **Quick reference for key design decisions**

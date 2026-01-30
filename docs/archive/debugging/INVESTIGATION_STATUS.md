@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Cox-de Boor SIMD Investigation Status
 
 **Date:** 2025-01-16

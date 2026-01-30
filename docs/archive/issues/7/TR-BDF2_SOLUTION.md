@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # TR-BDF2 Stagnation Bug - RESOLVED ✅
 
 ## Summary

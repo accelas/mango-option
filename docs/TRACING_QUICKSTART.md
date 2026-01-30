@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # USDT Tracing Quick Start (5 Minutes)
 
 Get started with zero-overhead tracing of the mango library in under 5 minutes.

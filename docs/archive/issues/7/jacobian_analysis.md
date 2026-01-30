@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Jacobian Usage Analysis - Issue #7 Follow-up
 
 ## Executive Summary

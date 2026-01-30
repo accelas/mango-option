@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Phase 1 Week 2: WorkspaceStorage + Spatial Operators Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

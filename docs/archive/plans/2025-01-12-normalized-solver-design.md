@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Normalized Chain Solver: Design and Implementation
 
 **Date:** 2025-01-12

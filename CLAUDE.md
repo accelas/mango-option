@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # CLAUDE.md
 
 Guide for Claude Code when working with this repository.

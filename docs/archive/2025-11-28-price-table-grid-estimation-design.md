@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Price Table Grid Estimation Design
 
 ## Problem

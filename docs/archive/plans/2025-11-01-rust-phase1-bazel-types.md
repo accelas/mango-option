@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: MIT -->
 # Rust Phase 1: Bazel + rules_rust Setup and Type Definitions
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
