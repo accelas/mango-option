@@ -2,7 +2,6 @@
 
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/pde_workspace.hpp"
-#include "src/support/cpu/cpu_diagnostics.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/core/time_domain.hpp"
@@ -18,7 +17,6 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
-#include <iostream>
 
 namespace mango {
 
@@ -38,11 +36,6 @@ concept HasObstacle = requires(const Derived& d, double t, std::span<const doubl
 using TemporalEventCallback = std::function<void(double t,
                                                   std::span<const double> x,
                                                   std::span<double> u)>;
-
-// Obstacle callback signature (legacy - used for std::function obstacle callbacks)
-using ObstacleCallback = std::function<void(double t,
-                                             std::span<const double> x,
-                                             std::span<double> psi)>;
 
 // Temporal event definition
 struct TemporalEvent {
