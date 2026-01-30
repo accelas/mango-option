@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/table/adaptive_grid_builder.hpp"
 #include "src/math/black_scholes_analytics.hpp"
 #include "src/math/latin_hypercube.hpp"

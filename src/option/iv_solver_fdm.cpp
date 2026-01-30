@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/math/root_finding.hpp"
 #include "src/option/american_option.hpp"

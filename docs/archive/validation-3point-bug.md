@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Validation Framework Bug: 3-Point "Ground Truth"
 
 ## Issue #61 Root Cause

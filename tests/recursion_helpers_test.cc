@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/recursion_helpers.hpp"
 #include <vector>

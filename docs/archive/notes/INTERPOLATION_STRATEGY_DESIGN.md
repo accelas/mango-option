@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Interpolation Strategy Design: Dependency Injection
 
 ## Overview

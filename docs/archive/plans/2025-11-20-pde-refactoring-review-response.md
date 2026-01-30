@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # PDE Workspace Refactoring - Codex Review Response
 
 **Date:** 2025-11-20

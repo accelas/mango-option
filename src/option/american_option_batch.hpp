@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_batch.hpp
  * @brief Batch American option pricing solver for parallel processing

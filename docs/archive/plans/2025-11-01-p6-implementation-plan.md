@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # P6 Implementation Plan: Unified Grid + Adaptive Refinement
 
 **Branch:** `feature/p6-unified-grid-adaptive`

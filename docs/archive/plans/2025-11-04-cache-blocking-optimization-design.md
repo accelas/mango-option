@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Cache-Blocking Optimization for Spatial Operators
 
 **Date:** 2025-11-04

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file option_types.hpp
  * @brief Option-related types for mango::simple namespace

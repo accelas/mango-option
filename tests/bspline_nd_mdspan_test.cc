@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/math/bspline_nd.hpp"
 #include "src/math/bspline_basis.hpp"
 #include <gtest/gtest.h>

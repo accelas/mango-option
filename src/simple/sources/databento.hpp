@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file databento.hpp
  * @brief Converter for Databento data format

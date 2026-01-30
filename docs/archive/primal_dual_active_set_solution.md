@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Primal-Dual Active Set Solution for American Options (Empirical Baseline)
 
 ⚠️ **WARNING: This is an empirical baseline with tuned parameters, not a theoretically sound implementation.**

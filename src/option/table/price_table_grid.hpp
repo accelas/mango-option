@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file price_table_grid.hpp
  * @brief Grid specification for price table construction

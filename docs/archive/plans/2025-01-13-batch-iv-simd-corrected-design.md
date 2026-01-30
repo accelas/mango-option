@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Batch IV Solver with SIMD - Corrected Design
 
 **Date:** 2025-01-13

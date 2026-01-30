@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # TR-BDF2 Time-Stepping Stagnation Problem
 
 ## Problem Statement

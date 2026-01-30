@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file simple_yfinance_test.cc
  * @brief Tests for yfinance data pipeline (converted from simple_yfinance_example.cpp)

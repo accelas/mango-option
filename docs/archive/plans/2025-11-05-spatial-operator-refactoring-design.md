@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Spatial Operator Refactoring Design (Revised)
 
 ## Overview

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Custom Grid Investigation Report
 
 ## Executive Summary

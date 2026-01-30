@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Unified CenteredDifference Design
 
 **Date:** 2025-11-11

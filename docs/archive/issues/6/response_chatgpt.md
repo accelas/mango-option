@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 Nice, this is a very clear write-up — thank you. You’ve already identified the likely cause (boundary rows / algebraic constraints breaking the telescoping property and allowing drift into the Neumann null space). Below I give a short diagnosis plus several robust fixes (ranked from simplest to most robust), explanations of why they work, and ready-to-run pseudo/Python code you can drop into your solver to test. My recommendation: switch to a flux-form (finite-volume) or ghost-point implementation first — those fix conservation without needing ad-hoc mass fixes. If you need a short-term quick patch, project out the mean after each stage; if you want a clean long-term fix, use flux-form or ghost points and handle the null-space in the linear solver.
 
 ---

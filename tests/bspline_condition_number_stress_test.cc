@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_condition_number_stress_test.cc
  * @brief Stress test for dgbcon-based condition number estimation

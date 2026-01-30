@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/adaptive_grid_builder.hpp"
 #include "src/option/american_option_batch.hpp"

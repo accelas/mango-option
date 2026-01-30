@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file batch_bracketing_test.cc
  * @brief Tests for OptionBracketing (grouping heterogeneous options)

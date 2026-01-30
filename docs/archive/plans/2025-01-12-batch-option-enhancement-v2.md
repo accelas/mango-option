@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Batch Option Enhancement Design (Revised)
 
 **Date:** 2025-01-12

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # PMR-Based Memory Management Refactoring
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

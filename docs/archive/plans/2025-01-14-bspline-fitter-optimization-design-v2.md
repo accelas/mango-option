@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # B-spline Fitter Performance Optimization Design (Revised)
 
 **Date**: 2025-01-14

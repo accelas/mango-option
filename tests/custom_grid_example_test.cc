@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file custom_grid_example_test.cc
  * @brief Tests for custom grid configuration (converted from example_custom_grid.cc)

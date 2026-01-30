@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 name: Build and Publish Docker Image
 
 on:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Dockerfile for mango-option CI environment
 # This image pre-installs all dependencies to speed up CI runs
 # Uses trixie-slim base for smaller size (~40% reduction)

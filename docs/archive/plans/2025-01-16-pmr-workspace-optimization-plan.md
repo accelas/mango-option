@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # PMR Workspace Optimization Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or superpowers:subagent-driven-development to implement this plan task-by-task.

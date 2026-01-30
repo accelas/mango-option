@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_nd_separable.hpp
  * @brief Generic N-dimensional separable B-spline collocation fitting

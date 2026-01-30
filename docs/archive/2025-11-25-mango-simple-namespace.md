@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # mango::simple Namespace Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

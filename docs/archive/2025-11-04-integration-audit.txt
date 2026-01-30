@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Spatial Operator Integration Audit
 
 ## PDESolver (src/cpp/pde_solver.hpp)

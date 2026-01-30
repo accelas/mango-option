@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # P1: Vega Interpolation Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

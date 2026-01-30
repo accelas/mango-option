@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file quantlib_performance.cc
  * @brief Performance comparison between mango-option and QuantLib

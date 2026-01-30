@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Phase 1 Weeks 3-4: Multi-Dimensional Grids + Index Options Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

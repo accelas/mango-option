@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 package(default_visibility = ["//visibility:public"])
 
 # Export headers for packaging

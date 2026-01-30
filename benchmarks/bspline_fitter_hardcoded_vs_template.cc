@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_fitter_hardcoded_vs_template.cc
  * @brief Benchmark: Hardcoded 4-axis fitting vs Template-based axis fitting

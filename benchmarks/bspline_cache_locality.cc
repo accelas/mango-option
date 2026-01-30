@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_cache_locality.cc
  * @brief Benchmark comparing cache locality impact of axis ordering in 4D B-spline fitting

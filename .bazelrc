@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Bazel configuration file
 # Note: Use .bazelignore to exclude directories from analysis
 

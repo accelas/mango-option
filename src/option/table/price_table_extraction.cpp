@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file price_table_extraction.cpp
  * @brief Implementation of price table extraction utility

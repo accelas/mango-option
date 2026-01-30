@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Price Table Arrow IPC Schema Design
 
 **Status:** Design Phase

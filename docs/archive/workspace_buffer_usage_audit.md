@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # PDEWorkspace Buffer Usage Audit
 
 **Date:** 2025-11-20

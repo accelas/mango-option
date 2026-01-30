@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // src/math/bspline_collocation_workspace.hpp
 
 #pragma once

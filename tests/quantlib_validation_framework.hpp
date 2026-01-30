@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file quantlib_validation_framework.hpp
  * @brief Unified testing framework for validating mango-option against QuantLib

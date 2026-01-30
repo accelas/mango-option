@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Unified Memory Management Module: C++23 Refactor
 
 **Date:** 2025-11-10

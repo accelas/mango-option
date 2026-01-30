@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Grid-Based American Option Result Design
 
 **Date:** 2025-11-20

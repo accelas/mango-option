@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/math/black_scholes_analytics.hpp"
 #include <cmath>

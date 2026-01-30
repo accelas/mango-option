@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Unified Root-Finding API with Workspace Management
 
 **Date:** 2025-11-04

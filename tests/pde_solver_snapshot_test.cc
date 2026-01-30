@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/operators/laplacian_pde.hpp"

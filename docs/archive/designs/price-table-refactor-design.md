@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Price Table Refactor – Full Design
 
 ## Objectives

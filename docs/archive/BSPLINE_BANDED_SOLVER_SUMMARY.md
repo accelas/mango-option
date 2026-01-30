@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # B-spline Banded Solver Implementation Summary
 
 **Date**: 2025-11-14

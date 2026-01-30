@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Export headers for packaging
 exports_files(glob(["*.hpp"]))
 

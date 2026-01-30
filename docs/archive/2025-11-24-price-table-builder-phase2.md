@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # PriceTableBuilder Phase 2: Performance & Quality Improvements
 
 **Date:** 2025-11-24

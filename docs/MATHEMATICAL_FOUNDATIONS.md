@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Mathematical Foundations
 
 Mathematical formulations and numerical methods underlying the mango-option library.

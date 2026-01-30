@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Pure Diffusion Operator Enforcement Design
 
 ## Problem Statement

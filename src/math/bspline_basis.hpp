@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_basis.hpp
  * @brief Generic B-spline basis function evaluation

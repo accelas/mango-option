@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Software Architecture
 
 How the mango-option library is built, from the PDE solver core up through price tables and batch processing. Each section introduces the C++ patterns and design decisions where they arise, rather than cataloguing them separately.

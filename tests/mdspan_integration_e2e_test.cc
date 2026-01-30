@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/math/banded_matrix_solver.hpp"
 #include "src/math/bspline_nd.hpp"
 #include "src/pde/core/grid.hpp"

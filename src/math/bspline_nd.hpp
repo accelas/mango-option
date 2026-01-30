@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_nd.hpp
  * @brief N-dimensional tensor-product B-spline interpolation

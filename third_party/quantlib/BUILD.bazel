@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """System QuantLib library."""
 
 cc_library(

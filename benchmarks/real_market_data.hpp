@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Auto-generated real market data for benchmarks
 // Generated: 2025-11-27T21:02:07.970683
 // Symbol: SPY

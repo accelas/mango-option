@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // OBSOLETE: This benchmark compared BSpline4D (removed) vs BSplineND template.
 // BSpline4D was dead code - production now uses PriceTableSurface<4> directly.
 // Kept for historical reference but no longer builds.

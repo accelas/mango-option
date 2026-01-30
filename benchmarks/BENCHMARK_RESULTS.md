@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # C++20 Benchmark Results
 
 **Date:** 2025-11-05

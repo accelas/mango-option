@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # FastVol Analysis and Optimization Plan for mango-option
 
 ## Executive Summary

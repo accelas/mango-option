@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 You've correctly identified the problem: your current Neumann boundary condition implementation is inconsistent and does not conserve mass. The 2% mass increase is a direct result of this inconsistency.
 
 Here is an analysis of the issue and a clear path to fix it.

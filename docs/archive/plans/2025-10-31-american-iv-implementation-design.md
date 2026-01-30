@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # American Option Implied Volatility Implementation Design
 
 **Date:** 2025-10-31

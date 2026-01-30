@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file vol_surface.hpp
  * @brief Volatility surface types and computation

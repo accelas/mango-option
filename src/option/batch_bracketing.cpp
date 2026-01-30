@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file batch_bracketing.cpp
  * @brief Implementation of option bracketing algorithm

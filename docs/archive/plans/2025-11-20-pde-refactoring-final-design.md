@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # PDE Workspace Refactoring - Final Design (Codex Approved)
 
 **Date:** 2025-11-20

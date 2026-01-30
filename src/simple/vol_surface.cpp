@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/simple/vol_surface.hpp"
 #include <cmath>
 

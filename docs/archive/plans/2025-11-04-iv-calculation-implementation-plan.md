@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Implied Volatility Calculation - C++20 Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

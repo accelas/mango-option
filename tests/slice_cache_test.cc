@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/slice_cache.hpp"
 #include "src/pde/core/grid.hpp"

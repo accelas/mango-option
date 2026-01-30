@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file iv_solver_interpolated.hpp
  * @brief Implied volatility solver using B-spline price interpolation

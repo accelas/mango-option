@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Newton-Raphson Integration for PDESolver
 
 **Date**: 2025-11-04

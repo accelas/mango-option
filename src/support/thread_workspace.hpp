@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // src/support/thread_workspace.hpp
 
 #pragma once

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include "src/support/error_types.hpp"

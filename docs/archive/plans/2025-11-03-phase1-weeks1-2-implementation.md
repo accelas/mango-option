@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Phase 1 Weeks 1-2: Grid System + Boundary Conditions Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

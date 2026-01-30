@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "src/option/table/adaptive_grid_types.hpp"

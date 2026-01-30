@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Critical Design Fixes: C++20 Migration
 
 **Date:** 2025-11-03 (Revision 1)

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # mango Tracing Scripts
 
 This directory contains ready-to-use bpftrace scripts for monitoring and debugging the mango library.

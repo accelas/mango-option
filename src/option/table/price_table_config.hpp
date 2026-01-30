@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "src/option/american_option.hpp"  // For OptionType

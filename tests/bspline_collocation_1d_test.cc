@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_collocation_1d_test.cc
  * @brief Unit tests for 1D B-spline collocation solver

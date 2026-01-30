@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Rust+GPU Rewrite Design
 
 **Date**: 2025-11-01

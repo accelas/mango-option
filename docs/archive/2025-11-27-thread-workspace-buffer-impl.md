@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # ThreadWorkspaceBuffer Implementation Plan
 
 **For Claude: REQUIRED SUB-SKILL: Use superpowers:executing-plans to execute this plan**

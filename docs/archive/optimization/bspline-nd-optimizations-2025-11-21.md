@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # B-Spline N-D Optimization Analysis
 **Date:** 2025-11-21
 **Target:** `src/math/bspline_nd_separable.hpp`

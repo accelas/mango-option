@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // src/support/aligned_allocator.hpp
 
 #pragma once
