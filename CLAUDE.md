@@ -37,9 +37,6 @@ bazel test //tests:iv_solver_test
 # Run with verbose output
 bazel test //tests:pde_solver_test --test_output=all
 
-# Run examples
-bazel run //examples:example_newton_solver
-
 # Clean
 bazel clean
 ```
@@ -55,8 +52,7 @@ mango-option/
 │   ├── option/            # American option pricing, IV solvers, price tables
 │   ├── math/              # Root finding, cubic splines, Thomas solver, B-splines
 │   └── support/           # Memory management (PMR arenas), CPU features, utilities
-├── tests/                 # 38 test files with GoogleTest
-├── examples/              # Example programs
+├── tests/                 # Test files with GoogleTest
 ├── benchmarks/            # Performance benchmarks
 └── docs/                  # Architecture, math, API guides
 ```
@@ -215,7 +211,6 @@ Shares tridiagonal solver with TR-BDF2 to avoid duplication.
 **Pre-PR Checklist:**
 Before creating a pull request, verify **all CI checks pass locally**:
 - [ ] All tests pass: `bazel test //...`
-- [ ] All examples compile: `bazel build //examples/...`
 - [ ] All benchmarks compile: `bazel build //benchmarks/...`
 - [ ] Python bindings compile: `bazel build //python:mango_option`
 - [ ] Code builds without warnings
@@ -234,7 +229,6 @@ git checkout -b feature/descriptive-name
 
 # 4. Verify builds before committing (must match CI)
 bazel test //...
-bazel build //examples/...
 bazel build //benchmarks/...
 bazel build //python:mango_option
 
@@ -322,7 +316,6 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 | Build all | `bazel build //...` |
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
-| Run example | `bazel run //examples:example_newton_solver` |
 | Build Python bindings | `bazel build //python:mango_option` |
 | Trace execution | `sudo ./scripts/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |

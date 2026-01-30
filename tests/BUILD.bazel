@@ -1274,3 +1274,48 @@ cc_test(
         "@fuzztest//fuzztest:fuzztest_gtest_main",
     ],
 )
+
+cc_test(
+    name = "custom_grid_example_test",
+    size = "small",
+    srcs = ["custom_grid_example_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "multi_sinh_grid_example_test",
+    size = "small",
+    srcs = ["multi_sinh_grid_example_test.cc"],
+    deps = [
+        "//src/pde/core:grid",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_yfinance_test",
+    size = "small",
+    srcs = ["simple_yfinance_test.cc"],
+    deps = [
+        "//src/simple",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_databento_test",
+    size = "small",
+    srcs = ["simple_databento_test.cc"],
+    deps = [
+        "//src/simple",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
