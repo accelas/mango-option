@@ -7,18 +7,7 @@ import sys
 import os
 import tempfile
 import numpy as np
-
-# Try different import paths
-try:
-    import mango_option
-except ImportError:
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'bazel-bin', 'python'))
-        import mango_option
-    except ImportError as e:
-        print(f"Failed to import mango_option: {e}")
-        print("Run: bazel build //python:mango_option")
-        sys.exit(1)
+import mango_option
 
 
 def test_option_types():
@@ -40,8 +29,8 @@ def test_yield_curve():
     print("✓ Flat YieldCurve works")
 
     # From discounts
-    tenors = [0.25, 0.5, 1.0, 2.0]
-    discounts = [0.9876, 0.9753, 0.9512, 0.9048]
+    tenors = [0.0, 0.25, 0.5, 1.0, 2.0]
+    discounts = [1.0, 0.9876, 0.9753, 0.9512, 0.9048]
     curve = mango_option.YieldCurve.from_discounts(tenors, discounts)
     assert curve.discount(1.0) > 0
     print("✓ YieldCurve from discounts works")
@@ -317,7 +306,7 @@ def test_price_table_surface():
     meta.m_max = 1.2
 
     # Create coefficients
-    shape = axes.shape
+    shape = axes.shape()
     n_coeffs = shape[0] * shape[1] * shape[2] * shape[3]
     coeffs = np.random.rand(n_coeffs) * 10.0
 
@@ -353,7 +342,7 @@ def test_iv_solver_interpolated():
     meta.m_min = 0.8
     meta.m_max = 1.2
 
-    shape = axes.shape
+    shape = axes.shape()
     coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
 
     surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
@@ -451,7 +440,7 @@ def test_surface_to_solver_integration():
     meta.m_min = 0.8
     meta.m_max = 1.2
 
-    shape = axes.shape
+    shape = axes.shape()
     coeffs = np.random.rand(shape[0] * shape[1] * shape[2] * shape[3]) * 10.0
 
     surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
