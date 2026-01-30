@@ -320,8 +320,8 @@ auto result = solver.solve_impl(query);
 **Pre-compute American option prices across parameter space:**
 
 ```cpp
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_surface.hpp"
 
 // Define 4D parameter grids
 std::vector<double> moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};  // m = S/K
@@ -803,4 +803,4 @@ auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy
 - **Software Architecture:** [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Mathematical Foundations:** [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)
 - **Workflow:** [../CLAUDE.md](../CLAUDE.md)
-- **USDT Tracing:** [../TRACING.md](../TRACING.md)
+- **USDT Tracing:** [TRACING.md](TRACING.md)

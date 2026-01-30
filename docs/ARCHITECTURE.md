@@ -645,4 +645,4 @@ auto result = builder.build(chain, grid_spec, n_time, OptionType::PUT);
 - **API Usage:** [API_GUIDE.md](API_GUIDE.md)
 - **Workflow:** [../CLAUDE.md](../CLAUDE.md)
 - **Vectorization Details:** [architecture/vectorization-strategy.md](architecture/vectorization-strategy.md)
-- **USDT Tracing:** [../TRACING.md](../TRACING.md)
+- **USDT Tracing:** [TRACING.md](TRACING.md)

@@ -25,7 +25,7 @@ Designed for research, prototyping, and production use with a focus on **correct
 - **General PDE Toolkit** – Custom PDEs, boundary conditions, spatial operators
 - **Production Ready** – OpenMP batching (15× speedup), USDT tracing, zero-allocation parallel workloads
 - **[Profiled](docs/PERF_ANALYSIS.md)** – IPC 1.94, 0.005% L1 miss rate, 2.1 insn/load op intensity
-- **IV Surface Web App** – Interactive 3D visualization with yfinance data
+- **Python Bindings** – pybind11 module with batch pricing, IV solvers, and price table access
 
 ---
 
@@ -196,12 +196,13 @@ mango-option/
 │   │   └── operators/     # Spatial operators (Black-Scholes, Laplacian)
 │   ├── option/            # American option pricing, IV solvers, price tables
 │   ├── math/              # Root finding, B-splines, tridiagonal solvers
+│   ├── simple/            # Market data integration (yfinance, Databento, IBKR)
+│   ├── python/            # Python bindings (pybind11)
 │   └── support/           # Memory management, CPU features, utilities
 ├── tests/                 # 100+ test files with GoogleTest
-├── examples/              # Example programs
 ├── benchmarks/            # Performance benchmarks
-├── apps/                  # Applications
-│   └── iv_surface/        # IV Surface web app (FastAPI + Plotly)
+├── third_party/           # External dependency configs
+├── tools/                 # Build helper rules
 └── docs/                  # Documentation
 ```
 
@@ -284,6 +285,8 @@ Property-based fuzz tests validate mathematical invariants:
 
 ```bash
 # Requires Earthly: https://earthly.dev/get-earthly
+# Earthly provides a containerized build environment to work around
+# Clang + libc++ ABI incompatibilities needed for FuzzTest.
 earthly +fuzz-test           # Quick run (unit test mode)
 earthly +fuzz-test-extended  # Extended fuzzing (100K iterations)
 ```

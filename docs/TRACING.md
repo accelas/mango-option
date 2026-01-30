@@ -59,13 +59,11 @@ sudo apt-get install systemtap-sdt-dev
 **USDT is enabled by default** - just build normally:
 
 ```bash
-# Build examples
-bazel build //examples:example_heat_equation
-bazel build //examples:example_american_option
-bazel build //examples:example_implied_volatility
-
-# Build your own program
+# Build your program
 bazel build //your:target
+
+# Build tests (which include tracing probes)
+bazel build //tests:pde_solver_test
 ```
 
 The library gracefully falls back to no-op probes if `sys/sdt.h` is not available.
@@ -74,11 +72,11 @@ The library gracefully falls back to no-op probes if `sys/sdt.h` is not availabl
 
 ```bash
 # Using helper tool
-sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./my_program
 
 # Or manually
-readelf -n ./bazel-bin/examples/example_heat_equation | grep NT_STAPSDT
-sudo bpftrace -l 'usdt:./bazel-bin/examples/example_heat_equation:mango:*'
+readelf -n ./my_program | grep NT_STAPSDT
+sudo bpftrace -l 'usdt:./my_program:mango:*'
 ```
 
 ## Common Use Cases
@@ -130,7 +128,7 @@ sudo bpftrace scripts/tracing/performance_profile.bt -c './my_program'
 
 ```bash
 # Detailed PDE solver tracing
-sudo bpftrace scripts/tracing/pde_detailed.bt -c './example_heat_equation'
+sudo bpftrace scripts/tracing/pde_detailed.bt -c './my_program'
 ```
 
 **What you get:**
@@ -143,7 +141,7 @@ sudo bpftrace scripts/tracing/pde_detailed.bt -c './example_heat_equation'
 
 ```bash
 # Detailed IV calculation tracing
-sudo bpftrace scripts/tracing/iv_detailed.bt -c './example_implied_volatility'
+sudo bpftrace scripts/tracing/iv_detailed.bt -c './my_program'
 ```
 
 **What you get:**
@@ -361,7 +359,7 @@ sudo ./scripts/mango-trace run <script.bt> <binary>
 
 ```bash
 # Quick monitoring
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace monitor ./my_program
 
 # Debug convergence
 sudo ./scripts/mango-trace monitor ./my_program --preset=debug
@@ -536,7 +534,7 @@ sudo apt-get install bpftrace
 - Type mismatch between probe definition and script
 - Binary/script version mismatch
 
-**Solution:** Verify probe signatures in `src/ivcalc_trace.h`
+**Solution:** Verify probe signatures in `src/support/ivcalc_trace.h`
 
 ## Best Practices
 
@@ -565,7 +563,7 @@ sudo apt-get install bpftrace
 
 - [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) - 5-minute getting started
 - [scripts/tracing/README.md](scripts/tracing/README.md) - Script reference
-- [src/ivcalc_trace.h](src/ivcalc_trace.h) - Probe definitions
+- [src/support/ivcalc_trace.h](src/support/ivcalc_trace.h) - Probe definitions
 - [bpftrace documentation](https://github.com/iovisor/bpftrace)
 - [USDT probes](https://lwn.net/Articles/753601/)
 
@@ -584,7 +582,7 @@ usdt::mango:convergence_success /arg0 == 1/ {
 END {
     print(@iters_per_step);
 }
-' -c './example_heat_equation'
+' -c './my_program'
 ```
 
 ### Example 2: Alert on Slow Convergence
@@ -613,7 +611,7 @@ usdt::mango:algo_progress /arg0 == 1/ {
 }
 
 END { print(@step_times); }
-' -c './example_heat_equation'
+' -c './my_program'
 ```
 
 ## Support
@@ -621,7 +619,7 @@ END { print(@step_times); }
 For issues or questions:
 
 1. Check [Troubleshooting](#troubleshooting) section
-2. Verify probe definitions in `src/ivcalc_trace.h`
+2. Verify probe definitions in `src/support/ivcalc_trace.h`
 3. Review example scripts in `scripts/tracing/`
 4. Consult bpftrace documentation
 

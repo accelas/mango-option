@@ -31,7 +31,7 @@ sudo apt-get install systemtap-sdt-dev
 
 ```bash
 # Build an example
-bazel build //examples:example_heat_equation
+bazel build //tests:pde_solver_test
 
 # Or build your own program
 bazel build //your:target
@@ -43,7 +43,7 @@ The binaries automatically include USDT probes (gracefully falls back if systemt
 
 ```bash
 # Check if probes are present
-sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/tests/pde_solver_test
 ```
 
 Expected output:
@@ -61,26 +61,26 @@ USDT support: OK
 
 ```bash
 # Monitor all library activity
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace monitor ./bazel-bin/tests/pde_solver_test
 
 # Watch convergence behavior
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+sudo ./scripts/mango-trace monitor ./bazel-bin/tests/pde_solver_test --preset=convergence
 
 # Debug failures
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+sudo ./scripts/mango-trace monitor ./bazel-bin/tests/pde_solver_test --preset=debug
 
 # Profile performance
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=performance
+sudo ./scripts/mango-trace monitor ./bazel-bin/tests/pde_solver_test --preset=performance
 ```
 
 **Option B: Use bpftrace directly**
 
 ```bash
 # Monitor all activity
-sudo bpftrace scripts/tracing/monitor_all.bt -c './bazel-bin/examples/example_heat_equation'
+sudo bpftrace scripts/tracing/monitor_all.bt -c './bazel-bin/tests/pde_solver_test'
 
 # Watch convergence
-sudo bpftrace scripts/tracing/convergence_watch.bt -c './bazel-bin/examples/example_heat_equation'
+sudo bpftrace scripts/tracing/convergence_watch.bt -c './bazel-bin/tests/pde_solver_test'
 ```
 
 ## Common Use Cases
@@ -88,7 +88,7 @@ sudo bpftrace scripts/tracing/convergence_watch.bt -c './bazel-bin/examples/exam
 ### Debug Convergence Issues
 
 ```bash
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=debug
+sudo ./scripts/mango-trace monitor ./bazel-bin/tests/pde_solver_test --preset=debug
 ```
 
 Shows:
@@ -99,7 +99,7 @@ Shows:
 ### Monitor PDE Solver Progress
 
 ```bash
-sudo bpftrace scripts/tracing/pde_detailed.bt -c './bazel-bin/examples/example_heat_equation'
+sudo bpftrace scripts/tracing/pde_detailed.bt -c './bazel-bin/tests/pde_solver_test'
 ```
 
 Shows:
@@ -110,7 +110,7 @@ Shows:
 ### Profile Performance
 
 ```bash
-sudo bpftrace scripts/tracing/performance_profile.bt -c './bazel-bin/examples/example_heat_equation'
+sudo bpftrace scripts/tracing/performance_profile.bt -c './bazel-bin/tests/pde_solver_test'
 ```
 
 Shows:
@@ -121,7 +121,7 @@ Shows:
 ### Monitor Implied Volatility Calculations
 
 ```bash
-sudo bpftrace scripts/tracing/iv_detailed.bt -c './bazel-bin/examples/example_implied_volatility'
+sudo bpftrace scripts/tracing/iv_detailed.bt -c './bazel-bin/tests/iv_solver_test'
 ```
 
 Shows:
@@ -146,10 +146,10 @@ All scripts are in `scripts/tracing/`:
 
 ```bash
 # List all available probes
-sudo ./scripts/mango-trace list ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace list ./bazel-bin/tests/pde_solver_test
 
 # Validate USDT support
-sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/tests/pde_solver_test
 
 # Monitor with preset
 sudo ./scripts/mango-trace monitor <binary> --preset=<name>
@@ -184,12 +184,12 @@ sudo bpftrace scripts/tracing/performance_profile.bt -c './my_program' > trace_o
 Solution:
 ```bash
 # Check if probes exist
-readelf -n ./bazel-bin/examples/example_heat_equation | grep NT_STAPSDT
+readelf -n ./bazel-bin/tests/pde_solver_test | grep NT_STAPSDT
 
 # If missing, install systemtap-sdt-dev and rebuild
 sudo apt-get install systemtap-sdt-dev
 bazel clean
-bazel build //examples:example_heat_equation
+bazel build //tests:pde_solver_test
 ```
 
 **Problem: "Permission denied"**
@@ -221,14 +221,14 @@ sudo yum install bpftrace
 
 ```bash
 # 1. Build
-bazel build //examples:example_heat_equation
+bazel build //tests:pde_solver_test
 
 # 2. Check USDT
-sudo ./scripts/mango-trace check ./bazel-bin/examples/example_heat_equation
+sudo ./scripts/mango-trace check ./bazel-bin/tests/pde_solver_test
 # ✓ USDT support: OK
 
 # 3. Monitor
-sudo ./scripts/mango-trace monitor ./bazel-bin/examples/example_heat_equation --preset=convergence
+sudo ./scripts/mango-trace monitor ./bazel-bin/tests/pde_solver_test --preset=convergence
 
 # Output shows:
 # - Convergence iterations per step
