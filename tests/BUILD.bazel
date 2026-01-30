@@ -1319,3 +1319,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+load("@pip//:requirements.bzl", "requirement")
+
+py_test(
+    name = "python_bindings_test",
+    size = "medium",
+    srcs = ["test_bindings.py"],
+    main = "test_bindings.py",
+    data = ["//src/python:mango_option"],
+    imports = ["../src/python"],
+    deps = [requirement("numpy")],
+)

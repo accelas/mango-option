@@ -1,5 +1,6 @@
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
+load("@rules_python//python:packaging.bzl", "py_wheel")
 
 # Combined library target that exports all public APIs
 cc_library(
@@ -76,6 +77,15 @@ pkg_files(
     strip_prefix = strip_prefix.files_only(),
 )
 
+# Shared library for C++ distribution
+cc_shared_library(
+    name = "libmango_option_so",
+    shared_lib_name = "libmango_option.so",
+    deps = [":mango_option"],
+    visibility = ["//visibility:public"],
+)
+
+
 # pkg-config file
 genrule(
     name = "mango_option_pc",
@@ -124,13 +134,55 @@ pkg_tar(
     visibility = ["//visibility:public"],
 )
 
-# Full distribution tarball (headers + pkg-config)
+# Static library for C++ distribution
+load("//tools:merge_archive.bzl", "merge_archive")
+
+merge_archive(
+    name = "mango_option_static",
+    dep = ":mango_option",
+    out = "libmango_option.a",
+    visibility = ["//visibility:public"],
+)
+
+# Library tarball
+pkg_tar(
+    name = "mango_option_lib",
+    srcs = [
+        ":libmango_option_so",
+        ":mango_option_static",
+    ],
+    extension = "tar.gz",
+    package_dir = "lib",
+    visibility = ["//visibility:public"],
+)
+
+# Full distribution tarball (headers + library + pkg-config)
 pkg_tar(
     name = "mango_option_dist",
     extension = "tar.gz",
     visibility = ["//visibility:public"],
     deps = [
         ":mango_option_headers",
+        ":mango_option_lib",
         ":mango_option_pkgconfig",
     ],
+)
+
+# Python wheel
+py_wheel(
+    name = "mango_option_wheel",
+    distribution = "mango_option",
+    version = "0.1.0",
+    summary = "American option pricing with FDM solvers and B-spline interpolation",
+    description_file = "README.md",
+    license = "MIT",
+    python_tag = "cp311",
+    abi = "cp311",
+    platform = select({
+        "@platforms//os:linux": "linux_x86_64",
+        "//conditions:default": "any",
+    }),
+    requires = ["numpy"],
+    strip_path_prefixes = ["src/python"],
+    deps = ["//src/python:mango_option"],
 )

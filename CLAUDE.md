@@ -212,7 +212,7 @@ Shares tridiagonal solver with TR-BDF2 to avoid duplication.
 Before creating a pull request, verify **all CI checks pass locally**:
 - [ ] All tests pass: `bazel test //...`
 - [ ] All benchmarks compile: `bazel build //benchmarks/...`
-- [ ] Python bindings compile: `bazel build //python:mango_option`
+- [ ] Python bindings compile: `bazel build //src/python:mango_option`
 - [ ] Code builds without warnings
 - [ ] Documentation updated if API changed
 
@@ -230,7 +230,7 @@ git checkout -b feature/descriptive-name
 # 4. Verify builds before committing (must match CI)
 bazel test //...
 bazel build //benchmarks/...
-bazel build //python:mango_option
+bazel build //src/python:mango_option
 
 git add <files>
 git commit -m "Imperative mood message"
@@ -316,7 +316,7 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 | Build all | `bazel build //...` |
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
-| Build Python bindings | `bazel build //python:mango_option` |
+| Build Python bindings | `bazel build //src/python:mango_option` |
 | Trace execution | `sudo ./scripts/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |
 

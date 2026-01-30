@@ -28,6 +28,15 @@ python.toolchain(
 )
 use_repo(python, "python_3_11")
 
+# Python pip dependencies
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pip",
+    python_version = "3.11",
+    requirements_lock = "//third_party:requirements.txt",
+)
+use_repo(pip, "pip")
+
 # Non-BCR dependencies (mdspan, etc.)
 non_bcr_deps = use_extension("//third_party:deps.bzl", "non_bcr_deps")
 use_repo(non_bcr_deps, "mdspan")
