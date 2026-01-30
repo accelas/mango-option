@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "src/simple/pricing.hpp"
 #include "src/option/american_option.hpp"
+#include "src/option/american_option_batch.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/pde/core/grid.hpp"
@@ -98,6 +99,57 @@ std::expected<double, std::string> implied_vol(
     }
 
     return result->implied_vol;
+}
+
+BatchPriceResult price_batch(const std::vector<PricingParams>& params) {
+    BatchAmericanOptionSolver solver;
+    // solve_batch automatically routes to normalized chain solver when eligible
+    auto batch_result = solver.solve_batch(params);
+
+    BatchPriceResult result;
+    result.failed_count = batch_result.failed_count;
+    result.prices.reserve(batch_result.results.size());
+
+    for (auto& r : batch_result.results) {
+        if (r.has_value()) {
+            result.prices.push_back(r->value());
+        } else {
+            std::ostringstream oss;
+            oss << r.error();
+            result.prices.push_back(std::unexpected(oss.str()));
+        }
+    }
+
+    return result;
+}
+
+BatchIVResult implied_vol_batch(const std::vector<IVQuery>& queries) {
+    IVSolverFDMConfig config;
+    IVSolverFDM solver(config);
+    auto batch_result = solver.solve_batch_impl(queries);
+
+    BatchIVResult result;
+    result.failed_count = batch_result.failed_count;
+    result.vols.reserve(batch_result.results.size());
+
+    for (auto& r : batch_result.results) {
+        if (r.has_value()) {
+            result.vols.push_back(r->implied_vol);
+        } else {
+            const auto& err = r.error();
+            std::ostringstream oss;
+            oss << "IVError{code=" << static_cast<int>(err.code)
+                << ", iterations=" << err.iterations
+                << ", final_error=" << err.final_error;
+            if (err.last_vol.has_value()) {
+                oss << ", last_vol=" << *err.last_vol;
+            }
+            oss << "}";
+            result.vols.push_back(std::unexpected(oss.str()));
+        }
+    }
+
+    return result;
 }
 
 }  // namespace mango::simple

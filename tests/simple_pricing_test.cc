@@ -106,4 +106,76 @@ TEST(SimplePricingTest, ImpliedVolInvalidPriceReturnsError) {
     EXPECT_FALSE(result.has_value());
 }
 
+// ===========================================================================
+// price_batch() tests
+// ===========================================================================
+
+TEST(SimplePricingTest, PriceBatchMultipleStrikes) {
+    // Chain-like batch: same maturity, varying strikes (eligible for normalized chain)
+    std::vector<mango::PricingParams> batch;
+    for (double K : {90.0, 95.0, 100.0, 105.0, 110.0}) {
+        mango::PricingParams p;
+        p.spot = 100.0;
+        p.strike = K;
+        p.maturity = 1.0;
+        p.rate = 0.05;
+        p.dividend_yield = 0.0;
+        p.type = OptionType::PUT;
+        p.volatility = 0.20;
+        batch.push_back(p);
+    }
+
+    auto result = mango::simple::price_batch(batch);
+    EXPECT_EQ(result.failed_count, 0u);
+    ASSERT_EQ(result.prices.size(), 5u);
+
+    for (auto& p : result.prices) {
+        ASSERT_TRUE(p.has_value()) << p.error();
+        EXPECT_GT(*p, 0.0);
+    }
+
+    // OTM puts (high strike) should be more expensive
+    EXPECT_GT(*result.prices[4], *result.prices[0]);
+}
+
+TEST(SimplePricingTest, PriceBatchEmpty) {
+    std::vector<mango::PricingParams> empty;
+    auto result = mango::simple::price_batch(empty);
+    EXPECT_EQ(result.prices.size(), 0u);
+    EXPECT_EQ(result.failed_count, 0u);
+}
+
+// ===========================================================================
+// implied_vol_batch() tests
+// ===========================================================================
+
+TEST(SimplePricingTest, ImpliedVolBatch) {
+    // Price a few options first, then recover IV
+    std::vector<mango::IVQuery> queries;
+    for (double K : {95.0, 100.0, 105.0}) {
+        auto price_result = mango::simple::price(
+            100.0, K, 1.0, 0.25, 0.05, 0.0, OptionType::PUT);
+        ASSERT_TRUE(price_result.has_value()) << price_result.error();
+
+        mango::IVQuery q;
+        q.spot = 100.0;
+        q.strike = K;
+        q.maturity = 1.0;
+        q.rate = 0.05;
+        q.dividend_yield = 0.0;
+        q.type = OptionType::PUT;
+        q.market_price = *price_result;
+        queries.push_back(q);
+    }
+
+    auto result = mango::simple::implied_vol_batch(queries);
+    EXPECT_EQ(result.failed_count, 0u);
+    ASSERT_EQ(result.vols.size(), 3u);
+
+    for (auto& v : result.vols) {
+        ASSERT_TRUE(v.has_value()) << v.error();
+        EXPECT_NEAR(*v, 0.25, 1e-3);
+    }
+}
+
 }  // anonymous namespace

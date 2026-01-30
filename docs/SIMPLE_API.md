@@ -45,6 +45,46 @@ if (iv.has_value()) {
 
 Both functions return `std::expected<double, std::string>`. Errors are human-readable strings.
 
+## Batch Pricing
+
+For pricing multiple options at once, use `price_batch()`. It automatically routes to the normalized chain solver when the batch is eligible (same maturity, varying strikes), providing up to 19,000x speedup over sequential solves:
+
+```cpp
+std::vector<mango::PricingParams> batch;
+for (double K : {90.0, 95.0, 100.0, 105.0, 110.0}) {
+    mango::PricingParams p;
+    p.spot = 100.0;
+    p.strike = K;
+    p.maturity = 1.0;
+    p.rate = 0.05;
+    p.type = mango::OptionType::PUT;
+    p.volatility = 0.20;
+    batch.push_back(p);
+}
+
+auto result = mango::simple::price_batch(batch);
+for (size_t i = 0; i < result.prices.size(); ++i) {
+    if (result.prices[i].has_value()) {
+        std::cout << "K=" << batch[i].strike
+                  << " Price=" << *result.prices[i] << "\n";
+    }
+}
+```
+
+Similarly, `implied_vol_batch()` solves multiple IV queries in parallel using OpenMP:
+
+```cpp
+std::vector<mango::IVQuery> queries;
+// ... populate queries ...
+
+auto result = mango::simple::implied_vol_batch(queries);
+for (auto& v : result.vols) {
+    if (v.has_value()) {
+        std::cout << "IV: " << *v << "\n";
+    }
+}
+```
+
 ## Price Tables
 
 For repeated queries (e.g., fitting a vol surface), pre-compute a price table. This builds a 4D B-spline surface over (moneyness, maturity, volatility, rate), enabling ~500ns price lookups instead of ~5ms PDE solves.
