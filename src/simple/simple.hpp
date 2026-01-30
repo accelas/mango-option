@@ -13,6 +13,8 @@
 #include "src/simple/converter.hpp"
 #include "src/simple/chain_builder.hpp"
 #include "src/simple/vol_surface.hpp"
+#include "src/simple/pricing.hpp"
+#include "src/simple/price_table.hpp"
 #include "src/simple/sources/yfinance.hpp"
 #include "src/simple/sources/databento.hpp"
 #include "src/simple/sources/ibkr.hpp"

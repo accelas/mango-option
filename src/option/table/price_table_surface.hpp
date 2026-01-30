@@ -43,6 +43,9 @@ public:
     /// @return Interpolated value (clamped at boundaries)
     [[nodiscard]] double value(const std::array<double, N>& coords) const;
 
+    /// Access B-spline coefficients (for serialization)
+    [[nodiscard]] const std::vector<double>& coefficients() const noexcept { return spline_->coefficients(); }
+
     /// Partial derivative along specified axis
     ///
     /// @param axis Axis index (0 to N-1)

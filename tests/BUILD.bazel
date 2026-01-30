@@ -1321,6 +1321,28 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "simple_pricing_test",
+    size = "small",
+    srcs = ["simple_pricing_test.cc"],
+    deps = [
+        "//src/simple:pricing",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "simple_price_table_test",
+    size = "medium",
+    srcs = ["simple_price_table_test.cc"],
+    deps = [
+        "//src/simple:price_table",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
 load("@pip//:requirements.bzl", "requirement")
 
 py_test(
