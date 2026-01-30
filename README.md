@@ -134,8 +134,6 @@ For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 | [Python Guide](docs/PYTHON_GUIDE.md) | Python bindings API reference |
 | [Performance Analysis](docs/PERF_ANALYSIS.md) | Instruction-level profiling data |
 | [Tracing Guide](docs/TRACING.md) | USDT probe documentation |
-| [Build System](docs/BUILD_SYSTEM.md) | Bazel configuration |
-
 ---
 
 ## Project Structure
