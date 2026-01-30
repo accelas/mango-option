@@ -1,4 +1,5 @@
 #!/usr/bin/env bpftrace
+# SPDX-License-Identifier: MIT
 /*
  * convergence_watch.bt - Monitor convergence behavior in real-time
  *

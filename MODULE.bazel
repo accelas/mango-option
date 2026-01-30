@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 module(
     name = "mango-option",
     version = "0.1.0",

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file iv_solver_interpolated_test.cc
  * @brief Tests for IVSolverInterpolated (B-spline based IV solver)

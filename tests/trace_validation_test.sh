@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # trace_validation_test.sh - Validate USDT probes are working correctly
 #

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file price_table_extraction.hpp
  * @brief Utility for extracting batch results into 4D price arrays

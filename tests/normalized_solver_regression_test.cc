@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file normalized_solver_regression_test.cc
  * @brief Regression tests for normalized chain solver integration

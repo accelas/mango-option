@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // src/pde/core/american_pde_workspace.hpp
 #pragma once
 

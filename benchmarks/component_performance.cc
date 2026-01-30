@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file component_performance.cc
  * @brief Component-level performance benchmarks for C++20 implementation

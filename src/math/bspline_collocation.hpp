@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_collocation.hpp
  * @brief 1D cubic B-spline collocation solver

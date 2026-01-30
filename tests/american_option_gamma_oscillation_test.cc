@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/american_option.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include <gtest/gtest.h>

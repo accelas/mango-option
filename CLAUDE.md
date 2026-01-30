@@ -105,6 +105,16 @@ if (result.has_value()) {
 
 **See [docs/API_GUIDE.md](docs/API_GUIDE.md) for more examples**
 
+### SPDX License Headers
+
+Every new source code file must start with an SPDX license identifier:
+
+- **C++ files** (`.hpp`, `.cpp`, `.cc`, `.h`): `// SPDX-License-Identifier: MIT`
+- **Scripts** (`.py`, `.sh`, `.bt`, `.bzl`): `# SPDX-License-Identifier: MIT`
+- **BUILD files** (`BUILD.bazel`): `# SPDX-License-Identifier: MIT`
+
+For files with a shebang (`#!/...`), place the SPDX line immediately after the shebang.
+
 ### Adding Tests
 
 All tests use GoogleTest:

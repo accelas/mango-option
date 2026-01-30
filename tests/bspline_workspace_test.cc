@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/math/bspline_nd_separable.hpp"
 #include <cmath>

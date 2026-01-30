@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tests/american_pde_workspace_test.cc
 
 #include "src/pde/core/american_pde_workspace.hpp"

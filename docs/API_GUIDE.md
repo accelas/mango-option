@@ -4,7 +4,6 @@ Practical examples and common usage patterns for the mango-option library.
 
 **For software architecture, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 **For mathematical formulations, see [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)**
-**For workflow guidance, see [../CLAUDE.md](../CLAUDE.md)**
 
 ## Table of Contents
 
@@ -802,5 +801,4 @@ auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy
 
 - **Software Architecture:** [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Mathematical Foundations:** [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)
-- **Workflow:** [../CLAUDE.md](../CLAUDE.md)
 - **USDT Tracing:** [TRACING.md](TRACING.md)

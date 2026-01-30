@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file iv_solver_fdm.hpp
  * @brief FDM-based implied volatility solver with std::expected error handling

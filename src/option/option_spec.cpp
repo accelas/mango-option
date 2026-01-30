@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/option_spec.hpp"
 #include <cmath>
 #include <algorithm>

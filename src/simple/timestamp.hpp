@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file timestamp.hpp
  * @brief Timestamp type with multiple format support

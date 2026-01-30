@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # mango-trace - Helper tool for tracing mango library with bpftrace
 #

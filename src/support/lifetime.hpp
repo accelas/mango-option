@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // src/support/lifetime.hpp
 #pragma once
 

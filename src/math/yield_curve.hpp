@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file yield_curve.hpp
  * @brief Yield curve with log-linear discount interpolation

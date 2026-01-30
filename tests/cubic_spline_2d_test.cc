@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file cubic_spline_2d_test.cc
  * @brief Comprehensive tests for CubicSpline2D template class

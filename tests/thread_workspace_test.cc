@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tests/thread_workspace_test.cc
 #include "src/support/thread_workspace.hpp"
 #include <gtest/gtest.h>

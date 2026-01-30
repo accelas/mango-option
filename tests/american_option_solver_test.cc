@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_solver_test.cc
  * @brief Tests for AmericanOptionSolver structure and API

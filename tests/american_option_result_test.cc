@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_result_test.cc
  * @brief Tests for AmericanOptionResult wrapper class

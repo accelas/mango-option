@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 cc_test(
     name = "black_scholes_analytics_test",
     size = "small",

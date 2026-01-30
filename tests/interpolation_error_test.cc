@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/support/error_types.hpp"
 #include <gtest/gtest.h>
 #include <sstream>

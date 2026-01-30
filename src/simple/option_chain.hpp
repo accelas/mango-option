@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file option_chain.hpp
  * @brief Option chain and market context types

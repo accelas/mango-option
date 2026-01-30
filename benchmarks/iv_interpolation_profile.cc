@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file iv_interpolation_profile.cc
  * @brief Profile B-spline interpolation performance, especially vega computation

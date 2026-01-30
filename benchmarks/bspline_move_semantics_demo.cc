@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_move_semantics_demo.cc
  * @brief Demonstrate move semantics benefit for BSplineNDSeparable

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <benchmark/benchmark.h>
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/math/cubic_spline_nd.hpp"

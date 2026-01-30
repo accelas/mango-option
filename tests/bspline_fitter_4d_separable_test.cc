@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_fitter_4d_separable_test.cc
  * @brief Unit tests for separable 4D B-spline coefficient fitting

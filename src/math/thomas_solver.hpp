@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file thomas_solver.hpp
  * @brief Modern C++20 Thomas algorithm for tridiagonal systems

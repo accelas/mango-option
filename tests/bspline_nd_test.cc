@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file bspline_nd_test.cc
  * @brief Tests for N-dimensional B-spline interpolation

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file simple_databento_test.cc
  * @brief Tests for Databento data pipeline (converted from simple_databento_example.cpp)

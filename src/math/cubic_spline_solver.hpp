@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file cubic_spline_solver.hpp
  * @brief Modern C++20 natural cubic spline interpolation

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option.cpp
  * @brief American option pricing solver implementation

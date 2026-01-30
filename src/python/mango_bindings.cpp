@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file mango_bindings.cpp
  * @brief Python bindings for mango-option library using pybind11

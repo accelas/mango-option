@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/simple/chain_builder.hpp"
 #include "src/simple/sources/yfinance.hpp"

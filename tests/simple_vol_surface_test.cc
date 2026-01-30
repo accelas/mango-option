@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/simple/vol_surface.hpp"
 #include "src/simple/chain_builder.hpp"

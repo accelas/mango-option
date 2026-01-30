@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_new_api_test.cc
  * @brief Tests for new AmericanOptionSolver API with PDEWorkspace

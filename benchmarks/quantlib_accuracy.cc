@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file quantlib_accuracy.cc
  * @brief Accuracy comparison between mango-option and QuantLib

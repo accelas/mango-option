@@ -1,4 +1,5 @@
 #!/usr/bin/env bpftrace
+# SPDX-License-Identifier: MIT
 /*
  * debug_failures.bt - Alert on all errors and failures
  *

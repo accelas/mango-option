@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file price_table_grid_estimator.hpp
  * @brief Automatic grid estimation for price table B-spline interpolation

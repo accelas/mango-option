@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file thomas_cubic_spline_test.cc
  * @brief Test modern C++20 Thomas solver and cubic spline

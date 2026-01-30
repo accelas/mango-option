@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/core/boundary_conditions.hpp"
 #include "src/pde/operators/operator_factory.hpp"

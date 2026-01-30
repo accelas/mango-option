@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/pde/operators/centered_difference_scalar.hpp"
 #include "src/pde/core/grid.hpp"

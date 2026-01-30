@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """System Arrow library."""
 
 cc_library(

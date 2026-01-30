@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file iv_solver_interpolated.cpp
  * @brief Implementation of interpolation-based IV solver

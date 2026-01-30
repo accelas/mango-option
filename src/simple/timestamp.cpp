@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/simple/timestamp.hpp"
 #include <charconv>
 #include <ctime>
