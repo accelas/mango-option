@@ -320,5 +320,4 @@ For reference, here are the C++23 features used and where they appear:
 - [Mathematical Foundations](MATHEMATICAL_FOUNDATIONS.md) — PDE formulations and numerical methods
 - [API Guide](API_GUIDE.md) — Usage examples and recipes
 - [Performance Analysis](PERF_ANALYSIS.md) — Instruction-level profiling
-- [Vectorization Strategy](architecture/vectorization-strategy.md) — SIMD benchmarks and rationale
 - [USDT Tracing](TRACING.md) — Runtime observability
