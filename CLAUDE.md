@@ -280,13 +280,13 @@ Use USDT probes for all logging and debugging:
 
 ```bash
 # Monitor execution
-sudo ./scripts/mango-trace monitor ./my_program
+sudo ./tools/mango-trace monitor ./my_program
 
 # Watch convergence
-sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
+sudo ./tools/mango-trace monitor ./my_program --preset=convergence
 
 # Debug failures
-sudo ./scripts/mango-trace monitor ./my_program --preset=debug
+sudo ./tools/mango-trace monitor ./my_program --preset=debug
 ```
 
 **Available presets:** `all`, `convergence`, `debug`, `performance`, `pde`, `iv`
@@ -323,7 +323,7 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
 | Build Python bindings | `bazel build //src/python:mango_option` |
-| Trace execution | `sudo ./scripts/mango-trace monitor ./program` |
+| Trace execution | `sudo ./tools/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |
 
 ## Getting Help

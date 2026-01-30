@@ -72,7 +72,7 @@ The library gracefully falls back to no-op probes if `sys/sdt.h` is not availabl
 
 ```bash
 # Using helper tool
-sudo ./scripts/mango-trace check ./my_program
+sudo ./tools/mango-trace check ./my_program
 
 # Or manually
 readelf -n ./my_program | grep NT_STAPSDT
@@ -85,10 +85,10 @@ sudo bpftrace -l 'usdt:./my_program:mango:*'
 
 ```bash
 # Alert on all failures with diagnostics
-sudo ./scripts/mango-trace monitor ./my_program --preset=debug
+sudo ./tools/mango-trace monitor ./my_program --preset=debug
 
 # Or directly with bpftrace
-sudo bpftrace scripts/tracing/debug_failures.bt -c './my_program'
+sudo bpftrace tools/tracing/debug_failures.bt -c './my_program'
 ```
 
 **What you get:**
@@ -101,7 +101,7 @@ sudo bpftrace scripts/tracing/debug_failures.bt -c './my_program'
 
 ```bash
 # Watch convergence in real-time
-sudo bpftrace scripts/tracing/convergence_watch.bt -c './my_program'
+sudo bpftrace tools/tracing/convergence_watch.bt -c './my_program'
 ```
 
 **What you get:**
@@ -114,7 +114,7 @@ sudo bpftrace scripts/tracing/convergence_watch.bt -c './my_program'
 
 ```bash
 # Comprehensive performance analysis
-sudo bpftrace scripts/tracing/performance_profile.bt -c './my_program'
+sudo bpftrace tools/tracing/performance_profile.bt -c './my_program'
 ```
 
 **What you get:**
@@ -128,7 +128,7 @@ sudo bpftrace scripts/tracing/performance_profile.bt -c './my_program'
 
 ```bash
 # Detailed PDE solver tracing
-sudo bpftrace scripts/tracing/pde_detailed.bt -c './my_program'
+sudo bpftrace tools/tracing/pde_detailed.bt -c './my_program'
 ```
 
 **What you get:**
@@ -141,7 +141,7 @@ sudo bpftrace scripts/tracing/pde_detailed.bt -c './my_program'
 
 ```bash
 # Detailed IV calculation tracing
-sudo bpftrace scripts/tracing/iv_detailed.bt -c './my_program'
+sudo bpftrace tools/tracing/iv_detailed.bt -c './my_program'
 ```
 
 **What you get:**
@@ -332,16 +332,16 @@ The `mango-trace` helper tool simplifies common tracing tasks.
 
 ```bash
 # List all USDT probes
-sudo ./scripts/mango-trace list <binary>
+sudo ./tools/mango-trace list <binary>
 
 # Validate USDT support
-sudo ./scripts/mango-trace check <binary>
+sudo ./tools/mango-trace check <binary>
 
 # Monitor with preset
-sudo ./scripts/mango-trace monitor <binary> --preset=<name>
+sudo ./tools/mango-trace monitor <binary> --preset=<name>
 
 # Run specific script
-sudo ./scripts/mango-trace run <script.bt> <binary>
+sudo ./tools/mango-trace run <script.bt> <binary>
 ```
 
 ### Monitor Presets
@@ -359,24 +359,24 @@ sudo ./scripts/mango-trace run <script.bt> <binary>
 
 ```bash
 # Quick monitoring
-sudo ./scripts/mango-trace monitor ./my_program
+sudo ./tools/mango-trace monitor ./my_program
 
 # Debug convergence
-sudo ./scripts/mango-trace monitor ./my_program --preset=debug
+sudo ./tools/mango-trace monitor ./my_program --preset=debug
 
 # Performance profiling
-sudo ./scripts/mango-trace monitor ./my_program --preset=performance
+sudo ./tools/mango-trace monitor ./my_program --preset=performance
 
 # Run custom script
-sudo ./scripts/mango-trace run my_custom.bt ./my_program
+sudo ./tools/mango-trace run my_custom.bt ./my_program
 
 # Pass arguments to binary
-sudo ./scripts/mango-trace monitor ./my_program -- --my-arg value
+sudo ./tools/mango-trace monitor ./my_program -- --my-arg value
 ```
 
 ## Script Reference
 
-All scripts are in `scripts/tracing/`. See [scripts/tracing/README.md](scripts/tracing/README.md) for details.
+All scripts are in `tools/tracing/`. See [tools/tracing/README.md](tools/tracing/README.md) for details.
 
 ### Script Summary
 
@@ -445,7 +445,7 @@ usdt::mango:convergence_success {
 ps aux | grep my_program
 
 # Attach (non-invasive, no restart needed)
-sudo bpftrace scripts/tracing/monitor_all.bt -p 12345
+sudo bpftrace tools/tracing/monitor_all.bt -p 12345
 ```
 
 ### Performance Impact
@@ -562,7 +562,7 @@ sudo apt-get install bpftrace
 ## Further Reading
 
 - [TRACING_QUICKSTART.md](TRACING_QUICKSTART.md) - 5-minute getting started
-- [scripts/tracing/README.md](scripts/tracing/README.md) - Script reference
+- [tools/tracing/README.md](tools/tracing/README.md) - Script reference
 - [src/support/ivcalc_trace.h](src/support/ivcalc_trace.h) - Probe definitions
 - [bpftrace documentation](https://github.com/iovisor/bpftrace)
 - [USDT probes](https://lwn.net/Articles/753601/)
@@ -620,7 +620,7 @@ For issues or questions:
 
 1. Check [Troubleshooting](#troubleshooting) section
 2. Verify probe definitions in `src/support/ivcalc_trace.h`
-3. Review example scripts in `scripts/tracing/`
+3. Review example scripts in `tools/tracing/`
 4. Consult bpftrace documentation
 
 ---
