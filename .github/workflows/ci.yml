@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y git wget ca-certificates build-essential clang systemtap-sdt-dev libquantlib0-dev liblapacke-dev
+          apt-get install -y git wget ca-certificates build-essential clang systemtap-sdt-dev libquantlib0-dev liblapacke-dev python3 python3-numpy python3-dev
 
           # Add Apache Arrow repository
           wget https://apache.jfrog.io/artifactory/arrow/debian/apache-arrow-apt-source-latest-trixie.deb
@@ -73,7 +73,7 @@ jobs:
         run: bazel build //... --build_tag_filters=-benchmark
 
       - name: Build Python bindings
-        run: bazel build //python:mango_option
+        run: bazel build //src/python:mango_option
 
       - name: Build benchmarks
         run: |

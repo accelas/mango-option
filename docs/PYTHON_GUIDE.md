@@ -5,10 +5,10 @@ Python bindings for American option pricing, implied volatility, and price table
 ## Build
 
 ```bash
-bazel build //python:mango_option
+bazel build //src/python:mango_option
 ```
 
-The module is built as `mango_option.so` in `bazel-bin/python/`.
+The module is built as `mango_option.so` in `bazel-bin/src/python/`.
 
 ## Pricing a Single Option
 
