@@ -1,382 +1,117 @@
 # Software Architecture
 
-Software design patterns, implementation strategies, and performance characteristics of the mango-option library.
+How the mango-option library is built, from the PDE solver core up through price tables and batch processing. Each section introduces the C++ patterns and design decisions where they arise, rather than cataloguing them separately.
 
-**For mathematical formulations, see [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)**
-**For usage examples, see [API_GUIDE.md](API_GUIDE.md)**
-**For workflow guidance, see [../CLAUDE.md](../CLAUDE.md)**
-
-## Table of Contents
-
-1. [Architecture Overview](#architecture-overview)
-2. [Component Design](#component-design)
-3. [Modern C++23 Patterns](#modern-c23-patterns)
-4. [Memory Management](#memory-management)
-5. [SIMD Vectorization](#simd-vectorization)
-6. [Performance Characteristics](#performance-characteristics)
-7. [Design Decisions](#design-decisions)
+**Related documents:**
+- [Mathematical Foundations](MATHEMATICAL_FOUNDATIONS.md) — PDE formulations, numerical methods
+- [API Guide](API_GUIDE.md) — Usage examples and recipes
+- [Performance Analysis](PERF_ANALYSIS.md) — Instruction-level profiling data
+- [USDT Tracing](TRACING.md) — Runtime observability
 
 ---
 
-## Architecture Overview
+## Overview
 
-### Component Diagram
+The library has three computation paths, each targeting a different latency/accuracy tradeoff:
+
+| Path | Latency | Use case |
+|------|---------|----------|
+| **FDM pricing** | ~1.4ms/option | Single option or small batch |
+| **FDM-based IV** | ~19ms/IV | Ground-truth implied volatility |
+| **Interpolated IV** | ~3.5us/IV | Production queries against pre-computed table |
+
+All three paths share the same PDE solver core. The interpolated path adds a pre-computation step (building a 4D B-spline price table), then replaces the PDE solve at query time with a surface lookup plus Newton iteration.
 
 ```mermaid
 graph TD
-    IV[IVSolverFDM<br/>iv_solver_fdm.cpp]
-    AO[AmericanOptionSolver<br/>american_option.hpp]
-    PDE[PDESolver CRTP<br/>pde_solver.hpp]
-    OPS[SpatialOperator<br/>operators/]
-    BC[BoundaryConditions<br/>boundary_conditions.hpp]
-    ROOT[Root Finding<br/>root_finding.hpp]
-    SPLINE[B-Spline<br/>bspline_nd.hpp]
-    PTABLE[PriceTableBuilder<N><br/>price_table_builder.hpp]
-    SURFACE[PriceTableSurface<N><br/>price_table_surface.hpp]
-    IVFAST[IVSolverInterpolated<br/>iv_solver_interpolated.hpp]
-
-    IV -->|Brent's method| ROOT
-    IV --> AO
-    AO --> PDE
-    PDE --> OPS
-    PDE --> BC
-    PTABLE -->|Pre-compute prices| AO
-    PTABLE -->|Fit coefficients| SPLINE
-    PTABLE -->|Produces| SURFACE
-    IVFAST -->|Newton on surface| ROOT
+    IV[IVSolverFDM] -->|Brent's method| ROOT[Root Finding]
+    IV --> AO[AmericanOptionSolver]
+    AO --> PDE[PDESolver CRTP]
+    PDE --> OPS[SpatialOperator]
+    PDE --> BC[BoundaryConditions]
+    PTABLE[PriceTableBuilder] -->|Pre-compute| AO
+    PTABLE -->|Fit coefficients| SPLINE[B-Spline]
+    PTABLE -->|Produces| SURFACE[PriceTableSurface]
+    IVFAST[IVSolverInterpolated] -->|Newton on surface| ROOT
     IVFAST -->|Query| SURFACE
 ```
 
-### Three Deployment Paths
-
-**1. FDM-Based Pricing** (Ground truth, ~1.3ms per option)
-- `AmericanOptionSolver` → `PDESolver<CRTP>` → spatial operators
-- Grid auto-estimation via `estimate_grid_for_option()` (101×498 typical)
-- Newton iteration for TR-BDF2 implicit stages
-
-**2. FDM-Based IV** (Robust, ~15ms per IV on 101×1k grid)
-- `IVSolverFDM` → Brent's method → nested `AmericanOptionSolver`
-- Adaptive volatility bounds based on intrinsic value
-- Monadic validation with `std::expected`
-- Higher accuracy: ~61ms per IV on 201×2k grid
-
-**3. Interpolated IV** (Fast, ~2.1µs per IV)
-- `IVSolverInterpolated` → Newton on 4D B-spline surface
-- Pre-computation: ~15-20 minutes for 300K grid
-- Query: ~193ns price interpolation, ~2.1µs IV solve
-- **7,000× speedup** over FDM-based IV
+The rest of this document walks through these components bottom-up: PDE solver core, American option layer, IV solvers, price tables, and finally batch processing.
 
 ---
 
-## Component Design
+## 1. PDE Solver Core
 
-### PDESolver: CRTP for Zero-Cost Polymorphism
+### CRTP for Zero-Cost Polymorphism
 
-**Design Pattern:** Curiously Recurring Template Pattern (CRTP)
+The PDE solver is a CRTP base class. Derived classes supply boundary conditions, a spatial operator, and optionally an obstacle function (for American options). The base class handles time-stepping, Newton iteration, and convergence control.
 
 ```cpp
 template<typename Derived>
 class PDESolver {
 public:
-    // Derived class must implement:
-    // - left_boundary() → BoundaryCondition
-    // - right_boundary() → BoundaryCondition
-    // - spatial_operator() → SpatialOperator
-    // - obstacle(t, x, psi) [optional, if HasObstacle<Derived>]
-
     std::expected<void, SolverError> solve() {
         auto& derived = static_cast<Derived&>(*this);
         auto left_bc = derived.left_boundary();
         auto spatial_op = derived.spatial_operator();
-        // ...
+        // TR-BDF2 time stepping with Newton iteration...
     }
 };
 ```
 
-**Benefits:**
-- Compile-time polymorphism (no virtual function overhead)
-- Boundary conditions and operators inlined
-- Type safety via concepts (`HasObstacle<Derived>`)
+Why CRTP instead of virtual functions? The solver's inner loop calls `spatial_operator().apply()` and `obstacle()` at every Newton iteration of every time step. Virtual dispatch would add ~5-10 cycles per call and prevent inlining. CRTP compiles to direct calls with full inlining, which matters when the loop body is only ~50 instructions. The tradeoff is more complex syntax and longer compile times.
 
-**Example Derived Class:**
-```cpp
-class AmericanPutSolver : public PDESolver<AmericanPutSolver> {
-public:
-    auto left_boundary() const { return DirichletBC(...); }
-    auto right_boundary() const { return DirichletBC(...); }
-    auto spatial_operator() const { return BlackScholesPDE(...); }
-    void obstacle(double t, auto x, auto psi) const { /* intrinsic value */ }
-};
-```
+A compile-time concept detects whether the derived class provides an analytical Jacobian:
 
-### Grid Ownership Model
-
-**Design:** Shared ownership via `std::shared_ptr<Grid>`
-
-```
-Grid (shared_ptr)
- ├── Solution storage (u_current, u_prev)
- ├── Spatial coordinates (x array)
- ├── Snapshot mechanism (optional recordings)
- └── Time domain (t_start, t_end, dt, n_steps)
-
-PDEWorkspace (owned by user)
- ├── dx (grid spacing)
- ├── Temporary buffers (u_stage, rhs, lu, psi)
- └── Newton arrays (jacobian, residual, delta_u)
-```
-
-**Rationale:**
-- Grid outlives PDESolver (needed for result extraction)
-- Workspace reusable across solves (PMR arena pattern)
-- Snapshots stored in Grid (not workspace)
-
-### GridSpec: Factory Pattern for Grid Generation
-
-**Design:** Immutable specification → generated buffer
-
-```cpp
-// Factory methods return std::expected
-auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
-
-if (grid_spec.has_value()) {
-    GridBuffer buffer = grid_spec.value().generate();  // Execute generation
-    auto x_points = buffer.x();  // Access generated coordinates
-}
-```
-
-**Types:**
-- `GridSpec::uniform()` - Constant spacing
-- `GridSpec::sinh_spaced()` - Single-center concentration
-- `GridSpec::multi_sinh_spaced()` - Multi-center concentration
-
-**Validation:** All factory methods validate parameters and return `std::expected<GridSpec, std::string>`
-
-### American OptionResult: Value Wrapper
-
-**Design:** Immutable result object with Grid reference
-
-```cpp
-class AmericanOptionResult {
-public:
-    double price() const;          // Interpolate at spot
-    double delta() const;          // ∂V/∂S via CenteredDifference
-    double gamma() const;          // ∂²V/∂S²
-    double theta() const;          // ∂V/∂t via backward difference
-
-    std::span<const double> snapshot(size_t idx) const;  // Recorded solution
-
-private:
-    std::shared_ptr<const Grid<double>> grid_;  // Shared ownership
-    PricingParams params_;                      // Option parameters
-};
-```
-
-**Lazy Greeks:** Delta, gamma, and theta computed on first access (cached afterward):
-- Delta/gamma: `CenteredDifference` spatial derivatives
-- Theta: Backward difference `(V_prev - V_current) / dt` from stored snapshots
-
----
-
-## Modern C++23 Patterns
-
-### std::expected for Error Handling
-
-**Pattern:** Monadic validation chains
-
-```cpp
-auto validate_query(const IVQuery& query) const
-    -> std::expected<std::monostate, IVError>
-{
-    return validate_positive_parameters(query)
-        .and_then([&](auto) { return validate_arbitrage_bounds(query); })
-        .and_then([&](auto) { return validate_grid_params(); });
-}
-```
-
-**Benefits:**
-- No exceptions (zero-cost when successful)
-- Type-safe error codes
-- Composable validation
-- Compiler-enforced error checking
-
-**Error Types:**
-```cpp
-enum class IVErrorCode {
-    NegativeSpot, NegativeStrike, NegativeMaturity,
-    ArbitrageViolation, MaxIterationsExceeded, ...
-};
-
-struct IVError {
-    IVErrorCode code;
-    std::string message;
-    size_t iterations{0};
-    std::optional<double> last_vol;
-    double final_error{0.0};
-};
-```
-
-### Concepts for Compile-Time Constraints
-
-**Spatial Operator Concept:**
 ```cpp
 template<typename SpatialOp>
-concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt, TridiagonalMatrixView jac) {
+concept HasAnalyticalJacobian = requires(const SpatialOp op, double coeff_dt,
+                                          TridiagonalMatrixView jac) {
     { op.assemble_jacobian(coeff_dt, jac) } -> std::same_as<void>;
 };
 ```
 
-**Usage:** PDESolver detects at compile-time if operator provides analytical Jacobian:
-```cpp
-if constexpr (HasAnalyticalJacobian<decltype(spatial_op)>) {
-    spatial_op.assemble_jacobian(dt_coeff, jacobian);  // Fast path
-} else {
-    compute_jacobian_fd(spatial_op, ...);               // Finite difference fallback
-}
+If the concept is satisfied, the solver uses the analytical Jacobian directly. Otherwise it falls back to finite difference approximation. `BlackScholesPDE` provides an analytical Jacobian; custom PDEs do not need to.
+
+### Grid and Workspace
+
+The solver operates on two objects: a **Grid** (spatial coordinates and solution storage) and a **PDEWorkspace** (temporary buffers for the solve).
+
+```
+Grid (shared_ptr)                PDEWorkspace (owned by caller)
+├── x coordinates                ├── dx (grid spacing)
+├── u_current, u_prev            ├── Temporary buffers (u_stage, rhs, lu, psi)
+├── Time domain                  └── Newton arrays (jacobian, residual, delta_u)
+└── Snapshot storage
 ```
 
-### std::mdspan for Multi-Dimensional Arrays
+The Grid is shared-ownership (`std::shared_ptr`) because the result object needs the Grid for interpolation after the solver is destroyed. The workspace is caller-owned so it can be reused across multiple solves.
 
-**Purpose:** Type-safe indexing without manual stride calculation
+Grid generation uses a factory pattern with validation:
 
-**Example: B-Spline Coefficients**
 ```cpp
-using std::experimental::mdspan;
-using std::experimental::dextents;
-
-mdspan<double, dextents<size_t, 4>> coeffs(data.data(), n_m, n_tau, n_sigma, n_r);
-double c = coeffs[i, j, k, l];  // Type-safe 4D indexing
+auto spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
+// Returns std::expected<GridSpec, std::string>
 ```
 
-**Custom Layouts:** LAPACK banded storage via `lapack_banded_layout`
+Three grid types: `uniform()`, `sinh_spaced()` (single concentration point), and `multi_sinh_spaced()` (multiple concentration points, useful for barrier options or multi-strike chains).
 
-**Zero Overhead:** Compiles to same assembly as manual indexing
+### Memory: PMR Arenas
 
-### PMR (Polymorphic Memory Resource)
-
-**Pattern:** Caller-provided memory resources
+All workspace arrays are allocated from a caller-provided PMR memory resource:
 
 ```cpp
-std::pmr::synchronized_pool_resource pool;  // Thread-safe arena
-
+std::pmr::synchronized_pool_resource pool;
 auto workspace = PDEWorkspace::create(grid_spec, &pool).value();
-// All workspace arrays allocated from pool
-
-auto solver = AmericanOptionSolver(params, workspace);
-auto result = solver.solve();
-
-// Pool can be reset for next solve (if no active references)
 ```
 
-**Benefits:**
-- Zero allocation during solve (all buffers pre-allocated)
-- Memory reuse across batches
-- Thread-safe via `synchronized_pool_resource`
+This means zero allocation during the solve itself — all buffers are pre-allocated. For batch processing, the same pool serves multiple solves. The workspace totals ~13n doubles for a grid of n points (including Newton iteration arrays), padded to 8-element boundaries for AVX-512.
 
-**Note:** For parallel workloads, prefer `ThreadWorkspaceBuffer` which provides 64-byte alignment and C++23 lifetime semantics. See [Memory Management](#memory-management).
+Why PMR instead of raw `new`? Repeated solves would otherwise allocate and deallocate the same ~10KB of buffers thousands of times. PMR lets the caller control lifetime: allocate once, reuse across solves, release when done. The tradeoff is that the caller must keep the memory resource alive.
 
----
+### Spatial Operators and SIMD
 
-## Memory Management
-
-### PDEWorkspace Design
-
-**Architecture:** PMR-based buffer manager
-
-```cpp
-class PDEWorkspace {
-    std::pmr::vector<double> grid_;      // Spatial coordinates
-    std::pmr::vector<double> dx_;        // Grid spacing
-    std::pmr::vector<double> u_current_; // Current solution
-    std::pmr::vector<double> u_next_;    // Next solution
-    std::pmr::vector<double> u_stage_;   // TR-BDF2 stage buffer
-    std::pmr::vector<double> rhs_;       // Right-hand side
-    std::pmr::vector<double> lu_;        // Spatial operator result
-    std::pmr::vector<double> psi_;       // Obstacle buffer
-
-    // Newton iteration arrays
-    std::pmr::vector<double> jacobian_diag_;
-    std::pmr::vector<double> jacobian_upper_;
-    std::pmr::vector<double> jacobian_lower_;
-    std::pmr::vector<double> residual_;
-    std::pmr::vector<double> delta_u_;
-};
-```
-
-**Total Allocation:** ~13n doubles for complete PDE + Newton solver
-
-**SIMD Padding:** All arrays padded to 8-element boundaries (AVX-512 safe)
-
-**Factory Pattern:**
-```cpp
-static std::expected<PDEWorkspace, std::string>
-create(const GridSpec<T>& spec, std::pmr::memory_resource* resource);
-```
-
-**Accessor Pattern:** Returns `std::span` for zero-copy access:
-```cpp
-std::span<double> u_current() { return {u_current_.data(), n_}; }
-```
-
-### ThreadWorkspaceBuffer
-
-**Purpose:** Per-thread byte buffer for zero-allocation parallel workloads
-
-```cpp
-MANGO_PRAGMA_PARALLEL
-{
-    // Allocate once per thread (64-byte aligned for AVX-512)
-    ThreadWorkspaceBuffer buffer(BSplineCollocationWorkspace<double>::required_bytes(n));
-
-    // Create workspace once per thread (starts object lifetimes)
-    auto ws = BSplineCollocationWorkspace<double>::from_bytes(buffer.bytes(), n).value();
-
-    MANGO_PRAGMA_FOR_STATIC
-    for (size_t i = 0; i < count; ++i) {
-        // Reuse workspace - solver overwrites arrays each iteration
-        solver.fit_with_workspace(values[i], ws, config);
-    }
-}
-```
-
-**Key Features:**
-- 64-byte aligned storage via `std::aligned_alloc`
-- PMR fallback (`unsynchronized_pool_resource`) if buffer exhausted
-- C++23 `std::start_lifetime_as_array` for strict-aliasing compliance
-- Reduces B-spline fitting allocations from 24,000 to N (thread count)
-
-**Workspace Types:**
-- `BSplineCollocationWorkspace<T>` - B-spline fitting (band matrix, LU workspace, pivots)
-- `AmericanPDEWorkspace` - PDE solver (byte-buffer wrapper around PDEWorkspace)
-
-### AlignedVector for Persistent Output
-
-**Purpose:** 64-byte aligned `std::vector` for SIMD-optimized persistent storage
-
-```cpp
-// Used by PriceTensor and Grid for output buffers
-template<typename T, size_t Alignment = 64>
-using AlignedVector = std::vector<T, AlignedAllocator<T, Alignment>>;
-```
-
-**Usage in PriceTensor:**
-```cpp
-auto tensor = PriceTensor<4>::create({20, 30, 20, 10});  // ~480K doubles
-// Storage is 64-byte aligned for AVX-512 loads/stores
-```
-
-**Why Not PMR:**
-- Persistent output buffers outlive solver lifetime
-- Need guaranteed 64-byte alignment (PMR only guarantees `alignof(max_align_t)` = 16 bytes)
-- Shared ownership via `std::shared_ptr<AlignedVector<double>>`
-
----
-
-## SIMD Vectorization
-
-### Target Clones Strategy
-
-**Pattern:** Single source, multi-ISA binaries
+Spatial operators (BlackScholesPDE, LaplacianPDE) compute `L*u` — the spatial discretization applied to the current solution vector. The inner loop is a weighted stencil:
 
 ```cpp
 [[gnu::target_clones("default", "avx2", "avx512f")]]
@@ -390,259 +125,178 @@ void compute_second_derivative(...) {
 }
 ```
 
-**How It Works:**
-1. Compiler generates 3 versions (SSE2, AVX2, AVX-512)
-2. IFUNC resolver selects version at first call (CPUID check)
-3. Subsequent calls direct jump (zero overhead)
+The `target_clones` attribute generates SSE2, AVX2, and AVX-512 versions. An IFUNC resolver picks the best one at first call (~500ns overhead, then zero). OpenMP SIMD pragmas guide auto-vectorization.
 
-**Performance:**
-- AVX2: 2.8× speedup vs SSE2
-- AVX-512: 4.2× speedup vs SSE2
-- First-call overhead: ~500ns (negligible)
+Why OpenMP SIMD instead of explicit SIMD intrinsics or `std::experimental::simd`? In benchmarks, OpenMP SIMD outperformed explicit SIMD in 9 of 12 cases (often by 15-45%). Modern compilers (GCC 14, Clang 19) are good enough at auto-vectorization that hand-written intrinsics add complexity without payoff for this workload.
 
-**Why Not Explicit SIMD:**
-OpenMP SIMD (`#pragma omp simd`) outperforms `std::experimental::simd` in 75% of benchmarks (9/12 cases), often by 15-45%.
+The `CenteredDifference` class provides a unified facade for all derivative computations, delegating to a `ScalarBackend` that uses OpenMP SIMD internally. No runtime mode selection — the facade is thin enough for the compiler to inline through.
 
-### CenteredDifference Facade
+---
 
-**Unified Interface:** Single API for all derivative computations
+## 2. American Option Layer
+
+### Solver and Result
+
+`AmericanOptionSolver` derives from `PDESolver` and supplies:
+- **Left boundary:** Dirichlet BC (intrinsic value for deep ITM)
+- **Right boundary:** Dirichlet BC (zero for far OTM)
+- **Spatial operator:** `BlackScholesPDE` with the option's vol, rate, and dividend yield
+- **Obstacle:** Early exercise constraint (intrinsic value at each node)
+
+The solver returns an `AmericanOptionResult` that wraps the Grid:
 
 ```cpp
-class CenteredDifference<T> {
-    ScalarBackend<T> backend_;  // OpenMP SIMD implementation
+class AmericanOptionResult {
+    std::shared_ptr<const Grid<double>> grid_;
+    PricingParams params_;
 
 public:
-    void compute_second_derivative(auto u, auto d2u_dx2, size_t start, size_t end) const {
-        backend_.compute_second_derivative(u, d2u_dx2, start, end);  // Inlined
-    }
+    double price() const;   // Interpolate at spot
+    double delta() const;   // dV/dS via CenteredDifference
+    double gamma() const;   // d²V/dS²
+    double theta() const;   // dV/dt via backward difference
 };
 ```
 
-**No Mode Enum:** Previous design had `Mode::Auto`, `Mode::Scalar`, `Mode::Simd` (removed)
+Greeks are computed lazily on first access. Delta and gamma use centered finite differences on the spatial grid. Theta uses a backward difference between the last two time steps (stored as snapshots in the Grid).
 
-**Zero Overhead:** Direct function call, compiler inlines across facade
+### Error Handling with std::expected
+
+All public APIs return `std::expected<T, Error>` instead of throwing. Validation chains compose monadically:
+
+```cpp
+auto validate_query(const IVQuery& query) const
+    -> std::expected<std::monostate, IVError>
+{
+    return validate_positive_parameters(query)
+        .and_then([&](auto) { return validate_arbitrage_bounds(query); })
+        .and_then([&](auto) { return validate_grid_params(); });
+}
+```
+
+Why not exceptions? The solver runs in tight loops (batch pricing, Brent iterations). Exception overhead — stack unwinding setup, code size bloat (~20-30%) — is disproportionate for a numerical library where errors are expected outcomes (e.g., convergence failure is not exceptional, it's a valid result). `std::expected` has zero cost on the success path and makes error handling explicit in the type system.
+
+### Grid Auto-Estimation
+
+`estimate_grid_for_option()` selects grid size and time steps based on volatility, maturity, and moneyness. A typical result is 101 spatial points and 498 time steps. This avoids requiring the user to understand numerical parameters while still allowing override for fine-grained control.
 
 ---
 
-## Performance Characteristics
+## 3. Implied Volatility Solvers
 
-### FDM-Based Pricing
+### FDM-Based (IVSolverFDM)
 
-| Configuration | Grid | Time/Option | Notes |
-|---|---|---|---|
-| Standard (auto) | 101 pts, 498 steps | ~1.3ms | Auto-estimated, typical case |
-| Custom fine | 201 pts, 2000 steps | ~8-10ms | High accuracy |
+The FDM solver wraps Brent's root-finding method around the American option solver. Given a market price, it searches for the volatility that makes the model price match:
 
-**Auto-Estimation:** `estimate_grid_for_option()` selects grid based on σ, T, moneyness
-
-**Batch Processing (64 options):**
-- Sequential: ~81ms total (~1.26ms/option)
-- Parallel batch: ~7.7ms total (~0.12ms/option)
-- **10.4× speedup** with parallelization
-
-### Implied Volatility
-
-| Method | Time/IV | Accuracy | Use Case |
-|---|---|---|---|
-| FDM-based (101×1k) | ~15ms | Ground truth | Validation, moderate queries |
-| FDM-based (201×2k) | ~61ms | High accuracy | Validation, few queries |
-| Interpolated | ~2.1µs | 10–60 bps (profile-dependent) | Production, many queries |
-
-**FDM Breakdown (101×1k grid):**
-- 5-8 Brent iterations
-- ~2-3ms per PDE solve
-- Total: ~15ms average
-
-**Interpolated Breakdown:**
-- Surface evaluation: ~193ns (price lookup)
-- Newton on surface: ~2.1µs (IV solve)
-- **7,000× speedup** over FDM-based IV
-
-### Price Table Pre-Computation
-
-| Grid Size | Pre-Compute Time | Query Time | Speedup |
-|---|---|---|---|
-| 50×30×20×10 (300K) | 15-20 min (32 cores) | ~193ns | 77,000× vs FDM |
-
-**Pre-Computation:**
-- 200 unique (σ, r) pairs
-- 30 maturities per pair = 6,000 PDE solves
-- OpenMP parallelization: ~300 options/sec
-
-**Query:**
-- 4D B-spline evaluation: ~193ns (price)
-- Greeks: ~952ns (vega + gamma)
-
-**Automatic Grid Estimation:**
-
-Use `from_chain_auto()` to automatically estimate optimal grid density:
-```cpp
-auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto(
-    chain, grid_spec, n_time, OptionType::PUT,
-    PriceTableGridAccuracyParams<4>{.target_iv_error = 0.0005}  // 5 bps
-).value();
+```
+IVSolverFDM → Brent's method → AmericanOptionSolver (5-8 calls) → price
 ```
 
-Or use the top-level wrapper that estimates both table grids and PDE grid/time steps:
-```cpp
-auto [builder, axes] = PriceTableBuilder<4>::from_chain_auto_profile(
-    chain,
-    PriceTableGridProfile::High,
-    GridAccuracyProfile::High,
-    OptionType::PUT
-).value();
-```
+Each Brent iteration solves the PDE from scratch (no warm-starting), so total time is ~5-8 PDE solves. Adaptive volatility bounds narrow the search based on intrinsic value. Typical latency: ~19ms per IV on a 101x498 grid.
 
-Python helper (builds the surface directly; see [PYTHON_GUIDE.md](PYTHON_GUIDE.md) for full API):
-```python
-import mango_option as mo
+### Interpolated (IVSolverInterpolated)
 
-chain = mo.OptionChain()
-chain.spot = 100.0
-chain.strikes = [90, 95, 100, 105, 110]
-chain.maturities = [0.25, 0.5, 1.0]
-chain.implied_vols = [0.15, 0.20, 0.25]
-chain.rates = [0.02, 0.03]
-chain.dividend_yield = 0.0
+The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed 4D B-spline surface. Newton iteration on the smooth surface converges in 3-5 iterations, each requiring only a surface evaluation (~193ns). Total IV solve: ~3.5us — a 5,400x speedup over FDM.
 
-surface = mo.build_price_table_surface_from_chain(
-    chain,
-    option_type=mo.OptionType.PUT,
-    grid_profile=mo.PriceTableGridProfile.HIGH,
-    pde_profile=mo.GridAccuracyProfile.HIGH,
-)
-```
-
-Real data benchmark (SPY, auto-grid profiles, interpolation-only timing):
-
-| Profile | Grid (m×τ×σ×r) | PDE solves | interp IV (µs) | interp IV/s | FDM IV (µs) | FDM IV/s | max err (bps) | avg err (bps) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Low | 8×8×14×6 | 84 | 4.68 | 214k | 5275 | 190 | 90.5 | 52.5 |
-| Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
-| High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
-| Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
-
-Grid density is determined by curvature-based budget allocation:
-- σ (volatility): 1.5× weight (highest curvature, vega non-linearity)
-- m (moneyness): 1.0× (ATM gamma peak handled by log-transform)
-- τ (maturity): 1.0× (baseline, sqrt-tau behavior)
-- r (rate): 0.6× (nearly linear discounting)
-
-**Adaptive Grid Refinement:**
-
-For production accuracy, use `AdaptiveGridBuilder` for iterative refinement:
-```cpp
-AdaptiveGridParams params{.target_iv_error = 0.0005, .max_iterations = 5};
-AdaptiveGridBuilder builder(params);
-auto result = builder.build(chain, grid_spec, n_time, OptionType::PUT);
-// result->achieved_max_error <= params.target_iv_error when target_met
-```
-
-### Memory Usage
-
-| Component | Size (n=101) | Notes |
-|---|---|---|
-| PDEWorkspace | ~13n doubles (~10 KB) | Includes Newton arrays |
-| Grid + Solution | ~3n doubles (~2.4 KB) | u_current, u_prev, x |
-| BSplineCollocationWorkspace | ~21n doubles (~17 KB) | Band matrix, LU, pivots |
-| PriceTensor 4D | ~3.8 MB | 50×30×20×10 doubles (AlignedVector) |
-| ThreadWorkspaceBuffer | Per-thread | 64-byte aligned byte buffer |
+This is the production path. You pay a one-time pre-computation cost (see next section), then amortize it over millions of queries.
 
 ---
 
-## Design Decisions
+## 4. Price Tables and B-Splines
 
-### Why CRTP Instead of Virtual Functions?
+### Pre-Computation Pipeline
 
-**Virtual dispatch overhead:**
-- Indirect call through vtable (~5-10 cycles)
-- Prevents inlining
-- Cache misses on vtable lookup
+`PriceTableBuilder` constructs a 4D price surface over (moneyness, maturity, volatility, rate). The pipeline:
 
-**CRTP benefits:**
-- Zero overhead (direct call)
-- Full inlining of boundary conditions and operators
-- Compile-time type checking
+1. Enumerate grid points across all four dimensions
+2. For each (vol, rate) pair, solve the PDE across all maturities and strikes
+3. Fit 4D tensor-product B-spline coefficients to the results
+4. Package into a `PriceTableSurface` for fast evaluation
 
-**Tradeoff:** More complex syntax, longer compile times
+The tensor is stored as a `PriceTensor<4>` backed by an `AlignedVector` — a `std::vector` with a 64-byte aligned allocator. This alignment is needed for AVX-512 loads during B-spline evaluation.
 
-### Why std::expected Instead of Exceptions?
+Why `AlignedVector` instead of PMR? The price tensor is persistent output that outlives the solver. PMR only guarantees `alignof(max_align_t)` (16 bytes), but AVX-512 needs 64-byte alignment. The tensor is shared via `std::shared_ptr<AlignedVector<double>>`.
 
-**Exception overhead:**
-- Stack unwinding even when no error
-- Code size increase (~20-30%)
-- Unpredictable performance
+### Multi-Dimensional Indexing with mdspan
 
-**std::expected benefits:**
-- Zero cost when successful (no overhead)
-- Explicit error handling in type system
-- Composable with `.and_then()`, `.or_else()`
+B-spline coefficients use `std::mdspan` for type-safe multi-dimensional indexing:
 
-**Tradeoff:** Verbosity (must check `.has_value()`)
+```cpp
+mdspan<double, dextents<size_t, 4>> coeffs(data.data(), n_m, n_tau, n_sigma, n_r);
+double c = coeffs[i, j, k, l];  // No manual stride calculation
+```
 
-### Why Shared Grid Ownership?
+This compiles to the same assembly as hand-rolled `data[i*s0 + j*s1 + k*s2 + l]` but eliminates index arithmetic errors.
 
-**Problem:** Result needs Grid for interpolation, but PDESolver temporary
+### Grid Density Profiles
 
-**Alternatives considered:**
-1. Copy Grid into result → Expensive (~3KB per option)
-2. Weak pointer → Dangling if Grid destroyed
-3. **Shared pointer → Chosen (reference counting handles lifetime)**
+The builder supports automatic grid estimation via `from_chain_auto_profile()` with four density profiles (Low, Medium, High, Ultra). Grid budget is allocated by curvature:
 
-**Tradeoff:** Slight overhead (~8 bytes pointer) vs safety
+| Dimension | Weight | Rationale |
+|-----------|--------|-----------|
+| Volatility (sigma) | 1.5x | Highest curvature from vega non-linearity |
+| Moneyness (m) | 1.0x | ATM gamma peak handled by log-transform |
+| Maturity (tau) | 1.0x | Baseline, sqrt-tau behavior |
+| Rate (r) | 0.6x | Nearly linear discounting |
 
-### Why GridSpec Factory Pattern?
-
-**Problem:** Grid generation has multiple strategies with validation
-
-**Benefits:**
-- Validation at construction (`std::expected` return)
-- Immutable specification (can't accidentally modify)
-- Deferred generation (generate only when needed)
-- Type-safe factory methods
-
-**Tradeoff:** Extra indirection vs old direct construction
-
-### Why PMR for PDEWorkspace?
-
-**Problem:** Repeated solves allocate/deallocate same buffers
-
-**Benefits:**
-- Workspace allocation once, reused across solves
-- Thread-safe via `synchronized_pool_resource`
-- Zero allocation during solve (performance critical)
-
-**Tradeoff:** Caller must manage memory resource lifetime
-
-### Why ThreadWorkspaceBuffer for Parallel Workloads?
-
-**Problem:** PMR only guarantees 16-byte alignment; B-spline fitting needs 24,000+ allocations
-
-**Benefits:**
-- 64-byte alignment (AVX-512 safe) via `std::aligned_alloc`
-- C++23 `std::start_lifetime_as_array` for strict-aliasing compliance
-- Reduces allocations from O(work items) to O(thread count)
-- PMR fallback if buffer exhausted
-
-**Tradeoff:** Requires C++23 for proper lifetime semantics
-
-### Why OpenMP SIMD Over Explicit SIMD?
-
-**Benchmarks:** OpenMP SIMD faster in 75% of cases (9/12)
-
-**Reasons:**
-- Compiler auto-vectorization improved significantly (GCC 14, Clang 19)
-- `std::experimental::simd` requires manual load/store (overhead)
-- OpenMP SIMD less code, easier maintenance
-
-**Tradeoff:** Less portable (requires OpenMP support)
+The default (High) targets ~20 bps average IV error. For tighter tolerance, `AdaptiveGridBuilder` iteratively refines grid density until a target error is met.
 
 ---
 
-## Related Documentation
+## 5. Batch Processing and Parallelism
 
-- **Mathematical Foundations:** [MATHEMATICAL_FOUNDATIONS.md](MATHEMATICAL_FOUNDATIONS.md)
-- **API Usage:** [API_GUIDE.md](API_GUIDE.md)
-- **Workflow:** [../CLAUDE.md](../CLAUDE.md)
-- **Vectorization Details:** [architecture/vectorization-strategy.md](architecture/vectorization-strategy.md)
-- **USDT Tracing:** [TRACING.md](TRACING.md)
+### OpenMP Parallelization
+
+Batch pricing parallelizes across options with OpenMP:
+
+```cpp
+MANGO_PRAGMA_PARALLEL
+{
+    ThreadWorkspaceBuffer buffer(required_bytes);
+    auto ws = PDEWorkspace::from_bytes(buffer.bytes(), n).value();
+
+    MANGO_PRAGMA_FOR_STATIC
+    for (size_t i = 0; i < count; ++i) {
+        solver.solve_with_workspace(params[i], ws);
+    }
+}
+```
+
+Each thread gets its own workspace, allocated once at thread creation. This reduces total allocations from O(work items) to O(thread count).
+
+### ThreadWorkspaceBuffer
+
+`ThreadWorkspaceBuffer` is a per-thread byte buffer with 64-byte alignment (via `std::aligned_alloc`). Typed workspaces are created over this buffer using C++23's `std::start_lifetime_as_array` for strict-aliasing compliance. If the buffer is too small (shouldn't happen in practice), it falls back to a PMR `unsynchronized_pool_resource`.
+
+This pattern also serves B-spline fitting during price table construction, where each thread fits hundreds of 1D splines. Without per-thread workspaces, the 24,000+ fitting operations would each allocate and free band matrices and pivot arrays.
+
+### Shared-Grid Optimization
+
+When pricing a chain of options that differ only in strike (same vol, rate, maturity), the solver can share a single grid. This avoids re-generating spatial coordinates and re-computing grid-dependent quantities, giving ~10x speedup for a 15-option chain.
+
+---
+
+## Summary of C++23 Features
+
+For reference, here are the C++23 features used and where they appear:
+
+| Feature | Where | Purpose |
+|---------|-------|---------|
+| `std::expected<T, E>` | All public APIs | Type-safe error handling without exceptions |
+| Concepts | PDESolver | Compile-time detection of analytical Jacobian |
+| `std::mdspan` | B-spline coefficients | Type-safe multi-dimensional indexing |
+| `std::start_lifetime_as_array` | ThreadWorkspaceBuffer | Strict-aliasing compliance for byte-buffer reuse |
+| PMR (`std::pmr::vector`) | PDEWorkspace | Arena allocation for solver buffers |
+| CRTP | PDESolver | Zero-cost polymorphism for spatial operators |
+| `[[gnu::target_clones]]` | CenteredDifference | Multi-ISA code generation (SSE2/AVX2/AVX-512) |
+| Designated initializers | Option params, grid specs | Readable struct construction |
+
+---
+
+## Related Documents
+
+- [Mathematical Foundations](MATHEMATICAL_FOUNDATIONS.md) — PDE formulations and numerical methods
+- [API Guide](API_GUIDE.md) — Usage examples and recipes
+- [Performance Analysis](PERF_ANALYSIS.md) — Instruction-level profiling
+- [Vectorization Strategy](architecture/vectorization-strategy.md) — SIMD benchmarks and rationale
+- [USDT Tracing](TRACING.md) — Runtime observability
