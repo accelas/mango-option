@@ -256,50 +256,48 @@ Each thread gets its own workspace, allocated once at thread creation. This redu
 
 ### Memory Buffer Hierarchy
 
-The diagram below shows how memory is organized across single-option, batch, and price-table workloads:
+The library uses three memory strategies depending on the workload. Each diagram below shows one.
+
+**Single option solve** — the caller creates a PMR pool and a Grid. The pool backs the PDEWorkspace (scratch buffers). The Grid holds the spatial coordinates and solution vectors, and outlives the solver via `shared_ptr` so the result can interpolate from it.
 
 ```mermaid
-graph TD
-    subgraph "Single option (caller manages memory)"
-        PMR[synchronized_pool_resource]
-        PMR -->|allocates| PW1[PDEWorkspace<br/>u_stage, rhs, jacobian, ...]
-        G1[Grid shared_ptr<br/>x coords, u_current, u_prev]
-        PW1 --- SOLVER1[AmericanOptionSolver]
-        G1 --- SOLVER1
-        SOLVER1 -->|produces| RES[AmericanOptionResult<br/>holds Grid shared_ptr]
-    end
-
-    subgraph "Batch pricing (one per thread)"
-        TWB1[ThreadWorkspaceBuffer<br/>64-byte aligned byte slab]
-        TWB1 -->|from_bytes| PW2[PDEWorkspace<br/>typed view over bytes]
-        PW2 --- SOLVER2["solve(option[0]), solve(option[1]), ..."]
-    end
-
-    subgraph "Price table build (one per thread)"
-        TWB2[ThreadWorkspaceBuffer<br/>64-byte aligned byte slab]
-        TWB2 -->|from_bytes| BSW[BSplineCollocationWorkspace<br/>band matrix, LU, pivots]
-        BSW --- FIT["fit(slice[0]), fit(slice[1]), ..."]
-    end
-
-    subgraph "Price table output (persistent)"
-        AV[AlignedVector 64-byte<br/>PriceTensor coefficients]
-        AV --- SURF[PriceTableSurface<br/>shared_ptr]
-    end
+graph LR
+    PMR[synchronized_pool_resource] -->|allocates| PW[PDEWorkspace<br/>u_stage, rhs, jacobian, ...]
+    G[Grid shared_ptr<br/>x coords, u_current, u_prev]
+    PW --> SOLVER[AmericanOptionSolver]
+    G --> SOLVER
+    SOLVER -->|produces| RES[AmericanOptionResult<br/>holds Grid shared_ptr]
 ```
 
-Three memory strategies, each chosen for a reason:
+**Batch pricing** — each OpenMP thread gets one `ThreadWorkspaceBuffer` (a 64-byte-aligned byte slab) and one `Grid`. The PDEWorkspace is a typed view constructed over the byte slab via `from_bytes()`. Both are allocated once at thread creation and reused for every option in the thread's work queue.
 
-| Strategy | Used by | Why |
+In shared-grid mode (options differ only in strike), all options on a thread share one Grid — the solver resets the solution vector between solves but keeps the same spatial coordinates. In independent mode, a new Grid is created per option.
+
+```mermaid
+graph LR
+    TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| PW[PDEWorkspace<br/>typed view]
+    G[Grid per-thread or per-option]
+    PW --> LOOP["solve(option[0])<br/>solve(option[1])<br/>...reused each iteration"]
+    G --> LOOP
+```
+
+**Price table build** — same `ThreadWorkspaceBuffer` pattern, but the typed view is a `BSplineCollocationWorkspace` (band matrix, LU workspace, pivot indices) instead of a PDEWorkspace. Each thread fits hundreds of 1D spline slices, reusing the same workspace each time.
+
+```mermaid
+graph LR
+    TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| BSW[BSplineCollocationWorkspace<br/>band matrix, LU, pivots]
+    BSW --> FIT["fit(slice[0])<br/>fit(slice[1])<br/>...reused each iteration"]
+    FIT -->|output| AV[AlignedVector 64-byte<br/>PriceTensor coefficients]
+    AV --> SURF[PriceTableSurface shared_ptr]
+```
+
+**Why three strategies?**
+
+| Strategy | Used by | Why not the others? |
 |----------|---------|-----|
-| **PMR pool** | `PDEWorkspace` (single solve) | Caller controls lifetime; zero allocation during solve; reusable across solves |
-| **ThreadWorkspaceBuffer** | `PDEWorkspace` and `BSplineCollocationWorkspace` (parallel loops) | One 64-byte-aligned slab per thread, reused for every work item. Reduces allocations from O(work items) to O(thread count). Typed workspace constructed via `from_bytes()` using C++23 `std::start_lifetime_as_array` |
-| **AlignedVector** | `PriceTensor` (output) | Persistent data that outlives the solver. Needs 64-byte alignment for AVX-512, which PMR cannot guarantee (only `alignof(max_align_t)` = 16 bytes) |
-
-`ThreadWorkspaceBuffer` is not a workspace — it is the raw byte slab that typed workspaces are built on top of. In batch pricing, a `PDEWorkspace` is constructed over it. In price table construction, a `BSplineCollocationWorkspace` is constructed over it instead. Same allocation pattern, different typed view. If the buffer is ever too small, it falls back to a PMR `unsynchronized_pool_resource`.
-
-### Shared-Grid Optimization
-
-When pricing a chain of options that differ only in strike (same vol, rate, maturity), the solver can share a single grid. This avoids re-generating spatial coordinates and re-computing grid-dependent quantities, giving ~10x speedup for a 15-option chain.
+| **PMR pool** | PDEWorkspace (single solve) | Caller controls lifetime; zero allocation during solve; reusable across solves |
+| **ThreadWorkspaceBuffer** | PDEWorkspace and BSplineCollocationWorkspace (parallel loops) | One slab per thread, reused for every work item. Reduces allocations from O(work items) to O(threads). Uses C++23 `std::start_lifetime_as_array` for strict-aliasing compliance. Falls back to PMR if buffer too small |
+| **AlignedVector** | PriceTensor (persistent output) | Outlives the solver. Needs 64-byte alignment for AVX-512; PMR only guarantees 16 bytes |
 
 ---
 
