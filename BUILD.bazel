@@ -99,7 +99,7 @@ includedir=$${prefix}/include
 
 Name: mango-option
 Description: C++23 American option pricing library with FDM solvers and B-spline interpolation
-Version: 0.1.0
+Version: 0.2.0
 Requires:
 Libs: -L$${libdir} -lmango_option -llapacke -fopenmp
 Cflags: -I$${includedir} -std=c++23
@@ -172,7 +172,7 @@ pkg_tar(
 py_wheel(
     name = "mango_option_wheel",
     distribution = "mango_option",
-    version = "0.1.0",
+    version = "0.2.0",
     summary = "American option pricing with FDM solvers and B-spline interpolation",
     description_file = "README.md",
     license = "MIT",
