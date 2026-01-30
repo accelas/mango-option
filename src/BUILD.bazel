@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # All library targets have been reorganized into subdirectories:
 #
 # - Core PDE solver components: //src/pde/core:BUILD.bazel

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file iv_result.hpp
  * @brief IV solver result types for std::expected API

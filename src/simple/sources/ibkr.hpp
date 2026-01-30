@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file ibkr.hpp
  * @brief Converter for Interactive Brokers data format

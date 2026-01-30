@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file production_config_integration_test.cc
  * @brief Integration tests using production-like configurations

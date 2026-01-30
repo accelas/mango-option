@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file multi_sinh_grid_example_test.cc
  * @brief Tests for multi-sinh grid generation (converted from example_multi_sinh_grid.cc)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file batch_solver_fuzz_test.cc
  * @brief Fuzz tests for batch solver using FuzzTest

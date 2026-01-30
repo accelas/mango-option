@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file option_spec.hpp
  * @brief Unified option specification for IV solvers

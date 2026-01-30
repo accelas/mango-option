@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file price_table_end_to_end_performance_test.cc
  * @brief End-to-end performance test for banded solver optimization

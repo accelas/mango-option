@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_batch.cpp
  * @brief Implementation of batch and normalized chain solvers

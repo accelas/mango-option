@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Rule to merge all transitive static libraries into a single .a archive."""
 
 def _merge_archive_impl(ctx):

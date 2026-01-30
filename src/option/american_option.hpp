@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option.hpp
  * @brief American option pricing solver using finite difference method

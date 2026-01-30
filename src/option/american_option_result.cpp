@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_result.cpp
  * @brief Implementation of AmericanOptionResult wrapper class

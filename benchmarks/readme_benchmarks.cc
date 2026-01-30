@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/math/bspline_nd_separable.hpp"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file batch_bracketing.hpp
  * @brief Option bracketing/grouping for heterogeneous batch processing

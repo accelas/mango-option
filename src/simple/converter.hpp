@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file converter.hpp
  * @brief Type-safe converter traits for data sources

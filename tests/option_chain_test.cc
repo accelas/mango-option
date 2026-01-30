@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/option_chain.hpp"
 

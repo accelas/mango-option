@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file quantlib_accuracy_test.cc
  * @brief Accuracy validation against QuantLib reference implementation

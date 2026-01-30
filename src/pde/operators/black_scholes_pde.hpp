@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file black_scholes_pde.hpp
  * @brief Black-Scholes PDE operator in log-moneyness coordinates

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/math/safe_math.hpp"
 #include <limits>

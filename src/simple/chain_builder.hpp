@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file chain_builder.hpp
  * @brief Type-safe builder for OptionChain

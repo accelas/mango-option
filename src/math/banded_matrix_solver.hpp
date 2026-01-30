@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file banded_matrix_solver.hpp
  * @brief Banded matrix solver for narrow-bandwidth linear systems

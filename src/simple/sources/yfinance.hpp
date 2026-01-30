@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file yfinance.hpp
  * @brief Converter for yfinance data format

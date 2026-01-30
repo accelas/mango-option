@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_pde_solver.hpp
  * @brief American option PDE solvers inheriting from PDESolver via CRTP

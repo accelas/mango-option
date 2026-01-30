@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file american_option_result.hpp
  * @brief AmericanOptionResult wrapper class for Grid + PricingParams

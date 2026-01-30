@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file normalized_chain_accuracy_test.cc
  * @brief Accuracy validation of normalized chain solver (PDE invariant solution)

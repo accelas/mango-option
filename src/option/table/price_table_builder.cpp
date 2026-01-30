@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/recursion_helpers.hpp"
 #include "src/math/cubic_spline_solver.hpp"

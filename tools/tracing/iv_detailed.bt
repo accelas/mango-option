@@ -1,4 +1,5 @@
 #!/usr/bin/env bpftrace
+# SPDX-License-Identifier: MIT
 /*
  * iv_detailed.bt - Detailed implied volatility tracing
  *

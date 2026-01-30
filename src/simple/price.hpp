@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file price.hpp
  * @brief Price type with deferred double conversion

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file simple.hpp
  * @brief Umbrella header for mango::simple namespace

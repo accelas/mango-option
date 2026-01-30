@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "src/option/table/price_table_workspace.hpp"
 #include "src/support/crc64.hpp"
 #include <algorithm>

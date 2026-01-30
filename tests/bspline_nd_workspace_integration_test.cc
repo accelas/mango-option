@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tests/bspline_nd_workspace_integration_test.cc
 //
 // Integration test for BSplineNDSeparable with ThreadWorkspaceBuffer

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @file openmp_simd_benchmark.cc
  * @brief Benchmark OpenMP SIMD performance with target_clones
