@@ -266,9 +266,19 @@ Each thread gets its own workspace, allocated once at thread creation. This redu
 
 ### ThreadWorkspaceBuffer
 
-`ThreadWorkspaceBuffer` is a per-thread byte buffer with 64-byte alignment (via `std::aligned_alloc`). Typed workspaces are created over this buffer using C++23's `std::start_lifetime_as_array` for strict-aliasing compliance. If the buffer is too small (shouldn't happen in practice), it falls back to a PMR `unsynchronized_pool_resource`.
+`ThreadWorkspaceBuffer` is not a workspace itself — it is a per-thread aligned byte slab (64-byte via `std::aligned_alloc`) that typed workspaces are constructed over. The relationship:
 
-This pattern also serves B-spline fitting during price table construction, where each thread fits hundreds of 1D splines. Without per-thread workspaces, the 24,000+ fitting operations would each allocate and free band matrices and pivot arrays.
+```
+ThreadWorkspaceBuffer          (raw bytes, one per thread)
+  └─► PDEWorkspace             (batch pricing — solver buffers)
+  └─► BSplineCollocationWorkspace  (price table build — band matrix, pivots)
+```
+
+`PDEWorkspace` handles the PDE solver's arrays (solution vectors, Newton buffers, etc.). `BSplineCollocationWorkspace` handles B-spline fitting arrays (band matrix, LU workspace, pivot indices). Both are different typed views over the same kind of byte slab.
+
+Why the indirection? In a parallel loop, each thread processes many work items. Without `ThreadWorkspaceBuffer`, every iteration would allocate and free its own workspace — thousands of times for batch pricing, 24,000+ times for B-spline fitting during price table construction. With it, each thread allocates one byte slab at thread creation, constructs the appropriate typed workspace over it, and reuses that workspace for every work item assigned to the thread. Total allocations drop from O(work items) to O(thread count).
+
+The typed workspace is created via `from_bytes()`, which uses C++23's `std::start_lifetime_as_array` for strict-aliasing compliance. If the buffer is too small (shouldn't happen in normal use), it falls back to a PMR `unsynchronized_pool_resource`.
 
 ### Shared-Grid Optimization
 
