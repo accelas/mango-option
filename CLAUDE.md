@@ -51,17 +51,23 @@ mango-option/
 │   │   └── operators/     # Spatial operators (Laplacian, Black-Scholes, centered difference)
 │   ├── option/            # American option pricing, IV solvers, price tables
 │   ├── math/              # Root finding, cubic splines, Thomas solver, B-splines
+│   ├── simple/            # Market data integration (yfinance, Databento, IBKR)
+│   ├── python/            # Python bindings (pybind11)
 │   └── support/           # Memory management (PMR arenas), CPU features, utilities
 ├── tests/                 # Test files with GoogleTest
 ├── benchmarks/            # Performance benchmarks
+├── third_party/           # External dependency configs
+├── tools/                 # Build helper rules (merge_archive.bzl)
 └── docs/                  # Architecture, math, API guides
 ```
 
-**63 source files** organized into:
+**87 source files** organized into:
 - **//src/pde/core** - Grid, PDESolver, TimeDomain, boundary conditions
 - **//src/pde/operators** - BlackScholesPDE, LaplacianPDE, CenteredDifference
 - **//src/option** - AmericanOptionSolver, IVSolverFDM, price tables
 - **//src/math** - Root finding, B-splines, tridiagonal solvers
+- **//src/simple** - Market data integration (yfinance, Databento, IBKR)
+- **//src/python** - Python bindings (pybind11)
 - **//src/support** - PMR arenas, error types, parallel utilities
 
 ## Development Workflow
@@ -167,8 +173,8 @@ auto result = solver.solve_impl(query);
 
 **Pattern 2: Price Table Pre-computation**
 ```cpp
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_surface.hpp"
 
 auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value();
 auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
@@ -274,13 +280,13 @@ Use USDT probes for all logging and debugging:
 
 ```bash
 # Monitor execution
-sudo ./scripts/mango-trace monitor ./my_program
+sudo ./tools/mango-trace monitor ./my_program
 
 # Watch convergence
-sudo ./scripts/mango-trace monitor ./my_program --preset=convergence
+sudo ./tools/mango-trace monitor ./my_program --preset=convergence
 
 # Debug failures
-sudo ./scripts/mango-trace monitor ./my_program --preset=debug
+sudo ./tools/mango-trace monitor ./my_program --preset=debug
 ```
 
 **Available presets:** `all`, `convergence`, `debug`, `performance`, `pde`, `iv`
@@ -317,7 +323,7 @@ sudo ./scripts/mango-trace monitor ./my_program --preset=debug
 | Run all tests | `bazel test //...` |
 | Run single test | `bazel test //tests:pde_solver_test` |
 | Build Python bindings | `bazel build //src/python:mango_option` |
-| Trace execution | `sudo ./scripts/mango-trace monitor ./program` |
+| Trace execution | `sudo ./tools/mango-trace monitor ./program` |
 | Create PR | `gh pr create --title "..." --body "..."` |
 
 ## Getting Help

@@ -191,21 +191,21 @@ fi
 # Test 4: Validate helper tool works
 log_info "Test 4: Validating helper tool..."
 
-if [[ ! -x "$PROJECT_ROOT/scripts/mango-trace" ]]; then
-    log_error "Helper tool not executable: $PROJECT_ROOT/scripts/mango-trace"
+if [[ ! -x "$PROJECT_ROOT/tools/mango-trace" ]]; then
+    log_error "Helper tool not executable: $PROJECT_ROOT/tools/mango-trace"
 else
     log_success "Helper tool is executable"
 
     if [[ $SKIP_BPFTRACE -eq 0 ]]; then
         # Test check command
-        if "$PROJECT_ROOT/scripts/mango-trace" check "$HEAT_EQ_BIN" 2>&1 | grep -q "USDT support: OK"; then
+        if "$PROJECT_ROOT/tools/mango-trace" check "$HEAT_EQ_BIN" 2>&1 | grep -q "USDT support: OK"; then
             log_success "Helper tool 'check' command works"
         else
             log_error "Helper tool 'check' command failed"
         fi
 
         # Test list command
-        if "$PROJECT_ROOT/scripts/mango-trace" list "$HEAT_EQ_BIN" 2>&1 | grep -q "mango"; then
+        if "$PROJECT_ROOT/tools/mango-trace" list "$HEAT_EQ_BIN" 2>&1 | grep -q "mango"; then
             log_success "Helper tool 'list' command works"
         else
             log_error "Helper tool 'list' command failed"
