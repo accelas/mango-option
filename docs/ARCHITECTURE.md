@@ -36,7 +36,7 @@ graph TD
     IVFAST -->|Query| SURFACE
 ```
 
-The rest of this document walks through these components bottom-up: PDE solver core, American option layer, IV solvers, price tables, and finally batch processing.
+The rest of this document walks through these components bottom-up: PDE solver core, American option layer, IV solvers, price tables, memory management, and batch processing.
 
 ---
 
@@ -75,7 +75,7 @@ If the concept is satisfied, the solver uses the analytical Jacobian directly. O
 
 ### Grid and Workspace
 
-The solver operates on two objects: a **Grid** (spatial coordinates and solution storage) and a **PDEWorkspace** (temporary buffers for the solve). The Grid is shared-ownership (`std::shared_ptr`) because the result object needs the Grid for interpolation after the solver is destroyed. The workspace is caller-owned so it can be reused across multiple solves.
+The solver operates on two objects: a **Grid** (spatial coordinates and solution storage) and a **PDEWorkspace** (temporary buffers for the solve). The Grid is shared-ownership (`std::shared_ptr`) because the result object needs the Grid for interpolation after the solver is destroyed. The workspace is caller-owned so it can be reused across multiple solves. See [Memory Management](#5-memory-management) for how these are allocated.
 
 Grid generation uses a factory pattern with validation:
 
@@ -85,19 +85,6 @@ auto spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0);
 ```
 
 Three grid types: `uniform()`, `sinh_spaced()` (single concentration point), and `multi_sinh_spaced()` (multiple concentration points, useful for barrier options or multi-strike chains).
-
-### Memory: PMR Arenas
-
-All workspace arrays are allocated from a caller-provided PMR memory resource:
-
-```cpp
-std::pmr::synchronized_pool_resource pool;
-auto workspace = PDEWorkspace::create(grid_spec, &pool).value();
-```
-
-This means zero allocation during the solve itself — all buffers are pre-allocated. For batch processing, the same pool serves multiple solves. The workspace totals ~13n doubles for a grid of n points (including Newton iteration arrays), padded to 8-element boundaries for AVX-512.
-
-Why PMR instead of raw `new`? Repeated solves would otherwise allocate and deallocate the same ~10KB of buffers thousands of times. PMR lets the caller control lifetime: allocate once, reuse across solves, release when done. The tradeoff is that the caller must keep the memory resource alive.
 
 ### Spatial Operators and SIMD
 
@@ -203,10 +190,6 @@ This is the production path. You pay a one-time pre-computation cost (see next s
 3. Fit 4D tensor-product B-spline coefficients to the results
 4. Package into a `PriceTableSurface` for fast evaluation
 
-The tensor is stored as a `PriceTensor<4>` backed by an `AlignedVector` — a `std::vector` with a 64-byte aligned allocator. This alignment is needed for AVX-512 loads during B-spline evaluation.
-
-Why `AlignedVector` instead of PMR? The price tensor is persistent output that outlives the solver. PMR only guarantees `alignof(max_align_t)` (16 bytes), but AVX-512 needs 64-byte alignment. The tensor is shared via `std::shared_ptr<AlignedVector<double>>`.
-
 ### Multi-Dimensional Indexing with mdspan
 
 B-spline coefficients use `std::mdspan` for type-safe multi-dimensional indexing:
@@ -233,11 +216,64 @@ The default (High) targets ~20 bps average IV error. For tighter tolerance, `Ada
 
 ---
 
-## 5. Batch Processing and Parallelism
+## 5. Memory Management
 
-### OpenMP Parallelization
+The library uses three allocation strategies, each suited to a different lifetime and alignment requirement. The diagrams below show how they apply to each workload.
 
-Batch pricing parallelizes across options with OpenMP:
+### Single Option Solve
+
+The caller creates a PMR pool and a Grid. The pool backs the PDEWorkspace (scratch buffers for the solve — solution stages, RHS vector, Newton arrays). The Grid holds the spatial coordinates and solution vectors. After the solve, the result holds a `shared_ptr` to the Grid so it can interpolate prices and compute Greeks.
+
+```mermaid
+graph LR
+    PMR[synchronized_pool_resource] -->|allocates| PW[PDEWorkspace<br/>u_stage, rhs, jacobian, ...]
+    G[Grid shared_ptr<br/>x coords, u_current, u_prev]
+    PW --> SOLVER[AmericanOptionSolver]
+    G --> SOLVER
+    SOLVER -->|produces| RES[AmericanOptionResult<br/>holds Grid shared_ptr]
+```
+
+The workspace totals ~13n doubles for a grid of n points, padded to 8-element boundaries for AVX-512. Why PMR instead of raw `new`? Repeated solves would otherwise allocate and deallocate the same ~10KB of buffers thousands of times. PMR lets the caller control lifetime: allocate once, reuse across solves, release when done.
+
+### Batch Pricing
+
+Each OpenMP thread gets a `ThreadWorkspaceBuffer` — a 64-byte-aligned byte slab allocated once at thread creation. A `PDEWorkspace` is constructed as a typed view over this slab via `from_bytes()`. The thread also gets a `Grid`, which in shared-grid mode (options differ only in strike) is reused across all options on that thread. In independent mode, a new Grid is created per option.
+
+```mermaid
+graph LR
+    TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| PW[PDEWorkspace<br/>typed view]
+    G[Grid<br/>per-thread shared or per-option]
+    PW --> LOOP["solve(option[0])<br/>solve(option[1])<br/>...reused each iteration"]
+    G --> LOOP
+```
+
+### Price Table Build
+
+Same `ThreadWorkspaceBuffer` pattern, but the typed view is a `BSplineCollocationWorkspace` (band matrix, LU workspace, pivot indices) instead of a PDEWorkspace. Each thread fits hundreds of 1D spline slices, reusing the same workspace each time. The output — the fitted tensor of B-spline coefficients — is stored in an `AlignedVector` with 64-byte alignment for AVX-512.
+
+```mermaid
+graph LR
+    TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| BSW[BSplineCollocationWorkspace<br/>band matrix, LU, pivots]
+    BSW --> FIT["fit(slice[0])<br/>fit(slice[1])<br/>...reused each iteration"]
+    FIT -->|output| AV[AlignedVector 64-byte<br/>PriceTensor coefficients]
+    AV --> SURF[PriceTableSurface shared_ptr]
+```
+
+### Why Three Strategies?
+
+| Strategy | Used by | Why not the others? |
+|----------|---------|-----|
+| **PMR pool** | PDEWorkspace (single solve) | Caller controls lifetime; zero allocation during solve; reusable across solves |
+| **ThreadWorkspaceBuffer** | PDEWorkspace and BSplineCollocationWorkspace (parallel loops) | One slab per thread, reused for every work item. Reduces allocations from O(work items) to O(threads). Uses C++23 `std::start_lifetime_as_array` for strict-aliasing compliance. Falls back to PMR if buffer too small |
+| **AlignedVector** | PriceTensor (persistent output) | Outlives the solver. Needs 64-byte alignment for AVX-512; PMR only guarantees 16 bytes |
+
+`ThreadWorkspaceBuffer` is not a workspace — it is the raw byte slab that typed workspaces are built on top of. In batch pricing, a `PDEWorkspace` is constructed over it. In price table construction, a `BSplineCollocationWorkspace` is constructed over it instead. Same allocation pattern, different typed view.
+
+---
+
+## 6. Batch Processing and Parallelism
+
+With memory management covered above, the batch processing layer is straightforward. The solver distributes options across OpenMP threads, each with its own pre-allocated workspace and (optionally) shared Grid:
 
 ```cpp
 MANGO_PRAGMA_PARALLEL
@@ -252,52 +288,13 @@ MANGO_PRAGMA_PARALLEL
 }
 ```
 
-Each thread gets its own workspace, allocated once at thread creation. This reduces total allocations from O(work items) to O(thread count).
+### Shared-Grid Optimization
 
-### Memory Buffer Hierarchy
+When pricing a chain of options that differ only in strike (same vol, rate, maturity), the solver can share a single Grid per thread. This avoids re-generating spatial coordinates and re-computing grid-dependent quantities, giving ~10x speedup for a 15-option chain.
 
-The library uses three memory strategies depending on the workload. Each diagram below shows one.
+### Price Table Parallelism
 
-**Single option solve** — the caller creates a PMR pool and a Grid. The pool backs the PDEWorkspace (scratch buffers). The Grid holds the spatial coordinates and solution vectors, and outlives the solver via `shared_ptr` so the result can interpolate from it.
-
-```mermaid
-graph LR
-    PMR[synchronized_pool_resource] -->|allocates| PW[PDEWorkspace<br/>u_stage, rhs, jacobian, ...]
-    G[Grid shared_ptr<br/>x coords, u_current, u_prev]
-    PW --> SOLVER[AmericanOptionSolver]
-    G --> SOLVER
-    SOLVER -->|produces| RES[AmericanOptionResult<br/>holds Grid shared_ptr]
-```
-
-**Batch pricing** — each OpenMP thread gets one `ThreadWorkspaceBuffer` (a 64-byte-aligned byte slab) and one `Grid`. The PDEWorkspace is a typed view constructed over the byte slab via `from_bytes()`. Both are allocated once at thread creation and reused for every option in the thread's work queue.
-
-In shared-grid mode (options differ only in strike), all options on a thread share one Grid — the solver resets the solution vector between solves but keeps the same spatial coordinates. In independent mode, a new Grid is created per option.
-
-```mermaid
-graph LR
-    TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| PW[PDEWorkspace<br/>typed view]
-    G[Grid per-thread or per-option]
-    PW --> LOOP["solve(option[0])<br/>solve(option[1])<br/>...reused each iteration"]
-    G --> LOOP
-```
-
-**Price table build** — same `ThreadWorkspaceBuffer` pattern, but the typed view is a `BSplineCollocationWorkspace` (band matrix, LU workspace, pivot indices) instead of a PDEWorkspace. Each thread fits hundreds of 1D spline slices, reusing the same workspace each time.
-
-```mermaid
-graph LR
-    TWB[ThreadWorkspaceBuffer<br/>64-byte aligned bytes] -->|from_bytes| BSW[BSplineCollocationWorkspace<br/>band matrix, LU, pivots]
-    BSW --> FIT["fit(slice[0])<br/>fit(slice[1])<br/>...reused each iteration"]
-    FIT -->|output| AV[AlignedVector 64-byte<br/>PriceTensor coefficients]
-    AV --> SURF[PriceTableSurface shared_ptr]
-```
-
-**Why three strategies?**
-
-| Strategy | Used by | Why not the others? |
-|----------|---------|-----|
-| **PMR pool** | PDEWorkspace (single solve) | Caller controls lifetime; zero allocation during solve; reusable across solves |
-| **ThreadWorkspaceBuffer** | PDEWorkspace and BSplineCollocationWorkspace (parallel loops) | One slab per thread, reused for every work item. Reduces allocations from O(work items) to O(threads). Uses C++23 `std::start_lifetime_as_array` for strict-aliasing compliance. Falls back to PMR if buffer too small |
-| **AlignedVector** | PriceTensor (persistent output) | Outlives the solver. Needs 64-byte alignment for AVX-512; PMR only guarantees 16 bytes |
+Price table construction parallelizes along two axes: PDE solves (one per (vol, rate) pair) and B-spline fitting (one per 1D slice). Both use the same `ThreadWorkspaceBuffer` pattern with the appropriate typed workspace.
 
 ---
 
