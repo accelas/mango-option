@@ -8,6 +8,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include <cstdio>
@@ -113,7 +114,7 @@ int main() {
         auto pde_accuracy = grid_accuracy_profile(GridAccuracyProfile::Medium);
         auto builder_result = PriceTableBuilder<4>::from_vectors(
             estimate.grids[0], estimate.grids[1], estimate.grids[2], estimate.grids[3],
-            spot, pde_accuracy, OptionType::PUT, div_yield);
+            spot, pde_accuracy, OptionType::PUT, div_yield, 0.0, true);
 
         if (!builder_result) {
             printf("%-6zu BUILD FAILED\n", trial);
@@ -131,7 +132,12 @@ int main() {
             continue;
         }
 
-        auto iv_solver_result = IVSolverInterpolated::create(table_result->surface);
+        auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
+        if (!aps) {
+            printf("%-6zu APS CREATE FAILED\n", trial);
+            continue;
+        }
+        auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps));
         if (!iv_solver_result) {
             printf("%-6zu IV SOLVER FAILED\n", trial);
             continue;

@@ -16,7 +16,7 @@ The core C++ library exposes a pybind11-based Python module, so you can use it f
 
 - American option prices and Greeks (delta, gamma, theta, vega) from the PDE solver
 - Implied volatility via FDM (~19ms) or B-spline interpolation (~3.5us)
-- Pre-computed 4D price tables for sub-microsecond lookups (~476ns)
+- Pre-computed 4D price tables with EEP decomposition for sub-microsecond lookups (~500ns, 2-5 bps accuracy)
 - Batch pricing with OpenMP (10x speedup on multi-core)
 - USDT tracing probes for production monitoring at zero overhead when disabled
 - A general-purpose PDE toolkit if you want to solve your own equations
@@ -104,8 +104,9 @@ Batch processing (64 options): 10x speedup with OpenMP (~0.13ms/option parallel 
 |---|---|---|
 | FDM-based | ~19ms | Ground truth |
 | Interpolated (B-spline) | ~3.5us | 12-48 bps |
+| Interpolated (EEP mode) | ~3.5us | 2-5 bps |
 
-The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation.
+The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation. EEP mode stores the Early Exercise Premium instead of raw prices, yielding ~5x better accuracy at the same grid density by removing the American free boundary discontinuity from the interpolated surface.
 
 ### Price Table Profiles
 
@@ -119,6 +120,8 @@ The table below shows the accuracy/speed tradeoff across grid density profiles, 
 | Ultra | 24x24x58x14 | 812 | ~5us | 12 | 4.1 |
 
 Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~8 bps average error. Ultra achieves ~4 bps at the cost of ~800 PDE solves during table construction.
+
+**EEP mode** (`store_eep=true`) reduces error by ~5x at the same grid density by interpolating the smoother Early Exercise Premium instead of the raw price. See the [API Guide](docs/API_GUIDE.md#eep-mode-early-exercise-premium-decomposition) for usage.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 

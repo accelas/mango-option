@@ -333,11 +333,11 @@ auto result = solver.solve_impl(query);
 
 ### Building a 4D Price Surface
 
-**Pre-compute American option prices across parameter space:**
+**Pre-compute American option prices across parameter space (EEP mode recommended):**
 
 ```cpp
 #include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 
 // Define 4D parameter grids
 std::vector<double> moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};  // m = S/K
@@ -347,26 +347,15 @@ std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06, 0.08, 0.10};         // 
 
 double K_ref = 100.0;  // Reference strike price
 
-// PDE grid specification: auto-estimate (recommended) or explicit
-// Option A: Auto-estimate from accuracy params (handles domain coverage automatically)
-mango::PDEGridSpec pde_grid = mango::GridAccuracyParams{};
-
-// Option B: Explicit grid and time steps
-// mango::PDEGridSpec pde_grid = mango::ExplicitPDEGrid{
-//     .grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
-//     .n_time = 1000
-// };
-
-// Create builder and axes using factory method
+// Create builder with EEP mode (recommended — ~5x better interpolation accuracy)
 auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
-    moneyness_grid,
-    maturity_grid,
-    vol_grid,
-    rate_grid,
+    moneyness_grid, maturity_grid, vol_grid, rate_grid,
     K_ref,
-    pde_grid,
-    mango::OptionType::PUT
-);
+    mango::GridAccuracyParams{},  // auto-estimate PDE grid
+    mango::OptionType::PUT,
+    0.0,    // dividend_yield
+    0.0,    // max_failure_rate
+    true);  // store_eep (recommended)
 
 if (!factory_result.has_value()) {
     std::cerr << "Factory creation failed: " << factory_result.error() << "\n";
@@ -376,7 +365,6 @@ if (!factory_result.has_value()) {
 auto [builder, axes] = std::move(factory_result.value());
 
 // Build price table (parallelized with OpenMP)
-// This takes ~15-20 minutes for 300K grid on 32 cores
 auto result = builder.build(axes);
 
 if (!result.has_value()) {
@@ -384,19 +372,16 @@ if (!result.has_value()) {
     return;
 }
 
-// Access the surface (shared_ptr)
-auto surface = result->surface;
+// Wrap in AmericanPriceSurface for full price reconstruction
+auto aps = mango::AmericanPriceSurface::create(
+    result->surface, mango::OptionType::PUT).value();
 
-// Query price and partials (~500ns each)
-double m = 1.05;      // Moneyness (S/K)
-double tau = 0.25;    // Time to maturity (years)
-double sigma = 0.20;  // Volatility
-double r = 0.05;      // Risk-free rate
-
-double price = surface->value({m, tau, sigma, r});
-double delta = surface->partial(0, {m, tau, sigma, r});  // ∂price/∂m
-double vega = surface->partial(2, {m, tau, sigma, r});   // ∂price/∂σ
-double gamma = surface->partial(1, {m, tau, sigma, r});  // ∂price/∂τ (often called theta)
+// Query American option prices and Greeks
+double price = aps.price(spot, strike, tau, sigma, rate);
+double delta = aps.delta(spot, strike, tau, sigma, rate);
+double gamma = aps.gamma(spot, strike, tau, sigma, rate);
+double vega  = aps.vega(spot, strike, tau, sigma, rate);
+double theta = aps.theta(spot, strike, tau, sigma, rate);
 ```
 
 ### Factory Methods
@@ -468,6 +453,39 @@ surface = mo.build_price_table_surface_from_chain(
 | Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
 | High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
 | Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
+
+### Raw Price Mode (Without EEP)
+
+If you need direct access to the raw price surface without EEP decomposition, pass `store_eep=false` (or omit it) and query the surface directly:
+
+```cpp
+auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
+    moneyness_grid, maturity_grid, vol_grid, rate_grid,
+    K_ref,
+    mango::GridAccuracyParams{},
+    mango::OptionType::PUT);  // store_eep defaults to false
+
+auto [builder, axes] = std::move(factory_result.value());
+auto result = builder.build(axes);
+
+// Query raw price surface directly (~500ns each)
+double price = result->surface->value({m, tau, sigma, r});
+double delta = result->surface->partial(0, {m, tau, sigma, r});  // ∂price/∂m
+```
+
+Raw mode has lower accuracy (~5x worse) but avoids the European price computation at query time.
+
+### Using EEP with IVSolverInterpolated
+
+```cpp
+#include "src/option/iv_solver_interpolated.hpp"
+
+// Create IV solver from AmericanPriceSurface (EEP mode)
+auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+
+// Solve IV as usual — internally uses EEP reconstruction
+auto iv_result = iv_solver.solve_impl(iv_query);
+```
 
 ### Batch Queries on Price Surface
 

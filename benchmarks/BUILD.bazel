@@ -128,6 +128,7 @@ cc_binary(
         "//src/option:iv_solver_interpolated",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
     ],
     tags = ["benchmark", "manual"],
 )

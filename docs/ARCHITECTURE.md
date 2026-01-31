@@ -32,8 +32,13 @@ graph TD
     PTABLE[PriceTableBuilder] -->|Pre-compute| AO
     PTABLE -->|Fit coefficients| SPLINE[B-Spline]
     PTABLE -->|Produces| SURFACE[PriceTableSurface]
+    PTABLE -->|store_eep mode| EEP[EEP Subtraction]
+    EEP -->|subtract| EU[EuropeanOptionSolver]
+    APS[AmericanPriceSurface] -->|reconstructs via| SURFACE
+    APS -->|adds back| EU
     IVFAST[IVSolverInterpolated] -->|Newton on surface| ROOT
-    IVFAST -->|Query| SURFACE
+    IVFAST -->|Query| APS
+    IVFAST -->|or Query| SURFACE
 ```
 
 The rest of this document walks through these components bottom-up: PDE solver core, American option layer, IV solvers, price tables, memory management, and batch processing.
@@ -187,8 +192,37 @@ This is the production path. You pay a one-time pre-computation cost (see next s
 
 1. Enumerate grid points across all four dimensions
 2. For each (vol, rate) pair, solve the PDE across all maturities and strikes
-3. Fit 4D tensor-product B-spline coefficients to the results
-4. Package into a `PriceTableSurface` for fast evaluation
+3. Optionally subtract the closed-form European price (EEP mode, see below)
+4. Fit 4D tensor-product B-spline coefficients to the results
+5. Package into a `PriceTableSurface` for fast evaluation
+
+### Early Exercise Premium (EEP) Decomposition
+
+The American free boundary creates a C1 discontinuity in the price surface that degrades B-spline interpolation from O(h⁴) to ~O(h^2.5). EEP decomposition addresses this by storing the Early Exercise Premium instead of the raw price:
+
+```
+EEP(m, τ, σ, r) = P_American(m, τ, σ, r) − P_European(m, τ, σ, r)
+```
+
+The EEP surface is smoother (the discontinuity lies in the European component, which is computed exactly at query time), restoring full B-spline convergence. At query time, `AmericanPriceSurface` reconstructs the full price:
+
+```
+P_American = (K/K_ref) · EEP_spline(m, τ, σ, r) + P_European(S, K, τ, σ, r, q)
+```
+
+Greeks follow the same decomposition via chain rule (delta, vega, theta from partial derivatives of the EEP surface plus closed-form European Greeks). Gamma uses finite differences of delta since BSplineND lacks second derivatives.
+
+A softplus floor (`log1p(exp(100·x))/100`) enforces non-negativity of the EEP during tensor construction, preventing B-spline ringing near τ→0 where the premium vanishes.
+
+**Accuracy improvement** (grid sweep benchmark, SPY-like parameters):
+
+| Grid | Max IV err (bps) — raw | Max IV err (bps) — EEP |
+|------|:----------------------:|:----------------------:|
+| 6x6x15x4 | ~20 | 5.0 |
+| 10x10x25x6 | ~8 | 2.5 |
+| 12x12x30x8 | ~5 | 1.9 |
+
+EEP mode is enabled by passing `store_eep=true` to `PriceTableBuilder::from_vectors()`. The surface metadata records `SurfaceContent::EarlyExercisePremium` so consumers know which reconstruction path to use.
 
 ### Multi-Dimensional Indexing with mdspan
 
