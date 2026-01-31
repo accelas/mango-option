@@ -1392,6 +1392,18 @@ cc_test(
 )
 
 cc_test(
+    name = "segmented_price_surface_test",
+    size = "small",
+    srcs = ["segmented_price_surface_test.cc"],
+    deps = [
+        "//src/option/table:segmented_price_surface",
+        "//src/option/table:price_table_builder",
+        "//src/option/table:american_price_surface",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_builder_raw_price_test",
     size = "small",
     srcs = ["price_table_builder_raw_price_test.cc"],

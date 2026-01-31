@@ -177,6 +177,18 @@ cc_library(
 )
 
 cc_library(
+    name = "segmented_price_surface",
+    srcs = ["segmented_price_surface.cpp"],
+    hdrs = ["segmented_price_surface.hpp"],
+    deps = [
+        ":american_price_surface",
+        ":price_table_metadata",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
