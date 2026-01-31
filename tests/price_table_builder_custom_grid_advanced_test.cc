@@ -13,8 +13,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
-        .n_time = 100,
+        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividend_yield = 0.02
     };
 
@@ -44,10 +43,11 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
 
     // Create solver and check normalized eligibility
     BatchAmericanOptionSolver solver;
+    const auto& adv_grid1 = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridAccuracyParams accuracy;
-    accuracy.min_spatial_points = std::min(config.grid_estimator.n_points(), size_t(100));
-    accuracy.max_spatial_points = std::max(config.grid_estimator.n_points(), size_t(1200));
-    accuracy.max_time_steps = config.n_time;
+    accuracy.min_spatial_points = std::min(adv_grid1.grid_spec.n_points(), size_t(100));
+    accuracy.max_spatial_points = std::max(adv_grid1.grid_spec.n_points(), size_t(1200));
+    accuracy.max_time_steps = adv_grid1.n_time;
     solver.set_grid_accuracy(accuracy);
     solver.set_snapshot_times(axes.grids[1]);
 
@@ -59,8 +59,8 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
 
     // Test WITH custom_grid (what does this do?)
     std::cout << "\nTest 2: use_shared_grid=true, WITH custom_grid" << std::endl;
-    GridSpec<double> user_grid = config.grid_estimator;
-    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), config.n_time);
+    GridSpec<double> user_grid = adv_grid1.grid_spec;
+    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), adv_grid1.n_time);
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
         std::make_pair(user_grid, time_domain);
 
@@ -82,8 +82,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
-        .n_time = 100,
+        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividend_yield = 0.02
     };
 
@@ -109,8 +108,9 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
               << ", strike=" << batch[0].strike << std::endl;
 
     // Create custom grid
-    GridSpec<double> user_grid = config.grid_estimator;
-    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), config.n_time);
+    const auto& edge_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    GridSpec<double> user_grid = edge_grid.grid_spec;
+    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), edge_grid.n_time);
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
         std::make_pair(user_grid, time_domain);
 
@@ -119,7 +119,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = 101;
     accuracy.max_spatial_points = 101;
-    accuracy.max_time_steps = config.n_time;
+    accuracy.max_time_steps = edge_grid.n_time;
     solver.set_grid_accuracy(accuracy);
     solver.set_snapshot_times(axes.grids[1]);
 
@@ -155,8 +155,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
-        .n_time = 100,
+        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividend_yield = 0.02
     };
 
@@ -184,8 +183,9 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     std::cout << "Batch size: " << batch.size() << std::endl;
 
     // Create custom_grid as plan specifies
-    GridSpec<double> user_grid = config.grid_estimator;
-    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), config.n_time);
+    const auto& sim_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    GridSpec<double> user_grid = sim_grid.grid_spec;
+    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), sim_grid.n_time);
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
         std::make_pair(user_grid, time_domain);
 
@@ -198,11 +198,11 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     // Simulate the solve_batch call with custom_grid
     BatchAmericanOptionSolver solver;
     GridAccuracyParams accuracy;
-    accuracy.min_spatial_points = std::min(config.grid_estimator.n_points(), size_t(100));
-    accuracy.max_spatial_points = std::max(config.grid_estimator.n_points(), size_t(1200));
-    accuracy.max_time_steps = config.n_time;
-    if (config.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-        accuracy.alpha = config.grid_estimator.concentration();
+    accuracy.min_spatial_points = std::min(sim_grid.grid_spec.n_points(), size_t(100));
+    accuracy.max_spatial_points = std::max(sim_grid.grid_spec.n_points(), size_t(1200));
+    accuracy.max_time_steps = sim_grid.n_time;
+    if (sim_grid.grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
+        accuracy.alpha = sim_grid.grid_spec.concentration();
     }
     solver.set_grid_accuracy(accuracy);
     solver.set_snapshot_times(axes.grids[1]);

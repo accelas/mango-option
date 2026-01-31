@@ -8,15 +8,18 @@ namespace {
 TEST(PriceTableConfigTest, DefaultValues) {
     PriceTableConfig config;
     EXPECT_EQ(config.option_type, OptionType::PUT);
-    EXPECT_EQ(config.n_time, 1000);
     EXPECT_DOUBLE_EQ(config.dividend_yield, 0.0);
     EXPECT_TRUE(config.discrete_dividends.empty());
+    // Default PDE grid is ExplicitPDEGrid with 101 points and 1000 time steps
+    ASSERT_TRUE(std::holds_alternative<ExplicitPDEGrid>(config.pde_grid));
+    auto& grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    EXPECT_EQ(grid.n_time, 1000);
+    EXPECT_EQ(grid.grid_spec.n_points(), 101);
 }
 
 TEST(PriceTableConfigTest, WithDiscreteDividends) {
     PriceTableConfig config{
         .option_type = OptionType::CALL,
-        .n_time = 500,
         .dividend_yield = 0.01,
         .discrete_dividends = {{0.25, 2.0}, {0.75, 2.0}}
     };

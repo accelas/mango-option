@@ -108,8 +108,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        grid_spec,
-        500,  // n_time
+        ExplicitPDEGrid{grid_spec, 500},
         OptionType::PUT,
         grid.dividend);
 
@@ -144,8 +143,7 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        grid_spec_result.value(),
-        300,
+        ExplicitPDEGrid{grid_spec_result.value(), 300},
         OptionType::PUT,
         grid.dividend);
 
@@ -169,8 +167,7 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        grid_spec_result.value(),
-        1000,
+        ExplicitPDEGrid{grid_spec_result.value(), 1000},
         OptionType::PUT,
         grid.dividend);
 
@@ -193,8 +190,7 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        grid_spec_result.value(),
-        500,
+        ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend);
 
@@ -480,8 +476,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        grid_spec_result.value(),
-        500,
+        ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend);
 
@@ -515,8 +510,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        grid_spec_result.value(),
-        500,
+        ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend);
 

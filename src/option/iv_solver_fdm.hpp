@@ -33,6 +33,7 @@
 
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_result.hpp"
+#include "src/option/american_option.hpp"
 #include "src/math/root_finding.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -83,6 +84,15 @@ struct IVSolverFDMConfig {
 
     /// Sinh clustering parameter (used when use_manual_grid = true)
     double grid_alpha = 2.0;
+
+    /// Grid accuracy parameters for automatic grid estimation
+    ///
+    /// Controls the resolution of the PDE grid used internally for pricing
+    /// during root-finding iterations. Higher accuracy reduces IV error
+    /// at the cost of slower solves.
+    ///
+    /// Only used when use_manual_grid = false (default).
+    GridAccuracyParams grid_accuracy;
 };
 
 /// FDM-based Implied Volatility Solver for American Options

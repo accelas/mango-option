@@ -70,14 +70,17 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
     }
 
-    // Check PDE domain coverage
-    const double x_min_requested = std::log(axes.grids[0].front());
-    const double x_max_requested = std::log(axes.grids[0].back());
-    const double x_min = config_.grid_estimator.x_min();
-    const double x_max = config_.grid_estimator.x_max();
+    // Check PDE domain coverage (only for explicit grids; auto-estimated grids
+    // are computed from batch parameters and always cover the needed domain)
+    if (auto* explicit_grid = std::get_if<ExplicitPDEGrid>(&config_.pde_grid)) {
+        const double x_min_requested = std::log(axes.grids[0].front());
+        const double x_max_requested = std::log(axes.grids[0].back());
+        const double x_min = explicit_grid->grid_spec.x_min();
+        const double x_max = explicit_grid->grid_spec.x_max();
 
-    if (x_min_requested < x_min || x_max_requested > x_max) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        if (x_min_requested < x_min || x_max_requested > x_max) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
     }
 
     // Step 2: Generate batch (Nσ × Nr entries)
@@ -196,6 +199,51 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     return batch;
 }
 
+/// Ensure n_sigma is large enough so the PDE domain covers [log(m_min), log(m_max)].
+/// The batch solves use spot=strike=K_ref (x0=0), so the grid half-width is
+/// n_sigma * max(σ√T).  If the moneyness axis extends beyond that, we bump n_sigma.
+template <size_t N>
+static void ensure_moneyness_coverage(
+    GridAccuracyParams& accuracy,
+    const std::vector<AmericanOptionParams>& batch,
+    const PriceTableAxes<N>& axes)
+{
+    const double log_m_min = std::log(axes.grids[0].front());
+    const double log_m_max = std::log(axes.grids[0].back());
+    const double required_half_width = std::max(std::abs(log_m_min), std::abs(log_m_max));
+
+    // Compute max σ√T across the batch (floor to avoid division by zero)
+    double max_sigma_sqrt_T = 0.0;
+    for (const auto& p : batch) {
+        max_sigma_sqrt_T = std::max(max_sigma_sqrt_T,
+                                     p.volatility * std::sqrt(p.maturity));
+    }
+    max_sigma_sqrt_T = std::max(max_sigma_sqrt_T, 1e-10);
+
+    constexpr double MARGIN = 1.1;  // 10% margin for boundary effects
+    double required_n_sigma = (required_half_width / max_sigma_sqrt_T) * MARGIN;
+    accuracy.n_sigma = std::max(accuracy.n_sigma, required_n_sigma);
+}
+
+template <size_t N>
+std::pair<GridSpec<double>, TimeDomain>
+PriceTableBuilder<N>::estimate_pde_grid(
+    const std::vector<AmericanOptionParams>& batch,
+    const PriceTableAxes<N>& axes) const
+{
+    auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
+    ensure_moneyness_coverage<N>(accuracy, batch, axes);
+
+    auto [grid_spec, time_domain] = compute_global_grid_for_batch(
+        std::span<const AmericanOptionParams>(batch), accuracy);
+
+    // Extend time domain to cover max maturity from axes
+    const double max_maturity = axes.grids[1].back();
+    time_domain = TimeDomain::from_n_steps(0.0, max_maturity, time_domain.n_steps());
+
+    return {grid_spec, time_domain};
+}
+
 template <size_t N>
 BatchAmericanOptionResult
 PriceTableBuilder<N>::solve_batch(
@@ -210,95 +258,85 @@ PriceTableBuilder<N>::solve_batch(
     // This enables extract_tensor to access surfaces at each maturity point
     solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
-    // Solver stability constraints (from BatchAmericanOptionSolver)
-    constexpr double MAX_WIDTH = 5.8;   // Convergence limit (log-units)
-    constexpr double MAX_DX = 0.05;     // Von Neumann stability
+    return std::visit([&](auto&& grid) -> BatchAmericanOptionResult {
+        using T = std::decay_t<decltype(grid)>;
 
-    // Check if user's grid_spec meets solver constraints
-    // Note: Domain coverage (PDE grid covers moneyness range) is already
-    // validated in build() at lines 69-85, so we don't re-check here.
-    const double grid_width = config_.grid_estimator.x_max() - config_.grid_estimator.x_min();
-
-    // Compute actual max spacing for non-uniform grids
-    // Sinh grids concentrate points at center, so max spacing is in wings
-    // Using average dx would underestimate and potentially violate Von Neumann
-    double max_dx;
-    if (config_.grid_estimator.type() == GridSpec<double>::Type::Uniform) {
-        // Uniform grid: all spacings equal
-        max_dx = grid_width / static_cast<double>(config_.grid_estimator.n_points() - 1);
-    } else {
-        // Non-uniform grid: generate and find actual max spacing
-        // C++23 pairwise: compute adjacent differences and find maximum
-        auto grid_buffer = config_.grid_estimator.generate();
-        auto spacings = grid_buffer.span() | std::views::pairwise
-                                           | std::views::transform([](auto pair) {
-                                                 auto [a, b] = pair;
-                                                 return b - a;
-                                             });
-        max_dx = std::ranges::max(spacings);
-    }
-
-    // Compute minimum required width based on option parameters
-    // For accuracy, grid should cover ~3σ√τ on each side of log-moneyness
-    // C++23 ranges::max with projection
-    auto sigma_sqrt_tau = [](const AmericanOptionParams& p) {
-        return p.volatility * std::sqrt(p.maturity);
-    };
-    const double max_sigma_sqrt_tau = std::ranges::max(batch | std::views::transform(sigma_sqrt_tau));
-    const double min_required_width = 6.0 * max_sigma_sqrt_tau;  // 3σ√τ each side
-
-    const bool grid_meets_constraints =
-        (grid_width <= MAX_WIDTH) &&
-        (max_dx <= MAX_DX) &&
-        (grid_width >= min_required_width);
-
-    if (grid_meets_constraints) {
-        // Grid meets constraints: use custom_grid directly
-        // This honors user's exact spatial resolution request
-        const double max_maturity = axes.grids[1].back();
-        TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, config_.n_time);
-        auto custom_grid = std::make_pair(config_.grid_estimator, time_domain);
-        return solver.solve_batch(batch, true, nullptr, custom_grid);
-    } else {
-        // Grid violates constraints: use auto-estimation with configured bounds
-        // This ensures solver stability while covering requested domain
-        GridAccuracyParams accuracy;
-        const size_t n_points = config_.grid_estimator.n_points();
-        const size_t clamped = std::clamp(n_points, size_t(100), size_t(1200));
-        accuracy.min_spatial_points = clamped;
-        accuracy.max_spatial_points = clamped;
-        accuracy.max_time_steps = config_.n_time;
-
-        // Extract alpha parameter for sinh-spaced grids
-        if (config_.grid_estimator.type() == GridSpec<double>::Type::SinhSpaced) {
-            accuracy.alpha = config_.grid_estimator.concentration();
-        }
-
-        // Compute n_sigma to cover user's requested domain bounds
-        // Domain is centered at x=0 (ATM), with half-width = n_sigma * max_sigma_sqrt_tau
-        // User's domain: [x_min, x_max] from grid_estimator
-        // Required: n_sigma >= max(|x_min|, |x_max|) / max_sigma_sqrt_tau
-        const double x_min = config_.grid_estimator.x_min();
-        const double x_max = config_.grid_estimator.x_max();
-        const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
-
-        // Safety margin (10%) for boundary effects in PDE solver
-        constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
-
-        // Compute required n_sigma, guarding against near-zero sigma*sqrt(tau)
-        // (which could happen with very short maturities or near-zero volatility)
-        if (max_sigma_sqrt_tau < 1e-10) {
-            // Fallback to default n_sigma when volatility × sqrt(maturity) ≈ 0
-            accuracy.n_sigma = 5.0;
+        if constexpr (std::is_same_v<T, GridAccuracyParams>) {
+            // Auto-estimate PDE grid from batch parameters
+            auto custom_grid = estimate_pde_grid(batch, axes);
+            return solver.solve_batch(batch, true, nullptr, custom_grid);
         } else {
-            double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-            // Use at least the default (5.0) but expand if needed for user's domain
-            accuracy.n_sigma = std::max(5.0, required_n_sigma);
-        }
+            // Explicit grid: check solver stability constraints
+            const auto& grid_spec = grid.grid_spec;
+            const auto n_time = grid.n_time;
 
-        solver.set_grid_accuracy(accuracy);
-        return solver.solve_batch(batch, true);  // use_shared_grid = true, auto-estimation
-    }
+            constexpr double MAX_WIDTH = 5.8;   // Convergence limit (log-units)
+            constexpr double MAX_DX = 0.05;     // Von Neumann stability
+
+            const double grid_width = grid_spec.x_max() - grid_spec.x_min();
+
+            // Compute actual max spacing for non-uniform grids
+            double max_dx;
+            if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
+                max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
+            } else {
+                auto grid_buffer = grid_spec.generate();
+                auto spacings = grid_buffer.span() | std::views::pairwise
+                                                   | std::views::transform([](auto pair) {
+                                                         auto [a, b] = pair;
+                                                         return b - a;
+                                                     });
+                max_dx = std::ranges::max(spacings);
+            }
+
+            // Compute minimum required width: ~3σ√τ on each side
+            auto sigma_sqrt_tau = [](const AmericanOptionParams& p) {
+                return p.volatility * std::sqrt(p.maturity);
+            };
+            const double max_sigma_sqrt_tau = std::ranges::max(
+                batch | std::views::transform(sigma_sqrt_tau));
+            const double min_required_width = 6.0 * max_sigma_sqrt_tau;
+
+            const bool grid_meets_constraints =
+                (grid_width <= MAX_WIDTH) &&
+                (max_dx <= MAX_DX) &&
+                (grid_width >= min_required_width);
+
+            if (grid_meets_constraints) {
+                const double max_maturity = axes.grids[1].back();
+                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
+                auto custom_grid = std::make_pair(grid_spec, time_domain);
+                return solver.solve_batch(batch, true, nullptr, custom_grid);
+            } else {
+                // Grid violates constraints: fall back to auto-estimation
+                GridAccuracyParams accuracy;
+                const size_t n_points = grid_spec.n_points();
+                const size_t clamped = std::clamp(n_points, size_t(100), size_t(1200));
+                accuracy.min_spatial_points = clamped;
+                accuracy.max_spatial_points = clamped;
+                accuracy.max_time_steps = n_time;
+
+                if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
+                    accuracy.alpha = grid_spec.concentration();
+                }
+
+                const double x_min = grid_spec.x_min();
+                const double x_max = grid_spec.x_max();
+                const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
+                constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+
+                const double safe_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, 1e-10);
+                double required_n_sigma = (max_abs_x / safe_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+                accuracy.n_sigma = std::max(5.0, required_n_sigma);
+
+                // Also ensure coverage of the moneyness axis
+                ensure_moneyness_coverage<N>(accuracy, batch, axes);
+
+                solver.set_grid_accuracy(accuracy);
+                return solver.solve_batch(batch, true);
+            }
+        }
+    }, config_.pde_grid);
 }
 
 template <size_t N>
@@ -476,15 +514,14 @@ std::vector<double> sort_and_dedupe(std::vector<double> v) {
 
 // Factory method implementations (explicit specialization for N=4)
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::Setup
 PriceTableBuilder<4>::from_vectors(
     std::vector<double> moneyness,
     std::vector<double> maturity,
     std::vector<double> volatility,
     std::vector<double> rate,
     double K_ref,
-    GridSpec<double> grid_spec,
-    size_t n_time,
+    PDEGridSpec pde_grid,
     OptionType type,
     double dividend_yield,
     double max_failure_rate)
@@ -521,8 +558,7 @@ PriceTableBuilder<4>::from_vectors(
     PriceTableConfig config;
     config.option_type = type;
     config.K_ref = K_ref;
-    config.grid_estimator = grid_spec;
-    config.n_time = n_time;
+    config.pde_grid = std::move(pde_grid);
     config.dividend_yield = dividend_yield;
     config.max_failure_rate = max_failure_rate;
 
@@ -535,15 +571,14 @@ PriceTableBuilder<4>::from_vectors(
 }
 
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::Setup
 PriceTableBuilder<4>::from_strikes(
     double spot,
     std::vector<double> strikes,
     std::vector<double> maturities,
     std::vector<double> volatilities,
     std::vector<double> rates,
-    GridSpec<double> grid_spec,
-    size_t n_time,
+    PDEGridSpec pde_grid,
     OptionType type,
     double dividend_yield,
     double max_failure_rate)
@@ -578,8 +613,7 @@ PriceTableBuilder<4>::from_strikes(
         std::move(volatilities),
         std::move(rates),
         spot,  // K_ref = spot
-        grid_spec,
-        n_time,
+        std::move(pde_grid),
         type,
         dividend_yield,
         max_failure_rate
@@ -587,11 +621,10 @@ PriceTableBuilder<4>::from_strikes(
 }
 
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::Setup
 PriceTableBuilder<4>::from_chain(
     const OptionChain& chain,
-    GridSpec<double> grid_spec,
-    size_t n_time,
+    PDEGridSpec pde_grid,
     OptionType type,
     double max_failure_rate)
 {
@@ -601,8 +634,7 @@ PriceTableBuilder<4>::from_chain(
         chain.maturities,
         chain.implied_vols,
         chain.rates,
-        grid_spec,
-        n_time,
+        std::move(pde_grid),
         type,
         chain.dividend_yield,
         max_failure_rate
@@ -610,11 +642,10 @@ PriceTableBuilder<4>::from_chain(
 }
 
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::Setup
 PriceTableBuilder<4>::from_chain_auto(
     const OptionChain& chain,
-    GridSpec<double> grid_spec,
-    size_t n_time,
+    PDEGridSpec pde_grid,
     OptionType type,
     const PriceTableGridAccuracyParams<4>& accuracy)
 {
@@ -651,15 +682,13 @@ PriceTableBuilder<4>::from_chain_auto(
     }
 
     // Use estimated grids with from_vectors
-    // grids[0] = moneyness, grids[1] = maturity, grids[2] = volatility, grids[3] = rate
     return from_vectors(
         std::move(estimate.grids[0]),
         std::move(estimate.grids[1]),
         std::move(estimate.grids[2]),
         std::move(estimate.grids[3]),
         chain.spot,  // K_ref = spot
-        grid_spec,
-        n_time,
+        std::move(pde_grid),
         type,
         chain.dividend_yield,
         0.0  // max_failure_rate = 0 (strict)
@@ -667,7 +696,7 @@ PriceTableBuilder<4>::from_chain_auto(
 }
 
 template <>
-std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+PriceTableBuilder<4>::Setup
 PriceTableBuilder<4>::from_chain_auto_profile(
     const OptionChain& chain,
     PriceTableGridProfile grid_profile,
@@ -707,50 +736,14 @@ PriceTableBuilder<4>::from_chain_auto_profile(
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
-    // Build PDE grid/time domain from profile using extreme bounds
-    const double strike_min = *std::min_element(chain.strikes.begin(), chain.strikes.end());
-    const double strike_max = *std::max_element(chain.strikes.begin(), chain.strikes.end());
-    const double maturity_max = *std::max_element(chain.maturities.begin(), chain.maturities.end());
-    const double vol_max = *std::max_element(chain.implied_vols.begin(), chain.implied_vols.end());
-    const double rate_max = *std::max_element(chain.rates.begin(), chain.rates.end());
-
-    if (strike_min <= 0.0 || maturity_max <= 0.0 || vol_max <= 0.0) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
-    }
-
-    std::vector<PricingParams> params;
-    params.reserve(2);
-    params.emplace_back(PricingParams{
-        chain.spot,
-        strike_min,
-        maturity_max,
-        rate_max,
-        chain.dividend_yield,
-        type,
-        vol_max
-    });
-    params.emplace_back(PricingParams{
-        chain.spot,
-        strike_max,
-        maturity_max,
-        rate_max,
-        chain.dividend_yield,
-        type,
-        vol_max
-    });
-
-    auto pde_accuracy = grid_accuracy_profile(pde_profile);
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(params, pde_accuracy);
-
-    // Use estimated grids with from_vectors
+    // Auto-estimate PDE grid from batch parameters
     return from_vectors(
         std::move(estimate.grids[0]),
         std::move(estimate.grids[1]),
         std::move(estimate.grids[2]),
         std::move(estimate.grids[3]),
         chain.spot,  // K_ref = spot
-        grid_spec,
-        time_domain.n_steps(),
+        grid_accuracy_profile(pde_profile),
         type,
         chain.dividend_yield,
         0.0  // max_failure_rate = 0 (strict)

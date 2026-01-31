@@ -24,8 +24,9 @@ protected:
                 .max_iter = 100,
                 .tolerance = 1e-6,
                 .brent_tol_abs = 1e-6
-            }
+            },
             // Note: Using default auto-estimation mode (use_manual_grid = false)
+            .grid_accuracy = GridAccuracyParams{}
         };
     }
 
@@ -245,4 +246,53 @@ TEST_F(IVSolverTest, DISABLED_ManualGrid201Points) {
         EXPECT_LT(result->implied_vol, 0.5);
         EXPECT_GT(result->iterations, 0);
     }
+}
+
+// ===========================================================================
+// Regression tests
+// ===========================================================================
+
+// Regression: IVSolverFDM must respect grid_accuracy in config
+// Bug: objective_function() called estimate_grid_for_option() with default
+// GridAccuracyParams, ignoring config_.grid_accuracy. This caused a ~2-4 bps
+// IV error floor that could not be reduced.
+TEST_F(IVSolverTest, GridAccuracyReducesError) {
+    // Use the fixture query (ATM put, market_price=10.45)
+    // Both solvers recover IV from the same market price.
+    // The default solver's IV has ~2-4 bps error from its coarse internal grid.
+    // The high-accuracy solver should produce a meaningfully different IV,
+    // demonstrating that grid_accuracy actually flows through.
+
+    // Default accuracy
+    IVSolverFDMConfig default_config = config;
+    IVSolverFDM solver_default(default_config);
+    auto result_default = solver_default.solve_impl(query);
+    ASSERT_TRUE(result_default.has_value())
+        << "Default accuracy failed with error code: "
+        << static_cast<int>(result_default.error().code);
+
+    // Finer grid: tol=5e-3 (vs default 1e-2), min 150 points (vs default 100)
+    IVSolverFDMConfig finer_config = config;
+    finer_config.grid_accuracy.tol = 5e-3;
+    finer_config.grid_accuracy.min_spatial_points = 150;
+    IVSolverFDM solver_finer(finer_config);
+    auto result_finer = solver_finer.solve_impl(query);
+    ASSERT_TRUE(result_finer.has_value())
+        << "Finer accuracy failed with error code: "
+        << static_cast<int>(result_finer.error().code);
+
+    // The two results should differ — proving grid_accuracy is being used.
+    // Default grid (~101 points) vs finer grid (~150 points) produce
+    // different pricing, so the recovered IVs must differ.
+    double diff = std::abs(result_finer->implied_vol - result_default->implied_vol);
+    EXPECT_GT(diff, 1e-6)
+        << "Default IV=" << result_default->implied_vol
+        << " Finer IV=" << result_finer->implied_vol
+        << " — grid_accuracy should affect the result";
+
+    // Both should still be reasonable (between 15% and 35%)
+    EXPECT_GT(result_default->implied_vol, 0.15);
+    EXPECT_LT(result_default->implied_vol, 0.35);
+    EXPECT_GT(result_finer->implied_vol, 0.15);
+    EXPECT_LT(result_finer->implied_vol, 0.35);
 }

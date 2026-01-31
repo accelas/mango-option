@@ -16,8 +16,7 @@ TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {
     mango::PriceTableConfig config;
     config.option_type = mango::OptionType::PUT;
     config.K_ref = 100.0;
-    config.grid_estimator = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
-    config.n_time = 100;
+    config.pde_grid = mango::ExplicitPDEGrid{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 100};
 
     mango::PriceTableBuilder<4> builder(config);
     auto result = builder.build(axes);
