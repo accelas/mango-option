@@ -54,7 +54,8 @@ public:
         double K_ref,
         double dividend_yield,
         double m_min,
-        double m_max);
+        double m_max,
+        uint8_t surface_content = 0);
 
     /// Grid accessors (zero-copy spans into arena)
     /// Note: log_moneyness() returns ln(S/K), use m_min()/m_max() for original bounds
@@ -92,6 +93,7 @@ public:
     /// Metadata accessors
     double K_ref() const { return K_ref_; }
     double dividend_yield() const { return dividend_yield_; }
+    uint8_t surface_content() const { return surface_content_; }
 
     /// Grid dimensions
     std::tuple<size_t, size_t, size_t, size_t> dimensions() const {
@@ -112,7 +114,7 @@ public:
     /// Load error codes
     enum class LoadError {
         NOT_ARROW_FILE,              // Missing "ARROW1" magic
-        UNSUPPORTED_VERSION,         // format_version != 1
+        UNSUPPORTED_VERSION,         // format_version not in {1, 2}
         INSUFFICIENT_GRID_POINTS,    // n < 4 for any axis
         SIZE_MISMATCH,               // Array length doesn't match metadata
         COEFFICIENT_SIZE_MISMATCH,   // coeffs.size() != n_m×n_tau×n_sigma×n_r
@@ -191,6 +193,7 @@ private:
     double dividend_yield_ = 0.0;
     double m_min_ = 0.0;  // Original moneyness bounds
     double m_max_ = 0.0;
+    uint8_t surface_content_ = 0;  // 0 = RawPrice (default)
 };
 
 }  // namespace mango

@@ -232,7 +232,8 @@ std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
     double K_ref,
     double dividend_yield,
     double m_min,
-    double m_max)
+    double m_max,
+    uint8_t surface_content)
 {
     // Validate inputs first
     auto validation = validate_inputs(log_m_grid, tau_grid, sigma_grid, r_grid, coefficients);
@@ -246,6 +247,7 @@ std::expected<PriceTableWorkspace, std::string> PriceTableWorkspace::create(
     if (result) {
         result->m_min_ = m_min;
         result->m_max_ = m_max;
+        result->surface_content_ = surface_content;
     }
     return result;
 }
@@ -271,6 +273,9 @@ std::expected<void, std::string> PriceTableWorkspace::save(
         // Moneyness bounds (original S/K before log transform)
         arrow::field("m_min", arrow::float64()),
         arrow::field("m_max", arrow::float64()),
+
+        // Surface content type (0=RawPrice, added in format v2)
+        arrow::field("surface_content", arrow::uint8()),
 
         // Grid dimensions
         arrow::field("n_log_moneyness", arrow::uint32()),
@@ -333,6 +338,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
     arrow::DoubleBuilder dividend_builder;
 
     arrow::DoubleBuilder m_min_builder, m_max_builder;
+    arrow::UInt8Builder surface_content_builder;
     arrow::UInt32Builder n_m_builder, n_tau_builder, n_sigma_builder, n_r_builder;
 
     // List builders for grid vectors
@@ -374,7 +380,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
     arrow::UInt64Builder checksum_coeffs_builder, checksum_grids_builder;
 
     // Append scalar values
-    if (!format_version_builder.Append(1).ok() ||
+    if (!format_version_builder.Append(2).ok() ||
         !timestamp_builder.Append(micros).ok() ||
         !mango_version_builder.Append("dev").ok() ||  // Placeholder: "dev"
         !ticker_builder.Append(ticker).ok() ||
@@ -383,6 +389,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
         !dividend_builder.Append(dividend_yield_).ok() ||
         !m_min_builder.Append(m_min_).ok() ||
         !m_max_builder.Append(m_max_).ok() ||
+        !surface_content_builder.Append(surface_content_).ok() ||
         !n_m_builder.Append(static_cast<uint32_t>(n_m)).ok() ||
         !n_tau_builder.Append(static_cast<uint32_t>(n_tau)).ok() ||
         !n_sigma_builder.Append(static_cast<uint32_t>(n_sigma)).ok() ||
@@ -471,7 +478,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
 
     // Finish all builders and create arrays
     std::vector<std::shared_ptr<arrow::Array>> arrays;
-    arrays.reserve(35);  // Updated to match 35 fields (added m_min, m_max)
+    arrays.reserve(36);  // Updated to match 36 fields (added surface_content)
 
     auto finish_builder = [&arrays](arrow::ArrayBuilder& builder) -> bool {
         std::shared_ptr<arrow::Array> array;
@@ -489,6 +496,7 @@ std::expected<void, std::string> PriceTableWorkspace::save(
         !finish_builder(dividend_builder) ||
         !finish_builder(m_min_builder) ||
         !finish_builder(m_max_builder) ||
+        !finish_builder(surface_content_builder) ||
         !finish_builder(n_m_builder) ||
         !finish_builder(n_tau_builder) ||
         !finish_builder(n_sigma_builder) ||
@@ -656,8 +664,20 @@ PriceTableWorkspace::load(const std::string& filepath)
         return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
     uint32_t format_version = version_uint32->value;
-    if (format_version != 1) {
+    if (format_version != 1 && format_version != 2) {
         return std::unexpected(LoadError::UNSUPPORTED_VERSION);
+    }
+
+    // 7b. Read surface_content if v2 (default to 0 = RawPrice for v1)
+    uint8_t surface_content = 0;
+    if (format_version >= 2) {
+        auto sc_scalar = get_scalar("surface_content");
+        if (sc_scalar) {
+            auto sc_uint8 = std::dynamic_pointer_cast<arrow::UInt8Scalar>(sc_scalar);
+            if (sc_uint8) {
+                surface_content = sc_uint8->value;
+            }
+        }
     }
 
     // 8. Extract dimensions
@@ -843,10 +863,11 @@ PriceTableWorkspace::load(const std::string& filepath)
         return std::unexpected(LoadError::ARROW_READ_ERROR);
     }
 
-    // 20. Set moneyness bounds
+    // 20. Set moneyness bounds and surface content
     auto& ws = ws_result.value();
     ws.m_min_ = m_min;
     ws.m_max_ = m_max;
+    ws.surface_content_ = surface_content;
 
     // 21. Verify alignment of loaded data
     // Note: We rely on allocate_and_initialize() to ensure proper alignment
