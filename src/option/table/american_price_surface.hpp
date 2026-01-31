@@ -32,7 +32,7 @@ public:
     double delta(double spot, double strike, double tau,
                  double sigma, double rate) const;
 
-    /// Gamma via finite difference of delta (BSplineND lacks second derivatives)
+    /// Gamma = (1/(K_ref·K)) * ∂²E/∂m² + Gamma_Eu
     double gamma(double spot, double strike, double tau,
                  double sigma, double rate) const;
 
