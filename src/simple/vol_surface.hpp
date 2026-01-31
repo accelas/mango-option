@@ -71,7 +71,7 @@ struct ComputeError {
 struct IVComputeConfig {
     enum class Method {
         Interpolated,  // Fast: use precomputed tables (~30µs)
-        FDM            // Accurate: solve PDE per option (~143ms)
+        FDM            // Accurate: solve PDE per option (~19ms)
     };
 
     Method method = Method::Interpolated;

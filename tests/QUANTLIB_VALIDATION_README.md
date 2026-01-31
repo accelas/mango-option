@@ -101,7 +101,7 @@ The `DISABLED_StandardScenarios_IV_Interpolated` test validates the B-spline-bas
 2. Better initial guess for Newton solver
 3. Adaptive grid refinement near critical points
 
-**Performance Target**: ~30µs per IV (vs ~143ms for FDM, 4800× speedup)
+**Performance Target**: ~3.5µs per IV (vs ~19ms for FDM, 5400× speedup)
 
 **Next Steps**:
 1. Increase price table resolution (0.05 → 0.02 volatility steps)

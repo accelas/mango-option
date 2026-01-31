@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "src/option/table/price_table_metadata.hpp"
 #include "src/option/table/price_tensor.hpp"
 
 namespace mango {
@@ -406,6 +407,25 @@ TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
 
     EXPECT_EQ(build_result->total_slices, 4 * 4);  // Nσ × Nr = 4 × 4
     EXPECT_EQ(build_result->total_points, 4 * 4 * 4);  // Nσ × Nr × Nt = 4 × 4 × 4
+}
+
+// Default mode always produces EarlyExercisePremium metadata
+TEST(PriceTableBuilderTest, DefaultModeProducesEEPMetadata) {
+    auto setup = PriceTableBuilder<4>::from_vectors(
+        {0.8, 0.9, 1.0, 1.1},
+        {0.25, 0.5, 0.75, 1.0},
+        {0.15, 0.20, 0.25, 0.30},
+        {0.02, 0.04, 0.06, 0.08},
+        100.0,
+        ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
+        OptionType::PUT);
+    ASSERT_TRUE(setup.has_value());
+    auto& [builder, axes] = setup.value();
+
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
+    EXPECT_EQ(result->surface->metadata().content,
+              SurfaceContent::EarlyExercisePremium);
 }
 
 } // namespace

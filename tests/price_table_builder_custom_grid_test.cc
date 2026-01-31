@@ -231,7 +231,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
 
     auto setup_coarse = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate,
-        100.0, coarse, OptionType::PUT, 0.02);
+        100.0, coarse, OptionType::PUT, 0.02, 0.0);
 
     ASSERT_TRUE(setup_coarse.has_value());
     auto& [builder_coarse, axes_coarse] = setup_coarse.value();
@@ -246,7 +246,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
 
     auto setup_fine = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate,
-        100.0, fine, OptionType::PUT, 0.02);
+        100.0, fine, OptionType::PUT, 0.02, 0.0);
 
     ASSERT_TRUE(setup_fine.has_value());
     auto& [builder_fine, axes_fine] = setup_fine.value();

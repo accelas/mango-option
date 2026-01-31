@@ -66,6 +66,7 @@ cc_library(
         "//src/pde/core:grid",
         "//src/pde/operators:centered_difference_facade",
         ":option_spec",
+        ":option_concepts",
     ],
     copts = [
         "-Wall",
@@ -136,6 +137,7 @@ cc_library(
         ":american_option",
         ":iv_result",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         ":option_spec",
         "//src/math:root_finding",
         "//src/support:parallel",
@@ -159,6 +161,27 @@ cc_library(
     deps = [
         "//src/support:error_types",
         "//src/math:yield_curve",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "european_option",
+    srcs = ["european_option.cpp"],
+    hdrs = ["european_option.hpp"],
+    deps = [
+        ":option_spec",
+        ":option_concepts",
+        "//src/math:black_scholes_analytics",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "option_concepts",
+    hdrs = ["option_concepts.hpp"],
+    deps = [
+        ":option_spec",
     ],
     visibility = ["//visibility:public"],
 )

@@ -54,6 +54,8 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
     }
 
     // 4. No discrete dividends
+    // TODO(discrete-dividends): Remove this rejection once discrete dividend
+    // support is implemented via maturity segmentation with per-segment tables.
     for (const auto& p : params) {
         if (!p.discrete_dividends.empty()) {
             return false;

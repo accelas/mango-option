@@ -6,6 +6,7 @@
 
 #include "src/math/bspline_nd.hpp"
 #include "src/math/bspline_basis.hpp"
+#include "src/math/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <array>
@@ -243,6 +244,94 @@ TEST_F(BSplineNDTest, CoefficientSizeMismatch) {
     );
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::CoefficientSizeMismatch);
+}
+
+// ===========================================================================
+// Second derivative tests
+// ===========================================================================
+
+/// Test 1D second derivative: f(x) = x² → f''(x) = 2
+TEST_F(BSplineNDTest, SecondDerivativeQuadratic) {
+    auto grid = create_uniform_grid(0.0, 2.0, 10);
+
+    // Generate function values at grid points
+    std::vector<double> values(grid.size());
+    for (size_t i = 0; i < grid.size(); ++i) {
+        values[i] = grid[i] * grid[i];
+    }
+
+    // Fit proper B-spline coefficients via collocation
+    auto fitter = BSplineNDSeparable<double, 1>::create({grid});
+    ASSERT_TRUE(fitter.has_value());
+    auto fit = fitter->fit(values);
+    ASSERT_TRUE(fit.has_value());
+
+    auto knots = create_clamped_knots(grid);
+    auto spline = BSplineND<double, 1>::create({grid}, {knots}, fit->coefficients);
+    ASSERT_TRUE(spline.has_value());
+
+    // Second derivative of x² should be 2.0 everywhere in the interior
+    for (double x = 0.3; x <= 1.7; x += 0.2) {
+        double d2f = spline->eval_second_partial(0, {x});
+        EXPECT_NEAR(d2f, 2.0, 0.1) << "f''(x²) should be 2.0 at x=" << x;
+    }
+}
+
+/// Test 1D second derivative: f(x) = x (linear) → f''(x) = 0
+TEST_F(BSplineNDTest, SecondDerivativeLinear) {
+    auto grid = create_uniform_grid(0.0, 1.0, 8);
+
+    // Generate linear function values
+    std::vector<double> values(grid.size());
+    for (size_t i = 0; i < grid.size(); ++i) {
+        values[i] = grid[i];
+    }
+
+    // Fit proper B-spline coefficients via collocation
+    auto fitter = BSplineNDSeparable<double, 1>::create({grid});
+    ASSERT_TRUE(fitter.has_value());
+    auto fit = fitter->fit(values);
+    ASSERT_TRUE(fit.has_value());
+
+    auto knots = create_clamped_knots(grid);
+    auto spline = BSplineND<double, 1>::create({grid}, {knots}, fit->coefficients);
+    ASSERT_TRUE(spline.has_value());
+
+    // Second derivative of linear function should be 0
+    for (double x = 0.2; x <= 0.8; x += 0.2) {
+        double d2f = spline->eval_second_partial(0, {x});
+        EXPECT_NEAR(d2f, 0.0, 1e-8) << "f''(x) should be 0.0 at x=" << x;
+    }
+}
+
+/// Test 2D second partial: f(x,y) = x²·y → ∂²f/∂x² = 2y
+TEST_F(BSplineNDTest, SecondPartialDerivative2D) {
+    auto grid_x = create_uniform_grid(0.0, 2.0, 8);
+    auto grid_y = create_uniform_grid(0.0, 2.0, 8);
+
+    // Generate function values at grid points
+    std::vector<double> values(grid_x.size() * grid_y.size());
+    for (size_t i = 0; i < grid_x.size(); ++i) {
+        for (size_t j = 0; j < grid_y.size(); ++j) {
+            values[i * grid_y.size() + j] = grid_x[i] * grid_x[i] * grid_y[j];
+        }
+    }
+
+    // Fit proper B-spline coefficients via separable collocation
+    auto fitter = BSplineNDSeparable<double, 2>::create({grid_x, grid_y});
+    ASSERT_TRUE(fitter.has_value());
+    auto fit = fitter->fit(values);
+    ASSERT_TRUE(fit.has_value());
+
+    auto knots_x = create_clamped_knots(grid_x);
+    auto knots_y = create_clamped_knots(grid_y);
+    auto spline = BSplineND<double, 2>::create(
+        {grid_x, grid_y}, {knots_x, knots_y}, fit->coefficients);
+    ASSERT_TRUE(spline.has_value());
+
+    // ∂²f/∂x² at (1.0, 1.5) should be 2·1.5 = 3.0
+    double d2f = spline->eval_second_partial(0, {1.0, 1.5});
+    EXPECT_NEAR(d2f, 3.0, 0.3) << "∂²(x²·y)/∂x² should be 2y";
 }
 
 /// Test boundary clamping

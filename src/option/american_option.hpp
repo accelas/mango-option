@@ -10,6 +10,7 @@
 #include "src/pde/core/pde_solver.hpp"
 #include "src/pde/operators/black_scholes_pde.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
+#include "src/option/option_concepts.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include "src/support/parallel.hpp"
@@ -276,6 +277,8 @@ private:
     // TR-BDF2 configuration for the PDE solver
     TRBDF2Config trbdf2_config_;
 };
+
+static_assert(OptionSolver<AmericanOptionSolver>);
 
 }  // namespace mango
 

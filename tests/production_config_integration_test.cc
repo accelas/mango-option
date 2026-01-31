@@ -19,6 +19,7 @@
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/table/american_price_surface.hpp"
 
 using namespace mango;
 
@@ -110,7 +111,8 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec, 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value())
         << "PriceTableBuilder::from_vectors failed";
@@ -145,7 +147,8 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 300},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
@@ -169,7 +172,8 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 1000},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
@@ -192,7 +196,8 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
@@ -478,7 +483,8 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value())
         << "PriceTableBuilder::from_vectors failed";
@@ -512,20 +518,23 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0);    // max_failure_rate
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
     auto table_result = builder.build(axes);
     ASSERT_TRUE(table_result.has_value());
 
-    // Create IV solver from surface
+    // Create IV solver from surface via AmericanPriceSurface
     IVSolverInterpolatedConfig solver_config;
     solver_config.max_iterations = 50;
     solver_config.tolerance = 1e-6;
 
+    auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
     auto iv_solver_result = IVSolverInterpolated::create(
-        table_result->surface, solver_config);
+        std::move(*aps), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
         << "IVSolverInterpolated::create failed";
@@ -538,9 +547,11 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     double rate = 0.04;
     double vol = 0.20;
 
-    // Get price from surface
-    double m = spot / strike;
-    double price = table_result->surface->value({m, maturity, vol, rate});
+    // Get reconstructed American price from APS
+    // Note: table surface stores EEP, not raw price — must use APS for full price
+    auto aps_for_price = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
+    ASSERT_TRUE(aps_for_price.has_value());
+    double price = aps_for_price->price(spot, strike, maturity, vol, rate);
     EXPECT_GT(price, 0.0);
 
     // Solve for IV

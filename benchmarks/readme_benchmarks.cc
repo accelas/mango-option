@@ -4,7 +4,9 @@
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>
@@ -80,10 +82,6 @@ double analytic_bs_price(double S, double K, double tau, double sigma, double r,
 
 struct AnalyticSurfaceFixture {
     double K_ref;
-    std::vector<double> m_grid;
-    std::vector<double> tau_grid;
-    std::vector<double> sigma_grid;
-    std::vector<double> rate_grid;
     std::shared_ptr<const PriceTableSurface<4>> surface;
 };
 
@@ -91,74 +89,24 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
     static AnalyticSurfaceFixture* fixture = [] {
         auto fixture_ptr = std::make_unique<AnalyticSurfaceFixture>();
         fixture_ptr->K_ref = 100.0;
-        fixture_ptr->m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
-        fixture_ptr->tau_grid = {0.1, 0.5, 1.0, 2.0};
-        fixture_ptr->sigma_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
-        fixture_ptr->rate_grid = {0.0, 0.025, 0.05, 0.10};
 
-        const size_t Nm = fixture_ptr->m_grid.size();
-        const size_t Nt = fixture_ptr->tau_grid.size();
-        const size_t Nv = fixture_ptr->sigma_grid.size();
-        const size_t Nr = fixture_ptr->rate_grid.size();
+        std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+        std::vector<double> tau_grid = {0.1, 0.5, 1.0, 2.0};
+        std::vector<double> vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30};
+        std::vector<double> rate_grid = {0.0, 0.025, 0.05, 0.10};
 
-        std::vector<double> prices(Nm * Nt * Nv * Nr);
-        for (size_t i = 0; i < Nm; ++i) {
-            for (size_t j = 0; j < Nt; ++j) {
-                for (size_t k = 0; k < Nv; ++k) {
-                    for (size_t l = 0; l < Nr; ++l) {
-                        const size_t idx = ((i * Nt + j) * Nv + k) * Nr + l;
-                        prices[idx] = analytic_bs_price(
-                            fixture_ptr->m_grid[i] * fixture_ptr->K_ref,
-                            fixture_ptr->K_ref,
-                            fixture_ptr->tau_grid[j],
-                            fixture_ptr->sigma_grid[k],
-                            fixture_ptr->rate_grid[l],
-                            OptionType::PUT);
-                    }
-                }
-            }
+        auto result = PriceTableBuilder<4>::from_vectors(
+            m_grid, tau_grid, vol_grid, rate_grid, 100.0,
+            GridAccuracyParams{}, OptionType::PUT, 0.0);
+        if (!result) {
+            throw std::runtime_error("Failed to create PriceTableBuilder");
         }
-
-        auto fitter_result = BSplineNDSeparable<double, 4>::create(
-            std::array<std::vector<double>, 4>{
-                fixture_ptr->m_grid,
-                fixture_ptr->tau_grid,
-                fixture_ptr->sigma_grid,
-                fixture_ptr->rate_grid});
-
-        if (!fitter_result.has_value()) {
-            throw std::runtime_error("Failed to create BSpline fitter");
+        auto [builder, axes] = std::move(result.value());
+        auto table = builder.build(axes);
+        if (!table) {
+            throw std::runtime_error("Failed to build price table");
         }
-
-        auto& fitter = fitter_result.value();
-
-        auto fit_result = fitter.fit(prices, BSplineNDSeparableConfig<double>{.tolerance = 1e-6});
-        if (!fit_result.has_value()) {
-            throw std::runtime_error("Failed to fit analytic BSpline surface");
-        }
-
-        // Create PriceTableAxes
-        PriceTableAxes<4> axes;
-        axes.grids = {
-            fixture_ptr->m_grid,
-            fixture_ptr->tau_grid,
-            fixture_ptr->sigma_grid,
-            fixture_ptr->rate_grid
-        };
-
-        // Create metadata
-        PriceTableMetadata meta{
-            .K_ref = fixture_ptr->K_ref,
-            .dividend_yield = 0.0,
-            .discrete_dividends = {}
-        };
-
-        // Create surface with coefficients directly
-        auto surface_result = PriceTableSurface<4>::build(axes, fit_result->coefficients, meta);
-        if (!surface_result.has_value()) {
-            throw std::runtime_error("Failed to create surface");
-        }
-        fixture_ptr->surface = std::move(surface_result.value());
+        fixture_ptr->surface = table->surface;
 
         return fixture_ptr.release();
     }();
@@ -169,8 +117,12 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     const auto& surf = GetAnalyticSurfaceFixture();
 
-    // Create solver using factory method with new API
-    auto solver_result = IVSolverInterpolated::create(surf.surface);
+    // Create AmericanPriceSurface wrapper and IV solver
+    auto aps = AmericanPriceSurface::create(surf.surface, OptionType::PUT);
+    if (!aps) {
+        throw std::runtime_error("Failed to create AmericanPriceSurface");
+    }
+    auto solver_result = IVSolverInterpolated::create(std::move(*aps));
 
     if (!solver_result) {
         auto err = solver_result.error();

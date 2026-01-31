@@ -202,7 +202,7 @@ mango::PricingParams params{
 
 ## Implied Volatility Calculation
 
-### FDM-Based IV (Robust, ~143ms)
+### FDM-Based IV (Robust, ~19ms)
 
 **Uses Brent's method with nested PDE pricing:**
 
@@ -337,7 +337,7 @@ auto result = solver.solve_impl(query);
 
 ```cpp
 #include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 
 // Define 4D parameter grids
 std::vector<double> moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};  // m = S/K
@@ -347,26 +347,12 @@ std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06, 0.08, 0.10};         // 
 
 double K_ref = 100.0;  // Reference strike price
 
-// PDE grid specification: auto-estimate (recommended) or explicit
-// Option A: Auto-estimate from accuracy params (handles domain coverage automatically)
-mango::PDEGridSpec pde_grid = mango::GridAccuracyParams{};
-
-// Option B: Explicit grid and time steps
-// mango::PDEGridSpec pde_grid = mango::ExplicitPDEGrid{
-//     .grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
-//     .n_time = 1000
-// };
-
-// Create builder and axes using factory method
+// Create builder (always stores EEP for ~5x better interpolation accuracy)
 auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
-    moneyness_grid,
-    maturity_grid,
-    vol_grid,
-    rate_grid,
+    moneyness_grid, maturity_grid, vol_grid, rate_grid,
     K_ref,
-    pde_grid,
-    mango::OptionType::PUT
-);
+    mango::GridAccuracyParams{},  // auto-estimate PDE grid
+    mango::OptionType::PUT);
 
 if (!factory_result.has_value()) {
     std::cerr << "Factory creation failed: " << factory_result.error() << "\n";
@@ -376,7 +362,6 @@ if (!factory_result.has_value()) {
 auto [builder, axes] = std::move(factory_result.value());
 
 // Build price table (parallelized with OpenMP)
-// This takes ~15-20 minutes for 300K grid on 32 cores
 auto result = builder.build(axes);
 
 if (!result.has_value()) {
@@ -384,20 +369,42 @@ if (!result.has_value()) {
     return;
 }
 
-// Access the surface (shared_ptr)
-auto surface = result->surface;
+// Wrap in AmericanPriceSurface for full price reconstruction
+auto aps = mango::AmericanPriceSurface::create(
+    result->surface, mango::OptionType::PUT).value();
 
-// Query price and partials (~500ns each)
-double m = 1.05;      // Moneyness (S/K)
-double tau = 0.25;    // Time to maturity (years)
-double sigma = 0.20;  // Volatility
-double r = 0.05;      // Risk-free rate
+// Query American option prices (~500ns)
+double price = aps.price(spot, strike, tau, sigma, rate);
 
-double price = surface->value({m, tau, sigma, r});
-double delta = surface->partial(0, {m, tau, sigma, r});  // ∂price/∂m
-double vega = surface->partial(2, {m, tau, sigma, r});   // ∂price/∂σ
-double gamma = surface->partial(1, {m, tau, sigma, r});  // ∂price/∂τ (often called theta)
+// Greeks via interpolation (see accuracy note below)
+double delta = aps.delta(spot, strike, tau, sigma, rate);
+double vega  = aps.vega(spot, strike, tau, sigma, rate);
 ```
+
+### Interpolated Greek Accuracy
+
+`AmericanPriceSurface` computes Greeks by combining B-spline partial derivatives of the EEP surface with exact Black-Scholes Greeks for the European component:
+
+| Greek | Method | Accuracy |
+|---|---|---|
+| **Price** | B-spline interpolation + analytical European | Best: ~$0.005 RMSE (O(h⁴) B-spline) |
+| **Delta** | B-spline ∂EEP/∂m + analytical European delta | Good: one derivative lowers B-spline order to O(h³) |
+| **Vega** | B-spline ∂EEP/∂σ + analytical European vega | Good: same as delta |
+| **Theta** | B-spline ∂EEP/∂τ + analytical European theta | Good: same as delta |
+| **Gamma** | B-spline ∂²EEP/∂m² + analytical European gamma | Good: O(h²) analytical second derivative |
+
+Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: ∂²f/∂m² = (g″(x) − g′(x)) / m².
+
+**Measured accuracy** (interpolated vs PDE solver, σ=0.20, r=0.05, q=0.02):
+
+| Greek | Max Abs Error | Max Rel Error | Notes |
+|---|---|---|---|
+| **Price** | $0.086 | 1.9% | |
+| **Delta** | 0.0087 | 2.8% | |
+| **Gamma** | 0.0024 | 7.3% | Worst at short τ; < 1.3% for τ ≥ 0.5 |
+| **Theta** | $0.15 | 3.3% | |
+
+Accuracy degrades at short maturities (τ < 0.5yr) where Greeks have sharper curvature. When in doubt, use the PDE solver directly (`AmericanOptionSolver`) for authoritative Greeks.
 
 ### Factory Methods
 
@@ -460,14 +467,28 @@ surface = mo.build_price_table_surface_from_chain(
 )
 ```
 
-**Real data benchmark (SPY, auto-grid profiles, interpolation-only timing):**
+**Real data benchmark (SPY 7-day puts, auto-grid profiles with EEP decomposition):**
 
-| Profile | Grid (m×τ×σ×r) | PDE solves | interp IV (µs) | interp IV/s | FDM IV (µs) | FDM IV/s | max err (bps) | avg err (bps) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Low | 8×8×14×6 | 84 | 4.68 | 214k | 5275 | 190 | 90.5 | 52.5 |
-| Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
-| High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
-| Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
+| Profile | PDE solves | ATM (bps) | Near-OTM (bps) | Deep-OTM (bps) | Price RMSE |
+|---|---:|---:|---:|---:|---:|
+| Low | 100 | 10.0 | 2.7 | 20.7 | $0.014 |
+| Medium | 240 | 4.4 | 3.0 | 22.5 | $0.008 |
+| High (default) | 495 | 0.1 | 2.8 | 22.2 | $0.005 |
+| Ultra | 812 | 0.2 | 3.3 | 22.6 | $0.005 |
+
+IV error in bps varies with vega: a constant ~$0.005 price error maps to <1 bps near-ATM but 20+ bps for deep OTM short-dated options where vega is tiny. Price RMSE is the stable metric.
+
+### Using Price Surface with IVSolverInterpolated
+
+```cpp
+#include "src/option/iv_solver_interpolated.hpp"
+
+// Create IV solver from AmericanPriceSurface
+auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+
+// Solve IV — internally uses EEP reconstruction + Newton iteration
+auto iv_result = iv_solver.solve_impl(iv_query);
+```
 
 ### Batch Queries on Price Surface
 
