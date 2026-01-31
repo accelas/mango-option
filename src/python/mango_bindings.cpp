@@ -186,7 +186,8 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("grid_n_time", &mango::IVSolverFDMConfig::grid_n_time)
         .def_readwrite("grid_x_min", &mango::IVSolverFDMConfig::grid_x_min)
         .def_readwrite("grid_x_max", &mango::IVSolverFDMConfig::grid_x_max)
-        .def_readwrite("grid_alpha", &mango::IVSolverFDMConfig::grid_alpha);
+        .def_readwrite("grid_alpha", &mango::IVSolverFDMConfig::grid_alpha)
+        .def_readwrite("grid_accuracy", &mango::IVSolverFDMConfig::grid_accuracy);
 
     // IVSuccess structure (std::expected success type)
     py::class_<mango::IVSuccess>(m, "IVSuccess")

@@ -114,8 +114,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         vol_grid,
         rate_grid,
         100.0,  // K_ref
-        grid_spec,
-        time_domain.n_steps(),
+        ExplicitPDEGrid{grid_spec, time_domain.n_steps()},
         OptionType::PUT,
         dividend_yield);
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();

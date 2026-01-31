@@ -25,8 +25,7 @@ TEST(PriceTable4DIntegrationTest, FastPathEligible) {
         {0.15, 0.20, 0.25, 0.30},        // Volatility (4 points)
         {0.0, 0.02, 0.05, 0.08},         // Rate (4 points)
         100.0,                            // K_ref
-        grid_spec,
-        1000,
+        ExplicitPDEGrid{grid_spec, 1000},
         OptionType::PUT,
         0.02);                            // dividend_yield
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
@@ -58,8 +57,7 @@ TEST(PriceTable4DIntegrationTest, FallbackWideRange) {
         {0.15, 0.20, 0.25, 0.30},             // Volatility (4 points)
         {0.0, 0.02, 0.05, 0.08},              // Rate (4 points)
         100.0,                                 // K_ref
-        grid_spec,
-        1000,
+        ExplicitPDEGrid{grid_spec, 1000},
         OptionType::PUT,
         0.02);                                 // dividend_yield
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
@@ -91,7 +89,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
 
     auto builder_fast_result = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate, 100.0,
-        grid_spec_fast, 1000, OptionType::PUT, 0.02);
+        ExplicitPDEGrid{grid_spec_fast, 1000}, OptionType::PUT, 0.02);
     ASSERT_TRUE(builder_fast_result.has_value()) << "Failed to create builder: " << builder_fast_result.error();
     auto [builder_fast, axes_fast] = std::move(builder_fast_result.value());
     auto result_fast = builder_fast.build(axes_fast);
@@ -103,7 +101,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackConsistency) {
 
     auto builder_fallback_result = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate, 100.0,
-        grid_spec_fallback, 1000, OptionType::PUT, 0.02);
+        ExplicitPDEGrid{grid_spec_fallback, 1000}, OptionType::PUT, 0.02);
     ASSERT_TRUE(builder_fallback_result.has_value()) << "Failed to create builder: " << builder_fallback_result.error();
     auto [builder_fallback, axes_fallback] = std::move(builder_fallback_result.value());
     auto result_fallback = builder_fallback.build(axes_fallback);
@@ -156,7 +154,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackRawPriceEquivalence) {
 
     auto builder_fast_result = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate, 100.0,
-        grid_spec_fast, 1000, OptionType::PUT, 0.02);
+        ExplicitPDEGrid{grid_spec_fast, 1000}, OptionType::PUT, 0.02);
     ASSERT_TRUE(builder_fast_result.has_value()) << "Failed to create builder: " << builder_fast_result.error();
     auto [builder_fast, axes_fast] = std::move(builder_fast_result.value());
     auto result_fast = builder_fast.build(axes_fast);
@@ -168,7 +166,7 @@ TEST(PriceTable4DIntegrationTest, FastPathVsFallbackRawPriceEquivalence) {
 
     auto builder_fallback_result = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate, 100.0,
-        grid_spec_fallback, 1000, OptionType::PUT, 0.02);
+        ExplicitPDEGrid{grid_spec_fallback, 1000}, OptionType::PUT, 0.02);
     ASSERT_TRUE(builder_fallback_result.has_value()) << "Failed to create builder: " << builder_fallback_result.error();
     auto [builder_fallback, axes_fallback] = std::move(builder_fallback_result.value());
     auto result_fallback = builder_fallback.build(axes_fallback);
@@ -243,8 +241,7 @@ TEST(PriceTable4DIntegrationTest, PerformanceFastPath) {
         {0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40},         // 7 points
         {0.0, 0.01, 0.02, 0.03, 0.05, 0.07, 0.10},          // 7 points
         100.0,
-        grid_spec,
-        1000,
+        ExplicitPDEGrid{grid_spec, 1000},
         OptionType::PUT,
         0.02);
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();

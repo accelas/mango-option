@@ -16,8 +16,8 @@ The core C++ library exposes a pybind11-based Python module, so you can use it f
 
 - American option prices and Greeks (delta, gamma, theta, vega) from the PDE solver
 - Implied volatility via FDM (~19ms) or B-spline interpolation (~3.5us)
-- Pre-computed 4D price tables for sub-microsecond lookups (~470ns)
-- Batch pricing with OpenMP (15x speedup on multi-core)
+- Pre-computed 4D price tables for sub-microsecond lookups (~476ns)
+- Batch pricing with OpenMP (10x speedup on multi-core)
 - USDT tracing probes for production monitoring at zero overhead when disabled
 - A general-purpose PDE toolkit if you want to solve your own equations
 
@@ -93,17 +93,17 @@ The library also supports batch pricing, price table pre-computation, implied vo
 
 | Configuration | Grid | Time/Option | Use Case |
 |---|---|---|---|
-| Standard (auto) | 101x498 | ~1.4ms | Single option |
-| Option chain (shared grid) | 101x498 | ~0.13ms | Multi-strike |
+| Standard (auto) | 101x498 | ~1.35ms | Single option |
+| Option chain (shared grid) | 101x498 | ~0.23ms | Multi-strike |
 
-Batch processing (64 options): 15x speedup with OpenMP (~0.09ms/option parallel vs ~1.4ms sequential). Shared-grid chains get another 10x on top of that.
+Batch processing (64 options): 10x speedup with OpenMP (~0.13ms/option parallel vs ~1.34ms sequential). Shared-grid chains get another 6x on top of that.
 
 ### Implied Volatility
 
 | Method | Time/IV | Accuracy |
 |---|---|---|
 | FDM-based | ~19ms | Ground truth |
-| Interpolated (B-spline) | ~3.5us | 10-60 bps |
+| Interpolated (B-spline) | ~3.5us | 12-48 bps |
 
 The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation.
 
@@ -113,10 +113,10 @@ The table below shows the accuracy/speed tradeoff across grid density profiles, 
 
 | Profile | Grid (mxTxoxr) | PDE solves | Interp IV | Max err (bps) | Avg err (bps) |
 |---|---:|---:|---:|---:|---:|
-| Low | 8x8x14x6 | 84 | 4.68us | 90.5 | 52.5 |
-| Medium | 10x10x20x8 | 160 | 4.30us | 144.7 | 38.1 |
-| High (default) | 12x12x30x10 | 300 | 3.83us | 61.7 | 19.5 |
-| Ultra | 15x15x43x12 | 516 | 3.85us | 35.2 | 13.1 |
+| Low | 8x8x14x6 | 84 | 4.74us | 83.7 | 48.1 |
+| Medium | 10x10x20x8 | 160 | 4.43us | 148.3 | 41.9 |
+| High (default) | 12x12x30x10 | 300 | 4.00us | 62.7 | 21.3 |
+| Ultra | 15x15x43x12 | 516 | 4.09us | 34.5 | 11.8 |
 
 Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~20 bps average error.
 

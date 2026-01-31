@@ -59,6 +59,9 @@ template <size_t N>
 class PriceTableBuilder {
 public:
     /// Construct builder with configuration
+    /// Result type for factory methods: builder + axes pair
+    using Setup = std::expected<std::pair<PriceTableBuilder, PriceTableAxes<N>>, PriceTableError>;
+
     explicit PriceTableBuilder(PriceTableConfig config);
 
     /// Build price table surface
@@ -80,21 +83,19 @@ public:
     /// @param volatility Volatility values (must be > 0)
     /// @param rate Risk-free rate values (may be negative)
     /// @param K_ref Reference strike price (must be > 0)
-    /// @param grid_spec PDE spatial grid specification
-    /// @param n_time Number of time steps
+    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
-    /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
+    /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
     /// @return Pair of (builder, axes) or error
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    static Setup
     from_vectors(
         std::vector<double> moneyness,
         std::vector<double> maturity,
         std::vector<double> volatility,
         std::vector<double> rate,
         double K_ref,
-        GridSpec<double> grid_spec,
-        size_t n_time,
+        PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0);
@@ -110,21 +111,19 @@ public:
     /// @param maturities Time to expiration values in years (must be > 0)
     /// @param volatilities Volatility values (must be > 0)
     /// @param rates Risk-free rate values (may be negative)
-    /// @param grid_spec PDE spatial grid specification
-    /// @param n_time Number of time steps
+    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
-    /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
+    /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
     /// @return Pair of (builder, axes) or error
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    static Setup
     from_strikes(
         double spot,
         std::vector<double> strikes,
         std::vector<double> maturities,
         std::vector<double> volatilities,
         std::vector<double> rates,
-        GridSpec<double> grid_spec,
-        size_t n_time,
+        PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0);
@@ -136,16 +135,14 @@ public:
     /// Uses chain.dividend_yield.
     ///
     /// @param chain Option chain data
-    /// @param grid_spec PDE spatial grid specification
-    /// @param n_time Number of time steps
+    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
-    /// @param max_failure_rate Maximum tolerable failure rate, 0.0 = strict, 0.1 = allow 10% (default 0.0)
+    /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
     /// @return Pair of (builder, axes) or error
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    static Setup
     from_chain(
         const OptionChain& chain,
-        GridSpec<double> grid_spec,
-        size_t n_time,
+        PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         double max_failure_rate = 0.0);
 
@@ -156,16 +153,14 @@ public:
     /// the specified IV error tolerance.
     ///
     /// @param chain Option chain (provides domain bounds from strikes, maturities, vols, rates)
-    /// @param grid_spec PDE spatial grid specification
-    /// @param n_time Number of time steps
+    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param accuracy Grid accuracy parameters (controls target error and point allocation)
     /// @return Pair of (builder, axes) or error
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    static Setup
     from_chain_auto(
         const OptionChain& chain,
-        GridSpec<double> grid_spec,
-        size_t n_time,
+        PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         const PriceTableGridAccuracyParams<4>& accuracy = {});
 
@@ -179,7 +174,7 @@ public:
     /// @param pde_profile Accuracy profile for PDE grid/time domain estimation
     /// @param type Option type (PUT or CALL)
     /// @return Pair of (builder, axes) or error
-    static std::expected<std::pair<PriceTableBuilder<4>, PriceTableAxes<4>>, PriceTableError>
+    static Setup
     from_chain_auto_profile(
         const OptionChain& chain,
         PriceTableGridProfile grid_profile = PriceTableGridProfile::High,
@@ -291,6 +286,11 @@ private:
     };
     /// Generate batch of AmericanOptionParams from axes
     [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
+        const PriceTableAxes<N>& axes) const;
+
+    /// Estimate PDE grid from batch parameters using pde_accuracy config
+    [[nodiscard]] std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
+        const std::vector<AmericanOptionParams>& batch,
         const PriceTableAxes<N>& axes) const;
 
     /// Solve batch of options with snapshot registration
