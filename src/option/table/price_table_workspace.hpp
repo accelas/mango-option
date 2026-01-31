@@ -114,7 +114,7 @@ public:
     /// Load error codes
     enum class LoadError {
         NOT_ARROW_FILE,              // Missing "ARROW1" magic
-        UNSUPPORTED_VERSION,         // format_version not in {1, 2}
+        UNSUPPORTED_VERSION,         // format_version != 2
         INSUFFICIENT_GRID_POINTS,    // n < 4 for any axis
         SIZE_MISMATCH,               // Array length doesn't match metadata
         COEFFICIENT_SIZE_MISMATCH,   // coeffs.size() != n_m×n_tau×n_sigma×n_r

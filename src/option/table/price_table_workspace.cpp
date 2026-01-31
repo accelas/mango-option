@@ -664,19 +664,17 @@ PriceTableWorkspace::load(const std::string& filepath)
         return std::unexpected(LoadError::SCHEMA_MISMATCH);
     }
     uint32_t format_version = version_uint32->value;
-    if (format_version != 1 && format_version != 2) {
+    if (format_version != 2) {
         return std::unexpected(LoadError::UNSUPPORTED_VERSION);
     }
 
-    // 7b. Read surface_content if v2 (default to 0 = RawPrice for v1)
+    // 7b. Read surface_content
     uint8_t surface_content = 0;
-    if (format_version >= 2) {
-        auto sc_scalar = get_scalar("surface_content");
-        if (sc_scalar) {
-            auto sc_uint8 = std::dynamic_pointer_cast<arrow::UInt8Scalar>(sc_scalar);
-            if (sc_uint8) {
-                surface_content = sc_uint8->value;
-            }
+    auto sc_scalar = get_scalar("surface_content");
+    if (sc_scalar) {
+        auto sc_uint8 = std::dynamic_pointer_cast<arrow::UInt8Scalar>(sc_scalar);
+        if (sc_uint8) {
+            surface_content = sc_uint8->value;
         }
     }
 
