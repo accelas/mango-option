@@ -2,7 +2,9 @@
 #include "src/option/table/american_price_surface.hpp"
 #include "src/option/european_option.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace mango {
 
@@ -25,14 +27,16 @@ AmericanPriceSurface::create(
     }
 
     const auto& meta = eep_surface->metadata();
-    if (meta.content != SurfaceContent::EarlyExercisePremium) {
+    if (meta.content != SurfaceContent::EarlyExercisePremium &&
+        meta.content != SurfaceContent::RawPrice) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidBounds, 0.0, 0});
     }
 
-    // EEP decomposition assumes continuous dividend yield only.
-    // Discrete dividends require a different PDE formulation (jump conditions)
-    // that the current EEP surface does not support.
+    // Discrete dividends are not supported by either content type currently.
+    // EEP decomposition assumes continuous dividend yield only;
+    // RawPrice surfaces with discrete dividends require jump-condition handling
+    // that is not yet implemented.
     if (!meta.discrete_dividends.empty()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidBounds, 0.0, 0});
@@ -49,6 +53,11 @@ AmericanPriceSurface::create(
 
 double AmericanPriceSurface::price(double spot, double strike, double tau,
                                    double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::RawPrice) {
+        assert(strike == K_ref_ && "RawPrice surfaces require strike == K_ref");
+        double m = spot / K_ref_;
+        return surface_->value({m, tau, sigma, rate});
+    }
     double m = spot / strike;
     double eep = surface_->value({m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
@@ -80,6 +89,9 @@ double AmericanPriceSurface::gamma(double spot, double strike, double tau,
 
 double AmericanPriceSurface::vega(double spot, double strike, double tau,
                                   double sigma, double rate) const {
+    if (surface_->metadata().content == SurfaceContent::RawPrice) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
     double m = spot / strike;
     double eep_vega = (strike / K_ref_) * surface_->partial(2, {m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
@@ -106,6 +118,38 @@ const PriceTableSurface<4>& AmericanPriceSurface::eep_surface() const {
 
 const PriceTableMetadata& AmericanPriceSurface::metadata() const {
     return surface_->metadata();
+}
+
+double AmericanPriceSurface::m_min() const noexcept {
+    return surface_->metadata().m_min;
+}
+
+double AmericanPriceSurface::m_max() const noexcept {
+    return surface_->metadata().m_max;
+}
+
+double AmericanPriceSurface::tau_min() const noexcept {
+    return surface_->axes().grids[1].front();
+}
+
+double AmericanPriceSurface::tau_max() const noexcept {
+    return surface_->axes().grids[1].back();
+}
+
+double AmericanPriceSurface::sigma_min() const noexcept {
+    return surface_->axes().grids[2].front();
+}
+
+double AmericanPriceSurface::sigma_max() const noexcept {
+    return surface_->axes().grids[2].back();
+}
+
+double AmericanPriceSurface::rate_min() const noexcept {
+    return surface_->axes().grids[3].front();
+}
+
+double AmericanPriceSurface::rate_max() const noexcept {
+    return surface_->axes().grids[3].back();
 }
 
 }  // namespace mango
