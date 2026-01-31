@@ -299,30 +299,26 @@ inline PriceTableGridAccuracyParams<4> grid_accuracy_profile(
     PriceTableGridProfile profile)
 {
     PriceTableGridAccuracyParams<4> params;
+    // Uniform curvature weights across all profiles: sigma gets 2.5x weight
+    // (highest curvature from vega non-linearity), rate gets 0.6x (nearly linear).
+    params.curvature_weights = {1.0, 1.0, 2.5, 0.6};
+    params.min_points = 4;  // B-spline minimum
     switch (profile) {
         case PriceTableGridProfile::Low:
-            params.target_iv_error = 0.0005;  // 5 bps target
-            params.min_points = 6;
+            params.target_iv_error = 5e-4;   // → 8x8x20x5
             params.max_points = 80;
-            params.curvature_weights = {1.0, 1.0, 1.7, 0.6};
             break;
         case PriceTableGridProfile::Medium:
-            params.target_iv_error = 0.0002;  // 2 bps target
-            params.min_points = 8;
+            params.target_iv_error = 1e-4;   // → 12x12x30x8
             params.max_points = 120;
-            params.curvature_weights = {1.0, 1.0, 2.0, 0.6};
             break;
         case PriceTableGridProfile::High:
-            params.target_iv_error = 0.0001;  // 1 bps target
-            params.min_points = 10;
+            params.target_iv_error = 2e-5;   // → 18x18x45x11
             params.max_points = 160;
-            params.curvature_weights = {1.0, 1.0, 2.5, 0.6};
             break;
         case PriceTableGridProfile::Ultra:
-            params.target_iv_error = 0.00005;  // 0.5 bps target
-            params.min_points = 12;
+            params.target_iv_error = 7e-6;   // → 24x24x58x14
             params.max_points = 200;
-            params.curvature_weights = {1.0, 1.0, 3.0, 0.6};
             break;
     }
     return params;
