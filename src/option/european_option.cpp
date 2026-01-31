@@ -67,11 +67,12 @@ double EuropeanOptionResult::compute_delta(double S) const {
     double q = params_.dividend_yield;
 
     if (tau <= 0.0 || sigma <= 0.0) {
-        // Edge case: delta is ±1 for ITM, 0 for OTM
+        // Edge case: discounted delta for ITM, 0 for OTM
+        double exp_qt = std::exp(-q * tau);
         if (params_.type == OptionType::PUT) {
-            return (S < params_.strike) ? -1.0 : 0.0;
+            return (S < params_.strike) ? -exp_qt : 0.0;
         } else {
-            return (S > params_.strike) ? 1.0 : 0.0;
+            return (S > params_.strike) ? exp_qt : 0.0;
         }
     }
 

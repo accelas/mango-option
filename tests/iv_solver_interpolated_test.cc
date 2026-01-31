@@ -358,5 +358,33 @@ TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
     }
 }
 
+// Regression: raw-surface overload must reject EEP surfaces
+// Bug: Passing an EEP surface to create(shared_ptr) would silently
+// treat EEP values as raw prices, returning wrong IVs.
+TEST_F(IVSolverInterpolatedTest, RejectsEEPSurfaceInRawOverload) {
+    PriceTableAxes<4> eep_axes;
+    eep_axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    eep_axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
+    eep_axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
+    eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
+
+    std::vector<double> coeffs(5 * 4 * 4 * 4, 2.0);
+    PriceTableMetadata meta{
+        .K_ref = 100.0,
+        .dividend_yield = 0.0,
+        .m_min = 0.8,
+        .m_max = 1.2,
+        .content = SurfaceContent::EarlyExercisePremium,
+        .discrete_dividends = {}
+    };
+
+    auto surface = PriceTableSurface<4>::build(eep_axes, coeffs, meta);
+    ASSERT_TRUE(surface.has_value());
+
+    // Raw-surface overload must reject EEP content
+    auto result = IVSolverInterpolated::create(surface.value());
+    EXPECT_FALSE(result.has_value());
+}
+
 }  // namespace
 }  // namespace mango

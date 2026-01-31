@@ -279,4 +279,22 @@ TEST(EuropeanOptionTest, GammaVsFiniteDifferences) {
     EXPECT_NEAR(analytic_gamma, fd_gamma, 1e-4);
 }
 
+// Regression: zero-vol delta must apply dividend discount factor
+// Bug: Returned ±1 instead of ±e^{-qτ} when σ=0
+TEST(EuropeanOptionTest, ZeroVolDeltaWithDividendYield) {
+    PricingParams params;
+    params.spot = 90.0;
+    params.strike = 100.0;
+    params.maturity = 1.0;
+    params.rate = 0.05;
+    params.dividend_yield = 0.03;
+    params.type = OptionType::PUT;
+    params.volatility = 0.0;
+
+    auto result = EuropeanOptionSolver(params).solve();
+    // ITM put: delta = -exp(-q*tau) = -exp(-0.03)
+    double expected_delta = -std::exp(-0.03);
+    EXPECT_NEAR(result.delta(), expected_delta, 1e-10);
+}
+
 }  // namespace

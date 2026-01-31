@@ -6,6 +6,7 @@
 
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/price_table_metadata.hpp"
 #include "src/option/table/american_price_surface.hpp"
 #include "src/support/parallel.hpp"
 #include "src/math/root_finding.hpp"
@@ -28,6 +29,13 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
     // Extract metadata from surface
     const auto& axes = surface->axes();
     const auto& meta = surface->metadata();
+
+    // Reject EEP surfaces — use create(AmericanPriceSurface) overload instead
+    if (meta.content == SurfaceContent::EarlyExercisePremium) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize,
+            0.0));
+    }
 
     // Validate K_ref
     if (meta.K_ref <= 0.0) {

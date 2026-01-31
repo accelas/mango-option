@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "src/option/table/american_price_surface.hpp"
 #include "src/option/european_option.hpp"
+#include <algorithm>
+#include <cmath>
 
 namespace mango {
 
@@ -54,10 +56,11 @@ double AmericanPriceSurface::delta(double spot, double strike, double tau,
 
 double AmericanPriceSurface::gamma(double spot, double strike, double tau,
                                    double sigma, double rate) const {
-    double eps = spot * 1e-4;
+    double eps = std::max(spot * 1e-4, 1e-6);
+    double spot_dn = std::max(spot - eps, 1e-10);
     double d_up = delta(spot + eps, strike, tau, sigma, rate);
-    double d_dn = delta(spot - eps, strike, tau, sigma, rate);
-    return (d_up - d_dn) / (2.0 * eps);
+    double d_dn = delta(spot_dn, strike, tau, sigma, rate);
+    return (d_up - d_dn) / (spot + eps - spot_dn);
 }
 
 double AmericanPriceSurface::vega(double spot, double strike, double tau,
