@@ -669,6 +669,11 @@ PYBIND11_MODULE(mango_option, m) {
     // PriceTableSurface (4D B-spline interpolation)
     // =========================================================================
 
+    // SurfaceContent enum
+    py::enum_<mango::SurfaceContent>(m, "SurfaceContent")
+        .value("RawPrice", mango::SurfaceContent::RawPrice)
+        .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium);
+
     // PriceTableMetadata
     py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
         .def(py::init<>())
@@ -676,6 +681,7 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("dividend_yield", &mango::PriceTableMetadata::dividend_yield)
         .def_readwrite("m_min", &mango::PriceTableMetadata::m_min)
         .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
+        .def_readwrite("content", &mango::PriceTableMetadata::content)
         .def_readwrite("discrete_dividends", &mango::PriceTableMetadata::discrete_dividends);
 
     // PriceTableAxes<4>
@@ -847,7 +853,7 @@ PYBIND11_MODULE(mango_option, m) {
         .def("theta", &mango::AmericanPriceSurface::theta,
             py::arg("spot"), py::arg("strike"), py::arg("tau"),
             py::arg("sigma"), py::arg("rate"),
-            "Compute theta (dP/dtau)")
+            "Compute theta (dV/dt, calendar time, negative for decay)")
         .def_property_readonly("metadata", &mango::AmericanPriceSurface::metadata)
         .def("__repr__", [](const mango::AmericanPriceSurface& self) {
             return "<AmericanPriceSurface K_ref=" +

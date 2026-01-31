@@ -49,6 +49,28 @@ TEST(AmericanPriceSurfaceTest, RejectsNullSurface) {
     EXPECT_FALSE(result.has_value());
 }
 
+TEST(AmericanPriceSurfaceTest, RejectsDiscreteDividends) {
+    // EEP decomposition only supports continuous dividend yield
+    PriceTableAxes<4> axes;
+    axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
+    axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
+    axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
+
+    std::vector<double> coeffs(5 * 4 * 4 * 4, 2.0);
+    PriceTableMetadata meta{
+        .K_ref = 100.0,
+        .dividend_yield = 0.0,
+        .m_min = 0.8,
+        .m_max = 1.2,
+        .content = SurfaceContent::EarlyExercisePremium,
+        .discrete_dividends = {{0.25, 1.50}, {0.75, 1.50}}
+    };
+    auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
+    auto result = AmericanPriceSurface::create(surface, OptionType::PUT);
+    EXPECT_FALSE(result.has_value());
+}
+
 TEST(AmericanPriceSurfaceTest, PriceReconstructsCorrectly) {
     auto surface = make_test_surface(SurfaceContent::EarlyExercisePremium, 2.0, 0.02);
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);

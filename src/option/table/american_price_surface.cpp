@@ -30,6 +30,14 @@ AmericanPriceSurface::create(
             ValidationErrorCode::InvalidBounds, 0.0, 0});
     }
 
+    // EEP decomposition assumes continuous dividend yield only.
+    // Discrete dividends require a different PDE formulation (jump conditions)
+    // that the current EEP surface does not support.
+    if (!meta.discrete_dividends.empty()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, 0.0, 0});
+    }
+
     return AmericanPriceSurface(
         std::move(eep_surface), type, meta.K_ref, meta.dividend_yield);
 }
