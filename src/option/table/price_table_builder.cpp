@@ -199,15 +199,43 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     return batch;
 }
 
+/// Ensure n_sigma is large enough so the PDE domain covers [log(m_min), log(m_max)].
+/// The batch solves use spot=strike=K_ref (x0=0), so the grid half-width is
+/// n_sigma * max(σ√T).  If the moneyness axis extends beyond that, we bump n_sigma.
+template <size_t N>
+static void ensure_moneyness_coverage(
+    GridAccuracyParams& accuracy,
+    const std::vector<AmericanOptionParams>& batch,
+    const PriceTableAxes<N>& axes)
+{
+    const double log_m_min = std::log(axes.grids[0].front());
+    const double log_m_max = std::log(axes.grids[0].back());
+    const double required_half_width = std::max(std::abs(log_m_min), std::abs(log_m_max));
+
+    // Compute max σ√T across the batch (floor to avoid division by zero)
+    double max_sigma_sqrt_T = 0.0;
+    for (const auto& p : batch) {
+        max_sigma_sqrt_T = std::max(max_sigma_sqrt_T,
+                                     p.volatility * std::sqrt(p.maturity));
+    }
+    max_sigma_sqrt_T = std::max(max_sigma_sqrt_T, 1e-10);
+
+    constexpr double MARGIN = 1.1;  // 10% margin for boundary effects
+    double required_n_sigma = (required_half_width / max_sigma_sqrt_T) * MARGIN;
+    accuracy.n_sigma = std::max(accuracy.n_sigma, required_n_sigma);
+}
+
 template <size_t N>
 std::pair<GridSpec<double>, TimeDomain>
 PriceTableBuilder<N>::estimate_pde_grid(
     const std::vector<AmericanOptionParams>& batch,
     const PriceTableAxes<N>& axes) const
 {
+    auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
+    ensure_moneyness_coverage<N>(accuracy, batch, axes);
+
     auto [grid_spec, time_domain] = compute_global_grid_for_batch(
-        std::span<const AmericanOptionParams>(batch),
-        std::get<GridAccuracyParams>(config_.pde_grid));
+        std::span<const AmericanOptionParams>(batch), accuracy);
 
     // Extend time domain to cover max maturity from axes
     const double max_maturity = axes.grids[1].back();
@@ -297,12 +325,12 @@ PriceTableBuilder<N>::solve_batch(
                 const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
                 constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
 
-                if (max_sigma_sqrt_tau < 1e-10) {
-                    accuracy.n_sigma = 5.0;
-                } else {
-                    double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-                    accuracy.n_sigma = std::max(5.0, required_n_sigma);
-                }
+                const double safe_sigma_sqrt_tau = std::max(max_sigma_sqrt_tau, 1e-10);
+                double required_n_sigma = (max_abs_x / safe_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+                accuracy.n_sigma = std::max(5.0, required_n_sigma);
+
+                // Also ensure coverage of the moneyness axis
+                ensure_moneyness_coverage<N>(accuracy, batch, axes);
 
                 solver.set_grid_accuracy(accuracy);
                 return solver.solve_batch(batch, true);

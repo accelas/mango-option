@@ -197,7 +197,7 @@
   "moduleExtensions": {
     "//third_party:deps.bzl%non_bcr_deps": {
       "general": {
-        "bzlTransitiveDigest": "D2RhUPmekZlREThDxfuEhKBNA7RvfkFdNnJyDxpom3I=",
+        "bzlTransitiveDigest": "BKyZDkt4wLqVIo9FSpITcplvuCXCJPHJtIAteFL+9Rk=",
         "usagesDigest": "fyOJBWRT/fApqc/GtiV6fYLF0mFw5g3GkK9sRO4H+Aw=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},

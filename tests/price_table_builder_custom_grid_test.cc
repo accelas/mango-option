@@ -156,5 +156,181 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
     std::cout << std::endl;
 }
 
+// ===========================================================================
+// Regression tests for bugs found during code review
+// ===========================================================================
+
+// Regression: Auto-estimated PDE grid must cover wide moneyness axes
+// Bug: compute_global_grid_for_batch() used spot=strike=K_ref (x0=0) and
+// sized the domain solely from n_sigma * σ√T.  Wide moneyness axes could
+// fall outside the PDE grid, causing extrapolation failures in extract_tensor.
+TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
+    // Wide moneyness with LOW vol and SHORT maturity to trigger the bug.
+    // m ∈ [0.5, 2.0] → log(m) ∈ [-0.69, 0.69]
+    // All σ ≤ 0.15, T ≤ 0.25 → max(σ√T) = 0.15 * √0.25 = 0.075
+    // Without fix: n_sigma=5 → half-width = 0.375, does NOT cover |-0.69|.
+    // With fix: n_sigma bumped to ≥ (0.69/0.075)*1.1 ≈ 10.1
+    std::vector<double> moneyness = {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0};
+    std::vector<double> maturity = {0.04, 0.08, 0.17, 0.25};
+    std::vector<double> volatility = {0.10, 0.12, 0.14, 0.15};  // All small
+    std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
+
+    GridAccuracyParams accuracy;
+    accuracy.tol = 1e-2;  // Fast mode for test speed
+
+    auto setup = PriceTableBuilder<4>::from_vectors(
+        moneyness, maturity, volatility, rate,
+        100.0,                    // K_ref
+        accuracy,                 // auto-estimated PDE grid
+        OptionType::PUT,
+        0.02,                     // dividend_yield
+        0.0                       // strict: no failures allowed
+    );
+
+    ASSERT_TRUE(setup.has_value()) << "from_vectors failed";
+    auto& [builder, axes] = setup.value();
+
+    // Build the full table — this exercises estimate_pde_grid → solve_batch → extract_tensor
+    auto result = builder.build(axes);
+    ASSERT_TRUE(result.has_value())
+        << "build() failed — PDE grid likely did not cover moneyness axis";
+
+    // Verify no PDE or spline failures
+    EXPECT_EQ(result->failed_pde_slices, 0)
+        << "PDE failures indicate grid coverage issue";
+    EXPECT_EQ(result->failed_spline_points, 0)
+        << "Spline failures indicate extrapolation outside PDE domain";
+
+    // Verify surface returns sensible prices at extreme moneyness
+    auto& surface = result->surface;
+    ASSERT_NE(surface, nullptr);
+
+    // Deep ITM put (m=0.5 → spot/strike=0.5 → strike >> spot): high price
+    double deep_itm = surface->value({0.5, 0.17, 0.14, 0.05});
+    EXPECT_GT(deep_itm, 0.0) << "Deep ITM put should have positive price";
+    EXPECT_FALSE(std::isnan(deep_itm)) << "Deep ITM should not be NaN";
+
+    // Deep OTM put (m=2.0 → spot/strike=2.0 → spot >> strike): near zero
+    double deep_otm = surface->value({2.0, 0.17, 0.14, 0.05});
+    EXPECT_GE(deep_otm, 0.0) << "Put price should be non-negative";
+    EXPECT_FALSE(std::isnan(deep_otm)) << "Deep OTM should not be NaN";
+}
+
+// Verify GridAccuracyParams in PriceTableConfig actually drives grid choice
+TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
+    std::vector<double> moneyness = {0.9, 0.95, 1.0, 1.05, 1.1};
+    std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
+    std::vector<double> volatility = {0.15, 0.20, 0.25, 0.30};
+    std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
+
+    // Build with Coarse accuracy (few spatial points)
+    GridAccuracyParams coarse;
+    coarse.tol = 1e-1;
+    coarse.min_spatial_points = 51;
+    coarse.max_spatial_points = 51;
+
+    auto setup_coarse = PriceTableBuilder<4>::from_vectors(
+        moneyness, maturity, volatility, rate,
+        100.0, coarse, OptionType::PUT, 0.02);
+
+    ASSERT_TRUE(setup_coarse.has_value());
+    auto& [builder_coarse, axes_coarse] = setup_coarse.value();
+    auto result_coarse = builder_coarse.build(axes_coarse);
+    ASSERT_TRUE(result_coarse.has_value());
+
+    // Build with Fine accuracy (many spatial points)
+    GridAccuracyParams fine;
+    fine.tol = 1e-4;
+    fine.min_spatial_points = 401;
+    fine.max_spatial_points = 401;
+
+    auto setup_fine = PriceTableBuilder<4>::from_vectors(
+        moneyness, maturity, volatility, rate,
+        100.0, fine, OptionType::PUT, 0.02);
+
+    ASSERT_TRUE(setup_fine.has_value());
+    auto& [builder_fine, axes_fine] = setup_fine.value();
+    auto result_fine = builder_fine.build(axes_fine);
+    ASSERT_TRUE(result_fine.has_value());
+
+    // Both should succeed with no failures
+    EXPECT_EQ(result_coarse->failed_pde_slices, 0);
+    EXPECT_EQ(result_fine->failed_pde_slices, 0);
+
+    // ATM put prices from both
+    double price_coarse = result_coarse->surface->value({1.0, 0.5, 0.20, 0.05});
+    double price_fine   = result_fine->surface->value({1.0, 0.5, 0.20, 0.05});
+
+    // Both should be reasonable ATM put prices
+    EXPECT_GT(price_coarse, 0.0);
+    EXPECT_GT(price_fine, 0.0);
+    EXPECT_LT(price_coarse, 20.0);
+    EXPECT_LT(price_fine, 20.0);
+
+    // Different grid resolutions should produce measurably different results
+    // (51 vs 401 points is a large enough gap to cause observable difference)
+    double diff = std::abs(price_coarse - price_fine);
+    EXPECT_GT(diff, 1e-6) << "Accuracy params should influence the result";
+    EXPECT_LT(diff, 2.0) << "Prices should still be in the same ballpark";
+}
+
+// Regression: Explicit-grid fallback path must also cover wide moneyness
+// Bug: When an explicit grid violates solver constraints, the fallback
+// auto-estimation path ignored moneyness axis bounds (same root cause as above).
+TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
+    // Use a coarse explicit grid to trigger the fallback path.
+    // Uniform(-1.0, 1.0, 21): dx = 2.0/20 = 0.1 > MAX_DX (0.05) → fallback
+    auto coarse_grid = GridSpec<double>::uniform(-1.0, 1.0, 21).value();
+    ExplicitPDEGrid explicit_pde{coarse_grid, 200};
+
+    // Wide moneyness + low vol/short maturity (same scenario as AutoGridCoversWideMoneyness)
+    std::vector<double> moneyness = {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0};
+    std::vector<double> maturity = {0.04, 0.08, 0.17, 0.25};
+    std::vector<double> volatility = {0.10, 0.12, 0.14, 0.15};
+    std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
+
+    auto setup = PriceTableBuilder<4>::from_vectors(
+        moneyness, maturity, volatility, rate,
+        100.0,
+        explicit_pde,             // triggers fallback due to coarse spacing
+        OptionType::PUT,
+        0.02,
+        0.0                       // strict
+    );
+
+    // from_vectors may reject if explicit grid doesn't cover log(m) range
+    // (the coverage check at build() line 75-84 only applies to explicit grids
+    // that pass constraints — for fallback, we need to get past from_vectors first)
+    // Note: from_vectors doesn't do the coverage check, build() does.
+    ASSERT_TRUE(setup.has_value()) << "from_vectors failed";
+    auto& [builder, axes] = setup.value();
+
+    auto result = builder.build(axes);
+
+    // The explicit grid [-1, 1] doesn't cover log(0.5)=-0.69... wait, it does.
+    // But the explicit grid coverage check (lines 73-84) checks explicit grids:
+    // x_min_requested = log(0.5) = -0.69, x_min = -1.0 → covered.
+    // However the grid SPACING violates max_dx, so it hits the fallback path.
+    // The fallback must then produce a grid that covers the moneyness axis.
+    ASSERT_TRUE(result.has_value())
+        << "build() failed — fallback path did not cover moneyness axis";
+
+    EXPECT_EQ(result->failed_pde_slices, 0)
+        << "PDE failures in fallback path";
+    EXPECT_EQ(result->failed_spline_points, 0)
+        << "Spline failures indicate fallback grid under-coverage";
+
+    auto& surface = result->surface;
+    ASSERT_NE(surface, nullptr);
+
+    double deep_itm = surface->value({0.5, 0.17, 0.14, 0.05});
+    EXPECT_GT(deep_itm, 0.0);
+    EXPECT_FALSE(std::isnan(deep_itm));
+
+    double deep_otm = surface->value({2.0, 0.17, 0.14, 0.05});
+    EXPECT_GE(deep_otm, 0.0);
+    EXPECT_FALSE(std::isnan(deep_otm));
+}
+
 } // namespace
 } // namespace mango
