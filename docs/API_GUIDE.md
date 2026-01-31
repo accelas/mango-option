@@ -393,7 +393,18 @@ double vega  = aps.vega(spot, strike, tau, sigma, rate);
 | **Theta** | B-spline ∂EEP/∂τ + analytical European theta | Good: same as delta |
 | **Gamma** | B-spline ∂²EEP/∂m² + analytical European gamma | Good: O(h²) analytical second derivative |
 
-Delta, vega, and gamma are accurate enough for the IV solver's Newton iteration (where they drive convergence). Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: ∂²f/∂m² = (g″(x) − g′(x)) / m².
+Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: ∂²f/∂m² = (g″(x) − g′(x)) / m².
+
+**Measured accuracy** (interpolated vs PDE solver, σ=0.20, r=0.05, q=0.02):
+
+| Greek | Max Abs Error | Max Rel Error | Notes |
+|---|---|---|---|
+| **Price** | $0.086 | 1.9% | |
+| **Delta** | 0.0087 | 2.8% | |
+| **Gamma** | 0.0024 | 7.3% | Worst at short τ; < 1.3% for τ ≥ 0.5 |
+| **Theta** | $0.15 | 3.3% | |
+
+Accuracy degrades at short maturities (τ < 0.5yr) where Greeks have sharper curvature. When in doubt, use the PDE solver directly (`AmericanOptionSolver`) for authoritative Greeks.
 
 ### Factory Methods
 
