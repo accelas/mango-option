@@ -78,12 +78,13 @@ double AmericanPriceSurface::theta(double spot, double strike, double tau,
                                    double sigma, double rate) const {
     double m = spot / strike;
     // partial(1, ...) gives dE/d(tau) in time-to-expiry space.
-    // European theta() returns dV/dt (calendar time) = -dV/d(tau).
-    // Since we want dP/d(tau): theta = (K/K_ref) * dE/d(tau) - eu.theta()
-    double eep_theta = (strike / K_ref_) * surface_->partial(1, {m, tau, sigma, rate});
+    // Convert to calendar time: dV/dt = -dV/d(tau).
+    // European theta() already returns dV/dt (calendar time).
+    // theta = -(K/K_ref) * dE/d(tau) + eu.theta()
+    double eep_dtau = (strike / K_ref_) * surface_->partial(1, {m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         PricingParams(spot, strike, tau, rate, dividend_yield_, type_, sigma)).solve().value();
-    return eep_theta - eu.theta();
+    return -eep_dtau + eu.theta();
 }
 
 const PriceTableSurface<4>& AmericanPriceSurface::eep_surface() const {

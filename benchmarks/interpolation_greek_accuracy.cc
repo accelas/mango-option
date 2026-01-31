@@ -89,15 +89,15 @@ const EEPFixture& GetEEPFixture() {
 struct GreekErrors {
     double max_err = 0.0;
     double sum_err = 0.0;
-    double max_bps = 0.0;  // basis points relative to price
+    double max_rel_pct = 0.0;  // max relative error in percent
     int count = 0;
 
-    void record(double interp, double ref, double ref_price) {
+    void record(double interp, double ref) {
         double err = std::abs(interp - ref);
         max_err = std::max(max_err, err);
         sum_err += err;
-        if (ref_price > 0.01) {
-            max_bps = std::max(max_bps, err / ref_price * 10000.0);
+        if (std::abs(ref) > 1e-6) {
+            max_rel_pct = std::max(max_rel_pct, err / std::abs(ref) * 100.0);
         }
         ++count;
     }
@@ -164,10 +164,13 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
                 throw std::runtime_error("PDE solver failed");
             }
 
-            // Finite-difference theta in tau space: dP/d(tau)
-            double p_up = solve_price(K, tau + theta_eps);
-            double p_dn = solve_price(K, tau - theta_eps);
-            double fd_theta = (p_up - p_dn) / (2.0 * theta_eps);
+            // FD theta in calendar time: dV/dt = -(dP/d(tau))
+            // Guard: tau - eps must stay positive
+            double tau_lo = std::max(tau - theta_eps, theta_eps);
+            double tau_hi = tau + theta_eps;
+            double p_up = solve_price(K, tau_hi);
+            double p_dn = solve_price(K, tau_lo);
+            double fd_theta = -(p_up - p_dn) / (tau_hi - tau_lo);
 
             refs.push_back({
                 result->value_at(spot),
@@ -202,10 +205,10 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
                 benchmark::DoNotOptimize(i_gamma);
                 benchmark::DoNotOptimize(i_theta);
 
-                price_err.record(i_price, ref.price, ref.price);
-                delta_err.record(i_delta, ref.delta, ref.price);
-                gamma_err.record(i_gamma, ref.gamma, ref.price);
-                theta_err.record(i_theta, ref.theta, ref.price);
+                price_err.record(i_price, ref.price);
+                delta_err.record(i_delta, ref.delta);
+                gamma_err.record(i_gamma, ref.gamma);
+                theta_err.record(i_theta, ref.theta);
             }
         }
     }
@@ -213,16 +216,16 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
     state.counters["n_combos"] = static_cast<double>(refs.size());
     state.counters["max_price_err"] = price_err.max_err;
     state.counters["mean_price_err"] = price_err.mean_err();
-    state.counters["max_price_bps"] = price_err.max_bps;
+    state.counters["max_price_rel%"] = price_err.max_rel_pct;
     state.counters["max_delta_err"] = delta_err.max_err;
     state.counters["mean_delta_err"] = delta_err.mean_err();
-    state.counters["max_delta_bps"] = delta_err.max_bps;
+    state.counters["max_delta_rel%"] = delta_err.max_rel_pct;
     state.counters["max_gamma_err"] = gamma_err.max_err;
     state.counters["mean_gamma_err"] = gamma_err.mean_err();
-    state.counters["max_gamma_bps"] = gamma_err.max_bps;
+    state.counters["max_gamma_rel%"] = gamma_err.max_rel_pct;
     state.counters["max_theta_err"] = theta_err.max_err;
     state.counters["mean_theta_err"] = theta_err.mean_err();
-    state.counters["max_theta_bps"] = theta_err.max_bps;
+    state.counters["max_theta_rel%"] = theta_err.max_rel_pct;
     state.SetLabel(std::format("{} combos", refs.size()));
 }
 BENCHMARK(BM_InterpolationGreekAccuracy)->Iterations(1);
@@ -257,19 +260,19 @@ public:
             out << std::format("  Combos tested: {:.0f}\n", get("n_combos"));
             out << "\n";
             out << std::format("  {:>8s}  {:>12s}  {:>12s}  {:>10s}\n",
-                               "Greek", "Max Error", "Mean Error", "Max (bps)");
+                               "Greek", "Max Error", "Mean Error", "Max Rel%");
             out << std::format("  {:>8s}  {:>12s}  {:>12s}  {:>10s}\n",
                                "--------", "------------", "------------", "----------");
-            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.1f}\n",
-                               "Price", get("max_price_err"), get("mean_price_err"), get("max_price_bps"));
-            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.1f}\n",
-                               "Delta", get("max_delta_err"), get("mean_delta_err"), get("max_delta_bps"));
-            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.1f}\n",
-                               "Gamma", get("max_gamma_err"), get("mean_gamma_err"), get("max_gamma_bps"));
-            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.1f}\n",
-                               "Theta", get("max_theta_err"), get("mean_theta_err"), get("max_theta_bps"));
+            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.2f}\n",
+                               "Price", get("max_price_err"), get("mean_price_err"), get("max_price_rel%"));
+            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.2f}\n",
+                               "Delta", get("max_delta_err"), get("mean_delta_err"), get("max_delta_rel%"));
+            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.2f}\n",
+                               "Gamma", get("max_gamma_err"), get("mean_gamma_err"), get("max_gamma_rel%"));
+            out << std::format("  {:>8s}  {:>12.6f}  {:>12.6f}  {:>10.2f}\n",
+                               "Theta", get("max_theta_err"), get("mean_theta_err"), get("max_theta_rel%"));
             out << "\n";
-            out << "  bps = |error| / reference_price * 10000\n";
+            out << "  Rel% = |error| / |reference| * 100\n";
         }
     }
 };

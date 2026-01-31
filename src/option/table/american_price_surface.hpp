@@ -40,7 +40,8 @@ public:
     double vega(double spot, double strike, double tau,
                 double sigma, double rate) const;
 
-    /// dP/d(tau) = (K/K_ref) * partial_1(E) - Theta_Eu (sign: EU theta is dV/dt)
+    /// Theta = dV/dt (calendar time, negative for decay)
+    /// = -(K/K_ref) * ∂E/∂τ + Theta_Eu
     double theta(double spot, double strike, double tau,
                  double sigma, double rate) const;
 

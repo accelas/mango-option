@@ -110,7 +110,8 @@ TEST(AmericanPriceSurfaceTest, ThetaMatchesFiniteDiff) {
     double eps = 1e-5;
     double p_up = aps->price(S, K, tau + eps, sigma, r);
     double p_dn = aps->price(S, K, tau - eps, sigma, r);
-    double fd_theta = (p_up - p_dn) / (2.0 * eps);
+    // theta is dV/dt (calendar) = -(dP/d(tau))
+    double fd_theta = -(p_up - p_dn) / (2.0 * eps);
 
     EXPECT_NEAR(aps->theta(S, K, tau, sigma, r), fd_theta, 0.01);
 }
