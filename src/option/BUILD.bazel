@@ -136,6 +136,7 @@ cc_library(
         ":american_option",
         ":iv_result",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         ":option_spec",
         "//src/math:root_finding",
         "//src/support:parallel",

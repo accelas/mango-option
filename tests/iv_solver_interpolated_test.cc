@@ -9,6 +9,7 @@
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/price_table_axes.hpp"
 #include "src/option/table/price_table_metadata.hpp"
+#include "src/option/table/american_price_surface.hpp"
 
 namespace mango {
 namespace {
@@ -281,6 +282,79 @@ TEST_F(IVSolverInterpolatedTest, ConvergenceWithinIterations) {
 
     if (result.has_value()) {
         EXPECT_LE(result->iterations, 10u);
+    }
+}
+
+TEST_F(IVSolverInterpolatedTest, CreateFromAmericanPriceSurface) {
+    // Build an EEP surface
+    PriceTableAxes<4> eep_axes;
+    eep_axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    eep_axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
+    eep_axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
+    eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
+
+    std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);  // constant EEP
+    PriceTableMetadata eep_meta{
+        .K_ref = 100.0,
+        .dividend_yield = 0.0,
+        .m_min = 0.8,
+        .m_max = 1.2,
+        .content = SurfaceContent::EarlyExercisePremium,
+        .discrete_dividends = {}
+    };
+
+    auto eep_surface = PriceTableSurface<4>::build(eep_axes, eep_coeffs, eep_meta);
+    ASSERT_TRUE(eep_surface.has_value());
+
+    auto aps = AmericanPriceSurface::create(eep_surface.value(), OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
+
+    auto solver = IVSolverInterpolated::create(std::move(*aps));
+    EXPECT_TRUE(solver.has_value());
+}
+
+TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
+    // Build an EEP surface
+    PriceTableAxes<4> eep_axes;
+    eep_axes.grids[0] = {0.8, 0.9, 1.0, 1.1, 1.2};
+    eep_axes.grids[1] = {0.25, 0.5, 1.0, 2.0};
+    eep_axes.grids[2] = {0.10, 0.20, 0.30, 0.40};
+    eep_axes.grids[3] = {0.02, 0.04, 0.06, 0.08};
+
+    std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
+    PriceTableMetadata eep_meta{
+        .K_ref = 100.0,
+        .dividend_yield = 0.0,
+        .m_min = 0.8,
+        .m_max = 1.2,
+        .content = SurfaceContent::EarlyExercisePremium,
+        .discrete_dividends = {}
+    };
+
+    auto eep_surface = PriceTableSurface<4>::build(eep_axes, eep_coeffs, eep_meta);
+    ASSERT_TRUE(eep_surface.has_value());
+
+    auto aps = AmericanPriceSurface::create(eep_surface.value(), OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
+
+    auto solver = IVSolverInterpolated::create(std::move(*aps));
+    ASSERT_TRUE(solver.has_value());
+
+    IVQuery query{
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::PUT,
+        8.0     // market_price
+    };
+
+    auto result = solver->solve_impl(query);
+    // With synthetic data, accept success or graceful failure
+    if (result.has_value()) {
+        EXPECT_GT(result->implied_vol, 0.0);
+        EXPECT_LT(result->implied_vol, 5.0);
     }
 }
 

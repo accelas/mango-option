@@ -48,6 +48,7 @@
 
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_result.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <cmath>
@@ -91,6 +92,18 @@ public:
         std::shared_ptr<const PriceTableSurface<4>> surface,
         const IVSolverInterpolatedConfig& config = {});
 
+    /// Create solver from AmericanPriceSurface (EEP mode)
+    ///
+    /// When created this way, eval_price() and compute_vega() delegate to the
+    /// AmericanPriceSurface which reconstructs full American prices from EEP data.
+    ///
+    /// @param american_surface Pre-built AmericanPriceSurface
+    /// @param config Solver configuration
+    /// @return IV solver or ValidationError
+    static std::expected<IVSolverInterpolated, ValidationError> create(
+        AmericanPriceSurface american_surface,
+        const IVSolverInterpolatedConfig& config = {});
+
     /// Solve for implied volatility (single query)
     ///
     /// Uses Newton-Raphson method with B-spline price interpolation.
@@ -127,6 +140,7 @@ private:
     {}
 
     std::shared_ptr<const PriceTableSurface<4>> surface_;
+    std::optional<AmericanPriceSurface> american_surface_;
     double K_ref_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
     IVSolverInterpolatedConfig config_;

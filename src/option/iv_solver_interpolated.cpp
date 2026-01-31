@@ -6,6 +6,7 @@
 
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include "src/support/parallel.hpp"
 #include "src/math/root_finding.hpp"
 #include <algorithm>
@@ -63,13 +64,49 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
         config);
 }
 
+std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
+    AmericanPriceSurface american_surface,
+    const IVSolverInterpolatedConfig& config)
+{
+    const auto& eep = american_surface.eep_surface();
+    const auto& axes = eep.axes();
+    const auto& meta = eep.metadata();
+
+    if (meta.K_ref <= 0.0) {
+        return std::unexpected(ValidationError(ValidationErrorCode::InvalidStrike, meta.K_ref));
+    }
+
+    if (axes.grids[0].empty() || axes.grids[1].empty() ||
+        axes.grids[2].empty() || axes.grids[3].empty()) {
+        return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, 0.0));
+    }
+
+    auto m_range = std::make_pair(meta.m_min, meta.m_max);
+    auto tau_range = std::make_pair(axes.grids[1].front(), axes.grids[1].back());
+    auto sigma_range = std::make_pair(axes.grids[2].front(), axes.grids[2].back());
+    auto r_range = std::make_pair(axes.grids[3].front(), axes.grids[3].back());
+
+    // Create solver with null surface_ (american_surface_ will be used instead)
+    IVSolverInterpolated solver(nullptr, meta.K_ref, m_range, tau_range, sigma_range, r_range, config);
+    solver.american_surface_ = std::move(american_surface);
+    return solver;
+}
+
 double IVSolverInterpolated::eval_price(double moneyness, double maturity, double vol, double rate, double strike) const {
+    if (american_surface_) {
+        double spot = moneyness * strike;
+        return american_surface_->price(spot, strike, maturity, vol, rate);
+    }
     double price_Kref = surface_->value({moneyness, maturity, vol, rate});
     double scale_factor = strike / K_ref_;
     return price_Kref * scale_factor;
 }
 
 double IVSolverInterpolated::compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const {
+    if (american_surface_) {
+        double spot = moneyness * strike;
+        return american_surface_->vega(spot, strike, maturity, vol, rate);
+    }
     double vega_Kref = surface_->partial(2, {moneyness, maturity, vol, rate});
     const double scale_factor = strike / K_ref_;
     return vega_Kref * scale_factor;
