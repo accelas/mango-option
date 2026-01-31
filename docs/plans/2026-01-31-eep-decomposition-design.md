@@ -74,7 +74,7 @@ Note: theta sign convention follows the existing codebase (negative for time dec
 
 EEP decomposition assumes:
 - **Flat rate only.** Yield curves are collapsed to zero rate as in the existing surface.
-- **Continuous dividend yield only within each table segment.** Discrete dividends are handled at a higher level by segmenting the maturity axis at dividend dates, with each segment using its own table. Within any single table, the PDE solves use continuous dividend yield only, so the closed-form European formula and homogeneity argument hold. No validation against `discrete_dividends` is needed inside the builder or surface — the segmentation layer is responsible for routing queries to the correct table.
+- **Continuous dividend yield only.** Discrete dividends are not yet functional in the codebase: `PricingParams` carries a `discrete_dividends` field, but the PDE solver (`BlackScholesPDE`) ignores it, and `NormalizedBatchSolver` rejects batches that contain discrete dividends. The EEP decomposition inherits this limitation — the closed-form European formula and the homogeneity argument both require continuous yield only. No new validation is needed since the existing pipeline already rejects discrete dividends.
 
 Validation at query time in `AmericanPriceSurface::create()`:
 ```cpp
@@ -336,4 +336,4 @@ Serialization (Arrow IPC or any save/load path) must:
 1. **Discretization mismatch**: The PDE-computed P_Am and closed-form P_Eu use different numerical methods. The EEP tensor absorbs this difference. As long as the same `EuropeanOptionSolver` is used at build and query time, the decomposition is consistent.
 2. **Cancellation near τ → 0**: Mitigated by softplus regularization and asymptotic cross-checks. See "Cancellation near τ → 0" section.
 3. **Backward compatibility**: Format version bump from 1 to 2. Old surfaces load as `RawPrice` (no behavior change). New surfaces with `EarlyExercisePremium` require updated readers.
-4. **Discrete dividends**: Handled by the existing segmentation layer, which splits the maturity axis at dividend dates. Each segment's table uses continuous dividend yield only, so EEP decomposition applies within each segment without modification.
+4. **Discrete dividends**: Not yet functional in the PDE solver or price table pipeline. `BlackScholesPDE` ignores the `discrete_dividends` field, and `NormalizedBatchSolver` rejects batches containing it. EEP decomposition inherits this limitation. When discrete dividend support is added (likely via maturity segmentation with per-segment tables), EEP decomposition will apply within each segment without modification.
