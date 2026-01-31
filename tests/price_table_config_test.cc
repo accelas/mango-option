@@ -28,5 +28,16 @@ TEST(PriceTableConfigTest, WithDiscreteDividends) {
     EXPECT_EQ(config.discrete_dividends.size(), 2);
 }
 
+TEST(PriceTableConfigTest, DefaultStoreEepIsFalse) {
+    PriceTableConfig config;
+    EXPECT_FALSE(config.store_eep);
+}
+
+TEST(PriceTableConfigTest, CanEnableStoreEep) {
+    PriceTableConfig config;
+    config.store_eep = true;
+    EXPECT_TRUE(config.store_eep);
+}
+
 } // namespace
 } // namespace mango

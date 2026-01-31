@@ -26,5 +26,21 @@ TEST(PriceTableMetadataTest, WithDiscreteDividends) {
     EXPECT_DOUBLE_EQ(meta.discrete_dividends[0].second, 2.50);
 }
 
+TEST(PriceTableMetadataTest, DefaultContentIsRawPrice) {
+    PriceTableMetadata meta;
+    EXPECT_EQ(meta.content, SurfaceContent::RawPrice);
+}
+
+TEST(PriceTableMetadataTest, CanSetToEEP) {
+    PriceTableMetadata meta;
+    meta.content = SurfaceContent::EarlyExercisePremium;
+    EXPECT_EQ(meta.content, SurfaceContent::EarlyExercisePremium);
+}
+
+TEST(PriceTableMetadataTest, SurfaceContentEnumValues) {
+    EXPECT_EQ(static_cast<uint8_t>(SurfaceContent::RawPrice), 0);
+    EXPECT_EQ(static_cast<uint8_t>(SurfaceContent::EarlyExercisePremium), 1);
+}
+
 } // namespace
 } // namespace mango
