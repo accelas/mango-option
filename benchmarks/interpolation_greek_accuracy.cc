@@ -120,11 +120,31 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
     const std::vector<double> maturities = {0.25, 0.5, 1.0, 2.0};
 
     // Pre-compute PDE reference (expensive, do once)
+    // PDE solver gives delta/gamma from the spatial grid at tau=T.
+    // For theta, AmericanOptionResult::theta() returns dV/dt near expiry (τ≈0),
+    // NOT at the query tau. So we compute theta via finite differences on price:
+    //   theta_fd = (P(tau+eps) - P(tau-eps)) / (2*eps)  [in tau space]
     struct RefGreeks {
         double price, delta, gamma, theta;
     };
     std::vector<RefGreeks> refs;
     refs.reserve(strikes.size() * maturities.size());
+
+    auto solve_price = [&](double K, double tau) -> double {
+        AmericanOptionParams p(spot, K, tau, rate, fix.dividend_yield, OptionType::PUT, sigma);
+        auto [gs, td] = estimate_grid_for_option(p);
+        size_t n = gs.n_points();
+        std::pmr::synchronized_pool_resource pool;
+        std::pmr::vector<double> buf(PDEWorkspace::required_size(n), &pool);
+        auto ws = PDEWorkspace::from_buffer(buf, n);
+        if (!ws) throw std::runtime_error("Failed to create workspace");
+        AmericanOptionSolver solver(p, ws.value());
+        auto r = solver.solve();
+        if (!r) throw std::runtime_error("PDE solver failed");
+        return r->value_at(spot);
+    };
+
+    constexpr double theta_eps = 1.0 / 365.0;  // 1 day
 
     for (double K : strikes) {
         for (double tau : maturities) {
@@ -143,11 +163,17 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
             if (!result) {
                 throw std::runtime_error("PDE solver failed");
             }
+
+            // Finite-difference theta in tau space: dP/d(tau)
+            double p_up = solve_price(K, tau + theta_eps);
+            double p_dn = solve_price(K, tau - theta_eps);
+            double fd_theta = (p_up - p_dn) / (2.0 * theta_eps);
+
             refs.push_back({
                 result->value_at(spot),
                 result->delta(),
                 result->gamma(),
-                result->theta()
+                fd_theta
             });
         }
     }
@@ -179,9 +205,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
                 price_err.record(i_price, ref.price, ref.price);
                 delta_err.record(i_delta, ref.delta, ref.price);
                 gamma_err.record(i_gamma, ref.gamma, ref.price);
-                // PDE theta is dV/dt (calendar), interpolated theta is dP/d(tau).
-                // They differ by sign: dV/dt = -dV/d(tau). Compare with sign flip.
-                theta_err.record(i_theta, -ref.theta, ref.price);
+                theta_err.record(i_theta, ref.theta, ref.price);
             }
         }
     }
