@@ -9,6 +9,12 @@ filegroup(
 )
 
 cc_library(
+    name = "price_surface_concept",
+    hdrs = ["price_surface_concept.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "price_table_axes",
     hdrs = ["price_table_axes.hpp"],
     deps = [
