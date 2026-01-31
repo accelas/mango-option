@@ -103,7 +103,7 @@ Batch processing (64 options): 10x speedup with OpenMP (~0.13ms/option parallel 
 | Method | Time/IV | Accuracy |
 |---|---|---|
 | FDM-based | ~19ms | Ground truth |
-| Interpolated (B-spline) | ~3.5us | 12-48 bps |
+| Interpolated (B-spline) | ~3.5us | 5-48 bps |
 
 The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation.
 
@@ -113,12 +113,12 @@ The table below shows the accuracy/speed tradeoff across grid density profiles, 
 
 | Profile | Grid (mxTxσxr) | PDE solves | Interp IV | Max err (bps) | Avg err (bps) |
 |---|---:|---:|---:|---:|---:|
-| Low | 8x8x20x5 | 100 | ~5us | 179 | 63 |
-| Medium | 12x12x30x8 | 240 | ~5us | 62 | 21 |
-| High (default) | 18x18x45x11 | 495 | ~5us | 23 | 7.8 |
-| Ultra | 24x24x58x14 | 812 | ~5us | 12 | 4.1 |
+| Low | 8x8x20x5 | 100 | ~5us | 84 | 48 |
+| Medium | 12x12x30x8 | 240 | ~4us | 66 | 22 |
+| High (default) | 18x18x45x11 | 495 | ~4us | 21 | 7.5 |
+| Ultra | 24x24x58x14 | 812 | ~4us | 11 | 5.1 |
 
-Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~8 bps average error. Ultra achieves ~4 bps at the cost of ~800 PDE solves during table construction.
+Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~8 bps average error. Ultra achieves ~5 bps at the cost of ~800 PDE solves during table construction.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 

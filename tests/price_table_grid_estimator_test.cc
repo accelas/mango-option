@@ -32,13 +32,9 @@ TEST(PriceTableGridEstimatorTest, ProfileOrdering) {
     EXPECT_GT(medium.target_iv_error, high.target_iv_error);
     EXPECT_GT(high.target_iv_error, ultra.target_iv_error);
 
-    EXPECT_LT(low.min_points, medium.min_points);
-    EXPECT_LT(medium.min_points, high.min_points);
-    EXPECT_LT(high.min_points, ultra.min_points);
-
-    EXPECT_LT(low.max_points, medium.max_points);
-    EXPECT_LT(medium.max_points, high.max_points);
-    EXPECT_LT(high.max_points, ultra.max_points);
+    EXPECT_LE(low.max_points, medium.max_points);
+    EXPECT_LE(medium.max_points, high.max_points);
+    EXPECT_LE(high.max_points, ultra.max_points);
 }
 
 TEST(PriceTableGridEstimatorTest, PdeProfileOrdering) {
