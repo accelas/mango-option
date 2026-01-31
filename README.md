@@ -16,7 +16,7 @@ The core C++ library exposes a pybind11-based Python module, so you can use it f
 
 - American option prices and Greeks (delta, gamma, theta, vega) from the PDE solver
 - Implied volatility via FDM (~19ms) or B-spline interpolation (~3.5us)
-- Pre-computed 4D price tables with EEP decomposition for sub-microsecond lookups (~500ns, ~9 bps accuracy)
+- Pre-computed 4D price tables for sub-microsecond lookups (~476ns, ~1 bps near-ATM)
 - Batch pricing with OpenMP (10x speedup on multi-core)
 - USDT tracing probes for production monitoring at zero overhead when disabled
 - A general-purpose PDE toolkit if you want to solve your own equations
@@ -100,27 +100,25 @@ Batch processing (64 options): 10x speedup with OpenMP (~0.13ms/option parallel 
 
 ### Implied Volatility
 
-| Method | Time/IV | Accuracy |
-|---|---|---|
-| FDM-based | ~19ms | Ground truth |
-| Interpolated (B-spline) | ~3.5us | 8-10 bps |
+| Method | Time/IV | Near-ATM | Full-chain |
+|---|---|---|---|
+| FDM-based | ~19ms | Ground truth | Ground truth |
+| Interpolated (B-spline) | ~3.5us | ~1 bps IV | ~$0.005 price RMSE |
 
-The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation. Price tables use EEP decomposition — they store the Early Exercise Premium instead of raw prices, removing the American free boundary discontinuity from the interpolated surface.
+The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation. EEP decomposition (P = P_European + EEP) improves interpolation accuracy by separating the smooth early exercise premium from the closed-form European component.
 
 ### Price Table Profiles
 
-The table below shows the accuracy/speed tradeoff across grid density profiles, measured on real SPY option data:
+The table below shows the accuracy/speed tradeoff across grid density profiles, measured on real SPY option data (7-day puts, strikes from 88% to 107% of spot):
 
-| Profile | Grid (mxTxσxr) | PDE solves | Interp IV | Max err (bps) | Avg err (bps) |
+| Profile | PDE solves | ATM (bps) | Near-OTM (bps) | Deep-OTM (bps) | Price RMSE |
 |---|---:|---:|---:|---:|---:|
-| Low | 8x8x14x6 | 84 | ~4us | 36 | 9.4 |
-| Medium | 10x10x20x8 | 160 | ~4us | 37 | 9.2 |
-| High (default) | 12x12x30x10 | 300 | ~4us | 37 | 8.4 |
-| Ultra | 15x15x43x12 | 516 | ~4us | 37 | 8.8 |
+| Low | 100 | 10.0 | 2.7 | 20.7 | $0.014 |
+| Medium | 240 | 4.4 | 3.0 | 22.5 | $0.008 |
+| High (default) | 495 | 0.1 | 2.8 | 22.2 | $0.005 |
+| Ultra | 812 | 0.2 | 3.3 | 22.6 | $0.005 |
 
-Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. With EEP decomposition, even the Low profile achieves ~9 bps average error — accuracy that previously required the highest grid densities with raw price interpolation. The max error plateaus around ~37 bps from a few deep OTM near-expiry options where the EEP is near zero.
-
-See the [API Guide](docs/API_GUIDE.md#price-table-pre-computation) for usage.
+IV error in bps is sensitive to vega: a constant ~$0.005 price error maps to <1 bps near-ATM but 20+ bps for deep OTM short-dated options where vega is tiny. Price RMSE is the stable metric across the full chain. Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control the density/speed tradeoff.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 

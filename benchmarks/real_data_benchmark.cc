@@ -19,6 +19,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/option/table/american_price_surface.hpp"
+#include "src/math/black_scholes_analytics.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include <benchmark/benchmark.h>
@@ -39,6 +40,65 @@ namespace {
 
 constexpr int kWarmupIterations = 5;
 constexpr double kMinBenchmarkTimeSec = 2.0;
+
+// ============================================================================
+// Accuracy bucketing by moneyness
+// ============================================================================
+
+enum class MoneynessBucket : int { DeepOTM = 0, NearOTM, ATM, ITM, COUNT };
+
+struct BucketStats {
+    size_t count = 0;
+    double sum_iv_err_bps = 0.0;
+    double max_iv_err_bps = 0.0;
+    double sum_price_err_sq = 0.0;
+    double sum_vw_sq = 0.0;  // sum of (vega * iv_err)^2
+    double sum_vega = 0.0;
+};
+
+// Classify put option: S/K > 1 means OTM for puts.
+MoneynessBucket classify_put(double spot, double strike) {
+    double m = spot / strike;
+    if (m > 1.05) return MoneynessBucket::DeepOTM;
+    if (m > 1.00) return MoneynessBucket::NearOTM;
+    if (m >= 0.97) return MoneynessBucket::ATM;
+    return MoneynessBucket::ITM;
+}
+
+const char* bucket_label(MoneynessBucket b) {
+    switch (b) {
+        case MoneynessBucket::DeepOTM: return "deep_otm";
+        case MoneynessBucket::NearOTM: return "near_otm";
+        case MoneynessBucket::ATM:     return "atm";
+        case MoneynessBucket::ITM:     return "itm";
+        default:                       return "unknown";
+    }
+}
+
+void emit_bucket_counters(benchmark::State& state,
+                          const std::array<BucketStats, 4>& buckets,
+                          double global_sum_price_err_sq, size_t global_count) {
+    for (int i = 0; i < static_cast<int>(MoneynessBucket::COUNT); ++i) {
+        const auto& b = buckets[i];
+        auto name = bucket_label(static_cast<MoneynessBucket>(i));
+        state.counters[std::format("{}_n", name)] = static_cast<double>(b.count);
+        if (b.count > 0) {
+            state.counters[std::format("{}_avg_bps", name)] =
+                b.sum_iv_err_bps / b.count;
+            state.counters[std::format("{}_max_bps", name)] = b.max_iv_err_bps;
+            state.counters[std::format("{}_price_rmse", name)] =
+                std::sqrt(b.sum_price_err_sq / b.count);
+            if (b.sum_vega > 0.0) {
+                state.counters[std::format("{}_vw_bps", name)] =
+                    std::sqrt(b.sum_vw_sq) / b.sum_vega;
+            }
+        }
+    }
+    if (global_count > 0) {
+        state.counters["price_rmse"] =
+            std::sqrt(global_sum_price_err_sq / global_count);
+    }
+}
 
 // ============================================================================
 // Helper functions
@@ -1071,11 +1131,13 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     double max_abs_error = 0.0;
     double sum_abs_error = 0.0;
+    double sum_price_err_sq = 0.0;
     size_t valid_count = 0;
     double last_iter_seconds = 0.0;
     double last_iter_iv_us = 0.0;
     double fdm_iter_seconds = 0.0;
     double fdm_iv_us = 0.0;
+    std::array<BucketStats, static_cast<int>(MoneynessBucket::COUNT)> buckets{};
 
     // Compute accuracy once (outside timed loop)
     for (const auto& query : queries) {
@@ -1087,6 +1149,23 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
             max_abs_error = std::max(max_abs_error, abs_error);
             sum_abs_error += abs_error;
             valid_count++;
+
+            // Bucketed metrics
+            double rate = get_zero_rate(query.rate, query.maturity);
+            double vega = bs_vega(SPOT, query.strike, query.maturity,
+                                  fdm_result->implied_vol, rate, DIVIDEND_YIELD);
+            double iv_err_bps = abs_error * 10000.0;
+            double price_err = vega * abs_error;
+            sum_price_err_sq += price_err * price_err;
+
+            auto bucket = classify_put(SPOT, query.strike);
+            auto& b = buckets[static_cast<int>(bucket)];
+            b.count++;
+            b.sum_iv_err_bps += iv_err_bps;
+            b.max_iv_err_bps = std::max(b.max_iv_err_bps, iv_err_bps);
+            b.sum_price_err_sq += price_err * price_err;
+            b.sum_vw_sq += (vega * iv_err_bps) * (vega * iv_err_bps);
+            b.sum_vega += vega;
         }
     }
 
@@ -1151,16 +1230,23 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         state.counters["fdm_iv_us"] = fdm_iv_us;
     }
 
+    // Bucketed accuracy counters
+    emit_bucket_counters(state, buckets, sum_price_err_sq, valid_count);
+
     const char* label = (profile == 0) ? "low" : (profile == 1 ? "medium" : (profile == 2 ? "high" : "ultra"));
-    state.SetLabel(std::format("{} profile, grid={}×{}×{}×{}, {} solves, interp_iv={:.2f}us, fdm_iv={:.2f}us, max={:.1f}bps, avg={:.1f}bps (target {:.1f}bps) {}",
+    // ATM bucket stats for label
+    const auto& atm = buckets[static_cast<int>(MoneynessBucket::ATM)];
+    double atm_avg = atm.count > 0 ? atm.sum_iv_err_bps / atm.count : 0.0;
+    double price_rmse = valid_count > 0 ? std::sqrt(sum_price_err_sq / valid_count) : 0.0;
+    state.SetLabel(std::format("{} profile, grid={}×{}×{}×{}, {} solves, interp_iv={:.2f}us, atm={:.1f}bps, price_rmse=${:.4f}, max={:.1f}bps, avg={:.1f}bps {}",
         label,
         n_m, n_tau, n_sigma, n_rate,
         table_result->n_pde_solves,
         last_iter_iv_us,
-        fdm_iv_us,
+        atm_avg,
+        price_rmse,
         max_err_bps,
         avg_err_bps,
-        target_bps,
         achieved ? "✓" : "✗"));
 
 

@@ -107,6 +107,7 @@ cc_binary(
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:american_price_surface",
+        "//src/math:black_scholes_analytics",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
