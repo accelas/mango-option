@@ -56,8 +56,8 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
     }
 
-    // Check positive maturity (strict > 0)
-    if (axes.grids[1].front() <= 0.0) {
+    // Check positive maturity (strict > 0, unless allow_tau_zero is set)
+    if (!allow_tau_zero_ && axes.grids[1].front() <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 1});
     }
 
@@ -136,7 +136,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
         .dividend_yield = config_.dividend_yield,
-        .content = SurfaceContent::EarlyExercisePremium,
+        .content = surface_content_,
         .discrete_dividends = config_.discrete_dividends
     };
 
@@ -264,13 +264,22 @@ PriceTableBuilder<N>::solve_batch(
     // This enables extract_tensor to access surfaces at each maturity point
     solver.set_snapshot_times(axes.grids[1]);  // axes.grids[1] = maturity axis
 
+    // Create setup callback to inject custom initial condition if set
+    BatchAmericanOptionSolver::SetupCallback setup_cb = nullptr;
+    if (custom_ic_) {
+        auto ic = *custom_ic_;  // copy for lambda capture
+        setup_cb = [ic](size_t /*index*/, AmericanOptionSolver& s) {
+            s.set_initial_condition(ic);
+        };
+    }
+
     return std::visit([&](auto&& grid) -> BatchAmericanOptionResult {
         using T = std::decay_t<decltype(grid)>;
 
         if constexpr (std::is_same_v<T, GridAccuracyParams>) {
             // Auto-estimate PDE grid from batch parameters
             auto custom_grid = estimate_pde_grid(batch, axes);
-            return solver.solve_batch(batch, true, nullptr, custom_grid);
+            return solver.solve_batch(batch, true, setup_cb, custom_grid);
         } else {
             // Explicit grid: check solver stability constraints
             const auto& grid_spec = grid.grid_spec;
@@ -312,7 +321,7 @@ PriceTableBuilder<N>::solve_batch(
                 const double max_maturity = axes.grids[1].back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
                 auto custom_grid = std::make_pair(grid_spec, time_domain);
-                return solver.solve_batch(batch, true, nullptr, custom_grid);
+                return solver.solve_batch(batch, true, setup_cb, custom_grid);
             } else {
                 // Grid violates constraints: fall back to auto-estimation
                 GridAccuracyParams accuracy;
@@ -339,7 +348,7 @@ PriceTableBuilder<N>::solve_batch(
                 ensure_moneyness_coverage<N>(accuracy, batch, axes);
 
                 solver.set_grid_accuracy(accuracy);
-                return solver.solve_batch(batch, true);
+                return solver.solve_batch(batch, true, setup_cb);
             }
         }
     }, config_.pde_grid);
@@ -448,7 +457,12 @@ PriceTableBuilder<N>::extract_tensor(
                         double normalized_price = spline.eval(log_moneyness[i]);
                         double american_price = K_ref * normalized_price;
 
-                        {
+                        if (surface_content_ == SurfaceContent::RawPrice) {
+                            // RawPrice mode: store price as function of moneyness
+                            // Divide by K_ref so the surface is scale-invariant
+                            tensor.view[i, j, σ_idx, r_idx] = normalized_price;
+                        } else {
+                            // EEP mode: subtract European price
                             double m = axes.grids[0][i];
                             double tau = axes.grids[1][j];
                             double sigma = axes.grids[2][σ_idx];
@@ -567,7 +581,7 @@ PriceTableBuilder<4>::from_vectors(
     if (!moneyness.empty() && moneyness.front() <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 0});
     }
-    if (!maturity.empty() && maturity.front() <= 0.0) {
+    if (!maturity.empty() && maturity.front() < 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 1});
     }
     if (!volatility.empty() && volatility.front() <= 0.0) {

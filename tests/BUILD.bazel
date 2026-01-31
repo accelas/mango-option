@@ -1392,6 +1392,17 @@ cc_test(
 )
 
 cc_test(
+    name = "price_table_builder_raw_price_test",
+    size = "small",
+    srcs = ["price_table_builder_raw_price_test.cc"],
+    deps = [
+        "//src/option/table:price_table_builder",
+        "//src/option/table:american_price_surface",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "american_option_custom_ic_test",
     size = "small",
     srcs = ["american_option_custom_ic_test.cc"],

@@ -58,6 +58,7 @@ cc_library(
     name = "price_table_config",
     hdrs = ["price_table_config.hpp"],
     deps = [
+        ":price_table_metadata",
         "//src/option:american_option",
         "//src/pde/core:grid",
     ],
