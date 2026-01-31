@@ -195,6 +195,18 @@ cc_test(
 )
 
 cc_test(
+    name = "european_option_test",
+    size = "small",
+    srcs = ["european_option_test.cc"],
+    deps = [
+        "//src/option:european_option",
+        "//src/option:option_concepts",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "option_concepts_test",
     size = "small",
     srcs = ["option_concepts_test.cc"],

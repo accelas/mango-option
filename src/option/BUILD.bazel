@@ -164,6 +164,17 @@ cc_library(
 )
 
 cc_library(
+    name = "european_option",
+    srcs = ["european_option.cpp"],
+    hdrs = ["european_option.hpp"],
+    deps = [
+        ":option_spec",
+        "//src/math:black_scholes_analytics",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "option_concepts",
     hdrs = ["option_concepts.hpp"],
     deps = [
