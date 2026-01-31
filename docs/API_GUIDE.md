@@ -391,11 +391,9 @@ double vega  = aps.vega(spot, strike, tau, sigma, rate);
 | **Delta** | B-spline ∂EEP/∂m + analytical European delta | Good: one derivative lowers B-spline order to O(h³) |
 | **Vega** | B-spline ∂EEP/∂σ + analytical European vega | Good: same as delta |
 | **Theta** | B-spline ∂EEP/∂τ + analytical European theta | Good: same as delta |
-| **Gamma** | Finite differences on delta (bump-and-reprice) | Worst: amplifies interpolation noise |
+| **Gamma** | B-spline ∂²EEP/∂m² + analytical European gamma | Good: O(h²) analytical second derivative |
 
-Delta and vega are accurate enough for the IV solver's Newton iteration (where they drive convergence). Gamma uses finite differences on an already-approximate delta, so it accumulates more error.
-
-For production Greeks, use the PDE solver directly (`AmericanOptionSolver`), which computes delta and gamma from the PDE solution grid via centered finite differences at full spatial resolution.
+Delta, vega, and gamma are accurate enough for the IV solver's Newton iteration (where they drive convergence). Gamma uses the analytical B-spline second derivative with a log-moneyness chain rule correction: ∂²f/∂m² = (g″(x) − g′(x)) / m².
 
 ### Factory Methods
 

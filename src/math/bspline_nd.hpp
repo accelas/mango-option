@@ -196,6 +196,41 @@ public:
         return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
     }
 
+    /// Second partial derivative along a single axis
+    ///
+    /// Uses analytical B-spline second derivatives (O(h²) accuracy).
+    ///
+    /// @param axis Axis along which to differentiate (0 to N-1)
+    /// @param query N-dimensional query point
+    /// @return Second partial derivative ∂²f/∂x²_axis
+    T eval_second_partial(size_t axis, const QueryPoint& query) const {
+        assert(axis < N && "Axis index out of bounds");
+
+        QueryPoint clamped;
+        std::array<int, N> spans;
+        std::array<std::array<T, 4>, N> basis_weights;
+
+        for (size_t dim = 0; dim < N; ++dim) {
+            clamped[dim] = clamp_bspline_query(
+                query[dim],
+                grids_[dim].front(),
+                grids_[dim].back()
+            );
+
+            spans[dim] = find_span_cubic(knots_[dim], clamped[dim]);
+
+            if (dim == axis) {
+                cubic_basis_second_derivative_nonuniform(knots_[dim], spans[dim], clamped[dim],
+                                                         basis_weights[dim].data());
+            } else {
+                cubic_basis_nonuniform(knots_[dim], spans[dim], clamped[dim],
+                                      basis_weights[dim].data());
+            }
+        }
+
+        return eval_tensor_product<0>(spans, basis_weights, std::array<int, N>{});
+    }
+
     /// Get grid dimensions
     [[nodiscard]] Shape dimensions() const noexcept {
         Shape dims;

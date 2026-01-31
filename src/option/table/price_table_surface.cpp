@@ -115,6 +115,28 @@ double PriceTableSurface<N>::partial(size_t axis, const std::array<double, N>& c
     return raw_partial;
 }
 
+template <size_t N>
+double PriceTableSurface<N>::second_partial(size_t axis, const std::array<double, N>& coords) const {
+    // Transform axis 0 from moneyness to log-moneyness
+    std::array<double, N> internal_coords = coords;
+    if constexpr (N >= 1) {
+        internal_coords[0] = std::log(coords[0]);
+    }
+
+    // Chain rule for moneyness axis:
+    // ∂²f/∂m² = (g''(x) - g'(x)) / m²  where x = ln(m)
+    if constexpr (N >= 1) {
+        if (axis == 0) {
+            double g_prime = spline_->eval_partial(0, internal_coords);
+            double g_double_prime = spline_->eval_second_partial(0, internal_coords);
+            double m = coords[0];
+            return (g_double_prime - g_prime) / (m * m);
+        }
+    }
+
+    return spline_->eval_second_partial(axis, internal_coords);
+}
+
 // Explicit template instantiations
 template class PriceTableSurface<2>;
 template class PriceTableSurface<3>;

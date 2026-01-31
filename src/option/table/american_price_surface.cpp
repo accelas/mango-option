@@ -56,11 +56,13 @@ double AmericanPriceSurface::delta(double spot, double strike, double tau,
 
 double AmericanPriceSurface::gamma(double spot, double strike, double tau,
                                    double sigma, double rate) const {
-    double eps = std::max(spot * 1e-4, 1e-6);
-    double spot_dn = std::max(spot - eps, 1e-10);
-    double d_up = delta(spot + eps, strike, tau, sigma, rate);
-    double d_dn = delta(spot_dn, strike, tau, sigma, rate);
-    return (d_up - d_dn) / (spot + eps - spot_dn);
+    double m = spot / strike;
+    // γ_eep = (K/K_ref) · ∂²EEP/∂m² · (1/K)² = 1/(K_ref·K) · ∂²EEP/∂m²
+    double eep_gamma = (1.0 / (K_ref_ * strike)) *
+        surface_->second_partial(0, {m, tau, sigma, rate});
+    auto eu = EuropeanOptionSolver(
+        PricingParams(spot, strike, tau, rate, dividend_yield_, type_, sigma)).solve().value();
+    return eep_gamma + eu.gamma();
 }
 
 double AmericanPriceSurface::vega(double spot, double strike, double tau,
