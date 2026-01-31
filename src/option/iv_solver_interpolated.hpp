@@ -5,7 +5,7 @@
  *
  * Solves for implied volatility using Newton's method with interpolated
  * option prices from pre-computed 4D B-spline surface. Achieves ~30µs
- * IV calculation vs ~143ms with FDM (4,800× speedup).
+ * IV calculation vs ~19ms with FDM (5,400× speedup).
  *
  * Usage:
  *   // After building price table

@@ -145,7 +145,7 @@ struct IVSolverFDMConfig {
 /// ```
 ///
 /// **Performance:**
-/// - Single query: ~143ms (FDM ground truth)
+/// - Single query: ~19ms (FDM ground truth)
 /// - Batch: ~107 IVs/sec on 32 cores (15.3x speedup)
 ///
 /// **Thread Safety:**

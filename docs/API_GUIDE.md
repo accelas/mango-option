@@ -202,7 +202,7 @@ mango::PricingParams params{
 
 ## Implied Volatility Calculation
 
-### FDM-Based IV (Robust, ~143ms)
+### FDM-Based IV (Robust, ~19ms)
 
 **Uses Brent's method with nested PDE pricing:**
 

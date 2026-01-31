@@ -8,7 +8,7 @@ Guide for Claude Code when working with this repository.
 
 **Key capabilities:**
 - American option pricing via PDE solver (~5-20ms per option)
-- Implied volatility calculation (~143ms FDM, ~12ms interpolated)
+- Implied volatility calculation (~19ms FDM, ~3.5us interpolated)
 - Price table pre-computation with B-spline interpolation (~500ns per query)
 - Batch processing with OpenMP parallelization
 

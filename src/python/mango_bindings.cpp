@@ -1018,7 +1018,7 @@ PYBIND11_MODULE(mango_option, m) {
             R"pbdoc(
                 Solve for implied volatility (single query).
 
-                Uses Newton-Raphson with B-spline interpolation (~30µs vs ~143ms FDM).
+                Uses Newton-Raphson with B-spline interpolation (~3.5µs vs ~19ms FDM).
 
                 Note: When a YieldCurve is provided, it is collapsed to zero rate: -ln(D(T))/T.
                 This provides a reasonable approximation but does not capture term structure
