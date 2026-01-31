@@ -1470,6 +1470,20 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "discrete_dividend_iv_integration_test",
+    size = "medium",
+    srcs = ["discrete_dividend_iv_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option:iv_solver_factory",
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "@googletest//:gtest_main",
+    ],
+)
+
 load("@pip//:requirements.bzl", "requirement")
 
 py_test(
