@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "src/option/table/price_table_builder.hpp"
+#include "src/option/european_option.hpp"
 #include "src/option/table/recursion_helpers.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/math/bspline_nd_separable.hpp"
@@ -131,6 +132,8 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
         .dividend_yield = config_.dividend_yield,
+        .content = config_.store_eep ? SurfaceContent::EarlyExercisePremium
+                                     : SurfaceContent::RawPrice,
         .discrete_dividends = config_.discrete_dividends
     };
 
@@ -439,7 +442,33 @@ PriceTableBuilder<N>::extract_tensor(
                     const double K_ref = config_.K_ref;
                     for (size_t i = 0; i < Nm; ++i) {
                         double normalized_price = spline.eval(log_moneyness[i]);
-                        tensor.view[i, j, σ_idx, r_idx] = K_ref * normalized_price;
+                        double american_price = K_ref * normalized_price;
+
+                        if (config_.store_eep) {
+                            double m = axes.grids[0][i];
+                            double tau = axes.grids[1][j];
+                            double sigma = axes.grids[2][σ_idx];
+                            double rate = axes.grids[3][r_idx];
+                            double spot = m * K_ref;
+
+                            auto eu = EuropeanOptionSolver(PricingParams(
+                                spot, K_ref, tau, rate, config_.dividend_yield,
+                                config_.option_type, sigma)).solve();
+
+                            double eep_raw = american_price - eu.value();
+
+                            // Softplus floor: smooth non-negativity without creating kinks
+                            constexpr double kSharpness = 100.0;
+                            if (kSharpness * eep_raw > 500.0) {
+                                // Overflow protection: softplus ≈ x for large x
+                                tensor.view[i, j, σ_idx, r_idx] = eep_raw;
+                            } else {
+                                tensor.view[i, j, σ_idx, r_idx] =
+                                    std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
+                            }
+                        } else {
+                            tensor.view[i, j, σ_idx, r_idx] = american_price;
+                        }
                     }
                 }
             }
@@ -524,7 +553,8 @@ PriceTableBuilder<4>::from_vectors(
     PDEGridSpec pde_grid,
     OptionType type,
     double dividend_yield,
-    double max_failure_rate)
+    double max_failure_rate,
+    bool store_eep)
 {
     // Sort and dedupe
     moneyness = sort_and_dedupe(std::move(moneyness));
@@ -561,6 +591,7 @@ PriceTableBuilder<4>::from_vectors(
     config.pde_grid = std::move(pde_grid);
     config.dividend_yield = dividend_yield;
     config.max_failure_rate = max_failure_rate;
+    config.store_eep = store_eep;
 
     // Validate config
     if (auto err = validate_config(config); err.has_value()) {
@@ -581,7 +612,8 @@ PriceTableBuilder<4>::from_strikes(
     PDEGridSpec pde_grid,
     OptionType type,
     double dividend_yield,
-    double max_failure_rate)
+    double max_failure_rate,
+    bool store_eep)
 {
     if (spot <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
@@ -616,7 +648,8 @@ PriceTableBuilder<4>::from_strikes(
         std::move(pde_grid),
         type,
         dividend_yield,
-        max_failure_rate
+        max_failure_rate,
+        store_eep
     );
 }
 

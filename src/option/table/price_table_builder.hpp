@@ -98,7 +98,8 @@ public:
         PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
-        double max_failure_rate = 0.0);
+        double max_failure_rate = 0.0,
+        bool store_eep = false);
 
     /// Factory from strikes (auto-computes moneyness)
     ///
@@ -126,7 +127,8 @@ public:
         PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
-        double max_failure_rate = 0.0);
+        double max_failure_rate = 0.0,
+        bool store_eep = false);
 
     /// Factory from option chain
     ///
