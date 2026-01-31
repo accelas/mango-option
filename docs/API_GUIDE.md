@@ -11,10 +11,11 @@ Practical examples and common usage patterns for the mango-option library.
 2. [American Option Pricing](#american-option-pricing)
 3. [Implied Volatility Calculation](#implied-volatility-calculation)
 4. [Price Table Pre-Computation](#price-table-pre-computation)
-5. [Custom PDE Solving](#custom-pde-solving)
-6. [Error Handling Patterns](#error-handling-patterns)
-7. [Batch Processing](#batch-processing)
-8. [Advanced Topics](#advanced-topics)
+5. [Discrete Dividend IV](#discrete-dividend-iv)
+6. [Custom PDE Solving](#custom-pde-solving)
+7. [Error Handling Patterns](#error-handling-patterns)
+8. [Batch Processing](#batch-processing)
+9. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -196,7 +197,27 @@ mango::PricingParams params{
 };
 ```
 
-**Discrete dividends:** Not yet implemented in current API
+**Discrete dividends via IV solver factory:**
+```cpp
+#include "src/option/iv_solver_factory.hpp"
+
+// The make_iv_solver factory handles discrete dividends automatically
+mango::IVSolverConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},  // (time, amount)
+    .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+    .maturity = 1.0,
+    .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
+    .rate_grid = {0.02, 0.03, 0.05, 0.07},
+    .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+};
+
+auto solver = mango::make_iv_solver(config);
+auto result = solver->solve(query);
+```
+
+See [Discrete Dividend IV](#discrete-dividend-iv) for the full workflow.
 
 ---
 
@@ -527,6 +548,61 @@ if (result.has_value()) {
     std::cout << "Failed slices: " << stats.failed_slices_total << "\n";
 }
 ```
+
+---
+
+## Discrete Dividend IV
+
+### Factory-Based Solver Creation
+
+The `make_iv_solver` factory builds an interpolated IV solver that automatically handles discrete dividends. When no dividends are specified, it takes the standard single-surface path. When dividends are present, it builds a segmented surface with backward chaining.
+
+```cpp
+#include "src/option/iv_solver_factory.hpp"
+
+// Configure with discrete dividends
+mango::IVSolverConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},  // (time, amount)
+    .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+    .maturity = 1.0,
+    .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
+    .rate_grid = {0.02, 0.03, 0.05, 0.07},
+    .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+};
+
+auto solver = mango::make_iv_solver(config);
+```
+
+### Solving IV Queries
+
+The solver exposes the same interface regardless of whether dividends are present:
+
+```cpp
+mango::IVQuery query;
+query.spot = 100.0;
+query.strike = 95.0;
+query.maturity = 0.5;
+query.rate = mango::RateSpec{0.05};
+query.type = mango::OptionType::PUT;
+query.market_price = 7.5;
+
+auto result = solver->solve(query);
+
+if (result.has_value()) {
+    std::cout << "IV: " << result->implied_vol << "\n";
+}
+
+// Batch solving works the same way
+auto batch = solver->solve_batch(queries);
+```
+
+### Configuration Notes
+
+- **No dividends:** Use `maturity_grid` (vector of maturities) instead of `maturity` (single scalar). The factory takes the standard single-surface path.
+- **With dividends:** Use `maturity` (single expiry). The factory segments the time axis at each dividend date and chains surfaces backward.
+- **`kref_config`** is optional. When omitted, it defaults to three reference strikes at {0.8S, S, 1.2S}. Cash dividends break price homogeneity in strike, so multiple K_ref surfaces are built and interpolated to maintain accuracy.
 
 ---
 
