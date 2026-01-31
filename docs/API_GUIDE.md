@@ -227,7 +227,9 @@ mango::IVSolverFDMConfig config{
     .root_config = mango::RootFindingConfig{
         .max_iter = 100,
         .tolerance = 1e-6
-    }
+    },
+    // Control PDE grid accuracy (higher accuracy = lower IV error, slower)
+    .grid_accuracy = mango::GridAccuracyParams{.tol = 1e-3}
 };
 
 // Solve
@@ -294,7 +296,22 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 
 ### Custom Grid for IV
 
-**Override auto-estimation with manual grid:**
+**Control PDE accuracy via GridAccuracyParams (recommended):**
+
+```cpp
+mango::IVSolverFDMConfig config{
+    .grid_accuracy = mango::GridAccuracyParams{
+        .tol = 1e-4,                // Tighter truncation error
+        .min_spatial_points = 200,
+        .max_spatial_points = 800
+    }
+};
+
+mango::IVSolverFDM solver(config);
+auto result = solver.solve_impl(query);
+```
+
+**Override auto-estimation with manual grid (advanced):**
 
 ```cpp
 mango::IVSolverFDMConfig config{
@@ -330,8 +347,15 @@ std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06, 0.08, 0.10};         // 
 
 double K_ref = 100.0;  // Reference strike price
 
-// Create PDE grid specification
-auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+// PDE grid specification: auto-estimate (recommended) or explicit
+// Option A: Auto-estimate from accuracy params (handles domain coverage automatically)
+mango::PDEGridSpec pde_grid = mango::GridAccuracyParams{};
+
+// Option B: Explicit grid and time steps
+// mango::PDEGridSpec pde_grid = mango::ExplicitPDEGrid{
+//     .grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
+//     .n_time = 1000
+// };
 
 // Create builder and axes using factory method
 auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
@@ -340,8 +364,7 @@ auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
     vol_grid,
     rate_grid,
     K_ref,
-    grid_spec,
-    1000,  // n_time (time steps)
+    pde_grid,
     mango::OptionType::PUT
 );
 
@@ -381,21 +404,24 @@ double gamma = surface->partial(1, {m, tau, sigma, r});  // ∂price/∂τ (ofte
 **Three convenience factories for common use cases:**
 
 ```cpp
+// PDE grid: auto-estimated (recommended) or explicit
+mango::PDEGridSpec pde_grid = mango::GridAccuracyParams{};
+
 // 1. from_vectors: Explicit moneyness values
 auto result1 = mango::PriceTableBuilder<4>::from_vectors(
     moneyness_grid, maturity_grid, vol_grid, rate_grid,
-    K_ref, grid_spec, n_time, mango::OptionType::PUT);
+    K_ref, pde_grid, mango::OptionType::PUT);
 
 // 2. from_strikes: Auto-computes moneyness from spot and strikes
 auto result2 = mango::PriceTableBuilder<4>::from_strikes(
     spot, strikes, maturities, volatilities, rates,
-    grid_spec, n_time, mango::OptionType::CALL);
+    pde_grid, mango::OptionType::CALL);
 
 // 3. from_chain: Extracts all parameters from OptionChain
 auto result3 = mango::PriceTableBuilder<4>::from_chain(
-    option_chain, grid_spec, n_time, mango::OptionType::PUT);
+    option_chain, pde_grid, mango::OptionType::PUT);
 
-// All return std::expected<std::pair<builder, axes>, std::string>
+// All return std::expected<std::pair<builder, axes>, PriceTableError>
 ```
 
 ### Automatic Grid Profiles

@@ -186,10 +186,10 @@ auto result = solver.solve_impl(query);
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 
-auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 101).value();
+// Auto-estimate PDE grid (recommended)
 auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
     moneyness_grid, maturity_grid, vol_grid, rate_grid, K_ref,
-    grid_spec, 1000, mango::OptionType::PUT).value();
+    mango::GridAccuracyParams{}, mango::OptionType::PUT).value();
 auto result = builder.build(axes);
 double price = result->surface->value({m, tau, sigma, r});  // ~500ns
 ```
