@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "src/option/table/price_table_builder.hpp"
+#include "src/option/european_option.hpp"
 #include "src/option/table/recursion_helpers.hpp"
 #include "src/math/cubic_spline_solver.hpp"
 #include "src/math/bspline_nd_separable.hpp"
@@ -64,6 +65,10 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     if (axes.grids[2].front() <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 2});
     }
+
+    // TODO(discrete-dividends): Segment maturity axis at dividend dates,
+    // building a separate table for each segment. Each segment uses continuous
+    // dividend yield only, so EEP decomposition applies per-segment.
 
     // Check K_ref > 0
     if (config_.K_ref <= 0.0) {
@@ -131,6 +136,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
         .dividend_yield = config_.dividend_yield,
+        .content = SurfaceContent::EarlyExercisePremium,
         .discrete_dividends = config_.discrete_dividends
     };
 
@@ -373,6 +379,7 @@ PriceTableBuilder<N>::extract_tensor(
 
     // Precompute log-moneyness for interpolation
     std::vector<double> log_moneyness(Nm);
+    #pragma omp simd
     for (size_t i = 0; i < Nm; ++i) {
         log_moneyness[i] = std::log(axes.grids[0][i]);
     }
@@ -439,7 +446,31 @@ PriceTableBuilder<N>::extract_tensor(
                     const double K_ref = config_.K_ref;
                     for (size_t i = 0; i < Nm; ++i) {
                         double normalized_price = spline.eval(log_moneyness[i]);
-                        tensor.view[i, j, σ_idx, r_idx] = K_ref * normalized_price;
+                        double american_price = K_ref * normalized_price;
+
+                        {
+                            double m = axes.grids[0][i];
+                            double tau = axes.grids[1][j];
+                            double sigma = axes.grids[2][σ_idx];
+                            double rate = axes.grids[3][r_idx];
+                            double spot = m * K_ref;
+
+                            auto eu = EuropeanOptionSolver(PricingParams(
+                                spot, K_ref, tau, rate, config_.dividend_yield,
+                                config_.option_type, sigma)).solve().value();
+
+                            double eep_raw = american_price - eu.value();
+
+                            // Softplus floor: smooth non-negativity without creating kinks
+                            constexpr double kSharpness = 100.0;
+                            if (kSharpness * eep_raw > 500.0) {
+                                // Overflow protection: softplus ≈ x for large x
+                                tensor.view[i, j, σ_idx, r_idx] = eep_raw;
+                            } else {
+                                tensor.view[i, j, σ_idx, r_idx] =
+                                    std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
+                            }
+                        }
                     }
                 }
             }
@@ -840,16 +871,21 @@ PriceTableBuilder<N>::repair_failed_slices(
             }
 
             // At least one must exist (not all_maturities_failed)
-            for (size_t i = 0; i < Nm; ++i) {
-                if (τ_before && τ_after) {
-                    double t = static_cast<double>(τ_idx - *τ_before) /
-                               static_cast<double>(*τ_after - *τ_before);
+            if (τ_before && τ_after) {
+                double t = static_cast<double>(τ_idx - *τ_before) /
+                           static_cast<double>(*τ_after - *τ_before);
+                #pragma omp simd
+                for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] =
                         (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
                         t * tensor.view[i, *τ_after, σ_idx, r_idx];
-                } else if (τ_before) {
+                }
+            } else if (τ_before) {
+                for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
-                } else {
+                }
+            } else {
+                for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
                 }
             }

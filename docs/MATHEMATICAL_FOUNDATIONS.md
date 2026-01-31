@@ -18,12 +18,13 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 **Part II — Price Tables & Interpolation:** Pre-computing prices across parameter space for fast queries.
 
 6. [B-Spline Interpolation](#6-b-spline-interpolation)
-7. [Price Table Grid Estimation](#7-price-table-grid-estimation)
-8. [Implied Volatility](#8-implied-volatility)
+7. [EEP Decomposition](#7-eep-decomposition)
+8. [Price Table Grid Estimation](#8-price-table-grid-estimation)
+9. [Implied Volatility](#9-implied-volatility)
 
 **Part III — Analysis**
 
-9. [Convergence Analysis](#9-convergence-analysis)
+10. [Convergence Analysis](#10-convergence-analysis)
 
 ---
 
@@ -460,7 +461,84 @@ Each derivative costs the same as a price evaluation (~500ns) because we evaluat
 
 ---
 
-## 7. Price Table Grid Estimation
+## 7. EEP Decomposition
+
+The price table does not store raw American option prices. Instead, it stores the **Early Exercise Premium** (EEP): the difference between the American and European prices.
+
+### Decomposition
+
+Any American option price can be written as:
+
+```
+P_Am(S, K, τ, σ, r) = EEP(m, τ, σ, r) · (K / K_ref) + P_Eu(S, K, τ, σ, r, q)
+```
+
+where m = S/K is moneyness, K_ref is a fixed reference strike, and q is the continuous dividend yield.
+
+This decomposition has three advantages:
+
+1. **Smoothness.** The EEP varies slowly across parameter space — it lacks the sharp kink at S = K that the full price inherits from the payoff. Smoother functions interpolate better.
+
+2. **Strike homogeneity.** The EEP depends on strike only through moneyness m = S/K, so one 4D surface covers all strikes. The factor K/K_ref rescales back to absolute dollar terms.
+
+3. **European exactness.** The European component P_Eu is computed analytically (Black-Scholes), so interpolation error affects only the EEP — typically a small fraction of the total price.
+
+### Log-Moneyness Transform
+
+Internally, the B-spline interpolates in log-moneyness x = ln(m) rather than m. This provides symmetric resolution around ATM (where x = 0) and reduces interpolation error by 20–40% in the tails.
+
+All user-facing APIs accept moneyness m; the transform is applied internally.
+
+### Greeks via Chain Rule
+
+Because the price is reconstructed from an interpolated EEP and an analytic European component, each Greek requires a chain rule through the decomposition. Let E(m, τ, σ, r) denote the EEP B-spline and g(x) = E(e^x, τ, σ, r) the EEP in log-moneyness.
+
+**Delta** (∂P/∂S):
+
+```
+Δ = (1/K_ref) · ∂E/∂m + Δ_Eu
+```
+
+where ∂E/∂m = g'(x)/m (chain rule from log-moneyness).
+
+**Gamma** (∂²P/∂S²):
+
+```
+γ = 1/(K_ref · K) · ∂²E/∂m² + γ_Eu
+```
+
+where ∂²E/∂m² = (g''(x) − g'(x)) / m². Both g' and g'' are analytic B-spline derivatives (first and second order), so gamma avoids finite differencing entirely.
+
+**Theta** (∂P/∂t, calendar time):
+
+```
+Θ = −(K/K_ref) · ∂E/∂τ + Θ_Eu
+```
+
+The sign flip converts from time-to-expiry τ to calendar time t. Both the EEP and European theta use the same convention (dV/dt, negative for time decay).
+
+**Vega** (∂P/∂σ):
+
+```
+ν = (K/K_ref) · ∂E/∂σ + ν_Eu
+```
+
+### Measured Accuracy
+
+Interpolated Greeks vs. PDE solver reference across 20 (strike × maturity) combinations (S = 100, σ = 0.20, r = 0.05, q = 0.02):
+
+| Greek | Max Abs Error | Max Rel Error | Notes |
+|-------|---------------|---------------|-------|
+| Price | $0.086 | 1.9% | |
+| Delta | 0.0087 | 2.8% | |
+| Gamma | 0.0024 | 7.3% | Worst at short τ; < 1.3% for τ ≥ 0.5 |
+| Theta | $0.15 | 3.3% | |
+
+When accuracy is critical, use the PDE solver directly (`AmericanOptionSolver`).
+
+---
+
+## 8. Price Table Grid Estimation
 
 The 4D grid density directly controls IV accuracy. Too coarse and the B-spline interpolation introduces significant error; too fine and pre-computation takes days. The library provides both automatic estimation and iterative refinement.
 
@@ -522,7 +600,7 @@ else:
 
 ---
 
-## 8. Implied Volatility
+## 9. Implied Volatility
 
 Implied volatility is the volatility that, when plugged into the pricing model, reproduces the observed market price. Computing it requires inverting the price-to-volatility mapping — a root-finding problem.
 
@@ -573,7 +651,7 @@ The interpolated solver is ~5,000x faster, at the cost of pre-computation time a
 
 # Part III — Analysis
 
-## 9. Convergence Analysis
+## 10. Convergence Analysis
 
 ### Overall Error Budget
 

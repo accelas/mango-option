@@ -41,7 +41,9 @@ cc_binary(
         "//src/option:option_spec",
         "//src/math:bspline_nd_separable",
         "//src/option:iv_solver_interpolated",
+        "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -69,7 +71,9 @@ cc_binary(
         "//src/option:american_option_batch",
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
+        "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
@@ -102,6 +106,8 @@ cc_binary(
         "//src/option:option_chain",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
+        "//src/math:black_scholes_analytics",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
@@ -128,6 +134,7 @@ cc_binary(
         "//src/option:iv_solver_interpolated",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
     ],
     tags = ["benchmark", "manual"],
 )
@@ -178,6 +185,33 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "interpolation_greek_accuracy",
+    srcs = ["interpolation_greek_accuracy.cc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option/table:price_table_builder",
+        "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
@@ -246,6 +280,7 @@ cc_binary(
     deps = [
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         "//src/option:iv_solver_interpolated",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",

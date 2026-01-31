@@ -107,5 +107,25 @@ TEST(PriceTableSurfaceTest, Build3DReturnsCorrectTemplateType) {
 }
 
 
+TEST(PriceTableSurfaceTest, PartialClampsBeyondBounds) {
+    PriceTableAxes<2> axes;
+    axes.grids[0] = {0.8, 0.9, 1.0, 1.1};  // moneyness
+    axes.grids[1] = {0.1, 0.5, 1.0, 1.5};  // maturity
+
+    std::vector<double> coeffs(16, 1.0);
+    PriceTableMetadata meta{.K_ref = 100.0};
+    auto surface = PriceTableSurface<2>::build(std::move(axes), std::move(coeffs), meta).value();
+
+    // Query partial at m=0.5 (below m_min=0.8) should produce same result as at m_min
+    double partial_oob = surface->partial(0, {0.5, 0.5});
+    double partial_boundary = surface->partial(0, {0.8, 0.5});
+    EXPECT_DOUBLE_EQ(partial_oob, partial_boundary);
+
+    // Same for second_partial
+    double second_oob = surface->second_partial(0, {0.5, 0.5});
+    double second_boundary = surface->second_partial(0, {0.8, 0.5});
+    EXPECT_DOUBLE_EQ(second_oob, second_boundary);
+}
+
 } // namespace
 } // namespace mango

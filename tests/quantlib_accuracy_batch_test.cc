@@ -14,6 +14,7 @@
 #include "tests/quantlib_validation_framework.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;
@@ -116,7 +117,8 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         100.0,  // K_ref
         ExplicitPDEGrid{grid_spec, time_domain.n_steps()},
         OptionType::PUT,
-        dividend_yield);
+        dividend_yield,
+        0.0);    // max_failure_rate
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
     auto [builder, axes] = std::move(builder_axes_result.value());
 
@@ -134,7 +136,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         .sigma_min = 0.05,
         .sigma_max = 2.0
     };
-    auto iv_solver_result = IVSolverInterpolated::create(price_table_result.surface, iv_config);
+    auto aps = AmericanPriceSurface::create(price_table_result.surface, OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
+    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())
         << "Failed to create interpolated IV solver: " << iv_solver_result.error();
 

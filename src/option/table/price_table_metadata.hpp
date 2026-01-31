@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cstdint>
 #include <vector>
 #include <utility>
 
 namespace mango {
+
+/// What the surface tensor contains
+enum class SurfaceContent : uint8_t {
+    RawPrice = 0,              ///< Raw American option prices
+    EarlyExercisePremium = 1   ///< P_Am - P_Eu (requires reconstruction)
+};
 
 /// Metadata for price table surface
 ///
@@ -19,6 +26,7 @@ struct PriceTableMetadata {
     double dividend_yield = 0.0;                            ///< Continuous dividend yield
     double m_min = 0.0;                                     ///< Minimum moneyness (S/K)
     double m_max = 0.0;                                     ///< Maximum moneyness (S/K)
+    SurfaceContent content = SurfaceContent::EarlyExercisePremium;  ///< What tensor stores
     std::vector<std::pair<double, double>> discrete_dividends;  ///< (time, amount) pairs
 };
 

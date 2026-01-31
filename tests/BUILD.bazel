@@ -195,6 +195,45 @@ cc_test(
 )
 
 cc_test(
+    name = "european_option_test",
+    size = "small",
+    srcs = ["european_option_test.cc"],
+    deps = [
+        "//src/option:european_option",
+        "//src/option:option_concepts",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "american_price_surface_test",
+    size = "small",
+    srcs = ["american_price_surface_test.cc"],
+    deps = [
+        "//src/option/table:american_price_surface",
+        "//src/option/table:price_table_surface",
+        "//src/option/table:price_table_axes",
+        "//src/option/table:price_table_metadata",
+        "//src/option:european_option",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "option_concepts_test",
+    size = "small",
+    srcs = ["option_concepts_test.cc"],
+    deps = [
+        "//src/option:option_concepts",
+        "//src/option:american_option_result",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_grid_estimator_test",
     size = "small",
     srcs = ["price_table_grid_estimator_test.cc"],
@@ -858,6 +897,7 @@ cc_test(
         "//src/option:iv_solver_interpolated",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -890,6 +930,7 @@ cc_test(
     deps = [
         "//src/math:bspline_nd",
         "//src/math:bspline_basis",
+        "//src/math:bspline_nd_separable",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -1071,18 +1112,18 @@ cc_test(
 
 cc_test(
     name = "iv_solver_interpolated_test",
-    size = "small",
+    size = "medium",
     srcs = ["iv_solver_interpolated_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
     deps = [
         "//src/option:iv_solver_interpolated",
+        "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
+        "//src/option/table:american_price_surface",
         "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
     ],
 )
 
@@ -1244,6 +1285,7 @@ cc_test(
     deps = [
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
+        "//src/option/table:american_price_surface",
         "//src/option:american_option_batch",
         "//src/option:iv_solver_interpolated",
         "//src/pde/core:grid",
@@ -1316,6 +1358,22 @@ cc_test(
     srcs = ["simple_databento_test.cc"],
     deps = [
         "//src/simple",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "eep_integration_test",
+    size = "medium",
+    srcs = ["eep_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table:price_table_builder",
+        "//src/option/table:american_price_surface",
+        "//src/option:american_option",
+        "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

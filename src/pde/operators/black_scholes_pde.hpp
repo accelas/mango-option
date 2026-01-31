@@ -33,6 +33,8 @@ public:
      * @param rate_fn Rate function: rate_fn(t) -> r(t)
      * @param d Continuous dividend yield
      */
+    // TODO(discrete-dividends): Add discrete dividend handling — adjust spot
+    // at dividend dates via temporal event callbacks in PDESolver time-stepping.
     template<typename Fn,
              typename = std::enable_if_t<std::is_invocable_r_v<T, Fn, double>>>
     BlackScholesPDE(T sigma, Fn&& rate_fn, T d)

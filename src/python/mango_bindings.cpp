@@ -16,6 +16,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_workspace.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include "src/option/table/price_table_metadata.hpp"
 #include "src/option/table/price_table_axes.hpp"
 #include "src/pde/core/pde_workspace.hpp"
@@ -668,6 +669,11 @@ PYBIND11_MODULE(mango_option, m) {
     // PriceTableSurface (4D B-spline interpolation)
     // =========================================================================
 
+    // SurfaceContent enum
+    py::enum_<mango::SurfaceContent>(m, "SurfaceContent")
+        .value("RawPrice", mango::SurfaceContent::RawPrice)
+        .value("EarlyExercisePremium", mango::SurfaceContent::EarlyExercisePremium);
+
     // PriceTableMetadata
     py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
         .def(py::init<>())
@@ -675,6 +681,7 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("dividend_yield", &mango::PriceTableMetadata::dividend_yield)
         .def_readwrite("m_min", &mango::PriceTableMetadata::m_min)
         .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
+        .def_readwrite("content", &mango::PriceTableMetadata::content)
         .def_readwrite("discrete_dividends", &mango::PriceTableMetadata::discrete_dividends);
 
     // PriceTableAxes<4>
@@ -792,6 +799,66 @@ PYBIND11_MODULE(mango_option, m) {
             )pbdoc")
         .def_property_readonly("axes", &mango::PriceTableSurface<4>::axes)
         .def_property_readonly("metadata", &mango::PriceTableSurface<4>::metadata);
+
+    // =========================================================================
+    // AmericanPriceSurface (EEP + European reconstruction)
+    // =========================================================================
+
+    py::class_<mango::AmericanPriceSurface>(m, "AmericanPriceSurface")
+        .def_static("create",
+            [](std::shared_ptr<const mango::PriceTableSurface<4>> eep_surface,
+               mango::OptionType type) {
+                auto result = mango::AmericanPriceSurface::create(
+                    std::move(eep_surface), type);
+                if (!result.has_value()) {
+                    throw py::value_error(
+                        "Failed to create AmericanPriceSurface: validation error code " +
+                        std::to_string(static_cast<int>(result.error().code)));
+                }
+                return std::move(result.value());
+            },
+            py::arg("eep_surface"), py::arg("option_type"),
+            R"pbdoc(
+                Create an AmericanPriceSurface from an EEP B-spline surface.
+
+                Reconstructs full American prices as:
+                  P = (K/K_ref) * EEP(m, tau, sigma, r) + P_European(S, K, tau, sigma, r, q)
+
+                Args:
+                    eep_surface: Pre-computed PriceTableSurface4D with EEP data
+                    option_type: OptionType.PUT or OptionType.CALL
+
+                Returns:
+                    AmericanPriceSurface instance
+
+                Raises:
+                    ValueError: If validation fails
+            )pbdoc")
+        .def("price", &mango::AmericanPriceSurface::price,
+            py::arg("spot"), py::arg("strike"), py::arg("tau"),
+            py::arg("sigma"), py::arg("rate"),
+            "Compute American option price")
+        .def("delta", &mango::AmericanPriceSurface::delta,
+            py::arg("spot"), py::arg("strike"), py::arg("tau"),
+            py::arg("sigma"), py::arg("rate"),
+            "Compute delta (dP/dS)")
+        .def("gamma", &mango::AmericanPriceSurface::gamma,
+            py::arg("spot"), py::arg("strike"), py::arg("tau"),
+            py::arg("sigma"), py::arg("rate"),
+            "Compute gamma (d²P/dS²)")
+        .def("vega", &mango::AmericanPriceSurface::vega,
+            py::arg("spot"), py::arg("strike"), py::arg("tau"),
+            py::arg("sigma"), py::arg("rate"),
+            "Compute vega (dP/dsigma)")
+        .def("theta", &mango::AmericanPriceSurface::theta,
+            py::arg("spot"), py::arg("strike"), py::arg("tau"),
+            py::arg("sigma"), py::arg("rate"),
+            "Compute theta (dV/dt, calendar time, negative for decay)")
+        .def_property_readonly("metadata", &mango::AmericanPriceSurface::metadata)
+        .def("__repr__", [](const mango::AmericanPriceSurface& self) {
+            return "<AmericanPriceSurface K_ref=" +
+                   std::to_string(self.metadata().K_ref) + ">";
+        });
 
     // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)
@@ -914,28 +981,29 @@ PYBIND11_MODULE(mango_option, m) {
     // IVSolverInterpolated
     py::class_<mango::IVSolverInterpolated>(m, "IVSolverInterpolated")
         .def_static("create",
-            [](std::shared_ptr<const mango::PriceTableSurface<4>> surface,
+            [](mango::AmericanPriceSurface american_surface,
                const mango::IVSolverInterpolatedConfig& config) {
-                auto result = mango::IVSolverInterpolated::create(std::move(surface), config);
+                auto result = mango::IVSolverInterpolated::create(
+                    std::move(american_surface), config);
                 if (!result.has_value()) {
                     throw py::value_error("Failed to create solver: validation error");
                 }
                 return std::move(result.value());
             },
-            py::arg("surface"),
+            py::arg("american_surface"),
             py::arg("config") = mango::IVSolverInterpolatedConfig{},
             R"pbdoc(
-                Create an interpolation-based IV solver from a price surface.
+                Create an interpolation-based IV solver from an AmericanPriceSurface.
 
                 Args:
-                    surface: Pre-computed PriceTableSurface4D
+                    american_surface: Pre-built AmericanPriceSurface
                     config: Optional solver configuration
 
                 Returns:
                     IVSolverInterpolated instance
 
                 Raises:
-                    ValueError: If surface is invalid
+                    ValueError: If validation fails
             )pbdoc")
         .def("solve_impl",
             [](const mango::IVSolverInterpolated& solver, const mango::IVQuery& query) {
@@ -950,7 +1018,7 @@ PYBIND11_MODULE(mango_option, m) {
             R"pbdoc(
                 Solve for implied volatility (single query).
 
-                Uses Newton-Raphson with B-spline interpolation (~30µs vs ~143ms FDM).
+                Uses Newton-Raphson with B-spline interpolation (~3.5µs vs ~19ms FDM).
 
                 Note: When a YieldCurve is provided, it is collapsed to zero rate: -ln(D(T))/T.
                 This provides a reasonable approximation but does not capture term structure

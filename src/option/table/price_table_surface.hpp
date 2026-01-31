@@ -50,6 +50,16 @@ public:
     /// @return Partial derivative estimate
     [[nodiscard]] double partial(size_t axis, const std::array<double, N>& coords) const;
 
+    /// Second partial derivative along specified axis
+    ///
+    /// For axis 0 (moneyness), applies second-order chain rule from
+    /// log-moneyness: ∂²f/∂m² = (g''(x) - g'(x)) / m².
+    ///
+    /// @param axis Axis index (0 to N-1)
+    /// @param coords N-dimensional coordinates
+    /// @return Second partial derivative estimate
+    [[nodiscard]] double second_partial(size_t axis, const std::array<double, N>& coords) const;
+
 private:
     PriceTableSurface(PriceTableAxes<N> axes, PriceTableMetadata metadata,
                      std::unique_ptr<BSplineND<double, N>> spline);

@@ -329,6 +329,86 @@ void cubic_basis_derivative_nonuniform(
     }
 }
 
+/// Compute second derivatives of 4 nonzero cubic B-spline basis functions
+///
+/// Uses the recurrence: B''_{i,3}(x) = 3 · [ B'_{i,2}(x)/(t_{i+3}-t_i) - B'_{i+1,2}(x)/(t_{i+4}-t_{i+1}) ]
+/// where B'_{i,2}(x) = 2 · [ B_{i,1}(x)/(t_{i+2}-t_i) - B_{i+1,1}(x)/(t_{i+3}-t_{i+1}) ]
+///
+/// @tparam T Floating point type (float, double, etc.)
+/// @param t Knot vector (size = n_control_points + 4 for cubic)
+/// @param i Knot span index from find_span_cubic()
+/// @param x Evaluation point
+/// @param d2N Output: 4 basis function second derivatives d2N[0..3]
+template<std::floating_point T>
+void cubic_basis_second_derivative_nonuniform(
+    const std::vector<T>& t,
+    int i,
+    T x,
+    T d2N[4]) noexcept
+{
+    const int n = static_cast<int>(t.size());
+
+    // Degree 0: piecewise constants
+    T N0[4] = {T{0}, T{0}, T{0}, T{0}};
+    for (int k = 0; k < 4; ++k) {
+        const int idx = i - k;
+        if (idx >= 0 && idx + 1 < n) {
+            N0[k] = (t[idx] <= x && x < t[idx + 1]) ? T{1} : T{0};
+        }
+    }
+
+    // Degree 1: linear basis
+    T N1[4] = {T{0}, T{0}, T{0}, T{0}};
+    for (int k = 0; k < 4; ++k) {
+        const int idx = i - k;
+        if (idx >= 0 && idx + 2 < n) {
+            const T leftDen  = t[idx + 1] - t[idx];
+            const T rightDen = t[idx + 2] - t[idx + 1];
+
+            const T left  = (leftDen > T{0}) ? (x - t[idx]) / leftDen * N0[k] : T{0};
+            const T right = (rightDen > T{0} && k > 0) ?
+                           (t[idx + 2] - x) / rightDen * N0[k - 1] : T{0};
+
+            N1[k] = left + right;
+        }
+    }
+
+    // First derivatives of quadratic basis (degree 2):
+    // B'_{i,2}(x) = 2/(t_{i+2}-t_i) · B_{i,1}(x) - 2/(t_{i+3}-t_{i+1}) · B_{i+1,1}(x)
+    T dN2[4] = {T{0}, T{0}, T{0}, T{0}};
+    constexpr T p2 = T{2};
+    for (int k = 0; k < 4; ++k) {
+        const int idx = i - k;
+        if (idx >= 0 && idx + 3 < n) {
+            const T leftDen  = t[idx + 2] - t[idx];
+            const T rightDen = t[idx + 3] - t[idx + 1];
+
+            const T left = (leftDen > T{0}) ? (p2 / leftDen) * N1[k] : T{0};
+            const T right = (rightDen > T{0} && k > 0) ? (p2 / rightDen) * N1[k - 1] : T{0};
+
+            dN2[k] = left - right;
+        }
+    }
+
+    // Second derivative of cubic (p=3):
+    // B''_{i,3}(x) = 3/(t_{i+3}-t_i) · B'_{i,2}(x) - 3/(t_{i+4}-t_{i+1}) · B'_{i+1,2}(x)
+    constexpr T p3 = T{3};
+    for (int k = 0; k < 4; ++k) {
+        const int idx = i - k;
+        if (idx >= 0 && idx + 4 < n) {
+            const T leftDen  = t[idx + 3] - t[idx];
+            const T rightDen = t[idx + 4] - t[idx + 1];
+
+            const T left = (leftDen > T{0}) ? (p3 / leftDen) * dN2[k] : T{0};
+            const T right = (rightDen > T{0} && k > 0) ? (p3 / rightDen) * dN2[k - 1] : T{0};
+
+            d2N[k] = left - right;
+        } else {
+            d2N[k] = T{0};
+        }
+    }
+}
+
 /// Clamp query point to valid B-spline domain
 ///
 /// For evaluation at boundaries, uses nextafter to ensure x < xmax
