@@ -12,6 +12,7 @@
 
 #include "src/option/option_spec.hpp"
 #include <concepts>
+#include <expected>
 
 namespace mango {
 
@@ -53,11 +54,12 @@ concept OptionResultWithVega = OptionResult<R> && requires(const R& r) {
 /**
  * @brief Concept for option solvers
  *
- * A solver must provide a solve() method whose return type satisfies OptionResult.
+ * A solver must provide a solve() method returning std::expected<R, E>
+ * where R satisfies OptionResult.
  */
 template <typename S>
-concept OptionSolver = requires(const S& solver) {
-    { solver.solve() } -> OptionResult;
+concept OptionSolver = requires(S& solver) {
+    requires OptionResult<typename decltype(solver.solve())::value_type>;
 };
 
 }  // namespace mango

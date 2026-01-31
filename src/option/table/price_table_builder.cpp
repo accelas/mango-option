@@ -456,7 +456,7 @@ PriceTableBuilder<N>::extract_tensor(
 
                             auto eu = EuropeanOptionSolver(PricingParams(
                                 spot, K_ref, tau, rate, config_.dividend_yield,
-                                config_.option_type, sigma)).solve();
+                                config_.option_type, sigma)).solve().value();
 
                             double eep_raw = american_price - eu.value();
 

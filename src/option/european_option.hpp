@@ -84,8 +84,8 @@ public:
     static std::expected<EuropeanOptionSolver, ValidationError>
     create(const PricingParams& params) noexcept;
 
-    /// Compute European option price and Greeks
-    EuropeanOptionResult solve() const;
+    /// Compute European option price and Greeks (always succeeds)
+    std::expected<EuropeanOptionResult, SolverError> solve() const;
 
 private:
     PricingParams params_;

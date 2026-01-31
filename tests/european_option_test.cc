@@ -46,7 +46,7 @@ PricingParams atm_call_params() {
 TEST(EuropeanOptionTest, ATMPutKnownValue) {
     auto params = atm_put_params();
     EuropeanOptionSolver solver(params);
-    auto result = solver.solve();
+    auto result = solver.solve().value();
 
     // S=K=100, τ=1, σ=0.20, r=0.05, q=0.02
     // Expected ≈ 6.34 (Black-Scholes closed form)
@@ -63,8 +63,8 @@ TEST(EuropeanOptionTest, PutCallParity) {
     EuropeanOptionSolver put_solver(put_params);
     EuropeanOptionSolver call_solver(call_params);
 
-    auto put = put_solver.solve();
-    auto call = call_solver.solve();
+    auto put = put_solver.solve().value();
+    auto call = call_solver.solve().value();
 
     double S = put_params.spot;
     double K = put_params.strike;
@@ -80,8 +80,8 @@ TEST(EuropeanOptionTest, PutCallParity) {
 // 3. Delta bounds: put ∈ [-1, 0], call ∈ [0, 1]
 // ===========================================================================
 TEST(EuropeanOptionTest, DeltaBounds) {
-    auto put = EuropeanOptionSolver(atm_put_params()).solve();
-    auto call = EuropeanOptionSolver(atm_call_params()).solve();
+    auto put = EuropeanOptionSolver(atm_put_params()).solve().value();
+    auto call = EuropeanOptionSolver(atm_call_params()).solve().value();
 
     EXPECT_GE(put.delta(), -1.0);
     EXPECT_LE(put.delta(), 0.0);
@@ -94,8 +94,8 @@ TEST(EuropeanOptionTest, DeltaBounds) {
 // 4. Gamma non-negative
 // ===========================================================================
 TEST(EuropeanOptionTest, GammaNonNegative) {
-    auto put = EuropeanOptionSolver(atm_put_params()).solve();
-    auto call = EuropeanOptionSolver(atm_call_params()).solve();
+    auto put = EuropeanOptionSolver(atm_put_params()).solve().value();
+    auto call = EuropeanOptionSolver(atm_call_params()).solve().value();
 
     EXPECT_GE(put.gamma(), 0.0);
     EXPECT_GE(call.gamma(), 0.0);
@@ -108,8 +108,8 @@ TEST(EuropeanOptionTest, GammaNonNegative) {
 // 5. Vega non-negative
 // ===========================================================================
 TEST(EuropeanOptionTest, VegaNonNegative) {
-    auto put = EuropeanOptionSolver(atm_put_params()).solve();
-    auto call = EuropeanOptionSolver(atm_call_params()).solve();
+    auto put = EuropeanOptionSolver(atm_put_params()).solve().value();
+    auto call = EuropeanOptionSolver(atm_call_params()).solve().value();
 
     EXPECT_GE(put.vega(), 0.0);
     EXPECT_GE(call.vega(), 0.0);
@@ -122,7 +122,7 @@ TEST(EuropeanOptionTest, VegaNonNegative) {
 // 6. value_at(spot) == value()
 // ===========================================================================
 TEST(EuropeanOptionTest, ValueAtSpotEqualsValue) {
-    auto result = EuropeanOptionSolver(atm_put_params()).solve();
+    auto result = EuropeanOptionSolver(atm_put_params()).solve().value();
     EXPECT_NEAR(result.value_at(result.spot()), result.value(), 1e-12);
 }
 
@@ -133,7 +133,7 @@ TEST(EuropeanOptionTest, DeltaVsFiniteDifferences) {
     double eps = 0.01;
     auto params = atm_put_params();
 
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     double analytic_delta = result.delta();
 
     // Central difference: (V(S+eps) - V(S-eps)) / (2*eps)
@@ -149,7 +149,7 @@ TEST(EuropeanOptionTest, DeltaVsFiniteDifferences) {
 // ===========================================================================
 TEST(EuropeanOptionTest, AccessorsReturnCorrectValues) {
     auto params = atm_put_params();
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
 
     EXPECT_DOUBLE_EQ(result.spot(), 100.0);
     EXPECT_DOUBLE_EQ(result.strike(), 100.0);
@@ -171,7 +171,7 @@ TEST(EuropeanOptionTest, DeepITMPut) {
     params.type = OptionType::PUT;
     params.volatility = 0.20;
 
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     double expected = 100.0 * std::exp(-0.05) - 50.0 * std::exp(-0.02);
     EXPECT_NEAR(result.value(), expected, 0.01);
 }
@@ -189,7 +189,7 @@ TEST(EuropeanOptionTest, DeepOTMPut) {
     params.type = OptionType::PUT;
     params.volatility = 0.20;
 
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     EXPECT_NEAR(result.value(), 0.0, 0.01);
 }
 
@@ -210,11 +210,11 @@ TEST(EuropeanOptionTest, NegativeSpotRejected) {
 // ===========================================================================
 TEST(EuropeanOptionTest, RhoSign) {
     // Rho for put should be negative (higher rates decrease put value)
-    auto put = EuropeanOptionSolver(atm_put_params()).solve();
+    auto put = EuropeanOptionSolver(atm_put_params()).solve().value();
     EXPECT_LT(put.rho(), 0.0);
 
     // Rho for call should be positive (higher rates increase call value)
-    auto call = EuropeanOptionSolver(atm_call_params()).solve();
+    auto call = EuropeanOptionSolver(atm_call_params()).solve().value();
     EXPECT_GT(call.rho(), 0.0);
 }
 
@@ -226,12 +226,12 @@ TEST(EuropeanOptionTest, ZeroMaturityReturnsIntrinsic) {
     params.maturity = 0.0;
 
     // ITM put: intrinsic = max(K - S, 0) = 0 for ATM
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     EXPECT_DOUBLE_EQ(result.value(), 0.0);
 
     // ITM put
     params.spot = 90.0;
-    result = EuropeanOptionSolver(params).solve();
+    result = EuropeanOptionSolver(params).solve().value();
     EXPECT_DOUBLE_EQ(result.value(), 10.0);
 
     // Greeks should be zero (except delta for deep ITM)
@@ -254,7 +254,7 @@ TEST(EuropeanOptionTest, ZeroVolatilityReturnsDiscountedIntrinsic) {
     params.type = OptionType::PUT;
     params.volatility = 0.0;
 
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     // ITM put with zero vol: K*exp(-rT) - S*exp(-qT)
     double expected = 100.0 * std::exp(-0.05) - 90.0;
     EXPECT_NEAR(result.value(), expected, 1e-10);
@@ -267,7 +267,7 @@ TEST(EuropeanOptionTest, GammaVsFiniteDifferences) {
     double eps = 0.01;
     auto params = atm_put_params();
 
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     double analytic_gamma = result.gamma();
 
     // Central difference for gamma: (V(S+eps) - 2V(S) + V(S-eps)) / eps^2
@@ -291,7 +291,7 @@ TEST(EuropeanOptionTest, ZeroVolDeltaWithDividendYield) {
     params.type = OptionType::PUT;
     params.volatility = 0.0;
 
-    auto result = EuropeanOptionSolver(params).solve();
+    auto result = EuropeanOptionSolver(params).solve().value();
     // ITM put: delta = -exp(-q*tau) = -exp(-0.03)
     double expected_delta = -std::exp(-0.03);
     EXPECT_NEAR(result.delta(), expected_delta, 1e-10);

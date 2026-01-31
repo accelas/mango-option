@@ -182,7 +182,7 @@ EuropeanOptionSolver::create(const PricingParams& params) noexcept {
     return EuropeanOptionSolver(params);
 }
 
-EuropeanOptionResult EuropeanOptionSolver::solve() const {
+std::expected<EuropeanOptionResult, SolverError> EuropeanOptionSolver::solve() const {
     return EuropeanOptionResult(params_);
 }
 
