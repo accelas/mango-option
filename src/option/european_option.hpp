@@ -11,7 +11,6 @@
 
 #include "src/option/option_spec.hpp"
 #include <expected>
-#include <cmath>
 
 namespace mango {
 

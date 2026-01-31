@@ -52,8 +52,6 @@
 #include <expected>
 #include "src/support/error_types.hpp"
 #include <cmath>
-#include <string>
-#include <span>
 
 namespace mango {
 
