@@ -13,6 +13,7 @@
 
 #include "src/pde/core/grid.hpp"
 #include "src/option/option_spec.hpp"
+#include "src/option/option_concepts.hpp"
 #include "src/pde/operators/centered_difference_facade.hpp"
 #include <memory>
 #include <optional>
@@ -179,5 +180,7 @@ private:
     // Lazy-initialized operator for Greeks
     mutable std::unique_ptr<operators::CenteredDifference<double>> operator_;
 };
+
+static_assert(OptionResult<AmericanOptionResult>);
 
 } // namespace mango

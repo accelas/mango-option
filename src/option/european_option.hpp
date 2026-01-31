@@ -10,6 +10,7 @@
 #pragma once
 
 #include "src/option/option_spec.hpp"
+#include "src/option/option_concepts.hpp"
 #include <expected>
 
 namespace mango {
@@ -89,5 +90,8 @@ public:
 private:
     PricingParams params_;
 };
+
+static_assert(OptionResultWithVega<EuropeanOptionResult>);
+static_assert(OptionSolver<EuropeanOptionSolver>);
 
 }  // namespace mango

@@ -66,6 +66,7 @@ cc_library(
         "//src/pde/core:grid",
         "//src/pde/operators:centered_difference_facade",
         ":option_spec",
+        ":option_concepts",
     ],
     copts = [
         "-Wall",
@@ -170,6 +171,7 @@ cc_library(
     hdrs = ["european_option.hpp"],
     deps = [
         ":option_spec",
+        ":option_concepts",
         "//src/math:black_scholes_analytics",
     ],
     visibility = ["//visibility:public"],
