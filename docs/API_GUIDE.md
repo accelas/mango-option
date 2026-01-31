@@ -373,15 +373,29 @@ if (!result.has_value()) {
 auto aps = mango::AmericanPriceSurface::create(
     result->surface, mango::OptionType::PUT).value();
 
-// Query American option prices
+// Query American option prices (~500ns)
 double price = aps.price(spot, strike, tau, sigma, rate);
 
-// Greeks are available but intended for internal use by the IV solver (Newton iteration).
-// For accurate Greeks, use the PDE solver directly (AmericanOptionSolver).
-// The AmericanPriceSurface Greek methods may have cancellation issues at extreme moneyness.
+// Greeks via interpolation (see accuracy note below)
 double delta = aps.delta(spot, strike, tau, sigma, rate);
 double vega  = aps.vega(spot, strike, tau, sigma, rate);
 ```
+
+### Interpolated Greek Accuracy
+
+`AmericanPriceSurface` computes Greeks by combining B-spline partial derivatives of the EEP surface with exact Black-Scholes Greeks for the European component:
+
+| Greek | Method | Accuracy |
+|---|---|---|
+| **Price** | B-spline interpolation + analytical European | Best: ~$0.005 RMSE (O(h⁴) B-spline) |
+| **Delta** | B-spline ∂EEP/∂m + analytical European delta | Good: one derivative lowers B-spline order to O(h³) |
+| **Vega** | B-spline ∂EEP/∂σ + analytical European vega | Good: same as delta |
+| **Theta** | B-spline ∂EEP/∂τ + analytical European theta | Good: same as delta |
+| **Gamma** | Finite differences on delta (bump-and-reprice) | Worst: amplifies interpolation noise |
+
+Delta and vega are accurate enough for the IV solver's Newton iteration (where they drive convergence). Gamma uses finite differences on an already-approximate delta, so it accumulates more error.
+
+For production Greeks, use the PDE solver directly (`AmericanOptionSolver`), which computes delta and gamma from the PDE solution grid via centered finite differences at full spatial resolution.
 
 ### Factory Methods
 
@@ -444,14 +458,16 @@ surface = mo.build_price_table_surface_from_chain(
 )
 ```
 
-**Real data benchmark (SPY, auto-grid profiles, interpolation-only timing):**
+**Real data benchmark (SPY 7-day puts, auto-grid profiles with EEP decomposition):**
 
-| Profile | Grid (m×τ×σ×r) | PDE solves | interp IV (µs) | interp IV/s | FDM IV (µs) | FDM IV/s | max err (bps) | avg err (bps) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Low | 8×8×14×6 | 84 | 4.68 | 214k | 5275 | 190 | 90.5 | 52.5 |
-| Medium | 10×10×20×8 | 160 | 4.30 | 233k | 5416 | 185 | 144.7 | 38.1 |
-| High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
-| Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
+| Profile | PDE solves | ATM (bps) | Near-OTM (bps) | Deep-OTM (bps) | Price RMSE |
+|---|---:|---:|---:|---:|---:|
+| Low | 100 | 10.0 | 2.7 | 20.7 | $0.014 |
+| Medium | 240 | 4.4 | 3.0 | 22.5 | $0.008 |
+| High (default) | 495 | 0.1 | 2.8 | 22.2 | $0.005 |
+| Ultra | 812 | 0.2 | 3.3 | 22.6 | $0.005 |
+
+IV error in bps varies with vega: a constant ~$0.005 price error maps to <1 bps near-ATM but 20+ bps for deep OTM short-dated options where vega is tiny. Price RMSE is the stable metric.
 
 ### Using Price Surface with IVSolverInterpolated
 
