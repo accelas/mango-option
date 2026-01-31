@@ -38,6 +38,11 @@ AmericanPriceSurface::create(
             ValidationErrorCode::InvalidBounds, 0.0, 0});
     }
 
+    if (meta.K_ref <= 0.0) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidBounds, meta.K_ref, 0});
+    }
+
     return AmericanPriceSurface(
         std::move(eep_surface), type, meta.K_ref, meta.dividend_yield);
 }
