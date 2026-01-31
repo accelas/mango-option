@@ -111,14 +111,14 @@ The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price tab
 
 The table below shows the accuracy/speed tradeoff across grid density profiles, measured on real SPY option data:
 
-| Profile | Grid (mxTxoxr) | PDE solves | Interp IV | Max err (bps) | Avg err (bps) |
+| Profile | Grid (mxTxσxr) | PDE solves | Interp IV | Max err (bps) | Avg err (bps) |
 |---|---:|---:|---:|---:|---:|
-| Low | 8x8x14x6 | 84 | 4.74us | 83.7 | 48.1 |
-| Medium | 10x10x20x8 | 160 | 4.43us | 148.3 | 41.9 |
-| High (default) | 12x12x30x10 | 300 | 4.00us | 62.7 | 21.3 |
-| Ultra | 15x15x43x12 | 516 | 4.09us | 34.5 | 11.8 |
+| Low | 8x8x20x5 | 100 | ~5us | 179 | 63 |
+| Medium | 12x12x30x8 | 240 | ~5us | 62 | 21 |
+| High (default) | 18x18x45x11 | 495 | ~5us | 23 | 7.8 |
+| Ultra | 24x24x58x14 | 812 | ~5us | 12 | 4.1 |
 
-Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~20 bps average error.
+Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~8 bps average error. Ultra achieves ~4 bps at the cost of ~800 PDE solves during table construction.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 
