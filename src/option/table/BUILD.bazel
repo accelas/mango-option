@@ -189,6 +189,20 @@ cc_library(
 )
 
 cc_library(
+    name = "segmented_price_table_builder",
+    srcs = ["segmented_price_table_builder.cpp"],
+    hdrs = ["segmented_price_table_builder.hpp"],
+    deps = [
+        ":segmented_price_surface",
+        ":price_table_builder",
+        ":american_price_surface",
+        "//src/option:american_option",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
