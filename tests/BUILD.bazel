@@ -207,6 +207,18 @@ cc_test(
 )
 
 cc_test(
+    name = "price_surface_concept_test",
+    size = "small",
+    srcs = ["price_surface_concept_test.cc"],
+    deps = [
+        "//src/option/table:price_surface_concept",
+        "//src/option/table:american_price_surface",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "american_price_surface_test",
     size = "small",
     srcs = ["american_price_surface_test.cc"],
@@ -1375,6 +1387,16 @@ cc_test(
         "//src/option:american_option",
         "//src/pde/core:pde_workspace",
         "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "american_option_custom_ic_test",
+    size = "small",
+    srcs = ["american_option_custom_ic_test.cc"],
+    deps = [
+        "//src/option:american_option",
         "@googletest//:gtest_main",
     ],
 )

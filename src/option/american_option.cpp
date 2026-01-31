@@ -108,12 +108,20 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     if (params_.type == OptionType::PUT) {
         AmericanPutSolver pde_solver(params_, grid, workspace_);
-        pde_solver.initialize(AmericanPutSolver::payoff);
+        if (custom_ic_) {
+            pde_solver.initialize(*custom_ic_);
+        } else {
+            pde_solver.initialize(AmericanPutSolver::payoff);
+        }
         pde_solver.set_config(trbdf2_config_);
         solve_result = pde_solver.solve();
     } else {
         AmericanCallSolver pde_solver(params_, grid, workspace_);
-        pde_solver.initialize(AmericanCallSolver::payoff);
+        if (custom_ic_) {
+            pde_solver.initialize(*custom_ic_);
+        } else {
+            pde_solver.initialize(AmericanCallSolver::payoff);
+        }
         pde_solver.set_config(trbdf2_config_);
         solve_result = pde_solver.solve();
     }
