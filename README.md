@@ -111,7 +111,7 @@ The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price tab
 
 The table below shows the accuracy/speed tradeoff across grid density profiles, measured on real SPY option data (7-day puts, strikes from 88% to 107% of spot):
 
-| Profile | PDE solves | ATM (bps) | Near-OTM (bps) | Deep-OTM (bps) | Price RMSE |
+| Profile | PDE solves | ATM IV err (bps) | Near-OTM IV err (bps) | Deep-OTM IV err (bps) | Price RMSE |
 |---|---:|---:|---:|---:|---:|
 | Low | 100 | 10.0 | 2.7 | 20.7 | $0.014 |
 | Medium | 240 | 4.4 | 3.0 | 22.5 | $0.008 |
