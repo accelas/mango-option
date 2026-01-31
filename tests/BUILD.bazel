@@ -195,6 +195,18 @@ cc_test(
 )
 
 cc_test(
+    name = "option_concepts_test",
+    size = "small",
+    srcs = ["option_concepts_test.cc"],
+    deps = [
+        "//src/option:option_concepts",
+        "//src/option:american_option_result",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_grid_estimator_test",
     size = "small",
     srcs = ["price_table_grid_estimator_test.cc"],

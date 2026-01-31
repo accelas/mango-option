@@ -164,6 +164,15 @@ cc_library(
 )
 
 cc_library(
+    name = "option_concepts",
+    hdrs = ["option_concepts.hpp"],
+    deps = [
+        ":option_spec",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "iv_solver_fdm",
     srcs = ["iv_solver_fdm.cpp"],
     hdrs = ["iv_solver_fdm.hpp"],
