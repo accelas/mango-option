@@ -28,7 +28,6 @@ struct PriceTableConfig {
     double dividend_yield = 0.0;               ///< Continuous dividend yield
     std::vector<std::pair<double, double>> discrete_dividends;  ///< (time, amount) schedule
     double max_failure_rate = 0.0;             ///< Maximum tolerable failure rate: 0.0 = strict, 0.1 = allow 10%
-    bool store_eep = true;                     ///< Store early exercise premium instead of raw prices
 };
 
 /// Validate PriceTableConfig fields

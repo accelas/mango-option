@@ -121,7 +121,7 @@ The table below shows the accuracy/speed tradeoff across grid density profiles, 
 
 Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~8 bps average error. Ultra achieves ~4 bps at the cost of ~800 PDE solves during table construction.
 
-**EEP mode** (`store_eep=true`) reduces error by ~5x at the same grid density by interpolating the smoother Early Exercise Premium instead of the raw price. See the [API Guide](docs/API_GUIDE.md#eep-mode-early-exercise-premium-decomposition) for usage.
+Price tables always use **EEP decomposition** (Early Exercise Premium), which interpolates the smoother EEP surface instead of the raw price, reducing error by ~5x at the same grid density. See the [API Guide](docs/API_GUIDE.md#price-table-pre-computation) for usage.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 

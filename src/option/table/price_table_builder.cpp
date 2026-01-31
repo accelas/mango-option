@@ -136,8 +136,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
         .dividend_yield = config_.dividend_yield,
-        .content = config_.store_eep ? SurfaceContent::EarlyExercisePremium
-                                     : SurfaceContent::RawPrice,
+        .content = SurfaceContent::EarlyExercisePremium,
         .discrete_dividends = config_.discrete_dividends
     };
 
@@ -448,7 +447,7 @@ PriceTableBuilder<N>::extract_tensor(
                         double normalized_price = spline.eval(log_moneyness[i]);
                         double american_price = K_ref * normalized_price;
 
-                        if (config_.store_eep) {
+                        {
                             double m = axes.grids[0][i];
                             double tau = axes.grids[1][j];
                             double sigma = axes.grids[2][σ_idx];
@@ -470,8 +469,6 @@ PriceTableBuilder<N>::extract_tensor(
                                 tensor.view[i, j, σ_idx, r_idx] =
                                     std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
                             }
-                        } else {
-                            tensor.view[i, j, σ_idx, r_idx] = american_price;
                         }
                     }
                 }
@@ -557,8 +554,7 @@ PriceTableBuilder<4>::from_vectors(
     PDEGridSpec pde_grid,
     OptionType type,
     double dividend_yield,
-    double max_failure_rate,
-    bool store_eep)
+    double max_failure_rate)
 {
     // Sort and dedupe
     moneyness = sort_and_dedupe(std::move(moneyness));
@@ -595,7 +591,6 @@ PriceTableBuilder<4>::from_vectors(
     config.pde_grid = std::move(pde_grid);
     config.dividend_yield = dividend_yield;
     config.max_failure_rate = max_failure_rate;
-    config.store_eep = store_eep;
 
     // Validate config
     if (auto err = validate_config(config); err.has_value()) {
@@ -616,8 +611,7 @@ PriceTableBuilder<4>::from_strikes(
     PDEGridSpec pde_grid,
     OptionType type,
     double dividend_yield,
-    double max_failure_rate,
-    bool store_eep)
+    double max_failure_rate)
 {
     if (spot <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
@@ -652,8 +646,7 @@ PriceTableBuilder<4>::from_strikes(
         std::move(pde_grid),
         type,
         dividend_yield,
-        max_failure_rate,
-        store_eep
+        max_failure_rate
     );
 }
 

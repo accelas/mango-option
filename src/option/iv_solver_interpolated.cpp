@@ -16,63 +16,6 @@
 namespace mango {
 
 std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
-    std::shared_ptr<const PriceTableSurface<4>> surface,
-    const IVSolverInterpolatedConfig& config)
-{
-    // Validate surface pointer
-    if (!surface) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            0.0));
-    }
-
-    // Extract metadata from surface
-    const auto& axes = surface->axes();
-    const auto& meta = surface->metadata();
-
-    // Reject EEP surfaces — use create(AmericanPriceSurface) overload instead
-    if (meta.content == SurfaceContent::EarlyExercisePremium) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            0.0));
-    }
-
-    // Validate K_ref
-    if (meta.K_ref <= 0.0) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidStrike,
-            meta.K_ref));
-    }
-
-    // Extract ranges from axes and metadata
-    // Grid indices: 0=log-moneyness (internal), 1=maturity, 2=volatility, 3=rate
-    // Note: axis 0 is stored as log-moneyness internally, but we use metadata
-    // for the original moneyness bounds since user queries are in moneyness
-    if (axes.grids[0].empty() || axes.grids[1].empty() ||
-        axes.grids[2].empty() || axes.grids[3].empty()) {
-        return std::unexpected(ValidationError(
-            ValidationErrorCode::InvalidGridSize,
-            0.0));
-    }
-
-    // Use metadata for moneyness bounds (stored before log transform)
-    // This ensures bounds checking works correctly with user's moneyness queries
-    auto m_range = std::make_pair(meta.m_min, meta.m_max);
-    auto tau_range = std::make_pair(axes.grids[1].front(), axes.grids[1].back());
-    auto sigma_range = std::make_pair(axes.grids[2].front(), axes.grids[2].back());
-    auto r_range = std::make_pair(axes.grids[3].front(), axes.grids[3].back());
-
-    return IVSolverInterpolated(
-        std::move(surface),
-        meta.K_ref,
-        m_range,
-        tau_range,
-        sigma_range,
-        r_range,
-        config);
-}
-
-std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::create(
     AmericanPriceSurface american_surface,
     const IVSolverInterpolatedConfig& config)
 {
@@ -94,30 +37,24 @@ std::expected<IVSolverInterpolated, ValidationError> IVSolverInterpolated::creat
     auto sigma_range = std::make_pair(axes.grids[2].front(), axes.grids[2].back());
     auto r_range = std::make_pair(axes.grids[3].front(), axes.grids[3].back());
 
-    // Create solver with null surface_ (american_surface_ will be used instead)
-    IVSolverInterpolated solver(nullptr, meta.K_ref, m_range, tau_range, sigma_range, r_range, config);
-    solver.american_surface_ = std::move(american_surface);
-    return solver;
+    return IVSolverInterpolated(
+        std::move(american_surface),
+        meta.K_ref,
+        m_range,
+        tau_range,
+        sigma_range,
+        r_range,
+        config);
 }
 
 double IVSolverInterpolated::eval_price(double moneyness, double maturity, double vol, double rate, double strike) const {
-    if (american_surface_) {
-        double spot = moneyness * strike;
-        return american_surface_->price(spot, strike, maturity, vol, rate);
-    }
-    double price_Kref = surface_->value({moneyness, maturity, vol, rate});
-    double scale_factor = strike / K_ref_;
-    return price_Kref * scale_factor;
+    double spot = moneyness * strike;
+    return american_surface_.price(spot, strike, maturity, vol, rate);
 }
 
 double IVSolverInterpolated::compute_vega(double moneyness, double maturity, double vol, double rate, double strike) const {
-    if (american_surface_) {
-        double spot = moneyness * strike;
-        return american_surface_->vega(spot, strike, maturity, vol, rate);
-    }
-    double vega_Kref = surface_->partial(2, {moneyness, maturity, vol, rate});
-    const double scale_factor = strike / K_ref_;
-    return vega_Kref * scale_factor;
+    double spot = moneyness * strike;
+    return american_surface_.vega(spot, strike, maturity, vol, rate);
 }
 
 std::optional<ValidationError> IVSolverInterpolated::validate_query(const IVQuery& query) const {

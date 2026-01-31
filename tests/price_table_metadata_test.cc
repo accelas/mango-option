@@ -26,9 +26,9 @@ TEST(PriceTableMetadataTest, WithDiscreteDividends) {
     EXPECT_DOUBLE_EQ(meta.discrete_dividends[0].second, 2.50);
 }
 
-TEST(PriceTableMetadataTest, DefaultContentIsRawPrice) {
+TEST(PriceTableMetadataTest, DefaultContentIsEEP) {
     PriceTableMetadata meta;
-    EXPECT_EQ(meta.content, SurfaceContent::RawPrice);
+    EXPECT_EQ(meta.content, SurfaceContent::EarlyExercisePremium);
 }
 
 TEST(PriceTableMetadataTest, CanSetToEEP) {

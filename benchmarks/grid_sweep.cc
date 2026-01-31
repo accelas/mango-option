@@ -114,7 +114,7 @@ int main() {
         auto pde_accuracy = grid_accuracy_profile(GridAccuracyProfile::Medium);
         auto builder_result = PriceTableBuilder<4>::from_vectors(
             estimate.grids[0], estimate.grids[1], estimate.grids[2], estimate.grids[3],
-            spot, pde_accuracy, OptionType::PUT, div_yield, 0.0, true);
+            spot, pde_accuracy, OptionType::PUT, div_yield);
 
         if (!builder_result) {
             printf("%-6zu BUILD FAILED\n", trial);

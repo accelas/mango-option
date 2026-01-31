@@ -348,13 +348,14 @@ def test_iv_solver_interpolated():
 
     surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
 
-    # Create solver
+    # Create solver via AmericanPriceSurface
+    aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
     config = mango_option.IVSolverInterpolatedConfig()
     config.max_iterations = 50
     config.tolerance = 1e-6
 
-    solver = mango_option.IVSolverInterpolated.create(surface, config)
-    print("✓ Created IVSolverInterpolated")
+    solver = mango_option.IVSolverInterpolated.create(aps, config)
+    print("✓ Created IVSolverInterpolated via AmericanPriceSurface")
 
     # Note: With random coefficients, the solver may not converge
     # but we can verify the API works
@@ -446,11 +447,12 @@ def test_surface_to_solver_integration():
 
     surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
 
-    # Verify surface can be passed to IVSolverInterpolated (tests shared_ptr const conversion)
+    # Verify surface can be passed to IVSolverInterpolated via AmericanPriceSurface
+    aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
     config = mango_option.IVSolverInterpolatedConfig()
-    solver = mango_option.IVSolverInterpolated.create(surface, config)
+    solver = mango_option.IVSolverInterpolated.create(aps, config)
     assert solver is not None
-    print("✓ Surface correctly passes to IVSolverInterpolated.create()")
+    print("✓ Surface correctly passes to IVSolverInterpolated via AmericanPriceSurface")
 
 
 if __name__ == "__main__":

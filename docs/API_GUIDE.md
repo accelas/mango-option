@@ -333,7 +333,7 @@ auto result = solver.solve_impl(query);
 
 ### Building a 4D Price Surface
 
-**Pre-compute American option prices across parameter space (EEP mode recommended):**
+**Pre-compute American option prices across parameter space:**
 
 ```cpp
 #include "src/option/table/price_table_builder.hpp"
@@ -347,15 +347,12 @@ std::vector<double> rate_grid = {0.0, 0.02, 0.04, 0.06, 0.08, 0.10};         // 
 
 double K_ref = 100.0;  // Reference strike price
 
-// Create builder with EEP mode (recommended — ~5x better interpolation accuracy)
+// Create builder (always stores EEP for ~5x better interpolation accuracy)
 auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
     moneyness_grid, maturity_grid, vol_grid, rate_grid,
     K_ref,
     mango::GridAccuracyParams{},  // auto-estimate PDE grid
-    mango::OptionType::PUT,
-    0.0,    // dividend_yield
-    0.0,    // max_failure_rate
-    true);  // store_eep (recommended)
+    mango::OptionType::PUT);
 
 if (!factory_result.has_value()) {
     std::cerr << "Factory creation failed: " << factory_result.error() << "\n";
@@ -376,12 +373,14 @@ if (!result.has_value()) {
 auto aps = mango::AmericanPriceSurface::create(
     result->surface, mango::OptionType::PUT).value();
 
-// Query American option prices and Greeks
+// Query American option prices
 double price = aps.price(spot, strike, tau, sigma, rate);
+
+// Greeks are available but intended for internal use by the IV solver (Newton iteration).
+// For accurate Greeks, use the PDE solver directly (AmericanOptionSolver).
+// The AmericanPriceSurface Greek methods may have cancellation issues at extreme moneyness.
 double delta = aps.delta(spot, strike, tau, sigma, rate);
-double gamma = aps.gamma(spot, strike, tau, sigma, rate);
 double vega  = aps.vega(spot, strike, tau, sigma, rate);
-double theta = aps.theta(spot, strike, tau, sigma, rate);
 ```
 
 ### Factory Methods
@@ -454,36 +453,15 @@ surface = mo.build_price_table_surface_from_chain(
 | High (default) | 12×12×30×10 | 300 | 3.83 | 261k | 5280 | 189 | 61.7 | 19.5 |
 | Ultra | 15×15×43×12 | 516 | 3.85 | 260k | 5271 | 190 | 35.2 | 13.1 |
 
-### Raw Price Mode (Without EEP)
-
-If you need direct access to the raw price surface without EEP decomposition, pass `store_eep=false` (or omit it) and query the surface directly:
-
-```cpp
-auto factory_result = mango::PriceTableBuilder<4>::from_vectors(
-    moneyness_grid, maturity_grid, vol_grid, rate_grid,
-    K_ref,
-    mango::GridAccuracyParams{},
-    mango::OptionType::PUT);  // store_eep defaults to false
-
-auto [builder, axes] = std::move(factory_result.value());
-auto result = builder.build(axes);
-
-// Query raw price surface directly (~500ns each)
-double price = result->surface->value({m, tau, sigma, r});
-double delta = result->surface->partial(0, {m, tau, sigma, r});  // ∂price/∂m
-```
-
-Raw mode has lower accuracy (~5x worse) but avoids the European price computation at query time.
-
-### Using EEP with IVSolverInterpolated
+### Using Price Surface with IVSolverInterpolated
 
 ```cpp
 #include "src/option/iv_solver_interpolated.hpp"
 
-// Create IV solver from AmericanPriceSurface (EEP mode)
+// Create IV solver from AmericanPriceSurface
 auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
 
-// Solve IV as usual — internally uses EEP reconstruction
+// Solve IV — internally uses EEP reconstruction + Newton iteration
 auto iv_result = iv_solver.solve_impl(iv_query);
 ```
 

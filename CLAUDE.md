@@ -181,22 +181,26 @@ mango::IVSolverFDM solver(config);
 auto result = solver.solve_impl(query);
 ```
 
-**Pattern 2: Price Table Pre-computation (EEP mode recommended)**
+**Pattern 2: Price Table Pre-computation and Interpolated IV**
 ```cpp
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/american_price_surface.hpp"
+#include "src/option/iv_solver_interpolated.hpp"
 
-// Build with EEP mode (recommended — ~5x better interpolation accuracy)
+// Build price table (always uses EEP for ~5x better interpolation accuracy)
 auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
     moneyness_grid, maturity_grid, vol_grid, rate_grid, K_ref,
-    mango::GridAccuracyParams{}, mango::OptionType::PUT,
-    0.0, 0.0, true).value();  // last arg: store_eep
+    mango::GridAccuracyParams{}, mango::OptionType::PUT).value();
 auto result = builder.build(axes);
 
 // Wrap for full price reconstruction
 auto aps = mango::AmericanPriceSurface::create(
     result->surface, mango::OptionType::PUT).value();
 double price = aps.price(spot, strike, tau, sigma, rate);
+
+// Create interpolated IV solver from AmericanPriceSurface
+auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+auto iv_result = iv_solver.solve_impl(iv_query);
 ```
 
 **See [docs/API_GUIDE.md](docs/API_GUIDE.md) for complete patterns**

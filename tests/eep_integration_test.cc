@@ -18,7 +18,7 @@ namespace {
 // End-to-end integration tests for EEP decomposition
 // ===========================================================================
 
-/// Build a price table with store_eep=true and verify that the reconstructed
+/// Build a price table and verify that the reconstructed
 /// American price from AmericanPriceSurface matches a direct PDE solve.
 TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     // Grid covering a modest range for the price table
@@ -30,14 +30,13 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 
     double K_ref = 100.0;
 
-    // Build with store_eep = true, using auto-estimated PDE grid
+    // Build with auto-estimated PDE grid (always produces EEP surface)
     auto setup = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, vol, rate, K_ref,
         GridAccuracyParams{},   // auto-estimate PDE grid
         OptionType::PUT,
         0.0,   // dividend_yield
-        0.0,   // max_failure_rate
-        true); // store_eep
+        0.0);  // max_failure_rate
 
     ASSERT_TRUE(setup.has_value())
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);
@@ -95,7 +94,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
         << " tolerance=" << tol;
 }
 
-/// Build a price table with store_eep=true and verify that the raw EEP
+/// Build a price table and verify that the raw EEP
 /// surface produces non-negative values at all grid points.
 /// The softplus floor in extract_tensor should guarantee this.
 TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
@@ -112,8 +111,7 @@ TEST(EEPIntegrationTest, SoftplusFloorEnsuresNonNegative) {
         GridAccuracyParams{},
         OptionType::PUT,
         0.0,   // dividend_yield
-        0.0,   // max_failure_rate
-        true); // store_eep
+        0.0);  // max_failure_rate
 
     ASSERT_TRUE(setup.has_value())
         << "from_vectors failed: code=" << static_cast<int>(setup.error().code);

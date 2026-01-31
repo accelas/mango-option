@@ -26,7 +26,7 @@ struct PriceTableMetadata {
     double dividend_yield = 0.0;                            ///< Continuous dividend yield
     double m_min = 0.0;                                     ///< Minimum moneyness (S/K)
     double m_max = 0.0;                                     ///< Maximum moneyness (S/K)
-    SurfaceContent content = SurfaceContent::RawPrice;       ///< What tensor stores
+    SurfaceContent content = SurfaceContent::EarlyExercisePremium;  ///< What tensor stores
     std::vector<std::pair<double, double>> discrete_dividends;  ///< (time, amount) pairs
 };
 

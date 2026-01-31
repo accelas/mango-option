@@ -33,7 +33,8 @@
  * auto result = builder.build(axes);
  *
  * // Step 3: Create IV solver from surface
- * auto solver_result = IVSolverInterpolated::create(result.value().surface);
+ * auto aps = AmericanPriceSurface::create(result.value().surface, OptionType::PUT);
+ * auto solver_result = IVSolverInterpolated::create(std::move(*aps));
  * const auto& iv_solver = solver_result.value();
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
@@ -49,6 +50,7 @@
 
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/american_price_surface.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
@@ -273,7 +275,12 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     solver_config.max_iterations = 50;
     solver_config.tolerance = 1e-6;
 
-    auto iv_solver_result = IVSolverInterpolated::create(surface, solver_config);
+    auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
+    if (!aps) {
+        state.SkipWithError("AmericanPriceSurface::create failed");
+        return;
+    }
+    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps), solver_config);
     if (!iv_solver_result) {
         auto err = iv_solver_result.error();
         std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
@@ -375,7 +382,12 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         }
 
         // Step 3-4: Compute IVs
-        auto iv_solver_result = IVSolverInterpolated::create(surface);
+        auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
+        if (!aps) {
+            state.SkipWithError("AmericanPriceSurface::create failed");
+            return;
+        }
+        auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps));
         if (!iv_solver_result) {
             auto err = iv_solver_result.error();
             std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
