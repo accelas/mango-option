@@ -507,8 +507,7 @@ static void BM_RealData_IVSmile_BuildTable(benchmark::State& state) {
     for (auto _ : state) {
         auto builder_result = PriceTableBuilder<4>::from_chain(
             fixture.chain,
-            fixture.grid_spec,
-            200,  // time steps
+            ExplicitPDEGrid{fixture.grid_spec, 200},
             OptionType::PUT,
             0.1   // allow 10% failure rate
         );
@@ -547,8 +546,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Build price table once (not timed)
     auto builder_result = PriceTableBuilder<4>::from_chain(
         fixture.chain,
-        fixture.grid_spec,
-        200,
+        ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
         0.1
     );
@@ -658,8 +656,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     // Build price table
     auto builder_result = PriceTableBuilder<4>::from_chain(
         fixture.chain,
-        fixture.grid_spec,
-        200,
+        ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
         0.1
     );
@@ -823,8 +820,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     // Build price table
     auto builder_result = PriceTableBuilder<4>::from_chain(
         fixture.chain,
-        fixture.grid_spec,
-        200,
+        ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
         0.1
     );
@@ -934,8 +930,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     // Build price table with automatic grid estimation
     auto builder_result = PriceTableBuilder<4>::from_chain_auto(
         iv_fixture.chain,
-        GridSpec<double>::uniform(-3.0, 3.0, 101).value(),
-        200,
+        ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
         OptionType::PUT,
         accuracy
     );

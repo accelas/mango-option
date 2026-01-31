@@ -15,13 +15,13 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 21).value(),  // width = 6.0
-        .n_time = 100,
+        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},  // width = 6.0
         .dividend_yield = 0.02
     };
 
+    const auto& explicit_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     std::cout << "=== ROOT CAUSE ANALYSIS ===" << std::endl;
-    std::cout << "Custom grid width: " << (config.grid_estimator.x_max() - config.grid_estimator.x_min()) << std::endl;
+    std::cout << "Custom grid width: " << (explicit_grid.grid_spec.x_max() - explicit_grid.grid_spec.x_min()) << std::endl;
     std::cout << "Normalized chain MAX_WIDTH: 5.8" << std::endl;
     std::cout << "Result: Custom grid width EXCEEDS limit" << std::endl;
 
@@ -30,8 +30,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     PriceTableConfig config_narrow{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .grid_estimator = GridSpec<double>::uniform(-2.5, 2.5, 21).value(),  // width = 5.0
-        .n_time = 100,
+        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-2.5, 2.5, 21).value(), 100},  // width = 5.0
         .dividend_yield = 0.02
     };
 
@@ -43,8 +42,9 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     axes.grids[3] = {0.05};
 
     auto batch = builder_narrow.make_batch_for_testing(axes);
-    GridSpec<double> narrow_grid = config_narrow.grid_estimator;
-    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), config_narrow.n_time);
+    const auto& narrow_explicit = std::get<ExplicitPDEGrid>(config_narrow.pde_grid);
+    GridSpec<double> narrow_grid = narrow_explicit.grid_spec;
+    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), narrow_explicit.n_time);
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_narrow =
         std::make_pair(narrow_grid, time_domain);
 
@@ -52,7 +52,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = 21;
     accuracy.max_spatial_points = 1200;
-    accuracy.max_time_steps = config_narrow.n_time;
+    accuracy.max_time_steps = narrow_explicit.n_time;
     solver_narrow.set_grid_accuracy(accuracy);
     solver_narrow.set_snapshot_times(axes.grids[1]);
 
@@ -65,8 +65,8 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     std::cout << "\n=== Test 2: Wide grid (width=6.0 > 5.8) ===" << std::endl;
     PriceTableBuilder<4> builder_wide(config);
     auto batch2 = builder_wide.make_batch_for_testing(axes);
-    GridSpec<double> wide_grid = config.grid_estimator;
-    auto time_domain2 = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), config.n_time);
+    GridSpec<double> wide_grid = explicit_grid.grid_spec;
+    auto time_domain2 = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), explicit_grid.n_time);
     std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_wide =
         std::make_pair(wide_grid, time_domain2);
 

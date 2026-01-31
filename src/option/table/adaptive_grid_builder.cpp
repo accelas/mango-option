@@ -148,7 +148,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         auto builder_result = PriceTableBuilder<4>::from_vectors(
             moneyness_grid, maturity_grid, vol_grid, rate_grid,
             chain.spot,  // K_ref = spot as reference strike
-            grid_spec, n_time, type, chain.dividend_yield,
+            ExplicitPDEGrid{grid_spec, n_time}, type, chain.dividend_yield,
             params_.max_failure_rate);
 
         if (!builder_result.has_value()) {

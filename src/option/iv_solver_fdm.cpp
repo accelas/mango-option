@@ -140,6 +140,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     // Choose grid: manual override or automatic estimation
     auto dummy_grid = GridSpec<double>::uniform(0.0, 1.0, 10);
     GridSpec<double> grid_spec = dummy_grid.value();  // Dummy init, will be replaced
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, config_.grid_n_time);
 
     if (config_.use_manual_grid) {
         // Advanced mode: Use manually specified grid (for benchmarks)
@@ -158,13 +159,11 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
             return std::numeric_limits<double>::quiet_NaN();
         }
         grid_spec = grid_result.value();
-        // Note: config_.grid_n_time is not used here as AmericanOptionSolver
-        // determines time stepping internally based on grid and params
     } else {
         // Default mode: Use automatic grid estimation
-        auto [auto_grid, auto_time_domain] = estimate_grid_for_option(option_params);
-        (void)auto_time_domain;  // Not used here; AmericanOptionSolver will reconstruct it
+        auto [auto_grid, auto_time_domain] = estimate_grid_for_option(option_params, config_.grid_accuracy);
         grid_spec = auto_grid;
+        time_domain = auto_time_domain;
     }
 
     // Thread-local workspace cache to avoid repeated allocations during Brent iterations
@@ -191,15 +190,10 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    // Create solver and solve
+    // Create solver and solve — always pass grid config to ensure the solver
+    // uses the same grid we computed (matching the workspace size)
     try {
-        // Pass custom grid config if manual mode is enabled
-        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config = std::nullopt;
-
-        if (config_.use_manual_grid) {
-            TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, config_.grid_n_time);
-            custom_grid_config = std::make_pair(grid_spec, time_domain);
-        }
+        auto custom_grid_config = std::make_pair(grid_spec, time_domain);
 
         AmericanOptionSolver solver(option_params, pde_workspace_result.value(),
                                     std::nullopt,  // snapshot_times

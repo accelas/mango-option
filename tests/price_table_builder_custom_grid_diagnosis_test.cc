@@ -12,8 +12,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .grid_estimator = GridSpec<double>::uniform(-3.0, 3.0, 21).value(),
-        .n_time = 100,
+        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
         .dividend_yield = 0.02
     };
 
@@ -49,16 +48,17 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     std::cout << "  dividend_yield: " << params.dividend_yield << std::endl;
 
     // Check grid estimator
+    const auto& diag_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     std::cout << "\nGrid estimator from config:" << std::endl;
-    std::cout << "  x_min: " << config.grid_estimator.x_min() << std::endl;
-    std::cout << "  x_max: " << config.grid_estimator.x_max() << std::endl;
-    std::cout << "  n_points: " << config.grid_estimator.n_points() << std::endl;
+    std::cout << "  x_min: " << diag_grid.grid_spec.x_min() << std::endl;
+    std::cout << "  x_max: " << diag_grid.grid_spec.x_max() << std::endl;
+    std::cout << "  n_points: " << diag_grid.grid_spec.n_points() << std::endl;
 
     // Check what grid would be estimated for this option
     GridAccuracyParams accuracy;
-    accuracy.min_spatial_points = std::min(config.grid_estimator.n_points(), size_t(100));
-    accuracy.max_spatial_points = std::max(config.grid_estimator.n_points(), size_t(1200));
-    accuracy.max_time_steps = config.n_time;
+    accuracy.min_spatial_points = std::min(diag_grid.grid_spec.n_points(), size_t(100));
+    accuracy.max_spatial_points = std::max(diag_grid.grid_spec.n_points(), size_t(1200));
+    accuracy.max_time_steps = diag_grid.n_time;
 
     auto [auto_grid, auto_time] = estimate_grid_for_option(params, accuracy);
     std::cout << "\nAuto-estimated grid for these params:" << std::endl;
@@ -68,8 +68,8 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     std::cout << "  time: [" << auto_time.t_start() << ", " << auto_time.t_end() << "]" << std::endl;
 
     // Now check what custom_grid would be
-    GridSpec<double> user_grid = config.grid_estimator;
-    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), config.n_time);
+    GridSpec<double> user_grid = diag_grid.grid_spec;
+    auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), diag_grid.n_time);
     std::cout << "\nCustom grid (as plan specifies):" << std::endl;
     std::cout << "  x_min: " << user_grid.x_min() << std::endl;
     std::cout << "  x_max: " << user_grid.x_max() << std::endl;

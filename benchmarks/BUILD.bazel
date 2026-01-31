@@ -109,6 +109,30 @@ cc_binary(
 )
 
 cc_binary(
+    name = "grid_sweep",
+    srcs = ["grid_sweep.cc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = [
+        "-fopenmp",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver_interpolated",
+        "//src/option/table:price_table_builder",
+        "//src/option/table:price_table_surface",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
     name = "quantlib_performance",
     srcs = ["quantlib_performance.cc"],
     copts = [
