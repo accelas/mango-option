@@ -11,6 +11,15 @@ namespace mango {
 
 namespace {
 
+/// Context for sampling a previous segment's surface as an initial condition.
+struct ChainedICContext {
+    const AmericanPriceSurface* prev;
+    double K_ref;
+    double prev_tau_end;   ///< Previous segment's local τ at its far boundary
+    double boundary_div;   ///< Discrete dividend amount at this boundary
+    bool prev_is_eep;      ///< Whether previous segment uses EEP decomposition
+};
+
 /// Generate a τ grid for a segment [tau_start, tau_end] with at least
 /// `min_points` points (including endpoints).  The first segment (closest
 /// to expiry) uses a small ε instead of exactly 0 to avoid PDE degeneracy.
@@ -321,50 +330,35 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             batch_solver.set_snapshot_times(axes.grids[1]);
 
             // Build setup callback that sets per-solve IC
-            auto setup_callback = [prev, K_ref, prev_seg_tau_local_end,
-                                   boundary_div, &vol_grid, &rate_grid, Nr](
+            ChainedICContext ic_ctx{
+                .prev = prev,
+                .K_ref = K_ref,
+                .prev_tau_end = prev_seg_tau_local_end,
+                .boundary_div = boundary_div,
+                .prev_is_eep = (prev->metadata().content ==
+                                SurfaceContent::EarlyExercisePremium),
+            };
+
+            auto setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
                 size_t index, AmericanOptionSolver& solver)
             {
-                size_t sigma_idx = index / Nr;
-                size_t rate_idx = index % Nr;
-                double sigma = vol_grid[sigma_idx];
-                double rate = rate_grid[rate_idx];
+                double sigma = vol_grid[index / Nr];
+                double rate = rate_grid[index % Nr];
 
-                // The IC maps log-moneyness x -> normalized price u = V/K.
-                //
-                // Jump condition at a dividend date: V(t⁻, S) = V(t⁺, S - D).
-                // We evaluate the previous segment at spot_adj = S - D to apply
-                // the discrete dividend jump.
-                //
-                // prev->price(spot, K_ref, tau, sigma, rate) for EEP returns
-                // actual price V.  For RawPrice it returns V/K_ref.
-                // Since K_ref is the strike for all segments, we need u = V/K_ref.
-
-                bool prev_is_eep = (prev->metadata().content ==
-                                    SurfaceContent::EarlyExercisePremium);
-
+                // IC maps log-moneyness x → normalized price u = V/K.
+                // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
                 solver.set_initial_condition(
-                    [prev, K_ref, prev_seg_tau_local_end, sigma, rate,
-                     prev_is_eep, boundary_div](
+                    [ic_ctx, sigma, rate](
                         std::span<const double> x, std::span<double> u)
                     {
                         for (size_t i = 0; i < x.size(); ++i) {
-                            double spot = K_ref * std::exp(x[i]);
-                            // Apply dividend jump: V(t⁻, S) = V(t⁺, S - D)
-                            double spot_adj = spot - boundary_div;
-                            if (spot_adj <= 0.0) {
-                                spot_adj = 1e-8;
-                            }
-                            double raw = prev->price(
-                                spot_adj, K_ref, prev_seg_tau_local_end,
+                            double spot = ic_ctx.K_ref * std::exp(x[i]);
+                            double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
+                            double raw = ic_ctx.prev->price(
+                                spot_adj, ic_ctx.K_ref, ic_ctx.prev_tau_end,
                                 sigma, rate);
-                            if (prev_is_eep) {
-                                // EEP returns actual price; normalize
-                                u[i] = raw / K_ref;
-                            } else {
-                                // RawPrice returns V/K_ref already
-                                u[i] = raw;
-                            }
+                            // EEP returns actual price V; RawPrice returns V/K_ref
+                            u[i] = ic_ctx.prev_is_eep ? raw / ic_ctx.K_ref : raw;
                         }
                     });
             };
