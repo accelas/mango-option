@@ -1361,6 +1361,22 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "eep_integration_test",
+    size = "medium",
+    srcs = ["eep_integration_test.cc"],
+    copts = ["-fopenmp"],
+    linkopts = ["-fopenmp"],
+    deps = [
+        "//src/option/table:price_table_builder",
+        "//src/option/table:american_price_surface",
+        "//src/option:american_option",
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
 load("@pip//:requirements.bzl", "requirement")
 
 py_test(
