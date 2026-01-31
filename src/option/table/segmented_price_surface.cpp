@@ -111,8 +111,10 @@ double SegmentedPriceSurface::price(double spot, double strike,
         S_adj = 1e-8;
     }
 
-    // 5. Convert to local segment time
-    double tau_local = tau - seg.tau_start;
+    // 5. Convert to local segment time and clamp to segment grid bounds
+    double tau_local = std::clamp(tau - seg.tau_start,
+                                  seg.surface.tau_min(),
+                                  seg.surface.tau_max());
 
     // 6. Delegate to segment surface
     return seg.surface.price(S_adj, strike, tau_local, sigma, rate);
@@ -131,7 +133,9 @@ double SegmentedPriceSurface::vega(double spot, double strike,
         if (S_adj <= 0.0) {
             S_adj = 1e-8;
         }
-        double tau_local = tau - seg.tau_start;
+        double tau_local = std::clamp(tau - seg.tau_start,
+                                      seg.surface.tau_min(),
+                                      seg.surface.tau_max());
         return seg.surface.vega(S_adj, strike, tau_local, sigma, rate);
     }
 
@@ -151,7 +155,7 @@ double SegmentedPriceSurface::m_max() const noexcept {
 }
 
 double SegmentedPriceSurface::tau_min() const noexcept {
-    return segments_.front().tau_start;
+    return segments_.front().tau_start + segments_.front().surface.tau_min();
 }
 
 double SegmentedPriceSurface::tau_max() const noexcept {

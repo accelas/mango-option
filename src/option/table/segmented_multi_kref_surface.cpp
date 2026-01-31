@@ -18,6 +18,19 @@ SegmentedMultiKRefSurface::create(std::vector<Entry> entries) {
     std::sort(entries.begin(), entries.end(),
               [](const Entry& a, const Entry& b) { return a.K_ref < b.K_ref; });
 
+    // Remove duplicate K_refs (would cause division by zero in interpolation)
+    entries.erase(
+        std::unique(entries.begin(), entries.end(),
+                    [](const Entry& a, const Entry& b) {
+                        return std::abs(a.K_ref - b.K_ref) < 1e-12;
+                    }),
+        entries.end());
+
+    if (entries.empty()) {
+        return std::unexpected(ValidationError(
+            ValidationErrorCode::InvalidGridSize, 0.0, 0));
+    }
+
     // Compute bounds as intersection across all entries
     double m_min = -std::numeric_limits<double>::infinity();
     double m_max = std::numeric_limits<double>::infinity();

@@ -25,8 +25,8 @@ std::vector<double> make_segment_tau_grid(
 
     double effective_start = tau_start;
     if (is_last_segment && tau_start == 0.0) {
-        // For EEP mode the first tau must be > 0
-        effective_start = 0.01;
+        // For EEP mode the first tau must be > 0, but never exceed segment width
+        effective_start = std::min(0.01, tau_end * 0.5);
     }
 
     double step = (tau_end - effective_start) / static_cast<double>(n - 1);
@@ -453,7 +453,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     SegmentedPriceSurface::Config sps_config;
     sps_config.segments = std::move(segments);
-    sps_config.dividends = config.dividends;
+    sps_config.dividends = dividends;
     sps_config.K_ref = K_ref;
     sps_config.T = T;
 

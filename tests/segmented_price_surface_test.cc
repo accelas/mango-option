@@ -291,7 +291,8 @@ TEST(SegmentedPriceSurfaceTest, SpotClampWhenSAdjNegative) {
 TEST(SegmentedPriceSurfaceTest, BoundsSpanFullMaturityRange) {
     auto sps = build_two_segment_surface();
 
-    EXPECT_DOUBLE_EQ(sps.tau_min(), 0.0);
+    // tau_min reflects the first segment's actual grid start (not 0.0)
+    EXPECT_GT(sps.tau_min(), 0.0);
     EXPECT_DOUBLE_EQ(sps.tau_max(), 1.0);
 
     // Other bounds should come from segment 0
