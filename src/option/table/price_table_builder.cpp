@@ -66,6 +66,10 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 2});
     }
 
+    // TODO(discrete-dividends): Segment maturity axis at dividend dates,
+    // building a separate table for each segment. Each segment uses continuous
+    // dividend yield only, so EEP decomposition applies per-segment.
+
     // Check K_ref > 0
     if (config_.K_ref <= 0.0) {
         return std::unexpected(PriceTableError{PriceTableErrorCode::NonPositiveValue, 4});
