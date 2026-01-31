@@ -379,6 +379,7 @@ PriceTableBuilder<N>::extract_tensor(
 
     // Precompute log-moneyness for interpolation
     std::vector<double> log_moneyness(Nm);
+    #pragma omp simd
     for (size_t i = 0; i < Nm; ++i) {
         log_moneyness[i] = std::log(axes.grids[0][i]);
     }
@@ -870,16 +871,21 @@ PriceTableBuilder<N>::repair_failed_slices(
             }
 
             // At least one must exist (not all_maturities_failed)
-            for (size_t i = 0; i < Nm; ++i) {
-                if (τ_before && τ_after) {
-                    double t = static_cast<double>(τ_idx - *τ_before) /
-                               static_cast<double>(*τ_after - *τ_before);
+            if (τ_before && τ_after) {
+                double t = static_cast<double>(τ_idx - *τ_before) /
+                           static_cast<double>(*τ_after - *τ_before);
+                #pragma omp simd
+                for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] =
                         (1.0 - t) * tensor.view[i, *τ_before, σ_idx, r_idx] +
                         t * tensor.view[i, *τ_after, σ_idx, r_idx];
-                } else if (τ_before) {
+                }
+            } else if (τ_before) {
+                for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_before, σ_idx, r_idx];
-                } else {
+                }
+            } else {
+                for (size_t i = 0; i < Nm; ++i) {
                     tensor.view[i, τ_idx, σ_idx, r_idx] = tensor.view[i, *τ_after, σ_idx, r_idx];
                 }
             }
