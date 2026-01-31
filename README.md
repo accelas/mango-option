@@ -16,7 +16,7 @@ The core C++ library exposes a pybind11-based Python module, so you can use it f
 
 - American option prices and Greeks (delta, gamma, theta, vega) from the PDE solver
 - Implied volatility via FDM (~19ms) or B-spline interpolation (~3.5us)
-- Pre-computed 4D price tables with EEP decomposition for sub-microsecond lookups (~500ns, 2-5 bps accuracy)
+- Pre-computed 4D price tables with EEP decomposition for sub-microsecond lookups (~500ns, ~9 bps accuracy)
 - Batch pricing with OpenMP (10x speedup on multi-core)
 - USDT tracing probes for production monitoring at zero overhead when disabled
 - A general-purpose PDE toolkit if you want to solve your own equations
@@ -103,10 +103,9 @@ Batch processing (64 options): 10x speedup with OpenMP (~0.13ms/option parallel 
 | Method | Time/IV | Accuracy |
 |---|---|---|
 | FDM-based | ~19ms | Ground truth |
-| Interpolated (B-spline) | ~3.5us | 12-48 bps |
-| Interpolated (EEP mode) | ~3.5us | 2-5 bps |
+| Interpolated (B-spline) | ~3.5us | 8-10 bps |
 
-The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation. EEP mode stores the Early Exercise Premium instead of raw prices, yielding ~5x better accuracy at the same grid density by removing the American free boundary discontinuity from the interpolated surface.
+The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price table (moneyness x maturity x vol x rate), then query it with B-spline interpolation. Price tables use EEP decomposition — they store the Early Exercise Premium instead of raw prices, removing the American free boundary discontinuity from the interpolated surface.
 
 ### Price Table Profiles
 
@@ -114,14 +113,14 @@ The table below shows the accuracy/speed tradeoff across grid density profiles, 
 
 | Profile | Grid (mxTxσxr) | PDE solves | Interp IV | Max err (bps) | Avg err (bps) |
 |---|---:|---:|---:|---:|---:|
-| Low | 8x8x20x5 | 100 | ~5us | 179 | 63 |
-| Medium | 12x12x30x8 | 240 | ~5us | 62 | 21 |
-| High (default) | 18x18x45x11 | 495 | ~5us | 23 | 7.8 |
-| Ultra | 24x24x58x14 | 812 | ~5us | 12 | 4.1 |
+| Low | 8x8x14x6 | 84 | ~4us | 36 | 9.4 |
+| Medium | 10x10x20x8 | 160 | ~4us | 37 | 9.2 |
+| High (default) | 12x12x30x10 | 300 | ~4us | 37 | 8.4 |
+| Ultra | 15x15x43x12 | 516 | ~4us | 37 | 8.8 |
 
-Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. The default (High) targets ~8 bps average error. Ultra achieves ~4 bps at the cost of ~800 PDE solves during table construction.
+Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control this tradeoff. With EEP decomposition, even the Low profile achieves ~9 bps average error — accuracy that previously required the highest grid densities with raw price interpolation. The max error plateaus around ~37 bps from a few deep OTM near-expiry options where the EEP is near zero.
 
-Price tables always use **EEP decomposition** (Early Exercise Premium), which interpolates the smoother EEP surface instead of the raw price, reducing error by ~5x at the same grid density. See the [API Guide](docs/API_GUIDE.md#price-table-pre-computation) for usage.
+See the [API Guide](docs/API_GUIDE.md#price-table-pre-computation) for usage.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 
