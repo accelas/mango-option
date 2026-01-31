@@ -99,7 +99,7 @@ public:
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0,
-        bool store_eep = false);
+        bool store_eep = true);
 
     /// Factory from strikes (auto-computes moneyness)
     ///
@@ -128,7 +128,7 @@ public:
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0,
-        bool store_eep = false);
+        bool store_eep = true);
 
     /// Factory from option chain
     ///

@@ -431,8 +431,8 @@ TEST(PriceTableBuilderTest, EEPModeProducesCorrectMetadata) {
               SurfaceContent::EarlyExercisePremium);
 }
 
-// EEP mode: default (store_eep=false) produces RawPrice metadata
-TEST(PriceTableBuilderTest, DefaultModeProducesRawPriceMetadata) {
+// EEP mode: default (store_eep=true) produces EarlyExercisePremium metadata
+TEST(PriceTableBuilderTest, DefaultModeProducesEEPMetadata) {
     auto setup = PriceTableBuilder<4>::from_vectors(
         {0.8, 0.9, 1.0, 1.1},
         {0.25, 0.5, 0.75, 1.0},
@@ -447,7 +447,7 @@ TEST(PriceTableBuilderTest, DefaultModeProducesRawPriceMetadata) {
     auto result = builder.build(axes);
     ASSERT_TRUE(result.has_value()) << "Build failed: " << result.error();
     EXPECT_EQ(result->surface->metadata().content,
-              SurfaceContent::RawPrice);
+              SurfaceContent::EarlyExercisePremium);
 }
 
 } // namespace

@@ -110,7 +110,9 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec, 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct surface queries
 
     ASSERT_TRUE(builder_result.has_value())
         << "PriceTableBuilder::from_vectors failed";
@@ -145,7 +147,9 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 300},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct surface queries
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
@@ -169,7 +173,9 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 1000},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct surface queries
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
@@ -192,7 +198,9 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct surface queries
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());
@@ -478,7 +486,9 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct surface queries
 
     ASSERT_TRUE(builder_result.has_value())
         << "PriceTableBuilder::from_vectors failed";
@@ -512,7 +522,9 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         grid.K_ref,
         ExplicitPDEGrid{grid_spec_result.value(), 500},
         OptionType::PUT,
-        grid.dividend);
+        grid.dividend,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct surface queries
 
     ASSERT_TRUE(builder_result.has_value());
     auto [builder, axes] = std::move(builder_result.value());

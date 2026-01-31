@@ -28,15 +28,15 @@ TEST(PriceTableConfigTest, WithDiscreteDividends) {
     EXPECT_EQ(config.discrete_dividends.size(), 2);
 }
 
-TEST(PriceTableConfigTest, DefaultStoreEepIsFalse) {
+TEST(PriceTableConfigTest, DefaultStoreEepIsTrue) {
     PriceTableConfig config;
-    EXPECT_FALSE(config.store_eep);
+    EXPECT_TRUE(config.store_eep);
 }
 
-TEST(PriceTableConfigTest, CanEnableStoreEep) {
+TEST(PriceTableConfigTest, CanDisableStoreEep) {
     PriceTableConfig config;
-    config.store_eep = true;
-    EXPECT_TRUE(config.store_eep);
+    config.store_eep = false;
+    EXPECT_FALSE(config.store_eep);
 }
 
 } // namespace

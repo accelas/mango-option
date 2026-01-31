@@ -116,7 +116,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         100.0,  // K_ref
         ExplicitPDEGrid{grid_spec, time_domain.n_steps()},
         OptionType::PUT,
-        dividend_yield);
+        dividend_yield,
+        0.0,     // max_failure_rate
+        false);  // store_eep — raw mode for direct IV solving
     ASSERT_TRUE(builder_axes_result.has_value()) << "Failed to create builder: " << builder_axes_result.error();
     auto [builder, axes] = std::move(builder_axes_result.value());
 

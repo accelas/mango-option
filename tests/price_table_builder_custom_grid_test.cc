@@ -184,7 +184,8 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {
         accuracy,                 // auto-estimated PDE grid
         OptionType::PUT,
         0.02,                     // dividend_yield
-        0.0                       // strict: no failures allowed
+        0.0,                      // strict: no failures allowed
+        false                     // store_eep
     );
 
     ASSERT_TRUE(setup.has_value()) << "from_vectors failed";
@@ -231,7 +232,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
 
     auto setup_coarse = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate,
-        100.0, coarse, OptionType::PUT, 0.02);
+        100.0, coarse, OptionType::PUT, 0.02, 0.0, false);
 
     ASSERT_TRUE(setup_coarse.has_value());
     auto& [builder_coarse, axes_coarse] = setup_coarse.value();
@@ -246,7 +247,7 @@ TEST(PriceTableBuilderCustomGridTest, AutoGridAccuracyParamsDriveGridChoice) {
 
     auto setup_fine = PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, volatility, rate,
-        100.0, fine, OptionType::PUT, 0.02);
+        100.0, fine, OptionType::PUT, 0.02, 0.0, false);
 
     ASSERT_TRUE(setup_fine.has_value());
     auto& [builder_fine, axes_fine] = setup_fine.value();
@@ -295,7 +296,8 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
         explicit_pde,             // triggers fallback due to coarse spacing
         OptionType::PUT,
         0.02,
-        0.0                       // strict
+        0.0,                      // strict
+        false                     // store_eep
     );
 
     // from_vectors may reject if explicit grid doesn't cover log(m) range
