@@ -35,6 +35,63 @@ EEP scales linearly with K (degree-1 homogeneity in S, K under constant-rate BS)
 
 ## New Files
 
+### `src/option/option_concepts.hpp`
+
+Concepts that define the common interface between European and American solvers and results. Placed in `src/option/` alongside `option_spec.hpp`.
+
+```cpp
+namespace mango {
+
+/// An option pricing result that provides value and Greeks
+///
+/// Core Greeks: delta, gamma, theta (shared by American and European).
+/// AmericanOptionResult currently lacks vega(); adding it is a
+/// separate task. EuropeanOptionResult provides vega() from the start.
+template <typename R>
+concept OptionResult = requires(const R& r, double spot_price) {
+    { r.value() } -> std::convertible_to<double>;
+    { r.value_at(spot_price) } -> std::convertible_to<double>;
+    { r.delta() } -> std::convertible_to<double>;
+    { r.gamma() } -> std::convertible_to<double>;
+    { r.theta() } -> std::convertible_to<double>;
+    { r.spot() } -> std::convertible_to<double>;
+    { r.strike() } -> std::convertible_to<double>;
+    { r.maturity() } -> std::convertible_to<double>;
+    { r.volatility() } -> std::convertible_to<double>;
+    { r.option_type() } -> std::same_as<OptionType>;
+};
+
+/// Optional refinement: result also provides vega
+template <typename R>
+concept OptionResultWithVega = OptionResult<R> && requires(const R& r) {
+    { r.vega() } -> std::convertible_to<double>;
+};
+
+/// An option solver that takes PricingParams and produces an OptionResult
+template <typename S>
+concept OptionSolver = requires(const S& solver) {
+    { solver.solve() } -> OptionResult;
+} && requires(const PricingParams& params) {
+    { S::create(params) };  // Factory method
+};
+
+}  // namespace mango
+```
+
+These concepts enable generic code that works with either solver:
+
+```cpp
+template <OptionSolver Solver>
+auto price_option(const PricingParams& params) {
+    auto solver = Solver::create(params).value();
+    return solver.solve();
+}
+```
+
+`AmericanOptionResult` already satisfies `OptionResult`. `EuropeanOptionResult` will satisfy it by construction. `AmericanOptionSolver` already satisfies `OptionSolver` (modulo the workspace parameter — see note below).
+
+**Note on `AmericanOptionSolver::create()`**: The American solver requires a `PDEWorkspace` in addition to `PricingParams`. The `OptionSolver` concept captures the common case where only `PricingParams` is needed. `AmericanOptionSolver` can provide an overload of `create()` that auto-allocates a workspace (if one doesn't exist already), or the concept can be relaxed. The European solver satisfies it directly since it needs no workspace.
+
 ### `src/option/european_option.hpp`
 
 European put/call pricing with Greeks. Mirrors the `AmericanOptionSolver` API: accepts `PricingParams`, returns a result object with the same accessor methods. All inline — combinations of `norm_cdf`, `exp`, `sqrt`.
