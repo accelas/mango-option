@@ -116,8 +116,10 @@ double SegmentedPriceSurface::price(double spot, double strike,
                                   seg.surface.tau_min(),
                                   seg.surface.tau_max());
 
-    // 6. Delegate to segment surface
-    return seg.surface.price(S_adj, strike, tau_local, sigma, rate);
+    // 6. Delegate to segment surface (always use K_ref_ as strike;
+    //    all segments are built for this K_ref, and RawPrice segments
+    //    require strike == K_ref)
+    return seg.surface.price(S_adj, K_ref_, tau_local, sigma, rate);
 }
 
 double SegmentedPriceSurface::vega(double spot, double strike,
@@ -136,7 +138,7 @@ double SegmentedPriceSurface::vega(double spot, double strike,
         double tau_local = std::clamp(tau - seg.tau_start,
                                       seg.surface.tau_min(),
                                       seg.surface.tau_max());
-        return seg.surface.vega(S_adj, strike, tau_local, sigma, rate);
+        return seg.surface.vega(S_adj, K_ref_, tau_local, sigma, rate);
     }
 
     // RawPrice: finite difference vega using this->price() (includes spot adjustment)

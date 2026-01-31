@@ -214,6 +214,10 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // Capture prev_surface by pointer (it's in the segments vector)
             AmericanPriceSurface* prev = prev_surface_ptr;
 
+            // Dividend amount at this boundary.
+            // Boundary seg_idx was created from dividends[N - seg_idx].
+            double boundary_div = dividends[dividends.size() - seg_idx].second;
+
             // Set a per-solve custom IC via the builder's SetupCallback.
             // PriceTableBuilder itself doesn't have a SetupCallback setter,
             // but it does have set_initial_condition() which sets a GLOBAL IC.
@@ -318,7 +322,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
             // Build setup callback that sets per-solve IC
             auto setup_callback = [prev, K_ref, prev_seg_tau_local_end,
-                                   &vol_grid, &rate_grid, Nr](
+                                   boundary_div, &vol_grid, &rate_grid, Nr](
                 size_t index, AmericanOptionSolver& solver)
             {
                 size_t sigma_idx = index / Nr;
@@ -326,31 +330,33 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 double sigma = vol_grid[sigma_idx];
                 double rate = rate_grid[rate_idx];
 
-                // The IC maps log-moneyness x -> normalized price u = V/K
+                // The IC maps log-moneyness x -> normalized price u = V/K.
+                //
+                // Jump condition at a dividend date: V(t⁻, S) = V(t⁺, S - D).
+                // We evaluate the previous segment at spot_adj = S - D to apply
+                // the discrete dividend jump.
+                //
                 // prev->price(spot, K_ref, tau, sigma, rate) for EEP returns
                 // actual price V.  For RawPrice it returns V/K_ref.
                 // Since K_ref is the strike for all segments, we need u = V/K_ref.
-                //
-                // For EEP (segment 0): price() returns actual V.
-                //   u[i] = price(K_ref * exp(x[i]), K_ref, tau, sigma, rate) / K_ref
-                //
-                // For RawPrice (later segments): price() returns V/K_ref directly.
-                //   u[i] = price(K_ref * exp(x[i]), K_ref, tau, sigma, rate)
-                //
-                // To handle both uniformly, we check the metadata.
 
                 bool prev_is_eep = (prev->metadata().content ==
                                     SurfaceContent::EarlyExercisePremium);
 
                 solver.set_initial_condition(
                     [prev, K_ref, prev_seg_tau_local_end, sigma, rate,
-                     prev_is_eep](
+                     prev_is_eep, boundary_div](
                         std::span<const double> x, std::span<double> u)
                     {
                         for (size_t i = 0; i < x.size(); ++i) {
                             double spot = K_ref * std::exp(x[i]);
+                            // Apply dividend jump: V(t⁻, S) = V(t⁺, S - D)
+                            double spot_adj = spot - boundary_div;
+                            if (spot_adj <= 0.0) {
+                                spot_adj = 1e-8;
+                            }
                             double raw = prev->price(
-                                spot, K_ref, prev_seg_tau_local_end,
+                                spot_adj, K_ref, prev_seg_tau_local_end,
                                 sigma, rate);
                             if (prev_is_eep) {
                                 // EEP returns actual price; normalize

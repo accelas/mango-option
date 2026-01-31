@@ -34,7 +34,7 @@ BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
 
 static std::expected<IVSolver, ValidationError>
 build_standard(const IVSolverConfig& config) {
-    // Use moneyness_grid midpoint as K_ref
+    // Use spot as K_ref (ATM reference strike)
     double K_ref = config.spot;
 
     auto setup = PriceTableBuilder<4>::from_vectors(
