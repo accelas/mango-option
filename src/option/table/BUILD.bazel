@@ -155,6 +155,20 @@ cc_library(
 )
 
 cc_library(
+    name = "american_price_surface",
+    srcs = ["american_price_surface.cpp"],
+    hdrs = ["american_price_surface.hpp"],
+    deps = [
+        ":price_table_surface",
+        ":price_table_metadata",
+        "//src/option:european_option",
+        "//src/option:option_spec",
+        "//src/support:error_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [

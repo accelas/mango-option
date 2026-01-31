@@ -207,6 +207,21 @@ cc_test(
 )
 
 cc_test(
+    name = "american_price_surface_test",
+    size = "small",
+    srcs = ["american_price_surface_test.cc"],
+    deps = [
+        "//src/option/table:american_price_surface",
+        "//src/option/table:price_table_surface",
+        "//src/option/table:price_table_axes",
+        "//src/option/table:price_table_metadata",
+        "//src/option:european_option",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "option_concepts_test",
     size = "small",
     srcs = ["option_concepts_test.cc"],
