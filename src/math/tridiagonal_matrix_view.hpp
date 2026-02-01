@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cassert>
 #include <span>
 #include <cstddef>
 
@@ -12,9 +13,9 @@ namespace mango {
 /// tridiagonal matrix stored in three separate arrays.
 ///
 /// Memory layout:
-/// - lower[i] represents A[i+1,i] (i = 0..n-2)
-/// - diag[i] represents A[i,i] (i = 0..n-1)
-/// - upper[i] represents A[i,i+1] (i = 0..n-1)
+/// - lower[i] represents A[i+1,i] (i = 0..n-2), size n-1
+/// - diag[i] represents A[i,i] (i = 0..n-1), size n
+/// - upper[i] represents A[i,i+1] (i = 0..n-2), size n-1
 ///
 /// Commonly used for:
 /// - Jacobian matrices in PDE solvers
@@ -29,11 +30,9 @@ public:
         , diag_(diag)
         , upper_(upper)
     {
-        // Validate dimensions
-        // lower has n-1 elements (indices 0..n-2)
-        // diag has n elements (indices 0..n-1)
-        // upper has n elements (indices 0..n-1)
-        // Note: upper[n-1] is unused but present for alignment
+        assert(diag.size() >= 1 && "TridiagonalMatrixView: need at least 1x1 matrix");
+        assert(lower.size() == (diag.size() > 1 ? diag.size() - 1 : 0) && "TridiagonalMatrixView: lower must have n-1 elements");
+        assert(upper.size() == (diag.size() > 1 ? diag.size() - 1 : 0) && "TridiagonalMatrixView: upper must have n-1 elements");
     }
 
     /// Access lower diagonal: A[i+1,i]
