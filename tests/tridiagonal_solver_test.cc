@@ -141,9 +141,9 @@ TEST(ProjectedThomasTest, AllConstraintsActive) {
     );
 
     ASSERT_TRUE(result.ok());
-    // Each component should be >= obstacle
+    // Each component should equal obstacle (obstacle far above unconstrained solution)
     for (size_t i = 0; i < 3; ++i) {
-        EXPECT_GE(solution[i], psi[i] - 1e-10);
+        EXPECT_NEAR(solution[i], psi[i], 1e-10);
     }
 }
 

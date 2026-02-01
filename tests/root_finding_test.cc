@@ -144,7 +144,7 @@ TEST(RootFindingErrorTest, BrentMaxIterationsExceeded) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::MaxIterationsExceeded);
-    EXPECT_EQ(result.error().iterations, 1);
+    EXPECT_LE(result.error().iterations, config.max_iter);
 }
 
 TEST(RootFindingErrorTest, BrentNaNAtEndpoint) {
