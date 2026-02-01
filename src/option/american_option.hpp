@@ -165,9 +165,12 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
         }
     }
 
+    // Apply max_time_steps cap to both uniform and non-uniform paths
+    double dt_capped = std::max(dt, params.maturity / static_cast<double>(accuracy.max_time_steps));
+
     TimeDomain time_domain = mandatory_tau.empty()
         ? TimeDomain::from_n_steps(0.0, params.maturity, Nt)
-        : TimeDomain::with_mandatory_points(0.0, params.maturity, dt, mandatory_tau);
+        : TimeDomain::with_mandatory_points(0.0, params.maturity, dt_capped, mandatory_tau);
 
     return {grid_spec.value(), time_domain};
 }

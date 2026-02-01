@@ -806,7 +806,8 @@ convert_times_to_indices(std::span<const double> times,
         if (time_domain.has_time_points()) {
             // Non-uniform: binary search through stored time points
             const auto& pts = time_domain.time_points_ref();
-            auto it = std::lower_bound(pts.begin(), pts.end(), t - 1e-10);
+            double tol = dt * 1e-6;  // relative tolerance for snap-to-grid
+            auto it = std::lower_bound(pts.begin(), pts.end(), t - tol);
             size_t idx = static_cast<size_t>(std::distance(pts.begin(), it));
             // Find nearest point
             if (idx > 0 && (idx == pts.size() ||

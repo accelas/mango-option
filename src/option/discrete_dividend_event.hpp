@@ -39,13 +39,22 @@ inline TemporalEventCallback make_dividend_event(
         if (err.has_value()) return;  // spline build failed — leave u unchanged
 
         // Apply dividend shift: x' = ln(exp(x) - d)
+        const double x_lo = x[0];      // spline domain lower bound
+        const double x_hi = x[n - 1];  // spline domain upper bound
+
         for (size_t i = 0; i < n; ++i) {
             double S_over_K = std::exp(x[i]);
             double S_adj_over_K = S_over_K - d;
 
             if (S_adj_over_K > 1e-10) {
                 double x_shifted = std::log(S_adj_over_K);
-                u[i] = spline.eval(x_shifted);
+                // Guard against extrapolation outside the spline domain
+                if (x_shifted < x_lo) {
+                    // Below grid: use option-type-aware intrinsic
+                    u[i] = is_put ? 1.0 : 0.0;
+                } else {
+                    u[i] = spline.eval(std::min(x_shifted, x_hi));
+                }
             } else {
                 // Spot drops to zero or below: use option-type-aware intrinsic
                 if (is_put) {
