@@ -12,8 +12,8 @@ namespace mango {
 
 struct MultiKRefConfig {
     std::vector<double> K_refs;   // explicit list; if empty, use auto selection
-    int K_ref_count = 3;          // used when K_refs is empty
-    double K_ref_span = 0.2;      // +/-span around spot for auto mode
+    int K_ref_count = 11;         // used when K_refs is empty
+    double K_ref_span = 0.3;      // +/-span around spot for auto mode (log-spaced)
 };
 
 class SegmentedMultiKRefBuilder {

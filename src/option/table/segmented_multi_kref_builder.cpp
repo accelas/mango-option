@@ -12,7 +12,8 @@ SegmentedMultiKRefBuilder::build(const Config& config) {
     std::vector<double> K_refs = config.kref_config.K_refs;
 
     if (K_refs.empty()) {
-        // Auto selection: linspace from spot*(1-span) to spot*(1+span)
+        // Auto selection: log-spaced from spot*(1-span) to spot*(1+span)
+        // Log spacing naturally concentrates points near ATM.
         const int count = config.kref_config.K_ref_count;
         const double span = config.kref_config.K_ref_span;
 
@@ -23,8 +24,8 @@ SegmentedMultiKRefBuilder::build(const Config& config) {
             return std::unexpected(ValidationError{ValidationErrorCode::InvalidBounds, span});
         }
 
-        const double lo = config.spot * (1.0 - span);
-        const double hi = config.spot * (1.0 + span);
+        const double log_lo = std::log(1.0 - span);
+        const double log_hi = std::log(1.0 + span);
 
         K_refs.reserve(static_cast<size_t>(count));
         if (count == 1) {
@@ -32,7 +33,7 @@ SegmentedMultiKRefBuilder::build(const Config& config) {
         } else {
             for (int i = 0; i < count; ++i) {
                 double t = static_cast<double>(i) / static_cast<double>(count - 1);
-                K_refs.push_back(lo + t * (hi - lo));
+                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
             }
         }
     }

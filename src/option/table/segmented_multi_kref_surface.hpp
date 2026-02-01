@@ -36,6 +36,8 @@ public:
 private:
     SegmentedMultiKRefSurface() = default;
 
+    size_t find_bracket(double strike) const;
+
     std::vector<Entry> entries_;  // sorted by K_ref
 
     // Cached bounds (intersection across all entries)

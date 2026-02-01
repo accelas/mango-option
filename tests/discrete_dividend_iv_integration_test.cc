@@ -25,7 +25,7 @@ protected:
             .maturity = 1.0,
             .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
             .rate_grid = {0.02, 0.03, 0.05, 0.07},
-            .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+            // Use default K_ref config (9 log-spaced points)
         };
         auto result = make_iv_solver(config);
         ASSERT_TRUE(result.has_value()) << "Failed to build solver";
@@ -40,7 +40,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     PricingParams params(
         100.0,   // spot
         100.0,   // strike
-        0.8,     // maturity
+        1.0,     // maturity (matches surface build maturity)
         0.05,    // rate
         0.0,     // dividend_yield
         OptionType::PUT,
@@ -57,7 +57,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     IVQuery query;
     query.spot = 100.0;
     query.strike = 100.0;
-    query.maturity = 0.8;
+    query.maturity = 1.0;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
     query.type = OptionType::PUT;
@@ -74,17 +74,12 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     }
 }
 
-// Known limitation: RawPrice segments are strike-specific (discrete dividends
-// break strike homogeneity). Cross-K_ref interpolation is an approximation
-// whose error scales with K_ref spacing. With K_refs at 80/100/120, the
-// 40-point gap yields ~3-6pp IV error for off-K_ref strikes.
-// Denser K_ref grids or a 5D surface would fix this.
-TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_OTMPutIVRoundTrip) {
+TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     // OTM put: strike=90, vol=0.25
     PricingParams params(
         100.0,   // spot
         90.0,    // strike
-        0.8,     // maturity
+        1.0,     // maturity (matches surface build maturity)
         0.05,    // rate
         0.0,     // dividend_yield
         OptionType::PUT,
@@ -99,7 +94,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_OTMPutIVRoundTrip) {
     IVQuery query;
     query.spot = 100.0;
     query.strike = 90.0;
-    query.maturity = 0.8;
+    query.maturity = 1.0;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
     query.type = OptionType::PUT;
@@ -114,13 +109,12 @@ TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_OTMPutIVRoundTrip) {
         << iv_result->implied_vol;
 }
 
-// Known limitation: same RawPrice cross-K_ref approximation as OTM above.
-TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_ITMPutIVRoundTrip) {
+TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
     // ITM put: strike=110, vol=0.20
     PricingParams params(
         100.0,   // spot
         110.0,   // strike
-        0.8,     // maturity
+        1.0,     // maturity (matches surface build maturity)
         0.05,    // rate
         0.0,     // dividend_yield
         OptionType::PUT,
@@ -135,7 +129,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_ITMPutIVRoundTrip) {
     IVQuery query;
     query.spot = 100.0;
     query.strike = 110.0;
-    query.maturity = 0.8;
+    query.maturity = 1.0;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
     query.type = OptionType::PUT;

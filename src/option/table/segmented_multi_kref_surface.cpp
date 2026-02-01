@@ -2,6 +2,7 @@
 #include "src/option/table/segmented_multi_kref_surface.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -82,45 +83,109 @@ SegmentedMultiKRefSurface::create(std::vector<Entry> entries) {
     return result;
 }
 
+// Catmull-Rom cubic interpolation: given 4 values y[0..3] at positions x[0..3],
+// evaluate at position t (where x[1] <= t <= x[2]).
+static double catmull_rom(const std::array<double, 4>& x,
+                          const std::array<double, 4>& y,
+                          double t) {
+    // Normalize to [0, 1] on the central interval [x1, x2]
+    double h = x[2] - x[1];
+    double u = (t - x[1]) / h;
+    double u2 = u * u;
+    double u3 = u2 * u;
+
+    // Slopes at x[1] and x[2] using Catmull-Rom formula
+    double m1 = (y[2] - y[0]) / (x[2] - x[0]);
+    double m2 = (y[3] - y[1]) / (x[3] - x[1]);
+
+    // Scale slopes to the interval width
+    m1 *= h;
+    m2 *= h;
+
+    // Hermite basis
+    return (2.0 * u3 - 3.0 * u2 + 1.0) * y[1]
+         + (u3 - 2.0 * u2 + u)          * m1
+         + (-2.0 * u3 + 3.0 * u2)       * y[2]
+         + (u3 - u2)                     * m2;
+}
+
+// Find the index of the lower bracketing entry for a given strike.
+// Returns the index i such that entries_[i].K_ref <= strike < entries_[i+1].K_ref.
+size_t SegmentedMultiKRefSurface::find_bracket(double strike) const {
+    auto it = std::upper_bound(
+        entries_.begin(), entries_.end(), strike,
+        [](double s, const Entry& e) { return s < e.K_ref; });
+    // it points to first entry with K_ref > strike; prev is the lower bracket
+    return static_cast<size_t>(std::prev(it) - entries_.begin());
+}
+
+// Interpolate a per-entry quantity across K_refs using Catmull-Rom in log(K_ref)
+// on normalized values (value/K_ref), then scale by strike.
+// eval_fn(entry_index) should return the raw value (price or vega) for that entry.
+template <typename EvalFn>
+static double interp_across_krefs(
+    const std::vector<SegmentedMultiKRefSurface::Entry>& entries,
+    double strike, size_t lo_idx, EvalFn eval_fn) {
+    const size_t n = entries.size();
+    const double log_strike = std::log(strike);
+
+    // Need at least 4 points for Catmull-Rom; fall back to linear otherwise
+    if (n < 4) {
+        size_t hi_idx = lo_idx + 1;
+        double w = (strike - entries[lo_idx].K_ref) /
+                   (entries[hi_idx].K_ref - entries[lo_idx].K_ref);
+        double v_lo = eval_fn(lo_idx) / entries[lo_idx].K_ref;
+        double v_hi = eval_fn(hi_idx) / entries[hi_idx].K_ref;
+        return ((1.0 - w) * v_lo + w * v_hi) * strike;
+    }
+
+    // Select 4 entries centered on the bracket [lo_idx, lo_idx+1]
+    // Clamp so indices stay in [0, n-1]
+    size_t i1 = lo_idx;
+    size_t i0 = (i1 > 0) ? i1 - 1 : 0;
+    size_t i2 = lo_idx + 1;
+    size_t i3 = (i2 + 1 < n) ? i2 + 1 : n - 1;
+
+    // If clamped, duplicate the edge point (degrades to quadratic at boundaries)
+    std::array<double, 4> x = {
+        std::log(entries[i0].K_ref),
+        std::log(entries[i1].K_ref),
+        std::log(entries[i2].K_ref),
+        std::log(entries[i3].K_ref),
+    };
+    std::array<double, 4> y = {
+        eval_fn(i0) / entries[i0].K_ref,
+        eval_fn(i1) / entries[i1].K_ref,
+        eval_fn(i2) / entries[i2].K_ref,
+        eval_fn(i3) / entries[i3].K_ref,
+    };
+
+    return catmull_rom(x, y, log_strike) * strike;
+}
+
 double SegmentedMultiKRefSurface::price(double spot, double strike,
                                          double tau, double sigma,
                                          double rate) const {
     const size_t n = entries_.size();
 
-    // Single entry or strike at/below lowest K_ref: use first entry
+    // Single entry or strike outside K_ref range: use nearest entry
     if (n == 1 || strike <= entries_.front().K_ref) {
-        return entries_.front().surface.price(spot, strike,
-                                              tau, sigma, rate);
+        return entries_.front().surface.price(spot, strike, tau, sigma, rate);
     }
-
-    // Strike at/above highest K_ref: use last entry
     if (strike >= entries_.back().K_ref) {
-        return entries_.back().surface.price(spot, strike,
-                                             tau, sigma, rate);
+        return entries_.back().surface.price(spot, strike, tau, sigma, rate);
     }
 
-    // Find bracketing entries via upper_bound
-    auto it = std::upper_bound(
-        entries_.begin(), entries_.end(), strike,
-        [](double s, const Entry& e) { return s < e.K_ref; });
+    size_t lo_idx = find_bracket(strike);
 
-    // it points to first entry with K_ref > strike
-    const auto& hi = *it;
-    const auto& lo = *std::prev(it);
-
-    // Exact match on lower bound
-    if (strike == lo.K_ref) {
-        return lo.surface.price(spot, strike, tau, sigma, rate);
+    // Exact match
+    if (strike == entries_[lo_idx].K_ref) {
+        return entries_[lo_idx].surface.price(spot, strike, tau, sigma, rate);
     }
 
-    // Interpolate in normalized price space (V/K), matching the PDE's
-    // log-moneyness coordinate system where the solution is V/K_ref.
-    double w = (strike - lo.K_ref) / (hi.K_ref - lo.K_ref);
-    double p_lo = lo.surface.price(spot, strike, tau, sigma, rate);
-    double p_hi = hi.surface.price(spot, strike, tau, sigma, rate);
-
-    double v_norm = (1.0 - w) * (p_lo / lo.K_ref) + w * (p_hi / hi.K_ref);
-    return v_norm * strike;
+    return interp_across_krefs(entries_, strike, lo_idx, [&](size_t i) {
+        return entries_[i].surface.price(spot, strike, tau, sigma, rate);
+    });
 }
 
 double SegmentedMultiKRefSurface::vega(double spot, double strike,
@@ -129,33 +194,21 @@ double SegmentedMultiKRefSurface::vega(double spot, double strike,
     const size_t n = entries_.size();
 
     if (n == 1 || strike <= entries_.front().K_ref) {
-        return entries_.front().surface.vega(spot, strike,
-                                             tau, sigma, rate);
+        return entries_.front().surface.vega(spot, strike, tau, sigma, rate);
     }
-
     if (strike >= entries_.back().K_ref) {
-        return entries_.back().surface.vega(spot, strike,
-                                            tau, sigma, rate);
+        return entries_.back().surface.vega(spot, strike, tau, sigma, rate);
     }
 
-    auto it = std::upper_bound(
-        entries_.begin(), entries_.end(), strike,
-        [](double s, const Entry& e) { return s < e.K_ref; });
+    size_t lo_idx = find_bracket(strike);
 
-    const auto& hi = *it;
-    const auto& lo = *std::prev(it);
-
-    if (strike == lo.K_ref) {
-        return lo.surface.vega(spot, strike, tau, sigma, rate);
+    if (strike == entries_[lo_idx].K_ref) {
+        return entries_[lo_idx].surface.vega(spot, strike, tau, sigma, rate);
     }
 
-    // Vega in normalized space: d(V/K)/dsigma = (1/K) * dV/dsigma
-    double w = (strike - lo.K_ref) / (hi.K_ref - lo.K_ref);
-    double v_lo = lo.surface.vega(spot, strike, tau, sigma, rate);
-    double v_hi = hi.surface.vega(spot, strike, tau, sigma, rate);
-
-    double vega_norm = (1.0 - w) * (v_lo / lo.K_ref) + w * (v_hi / hi.K_ref);
-    return vega_norm * strike;
+    return interp_across_krefs(entries_, strike, lo_idx, [&](size_t i) {
+        return entries_[i].surface.vega(spot, strike, tau, sigma, rate);
+    });
 }
 
 double SegmentedMultiKRefSurface::m_min() const noexcept { return m_min_; }
