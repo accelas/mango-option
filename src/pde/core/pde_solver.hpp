@@ -113,8 +113,8 @@ public:
     /// @return expected success or solver error diagnostic
     std::expected<void, SolverError> solve() {
         const auto& time = grid_->time();
-        double t = time.t_start();
-        const double dt = time.dt();
+        const auto time_pts = time.time_points();
+        double t = time_pts[0];
 
         auto u_current = grid_->solution();
         auto u_prev = grid_->solution_prev();
@@ -126,10 +126,10 @@ public:
 
         size_t step = 0;
         if (config_.rannacher_startup && time.n_steps() > 0) {
-            auto rannacher_ok = solve_rannacher_startup(t, dt, u_current, u_prev)
+            double dt_step = time.dt_at(0);
+            auto rannacher_ok = solve_rannacher_startup(t, dt_step, u_current, u_prev)
                 .transform([&] {
-                    // Update time and record snapshot after step 0
-                    t += dt;
+                    t = time_pts[1];  // avoid float drift
                     if (grid_->should_record(step + 1)) {
                         grid_->record(step + 1, u_current);
                     }
@@ -142,21 +142,21 @@ public:
 
         for (; step < time.n_steps(); ++step) {
             double t_old = t;
+            double dt_step = time.dt_at(step);
+            double t_next = time_pts[step + 1];  // read from sequence, not t + dt
 
             // Copy u_current to u_prev for next iteration
             std::copy(u_current.begin(), u_current.end(), u_prev.begin());
 
-            double t_next = t + dt;
-
             // Stage 1: Trapezoidal rule to t_n + γ·dt
-            double t_stage1 = t + config_.gamma * dt;
-            auto stage1_ok = solve_stage1(t, t_stage1, dt, u_current, u_prev);
+            double t_stage1 = t + config_.gamma * dt_step;
+            auto stage1_ok = solve_stage1(t, t_stage1, dt_step, u_current, u_prev);
             if (!stage1_ok) {
                 return std::unexpected(stage1_ok.error());
             }
 
             // Stage 2: BDF2 from t_n to t_n+1
-            auto stage2_ok = solve_stage2(t_stage1, t_next, dt, u_current, u_prev);
+            auto stage2_ok = solve_stage2(t_stage1, t_next, dt_step, u_current, u_prev);
             if (!stage2_ok) {
                 return std::unexpected(stage2_ok.error());
             }
@@ -164,7 +164,7 @@ public:
             // Process temporal events AFTER completing the step
             process_temporal_events(t_old, t_next, step, u_current);
 
-            // Update time
+            // Update time from sequence (not accumulation)
             t = t_next;
 
             // Record snapshot AFTER events

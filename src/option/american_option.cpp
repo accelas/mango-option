@@ -6,6 +6,8 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_pde_solver.hpp"
+#include "src/option/discrete_dividend_event.hpp"
+#include "src/math/cubic_spline_solver.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include <algorithm>
@@ -103,6 +105,14 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         dx_span[i] = grid_points[i + 1] - grid_points[i];
     }
 
+    // Pre-allocate spline for dividend events (zero-alloc after first build)
+    CubicSpline<double> dividend_spline;
+    if (!params_.discrete_dividends.empty()) {
+        auto x = grid->x();
+        std::vector<double> dummy(x.size(), 0.0);
+        [[maybe_unused]] auto err = dividend_spline.build(x, std::span<const double>(dummy));
+    }
+
     // Create appropriate PDE solver (put vs call)
     std::expected<void, SolverError> solve_result;
 
@@ -114,6 +124,16 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             pde_solver.initialize(AmericanPutSolver::payoff);
         }
         pde_solver.set_config(trbdf2_config_);
+
+        // Register discrete dividend events
+        for (const auto& [t_cal, amount] : params_.discrete_dividends) {
+            double tau = params_.maturity - t_cal;
+            if (tau > 0.0 && tau < params_.maturity) {
+                pde_solver.add_temporal_event(tau,
+                    make_put_dividend_event(amount, params_.strike, &dividend_spline));
+            }
+        }
+
         solve_result = pde_solver.solve();
     } else {
         AmericanCallSolver pde_solver(params_, grid, workspace_);
@@ -123,6 +143,15 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             pde_solver.initialize(AmericanCallSolver::payoff);
         }
         pde_solver.set_config(trbdf2_config_);
+
+        for (const auto& [t_cal, amount] : params_.discrete_dividends) {
+            double tau = params_.maturity - t_cal;
+            if (tau > 0.0 && tau < params_.maturity) {
+                pde_solver.add_temporal_event(tau,
+                    make_call_dividend_event(amount, params_.strike, &dividend_spline));
+            }
+        }
+
         solve_result = pde_solver.solve();
     }
 

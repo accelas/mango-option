@@ -122,9 +122,7 @@ TEST_F(AmericanOptionPricingTest, PutValueIncreasesWithMaturity) {
     }
 }
 
-TEST_F(AmericanOptionPricingTest, DISABLED_DividendsReduceCallValue) {
-    // TODO: Discrete dividend support not yet implemented in solver
-    // This test is disabled until temporal event handling for dividends is added
+TEST_F(AmericanOptionPricingTest, DividendsReduceCallValue) {
     AmericanOptionParams no_dividends(
         100.0, 100.0, 1.0, 0.02, 0.00, OptionType::CALL, 0.3);
 
@@ -268,6 +266,103 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
     double flat_price = flat_result->value_at(flat_params.spot);
     EXPECT_NEAR(price, flat_price, flat_price * 0.02)
         << "Yield curve price differs significantly from flat rate average";
+}
+
+TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) {
+    // A discrete dividend increases put value (spot drops)
+    AmericanOptionParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20);
+    AmericanOptionParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                                  {{0.5, 3.0}});
+
+    auto result_no_div = solve_american_option_auto(no_div);
+    auto result_with_div = solve_american_option_auto(with_div);
+
+    ASSERT_TRUE(result_no_div.has_value());
+    ASSERT_TRUE(result_with_div.has_value());
+
+    EXPECT_GT(result_with_div->value_at(with_div.spot), result_no_div->value_at(no_div.spot))
+        << "Put with discrete dividend should be worth more than without";
+}
+
+TEST_F(AmericanOptionPricingTest, DiscreteDividendCallPriceLowerThanNoDividend) {
+    AmericanOptionParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.20);
+    AmericanOptionParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.20,
+                                  {{0.5, 3.0}});
+
+    auto result_no_div = solve_american_option_auto(no_div);
+    auto result_with_div = solve_american_option_auto(with_div);
+
+    ASSERT_TRUE(result_no_div.has_value());
+    ASSERT_TRUE(result_with_div.has_value());
+
+    EXPECT_LT(result_with_div->value_at(with_div.spot), result_no_div->value_at(no_div.spot))
+        << "Call with discrete dividend should be worth less than without";
+}
+
+TEST_F(AmericanOptionPricingTest, DiscreteDividendCallLargeDividend) {
+    AmericanOptionParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.30,
+                                {{0.5, 50.0}});
+
+    auto result = solve_american_option_auto(params);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GE(result->value_at(params.spot), 0.0);
+    EXPECT_TRUE(std::isfinite(result->value_at(params.spot)));
+}
+
+TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
+    AmericanOptionParams one_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                                 {{0.5, 2.0}});
+    AmericanOptionParams two_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                                 {{0.3, 2.0}, {0.7, 2.0}});
+
+    auto result_one = solve_american_option_auto(one_div);
+    auto result_two = solve_american_option_auto(two_div);
+
+    ASSERT_TRUE(result_one.has_value());
+    ASSERT_TRUE(result_two.has_value());
+
+    EXPECT_GT(result_two->value_at(two_div.spot), result_one->value_at(one_div.spot))
+        << "Two dividends should increase put value more than one";
+}
+
+TEST_F(AmericanOptionPricingTest, RegularBatchWithDiscreteDividends) {
+    // Batch of options with discrete dividends — uses regular path (not normalized)
+    std::vector<AmericanOptionParams> batch;
+    batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+    batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+
+    BatchAmericanOptionSolver solver;
+    auto results = solver.solve_batch(batch);
+
+    EXPECT_EQ(results.failed_count, 0u);
+    for (size_t i = 0; i < batch.size(); ++i) {
+        ASSERT_TRUE(results.results[i].has_value()) << "Batch solve failed for index " << i;
+        EXPECT_GT(results.results[i]->value_at(batch[i].spot), 0.0);
+    }
+}
+
+TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
+    // When requesting shared grid with dividends, should fall back to regular batch
+    // (normalized chain rejects discrete dividends)
+    std::vector<AmericanOptionParams> batch;
+    batch.emplace_back(100.0, 90.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+    batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+    batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+
+    BatchAmericanOptionSolver solver;
+    auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
+
+    // Should still succeed via regular batch fallback
+    EXPECT_EQ(results.failed_count, 0u);
+    for (size_t i = 0; i < batch.size(); ++i) {
+        ASSERT_TRUE(results.results[i].has_value()) << "Batch solve failed for index " << i;
+        EXPECT_GT(results.results[i]->value_at(batch[i].spot), 0.0);
+    }
 }
 
 }  // namespace

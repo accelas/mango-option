@@ -114,5 +114,36 @@ TEST(GridTest, SolutionBufferModification) {
     }
 }
 
+// ===========================================================================
+// Tests for convert_times_to_indices with non-uniform grids
+// ===========================================================================
+
+TEST(GridTest, ConvertTimesToIndicesNonUniform) {
+    auto td = mango::TimeDomain::with_mandatory_points(0.0, 1.0, 0.25, {0.3});
+    auto pts = td.time_points();
+
+    std::vector<double> query = {0.3};
+    auto result = convert_times_to_indices(query, td);
+    ASSERT_TRUE(result.has_value());
+
+    auto& [indices, snapped] = result.value();
+    ASSERT_EQ(snapped.size(), 1u);
+    EXPECT_NEAR(snapped[0], 0.3, 1e-14)
+        << "Should snap exactly to mandatory point";
+}
+
+TEST(GridTest, ConvertTimesToIndicesNonUniformEndpoints) {
+    auto td = mango::TimeDomain::with_mandatory_points(0.0, 1.0, 0.25, {0.3});
+
+    std::vector<double> query = {0.0, 1.0};
+    auto result = convert_times_to_indices(query, td);
+    ASSERT_TRUE(result.has_value());
+
+    auto& [indices, snapped] = result.value();
+    ASSERT_EQ(snapped.size(), 2u);
+    EXPECT_NEAR(snapped[0], 0.0, 1e-14);
+    EXPECT_NEAR(snapped[1], 1.0, 1e-14);
+}
+
 }  // namespace
 }  // namespace mango

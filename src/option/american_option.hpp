@@ -138,9 +138,40 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
     size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
     Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound for stability
 
+    // Widen grid for dividend shift: spline evaluates at x'=ln(exp(x)-D/K)
+    // Only consider dividends strictly within (0, T) — same filter as mandatory tau
+    double max_d_over_k = 0.0;
+    for (const auto& [t_cal, amount] : params.discrete_dividends) {
+        double tau = params.maturity - t_cal;
+        if (tau > 0.0 && tau < params.maturity) {
+            max_d_over_k = std::max(max_d_over_k, amount / params.strike);
+        }
+    }
+    if (max_d_over_k > 0.0 && std::exp(x_min) > max_d_over_k) {
+        x_min = std::log(std::exp(x_min) - max_d_over_k);
+    } else if (max_d_over_k > 0.0) {
+        x_min -= 1.0;  // conservative extension
+    }
+
     // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
     auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params.maturity, Nt);
+
+    // Convert discrete dividend calendar times to time-to-expiry (tau)
+    std::vector<double> mandatory_tau;
+    for (const auto& [t_cal, amount] : params.discrete_dividends) {
+        double tau = params.maturity - t_cal;
+        if (tau > 0.0 && tau < params.maturity) {
+            mandatory_tau.push_back(tau);
+        }
+    }
+
+    // Apply max_time_steps cap to both uniform and non-uniform paths
+    double dt_capped = std::max(dt, params.maturity / static_cast<double>(accuracy.max_time_steps));
+
+    TimeDomain time_domain = mandatory_tau.empty()
+        ? TimeDomain::from_n_steps(0.0, params.maturity, Nt)
+        : TimeDomain::with_mandatory_points(0.0, params.maturity, dt_capped, mandatory_tau);
+
     return {grid_spec.value(), time_domain};
 }
 
@@ -183,7 +214,26 @@ inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
 
     // Create sinh-spaced grid with same concentration parameter
     auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, global_Nt);
+
+    // Collect union of all dividend tau values across the batch
+    std::vector<double> all_mandatory_tau;
+    for (const auto& p : params) {
+        for (const auto& [t_cal, amount] : p.discrete_dividends) {
+            double tau = p.maturity - t_cal;
+            if (tau > 0.0 && tau < max_maturity) {
+                all_mandatory_tau.push_back(tau);
+            }
+        }
+    }
+
+    double global_dt = max_maturity / static_cast<double>(global_Nt);
+    double dt_capped = std::max(global_dt,
+        max_maturity / static_cast<double>(accuracy.max_time_steps));
+
+    TimeDomain time_domain = all_mandatory_tau.empty()
+        ? TimeDomain::from_n_steps(0.0, max_maturity, global_Nt)
+        : TimeDomain::with_mandatory_points(0.0, max_maturity, dt_capped, all_mandatory_tau);
+
     return {grid_spec.value(), time_domain};
 }
 

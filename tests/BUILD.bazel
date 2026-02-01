@@ -1406,6 +1406,17 @@ cc_test(
 )
 
 cc_test(
+    name = "discrete_dividend_event_test",
+    size = "small",
+    srcs = ["discrete_dividend_event_test.cc"],
+    deps = [
+        "//src/option:discrete_dividend_event",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "segmented_price_table_builder_test",
     size = "medium",
     srcs = ["segmented_price_table_builder_test.cc"],
@@ -1482,6 +1493,21 @@ cc_test(
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_test(
+    name = "discrete_dividend_accuracy_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["discrete_dividend_accuracy_test.cc"],
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+    linkopts = ["-lQuantLib"],
 )
 
 load("@pip//:requirements.bzl", "requirement")

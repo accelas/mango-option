@@ -111,6 +111,17 @@ public:
             h_[i] = x[i+1] - x[i];
         }
 
+        // Pre-allocate tridiagonal workspace (reused by rebuild_same_grid)
+        if (n > 2) {
+            const size_t m = n - 2;
+            tridiag_lower_.resize(m > 0 ? m - 1 : 0);
+            tridiag_diag_.resize(m);
+            tridiag_upper_.resize(m > 0 ? m - 1 : 0);
+            tridiag_rhs_.resize(m);
+            tridiag_solution_.resize(m);
+            tridiag_workspace_.resize(m);
+        }
+
         // Store config for rebuild_same_grid
         config_ = config;
 
@@ -241,6 +252,14 @@ private:
     std::vector<T> h_;  ///< Cached interval widths (n-1)
     CubicSplineConfig<T> config_;  ///< Cached spline configuration
 
+    // Cached tridiagonal workspace (allocated once in build(), reused in rebuild_same_grid())
+    std::vector<T> tridiag_lower_;
+    std::vector<T> tridiag_diag_;
+    std::vector<T> tridiag_upper_;
+    std::vector<T> tridiag_rhs_;
+    std::vector<T> tridiag_solution_;
+    ThomasWorkspace<T> tridiag_workspace_{0};
+
     /// Build natural cubic spline (second derivative boundary conditions)
     bool build_natural_spline(
         std::span<const T> h,
@@ -266,40 +285,34 @@ private:
         //     3·((y[i+1]-y[i])/h[i] - (y[i]-y[i-1])/h[i-1])
 
         const size_t m = n - 2;  // Interior points
-        std::vector<T> lower(m - 1);
-        std::vector<T> diag(m);
-        std::vector<T> upper(m - 1);
-        std::vector<T> rhs(m);
-        std::vector<T> c_interior(m);
 
-        // Build tridiagonal coefficients
+        // Build tridiagonal coefficients (using cached member storage)
         for (size_t i = 0; i < m; ++i) {
             const size_t k = i + 1;  // Original index in full array
 
-            diag[i] = static_cast<T>(2) * (h[k-1] + h[k]);
+            tridiag_diag_[i] = static_cast<T>(2) * (h[k-1] + h[k]);
 
             if (i > 0) {
-                lower[i-1] = h[k-1];
+                tridiag_lower_[i-1] = h[k-1];
             }
             if (i < m - 1) {
-                upper[i] = h[k];
+                tridiag_upper_[i] = h[k];
             }
 
             // RHS
             const T slope_right = (y_[k+1] - y_[k]) / h[k];
             const T slope_left = (y_[k] - y_[k-1]) / h[k-1];
-            rhs[i] = static_cast<T>(3) * (slope_right - slope_left);
+            tridiag_rhs_[i] = static_cast<T>(3) * (slope_right - slope_left);
         }
 
-        // Solve tridiagonal system
-        ThomasWorkspace<T> workspace(m);
+        // Solve tridiagonal system (using cached workspace)
         auto result = solve_thomas<T>(
-            std::span{lower},
-            std::span{diag},
-            std::span{upper},
-            std::span{rhs},
-            std::span{c_interior},
-            workspace.get(),
+            std::span{tridiag_lower_},
+            std::span{tridiag_diag_},
+            std::span{tridiag_upper_},
+            std::span{tridiag_rhs_},
+            std::span{tridiag_solution_},
+            tridiag_workspace_.get(),
             thomas_config
         );
 
@@ -310,7 +323,7 @@ private:
         // Copy interior second derivatives to full array
         MANGO_PRAGMA_SIMD
         for (size_t i = 0; i < m; ++i) {
-            c_[i + 1] = c_interior[i];
+            c_[i + 1] = tridiag_solution_[i];
         }
 
         return true;
