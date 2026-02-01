@@ -368,5 +368,92 @@ TEST_F(IVSolverInterpolatedTest, StandardAliasMatchesExplicitTemplate) {
     ASSERT_TRUE(solver.has_value());
 }
 
+// ===========================================================================
+// Regression tests for API safety
+// ===========================================================================
+
+// Regression: IVSolverInterpolated must reject queries with wrong option type
+// Bug: solve() accepted any IVQuery regardless of type, returning wrong IV
+TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
+    // Build an EEP surface for PUT options
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau_grid = {0.25, 0.5, 1.0, 2.0};
+    std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
+    constexpr double K_ref = 100.0;
+
+    auto result = PriceTableBuilder<4>::from_vectors(
+        m_grid, tau_grid, vol_grid, rate_grid, K_ref,
+        GridAccuracyParams{}, OptionType::PUT, 0.0);
+    ASSERT_TRUE(result.has_value());
+    auto [builder, axes] = std::move(result.value());
+    auto table = builder.build(axes);
+    ASSERT_TRUE(table.has_value());
+
+    auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
+
+    auto solver = IVSolverInterpolatedStandard::create(std::move(*aps));
+    ASSERT_TRUE(solver.has_value());
+
+    // Query with CALL type against a PUT surface — must fail
+    IVQuery query{
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.0,    // dividend_yield
+        OptionType::CALL,  // WRONG type: surface is PUT
+        8.0     // market_price
+    };
+
+    auto iv_result = solver->solve(query);
+    EXPECT_FALSE(iv_result.has_value())
+        << "Solver should reject CALL query against PUT surface";
+}
+
+// Regression: IVSolverInterpolated must reject queries with wrong dividend_yield
+// Bug: AmericanPriceSurface bakes in dividend_yield at construction; callers
+// with a different yield got wrong prices silently
+TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
+    // Build surface with dividend_yield = 0.02
+    std::vector<double> m_grid = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> tau_grid = {0.25, 0.5, 1.0, 2.0};
+    std::vector<double> vol_grid = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> rate_grid = {0.02, 0.04, 0.06, 0.08};
+    constexpr double K_ref = 100.0;
+    constexpr double div_yield = 0.02;
+
+    auto result = PriceTableBuilder<4>::from_vectors(
+        m_grid, tau_grid, vol_grid, rate_grid, K_ref,
+        GridAccuracyParams{}, OptionType::PUT, div_yield);
+    ASSERT_TRUE(result.has_value());
+    auto [builder, axes] = std::move(result.value());
+    auto table = builder.build(axes);
+    ASSERT_TRUE(table.has_value());
+
+    auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
+    ASSERT_TRUE(aps.has_value());
+    EXPECT_NEAR(aps->dividend_yield(), 0.02, 1e-12);
+
+    auto solver = IVSolverInterpolatedStandard::create(std::move(*aps));
+    ASSERT_TRUE(solver.has_value());
+
+    // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)
+    IVQuery query{
+        100.0,  // spot
+        100.0,  // strike
+        1.0,    // maturity
+        0.05,   // rate
+        0.05,   // WRONG dividend_yield: surface has 0.02
+        OptionType::PUT,
+        8.0     // market_price
+    };
+
+    auto iv_result = solver->solve(query);
+    EXPECT_FALSE(iv_result.has_value())
+        << "Solver should reject query with mismatched dividend_yield";
+}
+
 }  // namespace
 }  // namespace mango

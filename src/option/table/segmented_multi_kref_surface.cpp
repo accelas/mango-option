@@ -79,6 +79,8 @@ SegmentedMultiKRefSurface::create(std::vector<Entry> entries) {
     result.sigma_max_ = sigma_max;
     result.rate_min_ = rate_min;
     result.rate_max_ = rate_max;
+    result.option_type_ = result.entries_.front().surface.option_type();
+    result.dividend_yield_ = result.entries_.front().surface.dividend_yield();
 
     return result;
 }
@@ -220,4 +222,12 @@ double SegmentedMultiKRefSurface::sigma_max() const noexcept { return sigma_max_
 double SegmentedMultiKRefSurface::rate_min() const noexcept { return rate_min_; }
 double SegmentedMultiKRefSurface::rate_max() const noexcept { return rate_max_; }
 
+
+OptionType SegmentedMultiKRefSurface::option_type() const noexcept {
+    return option_type_;
+}
+
+double SegmentedMultiKRefSurface::dividend_yield() const noexcept {
+    return dividend_yield_;
+}
 }  // namespace mango

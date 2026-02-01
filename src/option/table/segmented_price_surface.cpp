@@ -35,6 +35,8 @@ SegmentedPriceSurface::create(Config config) {
     SegmentedPriceSurface result;
     result.K_ref_ = config.K_ref;
     result.T_ = config.T;
+    result.option_type_ = config.segments.front().surface.option_type();
+    result.dividend_yield_ = config.segments.front().surface.dividend_yield();
     result.segments_ = std::move(config.segments);
 
     result.dividends_.reserve(config.dividends.size());
@@ -203,4 +205,12 @@ double SegmentedPriceSurface::rate_max() const noexcept {
     return segments_.front().surface.rate_max();
 }
 
+
+OptionType SegmentedPriceSurface::option_type() const noexcept {
+    return option_type_;
+}
+
+double SegmentedPriceSurface::dividend_yield() const noexcept {
+    return dividend_yield_;
+}
 }  // namespace mango

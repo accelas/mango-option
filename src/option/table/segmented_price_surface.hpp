@@ -40,6 +40,8 @@ public:
     [[nodiscard]] double rate_min() const noexcept;
     [[nodiscard]] double rate_max() const noexcept;
     [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
+    [[nodiscard]] OptionType option_type() const noexcept;
+    [[nodiscard]] double dividend_yield() const noexcept;
 
 private:
     SegmentedPriceSurface() = default;
@@ -51,6 +53,8 @@ private:
     std::vector<Dividend> dividends_;
     double K_ref_;
     double T_;
+    OptionType option_type_ = OptionType::PUT;
+    double dividend_yield_ = 0.0;
 };
 
 }  // namespace mango

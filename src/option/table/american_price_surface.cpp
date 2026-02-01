@@ -152,4 +152,12 @@ double AmericanPriceSurface::rate_max() const noexcept {
     return surface_->axes().grids[3].back();
 }
 
+
+OptionType AmericanPriceSurface::option_type() const noexcept {
+    return type_;
+}
+
+double AmericanPriceSurface::dividend_yield() const noexcept {
+    return dividend_yield_;
+}
 }  // namespace mango

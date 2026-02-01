@@ -124,6 +124,8 @@ private:
         std::pair<double, double> tau_range,
         std::pair<double, double> sigma_range,
         std::pair<double, double> r_range,
+        OptionType option_type,
+        double dividend_yield,
         const IVSolverInterpolatedConfig& config)
         : surface_(std::move(surface))
         , m_range_(m_range)
@@ -131,11 +133,15 @@ private:
         , sigma_range_(sigma_range)
         , r_range_(r_range)
         , config_(config)
+        , option_type_(option_type)
+        , dividend_yield_(dividend_yield)
     {}
 
     Surface surface_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
     IVSolverInterpolatedConfig config_;
+    OptionType option_type_;
+    double dividend_yield_;
 
     /// Evaluate option price using B-spline interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
@@ -191,12 +197,17 @@ IVSolverInterpolated<Surface>::create(
         return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, 0.0));
     }
 
+    auto option_type = surface.option_type();
+    auto dividend_yield = surface.dividend_yield();
+
     return IVSolverInterpolated(
         std::move(surface),
         m_range,
         tau_range,
         sigma_range,
         r_range,
+        option_type,
+        dividend_yield,
         config);
 }
 
@@ -220,6 +231,14 @@ template <PriceSurface Surface>
 std::optional<ValidationError>
 IVSolverInterpolated<Surface>::validate_query(const IVQuery& query) const
 {
+    if (query.type != option_type_) {
+        return ValidationError{ValidationErrorCode::InvalidBounds, 0.0, 0};
+    }
+
+    if (std::abs(query.dividend_yield - dividend_yield_) > 1e-10) {
+        return ValidationError{ValidationErrorCode::InvalidBounds, 0.0, 0};
+    }
+
     // Use common validation for option spec, market price, and arbitrage checks
     auto validation = validate_iv_query(query);
     if (!validation.has_value()) {
