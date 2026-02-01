@@ -351,7 +351,7 @@ def test_iv_solver_interpolated():
     # Create solver via AmericanPriceSurface
     aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
     config = mango_option.IVSolverInterpolatedConfig()
-    config.max_iterations = 50
+    config.max_iter = 50
     config.tolerance = 1e-6
 
     solver = mango_option.IVSolverInterpolated.create(aps, config)

@@ -272,7 +272,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
 
     // API STEP 3: Create IV solver
     IVSolverInterpolatedConfig solver_config;
-    solver_config.max_iterations = 50;
+    solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);

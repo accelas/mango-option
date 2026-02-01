@@ -510,7 +510,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
 
     // Create IV solver from surface via AmericanPriceSurface
     IVSolverInterpolatedConfig solver_config;
-    solver_config.max_iterations = 50;
+    solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
     auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);

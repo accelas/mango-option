@@ -56,7 +56,7 @@ TEST_F(IVSolverInterpolatedTest, CreateFromAmericanPriceSurface) {
 
 TEST_F(IVSolverInterpolatedTest, CreateWithConfig) {
     IVSolverInterpolatedConfig config{
-        .max_iterations = 100,
+        .max_iter = 100,
         .tolerance = 1e-8,
         .sigma_min = 0.05,
         .sigma_max = 2.0
@@ -195,7 +195,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolveAllSucceed) {
 
 TEST_F(IVSolverInterpolatedTest, ConvergenceWithinIterations) {
     IVSolverInterpolatedConfig config{
-        .max_iterations = 10,  // Limited iterations
+        .max_iter = 10,  // Limited iterations
         .tolerance = 1e-6
     };
 

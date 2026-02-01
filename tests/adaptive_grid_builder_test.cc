@@ -37,7 +37,7 @@ TEST(AdaptiveGridBuilderTest, ConstructWithDefaultParams) {
 TEST(AdaptiveGridBuilderTest, ConstructWithCustomParams) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.001;  // 10 bps
-    params.max_iterations = 3;
+    params.max_iter = 3;
 
     AdaptiveGridBuilder builder(params);
     SUCCEED();
@@ -57,7 +57,7 @@ TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;  // 20 bps - relaxed for test speed
-    params.max_iterations = 2;
+    params.max_iter = 2;
     params.validation_samples = 8;  // Fewer for test speed
 
     AdaptiveGridBuilder builder(params);
@@ -284,7 +284,7 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.01;  // Very relaxed
-    params.max_iterations = 1;
+    params.max_iter = 1;
     params.validation_samples = 4;
 
     AdaptiveGridBuilder builder(params);
@@ -316,7 +316,7 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     chain2.spot = 50.0;  // Different spot => cache must not reuse chain1 slices
 
     AdaptiveGridParams params;
-    params.max_iterations = 1;
+    params.max_iter = 1;
     params.validation_samples = 1;  // Minimum to satisfy validation guard
 
     AdaptiveGridBuilder builder(params);

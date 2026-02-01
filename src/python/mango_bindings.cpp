@@ -994,7 +994,7 @@ PYBIND11_MODULE(mango_option, m) {
     // IVSolverInterpolatedConfig
     py::class_<mango::IVSolverInterpolatedConfig>(m, "IVSolverInterpolatedConfig")
         .def(py::init<>())
-        .def_readwrite("max_iterations", &mango::IVSolverInterpolatedConfig::max_iterations)
+        .def_readwrite("max_iter", &mango::IVSolverInterpolatedConfig::max_iter)
         .def_readwrite("tolerance", &mango::IVSolverInterpolatedConfig::tolerance)
         .def_readwrite("sigma_min", &mango::IVSolverInterpolatedConfig::sigma_min)
         .def_readwrite("sigma_max", &mango::IVSolverInterpolatedConfig::sigma_max);

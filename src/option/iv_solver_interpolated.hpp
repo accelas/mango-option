@@ -66,7 +66,7 @@ namespace mango {
 
 /// Configuration for interpolation-based IV solver
 struct IVSolverInterpolatedConfig {
-    int max_iterations = 50;      ///< Maximum Newton iterations
+    size_t max_iter = 50;          ///< Maximum Newton iterations
     double tolerance = 1e-6;       ///< Price convergence tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
@@ -334,7 +334,7 @@ IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
 
     // Use generic bounded Newton-Raphson
     RootFindingConfig newton_config{
-        .max_iter = static_cast<size_t>(std::max(0, config_.max_iterations)),
+        .max_iter = config_.max_iter,
         .tolerance = config_.tolerance
     };
 

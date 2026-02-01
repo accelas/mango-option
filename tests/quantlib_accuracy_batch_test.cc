@@ -128,7 +128,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
 
     // Create interpolated IV solver from surface
     IVSolverInterpolatedConfig iv_config{
-        .max_iterations = 100,
+        .max_iter = 100,
         .tolerance = 1e-7,
         .sigma_min = 0.05,
         .sigma_max = 2.0
