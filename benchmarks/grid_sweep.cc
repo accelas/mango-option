@@ -59,8 +59,10 @@ int main() {
     fprintf(stderr, "Computing reference prices...\n");
     std::vector<IVQuery> iv_queries;
     for (auto& tc : test_cases) {
-        PricingParams params(spot, tc.strike, tc.maturity, rate, div_yield,
-                                     OptionType::PUT, tc.vol_true);
+        PricingParams params(
+            OptionSpec{.spot = spot, .strike = tc.strike, .maturity = tc.maturity,
+                .rate = rate, .dividend_yield = div_yield, .type = OptionType::PUT},
+            tc.vol_true);
         auto [gs, td] = estimate_grid_for_option(params, grid_accuracy_profile(GridAccuracyProfile::High));
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buf(PDEWorkspace::required_size(gs.n_points()), &pool);

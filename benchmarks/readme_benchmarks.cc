@@ -137,15 +137,14 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     constexpr double rate = 0.05;
     constexpr double sigma_true = 0.20;
 
-    IVQuery query{
-        spot,
-        strike,
-        maturity,
-        rate,
-        0.0,  // dividend_yield
-        OptionType::PUT,
-        analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)
-    };
+    IVQuery query;
+    query.spot = spot;
+    query.strike = strike;
+    query.maturity = maturity;
+    query.rate = rate;
+    query.dividend_yield = 0.0;
+    query.type = OptionType::PUT;
+    query.market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT);
 
     auto run_once = [&]() {
         auto result = solver.solve(query);
@@ -174,14 +173,9 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
 
 static void BM_README_AmericanSingle(benchmark::State& state) {
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+        0.20);
 
     // Use automatic grid estimation
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
@@ -341,15 +335,14 @@ BENCHMARK(BM_README_AmericanBatch64)
     ->MinTime(kMinBenchmarkTimeSec);
 
 static void BM_README_IV_FDM(benchmark::State& state) {
-    IVQuery query{
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.0,    // dividend_yield
-        OptionType::PUT,
-        6.08    // market_price
-    };
+    IVQuery query;
+    query.spot = 100.0;
+    query.strike = 100.0;
+    query.maturity = 1.0;
+    query.rate = 0.05;
+    query.dividend_yield = 0.0;
+    query.type = OptionType::PUT;
+    query.market_price = 6.08;
 
     // Use default config with automatic grid estimation
     IVSolverFDMConfig config;
@@ -362,8 +355,10 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     // Get grid dimensions for typical case (σ=0.20 for ATM put)
     // The solver uses estimate_grid_for_option() which bases grid on current σ
     PricingParams sample_params(
-        query.spot, query.strike, query.maturity, query.rate,
-        query.dividend_yield, query.type, 0.20);  // Typical IV ~20%
+        OptionSpec{.spot = query.spot, .strike = query.strike,
+            .maturity = query.maturity, .rate = query.rate,
+            .dividend_yield = query.dividend_yield, .type = query.type},
+        0.20);  // Typical IV ~20%
     auto [grid_spec, time_domain] = estimate_grid_for_option(sample_params);
 
     auto run_once = [&]() {
@@ -467,15 +462,10 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
     std::vector<PricingParams> params;
     for (double tau : maturities) {
         for (double K : strikes) {
-            params.emplace_back(
-                spot,      // spot price
-                K,         // strike
-                tau,       // maturity
-                0.05,      // rate
-                0.02,      // dividend yield
-                OptionType::PUT,
-                0.20       // volatility
-            );
+            params.push_back(PricingParams(
+                OptionSpec{.spot = spot, .strike = K, .maturity = tau,
+                    .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+                0.20));
         }
     }
 
