@@ -262,8 +262,6 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
 
@@ -282,8 +280,6 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
 
@@ -302,8 +298,6 @@ static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
 
@@ -495,8 +489,6 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
     for (auto _ : state) {

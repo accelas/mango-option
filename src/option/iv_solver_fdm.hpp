@@ -34,6 +34,7 @@
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_result.hpp"
 #include "src/option/american_option.hpp"
+#include "src/option/grid_spec_types.hpp"
 #include "src/math/root_finding.hpp"
 #include <expected>
 #include "src/support/error_types.hpp"
@@ -62,37 +63,8 @@ struct IVSolverFDMConfig {
     /// - Set to SIZE_MAX to force serial execution for all batch sizes
     size_t batch_parallel_threshold = 4;
 
-    /// Use manual grid specification instead of auto-estimation
-    ///
-    /// When false (default): Automatically estimate optimal grid based on option parameters
-    /// When true: Use grid_n_space, grid_n_time, grid_x_min, grid_x_max, grid_alpha exactly
-    ///
-    /// **Advanced usage only** (for benchmarks or custom grid control)
-    bool use_manual_grid = false;
-
-    /// Number of spatial grid points (used when use_manual_grid = true)
-    size_t grid_n_space = 101;
-
-    /// Number of time steps (used when use_manual_grid = true)
-    size_t grid_n_time = 1000;
-
-    /// Minimum log-moneyness (used when use_manual_grid = true)
-    double grid_x_min = -3.0;
-
-    /// Maximum log-moneyness (used when use_manual_grid = true)
-    double grid_x_max = 3.0;
-
-    /// Sinh clustering parameter (used when use_manual_grid = true)
-    double grid_alpha = 2.0;
-
-    /// Grid accuracy parameters for automatic grid estimation
-    ///
-    /// Controls the resolution of the PDE grid used internally for pricing
-    /// during root-finding iterations. Higher accuracy reduces IV error
-    /// at the cost of slower solves.
-    ///
-    /// Only used when use_manual_grid = false (default).
-    GridAccuracyParams grid_accuracy;
+    /// PDE grid specification: auto-estimate (default) or explicit
+    PDEGridSpec grid = GridAccuracyParams{};
 };
 
 /// FDM-based Implied Volatility Solver for American Options
@@ -180,9 +152,8 @@ public:
     /// - ArbitrageViolation: Price violates arbitrage bounds or intrinsic value
     /// - MaxIterationsExceeded: Brent solver did not converge
     /// - BracketingFailed: Root not bracketed by initial bounds
-    /// - InvalidGridConfig: FDM grid parameters invalid (manual mode only)
     ///
-    /// @note Uses monadic validation: params → arbitrage → grid → Brent solving
+    /// @note Uses monadic validation: params → arbitrage → Brent solving
     std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query) const;
 
     /// Solve for implied volatility (batch with OpenMP)
@@ -213,28 +184,7 @@ private:
     /// @return Difference between theoretical and market price
     double objective_function(const IVQuery& query, double volatility) const;
 
-    // Grid validators (FDM-specific, only used when manual grid mode enabled)
-    /// Validate grid n_space is positive (manual grid mode)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_n_space_positive() const;
-
-    /// Validate grid n_time is positive (manual grid mode)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_n_time_positive() const;
-
-    /// Validate grid x_min < x_max (manual grid mode)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_x_bounds() const;
-
-    /// Validate grid alpha >= 0 (manual grid mode)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_alpha_nonnegative() const;
-
-    /// Validate grid parameters (FDM-specific, only when manual grid mode enabled)
-    /// @return std::monostate on success, IVError on validation failure
-    std::expected<std::monostate, IVError> validate_grid_params() const;
-
-    /// Validate query using centralized validation + grid params
+    /// Validate query using centralized validation
     /// Uses validate_iv_query() from option_spec.cpp for consistency
     /// @return std::monostate on success, IVError on validation failure
     std::expected<std::monostate, IVError> validate_query(const IVQuery& query) const;

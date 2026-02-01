@@ -10,87 +10,14 @@
 #include <algorithm>
 #include <memory>
 #include <memory_resource>
+#include <type_traits>
+#include <variant>
 
 namespace mango {
 
 IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
     : config_(config) {
     // Constructor - just stores configuration
-}
-
-// Atomic validators for grid parameters (uniform API)
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_n_space_positive() const {
-    if (config_.grid_n_space == 0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 6, config_.grid_n_space, 0.0);
-        return std::unexpected(IVError{
-            .code = IVErrorCode::InvalidGridConfig,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_n_time_positive() const {
-    if (config_.grid_n_time == 0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 7, config_.grid_n_time, 0.0);
-        return std::unexpected(IVError{
-            .code = IVErrorCode::InvalidGridConfig,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_x_bounds() const {
-    if (config_.grid_x_min >= config_.grid_x_max) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 9, config_.grid_x_min, config_.grid_x_max);
-        return std::unexpected(IVError{
-            .code = IVErrorCode::InvalidGridConfig,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_alpha_nonnegative() const {
-    if (config_.grid_alpha < 0.0) {
-        MANGO_TRACE_VALIDATION_ERROR(MODULE_IMPLIED_VOL, 10, config_.grid_alpha, 0.0);
-        return std::unexpected(IVError{
-            .code = IVErrorCode::InvalidGridConfig,
-            // error code set above,
-            .iterations = 0,
-            .final_error = 0.0,
-            .last_vol = std::nullopt
-        });
-    }
-    return std::monostate{};
-}
-
-// Composite validator for grid parameters (C++23 monadic)
-std::expected<std::monostate, IVError>
-IVSolverFDM::validate_grid_params() const {
-    // Only validate when manual grid mode is enabled
-    if (!config_.use_manual_grid) {
-        return std::monostate{};
-    }
-
-    return validate_n_space_positive()
-        .and_then([this](auto) { return validate_n_time_positive(); })
-        .and_then([this](auto) { return validate_x_bounds(); })
-        .and_then([this](auto) { return validate_alpha_nonnegative(); });
 }
 
 double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
@@ -137,34 +64,27 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     option_params.dividend_yield = query.dividend_yield;
     option_params.type = query.type;
 
-    // Choose grid: manual override or automatic estimation
-    auto dummy_grid = GridSpec<double>::uniform(0.0, 1.0, 10);
-    GridSpec<double> grid_spec = dummy_grid.value();  // Dummy init, will be replaced
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, config_.grid_n_time);
+    // Resolve grid from config
+    GridSpec<double> grid_spec = GridSpec<double>::uniform(0.0, 1.0, 10).value();  // Will be replaced
+    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, 100);
 
-    if (config_.use_manual_grid) {
-        // Advanced mode: Use manually specified grid (for benchmarks)
-        auto grid_result = GridSpec<double>::sinh_spaced(
-            config_.grid_x_min,
-            config_.grid_x_max,
-            config_.grid_n_space,
-            config_.grid_alpha
-        );
-        if (!grid_result.has_value()) {
-            last_solver_error_ = SolverError{
-                .code = SolverErrorCode::InvalidConfiguration,
-                // error code set above + grid_result.error(),
-                .iterations = 0
-            };
-            return std::numeric_limits<double>::quiet_NaN();
+    std::visit([&](const auto& grid_variant) {
+        using T = std::decay_t<decltype(grid_variant)>;
+        if constexpr (std::is_same_v<T, GridAccuracyParams>) {
+            auto [auto_grid, auto_td] = estimate_grid_for_option(option_params, grid_variant);
+            grid_spec = auto_grid;
+            time_domain = auto_td;
+        } else if constexpr (std::is_same_v<T, ExplicitPDEGrid>) {
+            grid_spec = grid_variant.grid_spec;
+            if (grid_variant.mandatory_times.empty()) {
+                time_domain = TimeDomain::from_n_steps(0.0, query.maturity, grid_variant.n_time);
+            } else {
+                time_domain = TimeDomain::with_mandatory_points(0.0, query.maturity,
+                    query.maturity / static_cast<double>(grid_variant.n_time),
+                    grid_variant.mandatory_times);
+            }
         }
-        grid_spec = grid_result.value();
-    } else {
-        // Default mode: Use automatic grid estimation
-        auto [auto_grid, auto_time_domain] = estimate_grid_for_option(option_params, config_.grid_accuracy);
-        grid_spec = auto_grid;
-        time_domain = auto_time_domain;
-    }
+    }, config_.grid);
 
     // Thread-local workspace cache to avoid repeated allocations during Brent iterations
     // Each thread (or serial context) maintains its own cache, avoiding data races
@@ -222,7 +142,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     }
 }
 
-// Validate query using centralized validation + grid params
+// Validate query using centralized validation
 std::expected<std::monostate, IVError>
 IVSolverFDM::validate_query(const IVQuery& query) const {
     // Use centralized IV query validation (option spec + market price + arbitrage)
@@ -231,8 +151,7 @@ IVSolverFDM::validate_query(const IVQuery& query) const {
         return std::unexpected(validation_error_to_iv_error(validation.error()));
     }
 
-    // FDM-specific: validate grid parameters if manual mode enabled
-    return validate_grid_params();
+    return std::monostate{};
 }
 
 std::expected<IVSuccess, IVError>

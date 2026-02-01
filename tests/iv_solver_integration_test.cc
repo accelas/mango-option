@@ -31,7 +31,7 @@ TEST(IVSolverIntegration, FullWorkflowSuccess) {
             .max_iter = 100,
             .tolerance = 1e-6
         },
-        .grid_accuracy = GridAccuracyParams{}
+
     };
 
     IVSolverFDM solver(config);

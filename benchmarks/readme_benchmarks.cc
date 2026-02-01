@@ -371,7 +371,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    // use_manual_grid defaults to false - uses estimate_grid_for_option()
+    // Uses default auto-estimation via GridAccuracyParams
 
     IVSolverFDM solver(config);
 

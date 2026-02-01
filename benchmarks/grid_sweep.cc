@@ -38,7 +38,7 @@ int main() {
     IVSolverFDMConfig fdm_config;
     fdm_config.root_config.max_iter = 100;
     fdm_config.root_config.tolerance = 1e-8;
-    fdm_config.grid_accuracy = grid_accuracy_profile(GridAccuracyProfile::High);
+    fdm_config.grid = grid_accuracy_profile(GridAccuracyProfile::High);
     IVSolverFDM fdm_solver(fdm_config);
 
     // Test queries: puts at various moneyness × maturity

@@ -182,13 +182,8 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::IVSolverFDMConfig>(m, "IVSolverFDMConfig")
         .def(py::init<>())
         .def_readwrite("root_config", &mango::IVSolverFDMConfig::root_config)
-        .def_readwrite("use_manual_grid", &mango::IVSolverFDMConfig::use_manual_grid)
-        .def_readwrite("grid_n_space", &mango::IVSolverFDMConfig::grid_n_space)
-        .def_readwrite("grid_n_time", &mango::IVSolverFDMConfig::grid_n_time)
-        .def_readwrite("grid_x_min", &mango::IVSolverFDMConfig::grid_x_min)
-        .def_readwrite("grid_x_max", &mango::IVSolverFDMConfig::grid_x_max)
-        .def_readwrite("grid_alpha", &mango::IVSolverFDMConfig::grid_alpha)
-        .def_readwrite("grid_accuracy", &mango::IVSolverFDMConfig::grid_accuracy);
+        .def_readwrite("batch_parallel_threshold", &mango::IVSolverFDMConfig::batch_parallel_threshold);
+    // Note: PDEGridSpec variant binding deferred — Python users use default auto-estimation
 
     // IVSuccess structure (std::expected success type)
     py::class_<mango::IVSuccess>(m, "IVSuccess")

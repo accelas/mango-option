@@ -316,7 +316,7 @@ void test_iv_scenario(
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    // Note: using auto-estimation (use_manual_grid = false by default)
+    // Note: using auto-estimation (default GridAccuracyParams)
 
     IVSolverFDM solver(config);
     auto iv_result = solver.solve(query);
