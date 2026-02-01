@@ -112,33 +112,32 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve — always pass grid config to ensure the solver
     // uses the same grid we computed (matching the workspace size)
-    try {
-        auto explicit_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    auto explicit_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
 
-        AmericanOptionSolver solver(option_params, pde_workspace_result.value(),
-                                    PDEGridSpec{explicit_grid});
-        // Surface always collected for value_at()
-        auto price_result = solver.solve();
-
-        if (!price_result) {
-            last_solver_error_ = price_result.error();
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        last_solver_error_.reset();
-        const AmericanOptionResult& result = price_result.value();
-
-        // Return difference: V(σ) - V_market
-        return result.value_at(query.spot) - query.market_price;
-    } catch (...) {
-        // If solver throws an exception, capture the error and return NaN
+    auto solver_result = AmericanOptionSolver::create(
+        option_params, pde_workspace_result.value(), PDEGridSpec{explicit_grid});
+    if (!solver_result) {
         last_solver_error_ = SolverError{
-            .code = SolverErrorCode::Unknown,
-            // error code set above,
+            .code = SolverErrorCode::InvalidConfiguration,
             .iterations = 0
         };
         return std::numeric_limits<double>::quiet_NaN();
     }
+    auto& solver = solver_result.value();
+
+    // Surface always collected for value_at()
+    auto price_result = solver.solve();
+
+    if (!price_result) {
+        last_solver_error_ = price_result.error();
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    last_solver_error_.reset();
+    const AmericanOptionResult& result = price_result.value();
+
+    // Return difference: V(σ) - V_market
+    return result.value_at(query.spot) - query.market_price;
 }
 
 // Validate query using centralized validation

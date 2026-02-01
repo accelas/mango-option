@@ -340,9 +340,15 @@ PYBIND11_MODULE(mango_option, m) {
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            mango::AmericanOptionSolver solver(
+            auto solver_result = mango::AmericanOptionSolver::create(
                 params, workspace_result.value(),
                 mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
+            if (!solver_result) {
+                throw py::value_error(
+                    "Failed to create solver (validation error code " +
+                    std::to_string(static_cast<int>(solver_result.error().code)) + ")");
+            }
+            auto& solver = solver_result.value();
             auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();

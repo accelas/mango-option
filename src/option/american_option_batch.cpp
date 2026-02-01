@@ -602,7 +602,19 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 auto& [gs, td] = *solver_grid_config;
                 solver_grid_spec = ExplicitPDEGrid{gs, td.n_steps(), {}};
             }
-            AmericanOptionSolver solver(params[i], *workspace_ptr, solver_grid_spec);
+            auto solver_result = AmericanOptionSolver::create(params[i], *workspace_ptr, solver_grid_spec);
+            if (!solver_result) {
+                results[i].~expected();
+                new (&results[i]) std::expected<AmericanOptionResult, SolverError>(
+                    std::unexpected(SolverError{
+                        .code = SolverErrorCode::InvalidConfiguration,
+                        .iterations = 0
+                    }));
+                MANGO_PRAGMA_ATOMIC
+                ++failed_count;
+                continue;
+            }
+            auto& solver = solver_result.value();
 
             // Register snapshot times if configured (preserves normalized optimization)
             if (!snapshot_times_.empty()) {

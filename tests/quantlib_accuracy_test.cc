@@ -118,7 +118,7 @@ void test_scenario(
     ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(mango_params, workspace);
+    auto solver = AmericanOptionSolver::create(mango_params, workspace).value();
     auto mango_result = solver.solve();
     ASSERT_TRUE(mango_result.has_value()) << mango_result.error().message;
 
@@ -220,7 +220,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -256,7 +256,7 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 

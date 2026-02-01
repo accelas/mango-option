@@ -192,23 +192,6 @@ public:
            std::optional<std::span<const double>> snapshot_times = std::nullopt) noexcept;
 
     /**
-     * Direct PDEWorkspace constructor (deprecated - use create() instead).
-     *
-     * @deprecated Use AmericanOptionSolver::create() for type-safe error handling
-     * @throws std::invalid_argument if parameters are invalid
-     *
-     * @param params Option pricing parameters
-     * @param workspace PDEWorkspace with pre-allocated buffers
-     * @param grid Optional grid specification (GridAccuracyParams or ExplicitPDEGrid).
-     *             When nullopt, auto-estimates from option parameters.
-     * @param snapshot_times Optional times to record solution snapshots
-     */
-    AmericanOptionSolver(const PricingParams& params,
-                        PDEWorkspace workspace,
-                        std::optional<PDEGridSpec> grid = std::nullopt,
-                        std::optional<std::span<const double>> snapshot_times = std::nullopt);
-
-    /**
      * Set snapshot times for solution recording.
      *
      * Must be called before solve(). Allows setup callbacks to register
@@ -237,6 +220,11 @@ public:
     std::expected<AmericanOptionResult, SolverError> solve();
 
 private:
+    AmericanOptionSolver(const PricingParams& params,
+                        PDEWorkspace workspace,
+                        std::optional<PDEGridSpec> grid = std::nullopt,
+                        std::optional<std::span<const double>> snapshot_times = std::nullopt);
+
     // Parameters
     PricingParams params_;
 

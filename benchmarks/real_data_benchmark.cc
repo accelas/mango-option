@@ -193,7 +193,7 @@ static void BM_RealData_AmericanSingle(benchmark::State& state) {
     }
 
     auto run_once = [&]() {
-        AmericanOptionSolver solver(params, workspace.value());
+        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error");
@@ -240,7 +240,7 @@ static void BM_RealData_AmericanSequential(benchmark::State& state) {
                 throw std::runtime_error("Failed to create workspace");
             }
 
-            AmericanOptionSolver solver(params, workspace.value());
+            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("Solver error");

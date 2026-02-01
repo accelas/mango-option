@@ -117,7 +117,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -156,7 +156,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -195,7 +195,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -239,7 +239,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -383,7 +383,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
 
     for (auto _ : state) {
         auto start = std::chrono::high_resolution_clock::now();
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         auto end = std::chrono::high_resolution_clock::now();
 
@@ -454,7 +454,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            AmericanOptionSolver solver(params, workspace_result.value());
+            auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
             results.push_back(solver.solve());
         }
 

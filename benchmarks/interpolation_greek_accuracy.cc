@@ -138,7 +138,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
         std::pmr::vector<double> buf(PDEWorkspace::required_size(n), &pool);
         auto ws = PDEWorkspace::from_buffer(buf, n);
         if (!ws) throw std::runtime_error("Failed to create workspace");
-        AmericanOptionSolver solver(p, ws.value());
+        auto solver = AmericanOptionSolver::create(p, ws.value()).value();
         auto r = solver.solve();
         if (!r) throw std::runtime_error("PDE solver failed");
         return r->value_at(spot);
@@ -158,7 +158,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
             if (!workspace) {
                 throw std::runtime_error("Failed to create workspace");
             }
-            AmericanOptionSolver solver(params, workspace.value());
+            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("PDE solver failed");

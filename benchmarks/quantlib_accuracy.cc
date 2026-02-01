@@ -134,7 +134,7 @@ static void compare_scenario(
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(mango_params, workspace);
+    auto solver = AmericanOptionSolver::create(mango_params, workspace).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -269,7 +269,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -327,7 +327,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -649,7 +649,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
 
     if (!result) {
@@ -721,7 +721,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
 
     if (!result) {

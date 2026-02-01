@@ -124,8 +124,8 @@ TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
 
     // Create solver with custom grid to avoid auto-estimation
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params.maturity, 100);
-    AmericanOptionSolver solver(params, workspace,
-        ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
+    auto solver = AmericanOptionSolver::create(params, workspace,
+        ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}}).value();
 
     // Set snapshot times using the new method
     std::vector<double> snapshot_times = {0.25, 0.5, 0.75, 1.0};

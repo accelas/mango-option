@@ -65,8 +65,8 @@ int main() {
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buf(PDEWorkspace::required_size(gs.n_points()), &pool);
         auto ws = PDEWorkspace::from_buffer(buf, gs.n_points()).value();
-        auto custom = std::make_pair(gs, td);
-        AmericanOptionSolver solver(params, ws, std::nullopt, custom);
+        auto solver = AmericanOptionSolver::create(params, ws,
+            ExplicitPDEGrid{gs, td.n_steps(), {}}).value();
         auto result = solver.solve();
         if (!result) continue;
         double price = result->value_at(spot);

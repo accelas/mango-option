@@ -35,7 +35,7 @@ TEST(AmericanOptionSolverTest, CustomInitialCondition) {
         }
     };
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     solver.set_initial_condition(custom_ic);
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
@@ -60,7 +60,7 @@ TEST(AmericanOptionSolverTest, DefaultPayoffStillWorks) {
                                      std::pmr::get_default_resource());
     auto workspace = PDEWorkspace::from_buffer(buffer, n).value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->value_at(params.spot), 0.0);

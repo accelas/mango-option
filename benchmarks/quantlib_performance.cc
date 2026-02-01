@@ -105,7 +105,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -165,7 +165,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -225,7 +225,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -287,7 +287,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));

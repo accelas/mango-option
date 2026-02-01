@@ -60,7 +60,7 @@ TEST(RealMarketDataTest, ATMPutPricing) {
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
     ASSERT_TRUE(workspace.has_value()) << workspace.error();
 
-    AmericanOptionSolver solver(params, workspace.value());
+    auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << "Solver failed: " << static_cast<int>(result.error().code);
 
@@ -87,7 +87,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
         auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
         ASSERT_TRUE(workspace.has_value()) << "Workspace creation failed for option " << i;
 
-        AmericanOptionSolver solver(params, workspace.value());
+        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
         auto result = solver.solve();
         ASSERT_TRUE(result.has_value())
             << "Solver failed for K=" << opt.strike << ": code " << static_cast<int>(result.error().code);
@@ -193,7 +193,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
     ASSERT_TRUE(workspace.has_value());
 
-    AmericanOptionSolver price_solver(params, workspace.value());
+    auto price_solver = AmericanOptionSolver::create(params, workspace.value()).value();
     auto price_result = price_solver.solve();
     ASSERT_TRUE(price_result.has_value());
 

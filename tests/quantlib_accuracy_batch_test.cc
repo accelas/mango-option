@@ -227,7 +227,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -259,7 +259,7 @@ TEST(QuantLibBatchTest, Greeks_ATM) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 

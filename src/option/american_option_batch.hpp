@@ -290,8 +290,14 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
 
     // Create and solve using PDEWorkspace API
     // Buffer stays alive during solve(), result contains Grid with solution
-    AmericanOptionSolver solver(params, workspace_result.value());
-    return solver.solve();
+    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
+    if (!solver_result) {
+        return std::unexpected(SolverError{
+            .code = SolverErrorCode::InvalidConfiguration,
+            .iterations = 0
+        });
+    }
+    return solver_result.value().solve();
 }
 
 }  // namespace mango

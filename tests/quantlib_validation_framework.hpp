@@ -154,7 +154,7 @@ inline PricingValidationResult validate_pricing(
         return validation;
     }
 
-    AmericanOptionSolver solver(mango_params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(mango_params, workspace_result.value()).value();
     auto mango_result = solver.solve();
     if (!mango_result.has_value()) {
         validation.passed = false;

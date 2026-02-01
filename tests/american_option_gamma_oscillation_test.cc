@@ -42,7 +42,7 @@ bool run_gamma_oscillation_case(const SweepCase& test_case) {
         return false;
     }
 
-    AmericanOptionSolver solver(params, workspace.value());
+    auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
     auto result = solver.solve();
     if (!result.has_value()) {
         ADD_FAILURE() << "Solver failed";
