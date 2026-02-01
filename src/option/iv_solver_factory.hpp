@@ -27,7 +27,7 @@ struct IVSolverConfig {
     OptionType option_type = OptionType::PUT;
     double spot = 100.0;
     double dividend_yield = 0.0;
-    std::vector<Dividend> discrete_dividends;  ///< (calendar_time, amount)
+    std::vector<Dividend> discrete_dividends;
     std::vector<double> moneyness_grid;
     double maturity = 1.0;                     ///< Max maturity (T), used for segmented path
     std::vector<double> maturity_grid;         ///< For standard path (no dividends)

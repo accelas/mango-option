@@ -11,6 +11,9 @@ filegroup(
 cc_library(
     name = "price_surface_concept",
     hdrs = ["price_surface_concept.hpp"],
+    deps = [
+        "//src/option:option_spec",
+    ],
     visibility = ["//visibility:public"],
 )
 
