@@ -45,6 +45,7 @@ cc_library(
         "//src/pde/core:pde_workspace",
         "//src/pde/core:grid",
         "//src/pde/core:time_domain",
+        ":discrete_dividend_event",
     ],
     copts = [
         "-Wall",

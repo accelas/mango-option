@@ -6,6 +6,7 @@
 
 #include "src/option/american_option.hpp"
 #include "src/option/american_pde_solver.hpp"
+#include "src/option/discrete_dividend_event.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include <algorithm>
@@ -110,11 +111,30 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         AmericanPutSolver pde_solver(params_, grid, workspace_);
         pde_solver.initialize(AmericanPutSolver::payoff);
         pde_solver.set_config(trbdf2_config_);
+
+        // Register discrete dividend events
+        for (const auto& [t_cal, amount] : params_.discrete_dividends) {
+            double tau = params_.maturity - t_cal;
+            if (tau > 0.0 && tau < params_.maturity) {
+                pde_solver.add_temporal_event(tau,
+                    make_dividend_event(amount, params_.strike, params_.type));
+            }
+        }
+
         solve_result = pde_solver.solve();
     } else {
         AmericanCallSolver pde_solver(params_, grid, workspace_);
         pde_solver.initialize(AmericanCallSolver::payoff);
         pde_solver.set_config(trbdf2_config_);
+
+        for (const auto& [t_cal, amount] : params_.discrete_dividends) {
+            double tau = params_.maturity - t_cal;
+            if (tau > 0.0 && tau < params_.maturity) {
+                pde_solver.add_temporal_event(tau,
+                    make_dividend_event(amount, params_.strike, params_.type));
+            }
+        }
+
         solve_result = pde_solver.solve();
     }
 
