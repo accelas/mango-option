@@ -167,11 +167,11 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
 }
 
 template <size_t N>
-std::vector<AmericanOptionParams>
+std::vector<PricingParams>
 PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
 
     // Iterate only over high-cost axes: axes[2] (σ) and axes[3] (r)
     // This creates Nσ × Nr batch entries, NOT Nm × Nt × Nσ × Nr
@@ -188,7 +188,7 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
     for (auto [sigma, r] : std::views::cartesian_product(axes.grids[2], axes.grids[3])) {
         // Normalized solve: Spot = Strike = K_ref
         // Surface will be interpolated across m and τ in extract_tensor
-        AmericanOptionParams params(
+        PricingParams params(
             K_ref,                          // spot
             K_ref,                          // strike
             axes.grids[1].back(),           // maturity (max for this σ,r)
@@ -211,7 +211,7 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
 template <size_t N>
 static void ensure_moneyness_coverage(
     GridAccuracyParams& accuracy,
-    const std::vector<AmericanOptionParams>& batch,
+    const std::vector<PricingParams>& batch,
     const PriceTableAxes<N>& axes)
 {
     const double log_m_min = std::log(axes.grids[0].front());
@@ -234,14 +234,14 @@ static void ensure_moneyness_coverage(
 template <size_t N>
 std::pair<GridSpec<double>, TimeDomain>
 PriceTableBuilder<N>::estimate_pde_grid(
-    const std::vector<AmericanOptionParams>& batch,
+    const std::vector<PricingParams>& batch,
     const PriceTableAxes<N>& axes) const
 {
     auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
     ensure_moneyness_coverage<N>(accuracy, batch, axes);
 
     auto [grid_spec, time_domain] = compute_global_grid_for_batch(
-        std::span<const AmericanOptionParams>(batch), accuracy);
+        std::span<const PricingParams>(batch), accuracy);
 
     // Extend time domain to cover max maturity from axes
     const double max_maturity = axes.grids[1].back();
@@ -253,7 +253,7 @@ PriceTableBuilder<N>::estimate_pde_grid(
 template <size_t N>
 BatchAmericanOptionResult
 PriceTableBuilder<N>::solve_batch(
-    const std::vector<AmericanOptionParams>& batch,
+    const std::vector<PricingParams>& batch,
     const PriceTableAxes<N>& axes) const
 {
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
@@ -278,7 +278,8 @@ PriceTableBuilder<N>::solve_batch(
 
         if constexpr (std::is_same_v<T, GridAccuracyParams>) {
             // Auto-estimate PDE grid from batch parameters
-            auto custom_grid = estimate_pde_grid(batch, axes);
+            auto [est_grid, est_td] = estimate_pde_grid(batch, axes);
+            PDEGridSpec custom_grid = ExplicitPDEGrid{est_grid, est_td.n_steps(), {}};
             return solver.solve_batch(batch, true, setup_cb, custom_grid);
         } else {
             // Explicit grid: check solver stability constraints
@@ -305,7 +306,7 @@ PriceTableBuilder<N>::solve_batch(
             }
 
             // Compute minimum required width: ~3σ√τ on each side
-            auto sigma_sqrt_tau = [](const AmericanOptionParams& p) {
+            auto sigma_sqrt_tau = [](const PricingParams& p) {
                 return p.volatility * std::sqrt(p.maturity);
             };
             const double max_sigma_sqrt_tau = std::ranges::max(
@@ -320,7 +321,7 @@ PriceTableBuilder<N>::solve_batch(
             if (grid_meets_constraints) {
                 const double max_maturity = axes.grids[1].back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                auto custom_grid = std::make_pair(grid_spec, time_domain);
+                PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
                 return solver.solve_batch(batch, true, setup_cb, custom_grid);
             } else {
                 // Grid violates constraints: fall back to auto-estimation
@@ -667,8 +668,8 @@ PriceTableBuilder<4>::from_strikes(
 
 template <>
 PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_chain(
-    const OptionChain& chain,
+PriceTableBuilder<4>::from_grid(
+    const OptionGrid& chain,
     PDEGridSpec pde_grid,
     OptionType type,
     double max_failure_rate)
@@ -688,8 +689,8 @@ PriceTableBuilder<4>::from_chain(
 
 template <>
 PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_chain_auto(
-    const OptionChain& chain,
+PriceTableBuilder<4>::from_grid_auto(
+    const OptionGrid& chain,
     PDEGridSpec pde_grid,
     OptionType type,
     const PriceTableGridAccuracyParams<4>& accuracy)
@@ -712,7 +713,7 @@ PriceTableBuilder<4>::from_chain_auto(
     }
 
     // Estimate optimal grids based on target accuracy
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         chain.strikes,
         chain.spot,
         chain.maturities,
@@ -742,8 +743,8 @@ PriceTableBuilder<4>::from_chain_auto(
 
 template <>
 PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_chain_auto_profile(
-    const OptionChain& chain,
+PriceTableBuilder<4>::from_grid_auto_profile(
+    const OptionGrid& chain,
     PriceTableGridProfile grid_profile,
     GridAccuracyProfile pde_profile,
     OptionType type)
@@ -767,7 +768,7 @@ PriceTableBuilder<4>::from_chain_auto_profile(
 
     // Estimate optimal grids based on target accuracy profile
     auto grid_params = grid_accuracy_profile(grid_profile);
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         chain.strikes,
         chain.spot,
         chain.maturities,

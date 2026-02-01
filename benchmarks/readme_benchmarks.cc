@@ -148,7 +148,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     };
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
@@ -173,7 +173,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
 // ============================================================================
 
 static void BM_README_AmericanSingle(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -197,7 +197,7 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
     }
 
     auto run_once = [&]() {
-        AmericanOptionSolver solver(params, workspace.value());
+        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -230,12 +230,12 @@ BENCHMARK(BM_README_AmericanSingle)
 static void BM_README_AmericanSequential(benchmark::State& state) {
     const size_t batch_size = static_cast<size_t>(state.range(0));
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(AmericanOptionParams(
+        batch.push_back(PricingParams(
             100.0,  // spot
             strike, // strike
             1.0,    // maturity
@@ -261,7 +261,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
                 throw std::runtime_error("Failed to create workspace");
             }
 
-            AmericanOptionSolver solver(params, workspace.value());
+            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -300,12 +300,12 @@ BENCHMARK(BM_README_AmericanSequential)
 static void BM_README_AmericanBatch64(benchmark::State& state) {
     const size_t batch_size = static_cast<size_t>(state.range(0));
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(AmericanOptionParams(
+        batch.push_back(PricingParams(
             100.0,  // spot
             strike, // strike
             1.0,    // maturity
@@ -371,19 +371,19 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    // use_manual_grid defaults to false - uses estimate_grid_for_option()
+    // Uses default auto-estimation via GridAccuracyParams
 
     IVSolverFDM solver(config);
 
     // Get grid dimensions for typical case (σ=0.20 for ATM put)
     // The solver uses estimate_grid_for_option() which bases grid on current σ
-    AmericanOptionParams sample_params(
+    PricingParams sample_params(
         query.spot, query.strike, query.maturity, query.rate,
         query.dividend_yield, query.type, 0.20);  // Typical IV ~20%
     auto [grid_spec, time_domain] = estimate_grid_for_option(sample_params);
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
@@ -480,7 +480,7 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
     double spot = 100.0;
 
     // Create option parameters (all puts with same vol/rate/maturity per group)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double tau : maturities) {
         for (double K : strikes) {
             params.emplace_back(

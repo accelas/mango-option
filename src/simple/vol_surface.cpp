@@ -126,7 +126,7 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
             query.market_price = market_price;
 
             if (solver) {
-                auto result = solver->solve_impl(query);
+                auto result = solver->solve(query);
                 if (result) {
                     pt.iv_mid = result->implied_vol;
                 } else {

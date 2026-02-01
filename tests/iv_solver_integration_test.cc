@@ -31,11 +31,11 @@ TEST(IVSolverIntegration, FullWorkflowSuccess) {
             .max_iter = 100,
             .tolerance = 1e-6
         },
-        .grid_accuracy = GridAccuracyParams{}
+
     };
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     // Verify success
     ASSERT_TRUE(result.has_value()) << "Solver should converge for valid query";
@@ -61,7 +61,7 @@ TEST(IVSolverIntegration, ValidationErrorPath) {
     );
 
     IVSolverFDM solver(IVSolverFDMConfig{});
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     // Verify failure with correct error code
     ASSERT_FALSE(result.has_value()) << "Should fail validation";
@@ -82,7 +82,7 @@ TEST(IVSolverIntegration, ArbitrageErrorPath) {
     );
 
     IVSolverFDM solver(IVSolverFDMConfig{});
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
@@ -108,7 +108,7 @@ TEST(IVSolverIntegration, BatchProcessingWorkflow) {
     );
 
     IVSolverFDM solver(IVSolverFDMConfig{});
-    auto batch = solver.solve_batch_impl(queries);
+    auto batch = solver.solve_batch(queries);
 
     // Check batch statistics
     EXPECT_EQ(batch.results.size(), 3);
@@ -135,7 +135,7 @@ TEST(IVSolverIntegration, MonadicErrorPropagation) {
     );
 
     IVSolverFDM solver(IVSolverFDMConfig{});
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     // Should stop at first validation error (spot)
     ASSERT_FALSE(result.has_value());
@@ -147,13 +147,13 @@ TEST(IVSolverIntegration, ITMOTMScenarios) {
     IVSolverFDM solver(IVSolverFDMConfig{});
 
     // ITM put (K > S)
-    auto itm_result = solver.solve_impl(IVQuery(
+    auto itm_result = solver.solve(IVQuery(
         100.0, 110.0, 1.0, 0.05, 0.02, OptionType::PUT, 15.0
     ));
     ASSERT_TRUE(itm_result.has_value());
 
     // OTM put (K < S)
-    auto otm_result = solver.solve_impl(IVQuery(
+    auto otm_result = solver.solve(IVQuery(
         100.0, 90.0, 1.0, 0.05, 0.02, OptionType::PUT, 3.0
     ));
     ASSERT_TRUE(otm_result.has_value());

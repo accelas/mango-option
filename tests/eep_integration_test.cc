@@ -78,7 +78,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     auto ws = PDEWorkspace::from_buffer(buffer, n_space);
     ASSERT_TRUE(ws.has_value()) << ws.error();
 
-    AmericanOptionSolver solver(params, std::move(*ws));
+    auto solver = AmericanOptionSolver::create(params, std::move(*ws)).value();
     auto pde_result = solver.solve();
     ASSERT_TRUE(pde_result.has_value())
         << "PDE solve failed: " << static_cast<int>(pde_result.error().code);

@@ -5,7 +5,7 @@
 using namespace mango;
 
 TEST(AmericanOptionBatchWorkspaceTest, BatchResultsUnchanged) {
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     for (int i = 0; i < 10; ++i) {
         batch.emplace_back(
             100.0,              // spot
@@ -30,7 +30,7 @@ TEST(AmericanOptionBatchWorkspaceTest, BatchResultsUnchanged) {
 }
 
 TEST(AmericanOptionBatchWorkspaceTest, SharedGridMode) {
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     for (int i = 0; i < 5; ++i) {
         batch.emplace_back(
             100.0,                  // spot
@@ -51,7 +51,7 @@ TEST(AmericanOptionBatchWorkspaceTest, SharedGridMode) {
 }
 
 TEST(AmericanOptionBatchWorkspaceTest, PerOptionGridMode) {
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     for (int i = 0; i < 5; ++i) {
         batch.emplace_back(
             100.0,                  // spot
@@ -72,7 +72,7 @@ TEST(AmericanOptionBatchWorkspaceTest, PerOptionGridMode) {
 }
 
 TEST(AmericanOptionBatchWorkspaceTest, MixedCallAndPut) {
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     for (int i = 0; i < 4; ++i) {
         OptionType type = (i % 2 == 0) ? OptionType::CALL : OptionType::PUT;
         batch.emplace_back(
@@ -97,7 +97,7 @@ TEST(AmericanOptionBatchWorkspaceTest, MixedCallAndPut) {
 }
 
 TEST(AmericanOptionBatchWorkspaceTest, EmptyBatch) {
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(batch);
@@ -107,7 +107,7 @@ TEST(AmericanOptionBatchWorkspaceTest, EmptyBatch) {
 }
 
 TEST(AmericanOptionBatchWorkspaceTest, SingleOption) {
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.emplace_back(
         100.0,                  // spot
         100.0,                  // strike

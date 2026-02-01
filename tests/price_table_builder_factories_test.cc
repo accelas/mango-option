@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 
 TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
     std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
@@ -187,7 +187,7 @@ TEST(PriceTableFactoriesTest, FromStrikesRejectsNegativeStrikes) {
 }
 
 TEST(PriceTableFactoriesTest, FromChainExtractsFields) {
-    mango::OptionChain chain;
+    mango::OptionGrid chain;
     chain.ticker = "AAPL";
     chain.spot = 150.0;
     chain.strikes = {140.0, 145.0, 150.0, 155.0, 160.0};
@@ -198,7 +198,7 @@ TEST(PriceTableFactoriesTest, FromChainExtractsFields) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_chain(
+    auto result = mango::PriceTableBuilder<4>::from_grid(
         chain, mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
     );
 
@@ -212,7 +212,7 @@ TEST(PriceTableFactoriesTest, FromChainExtractsFields) {
 }
 
 TEST(PriceTableFactoriesTest, FromChainUsesDividendYield) {
-    mango::OptionChain chain;
+    mango::OptionGrid chain;
     chain.ticker = "AAPL";
     chain.spot = 150.0;
     chain.strikes = {140.0, 145.0, 150.0, 155.0};
@@ -223,7 +223,7 @@ TEST(PriceTableFactoriesTest, FromChainUsesDividendYield) {
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
 
-    auto result = mango::PriceTableBuilder<4>::from_chain(
+    auto result = mango::PriceTableBuilder<4>::from_grid(
         chain, mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
     );
 

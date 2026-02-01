@@ -39,7 +39,7 @@
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
  * IVQuery query{spot, strike, maturity, rate, dividend, OptionType::PUT, market_price};
- * auto iv_result = iv_solver.solve_impl(query);
+ * auto iv_result = iv_solver.solve(query);
  * ```
  *
  * **Usage:**
@@ -309,7 +309,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
                 obs.market_price
             };
 
-            auto result = iv_solver.solve_impl(query);
+            auto result = iv_solver.solve(query);
 
             if (result.has_value()) {
                 converged++;
@@ -399,7 +399,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
         size_t converged = 0;
         for (const auto& obs : observations) {
             IVQuery query{obs.spot, obs.strike, obs.maturity, obs.rate, 0.0, obs.type, obs.market_price};
-            if (iv_solver.solve_impl(query).has_value()) {
+            if (iv_solver.solve(query).has_value()) {
                 converged++;
             }
         }

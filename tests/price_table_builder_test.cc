@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "tests/price_table_builder_test_access.hpp"
 #include "src/option/table/price_table_metadata.hpp"
 #include "src/option/table/price_tensor.hpp"
 
 namespace mango {
 namespace {
+
+using Access = testing::PriceTableBuilderAccess<4>;
 
 // Smoke test: Verify build() pipeline works with minimal grid
 // Uses small grid (4×4×4×4 minimum for B-spline, auto-estimated spatial/time)
@@ -53,7 +56,7 @@ TEST(PriceTableBuilderTest, MakeBatchIteratesVolatilityAndRateOnly) {
 
     // Should create 3 × 2 = 6 batch entries (vol × rate)
     // NOT 3 × 3 × 3 × 2 = 54 entries (all axes)
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
 
     EXPECT_EQ(batch.size(), 6);  // Nσ × Nr
 
@@ -82,7 +85,7 @@ TEST(PriceTableBuilderTest, MakeBatch4D) {
 
     // Should create 1 × 1 = 1 option (vol × rate)
     // NOT 2 × 2 × 1 × 1 = 4 options
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     EXPECT_EQ(batch.size(), 1);  // 1 vol × 1 rate
 
     // Check parameter set - should be normalized (Spot = Strike = K_ref)
@@ -116,8 +119,8 @@ TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {
     axes.grids[2] = {0.20};           // 1 vol
     axes.grids[3] = {0.05};           // 1 rate
 
-    auto batch_params = builder.make_batch_for_testing(axes);
-    auto batch_result = builder.solve_batch_for_testing(batch_params, axes);
+    auto batch_params = Access::make_batch(builder, axes);
+    auto batch_result = Access::solve_batch(builder, batch_params, axes);
 
     // Verify snapshots were registered (should have 3 snapshots)
     ASSERT_EQ(batch_result.results.size(), 1);
@@ -151,9 +154,9 @@ TEST(PriceTableBuilderTest, ExtractTensorInterpolatesSurfaces) {
     axes.grids[2] = {0.20};               // 1 vol
     axes.grids[3] = {0.05};               // 1 rate
 
-    auto batch_params = builder.make_batch_for_testing(axes);
-    auto batch_result = builder.solve_batch_for_testing(batch_params, axes);
-    auto tensor_result = builder.extract_tensor_for_testing(batch_result, axes);
+    auto batch_params = Access::make_batch(builder, axes);
+    auto batch_result = Access::solve_batch(builder, batch_params, axes);
+    auto tensor_result = Access::extract_tensor(builder, batch_result, axes);
 
     ASSERT_TRUE(tensor_result.has_value());
     auto& extraction = tensor_result.value();
@@ -240,7 +243,7 @@ TEST(PriceTableBuilderTest, FindNearestValidNeighborFindsAdjacent) {
     mango::PriceTableConfig config;
     mango::PriceTableBuilder<4> builder(config);
 
-    auto result = builder.find_nearest_valid_neighbor_for_testing(1, 1, 3, 3, slice_valid);
+    auto result = Access::find_nearest_valid_neighbor(builder, 1, 1, 3, 3, slice_valid);
     ASSERT_TRUE(result.has_value());
     // Should find one of (0,1), (1,0), (1,2), (2,1) at distance 1
     auto [nσ, nr] = result.value();
@@ -288,7 +291,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesInterpolatesPartial) {
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
     failed_spline.emplace_back(0, 0, 1);  // (σ=0, r=0, τ=1)
 
-    auto result = builder.repair_failed_slices_for_testing(
+    auto result = Access::repair_failed_slices(builder, 
         tensor, failed_pde, failed_spline, axes);
 
     ASSERT_TRUE(result.has_value());
@@ -339,7 +342,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesCopiesFromNeighbor) {
     std::vector<size_t> failed_pde = {0};
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
 
-    auto result = builder.repair_failed_slices_for_testing(
+    auto result = Access::repair_failed_slices(builder, 
         tensor, failed_pde, failed_spline, axes);
 
     ASSERT_TRUE(result.has_value());
@@ -379,7 +382,7 @@ TEST(PriceTableBuilderTest, RepairFailedSlicesFailsWhenNoValidDonor) {
     std::vector<size_t> failed_pde = {0};  // Only slice failed
     std::vector<std::tuple<size_t, size_t, size_t>> failed_spline;
 
-    auto result = builder.repair_failed_slices_for_testing(
+    auto result = Access::repair_failed_slices(builder, 
         tensor, failed_pde, failed_spline, axes);
 
     ASSERT_FALSE(result.has_value());

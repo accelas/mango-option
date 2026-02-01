@@ -12,7 +12,7 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_workspace.hpp"
 #include "src/option/table/price_table_surface.hpp"
@@ -92,18 +92,18 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("max_spatial_points", &mango::GridAccuracyParams::max_spatial_points)
         .def_readwrite("max_time_steps", &mango::GridAccuracyParams::max_time_steps);
 
-    // OptionChain data container
-    py::class_<mango::OptionChain>(m, "OptionChain")
+    // OptionGrid data container
+    py::class_<mango::OptionGrid>(m, "OptionGrid")
         .def(py::init<>())
-        .def_readwrite("ticker", &mango::OptionChain::ticker)
-        .def_readwrite("spot", &mango::OptionChain::spot)
-        .def_readwrite("strikes", &mango::OptionChain::strikes)
-        .def_readwrite("maturities", &mango::OptionChain::maturities)
-        .def_readwrite("implied_vols", &mango::OptionChain::implied_vols)
-        .def_readwrite("rates", &mango::OptionChain::rates)
-        .def_readwrite("dividend_yield", &mango::OptionChain::dividend_yield)
-        .def("__repr__", [](const mango::OptionChain& chain) {
-            return "<OptionChain spot=" + std::to_string(chain.spot) +
+        .def_readwrite("ticker", &mango::OptionGrid::ticker)
+        .def_readwrite("spot", &mango::OptionGrid::spot)
+        .def_readwrite("strikes", &mango::OptionGrid::strikes)
+        .def_readwrite("maturities", &mango::OptionGrid::maturities)
+        .def_readwrite("implied_vols", &mango::OptionGrid::implied_vols)
+        .def_readwrite("rates", &mango::OptionGrid::rates)
+        .def_readwrite("dividend_yield", &mango::OptionGrid::dividend_yield)
+        .def("__repr__", [](const mango::OptionGrid& chain) {
+            return "<OptionGrid spot=" + std::to_string(chain.spot) +
                    " strikes=" + std::to_string(chain.strikes.size()) +
                    " maturities=" + std::to_string(chain.maturities.size()) +
                    " vols=" + std::to_string(chain.implied_vols.size()) +
@@ -182,13 +182,8 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::IVSolverFDMConfig>(m, "IVSolverFDMConfig")
         .def(py::init<>())
         .def_readwrite("root_config", &mango::IVSolverFDMConfig::root_config)
-        .def_readwrite("use_manual_grid", &mango::IVSolverFDMConfig::use_manual_grid)
-        .def_readwrite("grid_n_space", &mango::IVSolverFDMConfig::grid_n_space)
-        .def_readwrite("grid_n_time", &mango::IVSolverFDMConfig::grid_n_time)
-        .def_readwrite("grid_x_min", &mango::IVSolverFDMConfig::grid_x_min)
-        .def_readwrite("grid_x_max", &mango::IVSolverFDMConfig::grid_x_max)
-        .def_readwrite("grid_alpha", &mango::IVSolverFDMConfig::grid_alpha)
-        .def_readwrite("grid_accuracy", &mango::IVSolverFDMConfig::grid_accuracy);
+        .def_readwrite("batch_parallel_threshold", &mango::IVSolverFDMConfig::batch_parallel_threshold);
+    // Note: PDEGridSpec variant binding deferred — Python users use default auto-estimation
 
     // IVSuccess structure (std::expected success type)
     py::class_<mango::IVSuccess>(m, "IVSuccess")
@@ -256,8 +251,8 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::IVSolverFDM>(m, "IVSolverFDM")
         .def(py::init<const mango::IVSolverFDMConfig&>(),
              py::arg("config"))
-        .def("solve_impl", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
-            auto result = solver.solve_impl(query);
+        .def("solve", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
+            auto result = solver.solve(query);
             if (result.has_value()) {
                 return py::make_tuple(true, result.value(), mango::IVError{});
             } else {
@@ -269,20 +264,20 @@ PYBIND11_MODULE(mango_option, m) {
 
     // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 
-    // AmericanOptionParams structure
-    py::class_<mango::AmericanOptionParams>(m, "AmericanOptionParams")
+    // PricingParams structure
+    py::class_<mango::PricingParams>(m, "PricingParams")
         .def(py::init<>())
-        .def_readwrite("strike", &mango::AmericanOptionParams::strike)
-        .def_readwrite("spot", &mango::AmericanOptionParams::spot)
-        .def_readwrite("maturity", &mango::AmericanOptionParams::maturity)
-        .def_readwrite("volatility", &mango::AmericanOptionParams::volatility)
+        .def_readwrite("strike", &mango::PricingParams::strike)
+        .def_readwrite("spot", &mango::PricingParams::spot)
+        .def_readwrite("maturity", &mango::PricingParams::maturity)
+        .def_readwrite("volatility", &mango::PricingParams::volatility)
         .def_property("rate",
-            [](const mango::AmericanOptionParams& p) { return rate_spec_to_python(p.rate); },
-            [](mango::AmericanOptionParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
+            [](const mango::PricingParams& p) { return rate_spec_to_python(p.rate); },
+            [](mango::PricingParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
             "Risk-free rate (float or YieldCurve)")
-        .def_readwrite("dividend_yield", &mango::AmericanOptionParams::dividend_yield)
-        .def_readwrite("type", &mango::AmericanOptionParams::type)
-        .def_readwrite("discrete_dividends", &mango::AmericanOptionParams::discrete_dividends);
+        .def_readwrite("dividend_yield", &mango::PricingParams::dividend_yield)
+        .def_readwrite("type", &mango::PricingParams::type)
+        .def_readwrite("discrete_dividends", &mango::PricingParams::discrete_dividends);
 
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
@@ -297,7 +292,7 @@ PYBIND11_MODULE(mango_option, m) {
 
     m.def(
         "american_option_price",
-        [](const mango::AmericanOptionParams& params,
+        [](const mango::PricingParams& params,
            std::optional<mango::GridAccuracyProfile> accuracy_profile) {
             // Validate parameters before grid estimation to avoid
             // division-by-zero or extreme allocations
@@ -345,9 +340,15 @@ PYBIND11_MODULE(mango_option, m) {
                     "Failed to create workspace: " + workspace_result.error());
             }
 
-            mango::AmericanOptionSolver solver(
-                params, workspace_result.value(), std::nullopt,
-                std::make_pair(grid_spec, time_domain));
+            auto solver_result = mango::AmericanOptionSolver::create(
+                params, workspace_result.value(),
+                mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
+            if (!solver_result) {
+                throw py::value_error(
+                    "Failed to create solver (validation error code " +
+                    std::to_string(static_cast<int>(solver_result.error().code)) + ")");
+            }
+            auto& solver = solver_result.value();
             auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();
@@ -368,7 +369,7 @@ PYBIND11_MODULE(mango_option, m) {
             (via params.discrete_dividends).
 
             Args:
-                params: AmericanOptionParams with contract and market parameters.
+                params: PricingParams with contract and market parameters.
                 accuracy: Optional GridAccuracyProfile (LOW/MEDIUM/HIGH/ULTRA).
                           If not specified, uses default parameters.
 
@@ -444,7 +445,7 @@ PYBIND11_MODULE(mango_option, m) {
             "Enable/disable normalized chain optimization")
         .def("solve_batch",
             [](mango::BatchAmericanOptionSolver& self,
-               const std::vector<mango::AmericanOptionParams>& params,
+               const std::vector<mango::PricingParams>& params,
                bool use_shared_grid) {
                 auto batch_result = self.solve_batch(params, use_shared_grid);
 
@@ -469,7 +470,7 @@ PYBIND11_MODULE(mango_option, m) {
                 The normalized path solves one PDE and reuses it for all strikes.
 
                 Args:
-                    params: List of AmericanOptionParams
+                    params: List of PricingParams
                     use_shared_grid: If True, all options share one global grid
                                      (required for normalized chain optimization)
 
@@ -863,7 +864,7 @@ PYBIND11_MODULE(mango_option, m) {
     // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)
     // =========================================================================
-    m.def("build_price_table_surface_from_chain_auto_profile",
+    m.def("build_price_table_surface_from_grid_auto_profile",
         [](double spot,
            const std::vector<double>& strikes,
            const std::vector<double>& maturities,
@@ -873,7 +874,7 @@ PYBIND11_MODULE(mango_option, m) {
            mango::OptionType type,
            mango::PriceTableGridProfile grid_profile,
            mango::GridAccuracyProfile pde_profile) {
-            mango::OptionChain chain;
+            mango::OptionGrid chain;
             chain.spot = spot;
             chain.strikes = strikes;
             chain.maturities = maturities;
@@ -881,11 +882,11 @@ PYBIND11_MODULE(mango_option, m) {
             chain.rates = rates;
             chain.dividend_yield = dividend_yield;
 
-            auto builder_axes = mango::PriceTableBuilder<4>::from_chain_auto_profile(
+            auto builder_axes = mango::PriceTableBuilder<4>::from_grid_auto_profile(
                 chain, grid_profile, pde_profile, type);
             if (!builder_axes.has_value()) {
                 std::ostringstream oss;
-                oss << "from_chain_auto_profile failed: " << builder_axes.error();
+                oss << "from_grid_auto_profile failed: " << builder_axes.error();
                 throw py::value_error(oss.str());
             }
 
@@ -926,16 +927,16 @@ PYBIND11_MODULE(mango_option, m) {
                 PriceTableSurface4D instance
         )pbdoc");
 
-    m.def("build_price_table_surface_from_chain",
-        [](const mango::OptionChain& chain,
+    m.def("build_price_table_surface_from_grid",
+        [](const mango::OptionGrid& chain,
            mango::OptionType type,
            mango::PriceTableGridProfile grid_profile,
            mango::GridAccuracyProfile pde_profile) {
-            auto builder_axes = mango::PriceTableBuilder<4>::from_chain_auto_profile(
+            auto builder_axes = mango::PriceTableBuilder<4>::from_grid_auto_profile(
                 chain, grid_profile, pde_profile, type);
             if (!builder_axes.has_value()) {
                 std::ostringstream oss;
-                oss << "from_chain_auto_profile failed: " << builder_axes.error();
+                oss << "from_grid_auto_profile failed: " << builder_axes.error();
                 throw py::value_error(oss.str());
             }
 
@@ -954,10 +955,10 @@ PYBIND11_MODULE(mango_option, m) {
         py::arg("grid_profile") = mango::PriceTableGridProfile::High,
         py::arg("pde_profile") = mango::GridAccuracyProfile::High,
         R"pbdoc(
-            Build a 4D price table surface from an OptionChain using auto-grid profiles.
+            Build a 4D price table surface from an OptionGrid using auto-grid profiles.
 
             Args:
-                chain: OptionChain with spot, strikes, maturities, implied_vols, rates
+                chain: OptionGrid with spot, strikes, maturities, implied_vols, rates
                 option_type: OptionType.PUT or OptionType.CALL
                 grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
                 pde_profile: GridAccuracyProfile for PDE grid/time steps
@@ -1005,9 +1006,9 @@ PYBIND11_MODULE(mango_option, m) {
                 Raises:
                     ValueError: If validation fails
             )pbdoc")
-        .def("solve_impl",
+        .def("solve",
             [](const mango::IVSolverInterpolatedStandard& solver, const mango::IVQuery& query) {
-                auto result = solver.solve_impl(query);
+                auto result = solver.solve(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
                 } else {
@@ -1032,7 +1033,7 @@ PYBIND11_MODULE(mango_option, m) {
             )pbdoc")
         .def("solve_batch",
             [](const mango::IVSolverInterpolatedStandard& solver, const std::vector<mango::IVQuery>& queries) {
-                auto batch_result = solver.solve_batch_impl(queries);
+                auto batch_result = solver.solve_batch(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {
                     if (r.has_value()) {

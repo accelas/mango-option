@@ -323,7 +323,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // ------ Manual build for chained segment ------
 
             // Create batch params from the builder
-            auto batch_params = builder.make_batch_for_testing(axes);
+            auto batch_params = builder.make_batch(axes);
 
             // Create batch solver with per-index setup
             BatchAmericanOptionSolver batch_solver;
@@ -368,7 +368,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 batch_params, true, setup_callback);
 
             // Extract tensor
-            auto extraction = builder.extract_tensor_for_testing(batch_result, axes);
+            auto extraction = builder.extract_tensor(batch_result, axes);
             if (!extraction.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidBounds,
@@ -376,7 +376,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             }
 
             // Repair failures
-            auto repair = builder.repair_failed_slices_for_testing(
+            auto repair = builder.repair_failed_slices(
                 extraction->tensor, extraction->failed_pde,
                 extraction->failed_spline, axes);
             if (!repair.has_value()) {
@@ -386,12 +386,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             }
 
             // Fit B-spline coefficients
-            auto coeffs = builder.fit_coeffs_for_testing(extraction->tensor, axes);
-            if (!coeffs.has_value()) {
+            auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
+            if (!fit_result.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidBounds,
                     static_cast<double>(seg_idx), 3});
             }
+            auto coeffs = std::move(fit_result->coefficients);
 
             // Build PriceTableSurface manually
             PriceTableMetadata metadata{
@@ -401,7 +402,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             };
 
             auto surface = PriceTableSurface<4>::build(
-                axes, std::move(*coeffs), metadata);
+                axes, std::move(coeffs), metadata);
             if (!surface.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidBounds,

@@ -15,7 +15,7 @@
 #include "src/option/american_option_batch.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/option/table/american_price_surface.hpp"
@@ -104,8 +104,8 @@ void emit_bucket_counters(benchmark::State& state,
 // Helper functions
 // ============================================================================
 
-AmericanOptionParams make_params(const RealOptionData& opt, double vol = 0.20) {
-    return AmericanOptionParams(
+PricingParams make_params(const RealOptionData& opt, double vol = 0.20) {
+    return PricingParams(
         SPOT,
         opt.strike,
         opt.maturity,
@@ -193,7 +193,7 @@ static void BM_RealData_AmericanSingle(benchmark::State& state) {
     }
 
     auto run_once = [&]() {
-        AmericanOptionSolver solver(params, workspace.value());
+        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error");
@@ -222,7 +222,7 @@ BENCHMARK(BM_RealData_AmericanSingle)
 static void BM_RealData_AmericanSequential(benchmark::State& state) {
     const size_t batch_size = REAL_PUTS.size();
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
     for (const auto& opt : REAL_PUTS) {
         batch.push_back(make_params(opt));
@@ -240,7 +240,7 @@ static void BM_RealData_AmericanSequential(benchmark::State& state) {
                 throw std::runtime_error("Failed to create workspace");
             }
 
-            AmericanOptionSolver solver(params, workspace.value());
+            auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
             auto result = solver.solve();
             if (!result) {
                 throw std::runtime_error("Solver error");
@@ -269,7 +269,7 @@ BENCHMARK(BM_RealData_AmericanSequential)
 static void BM_RealData_AmericanBatch(benchmark::State& state) {
     const size_t batch_size = REAL_PUTS.size();
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
     for (const auto& opt : REAL_PUTS) {
         batch.push_back(make_params(opt));
@@ -323,7 +323,7 @@ static void BM_RealData_IV_FDM(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("IV solver failed");
         }
@@ -374,7 +374,7 @@ static void BM_RealData_IV_BSpline(benchmark::State& state) {
     };
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error");
         }
@@ -462,7 +462,7 @@ BENCHMARK(BM_RealData_PriceTableGreeks)
 
 // Helper to build option chain from real market data for IV smile benchmarks
 struct IVSmileFixture {
-    OptionChain chain;
+    OptionGrid chain;
     std::vector<RealOptionData> smile_options;
     double target_maturity;
     GridSpec<double> grid_spec;
@@ -478,7 +478,7 @@ struct IVSmileFixture {
             }
         }
 
-        // Build OptionChain structure
+        // Build OptionGrid structure
         chain.ticker = SYMBOL;
         chain.spot = SPOT;
         chain.dividend_yield = DIVIDEND_YIELD;
@@ -519,7 +519,7 @@ static void BM_RealData_IVSmile_BuildTable(benchmark::State& state) {
     size_t n_pde_solves = 0;
 
     for (auto _ : state) {
-        auto builder_result = PriceTableBuilder<4>::from_chain(
+        auto builder_result = PriceTableBuilder<4>::from_grid(
             fixture.chain,
             ExplicitPDEGrid{fixture.grid_spec, 200},
             OptionType::PUT,
@@ -558,7 +558,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     const auto& fixture = GetIVSmileFixture();
 
     // Build price table once (not timed)
-    auto builder_result = PriceTableBuilder<4>::from_chain(
+    auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
         ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -603,7 +603,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Warmup
     for (int i = 0; i < kWarmupIterations; ++i) {
         for (const auto& query : queries) {
-            auto result = iv_solver.solve_impl(query);
+            auto result = iv_solver.solve(query);
             benchmark::DoNotOptimize(result);
         }
     }
@@ -611,7 +611,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Benchmark: Calculate IV for all strikes (the smile)
     for (auto _ : state) {
         for (const auto& query : queries) {
-            auto result = iv_solver.solve_impl(query);
+            auto result = iv_solver.solve(query);
             if (result.has_value()) {
                 benchmark::DoNotOptimize(result->implied_vol);
             }
@@ -653,7 +653,7 @@ static void BM_RealData_IVSmile_FDM(benchmark::State& state) {
     // Benchmark FDM IV calculation for entire smile
     for (auto _ : state) {
         for (const auto& query : queries) {
-            auto result = fdm_solver.solve_impl(query);
+            auto result = fdm_solver.solve(query);
             if (result.has_value()) {
                 benchmark::DoNotOptimize(result->implied_vol);
             }
@@ -672,7 +672,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     const auto& fixture = GetIVSmileFixture();
 
     // Build price table
-    auto builder_result = PriceTableBuilder<4>::from_chain(
+    auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
         ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -733,8 +733,8 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
         valid_count = 0;
 
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
-            auto interp_result = interp_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
+            auto interp_result = interp_solver.solve(query);
 
             if (fdm_result.has_value() && interp_result.has_value()) {
                 double fdm_iv = fdm_result->implied_vol;
@@ -769,7 +769,7 @@ BENCHMARK(BM_RealData_IVSmile_Accuracy)
 
 // Helper to create dense grid fixture with configurable resolution
 struct DenseGridFixture {
-    OptionChain chain;
+    OptionGrid chain;
     std::vector<RealOptionData> smile_options;
     double target_maturity;
     GridSpec<double> grid_spec;
@@ -840,7 +840,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     DenseGridFixture fixture(n_maturities, n_vols, n_rates);
 
     // Build price table
-    auto builder_result = PriceTableBuilder<4>::from_chain(
+    auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
         ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -902,8 +902,8 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
         valid_count = 0;
 
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
-            auto interp_result = interp_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
+            auto interp_result = interp_solver.solve(query);
 
             if (fdm_result.has_value() && interp_result.has_value()) {
                 double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
@@ -942,7 +942,7 @@ BENCHMARK(BM_RealData_GridDensity)
 // Automatic Grid Estimation Validation
 // ============================================================================
 
-// Test from_chain_auto with different target IV errors
+// Test from_grid_auto with different target IV errors
 static void BM_RealData_GridEstimator(benchmark::State& state) {
     const double target_error_bps = static_cast<double>(state.range(0));
     const double target_iv_error = target_error_bps / 10000.0;
@@ -955,7 +955,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     accuracy.target_iv_error = target_iv_error;
 
     // Build price table with automatic grid estimation
-    auto builder_result = PriceTableBuilder<4>::from_chain_auto(
+    auto builder_result = PriceTableBuilder<4>::from_grid_auto(
         iv_fixture.chain,
         ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
         OptionType::PUT,
@@ -1016,8 +1016,8 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
         valid_count = 0;
 
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
-            auto interp_result = interp_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
+            auto interp_result = interp_solver.solve(query);
 
             if (fdm_result.has_value() && interp_result.has_value()) {
                 double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
@@ -1082,7 +1082,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     const auto& iv_fixture = GetIVSmileFixture();
 
-    auto builder_result = PriceTableBuilder<4>::from_chain_auto_profile(
+    auto builder_result = PriceTableBuilder<4>::from_grid_auto_profile(
         iv_fixture.chain,
         grid_profile,
         pde_profile,
@@ -1141,8 +1141,8 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     // Compute accuracy once (outside timed loop)
     for (const auto& query : queries) {
-        auto fdm_result = fdm_solver.solve_impl(query);
-        auto interp_result = interp_solver.solve_impl(query);
+        auto fdm_result = fdm_solver.solve(query);
+        auto interp_result = interp_solver.solve(query);
 
         if (fdm_result.has_value() && interp_result.has_value()) {
             double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
@@ -1173,7 +1173,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     if (!queries.empty()) {
         auto t0 = std::chrono::steady_clock::now();
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
             benchmark::DoNotOptimize(fdm_result);
         }
         auto t1 = std::chrono::steady_clock::now();
@@ -1185,7 +1185,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     for (auto _ : state) {
         auto t0 = std::chrono::steady_clock::now();
         for (const auto& query : queries) {
-            auto interp_result = interp_solver.solve_impl(query);
+            auto interp_result = interp_solver.solve(query);
             benchmark::DoNotOptimize(interp_result);
         }
         auto t1 = std::chrono::steady_clock::now();

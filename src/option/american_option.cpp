@@ -25,8 +25,8 @@ std::expected<AmericanOptionSolver, ValidationError>
 AmericanOptionSolver::create(
     const PricingParams& params,
     PDEWorkspace workspace,
-    std::optional<std::span<const double>> snapshot_times,
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config) noexcept
+    std::optional<PDEGridSpec> grid,
+    std::optional<std::span<const double>> snapshot_times) noexcept
 {
     // Validate parameters first
     auto validation = validate_pricing_params(params);
@@ -35,20 +35,38 @@ AmericanOptionSolver::create(
     }
 
     // Construct (all validation done, cannot fail)
-    return AmericanOptionSolver(params, workspace, snapshot_times, custom_grid_config);
+    return AmericanOptionSolver(params, workspace, grid, snapshot_times);
 }
 
 // Constructor (throws for backward compatibility)
+// Helper for std::visit with multiple lambdas
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+
 AmericanOptionSolver::AmericanOptionSolver(
     const PricingParams& params,
     PDEWorkspace workspace,
-    std::optional<std::span<const double>> snapshot_times,
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config)
+    std::optional<PDEGridSpec> grid,
+    std::optional<std::span<const double>> snapshot_times)
     : params_(params)
     , workspace_(workspace)
-    , custom_grid_config_(custom_grid_config)
 {
     trbdf2_config_.rannacher_startup = true;
+
+    // Resolve grid specification to concrete GridSpec + TimeDomain
+    if (grid.has_value()) {
+        grid_config_ = std::visit(overloaded{
+            [&](const GridAccuracyParams& acc) {
+                return estimate_grid_for_option(params_, acc);
+            },
+            [&](const ExplicitPDEGrid& eg) {
+                auto td = eg.mandatory_times.empty()
+                    ? TimeDomain::from_n_steps(0.0, params_.maturity, eg.n_time)
+                    : TimeDomain::with_mandatory_points(0.0, params_.maturity,
+                        params_.maturity / static_cast<double>(eg.n_time), eg.mandatory_times);
+                return std::make_pair(eg.grid_spec, td);
+            }
+        }, *grid);
+    }
 
     // Store snapshot times if provided
     if (snapshot_times.has_value()) {
@@ -70,9 +88,9 @@ AmericanOptionSolver::AmericanOptionSolver(
 // ============================================================================
 
 std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
-    // Use custom grid config if provided, otherwise estimate from params
-    auto [grid_spec, time_domain] = custom_grid_config_.has_value()
-        ? custom_grid_config_.value()
+    // Use resolved grid config if provided, otherwise estimate from params
+    auto [grid_spec, time_domain] = grid_config_.has_value()
+        ? grid_config_.value()
         : estimate_grid_for_option(params_);
 
     // Validate workspace size matches grid

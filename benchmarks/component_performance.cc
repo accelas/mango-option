@@ -92,7 +92,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 // ============================================================================
 
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -117,7 +117,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -131,7 +131,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         110.0,  // spot (OTM put)
         100.0,  // strike
         0.25,   // maturity
@@ -156,7 +156,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -170,7 +170,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         90.0,   // spot (ITM put)
         100.0,  // strike
         2.0,    // maturity
@@ -195,7 +195,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -209,7 +209,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ITM_2Y);
 
 static void BM_AmericanCall_WithDividends(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -239,7 +239,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     auto workspace = workspace_result.value();
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -262,13 +262,11 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -282,13 +280,11 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -302,13 +298,11 @@ static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -344,7 +338,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
                   analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT));
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
@@ -360,7 +354,7 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 // ============================================================================
 
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -389,7 +383,7 @@ static void BM_AmericanPut_GridResolution(benchmark::State& state) {
 
     for (auto _ : state) {
         auto start = std::chrono::high_resolution_clock::now();
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
         auto result = solver.solve();
         auto end = std::chrono::high_resolution_clock::now();
 
@@ -424,12 +418,12 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     size_t batch_size = state.range(0);
 
     // Generate batch of strike prices around ATM
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;  // Strikes from 90 to 90 + batch_size*0.5
-        batch.push_back(AmericanOptionParams(
+        batch.push_back(PricingParams(
             100.0,  // spot
             strike, // strike
             1.0,    // maturity
@@ -460,7 +454,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            AmericanOptionSolver solver(params, workspace_result.value());
+            auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
             results.push_back(solver.solve());
         }
 
@@ -495,8 +489,6 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    config.grid_n_space = 101;
-    config.grid_n_time = 1000;
 
     IVSolverFDM solver(config);
     for (auto _ : state) {
@@ -505,7 +497,7 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            results.push_back(solver.solve_impl(params));
+            results.push_back(solver.solve(params));
         }
 
         benchmark::DoNotOptimize(results);

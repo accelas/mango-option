@@ -17,7 +17,7 @@ protected:
         pool_ = std::make_unique<std::pmr::synchronized_pool_resource>();
     }
 
-    [[nodiscard]] AmericanOptionResult Solve(const AmericanOptionParams& params) const {
+    [[nodiscard]] AmericanOptionResult Solve(const PricingParams& params) const {
         // Use convenience function that creates appropriately-sized workspace
         auto result = solve_american_option_auto(params);
         if (!result) {
@@ -36,7 +36,7 @@ protected:
 };
 
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         110.0,  // strike
         1.0,    // maturity
@@ -53,7 +53,7 @@ TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
 }
 
 TEST_F(AmericanOptionPricingTest, PutValueRespectsIntrinsicBound) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         110.0,  // strike
         1.0,    // maturity
@@ -83,7 +83,7 @@ TEST_F(AmericanOptionPricingTest, CallValueIncreasesWithVolatility) {
     double previous_vol = 0.0;
     for (size_t i = 0; i < volatilities.size(); ++i) {
         double vol = volatilities[i];
-        AmericanOptionParams params(
+        PricingParams params(
             spot, strike, maturity, rate, dividend_yield, OptionType::CALL, vol);
         AmericanOptionResult result = Solve(params);
         ASSERT_TRUE(result.converged);
@@ -102,7 +102,7 @@ TEST_F(AmericanOptionPricingTest, PutValueIncreasesWithMaturity) {
     std::vector<double> maturities = {0.25, 0.5, 1.0, 2.0};
     double previous_value = 0.0;
     for (double maturity : maturities) {
-        AmericanOptionParams params(
+        PricingParams params(
             100.0,  // spot
             95.0,   // strike
             maturity,
@@ -123,10 +123,10 @@ TEST_F(AmericanOptionPricingTest, PutValueIncreasesWithMaturity) {
 }
 
 TEST_F(AmericanOptionPricingTest, DividendsReduceCallValue) {
-    AmericanOptionParams no_dividends(
+    PricingParams no_dividends(
         100.0, 100.0, 1.0, 0.02, 0.00, OptionType::CALL, 0.3);
 
-    AmericanOptionParams with_dividends(
+    PricingParams with_dividends(
         100.0, 100.0, 1.0, 0.02, 0.00, OptionType::CALL, 0.3,
         {{0.5, 3.0}}  // $3 dividend halfway to maturity
     );
@@ -141,7 +141,7 @@ TEST_F(AmericanOptionPricingTest, DividendsReduceCallValue) {
 }
 
 TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.emplace_back(100.0, 100.0, 0.75, 0.01, 0.0, OptionType::CALL, 0.25);
     params.emplace_back(120.0, 100.0, 1.5, 0.02, 0.0, OptionType::PUT, 0.2);
     params.emplace_back(90.0,  95.0,  0.5, -0.01, 0.01, OptionType::PUT, 0.35);
@@ -168,7 +168,7 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
 TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
     // Deep ITM put test - verifies active set method locks nodes to payoff
     // Fixed by implementing proper complementarity enforcement in Newton solver
-    AmericanOptionParams params(
+    PricingParams params(
         0.25,   // spot deep ITM
         100.0,  // strike
         0.75,   // maturity
@@ -193,7 +193,7 @@ TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
     // Regression test for Issue #196 IV solver failure
     // Verifies that ATM options develop time value and don't lock to payoff=0
     // This guards against the known limitation of the 50% time window guard
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot ATM
         100.0,  // strike
         1.0,    // maturity
@@ -226,7 +226,7 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
     auto curve = YieldCurve::from_points(points).value();
 
     // Create params with yield curve
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -247,7 +247,7 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
     EXPECT_LT(price, params.strike);  // Put can't exceed strike
 
     // Compare with flat rate at average (5.5%)
-    AmericanOptionParams flat_params(
+    PricingParams flat_params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -270,8 +270,8 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) {
     // A discrete dividend increases put value (spot drops)
-    AmericanOptionParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20);
-    AmericanOptionParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+    PricingParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20);
+    PricingParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                                   {{0.5, 3.0}});
 
     auto result_no_div = solve_american_option_auto(no_div);
@@ -285,8 +285,8 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) 
 }
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendCallPriceLowerThanNoDividend) {
-    AmericanOptionParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.20);
-    AmericanOptionParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.20,
+    PricingParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.20);
+    PricingParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.20,
                                   {{0.5, 3.0}});
 
     auto result_no_div = solve_american_option_auto(no_div);
@@ -300,7 +300,7 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendCallPriceLowerThanNoDividend) 
 }
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendCallLargeDividend) {
-    AmericanOptionParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.30,
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.30,
                                 {{0.5, 50.0}});
 
     auto result = solve_american_option_auto(params);
@@ -310,9 +310,9 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendCallLargeDividend) {
 }
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
-    AmericanOptionParams one_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+    PricingParams one_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                                  {{0.5, 2.0}});
-    AmericanOptionParams two_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+    PricingParams two_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                                  {{0.3, 2.0}, {0.7, 2.0}});
 
     auto result_one = solve_american_option_auto(one_div);
@@ -327,7 +327,7 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
 
 TEST_F(AmericanOptionPricingTest, RegularBatchWithDiscreteDividends) {
     // Batch of options with discrete dividends — uses regular path (not normalized)
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                        std::vector<std::pair<double, double>>{{0.5, 3.0}});
     batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
@@ -346,7 +346,7 @@ TEST_F(AmericanOptionPricingTest, RegularBatchWithDiscreteDividends) {
 TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
     // When requesting shared grid with dividends, should fall back to regular batch
     // (normalized chain rejects discrete dividends)
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.emplace_back(100.0, 90.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                        std::vector<std::pair<double, double>>{{0.5, 3.0}});
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,

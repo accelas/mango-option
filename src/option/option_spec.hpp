@@ -123,7 +123,7 @@ enum class OptionType {
  *
  * Note: This struct does NOT include volatility, as it's used for
  * IV solving (where volatility is the unknown). For pricing with
- * known volatility, see AmericanOptionParams.
+ * known volatility, see PricingParams.
  */
 struct OptionSpec {
     double spot = 0.0;             ///< Current spot price (S)
@@ -191,21 +191,6 @@ struct IVQuery : OptionSpec {
  * @return void on success, ValidationError on failure
  */
 std::expected<void, ValidationError> validate_iv_query(const IVQuery& query);
-
-/**
- * @brief Option solver grid configuration
- *
- * Specifies the computational grid and option parameters for
- * solving the option pricing PDE using finite difference methods.
- */
-struct OptionSolverGrid {
-    OptionType option_type;    ///< Call or Put
-    double x_min;              ///< Minimum log-moneyness
-    double x_max;              ///< Maximum log-moneyness
-    size_t n_space;            ///< Number of spatial grid points
-    size_t n_time;             ///< Number of time steps
-    double dividend_yield;     ///< Continuous dividend yield
-};
 
 /**
  * @brief Complete pricing parameters including volatility

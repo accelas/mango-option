@@ -17,7 +17,7 @@ namespace mango {
 namespace {
 
 TEST(AmericanOptionSolverTest, ConstructorValidation) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -32,12 +32,12 @@ TEST(AmericanOptionSolverTest, ConstructorValidation) {
 
     // Should construct successfully
     EXPECT_NO_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     });
 }
 
 TEST(AmericanOptionSolverTest, InvalidStrike) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,   // spot
         -100.0,  // strike (Invalid)
         1.0,     // maturity
@@ -51,12 +51,12 @@ TEST(AmericanOptionSolverTest, InvalidStrike) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, InvalidSpot) {
-    AmericanOptionParams params(
+    PricingParams params(
         0.0,    // spot (Invalid)
         100.0,  // strike
         1.0,    // maturity
@@ -70,12 +70,12 @@ TEST(AmericanOptionSolverTest, InvalidSpot) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, InvalidMaturity) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         -1.0,   // maturity (Invalid)
@@ -89,12 +89,12 @@ TEST(AmericanOptionSolverTest, InvalidMaturity) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, InvalidVolatility) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -108,13 +108,13 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
     // Negative rates are valid (EUR, JPY, CHF markets)
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -128,12 +128,12 @@ TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_NO_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     });
 }
 
 TEST(AmericanOptionSolverTest, InvalidDividendYield) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -147,12 +147,12 @@ TEST(AmericanOptionSolverTest, InvalidDividendYield) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -178,7 +178,7 @@ TEST(AmericanOptionSolverTest, InvalidGridNTime) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridBounds) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -195,7 +195,7 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividends) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -214,13 +214,13 @@ TEST(AmericanOptionSolverTest, DiscreteDividends) {
 
     // Should accept valid discrete dividends
     EXPECT_NO_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     });
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     // Should reject negative time
-    AmericanOptionParams params1(
+    PricingParams params1(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -237,11 +237,11 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params1, workspace);
+        auto solver = AmericanOptionSolver::create(params1, workspace).value();
     }, std::invalid_argument);
 
     // Should reject time beyond maturity
-    AmericanOptionParams params2(
+    PricingParams params2(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -255,12 +255,12 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     );
 
     EXPECT_THROW({
-        AmericanOptionSolver solver(params2, workspace);
+        auto solver = AmericanOptionSolver::create(params2, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -278,12 +278,12 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
 
     // Should reject negative amount
     EXPECT_THROW({
-        AmericanOptionSolver solver(params, workspace);
+        auto solver = AmericanOptionSolver::create(params, workspace).value();
     }, std::invalid_argument);
 }
 
 TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -295,7 +295,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -315,7 +315,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
 }
 
 TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -327,7 +327,7 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     // get_solution() should throw before solve()
     EXPECT_THROW({
@@ -336,7 +336,7 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
 }
 
 TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -348,7 +348,7 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -367,7 +367,7 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
 }
 
 TEST(AmericanOptionSolverTest, GammaIsComputed) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -379,7 +379,7 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -403,7 +403,7 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
 TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
     // Test American call option with discrete dividends
     // Dividends make early exercise more attractive for calls
-    AmericanOptionParams params(
+    PricingParams params(
         110.0,  // spot (ITM call)
         100.0,  // strike
         1.0,    // maturity
@@ -419,7 +419,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -450,7 +450,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
 TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     // Test American put option with discrete dividends
     // Dividends make early exercise less attractive for puts
-    AmericanOptionParams params(
+    PricingParams params(
         90.0,   // spot (ITM put)
         100.0,  // strike
         1.0,    // maturity
@@ -466,7 +466,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -512,7 +512,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
 TEST(AmericanOptionSolverTest, HybridDividendModel) {
     // Test using both continuous and discrete dividends simultaneously
     // This models a stock with continuous yield + known discrete payments
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -527,7 +527,7 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
 
     auto grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
     auto workspace = PDEWorkspace::create(grid_spec, std::pmr::get_default_resource()).value();
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -558,9 +558,9 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
 }
 
 TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
-    std::vector<AmericanOptionParams> batch(5);
+    std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0,                   // spot
             100.0,                   // strike
             1.0,                     // maturity
@@ -599,9 +599,9 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
 }
 
 TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
-    std::vector<AmericanOptionParams> batch(3);
+    std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0,          // spot
             100.0,          // strike
             1.0,            // maturity
@@ -644,9 +644,9 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
 }
 
 TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
-    std::vector<AmericanOptionParams> batch(3);
+    std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0,          // spot
             100.0,          // strike
             1.0,            // maturity

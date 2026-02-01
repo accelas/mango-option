@@ -247,7 +247,7 @@ inline PriceTableGridEstimate<4> estimate_grid_for_price_table(
  * @param params Accuracy parameters
  * @return Grid estimate, or empty grids if inputs are invalid
  */
-inline PriceTableGridEstimate<4> estimate_grid_from_chain_bounds(
+inline PriceTableGridEstimate<4> estimate_grid_from_grid_bounds(
     const std::vector<double>& strikes,
     double spot,
     const std::vector<double>& maturities,

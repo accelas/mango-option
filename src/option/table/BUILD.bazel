@@ -59,8 +59,8 @@ cc_library(
     hdrs = ["price_table_config.hpp"],
     deps = [
         ":price_table_metadata",
-        "//src/option:american_option",
-        "//src/pde/core:grid",
+        "//src/option:grid_spec_types",
+        "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
 )
@@ -84,7 +84,7 @@ cc_library(
         ":price_tensor",
         ":price_table_grid_estimator",
         ":recursion_helpers",
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "//src/option:american_option",
         "//src/option:american_option_batch",
         "//src/option:european_option",
@@ -256,7 +256,7 @@ cc_library(
         ":slice_cache",
         "//src/math:black_scholes_analytics",
         "//src/math:latin_hypercube",
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "//src/pde/core:grid",
         "//src/support:error_types",
     ],

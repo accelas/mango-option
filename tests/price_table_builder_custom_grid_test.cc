@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "tests/price_table_builder_test_access.hpp"
 #include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 namespace {
+
+using Access = testing::PriceTableBuilderAccess<4>;
 
 // Test to investigate the claimed failure when using custom_grid
 // The claim is: "custom_grid causes all PDE solves to fail when options have spot==strike (normalized case)"
@@ -26,7 +29,7 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     axes.grids[3] = {0.05, 0.06};             // rate: 2 points
 
     // Generate batch (should be 2×2=4 entries with spot==strike==K_ref)
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     ASSERT_EQ(batch.size(), 4);  // 2 vols × 2 rates
 
     // Verify all batch entries are normalized (spot == strike == K_ref)
@@ -36,7 +39,7 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     }
 
     // Now test solve_batch WITHOUT custom_grid (baseline - should work)
-    auto batch_result_baseline = builder.solve_batch_for_testing(batch, axes);
+    auto batch_result_baseline = Access::solve_batch(builder, batch, axes);
 
     std::cout << "=== Baseline (no custom_grid) ===" << std::endl;
     std::cout << "Total results: " << batch_result_baseline.results.size() << std::endl;
@@ -63,8 +66,8 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     const auto& cg_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridSpec<double> user_grid = cg_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), cg_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     // Create a BatchAmericanOptionSolver to test with custom_grid
     BatchAmericanOptionSolver solver;
@@ -128,7 +131,7 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
     axes.grids[2] = {0.20};
     axes.grids[3] = {0.05};
 
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
 
     ASSERT_EQ(batch.size(), 1);
 

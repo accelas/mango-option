@@ -110,7 +110,7 @@ static void compare_scenario(
     bool is_call)
 {
     // Mango-Option pricing with workspace
-    AmericanOptionParams mango_params(
+    PricingParams mango_params(
         spot,
         strike,
         maturity,
@@ -134,7 +134,7 @@ static void compare_scenario(
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(mango_params, workspace);
+    auto solver = AmericanOptionSolver::create(mango_params, workspace).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -246,7 +246,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     }
 
     // Mango-Option pricing at automatically determined resolution
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -269,7 +269,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -304,7 +304,7 @@ BENCHMARK(BM_Convergence_GridResolution)
 // ============================================================================
 
 static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -327,7 +327,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto mango_result_expected = solver.solve();
     if (!mango_result_expected) {
         throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(mango_result_expected.error().code)));
@@ -624,7 +624,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
         {0.25, 1.0}  // $1 dividend at 0.25 years
     };
 
-    AmericanOptionParams params(
+    PricingParams params(
         spot,
         strike,
         maturity,
@@ -649,7 +649,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
 
     if (!result) {
@@ -697,7 +697,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         // Note: dividend at maturity (1.0y) excluded (no impact)
     };
 
-    AmericanOptionParams params(
+    PricingParams params(
         spot,
         strike,
         maturity,
@@ -721,7 +721,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     }
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
 
     if (!result) {
