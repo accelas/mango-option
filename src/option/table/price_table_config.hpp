@@ -1,25 +1,14 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/american_option.hpp"  // For OptionType
+#include "src/option/grid_spec_types.hpp"  // PDEGridSpec, ExplicitPDEGrid, GridAccuracyParams
+#include "src/option/option_spec.hpp"      // OptionType
 #include "src/option/table/price_table_metadata.hpp"  // For SurfaceContent
-#include "src/pde/core/grid.hpp"  // For GridSpec
-#include <variant>
-#include <vector>
 #include <utility>
 #include <optional>
 #include <string>
 
 namespace mango {
-
-/// Explicit PDE grid: caller-specified spatial grid and time steps
-struct ExplicitPDEGrid {
-    GridSpec<double> grid_spec = GridSpec<double>::uniform(-3.0, 3.0, 101).value();
-    size_t n_time = 1000;
-};
-
-/// PDE grid specification: either explicit grid or auto-estimated from accuracy params
-using PDEGridSpec = std::variant<ExplicitPDEGrid, GridAccuracyParams>;
 
 /// Configuration for price table pre-computation
 struct PriceTableConfig {

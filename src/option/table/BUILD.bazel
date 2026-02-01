@@ -59,8 +59,8 @@ cc_library(
     hdrs = ["price_table_config.hpp"],
     deps = [
         ":price_table_metadata",
-        "//src/option:american_option",
-        "//src/pde/core:grid",
+        "//src/option:grid_spec_types",
+        "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
 )

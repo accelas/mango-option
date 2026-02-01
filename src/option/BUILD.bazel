@@ -9,6 +9,16 @@ filegroup(
 )
 
 cc_library(
+    name = "grid_spec_types",
+    srcs = ["grid_spec_types.cpp"],
+    hdrs = ["grid_spec_types.hpp"],
+    deps = [
+        "//src/pde/core:grid",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "option_chain",
     hdrs = ["option_chain.hpp"],
     visibility = ["//visibility:public"],
@@ -40,6 +50,7 @@ cc_library(
         "//src/pde/operators:black_scholes_pde",
         ":american_pde_solver",
         ":american_option_result",
+        ":grid_spec_types",
         ":option_spec",
         "//src/support:error_types",
         "//src/pde/core:pde_workspace",

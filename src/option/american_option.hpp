@@ -16,6 +16,7 @@
 #include "src/support/parallel.hpp"
 #include "src/option/american_option_result.hpp"
 #include "src/option/option_spec.hpp"  // For OptionType enum
+#include "src/option/grid_spec_types.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include <vector>
 #include <memory>
@@ -30,75 +31,6 @@ namespace mango {
  * @deprecated Use PricingParams from option_spec.hpp instead
  */
 using AmericanOptionParams = PricingParams;
-
-/**
- * Grid estimation accuracy parameters.
- *
- * Controls spatial/temporal resolution tradeoffs for American option PDE solver.
- */
-struct GridAccuracyParams {
-    /// Domain half-width in units of σ√T (default: 5.0 covers ±5 std devs)
-    double n_sigma = 5.0;
-
-    /// Sinh clustering strength (default: 2.0 concentrates points near strike)
-    double alpha = 2.0;
-
-    /// Target spatial truncation error (default: 1e-2 for ~1e-3 price accuracy)
-    /// - 1e-2: Fast mode (~100-150 points, ~5ms per option)
-    /// - 1e-3: Medium accuracy (~300-400 points, ~50ms per option)
-    /// - 1e-6: High accuracy mode (~1200 points, ~300ms per option)
-    double tol = 1e-2;
-
-    /// CFL safety factor for time step (default: 0.75)
-    double c_t = 0.75;
-
-    /// Minimum spatial grid points (default: 100)
-    size_t min_spatial_points = 100;
-
-    /// Maximum spatial grid points (default: 1200)
-    size_t max_spatial_points = 1200;
-
-    /// Maximum time steps (default: 5000)
-    size_t max_time_steps = 5000;
-};
-
-enum class GridAccuracyProfile {
-    Low,
-    Medium,
-    High,
-    Ultra
-};
-
-inline GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile) {
-    GridAccuracyParams params;
-    switch (profile) {
-        case GridAccuracyProfile::Low:
-            params.tol = 5e-3;
-            params.min_spatial_points = 150;
-            params.max_spatial_points = 1500;
-            params.max_time_steps = 6000;
-            break;
-        case GridAccuracyProfile::Medium:
-            params.tol = 5e-5;
-            params.min_spatial_points = 201;
-            params.max_spatial_points = 2500;
-            params.max_time_steps = 12000;
-            break;
-        case GridAccuracyProfile::High:
-            params.tol = 1e-5;
-            params.min_spatial_points = 301;
-            params.max_spatial_points = 3500;
-            params.max_time_steps = 16000;
-            break;
-        case GridAccuracyProfile::Ultra:
-            params.tol = 5e-6;
-            params.min_spatial_points = 401;
-            params.max_spatial_points = 5000;
-            params.max_time_steps = 20000;
-            break;
-    }
-    return params;
-}
 
 /**
  * Estimate grid specification from option parameters.
