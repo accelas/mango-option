@@ -347,7 +347,29 @@ if (time_domain.has_time_points()) {
 This requires adding `has_time_points()` and `time_points_ref()` accessors to
 TimeDomain.
 
-**Step 4: Run full test suite**
+**Step 4: Write test for convert_times_to_indices with non-uniform grid**
+
+Add to `tests/time_domain_test.cc` or `tests/pde_solver_test.cc`:
+
+```cpp
+TEST(GridTest, ConvertTimesToIndicesNonUniform) {
+    // Non-uniform time domain with mandatory point at 0.3
+    auto td = TimeDomain::with_mandatory_points(0.0, 1.0, 0.25, {0.3});
+    auto pts = td.time_points();
+
+    // Request snap to the mandatory point 0.3
+    std::vector<double> query = {0.3};
+    auto result = convert_times_to_indices(query, td);
+    ASSERT_TRUE(result.has_value());
+
+    auto& [indices, snapped] = result.value();
+    ASSERT_EQ(snapped.size(), 1u);
+    EXPECT_NEAR(snapped[0], 0.3, 1e-14)
+        << "Should snap exactly to mandatory point";
+}
+```
+
+**Step 5: Run full test suite**
 
 Run: `bazel test //...`
 Expected: All 104 tests pass. The uniform dt path produces identical `dt_at(step)` values, so existing behavior is unchanged.
@@ -423,8 +445,9 @@ TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendPut) {
     auto callback = make_dividend_event(10.0, 100.0, OptionType::PUT);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
-    // Put intrinsic: max(1 - S_adj/K, 0) ≈ 1.0 (deep ITM)
-    EXPECT_NEAR(u[0], 1.0, 0.1);
+    // Put: S_adj <= 0 means deep ITM, payoff = 1.0 (normalized)
+    // Must NOT exceed 1.0 (that would be overvaluation)
+    EXPECT_DOUBLE_EQ(u[0], 1.0);
 }
 
 TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendCall) {
@@ -545,9 +568,10 @@ inline TemporalEventCallback make_dividend_event(
                 u[i] = spline.eval(x_shifted);
             } else {
                 // Spot drops to zero or below: use option-type-aware intrinsic
+                // Floor S_adj at 0 to avoid intrinsic > 1.0
                 if (is_put) {
-                    // Put: deep ITM, intrinsic ≈ 1 - S_adj/K
-                    u[i] = std::max(1.0 - S_adj_over_K, 0.0);
+                    // Put: deep ITM, payoff = 1 - max(S_adj/K, 0) = 1.0
+                    u[i] = 1.0;
                 } else {
                     // Call: worthless when spot ≤ 0
                     u[i] = 0.0;
@@ -673,15 +697,30 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
     // ... existing spatial grid estimation ...
 
     // Widen spatial grid for dividend shift safety:
-    // The spline evaluates at x' = ln(exp(x) - D/K). The maximum leftward
-    // shift is approximately D_max/K in log-moneyness. Extend x_min by this
-    // amount so shifted points stay within the interpolation domain.
+    // The spline evaluates at x' = ln(exp(x) - D/K). At x_min, the shifted
+    // point is ln(exp(x_min) - d) which is more negative. We need the grid
+    // to include points down to that shifted value.
+    // Equivalently: new x_min should satisfy exp(new_x_min) = exp(old_x_min) - d_max,
+    // but we want the grid to CONTAIN the shifted point, so we extend to:
+    // new_x_min = ln(exp(old_x_min) + d_max) ... wait, the shift goes LEFT,
+    // so the shifted point is BELOW x_min. We need:
+    // new_x_min such that when the HIGHEST dividend shifts the CURRENT x_min,
+    // the result is still in-bounds. The new lower bound must be:
+    // new_x_min = ln(exp(x_min) - d_max) if exp(x_min) > d_max
+    // But that's the shifted point itself — we need the grid to go BELOW it.
+    // Simpler: extend x_min leftward by the log-shift amount.
     double max_d_over_k = 0.0;
     for (const auto& [t_cal, amount] : params.discrete_dividends) {
         max_d_over_k = std::max(max_d_over_k, amount / params.strike);
     }
-    if (max_d_over_k > 0.0) {
-        x_min -= max_d_over_k;  // extend lower bound
+    if (max_d_over_k > 0.0 && std::exp(x_min) > max_d_over_k) {
+        // Exact: the shifted x_min is ln(exp(x_min) - d_max)
+        double x_min_shifted = std::log(std::exp(x_min) - max_d_over_k);
+        x_min = x_min_shifted;  // extend to cover shifted domain
+    } else if (max_d_over_k > 0.0) {
+        // exp(x_min) <= d_max: grid already covers very low spots,
+        // extend conservatively
+        x_min -= 1.0;
     }
 
     // Create sinh-spaced GridSpec
@@ -781,9 +820,23 @@ The regular batch solver calls `AmericanOptionSolver::solve()` per option, so
 discrete dividends should work automatically. Normalized chain rejects them.
 Write tests to confirm both paths.
 
-**Step 1: Write the test**
+**Step 1: Write the tests**
 
 ```cpp
+TEST(AmericanOptionBatchTest, NormalizedChainRejectsDiscreteDividends) {
+    // Normalized chain cannot handle discrete dividends (D/K differs per strike)
+    std::vector<PricingParams> batch;
+    batch.push_back(PricingParams(100.0, 90.0, 1.0, 0.05, 0.0,
+                                  OptionType::PUT, 0.20, {{0.5, 3.0}}));
+    batch.push_back(PricingParams(100.0, 100.0, 1.0, 0.05, 0.0,
+                                  OptionType::PUT, 0.20, {{0.5, 3.0}}));
+    batch.push_back(PricingParams(100.0, 110.0, 1.0, 0.05, 0.0,
+                                  OptionType::PUT, 0.20, {{0.5, 3.0}}));
+
+    // Should not be eligible for normalized chain
+    EXPECT_FALSE(is_normalized_eligible(batch));
+}
+
 TEST(AmericanOptionBatchTest, RegularBatchWithDiscreteDividends) {
     // Batch of options with discrete dividends falls back to regular path
     std::vector<PricingParams> batch;

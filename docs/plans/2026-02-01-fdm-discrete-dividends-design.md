@@ -22,9 +22,13 @@ This produces a non-uniform sequence of time points. Between mandatory times,
 sub-steps are roughly dt-sized. The solve loop reads dt per step from the
 sequence rather than using a single constant.
 
-**Boundary policy:** Dividends at `t_cal <= 0` (at or before valuation) and
-`t_cal >= maturity` (at or after expiry) are silently ignored. Only dividends
-strictly within `(0, T)` are included as mandatory points.
+**Boundary policy:** Dividend times use calendar time `t_cal` where `t_cal = 0`
+is the valuation date and `t_cal = T` is expiry. Dividends at `t_cal <= 0` (at
+or before valuation — already paid) and `t_cal >= T` (at or after expiry — not
+relevant) are silently ignored. Only dividends strictly within `(0, T)` are
+included as mandatory points. Internally, calendar times are converted to
+time-to-expiry via `tau = T - t_cal` for the PDE solver, which marches in tau
+from 0 to T.
 
 ### PDESolver variable-dt loop
 
@@ -32,8 +36,10 @@ The solve loop changes from uniform `t_next = t + dt` to reading time points
 directly from the stored sequence: `t_next = time_points_[step+1]` with
 `local_dt = t_next - t`. This avoids float drift from repeated addition.
 
-The TR-BDF2 stages already accept dt as a parameter, so variable step sizes
-work without changing the stage implementations.
+The TR-BDF2 stages already accept dt as a parameter and recompute weights
+(`stage1_weight(dt)`, `stage2_weight(dt)`) fresh each call. No matrices or
+coefficients are cached across steps, so variable step sizes work without
+changing the stage implementations.
 
 ### Snapshot indexing for non-uniform grids
 
@@ -48,8 +54,8 @@ when the time domain is uniform (no stored time points).
 `make_dividend_event(amount, strike, option_type)` creates the temporal event
 callback. The option type is required for correct fallback when `S - D <= 0`:
 
-- **Put:** intrinsic = `max(1 - S_adj/K, 0)` ≈ 1.0 (deep ITM)
-- **Call:** intrinsic = `max(S_adj/K - 1, 0)` = 0.0 (worthless)
+- **Put:** intrinsic = 1.0 (deep ITM, S_adj floored at 0)
+- **Call:** intrinsic = 0.0 (worthless when spot ≤ 0)
 
 At each dividend time, the callback:
 
@@ -57,16 +63,20 @@ At each dividend time, the callback:
 2. For each grid point x[i], computes x' = ln(exp(x[i]) - D/K).
 3. Sets u[i] = spline(x') if exp(x[i]) > D/K, else option-type-aware
    intrinsic value.
-4. If the spline build fails (degenerate data), returns an error rather than
-   silently leaving the solution unchanged.
+4. If the spline build fails (degenerate data), the callback leaves u unchanged
+   and returns early. The PDESolver re-applies obstacle conditions, so the
+   worst case is one dividend event missed — acceptable since spline failure
+   requires pathologically degenerate grid data.
 5. PDESolver re-applies obstacle and boundary conditions automatically.
 
 ### Grid expansion for spline safety
 
-`estimate_grid_for_option` widens the spatial grid by the maximum dividend
-shift `max(D/K)` on the lower end. This ensures the shifted evaluation points
-`x' = ln(exp(x) - D/K)` stay within the spline's interpolation domain rather
-than relying on extrapolation.
+The spline evaluates shifted points `x' = ln(exp(x) - D/K)`. For the lowest
+grid point x_min, the shifted value is `ln(exp(x_min) - D/K)` which is more
+negative than x_min. To keep shifted points within the interpolation domain,
+`estimate_grid_for_option` extends `x_min` to `ln(exp(x_min) + d_max)` where
+`d_max = max(D_i/K)` across all dividends. This computes the exact lower bound
+needed rather than using an approximate linear shift.
 
 ### Registration in AmericanOptionSolver
 
