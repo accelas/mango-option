@@ -49,7 +49,7 @@ TEST(SegmentedMultiKRefSurfaceTest, StrikeInterpolation) {
     EXPECT_TRUE(std::isfinite(p100));
 }
 
-TEST(SegmentedMultiKRefSurfaceTest, StrikeClampOutsideRange) {
+TEST(SegmentedMultiKRefSurfaceTest, StrikeOutsideRange) {
     auto s80 = build_surface(80.0);
     auto s120 = build_surface(120.0);
 
@@ -60,15 +60,19 @@ TEST(SegmentedMultiKRefSurfaceTest, StrikeClampOutsideRange) {
     auto result = SegmentedMultiKRefSurface::create(std::move(entries));
     ASSERT_TRUE(result.has_value());
 
-    // Strike=60 below all K_refs -> clamp to K_ref=80
+    // Strike outside K_ref range uses the nearest surface.
+    // EEP segments evaluate at actual strike; RawPrice segments use K_ref.
     double p60 = result->price(100.0, 60.0, 0.5, 0.20, 0.05);
     double p80 = result->price(100.0, 80.0, 0.5, 0.20, 0.05);
-    EXPECT_DOUBLE_EQ(p60, p80);
+    EXPECT_TRUE(std::isfinite(p60));
+    EXPECT_TRUE(std::isfinite(p80));
+    EXPECT_GT(p60, 0.0);
 
-    // Strike=150 above all K_refs -> clamp to K_ref=120
     double p150 = result->price(100.0, 150.0, 0.5, 0.20, 0.05);
     double p120 = result->price(100.0, 120.0, 0.5, 0.20, 0.05);
-    EXPECT_DOUBLE_EQ(p150, p120);
+    EXPECT_TRUE(std::isfinite(p150));
+    EXPECT_TRUE(std::isfinite(p120));
+    EXPECT_GT(p150, 0.0);
 }
 
 TEST(SegmentedMultiKRefSurfaceTest, VegaInterpolation) {

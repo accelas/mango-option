@@ -127,7 +127,12 @@ double SegmentedPriceSurface::price(double spot, double strike,
                                   seg.surface.tau_max());
 
     // 6. Delegate to segment surface and denormalize
-    double raw = seg.surface.price(S_adj, K_ref_, tau_local, sigma, rate);
+    //    EEP segments support arbitrary strikes via strike homogeneity;
+    //    RawPrice segments are only valid at K_ref.
+    double strike_for_seg =
+        (seg.surface.metadata().content == SurfaceContent::EarlyExercisePremium)
+            ? strike : K_ref_;
+    double raw = seg.surface.price(S_adj, strike_for_seg, tau_local, sigma, rate);
     return denormalize_price(seg.surface, raw, K_ref_);
 }
 
@@ -147,8 +152,8 @@ double SegmentedPriceSurface::vega(double spot, double strike,
         double tau_local = std::clamp(tau - seg.tau_start,
                                       seg.surface.tau_min(),
                                       seg.surface.tau_max());
-        // EEP vega is already in actual units; denormalize is a no-op here
-        double raw_vega = seg.surface.vega(S_adj, K_ref_, tau_local, sigma, rate);
+        // EEP vega supports arbitrary strikes; pass actual strike through
+        double raw_vega = seg.surface.vega(S_adj, strike, tau_local, sigma, rate);
         return denormalize_price(seg.surface, raw_vega, K_ref_);
     }
 

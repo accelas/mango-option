@@ -89,13 +89,13 @@ double SegmentedMultiKRefSurface::price(double spot, double strike,
 
     // Single entry or strike at/below lowest K_ref: use first entry
     if (n == 1 || strike <= entries_.front().K_ref) {
-        return entries_.front().surface.price(spot, entries_.front().K_ref,
+        return entries_.front().surface.price(spot, strike,
                                               tau, sigma, rate);
     }
 
     // Strike at/above highest K_ref: use last entry
     if (strike >= entries_.back().K_ref) {
-        return entries_.back().surface.price(spot, entries_.back().K_ref,
+        return entries_.back().surface.price(spot, strike,
                                              tau, sigma, rate);
     }
 
@@ -110,12 +110,15 @@ double SegmentedMultiKRefSurface::price(double spot, double strike,
 
     // Exact match on lower bound
     if (strike == lo.K_ref) {
-        return lo.surface.price(spot, lo.K_ref, tau, sigma, rate);
+        return lo.surface.price(spot, strike, tau, sigma, rate);
     }
 
+    // Each surface evaluates at the actual strike (EEP segments handle this
+    // via strike homogeneity; RawPrice segments use K_ref internally).
+    // Interpolate across K_ref surfaces for additional accuracy.
     double w = (strike - lo.K_ref) / (hi.K_ref - lo.K_ref);
-    double p_lo = lo.surface.price(spot, lo.K_ref, tau, sigma, rate);
-    double p_hi = hi.surface.price(spot, hi.K_ref, tau, sigma, rate);
+    double p_lo = lo.surface.price(spot, strike, tau, sigma, rate);
+    double p_hi = hi.surface.price(spot, strike, tau, sigma, rate);
 
     return (1.0 - w) * p_lo + w * p_hi;
 }
@@ -126,12 +129,12 @@ double SegmentedMultiKRefSurface::vega(double spot, double strike,
     const size_t n = entries_.size();
 
     if (n == 1 || strike <= entries_.front().K_ref) {
-        return entries_.front().surface.vega(spot, entries_.front().K_ref,
+        return entries_.front().surface.vega(spot, strike,
                                              tau, sigma, rate);
     }
 
     if (strike >= entries_.back().K_ref) {
-        return entries_.back().surface.vega(spot, entries_.back().K_ref,
+        return entries_.back().surface.vega(spot, strike,
                                             tau, sigma, rate);
     }
 
@@ -143,12 +146,12 @@ double SegmentedMultiKRefSurface::vega(double spot, double strike,
     const auto& lo = *std::prev(it);
 
     if (strike == lo.K_ref) {
-        return lo.surface.vega(spot, lo.K_ref, tau, sigma, rate);
+        return lo.surface.vega(spot, strike, tau, sigma, rate);
     }
 
     double w = (strike - lo.K_ref) / (hi.K_ref - lo.K_ref);
-    double v_lo = lo.surface.vega(spot, lo.K_ref, tau, sigma, rate);
-    double v_hi = hi.surface.vega(spot, hi.K_ref, tau, sigma, rate);
+    double v_lo = lo.surface.vega(spot, strike, tau, sigma, rate);
+    double v_hi = hi.surface.vega(spot, strike, tau, sigma, rate);
 
     return (1.0 - w) * v_lo + w * v_hi;
 }
