@@ -162,7 +162,7 @@ TEST(RealMarketDataTest, IVCalculationFDM) {
     config.root_config.tolerance = 1e-4;
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value())
         << "IV solver failed: error code " << static_cast<int>(result.error().code);
@@ -179,7 +179,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
 
     IVSolverFDMConfig config;
     IVSolverFDM iv_solver(config);
-    auto iv_result = iv_solver.solve_impl(query);
+    auto iv_result = iv_solver.solve(query);
     ASSERT_TRUE(iv_result.has_value());
 
     double iv = iv_result->implied_vol;

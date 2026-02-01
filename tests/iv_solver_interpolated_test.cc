@@ -82,7 +82,7 @@ TEST_F(IVSolverInterpolatedTest, SolveATMPut) {
         8.0     // market_price
     };
 
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     // With precomputed data, may or may not converge - test that it returns a result
     if (result.has_value()) {
         EXPECT_GT(result->implied_vol, 0.0);
@@ -111,7 +111,7 @@ TEST_F(IVSolverInterpolatedTest, SolveITMPut) {
         15.0    // higher price for ITM
     };
 
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     if (result.has_value()) {
         EXPECT_GT(result->implied_vol, 0.0);
         EXPECT_LT(result->implied_vol, 5.0);
@@ -135,7 +135,7 @@ TEST_F(IVSolverInterpolatedTest, SolveOTMPut) {
         3.0     // lower price for OTM
     };
 
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     if (result.has_value()) {
         EXPECT_GT(result->implied_vol, 0.0);
         EXPECT_LT(result->implied_vol, 5.0);
@@ -159,7 +159,7 @@ TEST_F(IVSolverInterpolatedTest, RejectsInvalidQuery) {
         10.0
     };
 
-    auto result = solver.solve_impl(invalid_query);
+    auto result = solver.solve(invalid_query);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
 }
@@ -179,7 +179,7 @@ TEST_F(IVSolverInterpolatedTest, RejectsNegativeMarketPrice) {
         -5.0    // invalid negative price
     };
 
-    auto result = solver.solve_impl(invalid_query);
+    auto result = solver.solve(invalid_query);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeMarketPrice);
 }
@@ -206,7 +206,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolve) {
         });
     }
 
-    auto batch_result = solver.solve_batch_impl(queries);
+    auto batch_result = solver.solve_batch(queries);
 
     // With precomputed data, just verify batch processing works
     EXPECT_EQ(batch_result.results.size(), 5);
@@ -228,7 +228,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolveAllSucceed) {
         IVQuery{100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 8.0}
     };
 
-    auto batch_result = solver.solve_batch_impl(queries);
+    auto batch_result = solver.solve_batch(queries);
 
     EXPECT_EQ(batch_result.results.size(), 1);
     if (batch_result.all_succeeded()) {
@@ -247,7 +247,7 @@ TEST_F(IVSolverInterpolatedTest, ConvergenceWithinIterations) {
     auto& solver = solver_result.value();
 
     IVQuery query{100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 8.0};
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     if (result.has_value()) {
         EXPECT_LE(result->iterations, 10u);
@@ -291,7 +291,7 @@ TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
         8.0     // market_price
     };
 
-    auto result = solver->solve_impl(query);
+    auto result = solver->solve(query);
     // With synthetic data, accept success or graceful failure
     if (result.has_value()) {
         EXPECT_GT(result->implied_vol, 0.0);
@@ -343,7 +343,7 @@ TEST_F(IVSolverInterpolatedTest, WorksWithSegmentedMultiKRefSurface) {
         8.0     // market_price
     };
 
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     // With synthetic data from segmented builder, accept success or graceful failure
     if (result.has_value()) {
         EXPECT_GT(result->implied_vol, 0.0);

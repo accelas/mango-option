@@ -18,13 +18,13 @@ IVSolver::IVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver)
 
 std::expected<IVSuccess, IVError> IVSolver::solve(const IVQuery& query) const {
     return std::visit([&](const auto& solver) {
-        return solver.solve_impl(query);
+        return solver.solve(query);
     }, solver_);
 }
 
 BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
     return std::visit([&](const auto& solver) {
-        return solver.solve_batch_impl(queries);
+        return solver.solve_batch(queries);
     }, solver_);
 }
 

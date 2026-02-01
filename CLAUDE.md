@@ -179,7 +179,7 @@ TEST(RateSpecTest, TimeConversionForUpslopingCurve) {
 
 mango::IVQuery query{.option = spec, .market_price = 10.45};
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 ```
 
 **Pattern 2: Price Table Pre-computation and Interpolated IV**
@@ -201,7 +201,7 @@ double price = aps.price(spot, strike, tau, sigma, rate);
 
 // Create interpolated IV solver from AmericanPriceSurface
 auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
-auto iv_result = iv_solver.solve_impl(iv_query);
+auto iv_result = iv_solver.solve(iv_query);
 ```
 
 **Pattern 3: Discrete Dividend IV Calculation**

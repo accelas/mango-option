@@ -221,13 +221,13 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
     };
 }
 
-std::expected<IVSuccess, IVError> IVSolverFDM::solve_impl(const IVQuery& query) const {
+std::expected<IVSuccess, IVError> IVSolverFDM::solve(const IVQuery& query) const {
     // C++23 monadic validation pipeline: validate → solve
     return validate_query(query)
         .and_then([this, &query](auto) { return solve_brent(query); });
 }
 
-BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries) const {
+BatchIVResult IVSolverFDM::solve_batch(const std::vector<IVQuery>& queries) const {
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
 
@@ -236,17 +236,17 @@ BatchIVResult IVSolverFDM::solve_batch_impl(const std::vector<IVQuery>& queries)
     if (queries.size() < config_.batch_parallel_threshold) {
         // Serial path for batches below threshold (avoid parallel overhead)
         for (size_t i = 0; i < queries.size(); ++i) {
-            results[i] = solve_impl(queries[i]);
+            results[i] = solve(queries[i]);
             if (!results[i].has_value()) {
                 ++failed_count;
             }
         }
     } else {
         // Parallel path: each IV solve is independent (different PDE workspaces)
-        // Mirrors IVSolverInterpolated::solve_batch_impl pattern
+        // Mirrors IVSolverInterpolated::solve_batch pattern
         MANGO_PRAGMA_PARALLEL_FOR
         for (size_t i = 0; i < queries.size(); ++i) {
-            results[i] = solve_impl(queries[i]);
+            results[i] = solve(queries[i]);
             if (!results[i].has_value()) {
                 MANGO_PRAGMA_ATOMIC
                 ++failed_count;

@@ -37,7 +37,7 @@ protected:
 TEST_F(IVSolverTest, ATMPutIVCalculation) {
     IVSolverFDM solver(config);
 
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     // Should converge with real implementation
     ASSERT_TRUE(result.has_value());
@@ -50,7 +50,7 @@ TEST_F(IVSolverTest, InvalidSpotPrice) {
     query.spot = -100.0;  // Invalid
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
@@ -62,7 +62,7 @@ TEST_F(IVSolverTest, InvalidStrike) {
     query.strike = 0.0;  // Invalid
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeStrike);
@@ -74,7 +74,7 @@ TEST_F(IVSolverTest, InvalidTimeToMaturity) {
     query.maturity = -1.0;  // Invalid
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeMaturity);
@@ -86,7 +86,7 @@ TEST_F(IVSolverTest, InvalidMarketPrice) {
     query.market_price = -5.0;  // Invalid
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeMarketPrice);
@@ -99,7 +99,7 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
     query.market_price = 15.0;
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->implied_vol, 0.28, 0.08);
@@ -111,7 +111,7 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
     query.market_price = 2.5;
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->implied_vol, 0.20, 0.08);
@@ -124,7 +124,7 @@ TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
     query.market_price = 54.5;  // Realistic: intrinsic=50 + time value ~4.5
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value()) << "Deep ITM should converge with adaptive grid";
     EXPECT_NEAR(result->implied_vol, 0.875, 0.10);
@@ -138,7 +138,7 @@ TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
     query.market_price = 1.0;
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     // Should converge with adaptive grid
     ASSERT_TRUE(result.has_value()) << "Deep OTM should converge with adaptive grid";
@@ -153,7 +153,7 @@ TEST_F(IVSolverTest, ATMCallIVCalculation) {
     query.market_price = 10.0;  // ATM call price
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value()) << "ATM call should converge";
     // Relaxed lower bound slightly due to minor numerical differences after CRTP refactoring
@@ -166,7 +166,7 @@ TEST_F(IVSolverTest, ExplicitGridMinimalPoints) {
     config.grid = ExplicitPDEGrid{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 11, 2.0).value(), 50};
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     // Minimal grid should still produce a result (possibly less accurate)
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.1);
@@ -178,7 +178,7 @@ TEST_F(IVSolverTest, ExplicitGridFewTimeSteps) {
     config.grid = ExplicitPDEGrid{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value(), 10};
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     // Few time steps — solver should still produce a result
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.1);
@@ -197,7 +197,7 @@ TEST_F(IVSolverTest, ExplicitGrid201Points) {
     config.grid = ExplicitPDEGrid{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0).value(), 1000};
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.1);
     EXPECT_LT(result->implied_vol, 0.5);
@@ -222,7 +222,7 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
     // Default accuracy
     IVSolverFDMConfig default_config = config;
     IVSolverFDM solver_default(default_config);
-    auto result_default = solver_default.solve_impl(query);
+    auto result_default = solver_default.solve(query);
     ASSERT_TRUE(result_default.has_value())
         << "Default accuracy failed with error code: "
         << static_cast<int>(result_default.error().code);
@@ -234,7 +234,7 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
     finer_accuracy.min_spatial_points = 150;
     finer_config.grid = finer_accuracy;
     IVSolverFDM solver_finer(finer_config);
-    auto result_finer = solver_finer.solve_impl(query);
+    auto result_finer = solver_finer.solve(query);
     ASSERT_TRUE(result_finer.has_value())
         << "Finer accuracy failed with error code: "
         << static_cast<int>(result_finer.error().code);

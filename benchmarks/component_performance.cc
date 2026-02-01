@@ -266,7 +266,7 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -284,7 +284,7 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -302,7 +302,7 @@ static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         benchmark::DoNotOptimize(result);
     }
 
@@ -338,7 +338,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
                   analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT));
 
     for (auto _ : state) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
@@ -497,7 +497,7 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
 
         // Sequential processing for now (batch API may not exist)
         for (const auto& params : batch) {
-            results.push_back(solver.solve_impl(params));
+            results.push_back(solver.solve(params));
         }
 
         benchmark::DoNotOptimize(results);

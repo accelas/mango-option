@@ -226,7 +226,7 @@ inline IVValidationResult validate_iv_fdm(
     config.root_config.tolerance = 1e-6;
 
     IVSolverFDM solver(config);
-    auto iv_result = solver.solve_impl(query);
+    auto iv_result = solver.solve(query);
 
     if (!iv_result.has_value()) {
         validation.passed = false;

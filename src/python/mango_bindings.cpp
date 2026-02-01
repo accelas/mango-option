@@ -251,8 +251,8 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::IVSolverFDM>(m, "IVSolverFDM")
         .def(py::init<const mango::IVSolverFDMConfig&>(),
              py::arg("config"))
-        .def("solve_impl", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
-            auto result = solver.solve_impl(query);
+        .def("solve", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
+            auto result = solver.solve(query);
             if (result.has_value()) {
                 return py::make_tuple(true, result.value(), mango::IVError{});
             } else {
@@ -1006,9 +1006,9 @@ PYBIND11_MODULE(mango_option, m) {
                 Raises:
                     ValueError: If validation fails
             )pbdoc")
-        .def("solve_impl",
+        .def("solve",
             [](const mango::IVSolverInterpolatedStandard& solver, const mango::IVQuery& query) {
-                auto result = solver.solve_impl(query);
+                auto result = solver.solve(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
                 } else {
@@ -1033,7 +1033,7 @@ PYBIND11_MODULE(mango_option, m) {
             )pbdoc")
         .def("solve_batch",
             [](const mango::IVSolverInterpolatedStandard& solver, const std::vector<mango::IVQuery>& queries) {
-                auto batch_result = solver.solve_batch_impl(queries);
+                auto batch_result = solver.solve_batch(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {
                     if (r.has_value()) {

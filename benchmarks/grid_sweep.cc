@@ -78,7 +78,7 @@ int main() {
     fprintf(stderr, "Computing reference IVs...\n");
     std::vector<double> ref_ivs;
     for (auto& q : iv_queries) {
-        auto r = fdm_solver.solve_impl(q);
+        auto r = fdm_solver.solve(q);
         ref_ivs.push_back(r.has_value() ? r->implied_vol : -1.0);
     }
 
@@ -150,7 +150,7 @@ int main() {
         bool is_last = (trial == targets.size() - 1);
         for (size_t i = 0; i < iv_queries.size(); i++) {
             if (ref_ivs[i] < 0) continue;
-            auto interp_r = interp_solver.solve_impl(iv_queries[i]);
+            auto interp_r = interp_solver.solve(iv_queries[i]);
             if (!interp_r) continue;
             double err = std::abs(ref_ivs[i] - interp_r->implied_vol);
             max_err = std::max(max_err, err);
@@ -165,7 +165,7 @@ int main() {
             printf("  %-8s %-8s %-8s %-10s %-10s\n", "m", "T", "ref_iv", "interp_iv", "err(bps)");
             for (size_t i = 0; i < iv_queries.size(); i++) {
                 if (ref_ivs[i] < 0) continue;
-                auto interp_r = interp_solver.solve_impl(iv_queries[i]);
+                auto interp_r = interp_solver.solve(iv_queries[i]);
                 if (!interp_r) continue;
                 double err = std::abs(ref_ivs[i] - interp_r->implied_vol);
                 printf("  %-8.3f %-8.3f %-8.4f %-10.4f %-10.1f\n",
@@ -179,7 +179,7 @@ int main() {
         auto t2 = std::chrono::steady_clock::now();
         for (int rep = 0; rep < 100; rep++) {
             for (auto& q : iv_queries) {
-                auto r = interp_solver.solve_impl(q);
+                auto r = interp_solver.solve(q);
                 asm volatile("" : : "r"(&r) : "memory");
             }
         }

@@ -557,7 +557,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     // Solve for IV
     IVQuery query{spot, strike, maturity, rate, grid.dividend,
                   OptionType::PUT, price};
-    auto iv_result = iv_solver.solve_impl(query);
+    auto iv_result = iv_solver.solve(query);
 
     ASSERT_TRUE(iv_result.has_value())
         << "IV solve failed for ATM option";

@@ -71,7 +71,7 @@ def test_iv_solver_fdm():
     query.type = mango_option.OptionType.PUT
     query.market_price = 10.0
 
-    success, result, error = solver.solve_impl(query)
+    success, result, error = solver.solve(query)
     if success:
         print(f"✓ IVSolverFDM solved: IV = {result.implied_vol:.4f}")
     else:
@@ -368,8 +368,8 @@ def test_iv_solver_interpolated():
     query.type = mango_option.OptionType.PUT
     query.market_price = 5.0
 
-    success, result, error = solver.solve_impl(query)
-    print(f"✓ solve_impl ran: success={success}")
+    success, result, error = solver.solve(query)
+    print(f"✓ solve ran: success={success}")
 
     # Test batch
     queries = [query, query, query]

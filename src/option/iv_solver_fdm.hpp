@@ -7,8 +7,8 @@
  * and Brent's root-finding method to solve for implied volatility.
  *
  * API (C++23):
- * - solve_impl() → std::expected<IVSuccess, IVError>
- * - solve_batch_impl() → BatchIVResult
+ * - solve() → std::expected<IVSuccess, IVError>
+ * - solve_batch() → BatchIVResult
  *
  * Error Handling:
  * - Type-safe error codes via IVErrorCode enum
@@ -19,7 +19,7 @@
  * @code
  * IVQuery query{...};
  * FDMIVSolver solver(config);
- * auto result = solver.solve_impl(query);
+ * auto result = solver.solve(query);
  *
  * if (result.has_value()) {
  *     std::cout << "IV: " << result->implied_vol << "\n";
@@ -95,7 +95,7 @@ struct IVSolverFDMConfig {
 /// };
 ///
 /// IVSolverFDM solver(config);
-/// auto result = solver.solve_impl(query);
+/// auto result = solver.solve(query);
 ///
 /// if (result.has_value()) {
 ///     std::cout << "IV: " << result->implied_vol << "\n";
@@ -107,7 +107,7 @@ struct IVSolverFDMConfig {
 /// **Batch Usage:**
 /// ```cpp
 /// std::vector<IVQuery> queries = { ... };
-/// auto batch = solver.solve_batch_impl(queries);
+/// auto batch = solver.solve_batch(queries);
 ///
 /// for (size_t i = 0; i < batch.results.size(); ++i) {
 ///     if (batch.results[i].has_value()) {
@@ -154,7 +154,7 @@ public:
     /// - BracketingFailed: Root not bracketed by initial bounds
     ///
     /// @note Uses monadic validation: params → arbitrage → Brent solving
-    std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query) const;
+    std::expected<IVSuccess, IVError> solve(const IVQuery& query) const;
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
@@ -164,7 +164,7 @@ public:
     ///
     /// @param queries Input queries (as vector for convenience)
     /// @return BatchIVResult with individual results and failure count
-    BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries) const;
+    BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
 private:
     IVSolverFDMConfig config_;

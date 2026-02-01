@@ -40,7 +40,7 @@ TEST(IVSolverPropertyTest, IVAlwaysPositive) {
 
     for (const auto& [spot, strike, maturity, price] : test_cases) {
         IVQuery query(spot, strike, maturity, 0.05, 0.02, OptionType::PUT, price);
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
 
         if (result.has_value()) {
             EXPECT_GT(result->implied_vol, 0.0)
@@ -66,7 +66,7 @@ TEST(IVSolverPropertyTest, IVWithinBounds) {
     IVSolverFDM solver(config);
 
     IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 10.0);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     if (result.has_value()) {
         EXPECT_GE(result->implied_vol, vol_lower) << "IV below lower bound";
@@ -89,7 +89,7 @@ TEST(IVSolverPropertyTest, NeverProducesNaNOrInf) {
     IVSolverFDM solver(config);
 
     for (const auto& query : queries) {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
 
         if (result.has_value()) {
             EXPECT_FALSE(std::isnan(result->implied_vol))

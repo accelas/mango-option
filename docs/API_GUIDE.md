@@ -82,7 +82,7 @@ int main() {
 
     // Solve
     mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     if (result.has_value()) {
         std::cout << "Implied Vol: " << result->implied_vol << "\n";
@@ -255,7 +255,7 @@ mango::IVSolverFDMConfig config{
 
 // Solve
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 
 if (result.has_value()) {
     std::cout << "Implied Vol: " << result->implied_vol << " ("
@@ -298,7 +298,7 @@ for (const auto& [strike, price] : market_data) {
 
 // Solve batch (OpenMP parallel)
 mango::IVSolverFDM solver(config);
-auto batch = solver.solve_batch_impl(queries);
+auto batch = solver.solve_batch(queries);
 
 std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
 std::cout << "Failed: " << batch.failed_count << "\n";
@@ -329,7 +329,7 @@ mango::IVSolverFDMConfig config{
 };
 
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 ```
 
 **Override auto-estimation with manual grid (advanced):**
@@ -345,7 +345,7 @@ mango::IVSolverFDMConfig config{
 };
 
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 ```
 
 ---
@@ -508,7 +508,7 @@ IV error in bps varies with vega: a constant ~$0.005 price error maps to <1 bps 
 auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
 
 // Solve IV — internally uses EEP reconstruction + Newton iteration
-auto iv_result = iv_solver.solve_impl(iv_query);
+auto iv_result = iv_solver.solve(iv_query);
 ```
 
 ### Batch Queries on Price Surface
@@ -694,7 +694,7 @@ int main() {
 **std::expected provides type-safe error handling:**
 
 ```cpp
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 
 // Pattern 1: if/else
 if (result.has_value()) {
@@ -717,7 +717,7 @@ auto vol_pct = result.transform([](const auto& r) {
 **Detailed error diagnostics:**
 
 ```cpp
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 
 if (!result.has_value()) {
     const auto& error = result.error();
@@ -794,13 +794,13 @@ for (size_t i = 0; i < params_batch.size(); ++i) {
 
 ### IV Batch (Built-in)
 
-**Use solve_batch_impl() for parallel IV calculation:**
+**Use solve_batch() for parallel IV calculation:**
 
 ```cpp
 std::vector<mango::IVQuery> queries = load_market_data();
 
 mango::IVSolverFDM solver(config);
-auto batch = solver.solve_batch_impl(queries);
+auto batch = solver.solve_batch(queries);
 
 // Results and statistics
 std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";

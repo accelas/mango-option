@@ -323,7 +323,7 @@ static void BM_RealData_IV_FDM(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("IV solver failed");
         }
@@ -374,7 +374,7 @@ static void BM_RealData_IV_BSpline(benchmark::State& state) {
     };
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error");
         }
@@ -603,7 +603,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Warmup
     for (int i = 0; i < kWarmupIterations; ++i) {
         for (const auto& query : queries) {
-            auto result = iv_solver.solve_impl(query);
+            auto result = iv_solver.solve(query);
             benchmark::DoNotOptimize(result);
         }
     }
@@ -611,7 +611,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Benchmark: Calculate IV for all strikes (the smile)
     for (auto _ : state) {
         for (const auto& query : queries) {
-            auto result = iv_solver.solve_impl(query);
+            auto result = iv_solver.solve(query);
             if (result.has_value()) {
                 benchmark::DoNotOptimize(result->implied_vol);
             }
@@ -653,7 +653,7 @@ static void BM_RealData_IVSmile_FDM(benchmark::State& state) {
     // Benchmark FDM IV calculation for entire smile
     for (auto _ : state) {
         for (const auto& query : queries) {
-            auto result = fdm_solver.solve_impl(query);
+            auto result = fdm_solver.solve(query);
             if (result.has_value()) {
                 benchmark::DoNotOptimize(result->implied_vol);
             }
@@ -733,8 +733,8 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
         valid_count = 0;
 
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
-            auto interp_result = interp_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
+            auto interp_result = interp_solver.solve(query);
 
             if (fdm_result.has_value() && interp_result.has_value()) {
                 double fdm_iv = fdm_result->implied_vol;
@@ -902,8 +902,8 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
         valid_count = 0;
 
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
-            auto interp_result = interp_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
+            auto interp_result = interp_solver.solve(query);
 
             if (fdm_result.has_value() && interp_result.has_value()) {
                 double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
@@ -1016,8 +1016,8 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
         valid_count = 0;
 
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
-            auto interp_result = interp_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
+            auto interp_result = interp_solver.solve(query);
 
             if (fdm_result.has_value() && interp_result.has_value()) {
                 double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
@@ -1141,8 +1141,8 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     // Compute accuracy once (outside timed loop)
     for (const auto& query : queries) {
-        auto fdm_result = fdm_solver.solve_impl(query);
-        auto interp_result = interp_solver.solve_impl(query);
+        auto fdm_result = fdm_solver.solve(query);
+        auto interp_result = interp_solver.solve(query);
 
         if (fdm_result.has_value() && interp_result.has_value()) {
             double abs_error = std::abs(fdm_result->implied_vol - interp_result->implied_vol);
@@ -1173,7 +1173,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     if (!queries.empty()) {
         auto t0 = std::chrono::steady_clock::now();
         for (const auto& query : queries) {
-            auto fdm_result = fdm_solver.solve_impl(query);
+            auto fdm_result = fdm_solver.solve(query);
             benchmark::DoNotOptimize(fdm_result);
         }
         auto t1 = std::chrono::steady_clock::now();
@@ -1185,7 +1185,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     for (auto _ : state) {
         auto t0 = std::chrono::steady_clock::now();
         for (const auto& query : queries) {
-            auto interp_result = interp_solver.solve_impl(query);
+            auto interp_result = interp_solver.solve(query);
             benchmark::DoNotOptimize(interp_result);
         }
         auto t1 = std::chrono::steady_clock::now();

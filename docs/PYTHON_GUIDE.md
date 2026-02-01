@@ -136,7 +136,7 @@ query = mo.IVQuery(
     type=mo.OptionType.PUT, market_price=10.0,
 )
 
-success, result, error = solver.solve_impl(query)
+success, result, error = solver.solve(query)
 if success:
     print(f"IV = {result.implied_vol:.4f}")
 ```
@@ -166,7 +166,7 @@ surface = mo.build_price_table_surface_from_chain(
 iv_solver = mo.IVSolverInterpolated.create(surface)
 
 # 3. Solve single query
-success, result, error = iv_solver.solve_impl(query)
+success, result, error = iv_solver.solve(query)
 
 # 4. Solve batch (parallelized with OpenMP)
 queries = [query1, query2, query3]

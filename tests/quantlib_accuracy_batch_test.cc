@@ -168,7 +168,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
             ql_result.price
         };
 
-        auto iv_result = iv_solver.solve_impl(query);
+        auto iv_result = iv_solver.solve(query);
 
         ASSERT_TRUE(iv_result.has_value())
             << "IV solver failed with code: " << static_cast<int>(iv_result.error().code);

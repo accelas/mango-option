@@ -148,7 +148,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     };
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }
@@ -383,7 +383,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     auto [grid_spec, time_domain] = estimate_grid_for_option(sample_params);
 
     auto run_once = [&]() {
-        auto result = solver.solve_impl(query);
+        auto result = solver.solve(query);
         if (!result.has_value()) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
         }

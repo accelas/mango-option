@@ -23,7 +23,7 @@
  *   };
  *   IVQuery query{.option = spec, .market_price = 10.45};
  *
- *   auto result = solver->solve_impl(query);
+ *   auto result = solver->solve(query);
  *   if (result.has_value()) {
  *       std::cout << "IV: " << result->implied_vol << "\n";
  *   } else {
@@ -106,7 +106,7 @@ public:
     ///
     /// @param query Option specification and market price
     /// @return Success with IV and diagnostics, or error with details
-    std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query) const noexcept;
+    std::expected<IVSuccess, IVError> solve(const IVQuery& query) const noexcept;
 
     /// Solve for implied volatility (batch with OpenMP)
     ///
@@ -114,7 +114,7 @@ public:
     ///
     /// @param queries Input queries (as vector for convenience)
     /// @return BatchIVResult with individual results and failure count
-    BatchIVResult solve_batch_impl(const std::vector<IVQuery>& queries) const noexcept;
+    BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const noexcept;
 
 private:
     /// Private constructor (use create() factory method)
@@ -147,7 +147,7 @@ private:
     bool is_in_bounds(const IVQuery& query, double vol) const {
         const double m = query.spot / query.strike;
 
-        // Extract zero rate for bounds check - must match what solve_impl uses
+        // Extract zero rate for bounds check - must match what solve uses
         // Using get_zero_rate() ensures consistency: -ln(D(T))/T for curves
         double rate_value = get_zero_rate(query.rate, query.maturity);
 
@@ -267,7 +267,7 @@ IVSolverInterpolated<Surface>::adaptive_bounds(const IVQuery& query) const
 
 template <PriceSurface Surface>
 std::expected<IVSuccess, IVError>
-IVSolverInterpolated<Surface>::solve_impl(const IVQuery& query) const noexcept
+IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
 {
     // Validate input using centralized validation
     auto error = validate_query(query);
@@ -365,7 +365,7 @@ IVSolverInterpolated<Surface>::solve_impl(const IVQuery& query) const noexcept
 
 template <PriceSurface Surface>
 BatchIVResult
-IVSolverInterpolated<Surface>::solve_batch_impl(const std::vector<IVQuery>& queries) const noexcept
+IVSolverInterpolated<Surface>::solve_batch(const std::vector<IVQuery>& queries) const noexcept
 {
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
@@ -373,7 +373,7 @@ IVSolverInterpolated<Surface>::solve_batch_impl(const std::vector<IVQuery>& quer
     // Trivially parallel: B-spline is immutable and thread-safe
     MANGO_PRAGMA_PARALLEL_FOR
     for (size_t i = 0; i < queries.size(); ++i) {
-        results[i] = solve_impl(queries[i]);
+        results[i] = solve(queries[i]);
         if (!results[i].has_value()) {
             MANGO_PRAGMA_ATOMIC
             ++failed_count;

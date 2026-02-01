@@ -7,7 +7,7 @@
 using namespace mango;
 
 // Test for new std::expected signature (Task 2.1)
-// NOTE: This test calls solve_impl() directly to verify the new signature,
+// NOTE: This test calls solve() directly to verify the new signature,
 // bypassing the base class which still returns IVResult (will be updated in Task 3).
 TEST(IVSolverFDMExpected, ReturnsExpectedType) {
     // Simple test to verify std::expected signature compiles
@@ -24,8 +24,8 @@ TEST(IVSolverFDMExpected, ReturnsExpectedType) {
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
 
-    // Call solve_impl() directly (not solve() which goes through base class)
-    auto result = solver.solve_impl(query);
+    // Call solve() directly (not solve() which goes through base class)
+    auto result = solver.solve(query);
 
     // Verify it compiles and returns expected type
     static_assert(std::is_same_v<decltype(result), std::expected<IVSuccess, IVError>>);
@@ -56,7 +56,7 @@ TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
@@ -77,7 +77,7 @@ TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
@@ -99,7 +99,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
@@ -121,7 +121,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::ArbitrageViolation);
@@ -141,7 +141,7 @@ TEST(IVSolverFDMExpected, ValidationZeroSpot) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeSpot);
@@ -161,7 +161,7 @@ TEST(IVSolverFDMExpected, ValidationZeroStrike) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::NegativeStrike);
@@ -184,7 +184,7 @@ TEST(IVSolverFDMExpected, SolvesATMPut) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.01);  // Reasonable vol
@@ -207,7 +207,7 @@ TEST(IVSolverFDMExpected, SolvesITMPut) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.01);
@@ -228,7 +228,7 @@ TEST(IVSolverFDMExpected, SolvesOTMPut) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.01);
@@ -251,7 +251,7 @@ TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
     };
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, IVErrorCode::MaxIterationsExceeded);
@@ -272,7 +272,7 @@ TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
 
@@ -299,7 +299,7 @@ TEST(IVSolverFDMExpected, BatchSolveAllSuccess) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto batch_result = solver.solve_batch_impl(queries);
+    auto batch_result = solver.solve_batch(queries);
 
     EXPECT_TRUE(batch_result.all_succeeded());
     EXPECT_EQ(batch_result.failed_count, 0);
@@ -327,7 +327,7 @@ TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto batch_result = solver.solve_batch_impl(queries);
+    auto batch_result = solver.solve_batch(queries);
 
     EXPECT_FALSE(batch_result.all_succeeded());
     EXPECT_EQ(batch_result.failed_count, 1);
@@ -347,7 +347,7 @@ TEST(IVSolverFDMExpected, BatchSolveEmptyBatch) {
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
-    auto batch_result = solver.solve_batch_impl(queries);
+    auto batch_result = solver.solve_batch(queries);
 
     EXPECT_TRUE(batch_result.all_succeeded());
     EXPECT_EQ(batch_result.failed_count, 0);
