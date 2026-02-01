@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "tests/price_table_builder_test_access.hpp"
 #include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 namespace {
+
+using Access = testing::PriceTableBuilderAccess<4>;
 
 // Test the normalized chain solver with custom_grid
 // This tests the ACTUAL code path used by price table builder
@@ -26,7 +29,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     axes.grids[3] = {0.05, 0.06};
 
     // Generate batch with normalized parameters
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     ASSERT_EQ(batch.size(), 4);  // 2 vols × 2 rates
 
     std::cout << "=== Testing normalized chain solver ===" << std::endl;
@@ -96,7 +99,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     axes.grids[3] = {0.05};
 
     // Generate batch (normalized: spot=strike=100)
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     ASSERT_EQ(batch.size(), 1);
 
     // Verify normalized parameters
@@ -179,7 +182,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
               << " (Nσ × Nr)" << std::endl;
 
     // Generate batch as plan does
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     std::cout << "Batch size: " << batch.size() << std::endl;
 
     // Create custom_grid as plan specifies

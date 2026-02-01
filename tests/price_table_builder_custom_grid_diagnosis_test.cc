@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "tests/price_table_builder_test_access.hpp"
 #include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 namespace {
+
+using Access = testing::PriceTableBuilderAccess<4>;
 
 // Reproduce the exact failing test scenario
 TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
@@ -27,7 +30,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     std::cout << "=== Diagnosing failure ===" << std::endl;
 
     // Generate batch
-    auto batch_params = builder.make_batch_for_testing(axes);
+    auto batch_params = Access::make_batch(builder, axes);
     std::cout << "Batch size: " << batch_params.size() << std::endl;
     ASSERT_EQ(batch_params.size(), 1);
 

@@ -21,6 +21,11 @@
 
 namespace mango {
 
+namespace testing {
+template <size_t N> struct PriceTableBuilderAccess;
+}  // namespace testing
+
+
 /// Result from price table build with diagnostics
 template <size_t N>
 struct PriceTableResult {
@@ -196,102 +201,6 @@ public:
         GridAccuracyProfile pde_profile = GridAccuracyProfile::High,
         OptionType type = OptionType::PUT);
 
-    /// For testing: expose make_batch method
-    [[nodiscard]] std::vector<PricingParams> make_batch_for_testing(
-        const PriceTableAxes<N>& axes) const {
-        return make_batch(axes);
-    }
-
-    /// For testing: expose solve_batch method
-    [[nodiscard]] BatchAmericanOptionResult solve_batch_for_testing(
-        const std::vector<PricingParams>& batch,
-        const PriceTableAxes<N>& axes) const {
-        return solve_batch(batch, axes);
-    }
-
-    /// For testing: expose extract_tensor method
-    [[nodiscard]] std::expected<ExtractionResult<N>, PriceTableError> extract_tensor_for_testing(
-        const BatchAmericanOptionResult& batch,
-        const PriceTableAxes<N>& axes) const {
-        return extract_tensor(batch, axes);
-    }
-
-    /// For testing: expose fit_coeffs method
-    [[nodiscard]] std::expected<std::vector<double>, PriceTableError> fit_coeffs_for_testing(
-        const PriceTensor<N>& tensor,
-        const PriceTableAxes<N>& axes) const {
-        auto result = fit_coeffs(tensor, axes);
-        if (!result.has_value()) {
-            return std::unexpected(result.error());
-        }
-        return std::move(result.value().coefficients);
-    }
-
-    /// For testing: expose find_nearest_valid_neighbor method
-    [[nodiscard]] std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor_for_testing(
-        size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
-        const std::vector<bool>& slice_valid) const {
-        return find_nearest_valid_neighbor(σ_idx, r_idx, Nσ, Nr, slice_valid);
-    }
-
-    /// For testing: expose repair_failed_slices method
-    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_failed_slices_for_testing(
-        PriceTensor<N>& tensor,
-        const std::vector<size_t>& failed_pde,
-        const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
-        const PriceTableAxes<N>& axes) const {
-        return repair_failed_slices(tensor, failed_pde, failed_spline, axes);
-    }
-
-    // =========================================================================
-    // Internal API for AdaptiveGridBuilder
-    // These methods expose internal functionality for incremental builds.
-    // =========================================================================
-
-    /// Internal API: generate batch of PricingParams from axes
-    /// Used by AdaptiveGridBuilder for incremental builds
-    [[nodiscard]] std::vector<PricingParams> make_batch_internal(
-        const PriceTableAxes<N>& axes) const {
-        return make_batch(axes);
-    }
-
-    /// Internal API: solve batch of options
-    /// Used by AdaptiveGridBuilder for incremental builds
-    [[nodiscard]] BatchAmericanOptionResult solve_batch_internal(
-        const std::vector<PricingParams>& batch,
-        const PriceTableAxes<N>& axes) const {
-        return solve_batch(batch, axes);
-    }
-
-    /// Internal API: extract tensor from batch results
-    /// Used by AdaptiveGridBuilder for incremental builds
-    [[nodiscard]] std::expected<ExtractionResult<N>, PriceTableError> extract_tensor_internal(
-        const BatchAmericanOptionResult& batch,
-        const PriceTableAxes<N>& axes) const {
-        return extract_tensor(batch, axes);
-    }
-
-    /// Internal API: fit B-spline coefficients from tensor
-    /// Used by AdaptiveGridBuilder for incremental builds
-    [[nodiscard]] std::expected<std::vector<double>, PriceTableError> fit_coeffs_internal(
-        const PriceTensor<N>& tensor,
-        const PriceTableAxes<N>& axes) const {
-        auto result = fit_coeffs(tensor, axes);
-        if (!result.has_value()) {
-            return std::unexpected(result.error());
-        }
-        return std::move(result.value().coefficients);
-    }
-
-    /// Internal API: repair failed slices using neighbor interpolation
-    /// Used by AdaptiveGridBuilder for incremental builds
-    [[nodiscard]] std::expected<RepairStats, PriceTableError> repair_failed_slices_internal(
-        PriceTensor<N>& tensor,
-        const std::vector<size_t>& failed_pde,
-        const std::vector<std::tuple<size_t, size_t, size_t>>& failed_spline,
-        const PriceTableAxes<N>& axes) const {
-        return repair_failed_slices(tensor, failed_pde, failed_spline, axes);
-    }
 
 private:
     /// Internal result from B-spline coefficient fitting
@@ -334,6 +243,10 @@ private:
     [[nodiscard]] std::optional<std::pair<size_t, size_t>> find_nearest_valid_neighbor(
         size_t σ_idx, size_t r_idx, size_t Nσ, size_t Nr,
         const std::vector<bool>& slice_valid) const;
+
+    friend class AdaptiveGridBuilder;
+    friend class SegmentedPriceTableBuilder;
+    template <size_t M> friend struct testing::PriceTableBuilderAccess;
 
     PriceTableConfig config_;
     std::optional<InitialCondition> custom_ic_;

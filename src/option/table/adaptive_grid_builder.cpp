@@ -166,7 +166,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         }
 
         // Generate all (σ,r) parameter combinations
-        auto all_params = builder.make_batch_internal(axes);
+        auto all_params = builder.make_batch(axes);
 
         // Extract (σ,r) pairs from all_params
         std::vector<std::pair<double, double>> all_pairs;
@@ -288,7 +288,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         auto merged_results = merge_results(all_params, missing_indices, fresh_results);
 
         // Extract tensor from merged results
-        auto tensor_result = builder.extract_tensor_internal(merged_results, axes);
+        auto tensor_result = builder.extract_tensor(merged_results, axes);
         if (!tensor_result.has_value()) {
             return std::unexpected(tensor_result.error());
         }
@@ -298,7 +298,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         // Repair failed slices if needed
         RepairStats repair_stats{0, 0};
         if (!extraction.failed_pde.empty() || !extraction.failed_spline.empty()) {
-            auto repair_result = builder.repair_failed_slices_internal(
+            auto repair_result = builder.repair_failed_slices(
                 extraction.tensor, extraction.failed_pde,
                 extraction.failed_spline, axes);
             if (!repair_result.has_value()) {
@@ -308,10 +308,11 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         }
 
         // Fit coefficients
-        auto coeffs_result = builder.fit_coeffs_internal(extraction.tensor, axes);
-        if (!coeffs_result.has_value()) {
-            return std::unexpected(coeffs_result.error());
+        auto fit_result = builder.fit_coeffs(extraction.tensor, axes);
+        if (!fit_result.has_value()) {
+            return std::unexpected(fit_result.error());
         }
+        auto coeffs_result = std::move(fit_result->coefficients);
 
         // Build metadata
         PriceTableMetadata metadata;
@@ -322,7 +323,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         metadata.discrete_dividends = {};
 
         // Build surface
-        auto surface = PriceTableSurface<4>::build(axes, coeffs_result.value(), metadata);
+        auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);
         if (!surface.has_value()) {
             return std::unexpected(surface.error());
         }

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "tests/price_table_builder_test_access.hpp"
 #include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 namespace {
+
+using Access = testing::PriceTableBuilderAccess<4>;
 
 // Test to identify the ROOT CAUSE: grid width exceeds normalized chain solver limits
 TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
@@ -41,7 +44,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     axes.grids[2] = {0.20};
     axes.grids[3] = {0.05};
 
-    auto batch = builder_narrow.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder_narrow, axes);
     const auto& narrow_explicit = std::get<ExplicitPDEGrid>(config_narrow.pde_grid);
     GridSpec<double> narrow_grid = narrow_explicit.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), narrow_explicit.n_time);
@@ -64,7 +67,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     // Test 2: Use the original wide grid
     std::cout << "\n=== Test 2: Wide grid (width=6.0 > 5.8) ===" << std::endl;
     PriceTableBuilder<4> builder_wide(config);
-    auto batch2 = builder_wide.make_batch_for_testing(axes);
+    auto batch2 = Access::make_batch(builder_wide, axes);
     GridSpec<double> wide_grid = explicit_grid.grid_spec;
     auto time_domain2 = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), explicit_grid.n_time);
     std::optional<PDEGridSpec> custom_grid_wide =
