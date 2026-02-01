@@ -3,68 +3,206 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include <cmath>
+#include <memory_resource>
+#include <ql/quantlib.hpp>
 
 using namespace mango;
+namespace ql = QuantLib;
 
-TEST(DiscreteDividendAccuracyTest, PutPriceWithinReasonableBounds) {
+// ============================================================================
+// QuantLib reference: American option with discrete cash dividends
+// ============================================================================
+
+namespace {
+
+double price_american_discrete_div_quantlib(
+    double spot, double strike, double maturity,
+    double volatility, double rate,
+    const std::vector<std::pair<double, double>>& dividends,
+    bool is_call,
+    size_t grid_steps = 401,
+    size_t time_steps = 4000)
+{
+    ql::Date today = ql::Date::todaysDate();
+    ql::Settings::instance().evaluationDate() = today;
+
+    auto option_type = is_call ? ql::Option::Call : ql::Option::Put;
+    ql::Date maturity_date = today + ql::Period(
+        static_cast<int>(maturity * 365), ql::Days);
+
+    auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, maturity_date);
+    auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(option_type, strike);
+
+    ql::VanillaOption option(payoff, exercise);
+
+    // Convert dividend schedule to QuantLib DividendSchedule
+    ql::DividendSchedule div_schedule;
+    for (const auto& [t_cal, amount] : dividends) {
+        if (t_cal > 0.0 && t_cal < maturity) {
+            ql::Date div_date = today + ql::Period(
+                static_cast<int>(t_cal * 365), ql::Days);
+            div_schedule.push_back(
+                ql::ext::make_shared<ql::FixedDividend>(amount, div_date));
+        }
+    }
+
+    // Market data (zero continuous dividend yield — discrete only)
+    ql::Handle<ql::Quote> spot_h(ql::ext::make_shared<ql::SimpleQuote>(spot));
+    ql::Handle<ql::YieldTermStructure> rate_ts(
+        ql::ext::make_shared<ql::FlatForward>(today, rate, ql::Actual365Fixed()));
+    ql::Handle<ql::YieldTermStructure> div_ts(
+        ql::ext::make_shared<ql::FlatForward>(today, 0.0, ql::Actual365Fixed()));
+    ql::Handle<ql::BlackVolTermStructure> vol_ts(
+        ql::ext::make_shared<ql::BlackConstantVol>(
+            today, ql::NullCalendar(), volatility, ql::Actual365Fixed()));
+
+    auto process = ql::ext::make_shared<ql::BlackScholesMertonProcess>(
+        spot_h, div_ts, rate_ts, vol_ts);
+
+    // FD engine with discrete dividend schedule
+    option.setPricingEngine(
+        ql::ext::make_shared<ql::FdBlackScholesVanillaEngine>(
+            process, std::move(div_schedule), time_steps, grid_steps));
+
+    return option.NPV();
+}
+
+// Helper: solve with mango at a given accuracy profile
+double solve_mango(const PricingParams& params,
+                   const GridAccuracyParams& accuracy = GridAccuracyParams{}) {
+    auto [grid_spec, time_domain] = estimate_grid_for_option(params, accuracy);
+    size_t n = grid_spec.n_points();
+    std::pmr::vector<double> buffer(
+        PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+    auto ws = PDEWorkspace::from_buffer(buffer, n).value();
+    AmericanOptionSolver solver(params, ws, std::nullopt,
+                                std::make_pair(grid_spec, time_domain));
+    auto result = solver.solve();
+    return result->value();
+}
+
+}  // namespace
+
+// ============================================================================
+// QuantLib comparison tests
+// ============================================================================
+
+TEST(DiscreteDividendAccuracyTest, PutSingleDividendVsQuantLib) {
     // ATM put, S=100, K=100, T=1, sigma=0.20, r=0.05
-    // Discrete dividend: $3 at t=0.5
-    PricingParams with_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                           {{0.5, 3.0}});
-
-    auto result = solve_american_option_auto(with_div);
-    ASSERT_TRUE(result.has_value());
-    double price = result->value();
-
-    // Lower bound: American put on S-PV(D) (spot adjusted for PV of dividend)
-    // PV(D) = 3 * exp(-0.05 * 0.5) ≈ 2.926
-    // S_adj ≈ 97.07
-    PricingParams lower_bound(97.07, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20);
-    auto lb_result = solve_american_option_auto(lower_bound);
-    ASSERT_TRUE(lb_result.has_value());
-
-    // Price should be in a reasonable range
-    EXPECT_GT(price, 3.0) << "Put with dividend must be worth more than intrinsic bump";
-    EXPECT_LT(price, 25.0) << "Put price should be reasonable";
-
-    // Should be close to the spot-adjusted price (within ~15% relative)
-    double ref = lb_result->value();
-    EXPECT_NEAR(price, ref, ref * 0.15)
-        << "Discrete dividend put should be close to spot-adjusted reference";
-}
-
-TEST(DiscreteDividendAccuracyTest, LargeDividendStressTest) {
-    // Large dividend: $20 on S=100 (20% of spot)
-    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.30,
-                         {{0.5, 20.0}});
-
-    auto result = solve_american_option_auto(params);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_GT(result->value(), 0.0);
-    EXPECT_TRUE(std::isfinite(result->value()));
-}
-
-TEST(DiscreteDividendAccuracyTest, DividendNearExpiry) {
-    // Dividend very close to expiry (t=0.95, T=1.0)
+    // Single $3 dividend at t=0.5
     PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                         {{0.95, 2.0}});
+                         {{0.5, 3.0}});
 
-    auto result = solve_american_option_auto(params);
-    ASSERT_TRUE(result.has_value());
-    EXPECT_GT(result->value(), 0.0);
-    EXPECT_TRUE(std::isfinite(result->value()));
+    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double ql_price = price_american_discrete_div_quantlib(
+        100.0, 100.0, 1.0, 0.20, 0.05, {{0.5, 3.0}}, false);
+
+    double rel_err = std::abs(mango_price - ql_price) / ql_price;
+    EXPECT_LT(rel_err, 0.01)
+        << "mango=" << mango_price << " ql=" << ql_price
+        << " rel_err=" << rel_err * 100 << "%";
 }
+
+TEST(DiscreteDividendAccuracyTest, CallSingleDividendVsQuantLib) {
+    // ATM call, S=100, K=100, T=1, sigma=0.25, r=0.05
+    // Single $4 dividend at t=0.3
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.25,
+                         {{0.3, 4.0}});
+
+    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double ql_price = price_american_discrete_div_quantlib(
+        100.0, 100.0, 1.0, 0.25, 0.05, {{0.3, 4.0}}, true);
+
+    double rel_err = std::abs(mango_price - ql_price) / ql_price;
+    EXPECT_LT(rel_err, 0.01)
+        << "mango=" << mango_price << " ql=" << ql_price
+        << " rel_err=" << rel_err * 100 << "%";
+}
+
+TEST(DiscreteDividendAccuracyTest, MultipleDividendsVsQuantLib) {
+    // ITM put, two dividends
+    PricingParams params(95.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                         {{0.25, 2.0}, {0.75, 2.0}});
+
+    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double ql_price = price_american_discrete_div_quantlib(
+        95.0, 100.0, 1.0, 0.20, 0.05, {{0.25, 2.0}, {0.75, 2.0}}, false);
+
+    double rel_err = std::abs(mango_price - ql_price) / ql_price;
+    EXPECT_LT(rel_err, 0.01)
+        << "mango=" << mango_price << " ql=" << ql_price
+        << " rel_err=" << rel_err * 100 << "%";
+}
+
+TEST(DiscreteDividendAccuracyTest, LargeDividendVsQuantLib) {
+    // Large dividend: $15 on S=100 (15% of spot)
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.30,
+                         {{0.5, 15.0}});
+
+    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double ql_price = price_american_discrete_div_quantlib(
+        100.0, 100.0, 1.0, 0.30, 0.05, {{0.5, 15.0}}, false);
+
+    // Larger dividend → larger model differences, relax to 2%
+    double rel_err = std::abs(mango_price - ql_price) / ql_price;
+    EXPECT_LT(rel_err, 0.02)
+        << "mango=" << mango_price << " ql=" << ql_price
+        << " rel_err=" << rel_err * 100 << "%";
+}
+
+TEST(DiscreteDividendAccuracyTest, DividendNearExpiryVsQuantLib) {
+    // Dividend close to expiry (t=0.9, T=1.0)
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                         {{0.9, 2.0}});
+
+    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double ql_price = price_american_discrete_div_quantlib(
+        100.0, 100.0, 1.0, 0.20, 0.05, {{0.9, 2.0}}, false);
+
+    double rel_err = std::abs(mango_price - ql_price) / ql_price;
+    EXPECT_LT(rel_err, 0.01)
+        << "mango=" << mango_price << " ql=" << ql_price
+        << " rel_err=" << rel_err * 100 << "%";
+}
+
+// ============================================================================
+// Grid convergence: prices should converge as resolution increases
+// ============================================================================
+
+TEST(DiscreteDividendAccuracyTest, GridConvergence) {
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                         {{0.5, 3.0}});
+
+    double p_low  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Low));
+    double p_med  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double p_high = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::High));
+
+    // Successive differences should shrink
+    double diff_1 = std::abs(p_med - p_low);
+    double diff_2 = std::abs(p_high - p_med);
+
+    EXPECT_LT(diff_2, diff_1)
+        << "Grid convergence: |high-med|=" << diff_2
+        << " should be < |med-low|=" << diff_1;
+
+    // High and medium should agree to within 0.1%
+    double rel = std::abs(p_high - p_med) / p_high;
+    EXPECT_LT(rel, 0.001)
+        << "High and medium grids should agree to <0.1%: rel=" << rel * 100 << "%";
+}
+
+// ============================================================================
+// Structural tests (no QuantLib dependency)
+// ============================================================================
 
 TEST(DiscreteDividendAccuracyTest, EventAlignsWithMandatoryTimePoint) {
-    // Verify that the time grid actually contains the dividend date
     PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                          {{0.3, 2.0}});
 
     auto [grid_spec, td] = estimate_grid_for_option(params);
     auto pts = td.time_points();
 
-    // tau = T - t_cal = 1.0 - 0.3 = 0.7
-    double tau_div = 0.7;
+    double tau_div = 0.7;  // tau = T - t_cal = 1.0 - 0.3
     bool found = false;
     for (double p : pts) {
         if (std::abs(p - tau_div) < 1e-14) { found = true; break; }
@@ -73,14 +211,12 @@ TEST(DiscreteDividendAccuracyTest, EventAlignsWithMandatoryTimePoint) {
 }
 
 TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
-    // Dividends at t=0 or t=T should be silently ignored (no crash)
     PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                          {{0.0, 5.0}, {1.0, 5.0}});
 
     auto result = solve_american_option_auto(params);
     ASSERT_TRUE(result.has_value());
 
-    // Should produce the same price as no dividends
     PricingParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20);
     auto result_no_div = solve_american_option_auto(no_div);
     ASSERT_TRUE(result_no_div.has_value());
@@ -90,8 +226,6 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
 }
 
 TEST(DiscreteDividendAccuracyTest, SharedGridBatchIncludesDividendTimePoints) {
-    // Regression: compute_global_grid_for_batch must include mandatory points
-    // for dividend tau values so shared-grid batch solves land on dividend dates
     std::vector<PricingParams> batch;
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
                        std::vector<std::pair<double, double>>{{0.4, 3.0}});
@@ -101,8 +235,7 @@ TEST(DiscreteDividendAccuracyTest, SharedGridBatchIncludesDividendTimePoints) {
     auto [grid_spec, td] = compute_global_grid_for_batch(batch);
     auto pts = td.time_points();
 
-    // tau = T - t_cal = 1.0 - 0.4 = 0.6
-    double tau_div = 0.6;
+    double tau_div = 0.6;  // tau = T - t_cal = 1.0 - 0.4
     bool found = false;
     for (double p : pts) {
         if (std::abs(p - tau_div) < 1e-14) { found = true; break; }
