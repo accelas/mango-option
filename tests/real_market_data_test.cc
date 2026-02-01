@@ -20,12 +20,12 @@ namespace {
 
 // Helper to convert market data to solver params
 PricingParams make_params(const bdata::RealOptionData& opt, double vol = 0.20) {
-    return PricingParams(OptionSpec{.spot = bdata::SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = bdata::RISK_FREE_RATE, .dividend_yield = bdata::DIVIDEND_YIELD, .type = opt.is_call ? OptionType::CALL : OptionType::PUT}, vol);
+    return PricingParams(OptionSpec{.spot = bdata::SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = bdata::RISK_FREE_RATE, .dividend_yield = bdata::DIVIDEND_YIELD, .option_type = opt.is_call ? OptionType::CALL : OptionType::PUT}, vol);
 }
 
 // Helper to create IVQuery from real data
 IVQuery make_iv_query(const bdata::RealOptionData& opt) {
-    return IVQuery(OptionSpec{.spot = bdata::SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = bdata::RISK_FREE_RATE, .dividend_yield = bdata::DIVIDEND_YIELD, .type = opt.is_call ? OptionType::CALL : OptionType::PUT}, opt.market_price);
+    return IVQuery(OptionSpec{.spot = bdata::SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = bdata::RISK_FREE_RATE, .dividend_yield = bdata::DIVIDEND_YIELD, .option_type = opt.is_call ? OptionType::CALL : OptionType::PUT}, opt.market_price);
 }
 
 }  // namespace

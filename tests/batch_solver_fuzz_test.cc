@@ -53,7 +53,7 @@ void BatchSolverNeverCrashes(
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike + i * strike_step;
         if (K <= 0) continue;
-        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, volatility));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, volatility));
     }
 
     if (params.empty()) return;
@@ -98,7 +98,7 @@ void OptionPricesNonNegative(
     if (spot <= 0 || strike <= 0 || maturity <= 0 || volatility <= 0) return;
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -143,7 +143,7 @@ void AmericanOptionLowerBounds(
     if (moneyness < 0.5 || moneyness > 2.0) return;
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -191,7 +191,7 @@ void GridSizeConsistency(size_t n_points, size_t batch_size, bool use_shared_gri
 
     std::vector<PricingParams> params;
     for (size_t i = 0; i < batch_size; ++i) {
-        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 90.0 + i * 2.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 90.0 + i * 2.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
@@ -243,8 +243,8 @@ void PutPriceMonotonicInStrike(
     if (strike2 - strike1 < 1.0) return;  // Need meaningful difference
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike1, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, volatility));
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike2, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike1, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike2, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -291,8 +291,8 @@ void CallPriceMonotonicInStrike(
     if (strike2 - strike1 < 1.0) return;
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike1, .maturity = maturity, .rate = rate, .type = OptionType::CALL}, volatility));
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike2, .maturity = maturity, .rate = rate, .type = OptionType::CALL}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike1, .maturity = maturity, .rate = rate, .option_type = OptionType::CALL}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike2, .maturity = maturity, .rate = rate, .option_type = OptionType::CALL}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -340,8 +340,8 @@ void PriceIncreasesWithVolatility(
     if (vol2 - vol1 < 0.05) return;  // Need meaningful difference
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, vol1));
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, vol2));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, vol1));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, vol2));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -390,8 +390,8 @@ void PriceIncreasesWithMaturity(
     if (mat2 - mat1 < 0.1) return;
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = mat1, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = mat2, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = mat1, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = mat2, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -434,7 +434,7 @@ void DeltaWithinBounds(
     if (spot <= 0 || strike <= 0 || maturity < 0.01 || volatility < 0.05) return;
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -484,7 +484,7 @@ void GammaNonNegative(
     if (!is_call && moneyness < 0.7) return; // Deep ITM put
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);
@@ -525,7 +525,7 @@ void ExtremeParametersNoExceptions(
     if (spot <= 0 || strike <= 0 || maturity <= 0 || volatility <= 0) return;
 
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, volatility));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     // This should not throw or crash
@@ -574,7 +574,7 @@ void NormalizedVsRegularConsistency(
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike_base + i * 2.0;
         if (K <= 0) continue;
-        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
     }
 
     if (params.size() < 2) return;
@@ -640,11 +640,11 @@ void ScaleInvarianceProperty(
 
     // Original option
     std::vector<PricingParams> params1;
-    params1.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params1.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     // Scaled option (multiply spot and strike by scale_factor)
     std::vector<PricingParams> params2;
-    params2.push_back(PricingParams(OptionSpec{.spot = spot * scale_factor, .strike = strike * scale_factor, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+    params2.push_back(PricingParams(OptionSpec{.spot = spot * scale_factor, .strike = strike * scale_factor, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
 
     BatchAmericanOptionSolver solver;
     auto results1 = solver.solve_batch(params1, false);
@@ -700,7 +700,7 @@ void PDEGroupingConsistency(
         double spot = spot_base + i * 3.0;
         double strike = 100.0;  // Fixed strike for all
         if (spot <= 0) continue;
-        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = is_call ? OptionType::CALL : OptionType::PUT}, volatility));
     }
 
     if (params.size() < 3) return;
@@ -755,7 +755,7 @@ void WideMoneynessCoverage(
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike_min + i * strike_step;
         if (K <= 0) continue;
-        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, volatility));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, volatility));
     }
 
     if (params.size() < 3) return;
@@ -812,8 +812,8 @@ void MixedPDEParametersHandled(
 
     // Create batch with different volatilities (cannot share PDE)
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, vol1));
-    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike * 1.05, .maturity = maturity, .rate = rate, .type = OptionType::PUT}, vol2));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, vol1));
+    params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike * 1.05, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT}, vol2));
 
     BatchAmericanOptionSolver solver;
     solver.set_use_normalized(true);
@@ -870,7 +870,7 @@ void NormalizedChainNoNaNInf(
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike_base + i * 2.0;
         if (K <= 0) continue;
-        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend, .type = OptionType::PUT}, volatility));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend, .option_type = OptionType::PUT}, volatility));
     }
 
     if (params.empty()) return;
@@ -917,7 +917,7 @@ FUZZ_TEST(BatchSolverFuzz, NormalizedChainNoNaNInf)
 TEST(BatchSolverFuzz, RegressionDeepITMCallNegativeGamma) {
     // This test documents the known numerical issue
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = 108.22, .strike = 80.0, .maturity = 1.70, .rate = 0.08, .type = OptionType::CALL}, 0.10));
+    params.push_back(PricingParams(OptionSpec{.spot = 108.22, .strike = 80.0, .maturity = 1.70, .rate = 0.08, .option_type = OptionType::CALL}, 0.10));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, false);

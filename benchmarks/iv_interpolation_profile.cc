@@ -116,8 +116,6 @@ const AnalyticSurfaceFixture& GetSurface() {
         // Create metadata
         PriceTableMetadata meta{
             .K_ref = fixture_ptr->K_ref,
-            .dividend_yield = 0.0,
-            .discrete_dividends = {}
         };
 
         // Create surface with coefficients directly

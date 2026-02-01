@@ -201,16 +201,18 @@ mango::PricingParams params{
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-// The make_iv_solver factory handles discrete dividends automatically
+// The make_iv_solver factory dispatches on the path variant
 mango::IVSolverConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
-    .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},  // (time, amount)
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-    .maturity = 1.0,
     .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
     .rate_grid = {0.02, 0.03, 0.05, 0.07},
-    .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    .path = mango::SegmentedIVPath{
+        .maturity = 1.0,
+        .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    },
 };
 
 auto solver = mango::make_iv_solver(config);
@@ -560,16 +562,31 @@ The `make_iv_solver` factory builds an interpolated IV solver that automatically
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-// Configure with discrete dividends
+// Standard path (no discrete dividends):
 mango::IVSolverConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
-    .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},  // (time, amount)
+    .dividend_yield = 0.02,
+    .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
+    .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
+    .rate_grid = {0.02, 0.03, 0.05, 0.07},
+    .path = mango::StandardIVPath{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+};
+
+// Segmented path (with discrete dividends):
+mango::IVSolverConfig div_config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-    .maturity = 1.0,
     .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
     .rate_grid = {0.02, 0.03, 0.05, 0.07},
-    .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    .path = mango::SegmentedIVPath{
+        .maturity = 1.0,
+        .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    },
 };
 
 auto solver = mango::make_iv_solver(config);
@@ -600,8 +617,8 @@ auto batch = solver->solve_batch(queries);
 
 ### Configuration Notes
 
-- **No dividends:** Use `maturity_grid` (vector of maturities) instead of `maturity` (single scalar). The factory takes the standard single-surface path.
-- **With dividends:** Use `maturity` (single expiry). The factory segments the time axis at each dividend date and chains surfaces backward.
+- **No dividends:** Use `StandardIVPath` with a `maturity_grid` (vector of maturities). The factory takes the standard single-surface path.
+- **With dividends:** Use `SegmentedIVPath` with a single `maturity`, `discrete_dividends`, and optional `kref_config`. The factory segments the time axis at each dividend date and chains surfaces backward.
 - **`kref_config`** is optional. When omitted, it defaults to three reference strikes at {0.8S, S, 1.2S}. Cash dividends break price homogeneity in strike, so multiple K_ref surfaces are built and interpolated to maintain accuracy.
 
 ---

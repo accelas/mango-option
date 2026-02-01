@@ -19,7 +19,7 @@ public:
 
     struct Config {
         std::vector<Segment> segments;  // ordered: last segment first (index 0 has lowest τ)
-        std::vector<Dividend> dividends;
+        std::vector<Dividend> discrete_dividends;
         double K_ref;
         double T;  // expiry in calendar time
     };

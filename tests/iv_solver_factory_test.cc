@@ -10,9 +10,9 @@ TEST(IVSolverFactoryTest, NoDividendsUsesStandardPath) {
         .spot = 100.0,
         .dividend_yield = 0.02,
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
         .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate_grid = {0.02, 0.03, 0.05, 0.07},
+        .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
 
     auto solver = make_iv_solver(config);
@@ -24,7 +24,7 @@ TEST(IVSolverFactoryTest, NoDividendsUsesStandardPath) {
     query.maturity = 0.5;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.02;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = 6.0;
 
     auto result = solver->solve(query);
@@ -39,12 +39,14 @@ TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
     IVSolverConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
-        .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
         .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-        .maturity = 1.0,
         .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate_grid = {0.02, 0.03, 0.05, 0.07},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        .path = SegmentedIVPath{
+            .maturity = 1.0,
+            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+            .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        },
     };
 
     auto solver = make_iv_solver(config);
@@ -56,7 +58,7 @@ TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
     query.maturity = 0.5;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = 7.0;
 
     auto result = solver->solve(query);
@@ -72,9 +74,9 @@ TEST(IVSolverFactoryTest, BatchSolveWorks) {
         .spot = 100.0,
         .dividend_yield = 0.02,
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
         .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate_grid = {0.02, 0.03, 0.05, 0.07},
+        .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
 
     auto solver = make_iv_solver(config);
@@ -87,7 +89,7 @@ TEST(IVSolverFactoryTest, BatchSolveWorks) {
         q.maturity = 0.5;
         q.rate = RateSpec{0.05};
         q.dividend_yield = 0.02;
-        q.type = OptionType::PUT;
+        q.option_type = OptionType::PUT;
         q.market_price = 6.0;
     }
 

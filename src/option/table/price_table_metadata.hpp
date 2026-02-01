@@ -23,11 +23,10 @@ enum class SurfaceContent : uint8_t {
 /// better B-spline interpolation, but the user-facing API remains in moneyness.
 struct PriceTableMetadata {
     double K_ref = 0.0;                                     ///< Reference strike price
-    double dividend_yield = 0.0;                            ///< Continuous dividend yield
+    DividendSpec dividends;                                  ///< Continuous yield + discrete schedule
     double m_min = 0.0;                                     ///< Minimum moneyness (S/K)
     double m_max = 0.0;                                     ///< Maximum moneyness (S/K)
     SurfaceContent content = SurfaceContent::EarlyExercisePremium;  ///< What tensor stores
-    std::vector<Dividend> discrete_dividends;  ///< Discrete dividend schedule
 };
 
 } // namespace mango

@@ -19,8 +19,7 @@ public:
     struct Config {
         double K_ref;
         OptionType option_type;
-        double dividend_yield = 0.0;
-        std::vector<Dividend> dividends;  // (calendar_time, amount)
+        DividendSpec dividends;  ///< Continuous yield + discrete schedule
         std::vector<double> moneyness_grid;
         double maturity;  // T in years
         std::vector<double> vol_grid;

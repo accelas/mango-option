@@ -257,49 +257,6 @@ private:
         std::optional<PDEGridSpec> custom_grid = std::nullopt);
 };
 
-/// Solve a single American option with automatic grid determination
-///
-/// Convenience API that automatically determines optimal grid parameters
-/// based on option characteristics, eliminating need for manual grid specification.
-///
-/// Note: Allocates temporary workspace buffer (discarded after solve).
-/// For reusable workspaces, caller should manage buffer and use PDEWorkspace directly.
-///
-/// @param params Option parameters
-/// @return Expected containing result on success, error on failure
-inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
-    const PricingParams& params)
-{
-    // Estimate grid for this option
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
-    (void)time_domain;  // time_domain not used here; solver will reconstruct it
-
-    // Allocate workspace buffer (local, temporary)
-    size_t n = grid_spec.n_points();
-    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-
-    // Create workspace spans from buffer
-    auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
-    if (!workspace_result.has_value()) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            // error code set above + workspace_result.error(),
-            .iterations = 0
-        });
-    }
-
-    // Create and solve using PDEWorkspace API
-    // Buffer stays alive during solve(), result contains Grid with solution
-    auto solver_result = AmericanOptionSolver::create(params, workspace_result.value());
-    if (!solver_result) {
-        return std::unexpected(SolverError{
-            .code = SolverErrorCode::InvalidConfiguration,
-            .iterations = 0
-        });
-    }
-    return solver_result.value().solve();
-}
-
 }  // namespace mango
 
 #endif  // MANGO_AMERICAN_OPTION_BATCH_HPP

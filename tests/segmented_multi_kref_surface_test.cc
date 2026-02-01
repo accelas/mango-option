@@ -14,8 +14,7 @@ static SegmentedPriceSurface build_surface(double K_ref) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = K_ref,
         .option_type = OptionType::PUT,
-        .dividend_yield = 0.0,
-        .dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},

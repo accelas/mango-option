@@ -106,7 +106,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 1: Filter and sort dividends
     // =====================================================================
-    auto dividends = filter_dividends(config.dividends, T);
+    auto dividends = filter_dividends(config.dividends.discrete_dividends, T);
 
     // =====================================================================
     // Step 2: Compute segment boundaries in τ-space
@@ -192,7 +192,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto setup = PriceTableBuilder<4>::from_vectors(
             expanded_m_grid, local_tau, config.vol_grid, config.rate_grid,
             K_ref, GridAccuracyParams{}, config.option_type,
-            config.dividend_yield);
+            config.dividends.dividend_yield);
 
         if (!setup.has_value()) {
             return std::unexpected(ValidationError{
@@ -397,7 +397,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // Build PriceTableSurface manually
             PriceTableMetadata metadata{
                 .K_ref = K_ref,
-                .dividend_yield = config.dividend_yield,
+                .dividends = {.dividend_yield = config.dividends.dividend_yield},
                 .content = content,
             };
 
@@ -454,7 +454,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     SegmentedPriceSurface::Config sps_config;
     sps_config.segments = std::move(segments);
-    sps_config.dividends = dividends;
+    sps_config.discrete_dividends = dividends;
     sps_config.K_ref = K_ref;
     sps_config.T = T;
 

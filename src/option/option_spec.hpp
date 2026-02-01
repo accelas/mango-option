@@ -120,6 +120,15 @@ struct Dividend {
     double amount = 0.0;         ///< Dollar amount
 };
 
+/// Shared dividend specification: continuous yield + discrete schedule
+///
+/// Bundles both continuous dividend yield and discrete dividend events
+/// into a single struct for config objects that need both.
+struct DividendSpec {
+    double dividend_yield = 0.0;              ///< Continuous dividend yield (annualized, decimal)
+    std::vector<Dividend> discrete_dividends; ///< Discrete dividend schedule
+};
+
 /**
  * @brief Complete specification of an option contract
  *
@@ -139,7 +148,7 @@ struct OptionSpec {
     double maturity = 0.0;         ///< Time to maturity in years (T)
     RateSpec rate = 0.0;           ///< Risk-free rate (constant or yield curve)
     double dividend_yield = 0.0;   ///< Continuous dividend yield (annualized, decimal)
-    OptionType type = OptionType::CALL; ///< CALL or PUT (default CALL)
+    OptionType option_type = OptionType::CALL; ///< CALL or PUT (default CALL)
 };
 
 /**

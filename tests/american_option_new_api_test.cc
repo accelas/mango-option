@@ -25,7 +25,7 @@ protected:
 
 TEST_F(AmericanOptionNewAPITest, SolveWithPDEWorkspace) {
     PricingParams params(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     // Create workspace matching grid size
     size_t n_space = 101;
@@ -54,7 +54,7 @@ TEST_F(AmericanOptionNewAPITest, SolveWithPDEWorkspace) {
 
 TEST_F(AmericanOptionNewAPITest, SolveWithSnapshots) {
     PricingParams params(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     size_t n_space = 101;
     size_t workspace_size = PDEWorkspace::required_size(n_space);
@@ -80,7 +80,7 @@ TEST_F(AmericanOptionNewAPITest, SolveWithSnapshots) {
 
 TEST_F(AmericanOptionNewAPITest, CallOptionWithNewAPI) {
     PricingParams params(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::CALL}, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::CALL}, 0.20);
 
     size_t n_space = 101;
     size_t workspace_size = PDEWorkspace::required_size(n_space);
@@ -99,7 +99,7 @@ TEST_F(AmericanOptionNewAPITest, CallOptionWithNewAPI) {
 
 TEST_F(AmericanOptionNewAPITest, ValueAtInterpolation) {
     PricingParams params(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     size_t n_space = 101;
     size_t workspace_size = PDEWorkspace::required_size(n_space);
@@ -125,7 +125,7 @@ TEST_F(AmericanOptionNewAPITest, ValueAtInterpolation) {
 
 TEST_F(AmericanOptionNewAPITest, GreeksComputation) {
     PricingParams params(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     size_t n_space = 101;
     size_t workspace_size = PDEWorkspace::required_size(n_space);

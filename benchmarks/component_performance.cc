@@ -92,7 +92,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 // ============================================================================
 
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
-    PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20};
+    PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -123,7 +123,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
-    PricingParams params{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.30};
+    PricingParams params{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.30};
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -154,7 +154,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
-    PricingParams params{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.25};
+    PricingParams params{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.25};
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -186,7 +186,7 @@ BENCHMARK(BM_AmericanPut_ITM_2Y);
 
 static void BM_AmericanCall_WithDividends(benchmark::State& state) {
     PricingParams params{
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::CALL},
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::CALL},
         0.20,
         {Dividend{0.25, 2.0}, Dividend{0.5, 2.0}, Dividend{0.75, 2.0}}
     };
@@ -224,7 +224,7 @@ BENCHMARK(BM_AmericanCall_WithDividends);
 // ============================================================================
 
 static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
-    IVQuery query{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 6.0};
+    IVQuery query{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 6.0};
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
@@ -242,7 +242,7 @@ static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
 BENCHMARK(BM_ImpliedVol_ATM_Put);
 
 static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
-    IVQuery query{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .type = OptionType::PUT}, 0.80};
+    IVQuery query{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .option_type = OptionType::PUT}, 0.80};
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
@@ -260,7 +260,7 @@ static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
 BENCHMARK(BM_ImpliedVol_OTM_Put);
 
 static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
-    IVQuery query{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .type = OptionType::PUT}, 15.0};
+    IVQuery query{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0};
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
@@ -301,7 +301,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     constexpr double sigma_true = 0.20;
 
     // Use a representative ATM put price for the IV query
-    IVQuery query{OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .type = OptionType::PUT},
+    IVQuery query{OptionSpec{.spot = spot, .strike = strike, .maturity = maturity, .rate = rate, .option_type = OptionType::PUT},
                   analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT)};
 
     for (auto _ : state) {
@@ -321,7 +321,7 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 // ============================================================================
 
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
-    PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20};
+    PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -382,7 +382,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;  // Strikes from 90 to 90 + batch_size*0.5
-        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     auto [grid_spec, time_domain] = compute_global_grid_for_batch(batch);
@@ -434,7 +434,7 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double market_price = 5.0 + i * 0.1;  // Different prices
-        batch.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, market_price));
+        batch.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, market_price));
     }
 
     IVSolverFDMConfig config;

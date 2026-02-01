@@ -26,7 +26,7 @@ double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
     // For deep ITM options, time value is small, so high vol is unlikely
 
     double intrinsic_value;
-    if (query.type == OptionType::CALL) {
+    if (query.option_type == OptionType::CALL) {
         intrinsic_value = std::max(query.spot - query.strike, 0.0);
     } else {
         intrinsic_value = std::max(query.strike - query.spot, 0.0);
@@ -62,7 +62,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     option_params.volatility = volatility;
     option_params.rate = query.rate;
     option_params.dividend_yield = query.dividend_yield;
-    option_params.type = query.type;
+    option_params.option_type = query.option_type;
 
     // Resolve grid from config
     GridSpec<double> grid_spec = GridSpec<double>::uniform(0.0, 1.0, 10).value();  // Will be replaced
@@ -155,7 +155,7 @@ IVSolverFDM::validate_query(const IVQuery& query) const {
 std::expected<IVSuccess, IVError>
 IVSolverFDM::solve_brent(const IVQuery& query) const {
     // Adaptive bounds logic
-    double intrinsic = (query.type == OptionType::CALL)
+    double intrinsic = (query.option_type == OptionType::CALL)
         ? std::max(0.0, query.spot - query.strike)
         : std::max(0.0, query.strike - query.spot);
 

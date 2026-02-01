@@ -229,7 +229,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     auto run_once = [&]() -> double {
@@ -291,7 +291,7 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -357,7 +357,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     PricingParams sample_params(
         OptionSpec{.spot = query.spot, .strike = query.strike,
             .maturity = query.maturity, .rate = query.rate,
-            .dividend_yield = query.dividend_yield, .type = query.type},
+            .dividend_yield = query.dividend_yield, .option_type = query.option_type},
         0.20);  // Typical IV ~20%
     auto [grid_spec, time_domain] = estimate_grid_for_option(sample_params);
 

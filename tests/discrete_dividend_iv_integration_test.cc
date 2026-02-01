@@ -20,12 +20,14 @@ protected:
         IVSolverConfig config{
             .option_type = OptionType::PUT,
             .spot = 100.0,
-            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
             .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-            .maturity = 1.0,
             .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
             .rate_grid = {0.02, 0.03, 0.05, 0.07},
-            // Use default K_ref config (9 log-spaced points)
+            .path = SegmentedIVPath{
+                .maturity = 1.0,
+                .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+                // Use default K_ref config (9 log-spaced points)
+            },
         };
         auto result = make_iv_solver(config);
         ASSERT_TRUE(result.has_value()) << "Failed to build solver";
@@ -39,7 +41,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     // Price an ATM put at known vol=0.20 using FDM
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
-            .rate = 0.05, .type = OptionType::PUT},
+            .rate = 0.05, .option_type = OptionType::PUT},
         0.20, {{.calendar_time = 0.5, .amount = 2.0}});
 
     auto price_result = solve_american_option_auto(params);
@@ -54,7 +56,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     query.maturity = 0.8;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = market_price;
 
     auto iv_result = solver_->solve(query);
@@ -72,7 +74,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     // OTM put: strike=90, vol=0.25
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 0.8,
-            .rate = 0.05, .type = OptionType::PUT},
+            .rate = 0.05, .option_type = OptionType::PUT},
         0.25, {{.calendar_time = 0.5, .amount = 2.0}});
 
     auto price_result = solve_american_option_auto(params);
@@ -85,7 +87,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     query.maturity = 0.8;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
@@ -108,7 +110,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
 
         PricingParams params(
             OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = tau,
-                .rate = 0.05, .type = OptionType::PUT}, 0.20, divs);
+                .rate = 0.05, .option_type = OptionType::PUT}, 0.20, divs);
 
         auto price_result = solve_american_option_auto(params);
         ASSERT_TRUE(price_result.has_value());
@@ -120,7 +122,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
         query.maturity = tau;
         query.rate = RateSpec{0.05};
         query.dividend_yield = 0.0;
-        query.type = OptionType::PUT;
+        query.option_type = OptionType::PUT;
         query.market_price = price_result->value();
 
         auto iv_result = solver_->solve(query);
@@ -141,7 +143,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
     // reasonable results for maturities before the first dividend.
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.3,
-            .rate = 0.05, .type = OptionType::PUT}, 0.20);
+            .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());
@@ -153,7 +155,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
     query.maturity = 0.3;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
@@ -170,7 +172,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
     // High vol: vol=0.35
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
-            .rate = 0.03, .type = OptionType::PUT},
+            .rate = 0.03, .option_type = OptionType::PUT},
         0.35, {{.calendar_time = 0.5, .amount = 2.0}});
 
     auto price_result = solve_american_option_auto(params);
@@ -183,7 +185,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
     query.maturity = 0.8;
     query.rate = RateSpec{0.03};
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
@@ -205,9 +207,9 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         .spot = 100.0,
         .dividend_yield = 0.02,
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
         .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate_grid = {0.02, 0.03, 0.05, 0.07},
+        .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
     auto solver = make_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "No-dividend factory should succeed";
@@ -215,7 +217,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
     // Price an option with continuous dividends via FDM for round-trip test
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
-            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());
@@ -226,7 +228,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
     query.maturity = 0.5;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.02;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = price_result->value();
 
     auto result = solver->solve(query);

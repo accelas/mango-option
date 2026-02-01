@@ -81,9 +81,9 @@ TEST(IVSolverPropertyTest, NeverProducesNaNOrInf) {
     config.root_config.tolerance = 1e-6;
 
     std::vector<IVQuery> queries = {
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 10.0),
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::CALL}, 10.0),
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 80.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 5.0),
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0),
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::CALL}, 10.0),
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 80.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 5.0),
     };
 
     IVSolverFDM solver(config);

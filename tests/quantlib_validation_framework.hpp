@@ -139,7 +139,7 @@ inline PricingValidationResult validate_pricing(
         OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
             .maturity = scenario.maturity, .rate = scenario.rate,
             .dividend_yield = scenario.dividend_yield,
-            .type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
+            .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         scenario.volatility);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
@@ -219,7 +219,7 @@ inline IVValidationResult validate_iv_fdm(
         OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
             .maturity = scenario.maturity, .rate = scenario.rate,
             .dividend_yield = scenario.dividend_yield,
-            .type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
+            .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         ql_result.price);
 
     IVSolverFDMConfig config;

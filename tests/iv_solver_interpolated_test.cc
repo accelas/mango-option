@@ -56,7 +56,7 @@ TEST_F(IVSolverInterpolatedTest, CreateFromAmericanPriceSurface) {
 
 TEST_F(IVSolverInterpolatedTest, CreateWithConfig) {
     IVSolverInterpolatedConfig config{
-        .max_iterations = 100,
+        .max_iter = 100,
         .tolerance = 1e-8,
         .sigma_min = 0.05,
         .sigma_max = 2.0
@@ -73,7 +73,7 @@ TEST_F(IVSolverInterpolatedTest, SolveATMPut) {
 
     // ATM put: S = K = 100, maturity = 1y, rate = 5%
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 8.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 8.0);
 
     auto result = solver.solve(query);
     // With precomputed data, may or may not converge - test that it returns a result
@@ -95,7 +95,7 @@ TEST_F(IVSolverInterpolatedTest, SolveITMPut) {
 
     // ITM put: S = 90, K = 100 (m = 0.9), maturity = 1y
     IVQuery query(
-        OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 15.0);
+        OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0);
 
     auto result = solver.solve(query);
     if (result.has_value()) {
@@ -112,7 +112,7 @@ TEST_F(IVSolverInterpolatedTest, SolveOTMPut) {
 
     // OTM put: S = 110, K = 100 (m = 1.1), maturity = 1y
     IVQuery query(
-        OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 3.0);
+        OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0);
 
     auto result = solver.solve(query);
     if (result.has_value()) {
@@ -129,7 +129,7 @@ TEST_F(IVSolverInterpolatedTest, RejectsInvalidQuery) {
 
     // Invalid: negative spot
     IVQuery invalid_query(
-        OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
+        OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
     auto result = solver.solve(invalid_query);
     EXPECT_FALSE(result.has_value());
@@ -142,7 +142,7 @@ TEST_F(IVSolverInterpolatedTest, RejectsNegativeMarketPrice) {
     auto& solver = solver_result.value();
 
     IVQuery invalid_query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, -5.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, -5.0);
 
     auto result = solver.solve(invalid_query);
     EXPECT_FALSE(result.has_value());
@@ -160,7 +160,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolve) {
     for (double strike : {90.0, 95.0, 100.0, 105.0, 110.0}) {
         double m = 100.0 / strike;  // moneyness
         double price = (m < 1.0) ? 12.0 : (m > 1.0 ? 4.0 : 8.0);  // Rough prices
-        queries.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, price));
+        queries.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, price));
     }
 
     auto batch_result = solver.solve_batch(queries);
@@ -182,7 +182,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolveAllSucceed) {
 
     // Single valid query in batch
     std::vector<IVQuery> queries = {
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 8.0)
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 8.0)
     };
 
     auto batch_result = solver.solve_batch(queries);
@@ -195,7 +195,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolveAllSucceed) {
 
 TEST_F(IVSolverInterpolatedTest, ConvergenceWithinIterations) {
     IVSolverInterpolatedConfig config{
-        .max_iterations = 10,  // Limited iterations
+        .max_iter = 10,  // Limited iterations
         .tolerance = 1e-6
     };
 
@@ -204,7 +204,7 @@ TEST_F(IVSolverInterpolatedTest, ConvergenceWithinIterations) {
     auto& solver = solver_result.value();
 
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 8.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 8.0);
     auto result = solver.solve(query);
 
     if (result.has_value()) {
@@ -223,11 +223,9 @@ TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
     std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
     PriceTableMetadata eep_meta{
         .K_ref = 100.0,
-        .dividend_yield = 0.0,
         .m_min = 0.8,
         .m_max = 1.2,
         .content = SurfaceContent::EarlyExercisePremium,
-        .discrete_dividends = {}
     };
 
     auto eep_surface = PriceTableSurface<4>::build(eep_axes, eep_coeffs, eep_meta);
@@ -240,7 +238,7 @@ TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
     ASSERT_TRUE(solver.has_value());
 
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 8.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 8.0);
 
     auto result = solver->solve(query);
     // With synthetic data, accept success or graceful failure
@@ -259,8 +257,7 @@ TEST_F(IVSolverInterpolatedTest, WorksWithSegmentedMultiKRefSurface) {
     SegmentedMultiKRefBuilder::Config config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
-        .dividend_yield = 0.0,
-        .dividends = {{.calendar_time = 0.5, .amount = 2.0}},  // One discrete dividend at t=0.5
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},  // One discrete dividend at t=0.5
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.10, 0.20, 0.30, 0.40},
@@ -285,7 +282,7 @@ TEST_F(IVSolverInterpolatedTest, WorksWithSegmentedMultiKRefSurface) {
 
     // Solve an IV query
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8, .rate = 0.05, .type = OptionType::PUT}, 8.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8, .rate = 0.05, .option_type = OptionType::PUT}, 8.0);
 
     auto result = solver.solve(query);
     // With synthetic data from segmented builder, accept success or graceful failure
@@ -342,7 +339,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
 
     // Query with CALL type against a PUT surface — must fail
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 8.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 8.0);
 
     auto iv_result = solver->solve(query);
     ASSERT_FALSE(iv_result.has_value())
@@ -379,7 +376,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
 
     // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.05, .type = OptionType::PUT}, 8.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.05, .option_type = OptionType::PUT}, 8.0);
 
     auto iv_result = solver->solve(query);
     ASSERT_FALSE(iv_result.has_value())

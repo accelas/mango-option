@@ -11,7 +11,7 @@ TEST(BatchAmericanOptionSolver, NormalizedEligibility) {
     std::vector<double> strikes = {90, 95, 100, 105, 110};
 
     for (double K : strikes) {
-        eligible_params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        eligible_params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -35,7 +35,7 @@ TEST(BatchAmericanOptionSolver, NormalizedIneligibleDividends) {
     double spot = 100.0;
 
     for (int i = 0; i < 5; ++i) {
-        ineligible_params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = 90.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20, {{0.5, 2.0}}));
+        ineligible_params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = 90.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20, {{0.5, 2.0}}));
     }
 
     BatchAmericanOptionSolver solver;
@@ -52,7 +52,7 @@ TEST(BatchAmericanOptionSolver, DisableNormalizedOptimization) {
     double spot = 100.0;
 
     for (int i = 0; i < 5; ++i) {
-        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = 90.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = 90.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -75,7 +75,7 @@ TEST(AmericanOptionBatch, RegressionIssue272_WorkspaceGridSizeConsistency) {
     // Create a batch that uses shared grid with varying strikes
     std::vector<PricingParams> params;
     for (double K : {85.0, 92.5, 100.0, 107.5, 115.0}) {
-        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -100,7 +100,7 @@ TEST(AmericanOptionBatch, RegressionIssue272_WorkspaceGridSizeConsistency) {
 TEST(AmericanOptionBatch, RegressionIssue272_PerOptionGridConsistency) {
     std::vector<PricingParams> params;
     for (double K : {90.0, 100.0, 110.0}) {
-        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;

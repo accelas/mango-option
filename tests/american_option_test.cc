@@ -38,7 +38,7 @@ protected:
 TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0,
-            .rate = 0.03, .type = OptionType::PUT}, 0.25);
+            .rate = 0.03, .option_type = OptionType::PUT}, 0.25);
 
     // Use convenience function that automatically sizes the workspace
     auto result = solve_american_option_auto(params);
@@ -49,7 +49,7 @@ TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
 TEST_F(AmericanOptionPricingTest, PutValueRespectsIntrinsicBound) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0,
-            .rate = 0.03, .type = OptionType::PUT}, 0.25);
+            .rate = 0.03, .option_type = OptionType::PUT}, 0.25);
 
     AmericanOptionResult result = Solve(params);
     ASSERT_TRUE(result.converged);
@@ -71,7 +71,7 @@ TEST_F(AmericanOptionPricingTest, CallValueIncreasesWithVolatility) {
         double vol = volatilities[i];
         PricingParams params(
             OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
-                .rate = rate, .type = OptionType::CALL}, vol);
+                .rate = rate, .option_type = OptionType::CALL}, vol);
         AmericanOptionResult result = Solve(params);
         ASSERT_TRUE(result.converged);
 
@@ -91,7 +91,7 @@ TEST_F(AmericanOptionPricingTest, PutValueIncreasesWithMaturity) {
     for (double maturity : maturities) {
         PricingParams params(
             OptionSpec{.spot = 100.0, .strike = 95.0, .maturity = maturity,
-                .rate = 0.02, .type = OptionType::PUT}, 0.2);
+                .rate = 0.02, .option_type = OptionType::PUT}, 0.2);
 
         AmericanOptionResult result = Solve(params);
         ASSERT_TRUE(result.converged);
@@ -106,11 +106,11 @@ TEST_F(AmericanOptionPricingTest, PutValueIncreasesWithMaturity) {
 TEST_F(AmericanOptionPricingTest, DividendsReduceCallValue) {
     PricingParams no_dividends(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.02, .type = OptionType::CALL}, 0.3);
+            .rate = 0.02, .option_type = OptionType::CALL}, 0.3);
 
     PricingParams with_dividends(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.02, .type = OptionType::CALL}, 0.3,
+            .rate = 0.02, .option_type = OptionType::CALL}, 0.3,
         {{.calendar_time = 0.5, .amount = 3.0}});
 
     AmericanOptionResult result_no_div = Solve(no_dividends);
@@ -124,9 +124,9 @@ TEST_F(AmericanOptionPricingTest, DividendsReduceCallValue) {
 
 TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     std::vector<PricingParams> params;
-    params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.75, .rate = 0.01, .type = OptionType::CALL}, 0.25));
-    params.push_back(PricingParams(OptionSpec{.spot = 120.0, .strike = 100.0, .maturity = 1.5, .rate = 0.02, .type = OptionType::PUT}, 0.2));
-    params.push_back(PricingParams(OptionSpec{.spot = 90.0, .strike = 95.0, .maturity = 0.5, .rate = -0.01, .dividend_yield = 0.01, .type = OptionType::PUT}, 0.35));
+    params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.75, .rate = 0.01, .option_type = OptionType::CALL}, 0.25));
+    params.push_back(PricingParams(OptionSpec{.spot = 120.0, .strike = 100.0, .maturity = 1.5, .rate = 0.02, .option_type = OptionType::PUT}, 0.2));
+    params.push_back(PricingParams(OptionSpec{.spot = 90.0, .strike = 95.0, .maturity = 0.5, .rate = -0.01, .dividend_yield = 0.01, .option_type = OptionType::PUT}, 0.35));
 
     // Use automatic grid determination for batch solver
     auto batch_result = BatchAmericanOptionSolver().solve_batch(params);
@@ -152,7 +152,7 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
     // Fixed by implementing proper complementarity enforcement in Newton solver
     PricingParams params(
         OptionSpec{.spot = 0.25, .strike = 100.0, .maturity = 0.75,
-            .rate = 0.05, .type = OptionType::PUT}, 0.2);
+            .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
 
     // Use convenience function - it will automatically size the grid appropriately
     auto result_exp = solve_american_option_auto(params);
@@ -171,7 +171,7 @@ TEST_F(AmericanOptionPricingTest, ATMOptionsRetainTimeValue) {
     // This guards against the known limitation of the 50% time window guard
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.05, .type = OptionType::PUT}, 0.25);
+            .rate = 0.05, .option_type = OptionType::PUT}, 0.25);
 
     AmericanOptionResult result = Solve(params);
     ASSERT_TRUE(result.converged);
@@ -198,7 +198,7 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
     // Create params with yield curve
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = curve, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+            .rate = curve, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     // Solve with yield curve
     auto result = solve_american_option_auto(params);
@@ -213,7 +213,7 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
     // Compare with flat rate at average (5.5%)
     PricingParams flat_params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.055, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+            .rate = 0.055, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     auto flat_result = solve_american_option_auto(flat_params);
     ASSERT_TRUE(flat_result.has_value()) << "Solver failed with flat rate";
@@ -228,8 +228,8 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) {
     // A discrete dividend increases put value (spot drops)
-    PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);
-    PricingParams with_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
+    PricingParams with_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                                   {{.calendar_time = 0.5, .amount = 3.0}});
 
     auto result_no_div = solve_american_option_auto(no_div);
@@ -243,8 +243,8 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) 
 }
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendCallPriceLowerThanNoDividend) {
-    PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 0.20);
-    PricingParams with_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 0.20,
+    PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.20);
+    PricingParams with_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.20,
                                   {{.calendar_time = 0.5, .amount = 3.0}});
 
     auto result_no_div = solve_american_option_auto(no_div);
@@ -258,7 +258,7 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendCallPriceLowerThanNoDividend) 
 }
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendCallLargeDividend) {
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 0.30,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.30,
                                 {{.calendar_time = 0.5, .amount = 50.0}});
 
     auto result = solve_american_option_auto(params);
@@ -268,9 +268,9 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendCallLargeDividend) {
 }
 
 TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
-    PricingParams one_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams one_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                                  {{.calendar_time = 0.5, .amount = 2.0}});
-    PricingParams two_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams two_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                                  {{.calendar_time = 0.3, .amount = 2.0}, {.calendar_time = 0.7, .amount = 2.0}});
 
     auto result_one = solve_american_option_auto(one_div);
@@ -286,9 +286,9 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
 TEST_F(AmericanOptionPricingTest, RegularBatchWithDiscreteDividends) {
     // Batch of options with discrete dividends — uses regular path (not normalized)
     std::vector<PricingParams> batch;
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}}));
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}}));
 
     BatchAmericanOptionSolver solver;
@@ -305,11 +305,11 @@ TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
     // When requesting shared grid with dividends, should fall back to regular batch
     // (normalized chain rejects discrete dividends)
     std::vector<PricingParams> batch;
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}}));
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}}));
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}}));
 
     BatchAmericanOptionSolver solver;
@@ -321,6 +321,43 @@ TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
         ASSERT_TRUE(results.results[i].has_value()) << "Batch solve failed for index " << i;
         EXPECT_GT(results.results[i]->value_at(batch[i].spot), 0.0);
     }
+}
+
+// ===========================================================================
+// Regression: create() must validate workspace/grid at construction time
+// Bug: Mismatch between workspace size and grid was only caught at solve()
+// ===========================================================================
+
+TEST(AmericanOptionTest, CreateRejectsMismatchedWorkspace) {
+    // #306: Mismatch should fail at create(), not at solve()
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .option_type = OptionType::PUT},
+        0.20);
+
+    // Create a workspace that is deliberately too small (10 points)
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(10));
+    auto ws = PDEWorkspace::from_buffer(buffer, 10);
+    ASSERT_TRUE(ws.has_value());
+
+    // create() should now fail because auto-estimated grid needs ~100+ points
+    auto result = AmericanOptionSolver::create(params, ws.value());
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
+}
+
+// ===========================================================================
+// solve_american_option_auto accessible from primary header
+// ===========================================================================
+
+TEST(AmericanOptionTest, SolveAutoFromPrimaryHeader) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
+        0.20);
+    auto result = solve_american_option_auto(params);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->value_at(100.0), 6.35, 0.5);
 }
 
 }  // namespace
