@@ -466,10 +466,10 @@ PriceTableBuilder<N>::extract_tensor(
                             double rate = axes.grids[3][r_idx];
                             double spot = m * K_ref;
 
-                            auto eu = EuropeanOptionSolver(PricingParams(
+                            auto eu = EuropeanOptionSolver(
                                 OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
                                     .rate = rate, .dividend_yield = config_.dividend_yield,
-                                    .type = config_.option_type}, sigma)).solve().value();
+                                    .type = config_.option_type}, sigma).solve().value();
 
                             double eep_raw = american_price - eu.value();
 

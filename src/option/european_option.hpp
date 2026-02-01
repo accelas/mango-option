@@ -80,6 +80,9 @@ public:
     /// Construct solver from pricing parameters (no validation)
     explicit EuropeanOptionSolver(const PricingParams& params);
 
+    /// Construct from option spec + volatility (convenience)
+    EuropeanOptionSolver(const OptionSpec& spec, double sigma);
+
     /// Factory with validation via validate_pricing_params()
     static std::expected<EuropeanOptionSolver, ValidationError>
     create(const PricingParams& params) noexcept;

@@ -173,6 +173,10 @@ EuropeanOptionSolver::EuropeanOptionSolver(const PricingParams& params)
     : params_(params)
 {}
 
+EuropeanOptionSolver::EuropeanOptionSolver(const OptionSpec& spec, double sigma)
+    : params_(spec, sigma)
+{}
+
 std::expected<EuropeanOptionSolver, ValidationError>
 EuropeanOptionSolver::create(const PricingParams& params) noexcept {
     auto validation = validate_pricing_params(params);
