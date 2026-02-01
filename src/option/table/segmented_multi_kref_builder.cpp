@@ -46,7 +46,6 @@ SegmentedMultiKRefBuilder::build(const Config& config) {
         SegmentedPriceTableBuilder::Config seg_config{
             .K_ref = K_ref,
             .option_type = config.option_type,
-            .dividend_yield = config.dividend_yield,
             .dividends = config.dividends,
             .moneyness_grid = config.moneyness_grid,
             .maturity = config.maturity,

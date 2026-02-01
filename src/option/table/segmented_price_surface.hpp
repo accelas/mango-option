@@ -2,9 +2,9 @@
 #pragma once
 
 #include <vector>
-#include <utility>
 #include <expected>
 #include "src/option/table/american_price_surface.hpp"
+#include "src/option/option_spec.hpp"
 #include "src/support/error_types.hpp"
 
 namespace mango {
@@ -19,7 +19,7 @@ public:
 
     struct Config {
         std::vector<Segment> segments;  // ordered: last segment first (index 0 has lowest τ)
-        std::vector<std::pair<double, double>> dividends;  // (calendar_time, amount)
+        std::vector<Dividend> discrete_dividends;
         double K_ref;
         double T;  // expiry in calendar time
     };
@@ -40,22 +40,21 @@ public:
     [[nodiscard]] double rate_min() const noexcept;
     [[nodiscard]] double rate_max() const noexcept;
     [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
+    [[nodiscard]] OptionType option_type() const noexcept;
+    [[nodiscard]] double dividend_yield() const noexcept;
 
 private:
     SegmentedPriceSurface() = default;
-
-    struct DividendEntry {
-        double calendar_time;
-        double amount;
-    };
 
     const Segment& find_segment(double tau) const;
     double compute_spot_adjustment(double spot, double t_query, double t_boundary) const;
 
     std::vector<Segment> segments_;
-    std::vector<DividendEntry> dividends_;
+    std::vector<Dividend> dividends_;
     double K_ref_;
     double T_;
+    OptionType option_type_ = OptionType::PUT;
+    double dividend_yield_ = 0.0;
 };
 
 }  // namespace mango

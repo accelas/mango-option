@@ -9,15 +9,9 @@ using namespace mango;
 class IVSolverTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        query = IVQuery{
-            100.0,  // spot
-            100.0,  // strike
-            1.0,    // maturity
-            0.05,   // rate
-            0.0,    // dividend_yield
-            OptionType::PUT,
-            10.45   // market_price
-        };
+        query = IVQuery(
+            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                .rate = 0.05, .option_type = OptionType::PUT}, 10.45);
 
         config = IVSolverFDMConfig{
             .root_config = RootFindingConfig{
@@ -149,7 +143,7 @@ TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
 // Test 11: Call option IV calculation
 // Re-enabled: ProjectedThomas is now the default (PR #200)
 TEST_F(IVSolverTest, ATMCallIVCalculation) {
-    query.type = OptionType::CALL;
+    query.option_type = OptionType::CALL;
     query.market_price = 10.0;  // ATM call price
 
     IVSolverFDM solver(config);

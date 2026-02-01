@@ -135,9 +135,8 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
     // Step 6: Create metadata
     PriceTableMetadata metadata{
         .K_ref = config_.K_ref,
-        .dividend_yield = config_.dividend_yield,
+        .dividends = config_.dividends,
         .content = surface_content_,
-        .discrete_dividends = config_.discrete_dividends
     };
 
     // Step 7: Build immutable surface
@@ -189,15 +188,11 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
         // Normalized solve: Spot = Strike = K_ref
         // Surface will be interpolated across m and τ in extract_tensor
         PricingParams params(
-            K_ref,                          // spot
-            K_ref,                          // strike
-            axes.grids[1].back(),           // maturity (max for this σ,r)
-            r,                              // rate
-            config_.dividend_yield,         // dividend_yield
-            config_.option_type,            // type
-            sigma,                          // volatility
-            config_.discrete_dividends      // discrete_dividends
-        );
+            OptionSpec{.spot = K_ref, .strike = K_ref,
+                .maturity = axes.grids[1].back(), .rate = r,
+                .dividend_yield = config_.dividends.dividend_yield,
+                .option_type = config_.option_type},
+            sigma, config_.dividends.discrete_dividends);
 
         batch.push_back(params);
     }
@@ -470,9 +465,10 @@ PriceTableBuilder<N>::extract_tensor(
                             double rate = axes.grids[3][r_idx];
                             double spot = m * K_ref;
 
-                            auto eu = EuropeanOptionSolver(PricingParams(
-                                spot, K_ref, tau, rate, config_.dividend_yield,
-                                config_.option_type, sigma)).solve().value();
+                            auto eu = EuropeanOptionSolver(
+                                OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
+                                    .rate = rate, .dividend_yield = config_.dividends.dividend_yield,
+                                    .option_type = config_.option_type}, sigma).solve().value();
 
                             double eep_raw = american_price - eu.value();
 
@@ -605,7 +601,7 @@ PriceTableBuilder<4>::from_vectors(
     config.option_type = type;
     config.K_ref = K_ref;
     config.pde_grid = std::move(pde_grid);
-    config.dividend_yield = dividend_yield;
+    config.dividends.dividend_yield = dividend_yield;
     config.max_failure_rate = max_failure_rate;
 
     // Validate config

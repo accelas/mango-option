@@ -24,27 +24,39 @@ SegmentedPriceSurface::create(Config config) {
             ValidationErrorCode::InvalidMaturity, config.T, 0});
     }
 
-    // Verify segments are ordered by tau_start ascending
+    // Verify segments are ordered and consistent
+    auto expected_type = config.segments.front().surface.option_type();
+    auto expected_yield = config.segments.front().surface.dividend_yield();
     for (size_t i = 1; i < config.segments.size(); ++i) {
         if (config.segments[i].tau_start <= config.segments[i - 1].tau_start) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::UnsortedGrid, config.segments[i].tau_start, i});
+        }
+        if (config.segments[i].surface.option_type() != expected_type) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OptionTypeMismatch, static_cast<double>(i), i});
+        }
+        if (std::abs(config.segments[i].surface.dividend_yield() - expected_yield) > 1e-10) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::DividendYieldMismatch, config.segments[i].surface.dividend_yield(), i});
         }
     }
 
     SegmentedPriceSurface result;
     result.K_ref_ = config.K_ref;
     result.T_ = config.T;
+    result.option_type_ = expected_type;
+    result.dividend_yield_ = expected_yield;
     result.segments_ = std::move(config.segments);
 
-    result.dividends_.reserve(config.dividends.size());
-    for (auto& [t, amount] : config.dividends) {
-        result.dividends_.push_back(DividendEntry{t, amount});
+    result.dividends_.reserve(config.discrete_dividends.size());
+    for (const auto& div : config.discrete_dividends) {
+        result.dividends_.push_back(div);
     }
 
     // Sort dividends by calendar time
     std::sort(result.dividends_.begin(), result.dividends_.end(),
-              [](const DividendEntry& a, const DividendEntry& b) {
+              [](const Dividend& a, const Dividend& b) {
                   return a.calendar_time < b.calendar_time;
               });
 
@@ -203,4 +215,12 @@ double SegmentedPriceSurface::rate_max() const noexcept {
     return segments_.front().surface.rate_max();
 }
 
+
+OptionType SegmentedPriceSurface::option_type() const noexcept {
+    return option_type_;
+}
+
+double SegmentedPriceSurface::dividend_yield() const noexcept {
+    return dividend_yield_;
+}
 }  // namespace mango

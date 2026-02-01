@@ -146,7 +146,14 @@ PYBIND11_MODULE(mango_option, m) {
     // IVQuery structure (replaces IVParams)
     py::class_<mango::IVQuery>(m, "IVQuery")
         .def(py::init<>())
-        .def(py::init<double, double, double, double, double, mango::OptionType, double>(),
+        .def(py::init([](double spot, double strike, double maturity,
+                         double rate, double dividend_yield, mango::OptionType type,
+                         double market_price) {
+                 return mango::IVQuery(
+                     mango::OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                         .rate = rate, .dividend_yield = dividend_yield, .option_type = type},
+                     market_price);
+             }),
              py::arg("spot"), py::arg("strike"), py::arg("maturity"),
              py::arg("rate"), py::arg("dividend_yield"), py::arg("type"),
              py::arg("market_price"))
@@ -158,7 +165,7 @@ PYBIND11_MODULE(mango_option, m) {
             [](mango::IVQuery& q, const py::object& obj) { q.rate = python_to_rate_spec(obj); },
             "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::IVQuery::dividend_yield)
-        .def_readwrite("type", &mango::IVQuery::type)
+        .def_readwrite("option_type", &mango::IVQuery::option_type)
         .def_readwrite("market_price", &mango::IVQuery::market_price)
         .def("__repr__", [](const mango::IVQuery& q) {
             return "<IVQuery spot=" + std::to_string(q.spot) +
@@ -166,7 +173,7 @@ PYBIND11_MODULE(mango_option, m) {
                    " maturity=" + std::to_string(q.maturity) +
                    " rate=" + rate_spec_to_string(q.rate) +
                    " dividend_yield=" + std::to_string(q.dividend_yield) +
-                   " type=" + (q.type == mango::OptionType::CALL ? "CALL" : "PUT") +
+                   " type=" + (q.option_type == mango::OptionType::CALL ? "CALL" : "PUT") +
                    " market_price=" + std::to_string(q.market_price) + ">";
         });
 
@@ -244,6 +251,8 @@ PYBIND11_MODULE(mango_option, m) {
         .value("BracketingFailed", mango::IVErrorCode::BracketingFailed)
         .value("NumericalInstability", mango::IVErrorCode::NumericalInstability)
         .value("InvalidGridConfig", mango::IVErrorCode::InvalidGridConfig)
+        .value("OptionTypeMismatch", mango::IVErrorCode::OptionTypeMismatch)
+        .value("DividendYieldMismatch", mango::IVErrorCode::DividendYieldMismatch)
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 
@@ -264,6 +273,23 @@ PYBIND11_MODULE(mango_option, m) {
 
     // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 
+    // Dividend structure (must be registered before PricingParams)
+    py::class_<mango::Dividend>(m, "Dividend")
+        .def(py::init<>())
+        .def(py::init<double, double>(), py::arg("calendar_time"), py::arg("amount"))
+        .def_readwrite("calendar_time", &mango::Dividend::calendar_time)
+        .def_readwrite("amount", &mango::Dividend::amount)
+        .def("__repr__", [](const mango::Dividend& d) {
+            return "Dividend(t=" + std::to_string(d.calendar_time) +
+                   ", amt=" + std::to_string(d.amount) + ")";
+        });
+
+    // DividendSpec structure
+    py::class_<mango::DividendSpec>(m, "DividendSpec")
+        .def(py::init<>())
+        .def_readwrite("dividend_yield", &mango::DividendSpec::dividend_yield)
+        .def_readwrite("discrete_dividends", &mango::DividendSpec::discrete_dividends);
+
     // PricingParams structure
     py::class_<mango::PricingParams>(m, "PricingParams")
         .def(py::init<>())
@@ -276,7 +302,7 @@ PYBIND11_MODULE(mango_option, m) {
             [](mango::PricingParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
             "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::PricingParams::dividend_yield)
-        .def_readwrite("type", &mango::PricingParams::type)
+        .def_readwrite("option_type", &mango::PricingParams::option_type)
         .def_readwrite("discrete_dividends", &mango::PricingParams::discrete_dividends);
 
     // AmericanOptionResult structure
@@ -679,11 +705,10 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
         .def(py::init<>())
         .def_readwrite("K_ref", &mango::PriceTableMetadata::K_ref)
-        .def_readwrite("dividend_yield", &mango::PriceTableMetadata::dividend_yield)
+        .def_readwrite("dividends", &mango::PriceTableMetadata::dividends)
         .def_readwrite("m_min", &mango::PriceTableMetadata::m_min)
         .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
-        .def_readwrite("content", &mango::PriceTableMetadata::content)
-        .def_readwrite("discrete_dividends", &mango::PriceTableMetadata::discrete_dividends);
+        .def_readwrite("content", &mango::PriceTableMetadata::content);
 
     // PriceTableAxes<4>
     py::class_<mango::PriceTableAxes<4>>(m, "PriceTableAxes4D")
@@ -974,7 +999,7 @@ PYBIND11_MODULE(mango_option, m) {
     // IVSolverInterpolatedConfig
     py::class_<mango::IVSolverInterpolatedConfig>(m, "IVSolverInterpolatedConfig")
         .def(py::init<>())
-        .def_readwrite("max_iterations", &mango::IVSolverInterpolatedConfig::max_iterations)
+        .def_readwrite("max_iter", &mango::IVSolverInterpolatedConfig::max_iter)
         .def_readwrite("tolerance", &mango::IVSolverInterpolatedConfig::tolerance)
         .def_readwrite("sigma_min", &mango::IVSolverInterpolatedConfig::sigma_min)
         .def_readwrite("sigma_max", &mango::IVSolverInterpolatedConfig::sigma_max);

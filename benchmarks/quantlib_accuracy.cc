@@ -111,14 +111,10 @@ static void compare_scenario(
 {
     // Mango-Option pricing with workspace
     PricingParams mango_params(
-        spot,
-        strike,
-        maturity,
-        rate,
-        dividend_yield,
-        is_call ? OptionType::CALL : OptionType::PUT,
-        volatility
-    );
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+            .rate = rate, .dividend_yield = dividend_yield,
+            .option_type = is_call ? OptionType::CALL : OptionType::PUT},
+        volatility);
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
@@ -247,14 +243,9 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
 
     // Mango-Option pricing at automatically determined resolution
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
+        0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -305,14 +296,9 @@ BENCHMARK(BM_Convergence_GridResolution)
 
 static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
+        0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -620,20 +606,15 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
     double div_yield = 0.02;
 
     // Discrete dividend: $1 at 0.25y (time, amount pairs)
-    std::vector<std::pair<double, double>> dividends = {
-        {0.25, 1.0}  // $1 dividend at 0.25 years
+    std::vector<Dividend> dividends = {
+        {.calendar_time = 0.25, .amount = 1.0}  // $1 dividend at 0.25 years
     };
 
     PricingParams params(
-        spot,
-        strike,
-        maturity,
-        rate,
-        div_yield,
-        OptionType::CALL,
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+            .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::CALL},
         volatility,
-        dividends
-    );
+        dividends);
 
     // Create workspace (use automatic grid determination)
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
@@ -690,23 +671,18 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     double div_yield = 0.01;
 
     // Quarterly dividends: $0.50 at 0.25y, 0.5y, 0.75y (time, amount pairs)
-    std::vector<std::pair<double, double>> dividends = {
-        {0.25, 0.5},  // $0.50 at 3 months
-        {0.50, 0.5},  // $0.50 at 6 months
-        {0.75, 0.5}   // $0.50 at 9 months
+    std::vector<Dividend> dividends = {
+        {.calendar_time = 0.25, .amount = 0.5},  // $0.50 at 3 months
+        {.calendar_time = 0.50, .amount = 0.5},  // $0.50 at 6 months
+        {.calendar_time = 0.75, .amount = 0.5}   // $0.50 at 9 months
         // Note: dividend at maturity (1.0y) excluded (no impact)
     };
 
     PricingParams params(
-        spot,
-        strike,
-        maturity,
-        rate,
-        div_yield,
-        OptionType::PUT,
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+            .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::PUT},
         volatility,
-        dividends
-    );
+        dividends);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 

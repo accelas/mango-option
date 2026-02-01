@@ -14,9 +14,8 @@ namespace mango {
 struct PriceTableConfig {
     OptionType option_type = OptionType::PUT;  ///< Option type (call/put)
     double K_ref = 100.0;                      ///< Reference strike price for normalization
-    PDEGridSpec pde_grid;                      ///< PDE grid: explicit or auto-estimated
-    double dividend_yield = 0.0;               ///< Continuous dividend yield
-    std::vector<std::pair<double, double>> discrete_dividends;  ///< (time, amount) schedule
+    PDEGridSpec pde_grid = GridAccuracyParams{};  ///< PDE grid: explicit or auto-estimated
+    DividendSpec dividends;                    ///< Continuous yield + discrete schedule
     double max_failure_rate = 0.0;             ///< Maximum tolerable failure rate: 0.0 = strict, 0.1 = allow 10%
     SurfaceContent surface_content = SurfaceContent::EarlyExercisePremium;  ///< Output mode
     bool allow_tau_zero = false;               ///< Allow τ=0 in maturity grid (requires custom IC)

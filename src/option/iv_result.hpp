@@ -75,10 +75,15 @@ inline IVError validation_error_to_iv_error(const ValidationError& ve) {
                 code = IVErrorCode::ArbitrageViolation;  // Positive but violates bounds
             }
             break;
+        case ValidationErrorCode::OptionTypeMismatch:
+            code = IVErrorCode::OptionTypeMismatch;
+            break;
+        case ValidationErrorCode::DividendYieldMismatch:
+            code = IVErrorCode::DividendYieldMismatch;
+            break;
         case ValidationErrorCode::InvalidRate:
         case ValidationErrorCode::InvalidDividend:
         case ValidationErrorCode::InvalidVolatility:
-            // These shouldn't occur in IV queries, but map to a reasonable error
             code = IVErrorCode::ArbitrageViolation;
             break;
         default:

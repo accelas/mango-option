@@ -39,7 +39,9 @@ enum class ValidationErrorCode {
     OutOfRange,
     InvalidGridSpacing,
     UnsortedGrid,
-    ZeroWidthGrid
+    ZeroWidthGrid,
+    OptionTypeMismatch,
+    DividendYieldMismatch
 };
 
 /// Detailed validation error for parameter validation failures
@@ -119,6 +121,8 @@ enum class IVErrorCode {
     NegativeMarketPrice,
     ArbitrageViolation,
     InvalidGridConfig,
+    OptionTypeMismatch,
+    DividendYieldMismatch,
 
     // Convergence errors
     MaxIterationsExceeded,
@@ -296,6 +300,12 @@ inline IVError convert_to_iv_error(const ValidationError& err) {
         case ValidationErrorCode::ZeroWidthGrid:
             code = IVErrorCode::InvalidGridConfig;
             break;
+        case ValidationErrorCode::OptionTypeMismatch:
+            code = IVErrorCode::OptionTypeMismatch;
+            break;
+        case ValidationErrorCode::DividendYieldMismatch:
+            code = IVErrorCode::DividendYieldMismatch;
+            break;
     }
     return IVError{
         .code = code,
@@ -368,6 +378,10 @@ inline PriceTableError convert_to_price_table_error(const ValidationError& err) 
         case ValidationErrorCode::UnsortedGrid:
         case ValidationErrorCode::ZeroWidthGrid:
             code = PriceTableErrorCode::GridNotSorted;
+            break;
+        case ValidationErrorCode::OptionTypeMismatch:
+        case ValidationErrorCode::DividendYieldMismatch:
+            code = PriceTableErrorCode::InvalidConfig;
             break;
     }
     return PriceTableError{code, err.index, 0};

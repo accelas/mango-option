@@ -37,9 +37,7 @@ TEST(NormalizedChainAccuracy, ConsistencyWithRegularSolver) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     // Solve with normalized chain (fast path)
@@ -119,9 +117,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_ATM_Chain) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     // Solve with normalized chain
@@ -189,9 +185,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_DeepITM_Puts) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     BatchAmericanOptionSolver solver;
@@ -231,9 +225,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_DeepOTM_Puts) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     BatchAmericanOptionSolver solver;
@@ -277,9 +269,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_HighVolatility) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     BatchAmericanOptionSolver solver;
@@ -323,9 +313,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_NegativeRate) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     BatchAmericanOptionSolver solver;
@@ -363,9 +351,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_HighRate) {
 
     std::vector<PricingParams> params;
     for (double K : strikes) {
-        params.push_back(PricingParams(
-            spot, K, maturity, rate, dividend_yield,
-            OptionType::PUT, volatility, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = maturity, .rate = rate, .dividend_yield = dividend_yield, .option_type = OptionType::PUT}, volatility));
     }
 
     BatchAmericanOptionSolver solver;

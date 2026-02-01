@@ -76,7 +76,7 @@ struct IVComputeConfig {
 
     Method method = Method::Interpolated;
     double tolerance = 1e-6;
-    int max_iterations = 50;
+    size_t max_iter = 50;
 };
 
 /// Price source for IV calculation

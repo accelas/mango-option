@@ -211,12 +211,14 @@ auto iv_result = iv_solver.solve(iv_query);
 mango::IVSolverConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
-    .discrete_dividends = {{0.25, 1.50}},
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-    .maturity = 1.0,
     .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
     .rate_grid = {0.02, 0.05},
-    .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    .path = mango::SegmentedIVPath{
+        .maturity = 1.0,
+        .discrete_dividends = {{0.25, 1.50}},
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    },
 };
 auto solver = mango::make_iv_solver(config);
 auto result = solver->solve(query);

@@ -19,7 +19,7 @@
  *       .maturity = 1.0,
  *       .rate = 0.05,
  *       .dividend_yield = 0.02,
- *       .type = OptionType::PUT
+ *       .option_type = OptionType::PUT
  *   };
  *   IVQuery query{.option = spec, .market_price = 10.45};
  *
@@ -66,7 +66,7 @@ namespace mango {
 
 /// Configuration for interpolation-based IV solver
 struct IVSolverInterpolatedConfig {
-    int max_iterations = 50;      ///< Maximum Newton iterations
+    size_t max_iter = 50;          ///< Maximum Newton iterations
     double tolerance = 1e-6;       ///< Price convergence tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
     double sigma_max = 3.0;        ///< Maximum volatility (300%)
@@ -124,6 +124,8 @@ private:
         std::pair<double, double> tau_range,
         std::pair<double, double> sigma_range,
         std::pair<double, double> r_range,
+        OptionType option_type,
+        double dividend_yield,
         const IVSolverInterpolatedConfig& config)
         : surface_(std::move(surface))
         , m_range_(m_range)
@@ -131,11 +133,15 @@ private:
         , sigma_range_(sigma_range)
         , r_range_(r_range)
         , config_(config)
+        , option_type_(option_type)
+        , dividend_yield_(dividend_yield)
     {}
 
     Surface surface_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
     IVSolverInterpolatedConfig config_;
+    OptionType option_type_;
+    double dividend_yield_;
 
     /// Evaluate option price using B-spline interpolation with strike scaling
     double eval_price(double moneyness, double maturity, double vol, double rate, double strike) const;
@@ -191,12 +197,17 @@ IVSolverInterpolated<Surface>::create(
         return std::unexpected(ValidationError(ValidationErrorCode::InvalidGridSize, 0.0));
     }
 
+    auto option_type = surface.option_type();
+    auto dividend_yield = surface.dividend_yield();
+
     return IVSolverInterpolated(
         std::move(surface),
         m_range,
         tau_range,
         sigma_range,
         r_range,
+        option_type,
+        dividend_yield,
         config);
 }
 
@@ -220,6 +231,16 @@ template <PriceSurface Surface>
 std::optional<ValidationError>
 IVSolverInterpolated<Surface>::validate_query(const IVQuery& query) const
 {
+    if (query.option_type != option_type_) {
+        return ValidationError{ValidationErrorCode::OptionTypeMismatch,
+            static_cast<double>(query.option_type), 0};
+    }
+
+    if (std::abs(query.dividend_yield - dividend_yield_) > 1e-10) {
+        return ValidationError{ValidationErrorCode::DividendYieldMismatch,
+            query.dividend_yield, 0};
+    }
+
     // Use common validation for option spec, market price, and arbitrage checks
     auto validation = validate_iv_query(query);
     if (!validation.has_value()) {
@@ -235,7 +256,7 @@ IVSolverInterpolated<Surface>::adaptive_bounds(const IVQuery& query) const
 {
     // Compute intrinsic value based on option type
     double intrinsic;
-    if (query.type == OptionType::CALL) {
+    if (query.option_type == OptionType::CALL) {
         intrinsic = std::max(query.spot - query.strike, 0.0);
     } else {  // PUT
         intrinsic = std::max(query.strike - query.spot, 0.0);
@@ -313,7 +334,7 @@ IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
 
     // Use generic bounded Newton-Raphson
     RootFindingConfig newton_config{
-        .max_iter = static_cast<size_t>(std::max(0, config_.max_iterations)),
+        .max_iter = config_.max_iter,
         .tolerance = config_.tolerance
     };
 

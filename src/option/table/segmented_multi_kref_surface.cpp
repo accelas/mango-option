@@ -41,6 +41,20 @@ SegmentedMultiKRefSurface::create(std::vector<Entry> entries) {
             ValidationErrorCode::InvalidGridSize, 0.0, 0));
     }
 
+    // Verify all entries share option_type and dividend_yield
+    auto expected_type = entries.front().surface.option_type();
+    auto expected_yield = entries.front().surface.dividend_yield();
+    for (size_t i = 1; i < entries.size(); ++i) {
+        if (entries[i].surface.option_type() != expected_type) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::OptionTypeMismatch, static_cast<double>(i), i));
+        }
+        if (std::abs(entries[i].surface.dividend_yield() - expected_yield) > 1e-10) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::DividendYieldMismatch, entries[i].surface.dividend_yield(), i));
+        }
+    }
+
     // Compute bounds as intersection across all entries
     double m_min = -std::numeric_limits<double>::infinity();
     double m_max = std::numeric_limits<double>::infinity();
@@ -79,6 +93,8 @@ SegmentedMultiKRefSurface::create(std::vector<Entry> entries) {
     result.sigma_max_ = sigma_max;
     result.rate_min_ = rate_min;
     result.rate_max_ = rate_max;
+    result.option_type_ = result.entries_.front().surface.option_type();
+    result.dividend_yield_ = result.entries_.front().surface.dividend_yield();
 
     return result;
 }
@@ -220,4 +236,12 @@ double SegmentedMultiKRefSurface::sigma_max() const noexcept { return sigma_max_
 double SegmentedMultiKRefSurface::rate_min() const noexcept { return rate_min_; }
 double SegmentedMultiKRefSurface::rate_max() const noexcept { return rate_max_; }
 
+
+OptionType SegmentedMultiKRefSurface::option_type() const noexcept {
+    return option_type_;
+}
+
+double SegmentedMultiKRefSurface::dividend_yield() const noexcept {
+    return dividend_yield_;
+}
 }  // namespace mango
