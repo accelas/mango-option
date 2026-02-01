@@ -74,9 +74,11 @@ At each dividend time, the callback:
 The spline evaluates shifted points `x' = ln(exp(x) - D/K)`. For the lowest
 grid point x_min, the shifted value is `ln(exp(x_min) - D/K)` which is more
 negative than x_min. To keep shifted points within the interpolation domain,
-`estimate_grid_for_option` extends `x_min` to `ln(exp(x_min) + d_max)` where
-`d_max = max(D_i/K)` across all dividends. This computes the exact lower bound
-needed rather than using an approximate linear shift.
+`estimate_grid_for_option` extends `x_min` to `ln(exp(x_min) - d_max)` where
+`d_max = max(D_i/K)` across all dividends, provided `exp(x_min) > d_max`. If
+`exp(x_min) <= d_max` (grid already covers very low spots), fall back to a
+conservative fixed extension. This computes the exact lower bound needed rather
+than using an approximate linear shift.
 
 ### Registration in AmericanOptionSolver
 
