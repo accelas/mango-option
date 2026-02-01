@@ -325,5 +325,45 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
         << "Two dividends should increase put value more than one";
 }
 
+TEST_F(AmericanOptionPricingTest, RegularBatchWithDiscreteDividends) {
+    // Batch of options with discrete dividends — uses regular path (not normalized)
+    std::vector<AmericanOptionParams> batch;
+    batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+    batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+
+    BatchAmericanOptionSolver solver;
+    auto results = solver.solve_batch(batch);
+
+    EXPECT_EQ(results.failed_count, 0u);
+    for (size_t i = 0; i < batch.size(); ++i) {
+        ASSERT_TRUE(results.results[i].has_value()) << "Batch solve failed for index " << i;
+        EXPECT_GT(results.results[i]->value_at(batch[i].spot), 0.0);
+    }
+}
+
+TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
+    // When requesting shared grid with dividends, should fall back to regular batch
+    // (normalized chain rejects discrete dividends)
+    std::vector<AmericanOptionParams> batch;
+    batch.emplace_back(100.0, 90.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+    batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+    batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+
+    BatchAmericanOptionSolver solver;
+    auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
+
+    // Should still succeed via regular batch fallback
+    EXPECT_EQ(results.failed_count, 0u);
+    for (size_t i = 0; i < batch.size(); ++i) {
+        ASSERT_TRUE(results.results[i].has_value()) << "Batch solve failed for index " << i;
+        EXPECT_GT(results.results[i]->value_at(batch[i].spot), 0.0);
+    }
+}
+
 }  // namespace
 }  // namespace mango
