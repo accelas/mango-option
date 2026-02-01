@@ -48,25 +48,25 @@ std::vector<double> make_segment_tau_grid(
 
 /// Filter dividends: keep only those strictly inside (0, T).  Sort by
 /// calendar time.  Merge any duplicates at the same date.
-std::vector<std::pair<double, double>> filter_dividends(
-    const std::vector<std::pair<double, double>>& divs, double T)
+std::vector<Dividend> filter_dividends(
+    const std::vector<Dividend>& divs, double T)
 {
-    std::vector<std::pair<double, double>> filtered;
-    for (auto [t, d] : divs) {
-        if (t > 0.0 && t < T && d > 0.0) {
-            filtered.emplace_back(t, d);
+    std::vector<Dividend> filtered;
+    for (const auto& div : divs) {
+        if (div.calendar_time > 0.0 && div.calendar_time < T && div.amount > 0.0) {
+            filtered.push_back(div);
         }
     }
     std::sort(filtered.begin(), filtered.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
+              [](const Dividend& a, const Dividend& b) { return a.calendar_time < b.calendar_time; });
 
     // Merge same-date dividends
-    std::vector<std::pair<double, double>> merged;
-    for (auto& [t, d] : filtered) {
-        if (!merged.empty() && std::abs(merged.back().first - t) < 1e-12) {
-            merged.back().second += d;
+    std::vector<Dividend> merged;
+    for (const auto& div : filtered) {
+        if (!merged.empty() && std::abs(merged.back().calendar_time - div.calendar_time) < 1e-12) {
+            merged.back().amount += div.amount;
         } else {
-            merged.emplace_back(t, d);
+            merged.push_back(div);
         }
     }
     return merged;
@@ -119,7 +119,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     std::vector<double> boundaries;
     boundaries.push_back(0.0);
     for (auto it = dividends.rbegin(); it != dividends.rend(); ++it) {
-        boundaries.push_back(T - it->first);
+        boundaries.push_back(T - it->calendar_time);
     }
     boundaries.push_back(T);
 
@@ -130,8 +130,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // Step 3: Expand moneyness grid downward
     // =====================================================================
     double total_div = 0.0;
-    for (auto& [t, d] : dividends) {
-        total_div += d;
+    for (const auto& div : dividends) {
+        total_div += div.amount;
     }
     double m_min_expanded = config.moneyness_grid.front() - total_div / K_ref;
     if (m_min_expanded < 0.01) m_min_expanded = 0.01;
@@ -225,7 +225,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
             // Dividend amount at this boundary.
             // Boundary seg_idx was created from dividends[N - seg_idx].
-            double boundary_div = dividends[dividends.size() - seg_idx].second;
+            double boundary_div = dividends[dividends.size() - seg_idx].amount;
 
             // Set a per-solve custom IC via the builder's SetupCallback.
             // PriceTableBuilder itself doesn't have a SetupCallback setter,

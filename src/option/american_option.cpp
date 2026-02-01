@@ -147,11 +147,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         pde_solver.set_config(trbdf2_config_);
 
         // Register discrete dividend events
-        for (const auto& [t_cal, amount] : params_.discrete_dividends) {
-            double tau = params_.maturity - t_cal;
+        for (const auto& div : params_.discrete_dividends) {
+            double tau = params_.maturity - div.calendar_time;
             if (tau > 0.0 && tau < params_.maturity) {
                 pde_solver.add_temporal_event(tau,
-                    make_put_dividend_event(amount, params_.strike, &dividend_spline));
+                    make_put_dividend_event(div.amount, params_.strike, &dividend_spline));
             }
         }
 
@@ -165,11 +165,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         }
         pde_solver.set_config(trbdf2_config_);
 
-        for (const auto& [t_cal, amount] : params_.discrete_dividends) {
-            double tau = params_.maturity - t_cal;
+        for (const auto& div : params_.discrete_dividends) {
+            double tau = params_.maturity - div.calendar_time;
             if (tau > 0.0 && tau < params_.maturity) {
                 pde_solver.add_temporal_event(tau,
-                    make_call_dividend_event(amount, params_.strike, &dividend_spline));
+                    make_call_dividend_event(div.amount, params_.strike, &dividend_spline));
             }
         }
 

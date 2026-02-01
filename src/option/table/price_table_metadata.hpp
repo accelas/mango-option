@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <vector>
-#include <utility>
+#include "src/option/option_spec.hpp"
 
 namespace mango {
 
@@ -27,7 +27,7 @@ struct PriceTableMetadata {
     double m_min = 0.0;                                     ///< Minimum moneyness (S/K)
     double m_max = 0.0;                                     ///< Maximum moneyness (S/K)
     SurfaceContent content = SurfaceContent::EarlyExercisePremium;  ///< What tensor stores
-    std::vector<std::pair<double, double>> discrete_dividends;  ///< (time, amount) pairs
+    std::vector<Dividend> discrete_dividends;  ///< (time, amount) pairs
 };
 
 } // namespace mango

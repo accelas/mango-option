@@ -38,13 +38,13 @@ SegmentedPriceSurface::create(Config config) {
     result.segments_ = std::move(config.segments);
 
     result.dividends_.reserve(config.dividends.size());
-    for (auto& [t, amount] : config.dividends) {
-        result.dividends_.push_back(DividendEntry{t, amount});
+    for (const auto& div : config.dividends) {
+        result.dividends_.push_back(div);
     }
 
     // Sort dividends by calendar time
     std::sort(result.dividends_.begin(), result.dividends_.end(),
-              [](const DividendEntry& a, const DividendEntry& b) {
+              [](const Dividend& a, const Dividend& b) {
                   return a.calendar_time < b.calendar_time;
               });
 

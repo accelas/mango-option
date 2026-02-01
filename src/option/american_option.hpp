@@ -67,10 +67,10 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
     // Widen grid for dividend shift: spline evaluates at x'=ln(exp(x)-D/K)
     // Only consider dividends strictly within (0, T) — same filter as mandatory tau
     double max_d_over_k = 0.0;
-    for (const auto& [t_cal, amount] : params.discrete_dividends) {
-        double tau = params.maturity - t_cal;
+    for (const auto& div : params.discrete_dividends) {
+        double tau = params.maturity - div.calendar_time;
         if (tau > 0.0 && tau < params.maturity) {
-            max_d_over_k = std::max(max_d_over_k, amount / params.strike);
+            max_d_over_k = std::max(max_d_over_k, div.amount / params.strike);
         }
     }
     if (max_d_over_k > 0.0 && std::exp(x_min) > max_d_over_k) {
@@ -84,8 +84,8 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
 
     // Convert discrete dividend calendar times to time-to-expiry (tau)
     std::vector<double> mandatory_tau;
-    for (const auto& [t_cal, amount] : params.discrete_dividends) {
-        double tau = params.maturity - t_cal;
+    for (const auto& div : params.discrete_dividends) {
+        double tau = params.maturity - div.calendar_time;
         if (tau > 0.0 && tau < params.maturity) {
             mandatory_tau.push_back(tau);
         }
@@ -144,8 +144,8 @@ inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
     // Collect union of all dividend tau values across the batch
     std::vector<double> all_mandatory_tau;
     for (const auto& p : params) {
-        for (const auto& [t_cal, amount] : p.discrete_dividends) {
-            double tau = p.maturity - t_cal;
+        for (const auto& div : p.discrete_dividends) {
+            double tau = p.maturity - div.calendar_time;
             if (tau > 0.0 && tau < max_maturity) {
                 all_mandatory_tau.push_back(tau);
             }

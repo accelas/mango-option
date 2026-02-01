@@ -113,23 +113,23 @@ std::expected<void, ValidationError> validate_pricing_params(const PricingParams
 
     // Validate discrete dividends
     for (size_t i = 0; i < params.discrete_dividends.size(); ++i) {
-        const auto& [time, amount] = params.discrete_dividends[i];
-        if (time < 0.0 || time > params.maturity) {
+        const auto& div = params.discrete_dividends[i];
+        if (div.calendar_time < 0.0 || div.calendar_time > params.maturity) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidDividend,
-                time,
+                div.calendar_time,
                 i));
         }
-        if (amount < 0.0) {
+        if (div.amount < 0.0) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidDividend,
-                amount,
+                div.amount,
                 i));
         }
-        if (!std::isfinite(time) || !std::isfinite(amount)) {
+        if (!std::isfinite(div.calendar_time) || !std::isfinite(div.amount)) {
             return std::unexpected(ValidationError(
                 ValidationErrorCode::InvalidDividend,
-                time,
+                div.calendar_time,
                 i));
         }
     }

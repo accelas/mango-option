@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 #include <utility>
-#include <initializer_list>
 #include <variant>
 #include <functional>
 
@@ -110,6 +109,15 @@ inline double get_zero_rate(const RateSpec& spec, double maturity) {
 enum class OptionType {
     CALL,
     PUT
+};
+
+/// Discrete dividend event
+///
+/// Represents a known future dividend payment at a specific calendar time.
+/// Calendar time is measured in years from the valuation date.
+struct Dividend {
+    double calendar_time = 0.0;  ///< Years from valuation date
+    double amount = 0.0;         ///< Dollar amount
 };
 
 /**
@@ -213,13 +221,13 @@ struct PricingParams : OptionSpec {
     /// Discrete dividend schedule: (time, amount) pairs
     /// Time is in years from now, amount is in dollars
     /// Can be used simultaneously with dividend_yield
-    std::vector<std::pair<double, double>> discrete_dividends;
+    std::vector<Dividend> discrete_dividends;
 
     PricingParams() = default;
 
     PricingParams(const OptionSpec& spec,
                   double volatility_,
-                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+                  std::vector<Dividend> discrete_dividends_ = {})
         : OptionSpec(spec)
         , volatility(volatility_)
         , discrete_dividends(std::move(discrete_dividends_))
@@ -232,7 +240,7 @@ struct PricingParams : OptionSpec {
                   double dividend_yield_,
                   OptionType type_,
                   double volatility_,
-                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+                  std::vector<Dividend> discrete_dividends_ = {})
         : volatility(volatility_)
         , discrete_dividends(std::move(discrete_dividends_))
     {
@@ -247,23 +255,11 @@ struct PricingParams : OptionSpec {
     PricingParams(double spot_,
                   double strike_,
                   double maturity_,
-                  double rate_,
-                  double dividend_yield_,
-                  OptionType type_,
-                  double volatility_,
-                  std::initializer_list<std::pair<double, double>> discrete_dividends_)
-        : PricingParams(spot_, strike_, maturity_, rate_, dividend_yield_, type_, volatility_,
-                        std::vector<std::pair<double, double>>(discrete_dividends_))
-    {}
-
-    PricingParams(double spot_,
-                  double strike_,
-                  double maturity_,
                   RateSpec rate_,
                   double dividend_yield_,
                   OptionType type_,
                   double volatility_,
-                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+                  std::vector<Dividend> discrete_dividends_ = {})
         : volatility(volatility_)
         , discrete_dividends(std::move(discrete_dividends_))
     {

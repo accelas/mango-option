@@ -2,7 +2,6 @@
 #pragma once
 
 #include <vector>
-#include <utility>
 #include <expected>
 #include "src/option/table/segmented_price_surface.hpp"
 #include "src/option/option_spec.hpp"
@@ -21,7 +20,7 @@ public:
         double K_ref;
         OptionType option_type;
         double dividend_yield = 0.0;
-        std::vector<std::pair<double, double>> dividends;  // (calendar_time, amount)
+        std::vector<Dividend> dividends;  // (calendar_time, amount)
         std::vector<double> moneyness_grid;
         double maturity;  // T in years
         std::vector<double> vol_grid;
