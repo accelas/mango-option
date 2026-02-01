@@ -264,6 +264,17 @@ PYBIND11_MODULE(mango_option, m) {
 
     // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 
+    // Dividend structure (must be registered before PricingParams)
+    py::class_<mango::Dividend>(m, "Dividend")
+        .def(py::init<>())
+        .def(py::init<double, double>(), py::arg("calendar_time"), py::arg("amount"))
+        .def_readwrite("calendar_time", &mango::Dividend::calendar_time)
+        .def_readwrite("amount", &mango::Dividend::amount)
+        .def("__repr__", [](const mango::Dividend& d) {
+            return "Dividend(t=" + std::to_string(d.calendar_time) +
+                   ", amt=" + std::to_string(d.amount) + ")";
+        });
+
     // PricingParams structure
     py::class_<mango::PricingParams>(m, "PricingParams")
         .def(py::init<>())
