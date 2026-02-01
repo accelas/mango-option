@@ -61,7 +61,7 @@ int main() {
     for (auto& tc : test_cases) {
         PricingParams params(
             OptionSpec{.spot = spot, .strike = tc.strike, .maturity = tc.maturity,
-                .rate = rate, .dividend_yield = div_yield, .type = OptionType::PUT},
+                .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::PUT},
             tc.vol_true);
         auto [gs, td] = estimate_grid_for_option(params, grid_accuracy_profile(GridAccuracyProfile::High));
         std::pmr::synchronized_pool_resource pool;

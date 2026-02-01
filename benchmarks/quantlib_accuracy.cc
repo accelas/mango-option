@@ -113,7 +113,7 @@ static void compare_scenario(
     PricingParams mango_params(
         OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
             .rate = rate, .dividend_yield = dividend_yield,
-            .type = is_call ? OptionType::CALL : OptionType::PUT},
+            .option_type = is_call ? OptionType::CALL : OptionType::PUT},
         volatility);
 
     // Create workspace (use automatic grid determination)
@@ -244,7 +244,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
     // Mango-Option pricing at automatically determined resolution
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
@@ -297,7 +297,7 @@ BENCHMARK(BM_Convergence_GridResolution)
 static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
@@ -612,7 +612,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
 
     PricingParams params(
         OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
-            .rate = rate, .dividend_yield = div_yield, .type = OptionType::CALL},
+            .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::CALL},
         volatility,
         dividends);
 
@@ -680,7 +680,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
 
     PricingParams params(
         OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
-            .rate = rate, .dividend_yield = div_yield, .type = OptionType::PUT},
+            .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::PUT},
         volatility,
         dividends);
 

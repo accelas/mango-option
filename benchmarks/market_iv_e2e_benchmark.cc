@@ -305,7 +305,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
             query.maturity = obs.maturity;
             query.rate = obs.rate;
             query.dividend_yield = grid.dividend;
-            query.type = obs.type;
+            query.option_type = obs.type;
             query.market_price = obs.market_price;
 
             auto result = iv_solver.solve(query);
@@ -403,7 +403,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             query.maturity = obs.maturity;
             query.rate = obs.rate;
             query.dividend_yield = 0.0;
-            query.type = obs.type;
+            query.option_type = obs.type;
             query.market_price = obs.market_price;
             if (iv_solver.solve(query).has_value()) {
                 converged++;

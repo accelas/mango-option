@@ -143,7 +143,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     query.maturity = maturity;
     query.rate = rate;
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = analytic_bs_price(spot, strike, maturity, sigma_true, rate, OptionType::PUT);
 
     auto run_once = [&]() {
@@ -174,7 +174,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
 static void BM_README_AmericanSingle(benchmark::State& state) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
     // Use automatic grid estimation
@@ -341,7 +341,7 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     query.maturity = 1.0;
     query.rate = 0.05;
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = 6.08;
 
     // Use default config with automatic grid estimation
@@ -464,7 +464,7 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
         for (double K : strikes) {
             params.push_back(PricingParams(
                 OptionSpec{.spot = spot, .strike = K, .maturity = tau,
-                    .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+                    .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
                 0.20));
         }
     }
