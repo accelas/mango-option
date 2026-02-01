@@ -105,15 +105,7 @@ void emit_bucket_counters(benchmark::State& state,
 // ============================================================================
 
 PricingParams make_params(const RealOptionData& opt, double vol = 0.20) {
-    return PricingParams(
-        SPOT,
-        opt.strike,
-        opt.maturity,
-        RISK_FREE_RATE,
-        DIVIDEND_YIELD,
-        opt.is_call ? OptionType::CALL : OptionType::PUT,
-        vol
-    );
+    return PricingParams(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = opt.is_call ? OptionType::CALL : OptionType::PUT}, vol);
 }
 
 // Analytic Black-Scholes for European options (used for B-spline surface)
@@ -589,15 +581,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     std::vector<IVQuery> queries;
     queries.reserve(fixture.smile_options.size());
     for (const auto& opt : fixture.smile_options) {
-        queries.push_back(IVQuery(
-            SPOT,
-            opt.strike,
-            fixture.target_maturity,
-            RISK_FREE_RATE,
-            DIVIDEND_YIELD,
-            OptionType::PUT,
-            opt.market_price
-        ));
+        queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = OptionType::PUT}, opt.market_price));
     }
 
     // Warmup
@@ -634,15 +618,7 @@ static void BM_RealData_IVSmile_FDM(benchmark::State& state) {
     std::vector<IVQuery> queries;
     queries.reserve(fixture.smile_options.size());
     for (const auto& opt : fixture.smile_options) {
-        queries.push_back(IVQuery(
-            SPOT,
-            opt.strike,
-            fixture.target_maturity,
-            RISK_FREE_RATE,
-            DIVIDEND_YIELD,
-            OptionType::PUT,
-            opt.market_price
-        ));
+        queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = OptionType::PUT}, opt.market_price));
     }
 
     IVSolverFDMConfig config;
@@ -709,15 +685,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     std::vector<IVQuery> queries;
     queries.reserve(fixture.smile_options.size());
     for (const auto& opt : fixture.smile_options) {
-        queries.push_back(IVQuery(
-            SPOT,
-            opt.strike,
-            fixture.target_maturity,
-            RISK_FREE_RATE,
-            DIVIDEND_YIELD,
-            OptionType::PUT,
-            opt.market_price
-        ));
+        queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = OptionType::PUT}, opt.market_price));
     }
 
     // Track accuracy metrics
@@ -880,15 +848,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     // Prepare IV queries
     std::vector<IVQuery> queries;
     for (const auto& opt : fixture.smile_options) {
-        queries.push_back(IVQuery(
-            SPOT,
-            opt.strike,
-            fixture.target_maturity,
-            RISK_FREE_RATE,
-            DIVIDEND_YIELD,
-            OptionType::PUT,
-            opt.market_price
-        ));
+        queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = OptionType::PUT}, opt.market_price));
     }
 
     // Track accuracy
@@ -995,15 +955,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     // Prepare IV queries
     std::vector<IVQuery> queries;
     for (const auto& opt : iv_fixture.smile_options) {
-        queries.push_back(IVQuery(
-            SPOT,
-            opt.strike,
-            iv_fixture.target_maturity,
-            RISK_FREE_RATE,
-            DIVIDEND_YIELD,
-            OptionType::PUT,
-            opt.market_price
-        ));
+        queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = iv_fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = OptionType::PUT}, opt.market_price));
     }
     // Track accuracy
     double max_abs_error = 0.0;
@@ -1118,15 +1070,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     std::vector<IVQuery> queries;
     for (const auto& opt : iv_fixture.smile_options) {
-        queries.push_back(IVQuery(
-            SPOT,
-            opt.strike,
-            iv_fixture.target_maturity,
-            RISK_FREE_RATE,
-            DIVIDEND_YIELD,
-            OptionType::PUT,
-            opt.market_price
-        ));
+        queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = iv_fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .type = OptionType::PUT}, opt.market_price));
     }
 
     double max_abs_error = 0.0;

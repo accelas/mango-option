@@ -189,15 +189,11 @@ PriceTableBuilder<N>::make_batch(const PriceTableAxes<N>& axes) const {
         // Normalized solve: Spot = Strike = K_ref
         // Surface will be interpolated across m and τ in extract_tensor
         PricingParams params(
-            K_ref,                          // spot
-            K_ref,                          // strike
-            axes.grids[1].back(),           // maturity (max for this σ,r)
-            r,                              // rate
-            config_.dividend_yield,         // dividend_yield
-            config_.option_type,            // type
-            sigma,                          // volatility
-            config_.discrete_dividends      // discrete_dividends
-        );
+            OptionSpec{.spot = K_ref, .strike = K_ref,
+                .maturity = axes.grids[1].back(), .rate = r,
+                .dividend_yield = config_.dividend_yield,
+                .type = config_.option_type},
+            sigma, config_.discrete_dividends);
 
         batch.push_back(params);
     }
@@ -471,8 +467,9 @@ PriceTableBuilder<N>::extract_tensor(
                             double spot = m * K_ref;
 
                             auto eu = EuropeanOptionSolver(PricingParams(
-                                spot, K_ref, tau, rate, config_.dividend_yield,
-                                config_.option_type, sigma)).solve().value();
+                                OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau,
+                                    .rate = rate, .dividend_yield = config_.dividend_yield,
+                                    .type = config_.option_type}, sigma)).solve().value();
 
                             double eep_raw = american_price - eu.value();
 

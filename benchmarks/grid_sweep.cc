@@ -70,8 +70,7 @@ int main() {
         auto result = solver.solve();
         if (!result) continue;
         double price = result->value_at(spot);
-        iv_queries.push_back(IVQuery(spot, tc.strike, tc.maturity, rate, div_yield,
-                                      OptionType::PUT, price));
+        iv_queries.push_back(IVQuery(OptionSpec{.spot = spot, .strike = tc.strike, .maturity = tc.maturity, .rate = rate, .dividend_yield = div_yield, .type = OptionType::PUT}, price));
     }
 
     // Reference FDM IVs

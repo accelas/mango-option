@@ -103,13 +103,13 @@ TEST(OptionSpecValidationTest, NegativeDividendYield) {
 // ===========================================================================
 
 TEST(IVQueryValidationTest, ValidQueryPasses) {
-    IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 10.0);
+    IVQuery query(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
     auto result = validate_iv_query(query);
     EXPECT_TRUE(result.has_value());
 }
 
 TEST(IVQueryValidationTest, NegativeMarketPrice) {
-    IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, -5.0);
+    IVQuery query(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, -5.0);
     auto result = validate_iv_query(query);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidMarketPrice);
@@ -117,7 +117,7 @@ TEST(IVQueryValidationTest, NegativeMarketPrice) {
 
 TEST(IVQueryValidationTest, ArbitrageCallExceedsSpot) {
     // Call price > spot is arbitrage
-    IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 150.0);
+    IVQuery query(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 150.0);
     auto result = validate_iv_query(query);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidMarketPrice);
@@ -125,7 +125,7 @@ TEST(IVQueryValidationTest, ArbitrageCallExceedsSpot) {
 
 TEST(IVQueryValidationTest, ArbitragePutExceedsStrike) {
     // Put price > strike is arbitrage
-    IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 150.0);
+    IVQuery query(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 150.0);
     auto result = validate_iv_query(query);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidMarketPrice);

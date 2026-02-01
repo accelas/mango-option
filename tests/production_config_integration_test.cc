@@ -227,9 +227,7 @@ TEST_P(BatchSolverGridSizeTest, SharedGrid_ExplicitSize) {
     // Create batch of options
     std::vector<PricingParams> params;
     for (double K : {90.0, 95.0, 100.0, 105.0, 110.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 1.0, 0.05, 0.02,
-            OptionType::PUT, 0.20, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
     }
 
     // Create custom grid config
@@ -261,9 +259,7 @@ TEST_P(BatchSolverGridSizeTest, PerOptionGrid_ExplicitSize) {
 
     std::vector<PricingParams> params;
     for (double K : {90.0, 100.0, 110.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 1.0, 0.05, 0.02,
-            OptionType::PUT, 0.20, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
@@ -309,9 +305,7 @@ TEST_P(BatchSolverConfigTest, ConfigurationMatrix) {
 
     for (size_t i = 0; i < config.batch_size; ++i) {
         double strike = base_strike + i * strike_step;
-        params.push_back(PricingParams(
-            spot, strike, 1.0, 0.05, 0.02,
-            config.option_type, 0.20, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = config.option_type}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -360,9 +354,7 @@ TEST(ProductionConfig, BatchSolver_DeepITM_Puts) {
     // Deep ITM puts (high strikes)
     std::vector<PricingParams> params;
     for (double K : {120.0, 130.0, 140.0, 150.0, 160.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 0.5, 0.05, 0.02,
-            OptionType::PUT, 0.25, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 0.5, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.25));
     }
 
     BatchAmericanOptionSolver solver;
@@ -380,9 +372,7 @@ TEST(ProductionConfig, BatchSolver_DeepOTM_Puts) {
     // Deep OTM puts (low strikes)
     std::vector<PricingParams> params;
     for (double K : {50.0, 60.0, 70.0, 80.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 0.5, 0.05, 0.02,
-            OptionType::PUT, 0.25, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 0.5, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.25));
     }
 
     BatchAmericanOptionSolver solver;
@@ -400,9 +390,7 @@ TEST(ProductionConfig, BatchSolver_WideStrikeRange) {
     // Very wide strike range in single batch
     std::vector<PricingParams> params;
     for (double K : {50.0, 70.0, 90.0, 100.0, 110.0, 130.0, 150.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 1.0, 0.05, 0.02,
-            OptionType::PUT, 0.25, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.25));
     }
 
     BatchAmericanOptionSolver solver;
@@ -421,9 +409,7 @@ TEST(ProductionConfig, BatchSolver_ShortMaturity) {
     // Very short maturities (weekly options)
     std::vector<PricingParams> params;
     for (double K : {95.0, 100.0, 105.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 7.0/365.0, 0.05, 0.02,
-            OptionType::PUT, 0.30, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 7.0/365.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.30));
     }
 
     BatchAmericanOptionSolver solver;
@@ -436,9 +422,7 @@ TEST(ProductionConfig, BatchSolver_HighVolatility) {
     // High volatility (meme stock scenario)
     std::vector<PricingParams> params;
     for (double K : {80.0, 100.0, 120.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 0.5, 0.05, 0.0,
-            OptionType::PUT, 0.80, {}));  // 80% vol
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 0.5, .rate = 0.05, .type = OptionType::PUT}, 0.80));  // 80% vol
     }
 
     BatchAmericanOptionSolver solver;
@@ -451,9 +435,7 @@ TEST(ProductionConfig, BatchSolver_NegativeRate) {
     // Negative interest rate (European scenario)
     std::vector<PricingParams> params;
     for (double K : {95.0, 100.0, 105.0}) {
-        params.push_back(PricingParams(
-            100.0, K, 1.0, -0.01, 0.0,  // -1% rate
-            OptionType::PUT, 0.20, {}));
+        params.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = K, .maturity = 1.0, .rate = -0.01, .type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -555,8 +537,8 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     EXPECT_GT(price, 0.0);
 
     // Solve for IV
-    IVQuery query{spot, strike, maturity, rate, grid.dividend,
-                  OptionType::PUT, price};
+    IVQuery query(OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                      .rate = rate, .dividend_yield = grid.dividend, .type = OptionType::PUT}, price);
     auto iv_result = iv_solver.solve(query);
 
     ASSERT_TRUE(iv_result.has_value())

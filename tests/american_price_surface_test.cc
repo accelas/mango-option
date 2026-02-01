@@ -102,7 +102,7 @@ TEST(AmericanPriceSurfaceTest, PriceReconstructsCorrectly) {
     // Expected: EEP * (K/K_ref) + P_EU
     double m = S / K;
     double eep_interp = surface->value({m, tau, sigma, r});
-    auto eu = EuropeanOptionSolver(PricingParams(S, K, tau, r, 0.02, OptionType::PUT, sigma)).solve().value();
+    auto eu = EuropeanOptionSolver(PricingParams(OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = r, .dividend_yield = 0.02, .type = OptionType::PUT}, sigma)).solve().value();
     double expected = eep_interp * (K / 100.0) + eu.value();
 
     EXPECT_NEAR(price, expected, 1e-10);

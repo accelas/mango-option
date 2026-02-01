@@ -352,14 +352,9 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
     for (const auto& group : pde_groups) {
         // Solve normalized PDE once for this group (S=K=1)
         PricingParams normalized_params(
-            1.0,                // spot (normalized)
-            1.0,                // strike (normalized)
-            group.maturity,     // maturity
-            group.rate,         // rate (RateSpec)
-            group.dividend,     // dividend_yield
-            group.option_type,  // type
-            group.sigma         // volatility
-        );
+            OptionSpec{.spot = 1.0, .strike = 1.0, .maturity = group.maturity,
+                .rate = group.rate, .dividend_yield = group.dividend,
+                .type = group.option_type}, group.sigma);
 
         // Solve with shared grid to get full surface
         auto solve_result = solve_regular_batch(

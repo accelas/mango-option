@@ -423,15 +423,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;  // Strikes from 90 to 90 + batch_size*0.5
-        batch.push_back(PricingParams(
-            100.0,  // spot
-            strike, // strike
-            1.0,    // maturity
-            0.05,   // rate
-            0.02,   // dividend_yield
-            OptionType::PUT,
-            0.20    // volatility
-        ));
+        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
     }
 
     auto [grid_spec, time_domain] = compute_global_grid_for_batch(batch);
@@ -483,7 +475,7 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double market_price = 5.0 + i * 0.1;  // Different prices
-        batch.push_back(IVQuery(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, market_price));
+        batch.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, market_price));
     }
 
     IVSolverFDMConfig config;

@@ -235,15 +235,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(PricingParams(
-            100.0,  // spot
-            strike, // strike
-            1.0,    // maturity
-            0.05,   // rate
-            0.02,   // dividend_yield
-            OptionType::PUT,
-            0.20    // volatility
-        ));
+        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
     }
 
     auto run_once = [&]() -> double {
@@ -305,15 +297,7 @@ static void BM_README_AmericanBatch64(benchmark::State& state) {
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;
-        batch.push_back(PricingParams(
-            100.0,  // spot
-            strike, // strike
-            1.0,    // maturity
-            0.05,   // rate
-            0.02,   // dividend_yield
-            OptionType::PUT,
-            0.20    // volatility
-        ));
+        batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;

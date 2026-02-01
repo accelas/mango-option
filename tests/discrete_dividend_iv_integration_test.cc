@@ -38,15 +38,9 @@ protected:
 TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     // Price an ATM put at known vol=0.20 using FDM
     PricingParams params(
-        100.0,   // spot
-        100.0,   // strike
-        0.8,     // maturity (shorter than surface build maturity)
-        0.05,    // rate
-        0.0,     // dividend_yield
-        OptionType::PUT,
-        0.20,    // volatility
-        {{0.5, 2.0}}  // discrete_dividends
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
+            .rate = 0.05, .type = OptionType::PUT},
+        0.20, {{.calendar_time = 0.5, .amount = 2.0}});
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());
@@ -77,15 +71,9 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
 TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     // OTM put: strike=90, vol=0.25
     PricingParams params(
-        100.0,   // spot
-        90.0,    // strike
-        0.8,     // maturity (shorter than surface build maturity)
-        0.05,    // rate
-        0.0,     // dividend_yield
-        OptionType::PUT,
-        0.25,    // volatility
-        {{0.5, 2.0}}  // discrete_dividends
-    );
+        OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 0.8,
+            .rate = 0.05, .type = OptionType::PUT},
+        0.25, {{.calendar_time = 0.5, .amount = 2.0}});
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());
@@ -119,9 +107,8 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
         if (tau > 0.5) divs = {{.calendar_time = 0.5, .amount = 2.0}};
 
         PricingParams params(
-            100.0, 110.0, tau, 0.05, 0.0,
-            OptionType::PUT, 0.20, divs
-        );
+            OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = tau,
+                .rate = 0.05, .type = OptionType::PUT}, 0.20, divs);
 
         auto price_result = solve_american_option_auto(params);
         ASSERT_TRUE(price_result.has_value());
@@ -153,14 +140,8 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
     // The interpolated solver (built with dividends) should still produce
     // reasonable results for maturities before the first dividend.
     PricingParams params(
-        100.0,   // spot
-        100.0,   // strike
-        0.3,     // maturity (before dividend at t=0.5)
-        0.05,    // rate
-        0.0,     // dividend_yield
-        OptionType::PUT,
-        0.20     // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.3,
+            .rate = 0.05, .type = OptionType::PUT}, 0.20);
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());
@@ -188,15 +169,9 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
 TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
     // High vol: vol=0.35
     PricingParams params(
-        100.0,   // spot
-        100.0,   // strike
-        0.8,     // maturity
-        0.03,    // rate
-        0.0,     // dividend_yield
-        OptionType::PUT,
-        0.35,    // volatility
-        {{0.5, 2.0}}  // discrete_dividends
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8,
+            .rate = 0.03, .type = OptionType::PUT},
+        0.35, {{.calendar_time = 0.5, .amount = 2.0}});
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());
@@ -239,14 +214,8 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
 
     // Price an option with continuous dividends via FDM for round-trip test
     PricingParams params(
-        100.0,   // spot
-        100.0,   // strike
-        0.5,     // maturity
-        0.05,    // rate
-        0.02,    // dividend_yield
-        OptionType::PUT,
-        0.20     // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
 
     auto price_result = solve_american_option_auto(params);
     ASSERT_TRUE(price_result.has_value());

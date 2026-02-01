@@ -146,7 +146,14 @@ PYBIND11_MODULE(mango_option, m) {
     // IVQuery structure (replaces IVParams)
     py::class_<mango::IVQuery>(m, "IVQuery")
         .def(py::init<>())
-        .def(py::init<double, double, double, double, double, mango::OptionType, double>(),
+        .def(py::init([](double spot, double strike, double maturity,
+                         double rate, double dividend_yield, mango::OptionType type,
+                         double market_price) {
+                 return mango::IVQuery(
+                     mango::OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                         .rate = rate, .dividend_yield = dividend_yield, .type = type},
+                     market_price);
+             }),
              py::arg("spot"), py::arg("strike"), py::arg("maturity"),
              py::arg("rate"), py::arg("dividend_yield"), py::arg("type"),
              py::arg("market_price"))

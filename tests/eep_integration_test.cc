@@ -67,7 +67,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
     EXPECT_GT(reconstructed, 0.0) << "Reconstructed price should be positive";
 
     // Direct PDE solve for comparison
-    PricingParams params(S, K, tau, r, 0.0, OptionType::PUT, sigma);
+    PricingParams params(OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = r, .type = OptionType::PUT}, sigma);
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     size_t n_space = grid_spec.n_points();

@@ -169,22 +169,8 @@ struct IVQuery : OptionSpec {
 
     IVQuery() = default;
 
-    IVQuery(double spot_,
-            double strike_,
-            double maturity_,
-            double rate_,
-            double dividend_yield_,
-            OptionType type_,
-            double market_price_)
-        : market_price(market_price_)
-    {
-        spot = spot_;
-        strike = strike_;
-        maturity = maturity_;
-        rate = rate_;
-        dividend_yield = dividend_yield_;
-        type = type_;
-    }
+    IVQuery(const OptionSpec& spec, double market_price_)
+        : OptionSpec(spec), market_price(market_price_) {}
 };
 
 /**
@@ -233,43 +219,7 @@ struct PricingParams : OptionSpec {
         , discrete_dividends(std::move(discrete_dividends_))
     {}
 
-    PricingParams(double spot_,
-                  double strike_,
-                  double maturity_,
-                  double rate_,
-                  double dividend_yield_,
-                  OptionType type_,
-                  double volatility_,
-                  std::vector<Dividend> discrete_dividends_ = {})
-        : volatility(volatility_)
-        , discrete_dividends(std::move(discrete_dividends_))
-    {
-        spot = spot_;
-        strike = strike_;
-        maturity = maturity_;
-        rate = rate_;
-        dividend_yield = dividend_yield_;
-        type = type_;
-    }
 
-    PricingParams(double spot_,
-                  double strike_,
-                  double maturity_,
-                  RateSpec rate_,
-                  double dividend_yield_,
-                  OptionType type_,
-                  double volatility_,
-                  std::vector<Dividend> discrete_dividends_ = {})
-        : volatility(volatility_)
-        , discrete_dividends(std::move(discrete_dividends_))
-    {
-        spot = spot_;
-        strike = strike_;
-        maturity = maturity_;
-        rate = std::move(rate_);
-        dividend_yield = dividend_yield_;
-        type = type_;
-    }
 };
 
 /**
