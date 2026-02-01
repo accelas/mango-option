@@ -17,14 +17,8 @@ using namespace mango;
 TEST(IVSolverIntegration, FullWorkflowSuccess) {
     // Setup: Real-world scenario - ATM put
     IVQuery query(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        10.0    // market_price
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDMConfig config{
         .root_config = RootFindingConfig{
@@ -51,14 +45,8 @@ TEST(IVSolverIntegration, FullWorkflowSuccess) {
 TEST(IVSolverIntegration, ValidationErrorPath) {
     // Test validation error handling
     IVQuery query(
-        -100.0,  // spot (invalid!)
-        100.0,   // strike
-        1.0,     // maturity
-        0.05,    // rate
-        0.02,    // dividend_yield
-        OptionType::PUT,
-        10.0     // market_price
-    );
+        OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDM solver(IVSolverFDMConfig{});
     auto result = solver.solve(query);
@@ -72,14 +60,8 @@ TEST(IVSolverIntegration, ValidationErrorPath) {
 TEST(IVSolverIntegration, ArbitrageErrorPath) {
     // Test arbitrage violation detection
     IVQuery query(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        150.0   // market_price (put price > strike!)
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 150.0);
 
     IVSolverFDM solver(IVSolverFDMConfig{});
     auto result = solver.solve(query);
@@ -93,19 +75,19 @@ TEST(IVSolverIntegration, BatchProcessingWorkflow) {
     std::vector<IVQuery> queries;
 
     // Valid query 1
-    queries.emplace_back(
-        100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 10.0
-    );
+    queries.push_back(IVQuery(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0));
 
     // Invalid query (negative spot)
-    queries.emplace_back(
-        -100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 10.0
-    );
+    queries.push_back(IVQuery(
+        OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0));
 
     // Valid query 2
-    queries.emplace_back(
-        100.0, 110.0, 1.0, 0.05, 0.02, OptionType::PUT, 15.0
-    );
+    queries.push_back(IVQuery(
+        OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 15.0));
 
     IVSolverFDM solver(IVSolverFDMConfig{});
     auto batch = solver.solve_batch(queries);
@@ -125,14 +107,8 @@ TEST(IVSolverIntegration, BatchProcessingWorkflow) {
 TEST(IVSolverIntegration, MonadicErrorPropagation) {
     // Test that validation errors short-circuit properly
     IVQuery query(
-        -100.0,  // spot (first error)
-        -50.0,   // strike (would be second error)
-        1.0,     // maturity
-        0.05,    // rate
-        0.02,    // dividend_yield
-        OptionType::PUT,
-        10.0     // market_price
-    );
+        OptionSpec{.spot = -100.0, .strike = -50.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDM solver(IVSolverFDMConfig{});
     auto result = solver.solve(query);
@@ -147,15 +123,11 @@ TEST(IVSolverIntegration, ITMOTMScenarios) {
     IVSolverFDM solver(IVSolverFDMConfig{});
 
     // ITM put (K > S)
-    auto itm_result = solver.solve(IVQuery(
-        100.0, 110.0, 1.0, 0.05, 0.02, OptionType::PUT, 15.0
-    ));
+    auto itm_result = solver.solve(IVQuery(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 15.0));
     ASSERT_TRUE(itm_result.has_value());
 
     // OTM put (K < S)
-    auto otm_result = solver.solve(IVQuery(
-        100.0, 90.0, 1.0, 0.05, 0.02, OptionType::PUT, 3.0
-    ));
+    auto otm_result = solver.solve(IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 3.0));
     ASSERT_TRUE(otm_result.has_value());
 
     // Different volatilities expected

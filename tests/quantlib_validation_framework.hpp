@@ -136,9 +136,10 @@ inline PricingValidationResult validate_pricing(
 
     // Mango-Option pricing with auto-estimation
     PricingParams mango_params(
-        scenario.spot, scenario.strike, scenario.maturity,
-        scenario.rate, scenario.dividend_yield,
-        scenario.is_call ? OptionType::CALL : OptionType::PUT,
+        OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
+            .maturity = scenario.maturity, .rate = scenario.rate,
+            .dividend_yield = scenario.dividend_yield,
+            .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         scenario.volatility);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
@@ -214,12 +215,12 @@ inline IVValidationResult validate_iv_fdm(
         201, 2000);
 
     // Solve for IV using FDM
-    IVQuery query{
-        scenario.spot, scenario.strike, scenario.maturity,
-        scenario.rate, scenario.dividend_yield,
-        scenario.is_call ? OptionType::CALL : OptionType::PUT,
-        ql_result.price
-    };
+    IVQuery query(
+        OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
+            .maturity = scenario.maturity, .rate = scenario.rate,
+            .dividend_yield = scenario.dividend_yield,
+            .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
+        ql_result.price);
 
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;

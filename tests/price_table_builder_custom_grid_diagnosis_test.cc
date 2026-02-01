@@ -16,7 +16,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
         .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
-        .dividend_yield = 0.02
+        .dividends = {.dividend_yield = 0.02}
     };
 
     PriceTableBuilder<4> builder(config);

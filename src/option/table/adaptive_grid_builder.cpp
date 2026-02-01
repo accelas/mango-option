@@ -116,7 +116,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     std::vector<double> rate_grid = linspace(min_rate, max_rate, 4);  // Need at least 4
 
     AdaptiveResult result;
-    result.iterations.reserve(params_.max_iterations);
+    result.iterations.reserve(params_.max_iter);
 
     // ========================================================================
     // 2. MAIN LOOP - Iterative refinement
@@ -132,7 +132,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     std::array<std::vector<size_t>, 4> focus_bins;
     bool focus_active = false;
 
-    for (size_t iteration = 0; iteration < params_.max_iterations; ++iteration) {
+    for (size_t iteration = 0; iteration < params_.max_iter; ++iteration) {
         auto iter_start = std::chrono::steady_clock::now();
 
         IterationStats stats;
@@ -317,10 +317,10 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         // Build metadata
         PriceTableMetadata metadata;
         metadata.K_ref = chain.spot;
-        metadata.dividend_yield = chain.dividend_yield;
+        metadata.dividends.dividend_yield = chain.dividend_yield;
         metadata.m_min = moneyness_grid.front();
         metadata.m_max = moneyness_grid.back();
-        metadata.discrete_dividends = {};
+        metadata.dividends.discrete_dividends = {};
 
         // Build surface
         auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);
@@ -408,7 +408,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
             params.maturity = tau;
             params.rate = rate;
             params.dividend_yield = chain.dividend_yield;
-            params.type = type;
+            params.option_type = type;
             params.volatility = sigma;
 
             auto fd_result = solve_american_option_auto(params);
@@ -462,7 +462,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         // d. CHECK CONVERGENCE
         bool converged = (max_error <= params_.target_iv_error);
 
-        if (converged || iteration == params_.max_iterations - 1) {
+        if (converged || iteration == params_.max_iter - 1) {
             // Final iteration - save results
             stats.refined_dim = -1;  // No refinement on final iteration
             result.iterations.push_back(stats);

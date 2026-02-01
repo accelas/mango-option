@@ -88,15 +88,12 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     std::vector<PricingParams> pde_params;
     pde_params.reserve(scenarios.size());
     for (const auto& scenario : scenarios) {
-        pde_params.emplace_back(PricingParams{
-            scenario.spot,
-            scenario.strike,
-            scenario.maturity,
-            scenario.rate,
-            scenario.dividend_yield,
-            scenario.is_call ? OptionType::CALL : OptionType::PUT,
-            scenario.volatility
-        });
+        pde_params.emplace_back(PricingParams(
+            OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
+                .maturity = scenario.maturity, .rate = scenario.rate,
+                .dividend_yield = scenario.dividend_yield,
+                .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
+            scenario.volatility));
     }
 
     auto pde_accuracy = grid_accuracy_profile(GridAccuracyProfile::High);
@@ -131,7 +128,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
 
     // Create interpolated IV solver from surface
     IVSolverInterpolatedConfig iv_config{
-        .max_iterations = 100,
+        .max_iter = 100,
         .tolerance = 1e-7,
         .sigma_min = 0.05,
         .sigma_max = 2.0

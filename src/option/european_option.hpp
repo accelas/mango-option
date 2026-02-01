@@ -53,7 +53,7 @@ public:
     double strike() const { return params_.strike; }
     double maturity() const { return params_.maturity; }
     double volatility() const { return params_.volatility; }
-    OptionType option_type() const { return params_.type; }
+    OptionType option_type() const { return params_.option_type; }
 
 private:
     /// Compute d1, d2 for given spot price
@@ -79,6 +79,9 @@ class EuropeanOptionSolver {
 public:
     /// Construct solver from pricing parameters (no validation)
     explicit EuropeanOptionSolver(const PricingParams& params);
+
+    /// Construct from option spec + volatility (convenience)
+    EuropeanOptionSolver(const OptionSpec& spec, double sigma);
 
     /// Factory with validation via validate_pricing_params()
     static std::expected<EuropeanOptionSolver, ValidationError>

@@ -19,7 +19,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
         .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},  // width = 6.0
-        .dividend_yield = 0.02
+        .dividends = {.dividend_yield = 0.02}
     };
 
     const auto& explicit_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
@@ -34,7 +34,7 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
         .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-2.5, 2.5, 21).value(), 100},  // width = 5.0
-        .dividend_yield = 0.02
+        .dividends = {.dividend_yield = 0.02}
     };
 
     PriceTableBuilder<4> builder_narrow(config_narrow);

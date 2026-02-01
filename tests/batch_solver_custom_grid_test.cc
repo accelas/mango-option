@@ -8,15 +8,8 @@ TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
     // Test without custom grid first (baseline)
     std::vector<mango::PricingParams> batch;
     batch.push_back(mango::PricingParams(
-        100.0,                 // spot
-        100.0,                 // strike
-        1.0,                   // maturity
-        0.05,                  // rate
-        0.02,                  // dividend_yield
-        mango::OptionType::PUT, // type
-        0.20,                  // volatility
-        {}                     // discrete_dividends
-    ));
+        mango::OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = mango::OptionType::PUT}, 0.20));
 
     mango::BatchAmericanOptionSolver solver;
     solver.set_use_normalized(false);
@@ -49,7 +42,9 @@ TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
 
 TEST(BatchSolverCustomGridTest, NulloptUsesAutoEstimation) {
     std::vector<mango::PricingParams> batch;
-    batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.02, mango::OptionType::PUT, 0.20);
+    batch.push_back(mango::PricingParams(
+        mango::OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = mango::OptionType::PUT}, 0.20));
 
     mango::BatchAmericanOptionSolver solver;
     // Pass nullopt explicitly - should use auto-estimation

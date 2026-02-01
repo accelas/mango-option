@@ -118,9 +118,9 @@ std::optional<std::string> OptionBracketing::validate_bracket_compatibility(
     }
 
     // Check that all options have same type
-    OptionType first_type = options[0].type;
+    OptionType first_type = options[0].option_type;
     for (size_t i = 1; i < options.size(); ++i) {
-        if (options[i].type != first_type) {
+        if (options[i].option_type != first_type) {
             return "Bracket contains mixed option types (calls and puts)";
         }
     }

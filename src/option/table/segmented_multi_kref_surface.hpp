@@ -32,6 +32,8 @@ public:
     [[nodiscard]] double sigma_max() const noexcept;
     [[nodiscard]] double rate_min() const noexcept;
     [[nodiscard]] double rate_max() const noexcept;
+    [[nodiscard]] OptionType option_type() const noexcept;
+    [[nodiscard]] double dividend_yield() const noexcept;
 
 private:
     SegmentedMultiKRefSurface() = default;
@@ -45,6 +47,8 @@ private:
     double tau_min_, tau_max_;
     double sigma_min_, sigma_max_;
     double rate_min_, rate_max_;
+    OptionType option_type_ = OptionType::PUT;
+    double dividend_yield_ = 0.0;
 };
 
 }  // namespace mango

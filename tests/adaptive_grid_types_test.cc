@@ -9,7 +9,7 @@ TEST(AdaptiveGridParamsTest, DefaultValues) {
     AdaptiveGridParams params;
 
     EXPECT_DOUBLE_EQ(params.target_iv_error, 0.0005);  // 5 bps
-    EXPECT_EQ(params.max_iterations, 5);
+    EXPECT_EQ(params.max_iter, 5);
     EXPECT_EQ(params.max_points_per_dim, 50);
     EXPECT_EQ(params.validation_samples, 64);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.3);
@@ -20,7 +20,7 @@ TEST(AdaptiveGridParamsTest, DefaultValues) {
 TEST(AdaptiveGridParamsTest, CustomValues) {
     AdaptiveGridParams params;
     params.target_iv_error = 0.001;  // 10 bps
-    params.max_iterations = 10;
+    params.max_iter = 10;
     params.max_points_per_dim = 100;
     params.validation_samples = 128;
     params.refinement_factor = 1.5;
@@ -28,7 +28,7 @@ TEST(AdaptiveGridParamsTest, CustomValues) {
     params.vega_floor = 1e-3;
 
     EXPECT_DOUBLE_EQ(params.target_iv_error, 0.001);
-    EXPECT_EQ(params.max_iterations, 10);
+    EXPECT_EQ(params.max_iter, 10);
     EXPECT_EQ(params.max_points_per_dim, 100);
     EXPECT_EQ(params.validation_samples, 128);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.5);

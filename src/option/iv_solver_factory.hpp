@@ -22,19 +22,28 @@
 
 namespace mango {
 
+/// Standard path: continuous dividends only, maturity grid for interpolation
+struct StandardIVPath {
+    std::vector<double> maturity_grid;
+};
+
+/// Segmented path: discrete dividends with multi-K_ref surface
+struct SegmentedIVPath {
+    double maturity = 1.0;
+    std::vector<Dividend> discrete_dividends;
+    MultiKRefConfig kref_config;  ///< defaults to auto
+};
+
 /// Configuration for the IV solver factory
 struct IVSolverConfig {
     OptionType option_type = OptionType::PUT;
     double spot = 100.0;
     double dividend_yield = 0.0;
-    std::vector<std::pair<double, double>> discrete_dividends;  ///< (calendar_time, amount)
     std::vector<double> moneyness_grid;
-    double maturity = 1.0;                     ///< Max maturity (T), used for segmented path
-    std::vector<double> maturity_grid;         ///< For standard path (no dividends)
     std::vector<double> vol_grid;
     std::vector<double> rate_grid;
-    MultiKRefConfig kref_config;               ///< For segmented path; defaults to auto
     IVSolverInterpolatedConfig solver_config;  ///< Newton config
+    std::variant<StandardIVPath, SegmentedIVPath> path;
 };
 
 /// Type-erased IV solver wrapping either path
@@ -62,8 +71,8 @@ private:
 
 /// Factory function: build price surface and IV solver from config
 ///
-/// If discrete_dividends is empty, uses the standard AmericanPriceSurface path.
-/// If discrete_dividends is non-empty, uses the SegmentedMultiKRefSurface path.
+/// If path holds StandardIVPath, uses the AmericanPriceSurface path.
+/// If path holds SegmentedIVPath, uses the SegmentedMultiKRefSurface path.
 ///
 /// @param config Solver configuration
 /// @return Type-erased IVSolver or ValidationError

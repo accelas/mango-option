@@ -29,14 +29,14 @@ PricingParams atm_put_params() {
     p.maturity = 1.0;
     p.rate = 0.05;
     p.dividend_yield = 0.02;
-    p.type = OptionType::PUT;
+    p.option_type = OptionType::PUT;
     p.volatility = 0.20;
     return p;
 }
 
 PricingParams atm_call_params() {
     PricingParams p = atm_put_params();
-    p.type = OptionType::CALL;
+    p.option_type = OptionType::CALL;
     return p;
 }
 
@@ -168,7 +168,7 @@ TEST(EuropeanOptionTest, DeepITMPut) {
     params.maturity = 1.0;
     params.rate = 0.05;
     params.dividend_yield = 0.02;
-    params.type = OptionType::PUT;
+    params.option_type = OptionType::PUT;
     params.volatility = 0.20;
 
     auto result = EuropeanOptionSolver(params).solve().value();
@@ -186,7 +186,7 @@ TEST(EuropeanOptionTest, DeepOTMPut) {
     params.maturity = 1.0;
     params.rate = 0.05;
     params.dividend_yield = 0.02;
-    params.type = OptionType::PUT;
+    params.option_type = OptionType::PUT;
     params.volatility = 0.20;
 
     auto result = EuropeanOptionSolver(params).solve().value();
@@ -251,7 +251,7 @@ TEST(EuropeanOptionTest, ZeroVolatilityReturnsDiscountedIntrinsic) {
     params.maturity = 1.0;
     params.rate = 0.05;
     params.dividend_yield = 0.0;
-    params.type = OptionType::PUT;
+    params.option_type = OptionType::PUT;
     params.volatility = 0.0;
 
     auto result = EuropeanOptionSolver(params).solve().value();
@@ -288,7 +288,7 @@ TEST(EuropeanOptionTest, ZeroVolDeltaWithDividendYield) {
     params.maturity = 1.0;
     params.rate = 0.05;
     params.dividend_yield = 0.03;
-    params.type = OptionType::PUT;
+    params.option_type = OptionType::PUT;
     params.volatility = 0.0;
 
     auto result = EuropeanOptionSolver(params).solve().value();

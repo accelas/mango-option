@@ -2,6 +2,7 @@
 #pragma once
 
 #include <concepts>
+#include "src/option/option_spec.hpp"
 
 namespace mango {
 
@@ -10,6 +11,8 @@ concept PriceSurface = requires(const S& s, double spot, double strike,
                                 double tau, double sigma, double rate) {
     { s.price(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
     { s.vega(spot, strike, tau, sigma, rate) } -> std::same_as<double>;
+    { s.option_type() } -> std::same_as<OptionType>;
+    { s.dividend_yield() } -> std::convertible_to<double>;
     { s.m_min() } -> std::convertible_to<double>;
     { s.m_max() } -> std::convertible_to<double>;
     { s.tau_min() } -> std::convertible_to<double>;

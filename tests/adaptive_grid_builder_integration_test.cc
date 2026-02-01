@@ -29,7 +29,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;  // 20 bps - achievable target
-    params.max_iterations = 2;
+    params.max_iter = 2;
     params.validation_samples = 8;  // Match unit test
 
     AdaptiveGridBuilder builder(params);
@@ -39,7 +39,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, ConvergesToTarget) {
 
     ASSERT_TRUE(result.has_value()) << "Build should succeed";
 
-    // Should meet target within max_iterations
+    // Should meet target within max_iter
     if (result->target_met) {
         EXPECT_LE(result->achieved_max_error, params.target_iv_error);
     }
@@ -56,7 +56,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, RefinementIncreasesGridSize) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.0001;  // Very tight target, likely won't hit
-    params.max_iterations = 3;
+    params.max_iter = 3;
     params.validation_samples = 8;
 
     AdaptiveGridBuilder builder(params);
@@ -88,7 +88,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 1e-10;  // Impossible target
-    params.max_iterations = 2;       // Limited iterations
+    params.max_iter = 2;       // Limited iterations
     params.max_points_per_dim = 10;  // Limited grid
     params.validation_samples = 8;
 
@@ -106,7 +106,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, HandlesImpossibleTarget) {
     EXPECT_NE(result->surface, nullptr);
 
     // Should have reached max iterations
-    EXPECT_EQ(result->iterations.size(), params.max_iterations);
+    EXPECT_EQ(result->iterations.size(), params.max_iter);
 }
 
 TEST_F(AdaptiveGridBuilderIntegrationTest, DeterministicWithSameSeed) {
@@ -114,7 +114,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, DeterministicWithSameSeed) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;  // Relaxed target
-    params.max_iterations = 2;
+    params.max_iter = 2;
     params.validation_samples = 8;
     params.lhs_seed = 12345;
 
@@ -145,7 +145,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, DifferentSeedsProduceDifferentSamples
 
     AdaptiveGridParams params1;
     params1.target_iv_error = 0.01;
-    params1.max_iterations = 1;  // Single iteration to focus on sampling difference
+    params1.max_iter = 1;  // Single iteration to focus on sampling difference
     params1.validation_samples = 8;
     params1.lhs_seed = 111;
 
@@ -175,7 +175,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, SurfaceInterpolatesWithinBounds) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.005;
-    params.max_iterations = 2;
+    params.max_iter = 2;
     params.validation_samples = 8;
 
     AdaptiveGridBuilder builder(params);
@@ -206,7 +206,7 @@ TEST_F(AdaptiveGridBuilderIntegrationTest, TracksIterationDiagnostics) {
 
     AdaptiveGridParams params;
     params.target_iv_error = 0.0001;  // Tight target to force multiple iterations
-    params.max_iterations = 3;
+    params.max_iter = 3;
     params.validation_samples = 8;
 
     AdaptiveGridBuilder builder(params);

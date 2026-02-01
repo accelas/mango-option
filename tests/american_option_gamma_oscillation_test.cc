@@ -24,12 +24,8 @@ constexpr double kDividendYield = 0.0;
 bool run_gamma_oscillation_case(const SweepCase& test_case) {
     const double strike = kSpot / test_case.moneyness;
     PricingParams params(
-        kSpot,
-        strike,
-        test_case.maturity,
-        kRate,
-        kDividendYield,
-        OptionType::PUT,
+        OptionSpec{.spot = kSpot, .strike = strike, .maturity = test_case.maturity,
+            .rate = kRate, .dividend_yield = kDividendYield, .option_type = OptionType::PUT},
         test_case.vol);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);

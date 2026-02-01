@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 #include <utility>
-#include <initializer_list>
 #include <variant>
 #include <functional>
 
@@ -112,6 +111,24 @@ enum class OptionType {
     PUT
 };
 
+/// Discrete dividend event
+///
+/// Represents a known future dividend payment at a specific calendar time.
+/// Calendar time is measured in years from the valuation date.
+struct Dividend {
+    double calendar_time = 0.0;  ///< Years from valuation date
+    double amount = 0.0;         ///< Dollar amount
+};
+
+/// Shared dividend specification: continuous yield + discrete schedule
+///
+/// Bundles both continuous dividend yield and discrete dividend events
+/// into a single struct for config objects that need both.
+struct DividendSpec {
+    double dividend_yield = 0.0;              ///< Continuous dividend yield (annualized, decimal)
+    std::vector<Dividend> discrete_dividends; ///< Discrete dividend schedule
+};
+
 /**
  * @brief Complete specification of an option contract
  *
@@ -131,7 +148,7 @@ struct OptionSpec {
     double maturity = 0.0;         ///< Time to maturity in years (T)
     RateSpec rate = 0.0;           ///< Risk-free rate (constant or yield curve)
     double dividend_yield = 0.0;   ///< Continuous dividend yield (annualized, decimal)
-    OptionType type = OptionType::CALL; ///< CALL or PUT (default CALL)
+    OptionType option_type = OptionType::CALL; ///< CALL or PUT (default CALL)
 };
 
 /**
@@ -161,22 +178,8 @@ struct IVQuery : OptionSpec {
 
     IVQuery() = default;
 
-    IVQuery(double spot_,
-            double strike_,
-            double maturity_,
-            double rate_,
-            double dividend_yield_,
-            OptionType type_,
-            double market_price_)
-        : market_price(market_price_)
-    {
-        spot = spot_;
-        strike = strike_;
-        maturity = maturity_;
-        rate = rate_;
-        dividend_yield = dividend_yield_;
-        type = type_;
-    }
+    IVQuery(const OptionSpec& spec, double market_price_)
+        : OptionSpec(spec), market_price(market_price_) {}
 };
 
 /**
@@ -213,67 +216,19 @@ struct PricingParams : OptionSpec {
     /// Discrete dividend schedule: (time, amount) pairs
     /// Time is in years from now, amount is in dollars
     /// Can be used simultaneously with dividend_yield
-    std::vector<std::pair<double, double>> discrete_dividends;
+    std::vector<Dividend> discrete_dividends;
 
     PricingParams() = default;
 
     PricingParams(const OptionSpec& spec,
                   double volatility_,
-                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
+                  std::vector<Dividend> discrete_dividends_ = {})
         : OptionSpec(spec)
         , volatility(volatility_)
         , discrete_dividends(std::move(discrete_dividends_))
     {}
 
-    PricingParams(double spot_,
-                  double strike_,
-                  double maturity_,
-                  double rate_,
-                  double dividend_yield_,
-                  OptionType type_,
-                  double volatility_,
-                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
-        : volatility(volatility_)
-        , discrete_dividends(std::move(discrete_dividends_))
-    {
-        spot = spot_;
-        strike = strike_;
-        maturity = maturity_;
-        rate = rate_;
-        dividend_yield = dividend_yield_;
-        type = type_;
-    }
 
-    PricingParams(double spot_,
-                  double strike_,
-                  double maturity_,
-                  double rate_,
-                  double dividend_yield_,
-                  OptionType type_,
-                  double volatility_,
-                  std::initializer_list<std::pair<double, double>> discrete_dividends_)
-        : PricingParams(spot_, strike_, maturity_, rate_, dividend_yield_, type_, volatility_,
-                        std::vector<std::pair<double, double>>(discrete_dividends_))
-    {}
-
-    PricingParams(double spot_,
-                  double strike_,
-                  double maturity_,
-                  RateSpec rate_,
-                  double dividend_yield_,
-                  OptionType type_,
-                  double volatility_,
-                  std::vector<std::pair<double, double>> discrete_dividends_ = {})
-        : volatility(volatility_)
-        , discrete_dividends(std::move(discrete_dividends_))
-    {
-        spot = spot_;
-        strike = strike_;
-        maturity = maturity_;
-        rate = std::move(rate_);
-        dividend_yield = dividend_yield_;
-        type = type_;
-    }
 };
 
 /**

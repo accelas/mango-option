@@ -29,15 +29,7 @@ protected:
         grid = grid_result.value();
 
         // Setup pricing params (ATM put)
-        params = PricingParams(
-            100.0,  // spot
-            100.0,  // strike
-            1.0,    // maturity
-            0.05,   // rate
-            0.02,   // dividend_yield
-            OptionType::PUT,
-            0.20    // volatility
-        );
+        params = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
         // Fill grid with known payoff: max(K - S, 0) for put
         // In log-moneyness: x = ln(S/K), so S = K * exp(x)
@@ -168,7 +160,7 @@ TEST_F(AmericanOptionResultTest, GridAccess) {
 // Test 9: Call option (for symmetry testing)
 TEST_F(AmericanOptionResultTest, CallOptionGreeks) {
     // Change to call option
-    params.type = OptionType::CALL;
+    params.option_type = OptionType::CALL;
 
     // Fill grid with call payoff: max(S - K, 0)
     // Store normalized by K: V/K
@@ -268,14 +260,8 @@ TEST_F(AmericanOptionResultTest, GammaAccuracy) {
     // Test at spot = 90 (ITM put)
     double spot = 90.0;
     PricingParams test_params(
-        spot,    // spot
-        100.0,   // strike
-        1.0,     // maturity
-        0.05,    // rate
-        0.02,    // dividend_yield
-        OptionType::PUT,
-        0.20     // volatility
-    );
+        OptionSpec{.spot = spot, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     AmericanOptionResult result(fine_grid, test_params);
     double gamma_computed = result.gamma();

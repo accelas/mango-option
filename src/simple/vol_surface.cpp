@@ -122,7 +122,7 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
             query.maturity = smile.tau;
             query.rate = rate;
             query.dividend_yield = div_yield;
-            query.type = leg.type;
+            query.option_type = leg.type;
             query.market_price = market_price;
 
             if (solver) {

@@ -45,6 +45,9 @@ public:
     double theta(double spot, double strike, double tau,
                  double sigma, double rate) const;
 
+
+    [[nodiscard]] OptionType option_type() const noexcept;
+    [[nodiscard]] double dividend_yield() const noexcept;
     /// Access underlying surface
     const PriceTableSurface<4>& eep_surface() const;
     const PriceTableMetadata& metadata() const;

@@ -272,7 +272,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
 
     // API STEP 3: Create IV solver
     IVSolverInterpolatedConfig solver_config;
-    solver_config.max_iterations = 50;
+    solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
@@ -299,15 +299,14 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
 
         for (const auto& obs : observations) {
             // API STEP 4: Solve for IV
-            IVQuery query{
-                obs.spot,
-                obs.strike,
-                obs.maturity,
-                obs.rate,
-                grid.dividend,
-                obs.type,
-                obs.market_price
-            };
+            IVQuery query;
+            query.spot = obs.spot;
+            query.strike = obs.strike;
+            query.maturity = obs.maturity;
+            query.rate = obs.rate;
+            query.dividend_yield = grid.dividend;
+            query.option_type = obs.type;
+            query.market_price = obs.market_price;
 
             auto result = iv_solver.solve(query);
 
@@ -398,7 +397,14 @@ static void BM_API_EndToEnd(benchmark::State& state) {
 
         size_t converged = 0;
         for (const auto& obs : observations) {
-            IVQuery query{obs.spot, obs.strike, obs.maturity, obs.rate, 0.0, obs.type, obs.market_price};
+            IVQuery query;
+            query.spot = obs.spot;
+            query.strike = obs.strike;
+            query.maturity = obs.maturity;
+            query.rate = obs.rate;
+            query.dividend_yield = 0.0;
+            query.option_type = obs.type;
+            query.market_price = obs.market_price;
             if (iv_solver.solve(query).has_value()) {
                 converged++;
             }

@@ -34,7 +34,7 @@ double EuropeanOptionResult::compute_price(double S) const {
     if (tau <= 0.0 || sigma <= 0.0) {
         if (tau <= 0.0) {
             // At expiry: intrinsic value
-            if (params_.type == OptionType::PUT) {
+            if (params_.option_type == OptionType::PUT) {
                 return std::max(K - S, 0.0);
             } else {
                 return std::max(S - K, 0.0);
@@ -43,7 +43,7 @@ double EuropeanOptionResult::compute_price(double S) const {
         // Zero vol, positive maturity: discounted intrinsic
         double S_fwd = S * std::exp(-q * tau);
         double K_disc = K * std::exp(-r * tau);
-        if (params_.type == OptionType::PUT) {
+        if (params_.option_type == OptionType::PUT) {
             return std::max(K_disc - S_fwd, 0.0);
         } else {
             return std::max(S_fwd - K_disc, 0.0);
@@ -54,7 +54,7 @@ double EuropeanOptionResult::compute_price(double S) const {
     double exp_qt = std::exp(-q * tau);
     double exp_rt = std::exp(-r * tau);
 
-    if (params_.type == OptionType::PUT) {
+    if (params_.option_type == OptionType::PUT) {
         return K * exp_rt * norm_cdf(-d2) - S * exp_qt * norm_cdf(-d1);
     } else {
         return S * exp_qt * norm_cdf(d1) - K * exp_rt * norm_cdf(d2);
@@ -69,7 +69,7 @@ double EuropeanOptionResult::compute_delta(double S) const {
     if (tau <= 0.0 || sigma <= 0.0) {
         // Edge case: discounted delta for ITM, 0 for OTM
         double exp_qt = std::exp(-q * tau);
-        if (params_.type == OptionType::PUT) {
+        if (params_.option_type == OptionType::PUT) {
             return (S < params_.strike) ? -exp_qt : 0.0;
         } else {
             return (S > params_.strike) ? exp_qt : 0.0;
@@ -79,7 +79,7 @@ double EuropeanOptionResult::compute_delta(double S) const {
     auto [d1, d2] = compute_d1_d2(S);
     double exp_qt = std::exp(-q * tau);
 
-    if (params_.type == OptionType::PUT) {
+    if (params_.option_type == OptionType::PUT) {
         return -exp_qt * norm_cdf(-d1);
     } else {
         return exp_qt * norm_cdf(d1);
@@ -138,7 +138,7 @@ double EuropeanOptionResult::theta() const {
     // Common term: -S·e^(-qτ)·φ(d1)·σ/(2√τ)
     double common = -S * exp_qt * norm_pdf(d1) * sigma / (2.0 * sqrt_tau);
 
-    if (params_.type == OptionType::PUT) {
+    if (params_.option_type == OptionType::PUT) {
         return common + r * K * exp_rt * norm_cdf(-d2) - q * S * exp_qt * norm_cdf(-d1);
     } else {
         return common - r * K * exp_rt * norm_cdf(d2) + q * S * exp_qt * norm_cdf(d1);
@@ -158,7 +158,7 @@ double EuropeanOptionResult::rho() const {
     auto [d1, d2] = compute_d1_d2(params_.spot);
     double exp_rt = std::exp(-r * tau);
 
-    if (params_.type == OptionType::PUT) {
+    if (params_.option_type == OptionType::PUT) {
         return -K * tau * exp_rt * norm_cdf(-d2);
     } else {
         return K * tau * exp_rt * norm_cdf(d2);
@@ -171,6 +171,10 @@ double EuropeanOptionResult::rho() const {
 
 EuropeanOptionSolver::EuropeanOptionSolver(const PricingParams& params)
     : params_(params)
+{}
+
+EuropeanOptionSolver::EuropeanOptionSolver(const OptionSpec& spec, double sigma)
+    : params_(spec, sigma)
 {}
 
 std::expected<EuropeanOptionSolver, ValidationError>

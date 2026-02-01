@@ -23,16 +23,9 @@ std::shared_ptr<AmericanOptionResult> make_mock_result(double sigma, double rate
         solution[i] = static_cast<double>(i);
     }
 
-    // Create PricingParams using constructor (not designated initializers)
     PricingParams params(
-        100.0,        // spot
-        100.0,        // strike
-        1.0,          // maturity
-        rate,         // rate
-        0.0,          // dividend_yield
-        OptionType::PUT,  // type
-        sigma         // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = rate, .option_type = OptionType::PUT}, sigma);
 
     return std::make_shared<AmericanOptionResult>(grid, params);
 }

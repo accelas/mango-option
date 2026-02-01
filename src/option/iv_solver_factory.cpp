@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "src/option/iv_solver_factory.hpp"
 #include "src/option/table/price_table_builder.hpp"
+#include <type_traits>
 
 namespace mango {
 
@@ -33,13 +34,13 @@ BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
 // ---------------------------------------------------------------------------
 
 static std::expected<IVSolver, ValidationError>
-build_standard(const IVSolverConfig& config) {
+build_standard(const IVSolverConfig& config, const StandardIVPath& path) {
     // Use spot as K_ref (ATM reference strike)
     double K_ref = config.spot;
 
     auto setup = PriceTableBuilder<4>::from_vectors(
         config.moneyness_grid,
-        config.maturity_grid,
+        path.maturity_grid,
         config.vol_grid,
         config.rate_grid,
         K_ref,
@@ -80,17 +81,16 @@ build_standard(const IVSolverConfig& config) {
 // ---------------------------------------------------------------------------
 
 static std::expected<IVSolver, ValidationError>
-build_segmented(const IVSolverConfig& config) {
+build_segmented(const IVSolverConfig& config, const SegmentedIVPath& path) {
     SegmentedMultiKRefBuilder::Config seg_config{
         .spot = config.spot,
         .option_type = config.option_type,
-        .dividend_yield = config.dividend_yield,
-        .dividends = config.discrete_dividends,
+        .dividends = {.dividend_yield = config.dividend_yield, .discrete_dividends = path.discrete_dividends},
         .moneyness_grid = config.moneyness_grid,
-        .maturity = config.maturity,
+        .maturity = path.maturity,
         .vol_grid = config.vol_grid,
         .rate_grid = config.rate_grid,
-        .kref_config = config.kref_config,
+        .kref_config = path.kref_config,
     };
 
     auto surface = SegmentedMultiKRefBuilder::build(seg_config);
@@ -113,11 +113,14 @@ build_segmented(const IVSolverConfig& config) {
 // ---------------------------------------------------------------------------
 
 std::expected<IVSolver, ValidationError> make_iv_solver(const IVSolverConfig& config) {
-    if (config.discrete_dividends.empty()) {
-        return build_standard(config);
-    } else {
-        return build_segmented(config);
-    }
+    return std::visit([&](const auto& path) -> std::expected<IVSolver, ValidationError> {
+        using T = std::decay_t<decltype(path)>;
+        if constexpr (std::is_same_v<T, StandardIVPath>) {
+            return build_standard(config, path);
+        } else {
+            return build_segmented(config, path);
+        }
+    }, config.path);
 }
 
 }  // namespace mango

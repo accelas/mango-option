@@ -85,7 +85,7 @@ struct IVSolverFDMConfig {
 ///     .maturity = 1.0,
 ///     .rate = 0.05,
 ///     .dividend_yield = 0.02,
-///     .type = OptionType::PUT
+///     .option_type = OptionType::PUT
 /// };
 ///
 /// IVQuery query{.option = spec, .market_price = 10.45};

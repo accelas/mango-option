@@ -12,14 +12,8 @@ TEST(AmericanOptionSolverTest, CustomInitialCondition) {
     // Use a custom IC that's slightly different from standard payoff
     // Verify the solver runs and produces a result
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        0.5,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     // Allocate workspace buffer
@@ -45,14 +39,8 @@ TEST(AmericanOptionSolverTest, CustomInitialCondition) {
 TEST(AmericanOptionSolverTest, DefaultPayoffStillWorks) {
     // Regression: ensure default behavior (no custom IC) is unchanged
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        0.5,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
     size_t n = grid_spec.n_points();

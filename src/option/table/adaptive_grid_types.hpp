@@ -17,7 +17,7 @@ struct AdaptiveGridParams {
     double target_iv_error = 0.0005;
 
     /// Maximum refinement iterations (default: 5)
-    size_t max_iterations = 5;
+    size_t max_iter = 5;
 
     /// Maximum points per dimension ceiling (default: 50)
     size_t max_points_per_dim = 50;

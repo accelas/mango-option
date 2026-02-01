@@ -8,8 +8,7 @@ TEST(SegmentedMultiKRefBuilderTest, BuildWithExplicitKRefs) {
     SegmentedMultiKRefBuilder::Config config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
-        .dividend_yield = 0.0,
-        .dividends = {{0.5, 2.0}},
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},
         .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -31,8 +30,7 @@ TEST(SegmentedMultiKRefBuilderTest, AutoKRefSelection) {
     SegmentedMultiKRefBuilder::Config config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
-        .dividend_yield = 0.0,
-        .dividends = {{0.5, 2.0}},
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},
         .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -53,8 +51,7 @@ TEST(SegmentedMultiKRefBuilderTest, NoDividendsFallback) {
     SegmentedMultiKRefBuilder::Config config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
-        .dividend_yield = 0.02,
-        .dividends = {},
+        .dividends = {.dividend_yield = 0.02},
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},

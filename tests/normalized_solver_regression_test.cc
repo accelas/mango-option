@@ -22,15 +22,7 @@ TEST(NormalizedSolverRegressionTest, SetupCallbackDisablesNormalizedPath) {
     // Create batch of options that would be eligible for normalized solver
     std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = PricingParams(
-            100.0 + i * 10.0,        // Varying spot (different moneyness)
-            100.0,                    // Same strike
-            1.0,                      // Same maturity
-            0.05,                     // Same rate
-            0.02,                     // Same dividend_yield
-            OptionType::PUT,          // Same type
-            0.20                      // Same volatility
-        );
+        batch[i] = PricingParams(OptionSpec{.spot = 100.0 + i * 10.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     }
 
     // Track callback invocations
@@ -82,7 +74,7 @@ TEST(NormalizedSolverRegressionTest, PriceTableSnapshotRegistration) {
 
     // Create a simple batch
     std::vector<PricingParams> batch(1);
-    batch[0] = PricingParams(100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
+    batch[0] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     BatchAmericanOptionSolver solver;
     auto result = solver.solve_batch(batch, false, snapshot_callback);
@@ -102,14 +94,8 @@ TEST(NormalizedSolverRegressionTest, PriceTableSnapshotRegistration) {
 // Test that set_snapshot_times() works correctly
 TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
     PricingParams params(
-        100.0,          // spot
-        100.0,          // strike
-        1.0,            // maturity
-        0.05,           // rate
-        0.02,           // dividend_yield
-        OptionType::PUT,
-        0.20            // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     // Create workspace
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, 51, 2.0);
@@ -154,15 +140,7 @@ TEST(NormalizedSolverRegressionTest, CallbackForcesRegularBatch) {
     // Create batch that would be eligible for normalized solver
     std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = PricingParams(
-            100.0 + i * 10.0,  // Varying spot
-            100.0,             // Same strike
-            1.0,               // Same maturity
-            0.05,              // Same rate
-            0.02,              // Same dividend
-            OptionType::PUT,   // Same type
-            0.20               // Same vol
-        );
+        batch[i] = PricingParams(OptionSpec{.spot = 100.0 + i * 10.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     }
 
     // Enable normalized solver
@@ -192,15 +170,7 @@ TEST(NormalizedSolverRegressionTest, NormalizedPathWorksWithSnapshots) {
     // Create batch eligible for normalized solver
     std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = PricingParams(
-            100.0 + i * 10.0,  // Varying spot
-            100.0,             // Same strike
-            1.0,               // Same maturity
-            0.05,              // Same rate
-            0.02,              // Same dividend
-            OptionType::PUT,   // Same type
-            0.20               // Same vol
-        );
+        batch[i] = PricingParams(OptionSpec{.spot = 100.0 + i * 10.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     }
 
     // Configure snapshots using dedicated API (preserves normalized path)
