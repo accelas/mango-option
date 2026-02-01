@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cassert>
 #include <concepts>
 #include <functional>
 
@@ -137,7 +138,9 @@ public:
     using tag = bc::robin_tag;
 
     RobinBC(Func f, double a, double b)
-        : func_(std::move(f)), a_(a), b_(b) {}
+        : func_(std::move(f)), a_(a), b_(b) {
+        assert((a != 0.0 || b != 0.0) && "RobinBC: a and b cannot both be zero");
+    }
 
     double rhs(double t, double x) const { return func_(t, x); }
     double a() const { return a_; }
@@ -151,11 +154,11 @@ public:
         // Left:  a*u[0] - b*(u[1] - u[0])/dx = g  →  u[0] = (g + b*u[1]/dx) / (a + b/dx)
         // Right: a*u[n-1] + b*(u[n-1] - u[n-2])/dx = g  →  u[n-1] = (g + b*u[n-2]/dx) / (a + b/dx)
         double g = rhs(t, x);
-        if (side == bc::BoundarySide::Left) {
-            u = (g + b_ * u_interior / dx) / (a_ + b_ / dx);
-        } else {  // Right
-            u = (g + b_ * u_interior / dx) / (a_ + b_ / dx);
-        }
+        // Rewrite to avoid b_/dx when dx could be small: multiply through by dx
+        // Original: u = (g + b*u_int/dx) / (a + b/dx) = (g*dx + b*u_int) / (a*dx + b)
+        double denom = a_ * dx + b_;
+        if (denom == 0.0) { u = g; return; }
+        u = (g * dx + b_ * u_interior) / denom;
     }
 
 private:
