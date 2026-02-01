@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/discrete_dividend_event.hpp"
+#include "src/math/cubic_spline_solver.hpp"
 #include <vector>
 #include <cmath>
 
 using namespace mango;
+
+// Helper: pre-build a spline on the given grid
+static CubicSpline<double> make_spline(std::span<const double> x,
+                                        std::span<const double> y) {
+    CubicSpline<double> s;
+    [[maybe_unused]] auto err = s.build(x, y);
+    return s;
+}
 
 TEST(DiscreteDividendEventTest, BasicPutShift) {
     std::vector<double> x = {-1.0, -0.5, 0.0, 0.5, 1.0};
@@ -15,7 +24,8 @@ TEST(DiscreteDividendEventTest, BasicPutShift) {
 
     double original_atm = u[2];
 
-    auto callback = make_put_dividend_event(5.0, 100.0);
+    auto spline = make_spline(x, u);
+    auto callback = make_put_dividend_event(5.0, 100.0, &spline);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     EXPECT_GT(u[2], original_atm)
@@ -38,7 +48,8 @@ TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendPut) {
     }
 
     // D = 10, K = 100 → d = 0.10. exp(-3.0) ≈ 0.0498 < 0.10 → fallback
-    auto callback = make_put_dividend_event(10.0, 100.0);
+    auto spline = make_spline(x, u);
+    auto callback = make_put_dividend_event(10.0, 100.0, &spline);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     EXPECT_DOUBLE_EQ(u[0], 1.0);
@@ -52,7 +63,8 @@ TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendCall) {
         u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);  // call payoff
     }
 
-    auto callback = make_call_dividend_event(10.0, 100.0);
+    auto spline = make_spline(x, u);
+    auto callback = make_call_dividend_event(10.0, 100.0, &spline);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     EXPECT_NEAR(u[0], 0.0, 1e-10);
@@ -63,7 +75,8 @@ TEST(DiscreteDividendEventTest, ZeroDividendNoOp) {
     std::vector<double> u = {0.5, 0.3, 0.1};
     std::vector<double> u_orig = u;
 
-    auto callback = make_put_dividend_event(0.0, 100.0);
+    auto spline = make_spline(x, u);
+    auto callback = make_put_dividend_event(0.0, 100.0, &spline);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     for (size_t i = 0; i < u.size(); ++i) {

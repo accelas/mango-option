@@ -5,7 +5,6 @@
 #include "src/math/cubic_spline_solver.hpp"
 #include <cmath>
 #include <span>
-#include <vector>
 
 namespace mango {
 
@@ -13,25 +12,29 @@ namespace detail {
 
 /// Core dividend shift logic shared by put and call variants.
 ///
-/// Builds a cubic spline of the current solution, then for each grid point
-/// evaluates u(x') where x' = ln(exp(x) - D/K).  Points that shift below
-/// the grid domain or where S - D <= 0 are set to the caller-supplied
-/// intrinsic fallback value.
+/// Rebuilds a pre-allocated cubic spline with the current solution, then for
+/// each grid point evaluates u(x') where x' = ln(exp(x) - D/K).  Points
+/// that shift below the grid domain or where S - D <= 0 are set to the
+/// caller-supplied intrinsic fallback value.
+///
+/// @param spline Pre-built spline (grid already set via build(); coefficients
+///               are refreshed each invocation via rebuild_same_grid()).
+///               Must outlive the returned callback.
 inline TemporalEventCallback make_dividend_event_impl(
-    double dividend_amount, double strike, double intrinsic_fallback)
+    double dividend_amount, double strike, double intrinsic_fallback,
+    CubicSpline<double>* spline)
 {
     const double d = dividend_amount / strike;  // normalized dividend
     const double fallback = intrinsic_fallback;
 
-    return [d, fallback](double /*t*/, std::span<const double> x, std::span<double> u) {
+    return [d, fallback, spline](double /*t*/, std::span<const double> x, std::span<double> u) {
         if (d <= 0.0) return;  // no-op for zero dividend
 
         const size_t n = x.size();
 
-        // Build cubic spline of current solution
-        CubicSpline<double> spline;
-        auto err = spline.build(x, std::span<const double>(u.data(), u.size()));
-        if (err.has_value()) return;  // spline build failed — leave u unchanged
+        // Rebuild spline coefficients with current solution (zero-alloc)
+        auto err = spline->rebuild_same_grid(std::span<const double>(u.data(), u.size()));
+        if (err.has_value()) return;  // spline rebuild failed — leave u unchanged
 
         // Apply dividend shift: x' = ln(exp(x) - d)
         const double x_lo = x[0];      // spline domain lower bound
@@ -47,7 +50,7 @@ inline TemporalEventCallback make_dividend_event_impl(
                 if (x_shifted < x_lo) {
                     u[i] = fallback;
                 } else {
-                    u[i] = spline.eval(std::min(x_shifted, x_hi));
+                    u[i] = spline->eval(std::min(x_shifted, x_hi));
                 }
             } else {
                 // Spot drops to zero or below
@@ -65,10 +68,11 @@ inline TemporalEventCallback make_dividend_event_impl(
 ///
 /// @param dividend_amount Cash dividend amount D (in dollars)
 /// @param strike Reference strike K (normalization base)
+/// @param spline Pre-built spline; must outlive the returned callback
 inline TemporalEventCallback make_put_dividend_event(
-    double dividend_amount, double strike)
+    double dividend_amount, double strike, CubicSpline<double>* spline)
 {
-    return detail::make_dividend_event_impl(dividend_amount, strike, 1.0);
+    return detail::make_dividend_event_impl(dividend_amount, strike, 1.0, spline);
 }
 
 /// Create a call dividend event callback.
@@ -77,10 +81,11 @@ inline TemporalEventCallback make_put_dividend_event(
 ///
 /// @param dividend_amount Cash dividend amount D (in dollars)
 /// @param strike Reference strike K (normalization base)
+/// @param spline Pre-built spline; must outlive the returned callback
 inline TemporalEventCallback make_call_dividend_event(
-    double dividend_amount, double strike)
+    double dividend_amount, double strike, CubicSpline<double>* spline)
 {
-    return detail::make_dividend_event_impl(dividend_amount, strike, 0.0);
+    return detail::make_dividend_event_impl(dividend_amount, strike, 0.0, spline);
 }
 
 }  // namespace mango
