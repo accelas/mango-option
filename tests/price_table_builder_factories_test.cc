@@ -58,74 +58,53 @@ TEST(PriceTableFactoriesTest, FromVectorsSortsAndDedupes) {
     EXPECT_NEAR(axes.grids[1][3], 1.0, 1e-10);
 }
 
-TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeMoneyness) {
-    std::vector<double> moneyness = {-0.1, 0.9, 1.0, 1.1};
-    std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
-    std::vector<double> vol = {0.15, 0.20, 0.25, 0.30};
-    std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
+struct NonPositiveParam {
+    std::string name;
+    int axis;  // 0=moneyness, 1=maturity, 2=vol, 3=kref
+};
 
-    auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
+class FromVectorsRejectsNonPositive
+    : public ::testing::TestWithParam<NonPositiveParam> {};
 
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
-        100.0, mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
-    );
+TEST_P(FromVectorsRejectsNonPositive, ReturnsNonPositiveValueError) {
+    auto param = GetParam();
 
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
-}
-
-TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeMaturity) {
-    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
-    std::vector<double> maturity = {-0.1, 0.5, 0.75, 1.0};
-    std::vector<double> vol = {0.15, 0.20, 0.25, 0.30};
-    std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
-
-    auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
-
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
-        100.0, mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
-    );
-
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
-}
-
-TEST(PriceTableFactoriesTest, FromVectorsRejectsNegativeVolatility) {
-    std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
-    std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
-    std::vector<double> vol = {-0.1, 0.20, 0.25, 0.30};
-    std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
-
-    auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
-
-    auto result = mango::PriceTableBuilder<4>::from_vectors(
-        moneyness, maturity, vol, rate,
-        100.0, mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
-    );
-
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
-}
-
-TEST(PriceTableFactoriesTest, FromVectorsRejectsZeroKRef) {
     std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
     std::vector<double> maturity = {0.25, 0.5, 0.75, 1.0};
     std::vector<double> vol = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rate = {0.03, 0.04, 0.05, 0.06};
+    double kref = 100.0;
+
+    switch (param.axis) {
+        case 0: moneyness[0] = -0.1; break;
+        case 1: maturity[0] = -0.1; break;
+        case 2: vol[0] = -0.1; break;
+        case 3: kref = 0.0; break;
+    }
 
     auto grid_spec = mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value();
-
     auto result = mango::PriceTableBuilder<4>::from_vectors(
         moneyness, maturity, vol, rate,
-        0.0,  // Invalid K_ref
-        mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
+        kref, mango::ExplicitPDEGrid{grid_spec, 100}, mango::OptionType::PUT
     );
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, mango::PriceTableErrorCode::NonPositiveValue);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    PriceTableFactory,
+    FromVectorsRejectsNonPositive,
+    ::testing::Values(
+        NonPositiveParam{"NegativeMoneyness", 0},
+        NonPositiveParam{"NegativeMaturity", 1},
+        NonPositiveParam{"NegativeVolatility", 2},
+        NonPositiveParam{"ZeroKRef", 3}
+    ),
+    [](const ::testing::TestParamInfo<NonPositiveParam>& info) {
+        return info.param.name;
+    }
+);
 
 TEST(PriceTableFactoriesTest, FromVectorsAcceptsNegativeRates) {
     std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};

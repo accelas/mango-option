@@ -18,8 +18,7 @@ TEST(BlackScholesAnalyticsTest, VegaOTMPut) {
     // OTM put: S=100, K=80, τ=0.5, σ=0.25, r=0.03
     double vega = bs_vega(100.0, 80.0, 0.5, 0.25, 0.03);
     // Lower vega for OTM
-    EXPECT_GT(vega, 0.0);
-    EXPECT_LT(vega, 20.0);  // Much lower than ATM
+    EXPECT_NEAR(vega, 10.1, 0.5);
 }
 
 TEST(BlackScholesAnalyticsTest, VegaShortMaturity) {
@@ -33,8 +32,7 @@ TEST(BlackScholesAnalyticsTest, VegaDeepITM) {
     // Deep ITM put: S=100, K=150
     double vega = bs_vega(100.0, 150.0, 1.0, 0.20, 0.05);
     // Still positive but lower than ATM
-    EXPECT_GT(vega, 0.0);
-    EXPECT_LT(vega, 30.0);
+    EXPECT_NEAR(vega, 9.4, 0.5);
 }
 
 // ===========================================================================

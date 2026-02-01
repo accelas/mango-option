@@ -7,14 +7,6 @@
 namespace mango {
 namespace {
 
-TEST(PriceTableBuilderTest, ConstructFromConfig) {
-    PriceTableConfig config;
-    PriceTableBuilder<4> builder(config);
-
-    // Just verify construction succeeds
-    SUCCEED();
-}
-
 // Smoke test: Verify build() pipeline works with minimal grid
 // Uses small grid (4×4×4×4 minimum for B-spline, auto-estimated spatial/time)
 TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
