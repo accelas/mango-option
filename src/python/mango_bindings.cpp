@@ -151,7 +151,7 @@ PYBIND11_MODULE(mango_option, m) {
                          double market_price) {
                  return mango::IVQuery(
                      mango::OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
-                         .rate = rate, .dividend_yield = dividend_yield, .type = type},
+                         .rate = rate, .dividend_yield = dividend_yield, .option_type = type},
                      market_price);
              }),
              py::arg("spot"), py::arg("strike"), py::arg("maturity"),
@@ -165,7 +165,7 @@ PYBIND11_MODULE(mango_option, m) {
             [](mango::IVQuery& q, const py::object& obj) { q.rate = python_to_rate_spec(obj); },
             "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::IVQuery::dividend_yield)
-        .def_readwrite("type", &mango::IVQuery::type)
+        .def_readwrite("option_type", &mango::IVQuery::option_type)
         .def_readwrite("market_price", &mango::IVQuery::market_price)
         .def("__repr__", [](const mango::IVQuery& q) {
             return "<IVQuery spot=" + std::to_string(q.spot) +
@@ -173,7 +173,7 @@ PYBIND11_MODULE(mango_option, m) {
                    " maturity=" + std::to_string(q.maturity) +
                    " rate=" + rate_spec_to_string(q.rate) +
                    " dividend_yield=" + std::to_string(q.dividend_yield) +
-                   " type=" + (q.type == mango::OptionType::CALL ? "CALL" : "PUT") +
+                   " type=" + (q.option_type == mango::OptionType::CALL ? "CALL" : "PUT") +
                    " market_price=" + std::to_string(q.market_price) + ">";
         });
 
@@ -296,7 +296,7 @@ PYBIND11_MODULE(mango_option, m) {
             [](mango::PricingParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
             "Risk-free rate (float or YieldCurve)")
         .def_readwrite("dividend_yield", &mango::PricingParams::dividend_yield)
-        .def_readwrite("type", &mango::PricingParams::type)
+        .def_readwrite("option_type", &mango::PricingParams::option_type)
         .def_readwrite("discrete_dividends", &mango::PricingParams::discrete_dividends);
 
     // AmericanOptionResult structure

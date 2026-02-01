@@ -24,7 +24,7 @@ TEST(IVSolverFactoryTest, NoDividendsUsesStandardPath) {
     query.maturity = 0.5;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.02;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = 6.0;
 
     auto result = solver->solve(query);
@@ -56,7 +56,7 @@ TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
     query.maturity = 0.5;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
+    query.option_type = OptionType::PUT;
     query.market_price = 7.0;
 
     auto result = solver->solve(query);
@@ -87,7 +87,7 @@ TEST(IVSolverFactoryTest, BatchSolveWorks) {
         q.maturity = 0.5;
         q.rate = RateSpec{0.05};
         q.dividend_yield = 0.02;
-        q.type = OptionType::PUT;
+        q.option_type = OptionType::PUT;
         q.market_price = 6.0;
     }
 

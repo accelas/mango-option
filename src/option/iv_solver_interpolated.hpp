@@ -19,7 +19,7 @@
  *       .maturity = 1.0,
  *       .rate = 0.05,
  *       .dividend_yield = 0.02,
- *       .type = OptionType::PUT
+ *       .option_type = OptionType::PUT
  *   };
  *   IVQuery query{.option = spec, .market_price = 10.45};
  *
@@ -231,9 +231,9 @@ template <PriceSurface Surface>
 std::optional<ValidationError>
 IVSolverInterpolated<Surface>::validate_query(const IVQuery& query) const
 {
-    if (query.type != option_type_) {
+    if (query.option_type != option_type_) {
         return ValidationError{ValidationErrorCode::OptionTypeMismatch,
-            static_cast<double>(query.type), 0};
+            static_cast<double>(query.option_type), 0};
     }
 
     if (std::abs(query.dividend_yield - dividend_yield_) > 1e-10) {
@@ -256,7 +256,7 @@ IVSolverInterpolated<Surface>::adaptive_bounds(const IVQuery& query) const
 {
     // Compute intrinsic value based on option type
     double intrinsic;
-    if (query.type == OptionType::CALL) {
+    if (query.option_type == OptionType::CALL) {
         intrinsic = std::max(query.spot - query.strike, 0.0);
     } else {  // PUT
         intrinsic = std::max(query.strike - query.spot, 0.0);

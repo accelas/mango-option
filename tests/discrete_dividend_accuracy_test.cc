@@ -90,7 +90,7 @@ double solve_mango(const PricingParams& params,
 TEST(DiscreteDividendAccuracyTest, PutSingleDividendVsQuantLib) {
     // ATM put, S=100, K=100, T=1, sigma=0.20, r=0.05
     // Single $3 dividend at t=0.5
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.5, .amount = 3.0}});
 
     double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
@@ -106,7 +106,7 @@ TEST(DiscreteDividendAccuracyTest, PutSingleDividendVsQuantLib) {
 TEST(DiscreteDividendAccuracyTest, CallSingleDividendVsQuantLib) {
     // ATM call, S=100, K=100, T=1, sigma=0.25, r=0.05
     // Single $4 dividend at t=0.3
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 0.25,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.25,
                          {{.calendar_time = 0.3, .amount = 4.0}});
 
     double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
@@ -121,7 +121,7 @@ TEST(DiscreteDividendAccuracyTest, CallSingleDividendVsQuantLib) {
 
 TEST(DiscreteDividendAccuracyTest, MultipleDividendsVsQuantLib) {
     // ITM put, two dividends
-    PricingParams params(OptionSpec{.spot = 95.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams params(OptionSpec{.spot = 95.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.25, .amount = 2.0}, {.calendar_time = 0.75, .amount = 2.0}});
 
     double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
@@ -136,7 +136,7 @@ TEST(DiscreteDividendAccuracyTest, MultipleDividendsVsQuantLib) {
 
 TEST(DiscreteDividendAccuracyTest, LargeDividendVsQuantLib) {
     // Large dividend: $15 on S=100 (15% of spot)
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.30,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.30,
                          {{.calendar_time = 0.5, .amount = 15.0}});
 
     double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
@@ -152,7 +152,7 @@ TEST(DiscreteDividendAccuracyTest, LargeDividendVsQuantLib) {
 
 TEST(DiscreteDividendAccuracyTest, DividendNearExpiryVsQuantLib) {
     // Dividend close to expiry (t=0.9, T=1.0)
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.9, .amount = 2.0}});
 
     double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
@@ -170,7 +170,7 @@ TEST(DiscreteDividendAccuracyTest, DividendNearExpiryVsQuantLib) {
 // ============================================================================
 
 TEST(DiscreteDividendAccuracyTest, GridConvergence) {
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.5, .amount = 3.0}});
 
     double p_low  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Low));
@@ -196,7 +196,7 @@ TEST(DiscreteDividendAccuracyTest, GridConvergence) {
 // ============================================================================
 
 TEST(DiscreteDividendAccuracyTest, EventAlignsWithMandatoryTimePoint) {
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.3, .amount = 2.0}});
 
     auto [grid_spec, td] = estimate_grid_for_option(params);
@@ -211,13 +211,13 @@ TEST(DiscreteDividendAccuracyTest, EventAlignsWithMandatoryTimePoint) {
 }
 
 TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
-    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.0, .amount = 5.0}, {.calendar_time = 1.0, .amount = 5.0}});
 
     auto result = solve_american_option_auto(params);
     ASSERT_TRUE(result.has_value());
 
-    PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);
+    PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
     auto result_no_div = solve_american_option_auto(no_div);
     ASSERT_TRUE(result_no_div.has_value());
 
@@ -227,9 +227,9 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
 
 TEST(DiscreteDividendAccuracyTest, SharedGridBatchIncludesDividendTimePoints) {
     std::vector<PricingParams> batch;
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<Dividend>{{.calendar_time = 0.4, .amount = 3.0}}));
-    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20,
+    batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<Dividend>{{.calendar_time = 0.4, .amount = 3.0}}));
 
     auto [grid_spec, td] = compute_global_grid_for_batch(batch);

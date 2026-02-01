@@ -8,7 +8,7 @@ TEST(AmericanOptionBatchWorkspaceTest, BatchResultsUnchanged) {
     std::vector<PricingParams> batch;
     for (int i = 0; i < 10; ++i) {
         batch.push_back(PricingParams(
-            OptionSpec{.spot = 100.0, .strike = 90.0 + i * 2.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+            OptionSpec{.spot = 100.0, .strike = 90.0 + i * 2.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -26,7 +26,7 @@ TEST(AmericanOptionBatchWorkspaceTest, SharedGridMode) {
     std::vector<PricingParams> batch;
     for (int i = 0; i < 5; ++i) {
         batch.push_back(PricingParams(
-            OptionSpec{.spot = 100.0, .strike = 100.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+            OptionSpec{.spot = 100.0, .strike = 100.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -40,7 +40,7 @@ TEST(AmericanOptionBatchWorkspaceTest, PerOptionGridMode) {
     std::vector<PricingParams> batch;
     for (int i = 0; i < 5; ++i) {
         batch.push_back(PricingParams(
-            OptionSpec{.spot = 100.0, .strike = 80.0 + i * 10.0, .maturity = 0.5 + i * 0.25, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.15 + i * 0.05));
+            OptionSpec{.spot = 100.0, .strike = 80.0 + i * 10.0, .maturity = 0.5 + i * 0.25, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.15 + i * 0.05));
     }
 
     BatchAmericanOptionSolver solver;
@@ -55,7 +55,7 @@ TEST(AmericanOptionBatchWorkspaceTest, MixedCallAndPut) {
     for (int i = 0; i < 4; ++i) {
         OptionType type = (i % 2 == 0) ? OptionType::CALL : OptionType::PUT;
         batch.push_back(PricingParams(
-            OptionSpec{.spot = 100.0, .strike = 95.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = type}, 0.20));
+            OptionSpec{.spot = 100.0, .strike = 95.0 + i * 5.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = type}, 0.20));
     }
 
     BatchAmericanOptionSolver solver;
@@ -81,7 +81,7 @@ TEST(AmericanOptionBatchWorkspaceTest, EmptyBatch) {
 TEST(AmericanOptionBatchWorkspaceTest, SingleOption) {
     std::vector<PricingParams> batch;
     batch.push_back(PricingParams(
-            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20));
+            OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(batch);

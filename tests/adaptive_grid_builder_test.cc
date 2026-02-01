@@ -17,7 +17,7 @@ std::shared_ptr<AmericanOptionResult> make_dummy_result() {
     params.volatility = 0.20;
     params.rate = 0.05;
     params.dividend_yield = 0.0;
-    params.type = OptionType::PUT;
+    params.option_type = OptionType::PUT;
 
     auto result = solve_american_option_auto(params);
     if (result.has_value()) {

@@ -60,7 +60,7 @@ public:
     double maturity() const { return params_.maturity; }
     const RateSpec& rate() const { return params_.rate; }
     double dividend_yield() const { return params_.dividend_yield; }
-    OptionType option_type() const { return params_.type; }
+    OptionType option_type() const { return params_.option_type; }
     double volatility() const { return params_.volatility; }
 
     /**

@@ -25,7 +25,7 @@ std::shared_ptr<AmericanOptionResult> make_mock_result(double sigma, double rate
 
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
-            .rate = rate, .type = OptionType::PUT}, sigma);
+            .rate = rate, .option_type = OptionType::PUT}, sigma);
 
     return std::make_shared<AmericanOptionResult>(grid, params);
 }

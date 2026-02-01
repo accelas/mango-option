@@ -92,7 +92,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
             OptionSpec{.spot = scenario.spot, .strike = scenario.strike,
                 .maturity = scenario.maturity, .rate = scenario.rate,
                 .dividend_yield = scenario.dividend_yield,
-                .type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
+                .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
             scenario.volatility));
     }
 

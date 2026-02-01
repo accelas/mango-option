@@ -133,7 +133,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
     // Create appropriate PDE solver (put vs call)
     std::expected<void, SolverError> solve_result;
 
-    if (params_.type == OptionType::PUT) {
+    if (params_.option_type == OptionType::PUT) {
         AmericanPutSolver pde_solver(params_, grid, workspace_);
         if (custom_ic_) {
             pde_solver.initialize(*custom_ic_);

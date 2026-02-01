@@ -42,7 +42,7 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
 
     // 2. All options must have consistent option type
     for (size_t i = 1; i < params.size(); ++i) {
-        if (params[i].type != first.type) {
+        if (params[i].option_type != first.option_type) {
             return false;
         }
     }
@@ -144,10 +144,10 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
 
     // Check option type consistency
     for (size_t i = 1; i < params.size(); ++i) {
-        if (params[i].type != first.type) {
+        if (params[i].option_type != first.option_type) {
             MANGO_TRACE_NORMALIZED_INELIGIBLE(
                 static_cast<int>(NormalizedIneligibilityReason::MISMATCHED_OPTION_TYPE),
-                static_cast<int>(params[i].type));
+                static_cast<int>(params[i].option_type));
             return;
         }
     }
@@ -263,7 +263,7 @@ std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameter
                 rate_match &&
                 std::abs(group.dividend - p.dividend_yield) < TOL &&
                 std::abs(group.maturity - p.maturity) < TOL &&
-                group.option_type == p.type)
+                group.option_type == p.option_type)
             {
                 group.option_indices.push_back(i);
                 found = true;
@@ -277,7 +277,7 @@ std::vector<PDEParameterGroup> BatchAmericanOptionSolver::group_by_pde_parameter
                 .sigma = p.volatility,
                 .rate = p.rate,
                 .dividend = p.dividend_yield,
-                .option_type = p.type,
+                .option_type = p.option_type,
                 .maturity = p.maturity,
                 .option_indices = {i}
             };
@@ -354,7 +354,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_normalized_chain(
         PricingParams normalized_params(
             OptionSpec{.spot = 1.0, .strike = 1.0, .maturity = group.maturity,
                 .rate = group.rate, .dividend_yield = group.dividend,
-                .type = group.option_type}, group.sigma);
+                .option_type = group.option_type}, group.sigma);
 
         // Solve with shared grid to get full surface
         auto solve_result = solve_regular_batch(

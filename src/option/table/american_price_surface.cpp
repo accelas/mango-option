@@ -62,7 +62,7 @@ double AmericanPriceSurface::price(double spot, double strike, double tau,
     double eep = surface_->value({m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-            .rate = rate, .dividend_yield = dividend_yield_, .type = type_}, sigma).solve().value();
+            .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
     return eep * (strike / K_ref_) + eu.value();
 }
 
@@ -74,7 +74,7 @@ double AmericanPriceSurface::delta(double spot, double strike, double tau,
     double eep_delta = (1.0 / K_ref_) * surface_->partial(0, {m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-            .rate = rate, .dividend_yield = dividend_yield_, .type = type_}, sigma).solve().value();
+            .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
     return eep_delta + eu.delta();
 }
 
@@ -86,7 +86,7 @@ double AmericanPriceSurface::gamma(double spot, double strike, double tau,
         surface_->second_partial(0, {m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-            .rate = rate, .dividend_yield = dividend_yield_, .type = type_}, sigma).solve().value();
+            .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
     return eep_gamma + eu.gamma();
 }
 
@@ -99,7 +99,7 @@ double AmericanPriceSurface::vega(double spot, double strike, double tau,
     double eep_vega = (strike / K_ref_) * surface_->partial(2, {m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-            .rate = rate, .dividend_yield = dividend_yield_, .type = type_}, sigma).solve().value();
+            .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
     return eep_vega + eu.vega();
 }
 
@@ -113,7 +113,7 @@ double AmericanPriceSurface::theta(double spot, double strike, double tau,
     double eep_dtau = (strike / K_ref_) * surface_->partial(1, {m, tau, sigma, rate});
     auto eu = EuropeanOptionSolver(
         OptionSpec{.spot = spot, .strike = strike, .maturity = tau,
-            .rate = rate, .dividend_yield = dividend_yield_, .type = type_}, sigma).solve().value();
+            .rate = rate, .dividend_yield = dividend_yield_, .option_type = type_}, sigma).solve().value();
     return -eep_dtau + eu.theta();
 }
 

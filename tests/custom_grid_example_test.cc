@@ -26,7 +26,7 @@ class CustomGridTest : public ::testing::Test {
         spec.maturity = 1.0;
         spec.rate = 0.05;
         spec.dividend_yield = 0.02;
-        spec.type = mango::OptionType::PUT;
+        spec.option_type = mango::OptionType::PUT;
         return mango::PricingParams(spec, 0.20);
     }
 

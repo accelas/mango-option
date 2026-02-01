@@ -139,7 +139,7 @@ struct OptionSpec {
     double maturity = 0.0;         ///< Time to maturity in years (T)
     RateSpec rate = 0.0;           ///< Risk-free rate (constant or yield curve)
     double dividend_yield = 0.0;   ///< Continuous dividend yield (annualized, decimal)
-    OptionType type = OptionType::CALL; ///< CALL or PUT (default CALL)
+    OptionType option_type = OptionType::CALL; ///< CALL or PUT (default CALL)
 };
 
 /**

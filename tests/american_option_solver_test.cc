@@ -560,7 +560,7 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
 TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
     std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20 + 0.02 * i);
+        batch[i] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20 + 0.02 * i);
     }
 
     // Track callback invocations
@@ -593,7 +593,7 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
 TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
     std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+        batch[i] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     }
 
     // Use automatic grid determination (preferred API)
@@ -630,7 +630,7 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
 TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
     std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT}, 0.20);
+        batch[i] = PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
     }
 
     // Call without callback using simplified API

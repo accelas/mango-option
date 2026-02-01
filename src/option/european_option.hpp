@@ -53,7 +53,7 @@ public:
     double strike() const { return params_.strike; }
     double maturity() const { return params_.maturity; }
     double volatility() const { return params_.volatility; }
-    OptionType option_type() const { return params_.type; }
+    OptionType option_type() const { return params_.option_type; }
 
 private:
     /// Compute d1, d2 for given spot price

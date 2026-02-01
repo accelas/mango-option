@@ -47,7 +47,7 @@ def test_iv_query():
     query.maturity = 1.0
     query.rate = 0.05
     query.dividend_yield = 0.02
-    query.type = mango_option.OptionType.PUT
+    query.option_type = mango_option.OptionType.PUT
     query.market_price = 10.0
 
     assert query.spot == 100.0
@@ -68,7 +68,7 @@ def test_iv_solver_fdm():
     query.maturity = 1.0
     query.rate = 0.05
     query.dividend_yield = 0.02
-    query.type = mango_option.OptionType.PUT
+    query.option_type = mango_option.OptionType.PUT
     query.market_price = 10.0
 
     success, result, error = solver.solve(query)
@@ -89,7 +89,7 @@ def test_american_option_price():
     params.volatility = 0.20
     params.rate = 0.05
     params.dividend_yield = 0.02
-    params.type = mango_option.OptionType.PUT
+    params.option_type = mango_option.OptionType.PUT
 
     result = mango_option.american_option_price(params)
     delta = result.delta()
@@ -107,7 +107,7 @@ def test_american_option_price_with_accuracy():
     params.volatility = 0.20
     params.rate = 0.05
     params.dividend_yield = 0.02
-    params.type = mango_option.OptionType.PUT
+    params.option_type = mango_option.OptionType.PUT
 
     result = mango_option.american_option_price(
         params, accuracy=mango_option.GridAccuracyProfile.HIGH)
@@ -131,7 +131,7 @@ def test_american_option_discrete_dividends():
     params.volatility = 0.20
     params.rate = 0.05
     params.dividend_yield = 0.0
-    params.type = mango_option.OptionType.PUT
+    params.option_type = mango_option.OptionType.PUT
     params.discrete_dividends = [mango_option.Dividend(0.25, 2.0), mango_option.Dividend(0.75, 2.0)]
 
     result = mango_option.american_option_price(params)
@@ -159,7 +159,7 @@ def test_american_option_yield_curve():
     params.volatility = 0.20
     params.rate = mango_option.YieldCurve.flat(0.05)
     params.dividend_yield = 0.02
-    params.type = mango_option.OptionType.PUT
+    params.option_type = mango_option.OptionType.PUT
 
     result = mango_option.american_option_price(params)
     price = result.value_at(100.0)
@@ -181,7 +181,7 @@ def test_batch_solver():
         p.volatility = 0.20
         p.rate = 0.05
         p.dividend_yield = 0.02
-        p.type = mango_option.OptionType.PUT
+        p.option_type = mango_option.OptionType.PUT
         batch.append(p)
 
     solver = mango_option.BatchAmericanOptionSolver()
@@ -213,7 +213,7 @@ def test_batch_solver_per_option_grids():
         p.volatility = 0.20
         p.rate = 0.05
         p.dividend_yield = 0.02
-        p.type = mango_option.OptionType.PUT
+        p.option_type = mango_option.OptionType.PUT
         batch.append(p)
 
     solver = mango_option.BatchAmericanOptionSolver()
@@ -365,7 +365,7 @@ def test_iv_solver_interpolated():
     query.maturity = 0.5
     query.rate = 0.05
     query.dividend_yield = 0.02
-    query.type = mango_option.OptionType.PUT
+    query.option_type = mango_option.OptionType.PUT
     query.market_price = 5.0
 
     success, result, error = solver.solve(query)

@@ -408,7 +408,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
             params.maturity = tau;
             params.rate = rate;
             params.dividend_yield = chain.dividend_yield;
-            params.type = type;
+            params.option_type = type;
             params.volatility = sigma;
 
             auto fd_result = solve_american_option_auto(params);

@@ -12,7 +12,7 @@ using namespace mango;
 TEST(IVSolverFDMExpected, ReturnsExpectedType) {
     // Simple test to verify std::expected signature compiles
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -38,7 +38,7 @@ TEST(IVSolverFDMExpected, ReturnsExpectedType) {
 TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
     // Call price cannot exceed spot price
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 150.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 150.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -52,7 +52,7 @@ TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
 TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
     // Put price cannot exceed strike price
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 150.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 150.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -67,7 +67,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
     // Market price must be >= intrinsic value
     // For call: intrinsic = max(S - K, 0) = max(110 - 100, 0) = 10
     IVQuery query(
-        OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 5.0);
+        OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 5.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -82,7 +82,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
     // Market price must be >= intrinsic value
     // For put: intrinsic = max(K - S, 0) = max(110 - 100, 0) = 10
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 5.0);
+        OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 5.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -95,7 +95,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
 
 TEST(IVSolverFDMExpected, ValidationZeroSpot) {
     IVQuery query(
-        OptionSpec{.spot = 0.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
+        OptionSpec{.spot = 0.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -108,7 +108,7 @@ TEST(IVSolverFDMExpected, ValidationZeroSpot) {
 
 TEST(IVSolverFDMExpected, ValidationZeroStrike) {
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 0.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
+        OptionSpec{.spot = 100.0, .strike = 0.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -124,7 +124,7 @@ TEST(IVSolverFDMExpected, ValidationZeroStrike) {
 TEST(IVSolverFDMExpected, SolvesATMPut) {
     // ATM American put - typical case
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -140,7 +140,7 @@ TEST(IVSolverFDMExpected, SolvesATMPut) {
 TEST(IVSolverFDMExpected, SolvesITMPut) {
     // ITM put - K > S
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 15.0);
+        OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -154,7 +154,7 @@ TEST(IVSolverFDMExpected, SolvesITMPut) {
 TEST(IVSolverFDMExpected, SolvesOTMPut) {
     // OTM put - K < S
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 3.0);
+        OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -171,7 +171,7 @@ TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
     config.root_config.max_iter = 2;  // Too few iterations
 
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
     IVSolverFDM solver(config);
     auto result = solver.solve(query);
@@ -184,7 +184,7 @@ TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
 TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
     // Test with known market scenario
     IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5, .rate = 0.03, .type = OptionType::PUT}, 5.0);
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5, .rate = 0.03, .option_type = OptionType::PUT}, 5.0);
 
     IVSolverFDMConfig config;
     IVSolverFDM solver(config);
@@ -208,9 +208,9 @@ TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
 TEST(IVSolverFDMExpected, BatchSolveAllSuccess) {
     // Batch of 3 valid queries
     std::vector<IVQuery> queries = {
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0),
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 15.0),
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 3.0)
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0),
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0),
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0)
     };
 
     IVSolverFDMConfig config;
@@ -234,11 +234,11 @@ TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
     // Mix of valid and invalid queries
     std::vector<IVQuery> queries = {
         // Valid query
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0),
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0),
         // Invalid: negative spot
-        IVQuery(OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 10.0),
+        IVQuery(OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0),
         // Valid query
-        IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 3.0)
+        IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0)
     };
 
     IVSolverFDMConfig config;

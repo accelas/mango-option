@@ -282,7 +282,7 @@ TEST(PriceTableSurface, ConstructsFromAxes) {
     PriceTableMetadata meta{
         .K_ref = 100.0,
         .dividend_yield = 0.015,
-        .type = OptionType::PUT
+        .option_type = OptionType::PUT
     };
 
     auto surface = PriceTableSurface<4>::create(axes, std::move(tensor), meta);

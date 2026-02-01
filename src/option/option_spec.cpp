@@ -74,7 +74,7 @@ std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
     double intrinsic;
     double upper_bound;
 
-    if (query.type == OptionType::CALL) {
+    if (query.option_type == OptionType::CALL) {
         intrinsic = std::max(query.spot - query.strike, 0.0);
         upper_bound = query.spot;
     } else {  // PUT

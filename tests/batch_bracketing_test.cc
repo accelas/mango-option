@@ -13,7 +13,7 @@ namespace {
 
 TEST(OptionBracketingTest, GroupSingleOption) {
     std::vector<PricingParams> options = {
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20)
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20)
     };
 
     auto result = OptionBracketing::group_options(options);
@@ -27,7 +27,7 @@ TEST(OptionBracketingTest, GroupSimilarOptions) {
     // Create options with similar parameters - should be grouped together
     std::vector<PricingParams> options;
     for (double strike : {95.0, 100.0, 105.0}) {
-        options.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20));
+        options.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20));
     }
 
     BracketingCriteria criteria{
@@ -48,13 +48,13 @@ TEST(OptionBracketingTest, GroupDiverseOptions) {
     // Create options with diverse parameters - may need multiple brackets
     std::vector<PricingParams> options = {
         // Short-term ATM
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
         // Long-term ATM
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
         // Deep ITM
-        PricingParams(OptionSpec{.spot = 80.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 80.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
         // Deep OTM
-        PricingParams(OptionSpec{.spot = 120.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 120.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
     };
 
     BracketingCriteria criteria{
@@ -83,8 +83,8 @@ TEST(OptionBracketingTest, GroupEmptyOptions) {
 }
 
 TEST(OptionBracketingTest, ComputeDistanceIdenticalOptions) {
-    PricingParams a(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);
-    PricingParams b(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);
+    PricingParams a(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
+    PricingParams b(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
 
     BracketingCriteria criteria;
     double distance = OptionBracketing::compute_distance(a, b, criteria);
@@ -93,8 +93,8 @@ TEST(OptionBracketingTest, ComputeDistanceIdenticalOptions) {
 }
 
 TEST(OptionBracketingTest, ComputeDistanceDifferentMaturity) {
-    PricingParams a(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);
-    PricingParams b(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);  // Different maturity
+    PricingParams a(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
+    PricingParams b(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);  // Different maturity
 
     BracketingCriteria criteria{.maturity_tolerance = 1.0};
     double distance = OptionBracketing::compute_distance(a, b, criteria);
@@ -103,8 +103,8 @@ TEST(OptionBracketingTest, ComputeDistanceDifferentMaturity) {
 }
 
 TEST(OptionBracketingTest, ComputeDistanceDifferentMoneyness) {
-    PricingParams a(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);  // m = 1.0
-    PricingParams b(OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20);   // m = 0.9
+    PricingParams a(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);  // m = 1.0
+    PricingParams b(OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);   // m = 0.9
 
     BracketingCriteria criteria;
     double distance = OptionBracketing::compute_distance(a, b, criteria);
@@ -114,9 +114,9 @@ TEST(OptionBracketingTest, ComputeDistanceDifferentMoneyness) {
 
 TEST(OptionBracketingTest, EstimateBracketGrid) {
     std::vector<PricingParams> options = {
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 95.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.25),
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 105.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 95.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.25),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 105.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
     };
 
     auto result = OptionBracketing::estimate_bracket_grid(options);
@@ -131,9 +131,9 @@ TEST(OptionBracketingTest, EstimateBracketGrid) {
 
 TEST(OptionBracketingTest, BracketStats) {
     std::vector<PricingParams> options = {
-        PricingParams(OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 0.5, .rate = 0.05, .type = OptionType::PUT}, 0.15),
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
-        PricingParams(OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.5, .rate = 0.05, .type = OptionType::PUT}, 0.25),
+        PricingParams(OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 0.5, .rate = 0.05, .option_type = OptionType::PUT}, 0.15),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.5, .rate = 0.05, .option_type = OptionType::PUT}, 0.25),
     };
 
     BracketingCriteria criteria{
@@ -161,9 +161,9 @@ TEST(OptionBracketingTest, BracketStats) {
 
 TEST(OptionBracketingTest, OriginalIndicesPreserved) {
     std::vector<PricingParams> options = {
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
-        PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
+        PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20),
     };
 
     auto result = OptionBracketing::group_options(options);
@@ -188,7 +188,7 @@ TEST(OptionBracketingTest, MaxBracketSizeRespected) {
     // Create many similar options
     std::vector<PricingParams> options;
     for (int i = 0; i < 150; ++i) {
-        options.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20));
+        options.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20));
     }
 
     BracketingCriteria criteria{
@@ -207,7 +207,7 @@ TEST(OptionBracketingTest, MaxBracketSizeRespected) {
 TEST(OptionBracketingTest, AvgBracketSize) {
     std::vector<PricingParams> options;
     for (int i = 0; i < 10; ++i) {
-        options.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::PUT}, 0.20));
+        options.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20));
     }
 
     auto result = OptionBracketing::group_options(options);
