@@ -18,7 +18,7 @@ namespace {
 double price_american_discrete_div_quantlib(
     double spot, double strike, double maturity,
     double volatility, double rate,
-    const std::vector<std::pair<double, double>>& dividends,
+    const std::vector<Dividend>& dividends,
     bool is_call,
     size_t grid_steps = 401,
     size_t time_steps = 4000)
@@ -228,9 +228,9 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
 TEST(DiscreteDividendAccuracyTest, SharedGridBatchIncludesDividendTimePoints) {
     std::vector<PricingParams> batch;
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.4, 3.0}});
+                       std::vector<Dividend>{{.calendar_time = 0.4, .amount = 3.0}});
     batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.4, 3.0}});
+                       std::vector<Dividend>{{.calendar_time = 0.4, .amount = 3.0}});
 
     auto [grid_spec, td] = compute_global_grid_for_batch(batch);
     auto pts = td.time_points();

@@ -16,14 +16,14 @@ TEST(PriceTableMetadataTest, WithDiscreteDividends) {
     PriceTableMetadata meta{
         .K_ref = 100.0,
         .dividend_yield = 0.02,
-        .discrete_dividends = {{0.25, 2.50}, {0.75, 2.50}}
+        .discrete_dividends = {{.calendar_time = 0.25, .amount = 2.50}, {.calendar_time = 0.75, .amount = 2.50}}
     };
 
     EXPECT_DOUBLE_EQ(meta.K_ref, 100.0);
     EXPECT_DOUBLE_EQ(meta.dividend_yield, 0.02);
     EXPECT_EQ(meta.discrete_dividends.size(), 2);
-    EXPECT_DOUBLE_EQ(meta.discrete_dividends[0].first, 0.25);
-    EXPECT_DOUBLE_EQ(meta.discrete_dividends[0].second, 2.50);
+    EXPECT_DOUBLE_EQ(meta.discrete_dividends[0].calendar_time, 0.25);
+    EXPECT_DOUBLE_EQ(meta.discrete_dividends[0].amount, 2.50);
 }
 
 TEST(PriceTableMetadataTest, DefaultContentIsEEP) {

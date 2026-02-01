@@ -20,7 +20,7 @@ protected:
         IVSolverConfig config{
             .option_type = OptionType::PUT,
             .spot = 100.0,
-            .discrete_dividends = {{0.5, 2.0}},
+            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
             .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
             .maturity = 1.0,
             .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
@@ -115,8 +115,8 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
     for (double tau : {1.0, 0.8, 0.6}) {
         SCOPED_TRACE("maturity=" + std::to_string(tau));
 
-        std::vector<std::pair<double, double>> divs;
-        if (tau > 0.5) divs = {{0.5, 2.0}};
+        std::vector<Dividend> divs;
+        if (tau > 0.5) divs = {{.calendar_time = 0.5, .amount = 2.0}};
 
         PricingParams params(
             100.0, 110.0, tau, 0.05, 0.0,

@@ -39,7 +39,7 @@ TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
     IVSolverConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
-        .discrete_dividends = {{0.5, 2.0}},
+        .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
         .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
         .maturity = 1.0,
         .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},

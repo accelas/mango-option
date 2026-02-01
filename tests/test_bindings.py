@@ -132,7 +132,7 @@ def test_american_option_discrete_dividends():
     params.rate = 0.05
     params.dividend_yield = 0.0
     params.type = mango_option.OptionType.PUT
-    params.discrete_dividends = [(0.25, 2.0), (0.75, 2.0)]
+    params.discrete_dividends = [mango_option.Dividend(0.25, 2.0), mango_option.Dividend(0.75, 2.0)]
 
     result = mango_option.american_option_price(params)
     price_div = result.value_at(100.0)

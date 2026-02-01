@@ -72,7 +72,7 @@ TEST(PriceTableBuilderTest, MakeBatch4D) {
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
         .dividend_yield = 0.02,
-        .discrete_dividends = {{0.25, 1.0}}
+        .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.0}}
     };
 
     PriceTableBuilder<4> builder(config);
@@ -99,7 +99,7 @@ TEST(PriceTableBuilderTest, MakeBatch4D) {
 
     // Check discrete dividends were copied
     EXPECT_EQ(batch[0].discrete_dividends.size(), 1);
-    EXPECT_DOUBLE_EQ(batch[0].discrete_dividends[0].first, 0.25);
+    EXPECT_DOUBLE_EQ(batch[0].discrete_dividends[0].calendar_time, 0.25);
 }
 
 TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {

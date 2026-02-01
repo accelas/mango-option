@@ -84,7 +84,7 @@ TEST(AmericanPriceSurfaceTest, RejectsDiscreteDividends) {
         .m_min = 0.8,
         .m_max = 1.2,
         .content = SurfaceContent::EarlyExercisePremium,
-        .discrete_dividends = {{0.25, 1.50}, {0.75, 1.50}}
+        .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
     auto result = AmericanPriceSurface::create(surface, OptionType::PUT);
@@ -214,7 +214,7 @@ TEST(AmericanPriceSurfaceTest, RejectsRawPriceWithDiscreteDividends) {
         .m_min = 0.8,
         .m_max = 1.2,
         .content = SurfaceContent::RawPrice,
-        .discrete_dividends = {{0.25, 1.50}, {0.75, 1.50}}
+        .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
     auto result = AmericanPriceSurface::create(surface, OptionType::PUT);

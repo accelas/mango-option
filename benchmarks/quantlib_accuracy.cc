@@ -620,8 +620,8 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
     double div_yield = 0.02;
 
     // Discrete dividend: $1 at 0.25y (time, amount pairs)
-    std::vector<std::pair<double, double>> dividends = {
-        {0.25, 1.0}  // $1 dividend at 0.25 years
+    std::vector<Dividend> dividends = {
+        {.calendar_time = 0.25, .amount = 1.0}  // $1 dividend at 0.25 years
     };
 
     PricingParams params(
@@ -690,10 +690,10 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
     double div_yield = 0.01;
 
     // Quarterly dividends: $0.50 at 0.25y, 0.5y, 0.75y (time, amount pairs)
-    std::vector<std::pair<double, double>> dividends = {
-        {0.25, 0.5},  // $0.50 at 3 months
-        {0.50, 0.5},  // $0.50 at 6 months
-        {0.75, 0.5}   // $0.50 at 9 months
+    std::vector<Dividend> dividends = {
+        {.calendar_time = 0.25, .amount = 0.5},  // $0.50 at 3 months
+        {.calendar_time = 0.50, .amount = 0.5},  // $0.50 at 6 months
+        {.calendar_time = 0.75, .amount = 0.5}   // $0.50 at 9 months
         // Note: dividend at maturity (1.0y) excluded (no impact)
     };
 

@@ -329,9 +329,9 @@ TEST_F(AmericanOptionPricingTest, RegularBatchWithDiscreteDividends) {
     // Batch of options with discrete dividends — uses regular path (not normalized)
     std::vector<PricingParams> batch;
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+                       std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}});
     batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+                       std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}});
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(batch);
@@ -348,11 +348,11 @@ TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
     // (normalized chain rejects discrete dividends)
     std::vector<PricingParams> batch;
     batch.emplace_back(100.0, 90.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+                       std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}});
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+                       std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}});
     batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
-                       std::vector<std::pair<double, double>>{{0.5, 3.0}});
+                       std::vector<mango::Dividend>{{.calendar_time = 0.5, .amount = 3.0}});
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);

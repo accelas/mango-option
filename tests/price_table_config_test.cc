@@ -21,7 +21,7 @@ TEST(PriceTableConfigTest, WithDiscreteDividends) {
     PriceTableConfig config{
         .option_type = OptionType::CALL,
         .dividend_yield = 0.01,
-        .discrete_dividends = {{0.25, 2.0}, {0.75, 2.0}}
+        .discrete_dividends = {{.calendar_time = 0.25, .amount = 2.0}, {.calendar_time = 0.75, .amount = 2.0}}
     };
 
     EXPECT_EQ(config.option_type, OptionType::CALL);
