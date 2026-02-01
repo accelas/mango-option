@@ -323,5 +323,19 @@ TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
     }
 }
 
+// ===========================================================================
+// solve_american_option_auto accessible from primary header
+// ===========================================================================
+
+TEST(AmericanOptionTest, SolveAutoFromPrimaryHeader) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+        0.20);
+    auto result = solve_american_option_auto(params);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->value_at(100.0), 6.35, 0.5);
+}
+
 }  // namespace
 }  // namespace mango
