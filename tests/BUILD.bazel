@@ -1512,6 +1512,26 @@ cc_test(
 
 load("@pip//:requirements.bzl", "requirement")
 
+cc_test(
+    name = "option_spec_test",
+    size = "small",
+    srcs = ["option_spec_test.cc"],
+    deps = [
+        "//src/option:option_spec",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "error_types_test",
+    size = "small",
+    srcs = ["error_types_test.cc"],
+    deps = [
+        "//src/support:error_types",
+        "@googletest//:gtest_main",
+    ],
+)
+
 py_test(
     name = "python_bindings_test",
     size = "medium",
