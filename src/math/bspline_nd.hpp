@@ -121,6 +121,16 @@ public:
                 coeffs.size()});
         }
 
+        // Validate coefficients for NaN/Inf
+        for (size_t i = 0; i < coeffs.size(); ++i) {
+            if (!std::isfinite(coeffs[i])) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::NaNInput,
+                    coeffs.size(),
+                    i});
+            }
+        }
+
         return BSplineND(std::move(grids), std::move(knots), std::move(coeffs));
     }
 
