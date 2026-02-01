@@ -225,7 +225,7 @@ TEST_P(BatchSolverGridSizeTest, SharedGrid_ExplicitSize) {
     auto grid_spec = grid_spec_result.value();
 
     // Create batch of options
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {90.0, 95.0, 100.0, 105.0, 110.0}) {
         params.push_back(PricingParams(
             100.0, K, 1.0, 0.05, 0.02,
@@ -234,7 +234,7 @@ TEST_P(BatchSolverGridSizeTest, SharedGrid_ExplicitSize) {
 
     // Create custom grid config
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    auto custom_grid = std::make_pair(grid_spec, time_domain);
+    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, /*use_shared_grid=*/true, nullptr, custom_grid);
@@ -259,7 +259,7 @@ TEST_P(BatchSolverGridSizeTest, PerOptionGrid_ExplicitSize) {
     ASSERT_TRUE(grid_spec_result.has_value());
     auto grid_spec = grid_spec_result.value();
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {90.0, 100.0, 110.0}) {
         params.push_back(PricingParams(
             100.0, K, 1.0, 0.05, 0.02,
@@ -267,7 +267,7 @@ TEST_P(BatchSolverGridSizeTest, PerOptionGrid_ExplicitSize) {
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    auto custom_grid = std::make_pair(grid_spec, time_domain);
+    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, /*use_shared_grid=*/false, nullptr, custom_grid);
@@ -302,7 +302,7 @@ class BatchSolverConfigTest : public ::testing::TestWithParam<BatchConfig> {};
 TEST_P(BatchSolverConfigTest, ConfigurationMatrix) {
     const auto& config = GetParam();
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     double spot = 100.0;
     double base_strike = 90.0;
     double strike_step = 20.0 / config.batch_size;
@@ -358,7 +358,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(ProductionConfig, BatchSolver_DeepITM_Puts) {
     // Deep ITM puts (high strikes)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {120.0, 130.0, 140.0, 150.0, 160.0}) {
         params.push_back(PricingParams(
             100.0, K, 0.5, 0.05, 0.02,
@@ -378,7 +378,7 @@ TEST(ProductionConfig, BatchSolver_DeepITM_Puts) {
 
 TEST(ProductionConfig, BatchSolver_DeepOTM_Puts) {
     // Deep OTM puts (low strikes)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {50.0, 60.0, 70.0, 80.0}) {
         params.push_back(PricingParams(
             100.0, K, 0.5, 0.05, 0.02,
@@ -398,7 +398,7 @@ TEST(ProductionConfig, BatchSolver_DeepOTM_Puts) {
 
 TEST(ProductionConfig, BatchSolver_WideStrikeRange) {
     // Very wide strike range in single batch
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {50.0, 70.0, 90.0, 100.0, 110.0, 130.0, 150.0}) {
         params.push_back(PricingParams(
             100.0, K, 1.0, 0.05, 0.02,
@@ -419,7 +419,7 @@ TEST(ProductionConfig, BatchSolver_WideStrikeRange) {
 
 TEST(ProductionConfig, BatchSolver_ShortMaturity) {
     // Very short maturities (weekly options)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {95.0, 100.0, 105.0}) {
         params.push_back(PricingParams(
             100.0, K, 7.0/365.0, 0.05, 0.02,
@@ -434,7 +434,7 @@ TEST(ProductionConfig, BatchSolver_ShortMaturity) {
 
 TEST(ProductionConfig, BatchSolver_HighVolatility) {
     // High volatility (meme stock scenario)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {80.0, 100.0, 120.0}) {
         params.push_back(PricingParams(
             100.0, K, 0.5, 0.05, 0.0,
@@ -449,7 +449,7 @@ TEST(ProductionConfig, BatchSolver_HighVolatility) {
 
 TEST(ProductionConfig, BatchSolver_NegativeRate) {
     // Negative interest rate (European scenario)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {95.0, 100.0, 105.0}) {
         params.push_back(PricingParams(
             100.0, K, 1.0, -0.01, 0.0,  // -1% rate
@@ -557,7 +557,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     // Solve for IV
     IVQuery query{spot, strike, maturity, rate, grid.dividend,
                   OptionType::PUT, price};
-    auto iv_result = iv_solver.solve_impl(query);
+    auto iv_result = iv_solver.solve(query);
 
     ASSERT_TRUE(iv_result.has_value())
         << "IV solve failed for ATM option";

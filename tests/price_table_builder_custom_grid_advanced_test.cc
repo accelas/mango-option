@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "src/option/table/price_table_builder.hpp"
+#include "tests/price_table_builder_test_access.hpp"
 #include "src/pde/core/time_domain.hpp"
 
 namespace mango {
 namespace {
+
+using Access = testing::PriceTableBuilderAccess<4>;
 
 // Test the normalized chain solver with custom_grid
 // This tests the ACTUAL code path used by price table builder
@@ -26,7 +29,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     axes.grids[3] = {0.05, 0.06};
 
     // Generate batch with normalized parameters
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     ASSERT_EQ(batch.size(), 4);  // 2 vols × 2 rates
 
     std::cout << "=== Testing normalized chain solver ===" << std::endl;
@@ -61,8 +64,8 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     std::cout << "\nTest 2: use_shared_grid=true, WITH custom_grid" << std::endl;
     GridSpec<double> user_grid = adv_grid1.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), adv_grid1.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     auto result2 = solver.solve_batch(batch, true, nullptr, custom_grid);
     std::cout << "  Failed count: " << result2.failed_count << std::endl;
@@ -96,7 +99,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     axes.grids[3] = {0.05};
 
     // Generate batch (normalized: spot=strike=100)
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     ASSERT_EQ(batch.size(), 1);
 
     // Verify normalized parameters
@@ -111,8 +114,8 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     const auto& edge_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridSpec<double> user_grid = edge_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), edge_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     // Test with custom_grid
     BatchAmericanOptionSolver solver;
@@ -179,15 +182,15 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
               << " (Nσ × Nr)" << std::endl;
 
     // Generate batch as plan does
-    auto batch = builder.make_batch_for_testing(axes);
+    auto batch = Access::make_batch(builder, axes);
     std::cout << "Batch size: " << batch.size() << std::endl;
 
     // Create custom_grid as plan specifies
     const auto& sim_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridSpec<double> user_grid = sim_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), sim_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     std::cout << "\nCustom grid specification:" << std::endl;
     std::cout << "  Spatial: [" << user_grid.x_min() << ", " << user_grid.x_max()

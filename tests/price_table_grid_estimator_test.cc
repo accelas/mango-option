@@ -180,7 +180,7 @@ TEST(PriceTableGridEstimatorTest, CurvatureWeightsAffectPointAllocation) {
 }
 
 // ===========================================================================
-// estimate_grid_from_chain_bounds tests
+// estimate_grid_from_grid_bounds tests
 // ===========================================================================
 
 TEST(PriceTableGridEstimatorTest, FromChainBounds_BasicFunctionality) {
@@ -190,7 +190,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_BasicFunctionality) {
     std::vector<double> vols = {0.15, 0.20, 0.25, 0.30};
     std::vector<double> rates = {0.02, 0.03, 0.04, 0.05};
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     // All grids should be non-empty
@@ -217,7 +217,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_EmptyStrikes_ReturnsEmpty) {
     std::vector<double> vols = {0.20};
     std::vector<double> rates = {0.03};
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     // Should return empty grids, not crash
@@ -234,7 +234,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_EmptyMaturities_ReturnsEmpty) 
     std::vector<double> vols = {0.20};
     std::vector<double> rates = {0.03};
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     EXPECT_TRUE(estimate.grids[0].empty());
@@ -247,7 +247,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_EmptyVols_ReturnsEmpty) {
     std::vector<double> vols = {};  // Empty!
     std::vector<double> rates = {0.03};
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     EXPECT_TRUE(estimate.grids[0].empty());
@@ -260,7 +260,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_EmptyRates_ReturnsEmpty) {
     std::vector<double> vols = {0.20};
     std::vector<double> rates = {};  // Empty!
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     EXPECT_TRUE(estimate.grids[0].empty());
@@ -273,7 +273,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_ZeroSpot_ReturnsEmpty) {
     std::vector<double> vols = {0.20};
     std::vector<double> rates = {0.03};
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     EXPECT_TRUE(estimate.grids[0].empty());
@@ -286,7 +286,7 @@ TEST(PriceTableGridEstimatorTest, FromChainBounds_NegativeSpot_ReturnsEmpty) {
     std::vector<double> vols = {0.20};
     std::vector<double> rates = {0.03};
 
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         strikes, spot, maturities, vols, rates);
 
     EXPECT_TRUE(estimate.grids[0].empty());

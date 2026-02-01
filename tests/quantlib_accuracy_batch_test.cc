@@ -168,7 +168,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
             ql_result.price
         };
 
-        auto iv_result = iv_solver.solve_impl(query);
+        auto iv_result = iv_solver.solve(query);
 
         ASSERT_TRUE(iv_result.has_value())
             << "IV solver failed with code: " << static_cast<int>(iv_result.error().code);
@@ -214,7 +214,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false,
         1001, 10000);
 
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation
@@ -227,7 +227,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -247,7 +247,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
 // ============================================================================
 
 TEST(QuantLibBatchTest, Greeks_ATM) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
@@ -259,7 +259,7 @@ TEST(QuantLibBatchTest, Greeks_ATM) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 

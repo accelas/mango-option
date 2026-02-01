@@ -81,7 +81,7 @@ double price_american_option_quantlib(
 // ============================================================================
 
 static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -105,7 +105,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -141,7 +141,7 @@ BENCHMARK(BM_QuantLib_AmericanPut_ATM);
 // ----------------------------------------------------------------------------
 
 static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         110.0,  // spot
         100.0,  // strike
         0.25,   // maturity
@@ -165,7 +165,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -201,7 +201,7 @@ BENCHMARK(BM_QuantLib_AmericanPut_OTM);
 // ----------------------------------------------------------------------------
 
 static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         90.0,   // spot
         100.0,  // strike
         2.0,    // maturity
@@ -225,7 +225,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));
@@ -263,7 +263,7 @@ BENCHMARK(BM_QuantLib_AmericanPut_ITM);
 // ============================================================================
 
 static void BM_Mango_GridResolution(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -287,7 +287,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        AmericanOptionSolver solver(params, workspace_result.value());
+        auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
         auto result = solver.solve();
         if (!result) {
             throw std::runtime_error("Solver error code " + std::to_string(static_cast<int>(result.error().code)));

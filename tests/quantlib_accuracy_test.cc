@@ -102,7 +102,7 @@ void test_scenario(
     SCOPED_TRACE(name);
 
     // Mango-Option pricing with auto-estimation (production mode)
-    AmericanOptionParams mango_params(
+    PricingParams mango_params(
         spot, strike, maturity, rate, dividend_yield,
         is_call ? OptionType::CALL : OptionType::PUT, volatility);
 
@@ -118,7 +118,7 @@ void test_scenario(
     ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(mango_params, workspace);
+    auto solver = AmericanOptionSolver::create(mango_params, workspace).value();
     auto mango_result = solver.solve();
     ASSERT_TRUE(mango_result.has_value()) << mango_result.error().message;
 
@@ -205,7 +205,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false,
         1001, 10000);
 
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation (production mode)
@@ -220,7 +220,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -241,7 +241,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
 // ============================================================================
 
 TEST(QuantLibAccuracyTest, Greeks_ATM) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation (production mode)
@@ -256,7 +256,7 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
     ASSERT_TRUE(workspace_result.has_value());
     auto workspace = workspace_result.value();
 
-    AmericanOptionSolver solver(params, workspace);
+    auto solver = AmericanOptionSolver::create(params, workspace).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
 
@@ -316,7 +316,7 @@ void test_iv_scenario(
     IVSolverFDMConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    // Note: using auto-estimation (use_manual_grid = false by default)
+    // Note: using auto-estimation (default GridAccuracyParams)
 
     IVSolverFDM solver(config);
     auto iv_result = solver.solve(query);

@@ -38,7 +38,7 @@ int main() {
     IVSolverFDMConfig fdm_config;
     fdm_config.root_config.max_iter = 100;
     fdm_config.root_config.tolerance = 1e-8;
-    fdm_config.grid_accuracy = grid_accuracy_profile(GridAccuracyProfile::High);
+    fdm_config.grid = grid_accuracy_profile(GridAccuracyProfile::High);
     IVSolverFDM fdm_solver(fdm_config);
 
     // Test queries: puts at various moneyness × maturity
@@ -59,14 +59,14 @@ int main() {
     fprintf(stderr, "Computing reference prices...\n");
     std::vector<IVQuery> iv_queries;
     for (auto& tc : test_cases) {
-        AmericanOptionParams params(spot, tc.strike, tc.maturity, rate, div_yield,
+        PricingParams params(spot, tc.strike, tc.maturity, rate, div_yield,
                                      OptionType::PUT, tc.vol_true);
         auto [gs, td] = estimate_grid_for_option(params, grid_accuracy_profile(GridAccuracyProfile::High));
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buf(PDEWorkspace::required_size(gs.n_points()), &pool);
         auto ws = PDEWorkspace::from_buffer(buf, gs.n_points()).value();
-        auto custom = std::make_pair(gs, td);
-        AmericanOptionSolver solver(params, ws, std::nullopt, custom);
+        auto solver = AmericanOptionSolver::create(params, ws,
+            ExplicitPDEGrid{gs, td.n_steps(), {}}).value();
         auto result = solver.solve();
         if (!result) continue;
         double price = result->value_at(spot);
@@ -78,7 +78,7 @@ int main() {
     fprintf(stderr, "Computing reference IVs...\n");
     std::vector<double> ref_ivs;
     for (auto& q : iv_queries) {
-        auto r = fdm_solver.solve_impl(q);
+        auto r = fdm_solver.solve(q);
         ref_ivs.push_back(r.has_value() ? r->implied_vol : -1.0);
     }
 
@@ -102,7 +102,7 @@ int main() {
         grid_params.curvature_weights = {1.0, 1.0, 2.5, 0.6};
         grid_params.scale_factor = 2.0;
 
-        auto estimate = estimate_grid_from_chain_bounds(
+        auto estimate = estimate_grid_from_grid_bounds(
             strikes, spot, maturities, vols, rates, grid_params);
 
         if (estimate.grids[0].empty()) {
@@ -150,7 +150,7 @@ int main() {
         bool is_last = (trial == targets.size() - 1);
         for (size_t i = 0; i < iv_queries.size(); i++) {
             if (ref_ivs[i] < 0) continue;
-            auto interp_r = interp_solver.solve_impl(iv_queries[i]);
+            auto interp_r = interp_solver.solve(iv_queries[i]);
             if (!interp_r) continue;
             double err = std::abs(ref_ivs[i] - interp_r->implied_vol);
             max_err = std::max(max_err, err);
@@ -165,7 +165,7 @@ int main() {
             printf("  %-8s %-8s %-8s %-10s %-10s\n", "m", "T", "ref_iv", "interp_iv", "err(bps)");
             for (size_t i = 0; i < iv_queries.size(); i++) {
                 if (ref_ivs[i] < 0) continue;
-                auto interp_r = interp_solver.solve_impl(iv_queries[i]);
+                auto interp_r = interp_solver.solve(iv_queries[i]);
                 if (!interp_r) continue;
                 double err = std::abs(ref_ivs[i] - interp_r->implied_vol);
                 printf("  %-8.3f %-8.3f %-8.4f %-10.4f %-10.1f\n",
@@ -179,7 +179,7 @@ int main() {
         auto t2 = std::chrono::steady_clock::now();
         for (int rep = 0; rep < 100; rep++) {
             for (auto& q : iv_queries) {
-                auto r = interp_solver.solve_impl(q);
+                auto r = interp_solver.solve(q);
                 asm volatile("" : : "r"(&r) : "memory");
             }
         }

@@ -35,7 +35,7 @@ TEST(NormalizedChainAccuracy, ConsistencyWithRegularSolver) {
     double dividend_yield = 0.02;
     double volatility = 0.20;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,
@@ -117,7 +117,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_ATM_Chain) {
     double dividend_yield = 0.02;
     double volatility = 0.25;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,
@@ -187,7 +187,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_DeepITM_Puts) {
     double dividend_yield = 0.02;
     double volatility = 0.25;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,
@@ -229,7 +229,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_DeepOTM_Puts) {
     double dividend_yield = 0.02;
     double volatility = 0.25;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,
@@ -275,7 +275,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_HighVolatility) {
     double dividend_yield = 0.02;
     double volatility = 0.50;  // 50% vol
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,
@@ -321,7 +321,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_NegativeRate) {
     double dividend_yield = 0.0;
     double volatility = 0.20;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,
@@ -361,7 +361,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_HighRate) {
     double dividend_yield = 0.03;
     double volatility = 0.30;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : strikes) {
         params.push_back(PricingParams(
             spot, K, maturity, rate, dividend_yield,

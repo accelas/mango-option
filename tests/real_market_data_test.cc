@@ -19,8 +19,8 @@ namespace bdata = mango::benchmark_data;
 namespace {
 
 // Helper to convert market data to solver params
-AmericanOptionParams make_params(const bdata::RealOptionData& opt, double vol = 0.20) {
-    return AmericanOptionParams(
+PricingParams make_params(const bdata::RealOptionData& opt, double vol = 0.20) {
+    return PricingParams(
         bdata::SPOT,               // spot
         opt.strike,                // strike
         opt.maturity,              // maturity
@@ -60,7 +60,7 @@ TEST(RealMarketDataTest, ATMPutPricing) {
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
     ASSERT_TRUE(workspace.has_value()) << workspace.error();
 
-    AmericanOptionSolver solver(params, workspace.value());
+    auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value()) << "Solver failed: " << static_cast<int>(result.error().code);
 
@@ -87,7 +87,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
         auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
         ASSERT_TRUE(workspace.has_value()) << "Workspace creation failed for option " << i;
 
-        AmericanOptionSolver solver(params, workspace.value());
+        auto solver = AmericanOptionSolver::create(params, workspace.value()).value();
         auto result = solver.solve();
         ASSERT_TRUE(result.has_value())
             << "Solver failed for K=" << opt.strike << ": code " << static_cast<int>(result.error().code);
@@ -103,7 +103,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
 
 TEST(RealMarketDataTest, BatchPutPricing) {
     // Batch price puts using parallel solver
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(bdata::REAL_PUTS.size());
 
     for (const auto& opt : bdata::REAL_PUTS) {
@@ -127,7 +127,7 @@ TEST(RealMarketDataTest, BatchPutPricing) {
 
 TEST(RealMarketDataTest, BatchCallPricing) {
     // Batch price calls
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(bdata::REAL_CALLS.size());
 
     for (const auto& opt : bdata::REAL_CALLS) {
@@ -162,7 +162,7 @@ TEST(RealMarketDataTest, IVCalculationFDM) {
     config.root_config.tolerance = 1e-4;
 
     IVSolverFDM solver(config);
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value())
         << "IV solver failed: error code " << static_cast<int>(result.error().code);
@@ -179,7 +179,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
 
     IVSolverFDMConfig config;
     IVSolverFDM iv_solver(config);
-    auto iv_result = iv_solver.solve_impl(query);
+    auto iv_result = iv_solver.solve(query);
     ASSERT_TRUE(iv_result.has_value());
 
     double iv = iv_result->implied_vol;
@@ -193,7 +193,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
     ASSERT_TRUE(workspace.has_value());
 
-    AmericanOptionSolver price_solver(params, workspace.value());
+    auto price_solver = AmericanOptionSolver::create(params, workspace.value()).value();
     auto price_result = price_solver.solve();
     ASSERT_TRUE(price_result.has_value());
 

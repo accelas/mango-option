@@ -20,7 +20,7 @@ AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridParams params)
 {}
 
 std::expected<AdaptiveResult, PriceTableError>
-AdaptiveGridBuilder::build(const OptionChain& chain,
+AdaptiveGridBuilder::build(const OptionGrid& chain,
                            GridSpec<double> grid_spec,
                            size_t n_time,
                            OptionType type)
@@ -166,7 +166,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         }
 
         // Generate all (σ,r) parameter combinations
-        auto all_params = builder.make_batch_internal(axes);
+        auto all_params = builder.make_batch(axes);
 
         // Extract (σ,r) pairs from all_params
         std::vector<std::pair<double, double>> all_pairs;
@@ -181,7 +181,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         auto missing_indices = cache_.get_missing_indices(all_pairs);
 
         // Build batch of params for missing pairs only
-        std::vector<AmericanOptionParams> missing_params;
+        std::vector<PricingParams> missing_params;
         missing_params.reserve(missing_indices.size());
         for (size_t idx : missing_indices) {
             missing_params.push_back(all_params[idx]);
@@ -218,7 +218,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
 
             // Compute min required width from ALL params (not just missing_params).
             // Using all_params ensures consistent domain coverage across iterations.
-            auto sigma_sqrt_tau = [](const AmericanOptionParams& p) {
+            auto sigma_sqrt_tau = [](const PricingParams& p) {
                 return p.volatility * std::sqrt(p.maturity);
             };
             const double max_sigma_sqrt_tau = std::ranges::max(
@@ -237,7 +237,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
                 // Grid meets constraints: pass exact grid_spec + TimeDomain
                 const double max_maturity = maturity_grid.back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                auto custom_grid = std::make_pair(grid_spec, time_domain);
+                PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
                 fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
             } else {
                 // Grid violates constraints: use GridAccuracyParams with proper bounds
@@ -288,7 +288,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         auto merged_results = merge_results(all_params, missing_indices, fresh_results);
 
         // Extract tensor from merged results
-        auto tensor_result = builder.extract_tensor_internal(merged_results, axes);
+        auto tensor_result = builder.extract_tensor(merged_results, axes);
         if (!tensor_result.has_value()) {
             return std::unexpected(tensor_result.error());
         }
@@ -298,7 +298,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         // Repair failed slices if needed
         RepairStats repair_stats{0, 0};
         if (!extraction.failed_pde.empty() || !extraction.failed_spline.empty()) {
-            auto repair_result = builder.repair_failed_slices_internal(
+            auto repair_result = builder.repair_failed_slices(
                 extraction.tensor, extraction.failed_pde,
                 extraction.failed_spline, axes);
             if (!repair_result.has_value()) {
@@ -308,10 +308,11 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         }
 
         // Fit coefficients
-        auto coeffs_result = builder.fit_coeffs_internal(extraction.tensor, axes);
-        if (!coeffs_result.has_value()) {
-            return std::unexpected(coeffs_result.error());
+        auto fit_result = builder.fit_coeffs(extraction.tensor, axes);
+        if (!fit_result.has_value()) {
+            return std::unexpected(fit_result.error());
         }
+        auto coeffs_result = std::move(fit_result->coefficients);
 
         // Build metadata
         PriceTableMetadata metadata;
@@ -322,7 +323,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         metadata.discrete_dividends = {};
 
         // Build surface
-        auto surface = PriceTableSurface<4>::build(axes, coeffs_result.value(), metadata);
+        auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);
         if (!surface.has_value()) {
             return std::unexpected(surface.error());
         }
@@ -602,7 +603,7 @@ std::optional<double> AdaptiveGridBuilder::compute_error_metric(
 }
 
 BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
-    const std::vector<AmericanOptionParams>& all_params,
+    const std::vector<PricingParams>& all_params,
     const std::vector<size_t>& fresh_indices,
     const BatchAmericanOptionResult& fresh_results) const
 {
@@ -649,7 +650,7 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
             if (cached) {
                 // Cache stores shared_ptr<AmericanOptionResult>
                 // We can create a new AmericanOptionResult that shares the same grid
-                // AmericanOptionParams is an alias for PricingParams, so we can pass it directly
+                // PricingParams is an alias for PricingParams, so we can pass it directly
                 merged.results.push_back(AmericanOptionResult(
                     cached->grid(), all_params[i]));
             } else {

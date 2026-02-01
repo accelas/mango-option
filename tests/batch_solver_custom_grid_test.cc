@@ -6,7 +6,7 @@
 
 TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
     // Test without custom grid first (baseline)
-    std::vector<mango::AmericanOptionParams> batch;
+    std::vector<mango::PricingParams> batch;
     batch.push_back(mango::PricingParams(
         100.0,                 // spot
         100.0,                 // strike
@@ -30,8 +30,8 @@ TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
         auto grid_spec = mango::GridSpec<double>::uniform(-4.0, 4.0, 101).value();
         auto time_domain = mango::TimeDomain::from_n_steps(0.0, 1.0, 200);
 
-        std::optional<std::pair<mango::GridSpec<double>, mango::TimeDomain>> custom_grid =
-            std::make_pair(grid_spec, time_domain);
+        std::optional<mango::PDEGridSpec> custom_grid =
+        mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
 
         auto result = solver.solve_batch(batch, true, nullptr, custom_grid);
 
@@ -48,7 +48,7 @@ TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
 }
 
 TEST(BatchSolverCustomGridTest, NulloptUsesAutoEstimation) {
-    std::vector<mango::AmericanOptionParams> batch;
+    std::vector<mango::PricingParams> batch;
     batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.02, mango::OptionType::PUT, 0.20);
 
     mango::BatchAmericanOptionSolver solver;

@@ -237,7 +237,7 @@ This compiles to the same assembly as hand-rolled `data[i*s0 + j*s1 + k*s2 + l]`
 
 ### Grid Density Profiles
 
-The builder supports automatic grid estimation via `from_chain_auto_profile()` with four density profiles (Low, Medium, High, Ultra). Grid budget is allocated by curvature:
+The builder supports automatic grid estimation via `from_grid_auto_profile()` with four density profiles (Low, Medium, High, Ultra). Grid budget is allocated by curvature:
 
 | Dimension | Weight | Rationale |
 |-----------|--------|-----------|

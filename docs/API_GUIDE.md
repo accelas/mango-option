@@ -82,7 +82,7 @@ int main() {
 
     // Solve
     mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
-    auto result = solver.solve_impl(query);
+    auto result = solver.solve(query);
 
     if (result.has_value()) {
         std::cout << "Implied Vol: " << result->implied_vol << "\n";
@@ -255,7 +255,7 @@ mango::IVSolverFDMConfig config{
 
 // Solve
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 
 if (result.has_value()) {
     std::cout << "Implied Vol: " << result->implied_vol << " ("
@@ -298,7 +298,7 @@ for (const auto& [strike, price] : market_data) {
 
 // Solve batch (OpenMP parallel)
 mango::IVSolverFDM solver(config);
-auto batch = solver.solve_batch_impl(queries);
+auto batch = solver.solve_batch(queries);
 
 std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
 std::cout << "Failed: " << batch.failed_count << "\n";
@@ -329,7 +329,7 @@ mango::IVSolverFDMConfig config{
 };
 
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 ```
 
 **Override auto-estimation with manual grid (advanced):**
@@ -345,7 +345,7 @@ mango::IVSolverFDMConfig config{
 };
 
 mango::IVSolverFDM solver(config);
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 ```
 
 ---
@@ -445,9 +445,9 @@ auto result2 = mango::PriceTableBuilder<4>::from_strikes(
     spot, strikes, maturities, volatilities, rates,
     pde_grid, mango::OptionType::CALL);
 
-// 3. from_chain: Extracts all parameters from OptionChain
-auto result3 = mango::PriceTableBuilder<4>::from_chain(
-    option_chain, pde_grid, mango::OptionType::PUT);
+// 3. from_grid: Extracts all parameters from OptionGrid
+auto result3 = mango::PriceTableBuilder<4>::from_grid(
+    option_grid, pde_grid, mango::OptionType::PUT);
 
 // All return std::expected<std::pair<builder, axes>, PriceTableError>
 ```
@@ -457,8 +457,8 @@ auto result3 = mango::PriceTableBuilder<4>::from_chain(
 **Use profiles to auto-estimate both table grids and PDE grid/time steps:**
 
 ```cpp
-auto result = mango::PriceTableBuilder<4>::from_chain_auto_profile(
-    option_chain,
+auto result = mango::PriceTableBuilder<4>::from_grid_auto_profile(
+    option_grid,
     mango::PriceTableGridProfile::High,
     mango::GridAccuracyProfile::High,
     mango::OptionType::PUT);
@@ -472,7 +472,7 @@ auto surface_result = builder.build(axes);
 ```python
 import mango_option as mo
 
-chain = mo.OptionChain()
+chain = mo.OptionGrid()
 chain.spot = 100.0
 chain.strikes = [90, 95, 100, 105, 110]
 chain.maturities = [0.25, 0.5, 1.0]
@@ -480,7 +480,7 @@ chain.implied_vols = [0.15, 0.20, 0.25]
 chain.rates = [0.02, 0.03]
 chain.dividend_yield = 0.0
 
-surface = mo.build_price_table_surface_from_chain(
+surface = mo.build_price_table_surface_from_grid(
     chain,
     option_type=mo.OptionType.PUT,
     grid_profile=mo.PriceTableGridProfile.HIGH,
@@ -508,7 +508,7 @@ IV error in bps varies with vega: a constant ~$0.005 price error maps to <1 bps 
 auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
 
 // Solve IV — internally uses EEP reconstruction + Newton iteration
-auto iv_result = iv_solver.solve_impl(iv_query);
+auto iv_result = iv_solver.solve(iv_query);
 ```
 
 ### Batch Queries on Price Surface
@@ -694,7 +694,7 @@ int main() {
 **std::expected provides type-safe error handling:**
 
 ```cpp
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 
 // Pattern 1: if/else
 if (result.has_value()) {
@@ -717,7 +717,7 @@ auto vol_pct = result.transform([](const auto& r) {
 **Detailed error diagnostics:**
 
 ```cpp
-auto result = solver.solve_impl(query);
+auto result = solver.solve(query);
 
 if (!result.has_value()) {
     const auto& error = result.error();
@@ -794,13 +794,13 @@ for (size_t i = 0; i < params_batch.size(); ++i) {
 
 ### IV Batch (Built-in)
 
-**Use solve_batch_impl() for parallel IV calculation:**
+**Use solve_batch() for parallel IV calculation:**
 
 ```cpp
 std::vector<mango::IVQuery> queries = load_market_data();
 
 mango::IVSolverFDM solver(config);
-auto batch = solver.solve_batch_impl(queries);
+auto batch = solver.solve_batch(queries);
 
 // Results and statistics
 std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";

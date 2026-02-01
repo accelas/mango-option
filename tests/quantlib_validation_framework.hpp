@@ -135,7 +135,7 @@ inline PricingValidationResult validate_pricing(
     PricingValidationResult validation;
 
     // Mango-Option pricing with auto-estimation
-    AmericanOptionParams mango_params(
+    PricingParams mango_params(
         scenario.spot, scenario.strike, scenario.maturity,
         scenario.rate, scenario.dividend_yield,
         scenario.is_call ? OptionType::CALL : OptionType::PUT,
@@ -154,7 +154,7 @@ inline PricingValidationResult validate_pricing(
         return validation;
     }
 
-    AmericanOptionSolver solver(mango_params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(mango_params, workspace_result.value()).value();
     auto mango_result = solver.solve();
     if (!mango_result.has_value()) {
         validation.passed = false;
@@ -226,7 +226,7 @@ inline IVValidationResult validate_iv_fdm(
     config.root_config.tolerance = 1e-6;
 
     IVSolverFDM solver(config);
-    auto iv_result = solver.solve_impl(query);
+    auto iv_result = solver.solve(query);
 
     if (!iv_result.has_value()) {
         validation.passed = false;

@@ -43,7 +43,7 @@ TEST_F(AmericanOptionNewAPITest, SolveWithPDEWorkspace) {
     ASSERT_TRUE(workspace_result.has_value()) << workspace_result.error();
 
     // NEW API: Pass PDEWorkspace directly
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value()) << "Solver failed: "
@@ -79,7 +79,7 @@ TEST_F(AmericanOptionNewAPITest, SolveWithSnapshots) {
 
     // NEW API: Pass snapshot times
     std::vector<double> snapshot_times = {0.0, 0.5, 1.0};
-    AmericanOptionSolver solver(params, workspace_result.value(), snapshot_times);
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value(), std::nullopt, std::span<const double>(snapshot_times)).value();
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());
@@ -110,7 +110,7 @@ TEST_F(AmericanOptionNewAPITest, CallOptionWithNewAPI) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n_space);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -136,7 +136,7 @@ TEST_F(AmericanOptionNewAPITest, ValueAtInterpolation) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n_space);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -169,7 +169,7 @@ TEST_F(AmericanOptionNewAPITest, GreeksComputation) {
     auto workspace_result = PDEWorkspace::from_buffer(buffer, n_space);
     ASSERT_TRUE(workspace_result.has_value());
 
-    AmericanOptionSolver solver(params, workspace_result.value());
+    auto solver = AmericanOptionSolver::create(params, workspace_result.value()).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());

@@ -48,7 +48,7 @@ void BatchSolverNeverCrashes(
     if (!grid_spec_result.has_value()) return;
 
     // Create batch of options with varying strikes
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     double strike_step = 0.5;
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike + i * strike_step;
@@ -62,7 +62,7 @@ void BatchSolverNeverCrashes(
 
     // Create custom grid config
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, maturity, 500);
-    auto custom_grid = std::make_pair(grid_spec_result.value(), time_domain);
+    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec_result.value(), time_domain.n_steps(), {}};
 
     // This should never crash
     BatchAmericanOptionSolver solver;
@@ -99,7 +99,7 @@ void OptionPricesNonNegative(
 {
     if (spot <= 0 || strike <= 0 || maturity <= 0 || volatility <= 0) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(
         spot, strike, maturity, rate, dividend_yield,
         is_call ? OptionType::CALL : OptionType::PUT,
@@ -147,7 +147,7 @@ void AmericanOptionLowerBounds(
     double moneyness = spot / strike;
     if (moneyness < 0.5 || moneyness > 2.0) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(
         spot, strike, maturity, rate, 0.0,
         is_call ? OptionType::CALL : OptionType::PUT,
@@ -197,7 +197,7 @@ void GridSizeConsistency(size_t n_points, size_t batch_size, bool use_shared_gri
     auto grid_spec_result = GridSpec<double>::sinh_spaced(-3.0, 3.0, n_points, 2.0);
     if (!grid_spec_result.has_value()) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (size_t i = 0; i < batch_size; ++i) {
         params.push_back(PricingParams(
             100.0, 90.0 + i * 2.0, 1.0, 0.05, 0.02,
@@ -205,7 +205,7 @@ void GridSizeConsistency(size_t n_points, size_t batch_size, bool use_shared_gri
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    auto custom_grid = std::make_pair(grid_spec_result.value(), time_domain);
+    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec_result.value(), time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, use_shared_grid, nullptr, custom_grid);
@@ -252,7 +252,7 @@ void PutPriceMonotonicInStrike(
     if (strike1 >= strike2) std::swap(strike1, strike2);
     if (strike2 - strike1 < 1.0) return;  // Need meaningful difference
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike1, maturity, rate, 0.0,
                                    OptionType::PUT, volatility, {}));
     params.push_back(PricingParams(spot, strike2, maturity, rate, 0.0,
@@ -302,7 +302,7 @@ void CallPriceMonotonicInStrike(
     if (strike1 >= strike2) std::swap(strike1, strike2);
     if (strike2 - strike1 < 1.0) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike1, maturity, rate, 0.0,
                                    OptionType::CALL, volatility, {}));
     params.push_back(PricingParams(spot, strike2, maturity, rate, 0.0,
@@ -353,7 +353,7 @@ void PriceIncreasesWithVolatility(
     if (vol1 >= vol2) std::swap(vol1, vol2);
     if (vol2 - vol1 < 0.05) return;  // Need meaningful difference
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
                                    is_call ? OptionType::CALL : OptionType::PUT, vol1, {}));
     params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
@@ -405,7 +405,7 @@ void PriceIncreasesWithMaturity(
     if (mat1 >= mat2) std::swap(mat1, mat2);
     if (mat2 - mat1 < 0.1) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike, mat1, rate, 0.0,
                                    is_call ? OptionType::CALL : OptionType::PUT, volatility, {}));
     params.push_back(PricingParams(spot, strike, mat2, rate, 0.0,
@@ -451,7 +451,7 @@ void DeltaWithinBounds(
 {
     if (spot <= 0 || strike <= 0 || maturity < 0.01 || volatility < 0.05) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
                                    is_call ? OptionType::CALL : OptionType::PUT, volatility, {}));
 
@@ -502,7 +502,7 @@ void GammaNonNegative(
     if (is_call && moneyness > 1.3) return;  // Deep ITM call
     if (!is_call && moneyness < 0.7) return; // Deep ITM put
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
                                    is_call ? OptionType::CALL : OptionType::PUT, volatility, {}));
 
@@ -544,7 +544,7 @@ void ExtremeParametersNoExceptions(
     // Test that extreme but valid parameters don't cause crashes
     if (spot <= 0 || strike <= 0 || maturity <= 0 || volatility <= 0) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
                                    OptionType::PUT, volatility, {}));
 
@@ -591,7 +591,7 @@ void NormalizedVsRegularConsistency(
     if (batch_size < 2 || batch_size > 20) return;
 
     // Create batch with varying strikes (normalized chain eligible)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike_base + i * 2.0;
         if (K <= 0) continue;
@@ -662,13 +662,13 @@ void ScaleInvarianceProperty(
     if (scale_factor < 0.5 || scale_factor > 2.0) return;
 
     // Original option
-    std::vector<AmericanOptionParams> params1;
+    std::vector<PricingParams> params1;
     params1.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
                                     is_call ? OptionType::CALL : OptionType::PUT,
                                     volatility, {}));
 
     // Scaled option (multiply spot and strike by scale_factor)
-    std::vector<AmericanOptionParams> params2;
+    std::vector<PricingParams> params2;
     params2.push_back(PricingParams(spot * scale_factor, strike * scale_factor,
                                     maturity, rate, 0.0,
                                     is_call ? OptionType::CALL : OptionType::PUT,
@@ -723,7 +723,7 @@ void PDEGroupingConsistency(
     if (batch_size < 3 || batch_size > 15) return;
 
     // Create batch with varying spot/strike ratios but same PDE parameters
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (size_t i = 0; i < batch_size; ++i) {
         double spot = spot_base + i * 3.0;
         double strike = 100.0;  // Fixed strike for all
@@ -780,7 +780,7 @@ void WideMoneynessCoverage(
     if (batch_size < 3 || batch_size > 20) return;
 
     // Create batch spanning wide moneyness range
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     double strike_step = (strike_max - strike_min) / (batch_size - 1);
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike_min + i * strike_step;
@@ -842,7 +842,7 @@ void MixedPDEParametersHandled(
     if (std::abs(vol1 - vol2) < 0.05) return;  // Need different vols
 
     // Create batch with different volatilities (cannot share PDE)
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(spot, strike, maturity, rate, 0.0,
                                    OptionType::PUT, vol1, {}));
     params.push_back(PricingParams(spot, strike * 1.05, maturity, rate, 0.0,
@@ -899,7 +899,7 @@ void NormalizedChainNoNaNInf(
     if (batch_size < 1 || batch_size > 20) return;
     if (dividend < 0 || dividend > 0.15) return;
 
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (size_t i = 0; i < batch_size; ++i) {
         double K = strike_base + i * 2.0;
         if (K <= 0) continue;
@@ -950,7 +950,7 @@ FUZZ_TEST(BatchSolverFuzz, NormalizedChainNoNaNInf)
 // Status: Known limitation - deep ITM options filtered in fuzz test
 TEST(BatchSolverFuzz, RegressionDeepITMCallNegativeGamma) {
     // This test documents the known numerical issue
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     params.push_back(PricingParams(
         108.22,  // spot - deep ITM
         80.0,    // strike

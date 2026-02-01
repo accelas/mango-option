@@ -103,7 +103,7 @@ cc_binary(
         "//src/option:american_option_batch",
         "//src/option:iv_solver_fdm",
         "//src/option:iv_solver_interpolated",
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:american_price_surface",

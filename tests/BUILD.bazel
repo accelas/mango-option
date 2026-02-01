@@ -260,7 +260,7 @@ cc_test(
 cc_test(
     name = "price_table_builder_test",
     size = "small",
-    srcs = ["price_table_builder_test.cc"],
+    srcs = ["price_table_builder_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
         "//src/option/table:price_table_builder",
         "@googletest//:gtest",
@@ -271,7 +271,7 @@ cc_test(
 cc_test(
     name = "price_table_builder_custom_grid_test",
     size = "small",
-    srcs = ["price_table_builder_custom_grid_test.cc"],
+    srcs = ["price_table_builder_custom_grid_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
         "//src/option/table:price_table_builder",
         "//src/pde/core:time_domain",
@@ -283,7 +283,7 @@ cc_test(
 cc_test(
     name = "price_table_builder_custom_grid_advanced_test",
     size = "small",
-    srcs = ["price_table_builder_custom_grid_advanced_test.cc"],
+    srcs = ["price_table_builder_custom_grid_advanced_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
         "//src/option/table:price_table_builder",
         "//src/pde/core:time_domain",
@@ -295,7 +295,7 @@ cc_test(
 cc_test(
     name = "price_table_builder_custom_grid_diagnosis_test",
     size = "small",
-    srcs = ["price_table_builder_custom_grid_diagnosis_test.cc"],
+    srcs = ["price_table_builder_custom_grid_diagnosis_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
         "//src/option/table:price_table_builder",
         "//src/pde/core:time_domain",
@@ -307,7 +307,7 @@ cc_test(
 cc_test(
     name = "price_table_builder_root_cause_test",
     size = "small",
-    srcs = ["price_table_builder_root_cause_test.cc"],
+    srcs = ["price_table_builder_root_cause_test.cc", "price_table_builder_test_access.hpp"],
     deps = [
         "//src/option/table:price_table_builder",
         "//src/pde/core:time_domain",
@@ -366,7 +366,7 @@ cc_test(
     srcs = ["price_table_builder_factories_test.cc"],
     deps = [
         "//src/option/table:price_table_builder",
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "@googletest//:gtest_main",
     ],
 )
@@ -1114,10 +1114,10 @@ cc_test(
 )
 
 cc_test(
-    name = "option_chain_test",
-    srcs = ["option_chain_test.cc"],
+    name = "option_grid_test",
+    srcs = ["option_grid_test.cc"],
     deps = [
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "@googletest//:gtest_main",
     ],
 )
@@ -1266,7 +1266,7 @@ cc_test(
     deps = [
         "//src/option/table:adaptive_grid_builder",
         "//src/option:american_option_batch",
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "//src/pde/core:grid",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -1282,7 +1282,7 @@ cc_test(
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option/table:adaptive_grid_builder",
-        "//src/option:option_chain",
+        "//src/option:option_grid",
         "//src/pde/core:grid",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
