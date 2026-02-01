@@ -105,12 +105,15 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         dx_span[i] = grid_points[i + 1] - grid_points[i];
     }
 
-    // Pre-allocate spline for dividend events (zero-alloc after first build)
+    // Pre-allocate spline for dividend events (zero-alloc after first build).
+    // Use a workspace scratch buffer as dummy y-data to avoid a heap allocation.
     CubicSpline<double> dividend_spline;
     if (!params_.discrete_dividends.empty()) {
         auto x = grid->x();
-        std::vector<double> dummy(x.size(), 0.0);
-        [[maybe_unused]] auto err = dividend_spline.build(x, std::span<const double>(dummy));
+        auto scratch = workspace_.reserved1();
+        std::fill(scratch.begin(), scratch.end(), 0.0);
+        [[maybe_unused]] auto err = dividend_spline.build(
+            x, std::span<const double>(scratch.data(), x.size()));
     }
 
     // Create appropriate PDE solver (put vs call)
@@ -118,7 +121,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     if (params_.type == OptionType::PUT) {
         AmericanPutSolver pde_solver(params_, grid, workspace_);
-        pde_solver.initialize(AmericanPutSolver::payoff);
+        if (custom_ic_) {
+            pde_solver.initialize(*custom_ic_);
+        } else {
+            pde_solver.initialize(AmericanPutSolver::payoff);
+        }
         pde_solver.set_config(trbdf2_config_);
 
         // Register discrete dividend events
@@ -133,7 +140,11 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         solve_result = pde_solver.solve();
     } else {
         AmericanCallSolver pde_solver(params_, grid, workspace_);
-        pde_solver.initialize(AmericanCallSolver::payoff);
+        if (custom_ic_) {
+            pde_solver.initialize(*custom_ic_);
+        } else {
+            pde_solver.initialize(AmericanCallSolver::payoff);
+        }
         pde_solver.set_config(trbdf2_config_);
 
         for (const auto& [t_cal, amount] : params_.discrete_dividends) {

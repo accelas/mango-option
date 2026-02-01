@@ -138,7 +138,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     };
     auto aps = AmericanPriceSurface::create(price_table_result.surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps), iv_config);
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())
         << "Failed to create interpolated IV solver: " << iv_solver_result.error();
 

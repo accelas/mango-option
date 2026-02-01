@@ -12,7 +12,10 @@
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/support/error_types.hpp"
 #include <expected>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <tuple>
 #include <vector>
 
@@ -70,6 +73,18 @@ public:
     /// @return PriceTableResult with surface and diagnostics, or error
     [[nodiscard]] std::expected<PriceTableResult<N>, PriceTableError>
     build(const PriceTableAxes<N>& axes);
+
+    /// Callable type for custom initial conditions: f(x, u) fills u given grid points x
+    using InitialCondition = std::function<void(std::span<const double>, std::span<double>)>;
+
+    /// Set a custom initial condition (passed through to AmericanOptionSolver)
+    void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
+
+    /// Controls whether output surface stores EEP or raw American prices
+    void set_surface_content(SurfaceContent content) { surface_content_ = content; }
+
+    /// When true, bypasses the τ>0 validation to allow τ=0 in the maturity grid
+    void set_allow_tau_zero(bool allow) { allow_tau_zero_ = allow; }
 
     /// Factory from vectors (returns builder AND axes)
     ///
@@ -321,6 +336,9 @@ private:
         const std::vector<bool>& slice_valid) const;
 
     PriceTableConfig config_;
+    std::optional<InitialCondition> custom_ic_;
+    SurfaceContent surface_content_ = SurfaceContent::EarlyExercisePremium;
+    bool allow_tau_zero_ = false;
 };
 
 } // namespace mango

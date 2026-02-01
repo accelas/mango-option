@@ -19,8 +19,9 @@ The library has three computation paths, each targeting a different latency/accu
 | **FDM pricing** | ~1.4ms/option | Single option or small batch |
 | **FDM-based IV** | ~19ms/IV | Ground-truth implied volatility |
 | **Interpolated IV** | ~3.5us/IV | Production queries against pre-computed table |
+| **Discrete dividend IV** | ~3.5us/IV | Same interpolated speed, with cash dividend handling |
 
-All three paths share the same PDE solver core. The interpolated path adds a pre-computation step (building a 4D B-spline price table), then replaces the PDE solve at query time with a surface lookup plus Newton iteration.
+All three paths share the same PDE solver core. The interpolated path adds a pre-computation step (building a 4D B-spline price table), then replaces the PDE solve at query time with a surface lookup plus Newton iteration. Discrete dividends extend the interpolated path by segmenting the time axis at each dividend date.
 
 ```mermaid
 graph TD
@@ -249,7 +250,44 @@ The default (High) targets ~20 bps average IV error. For tighter tolerance, `Ada
 
 ---
 
-## 5. Memory Management
+## 5. Discrete Dividend Support
+
+### Problem
+
+Cash dividends break the price homogeneity assumption that underpins the standard moneyness-based price table. A stock paying a $1.50 dividend at t=0.25 has a price discontinuity at that date: S(0.25+) = S(0.25-) - 1.50. The PDE boundary conditions change across the dividend, so a single surface over the full maturity range cannot capture the jump.
+
+### Segmented Approach
+
+The library handles discrete dividends by splitting the time axis at each dividend date and solving backward through each segment. The component hierarchy:
+
+```
+IVSolverInterpolated<SegmentedMultiKRefSurface>
+  └── SegmentedMultiKRefSurface
+        └── SegmentedPriceSurface (one per K_ref)
+              └── AmericanPriceSurface segments (one per time segment)
+```
+
+**Backward chaining:** Segments are built from expiry backward. The last segment (dividend-free) solves the standard American PDE. Earlier segments use the next segment's price as their initial condition (after adjusting spot for the dividend drop). This propagates the dividend effect through the full maturity range.
+
+**Multi-K_ref:** With continuous dividends, American option prices are homogeneous in strike: P(S, K) = K * f(S/K). Cash dividends break this property because the dividend amount is absolute, not proportional. To maintain interpolation accuracy, multiple reference strikes (K_ref) are used. Each K_ref produces a separate segmented surface, and queries interpolate across K_ref values weighted by proximity to the actual strike.
+
+### EEP vs Raw Price by Segment
+
+- **Last segment** (no dividend boundary): Uses EEP decomposition, same as the standard path. The European component can be computed analytically.
+- **Earlier segments**: Store raw prices. The initial condition comes from the next segment's surface evaluation (not from a closed-form expression), so no clean European decomposition exists.
+
+### PriceSurface Concept
+
+The `PriceSurface` concept type-erases the two solver paths so that `IVSolverInterpolated` works with either:
+
+- `AmericanPriceSurface` — single EEP surface (no dividends)
+- `SegmentedMultiKRefSurface` — segmented multi-K_ref surface (with dividends)
+
+Both satisfy the same interface: `price(spot, strike, tau, sigma, rate)` and `vega(spot, strike, tau, sigma, rate)`. The `make_iv_solver` factory selects the appropriate path based on whether `discrete_dividends` is empty.
+
+---
+
+## 6. Memory Management
 
 The library uses three allocation strategies, each suited to a different lifetime and alignment requirement. The diagrams below show how they apply to each workload.
 
@@ -304,7 +342,7 @@ graph LR
 
 ---
 
-## 6. Batch Processing and Parallelism
+## 7. Batch Processing and Parallelism
 
 With memory management covered above, the batch processing layer is straightforward. The solver distributes options across OpenMP threads, each with its own pre-allocated workspace and (optionally) shared Grid:
 

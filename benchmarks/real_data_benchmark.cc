@@ -351,7 +351,7 @@ static void BM_RealData_IV_BSpline(benchmark::State& state) {
     if (!aps) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto solver_result = IVSolverInterpolated::create(std::move(*aps));
+    auto solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
     if (!solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -579,7 +579,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     if (!aps_query) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps_query));
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_query));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -693,7 +693,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     if (!aps_acc) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps_acc));
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_acc));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -864,7 +864,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
         state.SkipWithError("Failed to create AmericanPriceSurface");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps_dense));
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_dense));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -979,7 +979,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
         state.SkipWithError("Failed to create AmericanPriceSurface");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps_est));
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_est));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -1104,7 +1104,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         state.SkipWithError("Failed to create AmericanPriceSurface");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps_prof));
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_prof));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;

@@ -19,7 +19,7 @@ namespace mango {
 /// Thread-safe after construction.
 class AmericanPriceSurface {
 public:
-    /// Create from EEP surface. Validates metadata.content == EarlyExercisePremium.
+    /// Create from price surface. Accepts EarlyExercisePremium or RawPrice content.
     static std::expected<AmericanPriceSurface, ValidationError> create(
         std::shared_ptr<const PriceTableSurface<4>> eep_surface,
         OptionType type);
@@ -45,9 +45,19 @@ public:
     double theta(double spot, double strike, double tau,
                  double sigma, double rate) const;
 
-    /// Access underlying EEP surface
+    /// Access underlying surface
     const PriceTableSurface<4>& eep_surface() const;
     const PriceTableMetadata& metadata() const;
+
+    /// Bounds accessors for PriceSurface concept
+    [[nodiscard]] double m_min() const noexcept;
+    [[nodiscard]] double m_max() const noexcept;
+    [[nodiscard]] double tau_min() const noexcept;
+    [[nodiscard]] double tau_max() const noexcept;
+    [[nodiscard]] double sigma_min() const noexcept;
+    [[nodiscard]] double sigma_max() const noexcept;
+    [[nodiscard]] double rate_min() const noexcept;
+    [[nodiscard]] double rate_max() const noexcept;
 
 private:
     AmericanPriceSurface(std::shared_ptr<const PriceTableSurface<4>> surface,

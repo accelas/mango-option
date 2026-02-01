@@ -533,11 +533,11 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
 
     auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = IVSolverInterpolated::create(
+    auto iv_solver_result = IVSolverInterpolatedStandard::create(
         std::move(*aps), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
-        << "IVSolverInterpolated::create failed";
+        << "IVSolverInterpolatedStandard::create failed";
 
     // Test IV solve at a sample point
     const auto& iv_solver = iv_solver_result.value();
