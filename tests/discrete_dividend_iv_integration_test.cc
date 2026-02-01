@@ -20,12 +20,14 @@ protected:
         IVSolverConfig config{
             .option_type = OptionType::PUT,
             .spot = 100.0,
-            .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
             .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-            .maturity = 1.0,
             .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
             .rate_grid = {0.02, 0.03, 0.05, 0.07},
-            // Use default K_ref config (9 log-spaced points)
+            .path = SegmentedIVPath{
+                .maturity = 1.0,
+                .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+                // Use default K_ref config (9 log-spaced points)
+            },
         };
         auto result = make_iv_solver(config);
         ASSERT_TRUE(result.has_value()) << "Failed to build solver";
@@ -205,9 +207,9 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         .spot = 100.0,
         .dividend_yield = 0.02,
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
         .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate_grid = {0.02, 0.03, 0.05, 0.07},
+        .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
     auto solver = make_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "No-dividend factory should succeed";
