@@ -117,7 +117,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             double tau = params_.maturity - t_cal;
             if (tau > 0.0 && tau < params_.maturity) {
                 pde_solver.add_temporal_event(tau,
-                    make_dividend_event(amount, params_.strike, params_.type));
+                    make_put_dividend_event(amount, params_.strike));
             }
         }
 
@@ -131,7 +131,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             double tau = params_.maturity - t_cal;
             if (tau > 0.0 && tau < params_.maturity) {
                 pde_solver.add_temporal_event(tau,
-                    make_dividend_event(amount, params_.strike, params_.type));
+                    make_call_dividend_event(amount, params_.strike));
             }
         }
 

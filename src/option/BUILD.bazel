@@ -219,7 +219,6 @@ cc_library(
     deps = [
         "//src/math:cubic_spline_solver",
         "//src/pde/core:pde_solver",
-        ":option_spec",
     ],
     visibility = ["//visibility:public"],
 )

@@ -15,7 +15,7 @@ TEST(DiscreteDividendEventTest, BasicPutShift) {
 
     double original_atm = u[2];
 
-    auto callback = make_dividend_event(5.0, 100.0, OptionType::PUT);
+    auto callback = make_put_dividend_event(5.0, 100.0);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     EXPECT_GT(u[2], original_atm)
@@ -38,7 +38,7 @@ TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendPut) {
     }
 
     // D = 10, K = 100 → d = 0.10. exp(-3.0) ≈ 0.0498 < 0.10 → fallback
-    auto callback = make_dividend_event(10.0, 100.0, OptionType::PUT);
+    auto callback = make_put_dividend_event(10.0, 100.0);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     EXPECT_DOUBLE_EQ(u[0], 1.0);
@@ -52,7 +52,7 @@ TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendCall) {
         u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);  // call payoff
     }
 
-    auto callback = make_dividend_event(10.0, 100.0, OptionType::CALL);
+    auto callback = make_call_dividend_event(10.0, 100.0);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     EXPECT_NEAR(u[0], 0.0, 1e-10);
@@ -63,7 +63,7 @@ TEST(DiscreteDividendEventTest, ZeroDividendNoOp) {
     std::vector<double> u = {0.5, 0.3, 0.1};
     std::vector<double> u_orig = u;
 
-    auto callback = make_dividend_event(0.0, 100.0, OptionType::PUT);
+    auto callback = make_put_dividend_event(0.0, 100.0);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     for (size_t i = 0; i < u.size(); ++i) {

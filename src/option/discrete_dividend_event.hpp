@@ -3,32 +3,27 @@
 
 #include "src/pde/core/pde_solver.hpp"
 #include "src/math/cubic_spline_solver.hpp"
-#include "src/option/option_spec.hpp"
 #include <cmath>
 #include <span>
 #include <vector>
 
 namespace mango {
 
-/// Create a temporal event callback for a discrete cash dividend.
+namespace detail {
+
+/// Core dividend shift logic shared by put and call variants.
 ///
-/// At the dividend date, the spot drops from S to S - D. In log-moneyness
-/// coordinates x = ln(S/K), this shifts the solution: for each grid point
-/// x[i], the new value is u(x') where x' = ln(exp(x[i]) - D/K).
-///
-/// Uses cubic spline interpolation for the shifted evaluation points.
-///
-/// @param dividend_amount Cash dividend amount D (in dollars)
-/// @param strike Reference strike K (normalization base)
-/// @param option_type PUT or CALL (determines fallback when S - D <= 0)
-/// @return TemporalEventCallback suitable for PDESolver::add_temporal_event()
-inline TemporalEventCallback make_dividend_event(
-    double dividend_amount, double strike, OptionType option_type)
+/// Builds a cubic spline of the current solution, then for each grid point
+/// evaluates u(x') where x' = ln(exp(x) - D/K).  Points that shift below
+/// the grid domain or where S - D <= 0 are set to the caller-supplied
+/// intrinsic fallback value.
+inline TemporalEventCallback make_dividend_event_impl(
+    double dividend_amount, double strike, double intrinsic_fallback)
 {
     const double d = dividend_amount / strike;  // normalized dividend
-    const bool is_put = (option_type == OptionType::PUT);
+    const double fallback = intrinsic_fallback;
 
-    return [d, is_put](double /*t*/, std::span<const double> x, std::span<double> u) {
+    return [d, fallback](double /*t*/, std::span<const double> x, std::span<double> u) {
         if (d <= 0.0) return;  // no-op for zero dividend
 
         const size_t n = x.size();
@@ -50,21 +45,42 @@ inline TemporalEventCallback make_dividend_event(
                 double x_shifted = std::log(S_adj_over_K);
                 // Guard against extrapolation outside the spline domain
                 if (x_shifted < x_lo) {
-                    // Below grid: use option-type-aware intrinsic
-                    u[i] = is_put ? 1.0 : 0.0;
+                    u[i] = fallback;
                 } else {
                     u[i] = spline.eval(std::min(x_shifted, x_hi));
                 }
             } else {
-                // Spot drops to zero or below: use option-type-aware intrinsic
-                if (is_put) {
-                    u[i] = 1.0;  // Put: deep ITM, normalized payoff = 1.0
-                } else {
-                    u[i] = 0.0;  // Call: worthless when spot <= 0
-                }
+                // Spot drops to zero or below
+                u[i] = fallback;
             }
         }
     };
+}
+
+}  // namespace detail
+
+/// Create a put dividend event callback.
+///
+/// When S - D <= 0, the put is deep ITM with normalized payoff = 1.0.
+///
+/// @param dividend_amount Cash dividend amount D (in dollars)
+/// @param strike Reference strike K (normalization base)
+inline TemporalEventCallback make_put_dividend_event(
+    double dividend_amount, double strike)
+{
+    return detail::make_dividend_event_impl(dividend_amount, strike, 1.0);
+}
+
+/// Create a call dividend event callback.
+///
+/// When S - D <= 0, the call is worthless with payoff = 0.0.
+///
+/// @param dividend_amount Cash dividend amount D (in dollars)
+/// @param strike Reference strike K (normalization base)
+inline TemporalEventCallback make_call_dividend_event(
+    double dividend_amount, double strike)
+{
+    return detail::make_dividend_event_impl(dividend_amount, strike, 0.0);
 }
 
 }  // namespace mango
