@@ -113,8 +113,15 @@ double SegmentedPriceSurface::price(double spot, double strike,
     const auto& seg = find_segment(tau);
 
     // 3. Compute spot adjustment
-    double t_boundary = T_ - seg.tau_start;
-    double S_adj = compute_spot_adjustment(spot, t_query, t_boundary);
+    //    EEP segments (closest to expiry) need spot adjustment because the PDE
+    //    is solved with the standard payoff IC and doesn't know about dividends.
+    //    RawPrice segments (chained) already embed the dividend shift in their IC,
+    //    so adjusting spot would double-count the dividend.
+    double S_adj = spot;
+    if (seg.surface.metadata().content == SurfaceContent::EarlyExercisePremium) {
+        double t_boundary = T_ - seg.tau_start;
+        S_adj = compute_spot_adjustment(spot, t_query, t_boundary);
+    }
 
     // 4. Clamp S_adj
     if (S_adj <= 0.0) {

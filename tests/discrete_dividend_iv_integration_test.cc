@@ -40,7 +40,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     PricingParams params(
         100.0,   // spot
         100.0,   // strike
-        1.0,     // maturity (matches surface build maturity)
+        0.8,     // maturity (shorter than surface build maturity)
         0.05,    // rate
         0.0,     // dividend_yield
         OptionType::PUT,
@@ -57,7 +57,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     IVQuery query;
     query.spot = 100.0;
     query.strike = 100.0;
-    query.maturity = 1.0;
+    query.maturity = 0.8;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
     query.type = OptionType::PUT;
@@ -79,7 +79,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     PricingParams params(
         100.0,   // spot
         90.0,    // strike
-        1.0,     // maturity (matches surface build maturity)
+        0.8,     // maturity (shorter than surface build maturity)
         0.05,    // rate
         0.0,     // dividend_yield
         OptionType::PUT,
@@ -94,7 +94,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     IVQuery query;
     query.spot = 100.0;
     query.strike = 90.0;
-    query.maturity = 1.0;
+    query.maturity = 0.8;
     query.rate = RateSpec{0.05};
     query.dividend_yield = 0.0;
     query.type = OptionType::PUT;
@@ -110,38 +110,40 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
 }
 
 TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
-    // ITM put: strike=110, vol=0.20
-    PricingParams params(
-        100.0,   // spot
-        110.0,   // strike
-        1.0,     // maturity (matches surface build maturity)
-        0.05,    // rate
-        0.0,     // dividend_yield
-        OptionType::PUT,
-        0.20,    // volatility
-        {{0.5, 2.0}}  // discrete_dividends
-    );
+    // ITM put: strike=110, vol=0.20 at various maturities
+    // Regression: spot adjustment must NOT apply to RawPrice (chained) segments
+    for (double tau : {1.0, 0.8, 0.6}) {
+        SCOPED_TRACE("maturity=" + std::to_string(tau));
 
-    auto price_result = solve_american_option_auto(params);
-    ASSERT_TRUE(price_result.has_value());
-    EXPECT_GT(price_result->value(), 0.0);
+        std::vector<std::pair<double, double>> divs;
+        if (tau > 0.5) divs = {{0.5, 2.0}};
 
-    IVQuery query;
-    query.spot = 100.0;
-    query.strike = 110.0;
-    query.maturity = 1.0;
-    query.rate = RateSpec{0.05};
-    query.dividend_yield = 0.0;
-    query.type = OptionType::PUT;
-    query.market_price = price_result->value();
+        PricingParams params(
+            100.0, 110.0, tau, 0.05, 0.0,
+            OptionType::PUT, 0.20, divs
+        );
 
-    auto iv_result = solver_->solve(query);
-    ASSERT_TRUE(iv_result.has_value())
-        << "IV solve must succeed; error code: "
-        << static_cast<int>(iv_result.error().code);
-    EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02)
-        << "Recovered IV should be close to true vol=0.20, got "
-        << iv_result->implied_vol;
+        auto price_result = solve_american_option_auto(params);
+        ASSERT_TRUE(price_result.has_value());
+        EXPECT_GT(price_result->value(), 0.0);
+
+        IVQuery query;
+        query.spot = 100.0;
+        query.strike = 110.0;
+        query.maturity = tau;
+        query.rate = RateSpec{0.05};
+        query.dividend_yield = 0.0;
+        query.type = OptionType::PUT;
+        query.market_price = price_result->value();
+
+        auto iv_result = solver_->solve(query);
+        ASSERT_TRUE(iv_result.has_value())
+            << "IV solve must succeed; error code: "
+            << static_cast<int>(iv_result.error().code);
+        EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02)
+            << "Recovered IV should be close to true vol=0.20, got "
+            << iv_result->implied_vol;
+    }
 }
 
 TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
