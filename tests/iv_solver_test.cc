@@ -34,15 +34,6 @@ protected:
     IVSolverFDMConfig config;
 };
 
-// Test 1: Construction should succeed
-TEST_F(IVSolverTest, ConstructionSucceeds) {
-    // Create solver
-    IVSolverFDM solver(config);
-
-    // Construction itself should succeed
-    SUCCEED();
-}
-
 // Test 2: Basic ATM put IV calculation
 // Re-enabled: ProjectedThomas is now the default (PR #200)
 TEST_F(IVSolverTest, ATMPutIVCalculation) {
@@ -52,8 +43,7 @@ TEST_F(IVSolverTest, ATMPutIVCalculation) {
 
     // Should converge with real implementation
     ASSERT_TRUE(result.has_value());
-    EXPECT_GT(result->implied_vol, 0.15);
-    EXPECT_LT(result->implied_vol, 0.35);
+    EXPECT_NEAR(result->implied_vol, 0.316, 0.02);
     EXPECT_GT(result->iterations, 0);
 }
 
@@ -114,8 +104,7 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
     auto result = solver.solve_impl(query);
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_GT(result->implied_vol, 0.0);
-    EXPECT_LT(result->implied_vol, 1.0);
+    EXPECT_NEAR(result->implied_vol, 0.28, 0.05);
 }
 
 // Test 8: OTM put IV calculation
@@ -127,28 +116,20 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
     auto result = solver.solve_impl(query);
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_GT(result->implied_vol, 0.0);
-    EXPECT_LT(result->implied_vol, 1.0);
+    EXPECT_NEAR(result->implied_vol, 0.20, 0.05);
 }
 
 // Test 9: Deep ITM put (tests adaptive grid bounds)
-// DISABLED: Test has invalid market price
-// For S=50, K=100, T=1.0, even with σ=0.01 (1%), time value is ~$4.47
-// But test uses market_price=51 which implies only $1 time value
-// This price is too low and not achievable with any positive volatility
-// TODO: Fix test to use realistic market price (~54.5) or truly deep ITM parameters (S=25)
-TEST_F(IVSolverTest, DISABLED_DeepITMPutIVCalculation) {
-    query.spot = 50.0;  // Moderately ITM (S/K = 0.5), not deep ITM
+TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
+    query.spot = 50.0;      // Deep ITM (S/K = 0.5)
     query.strike = 100.0;
-    query.market_price = 51.0;  // UNREALISTIC: Implies only $1 time value
+    query.market_price = 54.5;  // Realistic: intrinsic=50 + time value ~4.5
 
     IVSolverFDM solver(config);
     auto result = solver.solve_impl(query);
 
-    // Should converge with adaptive grid
     ASSERT_TRUE(result.has_value()) << "Deep ITM should converge with adaptive grid";
-    EXPECT_GT(result->implied_vol, 0.0);
-    EXPECT_LT(result->implied_vol, 1.0);
+    EXPECT_NEAR(result->implied_vol, 0.875, 0.05);
 }
 
 // Test 10: Deep OTM put (tests adaptive grid bounds)
@@ -193,8 +174,7 @@ TEST_F(IVSolverTest, InvalidGridNSpace) {
     auto result = solver.solve_impl(query);
 
     ASSERT_FALSE(result.has_value());
-    // Error code: result.error().code
-    // Error code should be checked instead
+    EXPECT_EQ(result.error().code, IVErrorCode::InvalidGridConfig);
 }
 
 // Test 13: Zero grid_n_time validation (manual mode)
@@ -209,8 +189,7 @@ TEST_F(IVSolverTest, InvalidGridNTime) {
     auto result = solver.solve_impl(query);
 
     ASSERT_FALSE(result.has_value());
-    // Error code: result.error().code
-    // Error code should be checked instead
+    EXPECT_EQ(result.error().code, IVErrorCode::InvalidGridConfig);
 }
 
 // Test 14: Invalid manual grid validation (x_min >= x_max)
@@ -224,8 +203,7 @@ TEST_F(IVSolverTest, InvalidManualGrid) {
     auto result = solver.solve_impl(query);
 
     ASSERT_FALSE(result.has_value());
-    // Error code: result.error().code
-    // Error code should be checked instead
+    EXPECT_EQ(result.error().code, IVErrorCode::InvalidGridConfig);
 }
 
 // Test 15: Manual grid with 201 points (verify larger grids work)
