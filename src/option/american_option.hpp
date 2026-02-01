@@ -139,9 +139,13 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
     Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound for stability
 
     // Widen grid for dividend shift: spline evaluates at x'=ln(exp(x)-D/K)
+    // Only consider dividends strictly within (0, T) — same filter as mandatory tau
     double max_d_over_k = 0.0;
     for (const auto& [t_cal, amount] : params.discrete_dividends) {
-        max_d_over_k = std::max(max_d_over_k, amount / params.strike);
+        double tau = params.maturity - t_cal;
+        if (tau > 0.0 && tau < params.maturity) {
+            max_d_over_k = std::max(max_d_over_k, amount / params.strike);
+        }
     }
     if (max_d_over_k > 0.0 && std::exp(x_min) > max_d_over_k) {
         x_min = std::log(std::exp(x_min) - max_d_over_k);

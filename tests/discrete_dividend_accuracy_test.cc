@@ -85,8 +85,6 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
     auto result_no_div = solve_american_option_auto(no_div);
     ASSERT_TRUE(result_no_div.has_value());
 
-    // Grid widening for dividend shift still occurs (conservative), so allow
-    // a small tolerance from the different spatial discretization.
-    EXPECT_NEAR(result->value(), result_no_div->value(), 0.01)
-        << "Boundary dividends should be effectively ignored";
+    EXPECT_NEAR(result->value(), result_no_div->value(), 1e-10)
+        << "Boundary dividends should be ignored";
 }
