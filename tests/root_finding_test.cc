@@ -120,3 +120,64 @@ TEST(GenericRootFindingTest, ComplexFunctionNewton) {
     double x = result->root;
     EXPECT_NEAR(std::exp(x), 3.0*x, 1e-8);
 }
+
+// ===========================================================================
+// Error path tests
+// ===========================================================================
+
+TEST(RootFindingErrorTest, BrentInvalidBracket) {
+    // f(a) and f(b) have same sign — no root bracketed
+    auto f = [](double x) { return x * x + 1.0; };  // Always positive
+    mango::RootFindingConfig config{.max_iter = 100, .brent_tol_abs = 1e-6};
+
+    auto result = mango::brent_find_root(f, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::InvalidBracket);
+}
+
+TEST(RootFindingErrorTest, BrentMaxIterationsExceeded) {
+    auto f = [](double x) { return x * x - 2.0; };
+    mango::RootFindingConfig config{.max_iter = 1, .brent_tol_abs = 1e-12};
+
+    auto result = mango::brent_find_root(f, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::MaxIterationsExceeded);
+    EXPECT_EQ(result.error().iterations, 1);
+}
+
+TEST(RootFindingErrorTest, BrentNaNAtEndpoint) {
+    auto f = [](double x) { return std::log(x); };  // log(-1) = NaN
+    mango::RootFindingConfig config{.max_iter = 100, .brent_tol_abs = 1e-6};
+
+    auto result = mango::brent_find_root(f, -1.0, 1.0, config);
+
+    // NaN at endpoint should be detected as either NumericalInstability or InvalidBracket
+    ASSERT_FALSE(result.has_value());
+    // Accept either error code since NaN makes bracket check undefined
+    EXPECT_TRUE(result.error().code == mango::RootFindingErrorCode::NumericalInstability ||
+                result.error().code == mango::RootFindingErrorCode::InvalidBracket);
+}
+
+TEST(RootFindingErrorTest, NewtonMaxIterationsExceeded) {
+    auto f = [](double x) { return x * x - 2.0; };
+    auto df = [](double x) { return 2.0 * x; };
+    mango::RootFindingConfig config{.max_iter = 1, .tolerance = 1e-15};
+
+    auto result = mango::newton_find_root(f, df, 0.1, 0.0, 2.0, config);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::RootFindingErrorCode::MaxIterationsExceeded);
+}
+
+TEST(RootFindingErrorTest, BrentRootAtEndpoint) {
+    // Root exactly at bracket endpoint a
+    auto f = [](double x) { return x * (x - 1.0); };  // Roots at 0 and 1
+    mango::RootFindingConfig config{.max_iter = 100, .brent_tol_abs = 1e-6};
+
+    auto result = mango::brent_find_root(f, 0.0, 0.5, config);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR(result->root, 0.0, 1e-6);
+}
