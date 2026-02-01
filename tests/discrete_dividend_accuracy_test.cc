@@ -88,3 +88,24 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
     EXPECT_NEAR(result->value(), result_no_div->value(), 1e-10)
         << "Boundary dividends should be ignored";
 }
+
+TEST(DiscreteDividendAccuracyTest, SharedGridBatchIncludesDividendTimePoints) {
+    // Regression: compute_global_grid_for_batch must include mandatory points
+    // for dividend tau values so shared-grid batch solves land on dividend dates
+    std::vector<PricingParams> batch;
+    batch.emplace_back(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.4, 3.0}});
+    batch.emplace_back(100.0, 110.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                       std::vector<std::pair<double, double>>{{0.4, 3.0}});
+
+    auto [grid_spec, td] = compute_global_grid_for_batch(batch);
+    auto pts = td.time_points();
+
+    // tau = T - t_cal = 1.0 - 0.4 = 0.6
+    double tau_div = 0.6;
+    bool found = false;
+    for (double p : pts) {
+        if (std::abs(p - tau_div) < 1e-14) { found = true; break; }
+    }
+    EXPECT_TRUE(found) << "Shared grid time domain must land on dividend tau=" << tau_div;
+}

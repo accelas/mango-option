@@ -214,7 +214,26 @@ inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
 
     // Create sinh-spaced grid with same concentration parameter
     auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
-    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, global_Nt);
+
+    // Collect union of all dividend tau values across the batch
+    std::vector<double> all_mandatory_tau;
+    for (const auto& p : params) {
+        for (const auto& [t_cal, amount] : p.discrete_dividends) {
+            double tau = p.maturity - t_cal;
+            if (tau > 0.0 && tau < max_maturity) {
+                all_mandatory_tau.push_back(tau);
+            }
+        }
+    }
+
+    double global_dt = max_maturity / static_cast<double>(global_Nt);
+    double dt_capped = std::max(global_dt,
+        max_maturity / static_cast<double>(accuracy.max_time_steps));
+
+    TimeDomain time_domain = all_mandatory_tau.empty()
+        ? TimeDomain::from_n_steps(0.0, max_maturity, global_Nt)
+        : TimeDomain::with_mandatory_points(0.0, max_maturity, dt_capped, all_mandatory_tau);
+
     return {grid_spec.value(), time_domain};
 }
 
