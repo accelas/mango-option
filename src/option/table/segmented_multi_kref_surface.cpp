@@ -113,14 +113,14 @@ double SegmentedMultiKRefSurface::price(double spot, double strike,
         return lo.surface.price(spot, strike, tau, sigma, rate);
     }
 
-    // Each surface evaluates at the actual strike (EEP segments handle this
-    // via strike homogeneity; RawPrice segments use K_ref internally).
-    // Interpolate across K_ref surfaces for additional accuracy.
+    // Interpolate in normalized price space (V/K), matching the PDE's
+    // log-moneyness coordinate system where the solution is V/K_ref.
     double w = (strike - lo.K_ref) / (hi.K_ref - lo.K_ref);
     double p_lo = lo.surface.price(spot, strike, tau, sigma, rate);
     double p_hi = hi.surface.price(spot, strike, tau, sigma, rate);
 
-    return (1.0 - w) * p_lo + w * p_hi;
+    double v_norm = (1.0 - w) * (p_lo / lo.K_ref) + w * (p_hi / hi.K_ref);
+    return v_norm * strike;
 }
 
 double SegmentedMultiKRefSurface::vega(double spot, double strike,
@@ -149,11 +149,13 @@ double SegmentedMultiKRefSurface::vega(double spot, double strike,
         return lo.surface.vega(spot, strike, tau, sigma, rate);
     }
 
+    // Vega in normalized space: d(V/K)/dsigma = (1/K) * dV/dsigma
     double w = (strike - lo.K_ref) / (hi.K_ref - lo.K_ref);
     double v_lo = lo.surface.vega(spot, strike, tau, sigma, rate);
     double v_hi = hi.surface.vega(spot, strike, tau, sigma, rate);
 
-    return (1.0 - w) * v_lo + w * v_hi;
+    double vega_norm = (1.0 - w) * (v_lo / lo.K_ref) + w * (v_hi / hi.K_ref);
+    return vega_norm * strike;
 }
 
 double SegmentedMultiKRefSurface::m_min() const noexcept { return m_min_; }

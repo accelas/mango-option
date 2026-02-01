@@ -74,10 +74,11 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     }
 }
 
-// Known limitation: off-K_ref strikes with discrete dividends land in RawPrice
-// segments that can only evaluate at their own K_ref. The multi-K_ref linear
-// interpolation approximation is too coarse for tight IV round-trip (5pp error).
-// TODO: improve cross-K_ref interpolation (log-price or IV-space interpolation).
+// Known limitation: RawPrice segments are strike-specific (discrete dividends
+// break strike homogeneity). Cross-K_ref interpolation is an approximation
+// whose error scales with K_ref spacing. With K_refs at 80/100/120, the
+// 40-point gap yields ~3-6pp IV error for off-K_ref strikes.
+// Denser K_ref grids or a 5D surface would fix this.
 TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_OTMPutIVRoundTrip) {
     // OTM put: strike=90, vol=0.25
     PricingParams params(
@@ -113,7 +114,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_OTMPutIVRoundTrip) {
         << iv_result->implied_vol;
 }
 
-// Known limitation: same RawPrice cross-K_ref interpolation issue as OTM above.
+// Known limitation: same RawPrice cross-K_ref approximation as OTM above.
 TEST_F(DiscreteDividendIVIntegrationTest, DISABLED_ITMPutIVRoundTrip) {
     // ITM put: strike=110, vol=0.20
     PricingParams params(
