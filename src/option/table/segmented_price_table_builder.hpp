@@ -20,7 +20,7 @@ public:
         double K_ref;
         OptionType option_type;
         double dividend_yield = 0.0;
-        std::vector<Dividend> dividends;  // (calendar_time, amount)
+        std::vector<Dividend> discrete_dividends;  // (calendar_time, amount)
         std::vector<double> moneyness_grid;
         double maturity;  // T in years
         std::vector<double> vol_grid;

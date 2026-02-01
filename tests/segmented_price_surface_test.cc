@@ -91,7 +91,7 @@ SegmentedPriceSurface build_two_segment_surface(
     });
 
     if (dividend_amount > 0.0) {
-        config.dividends.push_back({dividend_time, dividend_amount});
+        config.discrete_dividends.push_back({dividend_time, dividend_amount});
     }
 
     auto result = SegmentedPriceSurface::create(std::move(config));

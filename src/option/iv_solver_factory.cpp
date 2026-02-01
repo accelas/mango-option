@@ -85,7 +85,7 @@ build_segmented(const IVSolverConfig& config) {
         .spot = config.spot,
         .option_type = config.option_type,
         .dividend_yield = config.dividend_yield,
-        .dividends = config.discrete_dividends,
+        .discrete_dividends = config.discrete_dividends,
         .moneyness_grid = config.moneyness_grid,
         .maturity = config.maturity,
         .vol_grid = config.vol_grid,

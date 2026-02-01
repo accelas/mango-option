@@ -106,7 +106,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 1: Filter and sort dividends
     // =====================================================================
-    auto dividends = filter_dividends(config.dividends, T);
+    auto dividends = filter_dividends(config.discrete_dividends, T);
 
     // =====================================================================
     // Step 2: Compute segment boundaries in τ-space
@@ -454,7 +454,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     SegmentedPriceSurface::Config sps_config;
     sps_config.segments = std::move(segments);
-    sps_config.dividends = dividends;
+    sps_config.discrete_dividends = dividends;
     sps_config.K_ref = K_ref;
     sps_config.T = T;
 

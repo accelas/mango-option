@@ -10,7 +10,7 @@ TEST(SegmentedPriceTableBuilderTest, BuildWithOneDividend) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.0,
-        .dividends = {{.calendar_time = 0.5, .amount = 2.0}},
+        .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -36,7 +36,7 @@ TEST(SegmentedPriceTableBuilderTest, BuildWithNoDividends) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividend_yield = 0.02,
-        .dividends = {},
+        .discrete_dividends = {},
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -54,7 +54,7 @@ TEST(SegmentedPriceTableBuilderTest, DividendAtExpiryIgnored) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
-        .dividends = {{.calendar_time = 1.0, .amount = 5.0}},  // at expiry — should be filtered out
+        .discrete_dividends = {{.calendar_time = 1.0, .amount = 5.0}},  // at expiry — should be filtered out
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -69,7 +69,7 @@ TEST(SegmentedPriceTableBuilderTest, DividendAtTimeZeroIgnored) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
-        .dividends = {{.calendar_time = 0.0, .amount = 3.0}},  // at time 0 — should be filtered out
+        .discrete_dividends = {{.calendar_time = 0.0, .amount = 3.0}},  // at time 0 — should be filtered out
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -84,7 +84,7 @@ TEST(SegmentedPriceTableBuilderTest, InvalidKRefFails) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = -100.0,
         .option_type = OptionType::PUT,
-        .dividends = {},
+        .discrete_dividends = {},
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},
@@ -99,7 +99,7 @@ TEST(SegmentedPriceTableBuilderTest, InvalidMaturityFails) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
-        .dividends = {},
+        .discrete_dividends = {},
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 0.0,
         .vol_grid = {0.15, 0.20, 0.30, 0.40},

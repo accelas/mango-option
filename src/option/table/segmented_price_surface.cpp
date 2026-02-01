@@ -49,8 +49,8 @@ SegmentedPriceSurface::create(Config config) {
     result.dividend_yield_ = expected_yield;
     result.segments_ = std::move(config.segments);
 
-    result.dividends_.reserve(config.dividends.size());
-    for (const auto& div : config.dividends) {
+    result.dividends_.reserve(config.discrete_dividends.size());
+    for (const auto& div : config.discrete_dividends) {
         result.dividends_.push_back(div);
     }
 
