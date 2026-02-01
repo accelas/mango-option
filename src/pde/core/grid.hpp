@@ -12,6 +12,7 @@
 #include <optional>
 #include <algorithm>
 #include <format>
+#include <limits>
 #include <experimental/mdspan>
 #include "src/support/aligned_allocator.hpp"
 #include "src/support/error_types.hpp"
@@ -206,7 +207,7 @@ private:
                     const T threshold = T(0.3) / alpha_avg;
 
                     // Use slightly permissive comparison to handle floating point edge cases
-                    const T epsilon = T(1e-10);
+                    const T epsilon = T(100) * std::numeric_limits<T>::epsilon();
                     if (delta_x <= threshold + epsilon) {
                         // Merge clusters i and j into a new cluster
                         const T total_weight = clusters[i].weight + clusters[j].weight;
