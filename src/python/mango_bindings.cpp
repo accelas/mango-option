@@ -12,7 +12,7 @@
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/american_option.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_workspace.hpp"
 #include "src/option/table/price_table_surface.hpp"
@@ -92,18 +92,18 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("max_spatial_points", &mango::GridAccuracyParams::max_spatial_points)
         .def_readwrite("max_time_steps", &mango::GridAccuracyParams::max_time_steps);
 
-    // OptionChain data container
-    py::class_<mango::OptionChain>(m, "OptionChain")
+    // OptionGrid data container
+    py::class_<mango::OptionGrid>(m, "OptionGrid")
         .def(py::init<>())
-        .def_readwrite("ticker", &mango::OptionChain::ticker)
-        .def_readwrite("spot", &mango::OptionChain::spot)
-        .def_readwrite("strikes", &mango::OptionChain::strikes)
-        .def_readwrite("maturities", &mango::OptionChain::maturities)
-        .def_readwrite("implied_vols", &mango::OptionChain::implied_vols)
-        .def_readwrite("rates", &mango::OptionChain::rates)
-        .def_readwrite("dividend_yield", &mango::OptionChain::dividend_yield)
-        .def("__repr__", [](const mango::OptionChain& chain) {
-            return "<OptionChain spot=" + std::to_string(chain.spot) +
+        .def_readwrite("ticker", &mango::OptionGrid::ticker)
+        .def_readwrite("spot", &mango::OptionGrid::spot)
+        .def_readwrite("strikes", &mango::OptionGrid::strikes)
+        .def_readwrite("maturities", &mango::OptionGrid::maturities)
+        .def_readwrite("implied_vols", &mango::OptionGrid::implied_vols)
+        .def_readwrite("rates", &mango::OptionGrid::rates)
+        .def_readwrite("dividend_yield", &mango::OptionGrid::dividend_yield)
+        .def("__repr__", [](const mango::OptionGrid& chain) {
+            return "<OptionGrid spot=" + std::to_string(chain.spot) +
                    " strikes=" + std::to_string(chain.strikes.size()) +
                    " maturities=" + std::to_string(chain.maturities.size()) +
                    " vols=" + std::to_string(chain.implied_vols.size()) +
@@ -864,7 +864,7 @@ PYBIND11_MODULE(mango_option, m) {
     // =========================================================================
     // Price table builder convenience wrapper (auto-grid profiles)
     // =========================================================================
-    m.def("build_price_table_surface_from_chain_auto_profile",
+    m.def("build_price_table_surface_from_grid_auto_profile",
         [](double spot,
            const std::vector<double>& strikes,
            const std::vector<double>& maturities,
@@ -874,7 +874,7 @@ PYBIND11_MODULE(mango_option, m) {
            mango::OptionType type,
            mango::PriceTableGridProfile grid_profile,
            mango::GridAccuracyProfile pde_profile) {
-            mango::OptionChain chain;
+            mango::OptionGrid chain;
             chain.spot = spot;
             chain.strikes = strikes;
             chain.maturities = maturities;
@@ -882,11 +882,11 @@ PYBIND11_MODULE(mango_option, m) {
             chain.rates = rates;
             chain.dividend_yield = dividend_yield;
 
-            auto builder_axes = mango::PriceTableBuilder<4>::from_chain_auto_profile(
+            auto builder_axes = mango::PriceTableBuilder<4>::from_grid_auto_profile(
                 chain, grid_profile, pde_profile, type);
             if (!builder_axes.has_value()) {
                 std::ostringstream oss;
-                oss << "from_chain_auto_profile failed: " << builder_axes.error();
+                oss << "from_grid_auto_profile failed: " << builder_axes.error();
                 throw py::value_error(oss.str());
             }
 
@@ -927,16 +927,16 @@ PYBIND11_MODULE(mango_option, m) {
                 PriceTableSurface4D instance
         )pbdoc");
 
-    m.def("build_price_table_surface_from_chain",
-        [](const mango::OptionChain& chain,
+    m.def("build_price_table_surface_from_grid",
+        [](const mango::OptionGrid& chain,
            mango::OptionType type,
            mango::PriceTableGridProfile grid_profile,
            mango::GridAccuracyProfile pde_profile) {
-            auto builder_axes = mango::PriceTableBuilder<4>::from_chain_auto_profile(
+            auto builder_axes = mango::PriceTableBuilder<4>::from_grid_auto_profile(
                 chain, grid_profile, pde_profile, type);
             if (!builder_axes.has_value()) {
                 std::ostringstream oss;
-                oss << "from_chain_auto_profile failed: " << builder_axes.error();
+                oss << "from_grid_auto_profile failed: " << builder_axes.error();
                 throw py::value_error(oss.str());
             }
 
@@ -955,10 +955,10 @@ PYBIND11_MODULE(mango_option, m) {
         py::arg("grid_profile") = mango::PriceTableGridProfile::High,
         py::arg("pde_profile") = mango::GridAccuracyProfile::High,
         R"pbdoc(
-            Build a 4D price table surface from an OptionChain using auto-grid profiles.
+            Build a 4D price table surface from an OptionGrid using auto-grid profiles.
 
             Args:
-                chain: OptionChain with spot, strikes, maturities, implied_vols, rates
+                chain: OptionGrid with spot, strikes, maturities, implied_vols, rates
                 option_type: OptionType.PUT or OptionType.CALL
                 grid_profile: PriceTableGridProfile (LOW/MEDIUM/HIGH/ULTRA)
                 pde_profile: GridAccuracyProfile for PDE grid/time steps

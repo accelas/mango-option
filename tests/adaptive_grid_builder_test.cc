@@ -45,7 +45,7 @@ TEST(AdaptiveGridBuilderTest, ConstructWithCustomParams) {
 
 TEST(AdaptiveGridBuilderTest, BuildsWithSyntheticChain) {
     // Create a minimal synthetic chain
-    OptionChain chain;
+    OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
 
@@ -85,7 +85,7 @@ TEST(AdaptiveGridBuilderTest, EmptyChainReturnsError) {
     AdaptiveGridParams params;
     AdaptiveGridBuilder builder(params);
 
-    OptionChain chain;
+    OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
     // No options added
@@ -269,7 +269,7 @@ TEST(ErrorBinsTest, ProblematicBins) {
 // Bug: linspace(x, x, 5) produces {x, x, x, x, x} which dedupes to 1 point,
 // causing B-spline fitting failure (requires >= 4 points)
 TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
-    OptionChain chain;
+    OptionGrid chain;
     chain.spot = 100.0;
     chain.dividend_yield = 0.0;
 
@@ -304,7 +304,7 @@ TEST(AdaptiveGridBuilderTest, RegressionSingleValueAxes) {
 // Regression: Cache should clear on new build
 // Bug: reuse of AdaptiveGridBuilder re-used previous slices because cache wasn't cleared
 TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
-    OptionChain chain1;
+    OptionGrid chain1;
     chain1.spot = 100.0;
     chain1.dividend_yield = 0.0;
     chain1.strikes = {90.0, 100.0, 110.0};
@@ -312,7 +312,7 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     chain1.implied_vols = {0.18, 0.22};
     chain1.rates = {0.04, 0.05};
 
-    OptionChain chain2 = chain1;
+    OptionGrid chain2 = chain1;
     chain2.spot = 50.0;  // Different spot => cache must not reuse chain1 slices
 
     AdaptiveGridParams params;

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 
-TEST(OptionChainTest, DefaultConstruction) {
-    mango::OptionChain chain;
+TEST(OptionGridTest, DefaultConstruction) {
+    mango::OptionGrid chain;
     EXPECT_TRUE(chain.ticker.empty());
     EXPECT_EQ(chain.spot, 0.0);
     EXPECT_TRUE(chain.strikes.empty());
@@ -13,8 +13,8 @@ TEST(OptionChainTest, DefaultConstruction) {
     EXPECT_EQ(chain.dividend_yield, 0.0);
 }
 
-TEST(OptionChainTest, FieldPopulation) {
-    mango::OptionChain chain;
+TEST(OptionGridTest, FieldPopulation) {
+    mango::OptionGrid chain;
     chain.ticker = "AAPL";
     chain.spot = 150.0;
     chain.strikes = {140.0, 150.0, 160.0};

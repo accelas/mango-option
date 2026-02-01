@@ -6,14 +6,14 @@
 
 namespace mango {
 
-/// Market option chain data (from exchanges)
+/// Option parameter grid for price table construction
 ///
-/// Represents raw option chain data as typically received from market data
-/// feeds or exchanges. Can contain duplicate strikes/maturities (e.g., multiple
-/// options with same parameters but different bid/ask spreads).
+/// Represents a grid of option parameters used to build price tables.
+/// Can contain duplicate strikes/maturities which are deduplicated during
+/// grid construction.
 ///
 /// Extracted from PriceTable4DBuilder for reusability.
-struct OptionChain {
+struct OptionGrid {
     std::string ticker;                  ///< Underlying ticker symbol
     double spot = 0.0;                   ///< Current underlying price
     std::vector<double> strikes;         ///< Strike prices (may have duplicates)

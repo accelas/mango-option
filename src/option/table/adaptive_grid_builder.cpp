@@ -20,7 +20,7 @@ AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridParams params)
 {}
 
 std::expected<AdaptiveResult, PriceTableError>
-AdaptiveGridBuilder::build(const OptionChain& chain,
+AdaptiveGridBuilder::build(const OptionGrid& chain,
                            GridSpec<double> grid_spec,
                            size_t n_time,
                            OptionType type)

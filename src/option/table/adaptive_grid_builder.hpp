@@ -5,7 +5,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/slice_cache.hpp"
 #include "src/option/table/error_attribution.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/support/error_types.hpp"
 #include <expected>
@@ -37,13 +37,13 @@ public:
 
     /// Build price table with adaptive grid refinement
     ///
-    /// @param chain Option chain providing domain bounds
+    /// @param chain Option grid providing domain bounds
     /// @param grid_spec PDE spatial grid specification
     /// @param n_time Number of time steps for PDE solver
     /// @param type Option type (default: PUT)
     /// @return AdaptiveResult with surface and diagnostics, or error
     [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
-    build(const OptionChain& chain,
+    build(const OptionGrid& chain,
           GridSpec<double> grid_spec,
           size_t n_time,
           OptionType type = OptionType::PUT);

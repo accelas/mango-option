@@ -15,7 +15,7 @@
 #include "src/option/american_option_batch.hpp"
 #include "src/option/iv_solver_fdm.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/option/table/american_price_surface.hpp"
@@ -462,7 +462,7 @@ BENCHMARK(BM_RealData_PriceTableGreeks)
 
 // Helper to build option chain from real market data for IV smile benchmarks
 struct IVSmileFixture {
-    OptionChain chain;
+    OptionGrid chain;
     std::vector<RealOptionData> smile_options;
     double target_maturity;
     GridSpec<double> grid_spec;
@@ -478,7 +478,7 @@ struct IVSmileFixture {
             }
         }
 
-        // Build OptionChain structure
+        // Build OptionGrid structure
         chain.ticker = SYMBOL;
         chain.spot = SPOT;
         chain.dividend_yield = DIVIDEND_YIELD;
@@ -519,7 +519,7 @@ static void BM_RealData_IVSmile_BuildTable(benchmark::State& state) {
     size_t n_pde_solves = 0;
 
     for (auto _ : state) {
-        auto builder_result = PriceTableBuilder<4>::from_chain(
+        auto builder_result = PriceTableBuilder<4>::from_grid(
             fixture.chain,
             ExplicitPDEGrid{fixture.grid_spec, 200},
             OptionType::PUT,
@@ -558,7 +558,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     const auto& fixture = GetIVSmileFixture();
 
     // Build price table once (not timed)
-    auto builder_result = PriceTableBuilder<4>::from_chain(
+    auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
         ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -672,7 +672,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     const auto& fixture = GetIVSmileFixture();
 
     // Build price table
-    auto builder_result = PriceTableBuilder<4>::from_chain(
+    auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
         ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -769,7 +769,7 @@ BENCHMARK(BM_RealData_IVSmile_Accuracy)
 
 // Helper to create dense grid fixture with configurable resolution
 struct DenseGridFixture {
-    OptionChain chain;
+    OptionGrid chain;
     std::vector<RealOptionData> smile_options;
     double target_maturity;
     GridSpec<double> grid_spec;
@@ -840,7 +840,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     DenseGridFixture fixture(n_maturities, n_vols, n_rates);
 
     // Build price table
-    auto builder_result = PriceTableBuilder<4>::from_chain(
+    auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
         ExplicitPDEGrid{fixture.grid_spec, 200},
         OptionType::PUT,
@@ -942,7 +942,7 @@ BENCHMARK(BM_RealData_GridDensity)
 // Automatic Grid Estimation Validation
 // ============================================================================
 
-// Test from_chain_auto with different target IV errors
+// Test from_grid_auto with different target IV errors
 static void BM_RealData_GridEstimator(benchmark::State& state) {
     const double target_error_bps = static_cast<double>(state.range(0));
     const double target_iv_error = target_error_bps / 10000.0;
@@ -955,7 +955,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     accuracy.target_iv_error = target_iv_error;
 
     // Build price table with automatic grid estimation
-    auto builder_result = PriceTableBuilder<4>::from_chain_auto(
+    auto builder_result = PriceTableBuilder<4>::from_grid_auto(
         iv_fixture.chain,
         ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
         OptionType::PUT,
@@ -1082,7 +1082,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
 
     const auto& iv_fixture = GetIVSmileFixture();
 
-    auto builder_result = PriceTableBuilder<4>::from_chain_auto_profile(
+    auto builder_result = PriceTableBuilder<4>::from_grid_auto_profile(
         iv_fixture.chain,
         grid_profile,
         pde_profile,

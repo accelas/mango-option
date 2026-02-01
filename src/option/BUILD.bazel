@@ -19,8 +19,8 @@ cc_library(
 )
 
 cc_library(
-    name = "option_chain",
-    hdrs = ["option_chain.hpp"],
+    name = "option_grid",
+    hdrs = ["option_grid.hpp"],
     visibility = ["//visibility:public"],
 )
 

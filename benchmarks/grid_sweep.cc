@@ -102,7 +102,7 @@ int main() {
         grid_params.curvature_weights = {1.0, 1.0, 2.5, 0.6};
         grid_params.scale_factor = 2.0;
 
-        auto estimate = estimate_grid_from_chain_bounds(
+        auto estimate = estimate_grid_from_grid_bounds(
             strikes, spot, maturities, vols, rates, grid_params);
 
         if (estimate.grids[0].empty()) {

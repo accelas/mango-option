@@ -668,8 +668,8 @@ PriceTableBuilder<4>::from_strikes(
 
 template <>
 PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_chain(
-    const OptionChain& chain,
+PriceTableBuilder<4>::from_grid(
+    const OptionGrid& chain,
     PDEGridSpec pde_grid,
     OptionType type,
     double max_failure_rate)
@@ -689,8 +689,8 @@ PriceTableBuilder<4>::from_chain(
 
 template <>
 PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_chain_auto(
-    const OptionChain& chain,
+PriceTableBuilder<4>::from_grid_auto(
+    const OptionGrid& chain,
     PDEGridSpec pde_grid,
     OptionType type,
     const PriceTableGridAccuracyParams<4>& accuracy)
@@ -713,7 +713,7 @@ PriceTableBuilder<4>::from_chain_auto(
     }
 
     // Estimate optimal grids based on target accuracy
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         chain.strikes,
         chain.spot,
         chain.maturities,
@@ -743,8 +743,8 @@ PriceTableBuilder<4>::from_chain_auto(
 
 template <>
 PriceTableBuilder<4>::Setup
-PriceTableBuilder<4>::from_chain_auto_profile(
-    const OptionChain& chain,
+PriceTableBuilder<4>::from_grid_auto_profile(
+    const OptionGrid& chain,
     PriceTableGridProfile grid_profile,
     GridAccuracyProfile pde_profile,
     OptionType type)
@@ -768,7 +768,7 @@ PriceTableBuilder<4>::from_chain_auto_profile(
 
     // Estimate optimal grids based on target accuracy profile
     auto grid_params = grid_accuracy_profile(grid_profile);
-    auto estimate = estimate_grid_from_chain_bounds(
+    auto estimate = estimate_grid_from_grid_bounds(
         chain.strikes,
         chain.spot,
         chain.maturities,

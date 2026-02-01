@@ -8,7 +8,7 @@
 #include "src/option/table/price_tensor.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/option_chain.hpp"
+#include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/support/error_types.hpp"
 #include <expected>
@@ -148,38 +148,38 @@ public:
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0);
 
-    /// Factory from option chain
+    /// Factory from option grid
     ///
-    /// Creates a PriceTableBuilder and axes from an OptionChain.
-    /// Extracts spot, strikes, maturities, vols, rates from chain.
-    /// Uses chain.dividend_yield.
+    /// Creates a PriceTableBuilder and axes from an OptionGrid.
+    /// Extracts spot, strikes, maturities, vols, rates from grid.
+    /// Uses grid.dividend_yield.
     ///
-    /// @param chain Option chain data
+    /// @param chain Option grid data
     /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
     /// @return Pair of (builder, axes) or error
     static Setup
-    from_chain(
-        const OptionChain& chain,
+    from_grid(
+        const OptionGrid& chain,
         PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         double max_failure_rate = 0.0);
 
-    /// Factory from option chain with automatic grid estimation
+    /// Factory from option grid with automatic grid estimation
     ///
     /// Creates a PriceTableBuilder with optimal grids estimated from target accuracy.
     /// Uses curvature-based budget allocation to minimize PDE solves while achieving
     /// the specified IV error tolerance.
     ///
-    /// @param chain Option chain (provides domain bounds from strikes, maturities, vols, rates)
+    /// @param chain Option grid (provides domain bounds from strikes, maturities, vols, rates)
     /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param accuracy Grid accuracy parameters (controls target error and point allocation)
     /// @return Pair of (builder, axes) or error
     static Setup
-    from_chain_auto(
-        const OptionChain& chain,
+    from_grid_auto(
+        const OptionGrid& chain,
         PDEGridSpec pde_grid = ExplicitPDEGrid{},
         OptionType type = OptionType::PUT,
         const PriceTableGridAccuracyParams<4>& accuracy = {});
@@ -189,14 +189,14 @@ public:
     /// Uses grid estimation for table axes (m, tau, sigma, r) and
     /// computes a PDE grid/time domain via compute_global_grid_for_batch().
     ///
-    /// @param chain Option chain (provides domain bounds)
+    /// @param chain Option grid (provides domain bounds)
     /// @param grid_profile Accuracy profile for price table grid estimation
     /// @param pde_profile Accuracy profile for PDE grid/time domain estimation
     /// @param type Option type (PUT or CALL)
     /// @return Pair of (builder, axes) or error
     static Setup
-    from_chain_auto_profile(
-        const OptionChain& chain,
+    from_grid_auto_profile(
+        const OptionGrid& chain,
         PriceTableGridProfile grid_profile = PriceTableGridProfile::High,
         GridAccuracyProfile pde_profile = GridAccuracyProfile::High,
         OptionType type = OptionType::PUT);

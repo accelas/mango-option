@@ -147,7 +147,7 @@ Build a price table surface first, then solve IV via Newton-Raphson on the inter
 
 ```python
 # 1. Build price table from option chain
-chain = mo.OptionChain()
+chain = mo.OptionGrid()
 chain.spot = 100.0
 chain.strikes = [90, 95, 100, 105, 110]
 chain.maturities = [0.25, 0.5, 1.0]
@@ -155,7 +155,7 @@ chain.implied_vols = [0.15, 0.20, 0.25]
 chain.rates = [0.02, 0.03]
 chain.dividend_yield = 0.0
 
-surface = mo.build_price_table_surface_from_chain(
+surface = mo.build_price_table_surface_from_grid(
     chain,
     option_type=mo.OptionType.PUT,
     grid_profile=mo.PriceTableGridProfile.HIGH,
@@ -209,7 +209,7 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `IVSolverFDMConfig` | IV solver config with `root_config`, `grid_accuracy`, manual grid overrides |
 | `IVSolverFDM` | PDE-based IV solver |
 | `IVSolverInterpolated` | Fast B-spline interpolation IV solver |
-| `OptionChain` | Container for chain data (spot, strikes, maturities, vols, rates) |
+| `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
 | `PriceTableSurface4D` | 4D B-spline surface with `value(m, tau, sigma, r)` and `partial(axis, ...)` |
 | `PriceTableWorkspace` | Serializable price table data (save/load Arrow IPC) |
 | `SolverError` | Error detail with `code`, `iterations`, `residual` |
@@ -219,5 +219,5 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | Function | Description |
 |----------|-------------|
 | `american_option_price(params, accuracy=None)` | Price a single American option with auto-grid |
-| `build_price_table_surface_from_chain(chain, ...)` | Build 4D B-spline surface from OptionChain |
-| `build_price_table_surface_from_chain_auto_profile(spot, strikes, ...)` | Same, with positional args instead of OptionChain |
+| `build_price_table_surface_from_grid(chain, ...)` | Build 4D B-spline surface from OptionGrid |
+| `build_price_table_surface_from_grid_auto_profile(spot, strikes, ...)` | Same, with positional args instead of OptionGrid |

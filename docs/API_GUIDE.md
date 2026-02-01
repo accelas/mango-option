@@ -445,9 +445,9 @@ auto result2 = mango::PriceTableBuilder<4>::from_strikes(
     spot, strikes, maturities, volatilities, rates,
     pde_grid, mango::OptionType::CALL);
 
-// 3. from_chain: Extracts all parameters from OptionChain
-auto result3 = mango::PriceTableBuilder<4>::from_chain(
-    option_chain, pde_grid, mango::OptionType::PUT);
+// 3. from_grid: Extracts all parameters from OptionGrid
+auto result3 = mango::PriceTableBuilder<4>::from_grid(
+    option_grid, pde_grid, mango::OptionType::PUT);
 
 // All return std::expected<std::pair<builder, axes>, PriceTableError>
 ```
@@ -457,8 +457,8 @@ auto result3 = mango::PriceTableBuilder<4>::from_chain(
 **Use profiles to auto-estimate both table grids and PDE grid/time steps:**
 
 ```cpp
-auto result = mango::PriceTableBuilder<4>::from_chain_auto_profile(
-    option_chain,
+auto result = mango::PriceTableBuilder<4>::from_grid_auto_profile(
+    option_grid,
     mango::PriceTableGridProfile::High,
     mango::GridAccuracyProfile::High,
     mango::OptionType::PUT);
@@ -472,7 +472,7 @@ auto surface_result = builder.build(axes);
 ```python
 import mango_option as mo
 
-chain = mo.OptionChain()
+chain = mo.OptionGrid()
 chain.spot = 100.0
 chain.strikes = [90, 95, 100, 105, 110]
 chain.maturities = [0.25, 0.5, 1.0]
@@ -480,7 +480,7 @@ chain.implied_vols = [0.15, 0.20, 0.25]
 chain.rates = [0.02, 0.03]
 chain.dividend_yield = 0.0
 
-surface = mo.build_price_table_surface_from_chain(
+surface = mo.build_price_table_surface_from_grid(
     chain,
     option_type=mo.OptionType.PUT,
     grid_profile=mo.PriceTableGridProfile.HIGH,

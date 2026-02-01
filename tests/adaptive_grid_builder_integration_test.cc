@@ -9,8 +9,8 @@ namespace {
 class AdaptiveGridBuilderIntegrationTest : public ::testing::Test {
 protected:
     // Use same parameters as working unit test for reliability
-    OptionChain make_test_chain() {
-        OptionChain chain;
+    OptionGrid make_test_chain() {
+        OptionGrid chain;
         chain.spot = 100.0;
         chain.dividend_yield = 0.0;  // Match unit test
 
