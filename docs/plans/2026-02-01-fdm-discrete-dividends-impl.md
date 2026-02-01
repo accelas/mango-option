@@ -68,6 +68,18 @@ TEST(TimeDomainTest, MandatoryTimePointsEmptyFallback) {
     EXPECT_EQ(td.n_steps(), 4u);
     EXPECT_NEAR(td.dt(), 0.25, 1e-14);
 }
+
+TEST(TimeDomainTest, MandatoryPointsAtBoundariesIgnored) {
+    // Points at t_start and t_end are silently dropped
+    auto td = TimeDomain::with_mandatory_points(0.0, 1.0, 0.25, {0.0, 1.0});
+    EXPECT_EQ(td.n_steps(), 4u);  // same as empty mandatory
+}
+
+TEST(TimeDomainTest, MandatoryPointsOutOfRangeIgnored) {
+    // Points outside [t_start, t_end] are silently dropped
+    auto td = TimeDomain::with_mandatory_points(0.0, 1.0, 0.25, {-0.5, 1.5});
+    EXPECT_EQ(td.n_steps(), 4u);
+}
 ```
 
 **Step 2: Run test to verify it fails**
@@ -200,9 +212,10 @@ git commit -m "Add TimeDomain::with_mandatory_points for non-uniform grids"
 
 **Files:**
 - Modify: `src/pde/core/pde_solver.hpp`
+- Modify: `src/pde/core/grid.hpp` (convert_times_to_indices)
 - Test: `tests/pde_solver_test.cc`
 
-The `solve()` loop currently uses `const double dt = time.dt()`. Change it to read per-step dt from TimeDomain.
+The `solve()` loop currently uses `const double dt = time.dt()`. Change it to read per-step dt from TimeDomain. Also fix `convert_times_to_indices` for non-uniform grids.
 
 **Step 1: Write the failing test**
 
@@ -227,14 +240,17 @@ However, we can rely on the existing PDE solver tests continuing to pass (they u
 
 **Step 2: Modify PDESolver::solve()**
 
-In `src/pde/core/pde_solver.hpp`, change the `solve()` method:
+In `src/pde/core/pde_solver.hpp`, change the `solve()` method.
 
-Replace the time-stepping section (lines ~114-178):
+Key changes:
+- Use `time.time_point(step+1)` instead of `t + dt_step` to avoid float drift
+- Use `time.dt_at(step)` for per-step dt
 
 ```cpp
 std::expected<void, SolverError> solve() {
     const auto& time = grid_->time();
-    double t = time.t_start();
+    const auto time_pts = time.time_points();
+    double t = time_pts[0];
 
     auto u_current = grid_->solution();
     auto u_prev = grid_->solution_prev();
@@ -249,7 +265,7 @@ std::expected<void, SolverError> solve() {
         double dt_step = time.dt_at(0);
         auto rannacher_ok = solve_rannacher_startup(t, dt_step, u_current, u_prev)
             .transform([&] {
-                t += dt_step;
+                t = time_pts[1];  // avoid float drift
                 if (grid_->should_record(step + 1)) {
                     grid_->record(step + 1, u_current);
                 }
@@ -263,11 +279,10 @@ std::expected<void, SolverError> solve() {
     for (; step < time.n_steps(); ++step) {
         double t_old = t;
         double dt_step = time.dt_at(step);
+        double t_next = time_pts[step + 1];  // read from sequence, not t + dt
 
         // Copy u_current to u_prev for next iteration
         std::copy(u_current.begin(), u_current.end(), u_prev.begin());
-
-        double t_next = t + dt_step;
 
         // Stage 1: Trapezoidal rule to t_n + γ·dt
         double t_stage1 = t + config_.gamma * dt_step;
@@ -285,7 +300,7 @@ std::expected<void, SolverError> solve() {
         // Process temporal events AFTER completing the step
         process_temporal_events(t_old, t_next, step, u_current);
 
-        // Update time
+        // Update time from sequence (not accumulation)
         t = t_next;
 
         // Record snapshot AFTER events
@@ -300,16 +315,51 @@ std::expected<void, SolverError> solve() {
 
 Also update `solve_rannacher_startup()` similarly — it uses `dt` directly. Change it to accept `dt` as parameter or read `dt_at(0)`.
 
-**Step 3: Run full test suite**
+**Step 3: Fix convert_times_to_indices for non-uniform grids**
+
+In `src/pde/core/grid.hpp`, the `convert_times_to_indices` function uses
+`step_exact = (t - t_start) / dt` which assumes uniform spacing. Update it
+to use binary search through the time points vector when non-uniform:
+
+```cpp
+// For each requested time t:
+if (time_domain.has_time_points()) {
+    // Non-uniform: binary search through stored time points
+    const auto& pts = time_domain.time_points_ref();
+    auto it = std::lower_bound(pts.begin(), pts.end(), t - 1e-10);
+    // Find nearest point
+    size_t idx = std::distance(pts.begin(), it);
+    if (idx > 0 && (idx == pts.size() ||
+        std::abs(pts[idx-1] - t) < std::abs(pts[idx] - t))) {
+        idx--;
+    }
+    state_idx = std::min(idx, n_steps);
+    snapped_times.push_back(pts[state_idx]);
+} else {
+    // Uniform: existing arithmetic path
+    double step_exact = (t - t_start) / dt;
+    size_t state_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
+    state_idx = std::min(state_idx, n_steps);
+    snapped_times.push_back(t_start + state_idx * dt);
+}
+```
+
+This requires adding `has_time_points()` and `time_points_ref()` accessors to
+TimeDomain.
+
+**Step 4: Run full test suite**
 
 Run: `bazel test //...`
 Expected: All 104 tests pass. The uniform dt path produces identical `dt_at(step)` values, so existing behavior is unchanged.
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
-git add src/pde/core/pde_solver.hpp
-git commit -m "Use per-step dt in PDESolver for non-uniform time grids"
+git add src/pde/core/pde_solver.hpp src/pde/core/grid.hpp
+git commit -m "Use per-step dt in PDESolver for non-uniform time grids
+
+Read time points from stored sequence to avoid float drift.
+Fix convert_times_to_indices to use binary search for non-uniform grids."
 ```
 
 ---
@@ -350,7 +400,7 @@ TEST(DiscreteDividendEventTest, BasicPutShift) {
 
     double original_atm = u[2];  // At x=0, payoff = 0
 
-    auto callback = make_dividend_event(5.0, 100.0);
+    auto callback = make_dividend_event(5.0, 100.0, OptionType::PUT);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     // After dividend: value at x=0 should increase for a put
@@ -364,17 +414,29 @@ TEST(DiscreteDividendEventTest, BasicPutShift) {
     }
 }
 
-TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividend) {
+TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendPut) {
     // At x = -3 (S/K ≈ 0.05, S ≈ 5), dividend D = 10
-    // S - D < 0, so clamp to intrinsic value
+    // S - D < 0, so clamp to put intrinsic value
     std::vector<double> x = {-3.0};
     std::vector<double> u = {1.0 - std::exp(-3.0)};  // put intrinsic
 
-    auto callback = make_dividend_event(10.0, 100.0);
+    auto callback = make_dividend_event(10.0, 100.0, OptionType::PUT);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
-    // Should be clamped to intrinsic (can't go negative on spot)
-    EXPECT_GE(u[0], 0.0);
+    // Put intrinsic: max(1 - S_adj/K, 0) ≈ 1.0 (deep ITM)
+    EXPECT_NEAR(u[0], 1.0, 0.1);
+}
+
+TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendCall) {
+    // Call-side: when S - D <= 0, call is worthless
+    std::vector<double> x = {-3.0};
+    std::vector<double> u = {0.0};  // call intrinsic (OTM)
+
+    auto callback = make_dividend_event(10.0, 100.0, OptionType::CALL);
+    callback(0.5, std::span<const double>(x), std::span<double>(u));
+
+    // Call intrinsic: max(S_adj/K - 1, 0) = 0.0 (worthless)
+    EXPECT_NEAR(u[0], 0.0, 1e-10);
 }
 
 TEST(DiscreteDividendEventTest, ZeroDividendNoOp) {
@@ -382,7 +444,7 @@ TEST(DiscreteDividendEventTest, ZeroDividendNoOp) {
     std::vector<double> u = {0.5, 0.3, 0.1};
     std::vector<double> u_orig = u;
 
-    auto callback = make_dividend_event(0.0, 100.0);
+    auto callback = make_dividend_event(0.0, 100.0, OptionType::PUT);
     callback(0.5, std::span<const double>(x), std::span<double>(u));
 
     for (size_t i = 0; i < u.size(); ++i) {
@@ -453,11 +515,15 @@ namespace mango {
 ///
 /// @param dividend_amount Cash dividend amount D (in dollars)
 /// @param strike Reference strike K (normalization base)
+/// @param option_type PUT or CALL (determines fallback when S - D <= 0)
 /// @return TemporalEventCallback suitable for PDESolver::add_temporal_event()
-inline TemporalEventCallback make_dividend_event(double dividend_amount, double strike) {
+inline TemporalEventCallback make_dividend_event(
+    double dividend_amount, double strike, OptionType option_type)
+{
     const double d = dividend_amount / strike;  // normalized dividend
+    const bool is_put = (option_type == OptionType::PUT);
 
-    return [d](double /*t*/, std::span<const double> x, std::span<double> u) {
+    return [d, is_put](double /*t*/, std::span<const double> x, std::span<double> u) {
         if (d <= 0.0) return;  // no-op for zero dividend
 
         const size_t n = x.size();
@@ -465,7 +531,9 @@ inline TemporalEventCallback make_dividend_event(double dividend_amount, double 
         // Build cubic spline of current solution
         CubicSpline<double> spline;
         auto err = spline.build(x, std::span<const double>(u.data(), u.size()));
-        if (err.has_value()) return;  // spline build failed, leave u unchanged
+        if (err.has_value()) return;  // spline build failed — leave u unchanged
+        // (PDESolver will re-apply obstacle, so the worst case is
+        // one step without the dividend shift applied)
 
         // Apply dividend shift: x' = ln(exp(x) - d)
         for (size_t i = 0; i < n; ++i) {
@@ -476,10 +544,14 @@ inline TemporalEventCallback make_dividend_event(double dividend_amount, double 
                 double x_shifted = std::log(S_adj_over_K);
                 u[i] = spline.eval(x_shifted);
             } else {
-                // Spot drops to zero or below: put is worth max payoff,
-                // call is worthless. Use put intrinsic as safe fallback
-                // (obstacle re-application by PDESolver handles the rest).
-                u[i] = std::max(1.0 - S_adj_over_K, 0.0);
+                // Spot drops to zero or below: use option-type-aware intrinsic
+                if (is_put) {
+                    // Put: deep ITM, intrinsic ≈ 1 - S_adj/K
+                    u[i] = std::max(1.0 - S_adj_over_K, 0.0);
+                } else {
+                    // Call: worthless when spot ≤ 0
+                    u[i] = 0.0;
+                }
             }
         }
     };
@@ -553,6 +625,17 @@ TEST(AmericanOptionTest, DiscreteDividendCallPriceLowerThanNoDividend) {
         << "Call with discrete dividend should be worth less than without";
 }
 
+TEST(AmericanOptionTest, DiscreteDividendCallLargeDividend) {
+    // Large dividend on a call: tests call-side fallback (S - D <= 0)
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::CALL, 0.30,
+                         {{0.5, 50.0}});
+
+    auto result = solve_american_option_auto(params);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_GE(result->value(), 0.0);
+    EXPECT_TRUE(std::isfinite(result->value()));
+}
+
 TEST(AmericanOptionTest, DiscreteDividendMultiple) {
     // Two dividends should shift more than one
     PricingParams one_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
@@ -578,14 +661,28 @@ Expected: FAIL — discrete dividend prices equal non-dividend prices (events no
 
 **Step 3: Modify estimate_grid_for_option**
 
-In `src/option/american_option.hpp`, update `estimate_grid_for_option()` to produce a TimeDomain with mandatory points at dividend dates:
+In `src/option/american_option.hpp`, update `estimate_grid_for_option()` to:
+1. Produce a TimeDomain with mandatory points at dividend dates
+2. Widen the spatial grid to accommodate the maximum dividend shift
 
 ```cpp
 inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
     const PricingParams& params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
-    // ... existing spatial grid estimation (unchanged) ...
+    // ... existing spatial grid estimation ...
+
+    // Widen spatial grid for dividend shift safety:
+    // The spline evaluates at x' = ln(exp(x) - D/K). The maximum leftward
+    // shift is approximately D_max/K in log-moneyness. Extend x_min by this
+    // amount so shifted points stay within the interpolation domain.
+    double max_d_over_k = 0.0;
+    for (const auto& [t_cal, amount] : params.discrete_dividends) {
+        max_d_over_k = std::max(max_d_over_k, amount / params.strike);
+    }
+    if (max_d_over_k > 0.0) {
+        x_min -= max_d_over_k;  // extend lower bound
+    }
 
     // Create sinh-spaced GridSpec
     auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
@@ -629,7 +726,7 @@ In `solve()`, replace the solver creation block (lines 109-119) with:
             double tau = params_.maturity - t_cal;
             if (tau > 0.0 && tau < params_.maturity) {
                 pde_solver.add_temporal_event(tau,
-                    make_dividend_event(amount, params_.strike));
+                    make_dividend_event(amount, params_.strike, params_.type));
             }
         }
 
@@ -643,7 +740,7 @@ In `solve()`, replace the solver creation block (lines 109-119) with:
             double tau = params_.maturity - t_cal;
             if (tau > 0.0 && tau < params_.maturity) {
                 pde_solver.add_temporal_event(tau,
-                    make_dividend_event(amount, params_.strike));
+                    make_dividend_event(amount, params_.strike, params_.type));
             }
         }
 
@@ -794,6 +891,40 @@ TEST(DiscreteDividendAccuracyTest, DividendNearExpiry) {
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->value(), 0.0);
     EXPECT_TRUE(std::isfinite(result->value()));
+}
+
+TEST(DiscreteDividendAccuracyTest, EventAlignsWithMandatoryTimePoint) {
+    // Verify that the time grid actually contains the dividend date
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                         {{0.3, 2.0}});
+
+    auto [grid_spec, td] = estimate_grid_for_option(params);
+    auto pts = td.time_points();
+
+    // tau = T - t_cal = 1.0 - 0.3 = 0.7
+    double tau_div = 0.7;
+    bool found = false;
+    for (double p : pts) {
+        if (std::abs(p - tau_div) < 1e-14) { found = true; break; }
+    }
+    EXPECT_TRUE(found) << "Time grid must land exactly on dividend tau=" << tau_div;
+}
+
+TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
+    // Dividends at t=0 or t=T should be silently ignored (no crash)
+    PricingParams params(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20,
+                         {{0.0, 5.0}, {1.0, 5.0}});
+
+    auto result = solve_american_option_auto(params);
+    ASSERT_TRUE(result.has_value());
+
+    // Should produce the same price as no dividends
+    PricingParams no_div(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 0.20);
+    auto result_no_div = solve_american_option_auto(no_div);
+    ASSERT_TRUE(result_no_div.has_value());
+
+    EXPECT_NEAR(result->value(), result_no_div->value(), 1e-10)
+        << "Boundary dividends should be ignored";
 }
 ```
 
