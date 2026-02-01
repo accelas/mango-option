@@ -1379,6 +1379,17 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "discrete_dividend_event_test",
+    size = "small",
+    srcs = ["discrete_dividend_event_test.cc"],
+    deps = [
+        "//src/option:discrete_dividend_event",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
 load("@pip//:requirements.bzl", "requirement")
 
 py_test(

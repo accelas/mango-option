@@ -211,3 +211,14 @@ cc_library(
     linkopts = ["-fopenmp"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "discrete_dividend_event",
+    hdrs = ["discrete_dividend_event.hpp"],
+    deps = [
+        "//src/math:cubic_spline_solver",
+        "//src/pde/core:pde_solver",
+        ":option_spec",
+    ],
+    visibility = ["//visibility:public"],
+)
