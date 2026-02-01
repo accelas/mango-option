@@ -345,8 +345,9 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .type = OptionType::CALL}, 8.0);
 
     auto iv_result = solver->solve(query);
-    EXPECT_FALSE(iv_result.has_value())
+    ASSERT_FALSE(iv_result.has_value())
         << "Solver should reject CALL query against PUT surface";
+    EXPECT_EQ(iv_result.error().code, IVErrorCode::OptionTypeMismatch);
 }
 
 // Regression: IVSolverInterpolated must reject queries with wrong dividend_yield
@@ -381,8 +382,9 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.05, .type = OptionType::PUT}, 8.0);
 
     auto iv_result = solver->solve(query);
-    EXPECT_FALSE(iv_result.has_value())
+    ASSERT_FALSE(iv_result.has_value())
         << "Solver should reject query with mismatched dividend_yield";
+    EXPECT_EQ(iv_result.error().code, IVErrorCode::DividendYieldMismatch);
 }
 
 }  // namespace

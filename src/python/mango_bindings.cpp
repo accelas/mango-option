@@ -251,6 +251,8 @@ PYBIND11_MODULE(mango_option, m) {
         .value("BracketingFailed", mango::IVErrorCode::BracketingFailed)
         .value("NumericalInstability", mango::IVErrorCode::NumericalInstability)
         .value("InvalidGridConfig", mango::IVErrorCode::InvalidGridConfig)
+        .value("OptionTypeMismatch", mango::IVErrorCode::OptionTypeMismatch)
+        .value("DividendYieldMismatch", mango::IVErrorCode::DividendYieldMismatch)
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 

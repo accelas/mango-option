@@ -232,11 +232,13 @@ std::optional<ValidationError>
 IVSolverInterpolated<Surface>::validate_query(const IVQuery& query) const
 {
     if (query.type != option_type_) {
-        return ValidationError{ValidationErrorCode::InvalidBounds, 0.0, 0};
+        return ValidationError{ValidationErrorCode::OptionTypeMismatch,
+            static_cast<double>(query.type), 0};
     }
 
     if (std::abs(query.dividend_yield - dividend_yield_) > 1e-10) {
-        return ValidationError{ValidationErrorCode::InvalidBounds, 0.0, 0};
+        return ValidationError{ValidationErrorCode::DividendYieldMismatch,
+            query.dividend_yield, 0};
     }
 
     // Use common validation for option spec, market price, and arbitrage checks

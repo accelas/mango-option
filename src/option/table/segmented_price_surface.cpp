@@ -24,19 +24,29 @@ SegmentedPriceSurface::create(Config config) {
             ValidationErrorCode::InvalidMaturity, config.T, 0});
     }
 
-    // Verify segments are ordered by tau_start ascending
+    // Verify segments are ordered and consistent
+    auto expected_type = config.segments.front().surface.option_type();
+    auto expected_yield = config.segments.front().surface.dividend_yield();
     for (size_t i = 1; i < config.segments.size(); ++i) {
         if (config.segments[i].tau_start <= config.segments[i - 1].tau_start) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::UnsortedGrid, config.segments[i].tau_start, i});
+        }
+        if (config.segments[i].surface.option_type() != expected_type) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::OptionTypeMismatch, static_cast<double>(i), i});
+        }
+        if (std::abs(config.segments[i].surface.dividend_yield() - expected_yield) > 1e-10) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::DividendYieldMismatch, config.segments[i].surface.dividend_yield(), i});
         }
     }
 
     SegmentedPriceSurface result;
     result.K_ref_ = config.K_ref;
     result.T_ = config.T;
-    result.option_type_ = config.segments.front().surface.option_type();
-    result.dividend_yield_ = config.segments.front().surface.dividend_yield();
+    result.option_type_ = expected_type;
+    result.dividend_yield_ = expected_yield;
     result.segments_ = std::move(config.segments);
 
     result.dividends_.reserve(config.dividends.size());
