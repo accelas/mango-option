@@ -14,6 +14,15 @@ SegmentedMultiKRefSurface::create(std::vector<Entry> entries) {
             ValidationErrorCode::InvalidGridSize, 0.0, 0));
     }
 
+    // Validate K_ref consistency: Entry.K_ref must match its surface's K_ref
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (entries[i].K_ref <= 0.0 ||
+            std::abs(entries[i].K_ref - entries[i].surface.K_ref()) > 1e-10) {
+            return std::unexpected(ValidationError(
+                ValidationErrorCode::InvalidStrike, entries[i].K_ref, i));
+        }
+    }
+
     // Sort entries by K_ref
     std::sort(entries.begin(), entries.end(),
               [](const Entry& a, const Entry& b) { return a.K_ref < b.K_ref; });

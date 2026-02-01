@@ -64,10 +64,10 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
     query.market_price = market_price;
 
     auto iv_result = solver_->solve(query);
-    // The FDM and interpolated solvers may handle discrete dividends with
-    // slightly different numerical approaches, so allow for convergence
-    // difficulties in some cases.
-    if (iv_result.has_value()) {
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solve must succeed; error code: "
+        << (iv_result.has_value() ? 0 : static_cast<int>(iv_result.error().code));
+    {
         EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02)
             << "Recovered IV should be close to true vol=0.20, got "
             << iv_result->implied_vol << " for market_price=" << market_price;
@@ -101,11 +101,12 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
-    if (iv_result.has_value()) {
-        EXPECT_NEAR(iv_result->implied_vol, 0.25, 0.02)
-            << "Recovered IV should be close to true vol=0.25, got "
-            << iv_result->implied_vol;
-    }
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solve must succeed; error code: "
+        << static_cast<int>(iv_result.error().code);
+    EXPECT_NEAR(iv_result->implied_vol, 0.25, 0.02)
+        << "Recovered IV should be close to true vol=0.25, got "
+        << iv_result->implied_vol;
 }
 
 TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
@@ -135,11 +136,12 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
-    if (iv_result.has_value()) {
-        EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02)
-            << "Recovered IV should be close to true vol=0.20, got "
-            << iv_result->implied_vol;
-    }
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solve must succeed; error code: "
+        << static_cast<int>(iv_result.error().code);
+    EXPECT_NEAR(iv_result->implied_vol, 0.20, 0.02)
+        << "Recovered IV should be close to true vol=0.20, got "
+        << iv_result->implied_vol;
 }
 
 TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
@@ -172,12 +174,13 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
-    if (iv_result.has_value()) {
-        // For maturities before the dividend, the interpolated surface
-        // (which knows about dividends) should still recover a reasonable IV.
-        EXPECT_GT(iv_result->implied_vol, 0.05);
-        EXPECT_LT(iv_result->implied_vol, 1.0);
-    }
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solve must succeed; error code: "
+        << static_cast<int>(iv_result.error().code);
+    // For maturities before the dividend, the interpolated surface
+    // (which knows about dividends) should still recover a reasonable IV.
+    EXPECT_GT(iv_result->implied_vol, 0.05);
+    EXPECT_LT(iv_result->implied_vol, 1.0);
 }
 
 TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
@@ -207,11 +210,12 @@ TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
     query.market_price = price_result->value();
 
     auto iv_result = solver_->solve(query);
-    if (iv_result.has_value()) {
-        EXPECT_NEAR(iv_result->implied_vol, 0.35, 0.02)
-            << "High-vol IV should be close to true vol=0.35, got "
-            << iv_result->implied_vol;
-    }
+    ASSERT_TRUE(iv_result.has_value())
+        << "IV solve must succeed; error code: "
+        << static_cast<int>(iv_result.error().code);
+    EXPECT_NEAR(iv_result->implied_vol, 0.35, 0.02)
+        << "High-vol IV should be close to true vol=0.35, got "
+        << iv_result->implied_vol;
 }
 
 // ===========================================================================
@@ -255,11 +259,12 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
     query.market_price = price_result->value();
 
     auto result = solver->solve(query);
-    if (result.has_value()) {
-        EXPECT_GT(result->implied_vol, 0.0);
-        EXPECT_LT(result->implied_vol, 3.0);
-        EXPECT_NEAR(result->implied_vol, 0.20, 0.02)
-            << "Continuous dividend round-trip should recover vol=0.20, got "
-            << result->implied_vol;
-    }
+    ASSERT_TRUE(result.has_value())
+        << "IV solve must succeed; error code: "
+        << static_cast<int>(result.error().code);
+    EXPECT_GT(result->implied_vol, 0.0);
+    EXPECT_LT(result->implied_vol, 3.0);
+    EXPECT_NEAR(result->implied_vol, 0.20, 0.02)
+        << "Continuous dividend round-trip should recover vol=0.20, got "
+        << result->implied_vol;
 }

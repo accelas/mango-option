@@ -94,6 +94,16 @@ double SegmentedPriceSurface::compute_spot_adjustment(
     return spot - adjustment;
 }
 
+/// Denormalize a segment price to actual price.
+/// EEP segments return actual price V; RawPrice segments return V/K_ref.
+inline double denormalize_price(const AmericanPriceSurface& surface,
+                                double raw_price, double K_ref) {
+    if (surface.metadata().content == SurfaceContent::RawPrice) {
+        return raw_price * K_ref;
+    }
+    return raw_price;
+}
+
 double SegmentedPriceSurface::price(double spot, double strike,
                                      double tau, double sigma, double rate) const {
     // 1. Convert to calendar time
@@ -116,10 +126,9 @@ double SegmentedPriceSurface::price(double spot, double strike,
                                   seg.surface.tau_min(),
                                   seg.surface.tau_max());
 
-    // 6. Delegate to segment surface (always use K_ref_ as strike;
-    //    all segments are built for this K_ref, and RawPrice segments
-    //    require strike == K_ref)
-    return seg.surface.price(S_adj, K_ref_, tau_local, sigma, rate);
+    // 6. Delegate to segment surface and denormalize
+    double raw = seg.surface.price(S_adj, K_ref_, tau_local, sigma, rate);
+    return denormalize_price(seg.surface, raw, K_ref_);
 }
 
 double SegmentedPriceSurface::vega(double spot, double strike,
@@ -138,7 +147,9 @@ double SegmentedPriceSurface::vega(double spot, double strike,
         double tau_local = std::clamp(tau - seg.tau_start,
                                       seg.surface.tau_min(),
                                       seg.surface.tau_max());
-        return seg.surface.vega(S_adj, K_ref_, tau_local, sigma, rate);
+        // EEP vega is already in actual units; denormalize is a no-op here
+        double raw_vega = seg.surface.vega(S_adj, K_ref_, tau_local, sigma, rate);
+        return denormalize_price(seg.surface, raw_vega, K_ref_);
     }
 
     // RawPrice: finite difference vega using this->price() (includes spot adjustment)
