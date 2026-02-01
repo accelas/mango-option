@@ -21,9 +21,11 @@
 
 namespace mango {
 
+#ifndef NDEBUG
 namespace testing {
 template <size_t N> struct PriceTableBuilderAccess;
 }  // namespace testing
+#endif
 
 
 /// Result from price table build with diagnostics
@@ -246,7 +248,9 @@ private:
 
     friend class AdaptiveGridBuilder;
     friend class SegmentedPriceTableBuilder;
+#ifndef NDEBUG
     template <size_t M> friend struct testing::PriceTableBuilderAccess;
+#endif
 
     PriceTableConfig config_;
     std::optional<InitialCondition> custom_ic_;
