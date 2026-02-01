@@ -21,8 +21,7 @@ public:
     struct Config {
         double spot;
         OptionType option_type;
-        double dividend_yield = 0.0;
-        std::vector<Dividend> discrete_dividends;  // (calendar_time, amount)
+        DividendSpec dividends;  ///< Continuous yield + discrete schedule
         std::vector<double> moneyness_grid;
         double maturity;
         std::vector<double> vol_grid;

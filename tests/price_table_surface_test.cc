@@ -18,7 +18,7 @@ TEST(PriceTableSurfaceTest, Build2DSurface) {
         coeffs[i] = static_cast<double>(i + 1);
     }
 
-    PriceTableMetadata meta{.K_ref = 100.0, .dividend_yield = 0.02};
+    PriceTableMetadata meta{.K_ref = 100.0, .dividends = {.dividend_yield = 0.02}};
 
     auto result = PriceTableSurface<2>::build(std::move(axes), std::move(coeffs), meta);
     ASSERT_TRUE(result.has_value()) << "Error: " << result.error();

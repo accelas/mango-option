@@ -223,11 +223,9 @@ TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
     std::vector<double> eep_coeffs(5 * 4 * 4 * 4, 2.0);
     PriceTableMetadata eep_meta{
         .K_ref = 100.0,
-        .dividend_yield = 0.0,
         .m_min = 0.8,
         .m_max = 1.2,
         .content = SurfaceContent::EarlyExercisePremium,
-        .discrete_dividends = {}
     };
 
     auto eep_surface = PriceTableSurface<4>::build(eep_axes, eep_coeffs, eep_meta);
@@ -259,8 +257,7 @@ TEST_F(IVSolverInterpolatedTest, WorksWithSegmentedMultiKRefSurface) {
     SegmentedMultiKRefBuilder::Config config{
         .spot = 100.0,
         .option_type = OptionType::PUT,
-        .dividend_yield = 0.0,
-        .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}},  // One discrete dividend at t=0.5
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},  // One discrete dividend at t=0.5
         .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
         .maturity = 1.0,
         .vol_grid = {0.10, 0.20, 0.30, 0.40},

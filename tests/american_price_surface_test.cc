@@ -22,7 +22,7 @@ std::shared_ptr<const PriceTableSurface<4>> make_test_surface(
     std::vector<double> coeffs(5 * 4 * 4 * 4, eep_value);
     PriceTableMetadata meta{
         .K_ref = 100.0,
-        .dividend_yield = div_yield,
+        .dividends = {.dividend_yield = div_yield},
         .m_min = 0.8,
         .m_max = 1.2,
         .content = content
@@ -80,11 +80,10 @@ TEST(AmericanPriceSurfaceTest, RejectsDiscreteDividends) {
     std::vector<double> coeffs(5 * 4 * 4 * 4, 2.0);
     PriceTableMetadata meta{
         .K_ref = 100.0,
-        .dividend_yield = 0.0,
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}},
         .m_min = 0.8,
         .m_max = 1.2,
         .content = SurfaceContent::EarlyExercisePremium,
-        .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
     auto result = AmericanPriceSurface::create(surface, OptionType::PUT);
@@ -210,11 +209,10 @@ TEST(AmericanPriceSurfaceTest, RejectsRawPriceWithDiscreteDividends) {
     std::vector<double> coeffs(5 * 4 * 4 * 4, 5.0);
     PriceTableMetadata meta{
         .K_ref = 100.0,
-        .dividend_yield = 0.0,
+        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}},
         .m_min = 0.8,
         .m_max = 1.2,
         .content = SurfaceContent::RawPrice,
-        .discrete_dividends = {{.calendar_time = 0.25, .amount = 1.50}, {.calendar_time = 0.75, .amount = 1.50}}
     };
     auto surface = PriceTableSurface<4>::build(axes, coeffs, meta).value();
     auto result = AmericanPriceSurface::create(surface, OptionType::PUT);

@@ -284,6 +284,12 @@ PYBIND11_MODULE(mango_option, m) {
                    ", amt=" + std::to_string(d.amount) + ")";
         });
 
+    // DividendSpec structure
+    py::class_<mango::DividendSpec>(m, "DividendSpec")
+        .def(py::init<>())
+        .def_readwrite("dividend_yield", &mango::DividendSpec::dividend_yield)
+        .def_readwrite("discrete_dividends", &mango::DividendSpec::discrete_dividends);
+
     // PricingParams structure
     py::class_<mango::PricingParams>(m, "PricingParams")
         .def(py::init<>())
@@ -699,11 +705,10 @@ PYBIND11_MODULE(mango_option, m) {
     py::class_<mango::PriceTableMetadata>(m, "PriceTableMetadata")
         .def(py::init<>())
         .def_readwrite("K_ref", &mango::PriceTableMetadata::K_ref)
-        .def_readwrite("dividend_yield", &mango::PriceTableMetadata::dividend_yield)
+        .def_readwrite("dividends", &mango::PriceTableMetadata::dividends)
         .def_readwrite("m_min", &mango::PriceTableMetadata::m_min)
         .def_readwrite("m_max", &mango::PriceTableMetadata::m_max)
-        .def_readwrite("content", &mango::PriceTableMetadata::content)
-        .def_readwrite("discrete_dividends", &mango::PriceTableMetadata::discrete_dividends);
+        .def_readwrite("content", &mango::PriceTableMetadata::content);
 
     // PriceTableAxes<4>
     py::class_<mango::PriceTableAxes<4>>(m, "PriceTableAxes4D")

@@ -37,7 +37,7 @@ AmericanPriceSurface::create(
     // EEP decomposition assumes continuous dividend yield only;
     // RawPrice surfaces with discrete dividends require jump-condition handling
     // that is not yet implemented.
-    if (!meta.discrete_dividends.empty()) {
+    if (!meta.dividends.discrete_dividends.empty()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidBounds, 0.0, 0});
     }
@@ -48,7 +48,7 @@ AmericanPriceSurface::create(
     }
 
     return AmericanPriceSurface(
-        std::move(eep_surface), type, meta.K_ref, meta.dividend_yield);
+        std::move(eep_surface), type, meta.K_ref, meta.dividends.dividend_yield);
 }
 
 double AmericanPriceSurface::price(double spot, double strike, double tau,

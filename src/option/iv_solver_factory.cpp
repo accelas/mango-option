@@ -85,8 +85,7 @@ build_segmented(const IVSolverConfig& config, const SegmentedIVPath& path) {
     SegmentedMultiKRefBuilder::Config seg_config{
         .spot = config.spot,
         .option_type = config.option_type,
-        .dividend_yield = config.dividend_yield,
-        .discrete_dividends = path.discrete_dividends,
+        .dividends = {.dividend_yield = config.dividend_yield, .discrete_dividends = path.discrete_dividends},
         .moneyness_grid = config.moneyness_grid,
         .maturity = path.maturity,
         .vol_grid = config.vol_grid,

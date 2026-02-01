@@ -317,10 +317,10 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         // Build metadata
         PriceTableMetadata metadata;
         metadata.K_ref = chain.spot;
-        metadata.dividend_yield = chain.dividend_yield;
+        metadata.dividends.dividend_yield = chain.dividend_yield;
         metadata.m_min = moneyness_grid.front();
         metadata.m_max = moneyness_grid.back();
-        metadata.discrete_dividends = {};
+        metadata.dividends.discrete_dividends = {};
 
         // Build surface
         auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);

@@ -302,7 +302,7 @@ def test_price_table_surface():
     # Create metadata
     meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
-    meta.dividend_yield = 0.02
+    meta.dividends.dividend_yield = 0.02
     meta.m_min = 0.8
     meta.m_max = 1.2
 
@@ -339,7 +339,7 @@ def test_iv_solver_interpolated():
 
     meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
-    meta.dividend_yield = 0.02
+    meta.dividends.dividend_yield = 0.02
     meta.m_min = 0.8
     meta.m_max = 1.2
 
@@ -438,7 +438,7 @@ def test_surface_to_solver_integration():
 
     meta = mango_option.PriceTableMetadata()
     meta.K_ref = 100.0
-    meta.dividend_yield = 0.02
+    meta.dividends.dividend_yield = 0.02
     meta.m_min = 0.8
     meta.m_max = 1.2
 

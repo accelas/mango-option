@@ -281,15 +281,14 @@ TEST(PriceTableSurface, ConstructsFromAxes) {
 
     PriceTableMetadata meta{
         .K_ref = 100.0,
-        .dividend_yield = 0.015,
-        .option_type = OptionType::PUT
+        .dividends = {.dividend_yield = 0.015},
     };
 
     auto surface = PriceTableSurface<4>::create(axes, std::move(tensor), meta);
     ASSERT_TRUE(surface.has_value());
 
     EXPECT_DOUBLE_EQ(surface->metadata().K_ref, 100.0);
-    EXPECT_DOUBLE_EQ(surface->metadata().dividend_yield, 0.015);
+    EXPECT_DOUBLE_EQ(surface->metadata().dividends.dividend_yield, 0.015);
 
     const auto& grids = surface->axes().grids;
     EXPECT_DOUBLE_EQ(grids[0].front(), 0.8);
