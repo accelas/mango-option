@@ -979,11 +979,11 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("sigma_max", &mango::IVSolverInterpolatedConfig::sigma_max);
 
     // IVSolverInterpolated
-    py::class_<mango::IVSolverInterpolated>(m, "IVSolverInterpolated")
+    py::class_<mango::IVSolverInterpolatedStandard>(m, "IVSolverInterpolated")
         .def_static("create",
             [](mango::AmericanPriceSurface american_surface,
                const mango::IVSolverInterpolatedConfig& config) {
-                auto result = mango::IVSolverInterpolated::create(
+                auto result = mango::IVSolverInterpolatedStandard::create(
                     std::move(american_surface), config);
                 if (!result.has_value()) {
                     throw py::value_error("Failed to create solver: validation error");
@@ -1006,7 +1006,7 @@ PYBIND11_MODULE(mango_option, m) {
                     ValueError: If validation fails
             )pbdoc")
         .def("solve_impl",
-            [](const mango::IVSolverInterpolated& solver, const mango::IVQuery& query) {
+            [](const mango::IVSolverInterpolatedStandard& solver, const mango::IVQuery& query) {
                 auto result = solver.solve_impl(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
@@ -1031,7 +1031,7 @@ PYBIND11_MODULE(mango_option, m) {
                     Tuple of (success: bool, result: IVSuccess, error: IVError)
             )pbdoc")
         .def("solve_batch",
-            [](const mango::IVSolverInterpolated& solver, const std::vector<mango::IVQuery>& queries) {
+            [](const mango::IVSolverInterpolatedStandard& solver, const std::vector<mango::IVQuery>& queries) {
                 auto batch_result = solver.solve_batch_impl(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {

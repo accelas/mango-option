@@ -326,6 +326,17 @@ private:
 
     // TR-BDF2 configuration for the PDE solver
     TRBDF2Config trbdf2_config_;
+
+public:
+    /// Callable type for custom initial conditions: f(x, u) fills u given grid points x
+    using InitialCondition = std::function<void(std::span<const double>, std::span<double>)>;
+
+    /// Set a custom initial condition (overrides the standard payoff)
+    void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
+
+private:
+    /// Optional custom initial condition (replaces default payoff when set)
+    std::optional<InitialCondition> custom_ic_;
 };
 
 static_assert(OptionSolver<AmericanOptionSolver>);

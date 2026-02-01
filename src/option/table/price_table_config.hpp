@@ -2,6 +2,7 @@
 #pragma once
 
 #include "src/option/american_option.hpp"  // For OptionType
+#include "src/option/table/price_table_metadata.hpp"  // For SurfaceContent
 #include "src/pde/core/grid.hpp"  // For GridSpec
 #include <variant>
 #include <vector>
@@ -28,6 +29,8 @@ struct PriceTableConfig {
     double dividend_yield = 0.0;               ///< Continuous dividend yield
     std::vector<std::pair<double, double>> discrete_dividends;  ///< (time, amount) schedule
     double max_failure_rate = 0.0;             ///< Maximum tolerable failure rate: 0.0 = strict, 0.1 = allow 10%
+    SurfaceContent surface_content = SurfaceContent::EarlyExercisePremium;  ///< Output mode
+    bool allow_tau_zero = false;               ///< Allow τ=0 in maturity grid (requires custom IC)
 };
 
 /// Validate PriceTableConfig fields

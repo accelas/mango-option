@@ -137,7 +137,7 @@ int main() {
             printf("%-6zu APS CREATE FAILED\n", trial);
             continue;
         }
-        auto iv_solver_result = IVSolverInterpolated::create(std::move(*aps));
+        auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
         if (!iv_solver_result) {
             printf("%-6zu IV SOLVER FAILED\n", trial);
             continue;

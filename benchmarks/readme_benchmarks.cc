@@ -122,7 +122,7 @@ void RunAnalyticBSplineIVBenchmark(benchmark::State& state, const char* label) {
     if (!aps) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto solver_result = IVSolverInterpolated::create(std::move(*aps));
+    auto solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
 
     if (!solver_result) {
         auto err = solver_result.error();

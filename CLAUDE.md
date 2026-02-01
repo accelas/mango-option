@@ -9,6 +9,7 @@ Guide for Claude Code when working with this repository.
 **Key capabilities:**
 - American option pricing via PDE solver (~5-20ms per option)
 - Implied volatility calculation (~19ms FDM, ~3.5us interpolated)
+- Discrete dividend support via segmented price surfaces
 - Price table pre-computation with B-spline interpolation (~500ns per query)
 - Batch processing with OpenMP parallelization
 
@@ -201,6 +202,24 @@ double price = aps.price(spot, strike, tau, sigma, rate);
 // Create interpolated IV solver from AmericanPriceSurface
 auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
 auto iv_result = iv_solver.solve_impl(iv_query);
+```
+
+**Pattern 3: Discrete Dividend IV Calculation**
+```cpp
+#include "src/option/iv_solver_factory.hpp"
+
+mango::IVSolverConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .discrete_dividends = {{0.25, 1.50}},
+    .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+    .maturity = 1.0,
+    .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
+    .rate_grid = {0.02, 0.05},
+    .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+};
+auto solver = mango::make_iv_solver(config);
+auto result = solver->solve(query);
 ```
 
 **See [docs/API_GUIDE.md](docs/API_GUIDE.md) for complete patterns**
