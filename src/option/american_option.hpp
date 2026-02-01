@@ -27,12 +27,6 @@
 namespace mango {
 
 /**
- * @brief Backward compatibility alias for PricingParams
- * @deprecated Use PricingParams from option_spec.hpp instead
- */
-using AmericanOptionParams = PricingParams;
-
-/**
  * Estimate grid specification from option parameters.
  *
  * Automatically determines appropriate spatial/temporal discretization
@@ -186,17 +180,16 @@ public:
      *
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
+     * @param grid Optional grid specification (GridAccuracyParams or ExplicitPDEGrid).
+     *             When nullopt, auto-estimates from option parameters.
      * @param snapshot_times Optional times to record solution snapshots
-     * @param custom_grid_config Optional custom grid config (GridSpec + TimeDomain)
-     *                           When provided, bypasses auto-estimation entirely.
-     *                           Both must be provided together to ensure consistent discretization.
      * @return AmericanOptionSolver on success, ValidationError on failure
      */
     static std::expected<AmericanOptionSolver, ValidationError>
     create(const PricingParams& params,
            PDEWorkspace workspace,
-           std::optional<std::span<const double>> snapshot_times = std::nullopt,
-           std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config = std::nullopt) noexcept;
+           std::optional<PDEGridSpec> grid = std::nullopt,
+           std::optional<std::span<const double>> snapshot_times = std::nullopt) noexcept;
 
     /**
      * Direct PDEWorkspace constructor (deprecated - use create() instead).
@@ -206,13 +199,14 @@ public:
      *
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
+     * @param grid Optional grid specification (GridAccuracyParams or ExplicitPDEGrid).
+     *             When nullopt, auto-estimates from option parameters.
      * @param snapshot_times Optional times to record solution snapshots
-     * @param custom_grid_config Optional custom grid config (GridSpec + TimeDomain)
      */
     AmericanOptionSolver(const PricingParams& params,
                         PDEWorkspace workspace,
-                        std::optional<std::span<const double>> snapshot_times = std::nullopt,
-                        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config = std::nullopt);
+                        std::optional<PDEGridSpec> grid = std::nullopt,
+                        std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     /**
      * Set snapshot times for solution recording.
@@ -252,9 +246,9 @@ private:
     // Snapshot times for Grid creation
     std::vector<double> snapshot_times_;
 
-    // Optional custom grid configuration (bypasses auto-estimation)
-    // Both GridSpec and TimeDomain must be provided together for consistent discretization
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config_;
+    // Resolved grid configuration (GridSpec + TimeDomain)
+    // Resolved from PDEGridSpec at construction time
+    std::optional<std::pair<GridSpec<double>, TimeDomain>> grid_config_;
 
     // TR-BDF2 configuration for the PDE solver
     TRBDF2Config trbdf2_config_;

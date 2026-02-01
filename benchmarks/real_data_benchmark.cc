@@ -104,8 +104,8 @@ void emit_bucket_counters(benchmark::State& state,
 // Helper functions
 // ============================================================================
 
-AmericanOptionParams make_params(const RealOptionData& opt, double vol = 0.20) {
-    return AmericanOptionParams(
+PricingParams make_params(const RealOptionData& opt, double vol = 0.20) {
+    return PricingParams(
         SPOT,
         opt.strike,
         opt.maturity,
@@ -222,7 +222,7 @@ BENCHMARK(BM_RealData_AmericanSingle)
 static void BM_RealData_AmericanSequential(benchmark::State& state) {
     const size_t batch_size = REAL_PUTS.size();
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
     for (const auto& opt : REAL_PUTS) {
         batch.push_back(make_params(opt));
@@ -269,7 +269,7 @@ BENCHMARK(BM_RealData_AmericanSequential)
 static void BM_RealData_AmericanBatch(benchmark::State& state) {
     const size_t batch_size = REAL_PUTS.size();
 
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
     for (const auto& opt : REAL_PUTS) {
         batch.push_back(make_params(opt));

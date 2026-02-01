@@ -214,7 +214,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false,
         1001, 10000);
 
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation
@@ -247,7 +247,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
 // ============================================================================
 
 TEST(QuantLibBatchTest, Greeks_ATM) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);

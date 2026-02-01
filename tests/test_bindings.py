@@ -82,7 +82,7 @@ def test_american_option_price():
     """Test american_option_price function"""
     print("Testing american_option_price...")
 
-    params = mango_option.AmericanOptionParams()
+    params = mango_option.PricingParams()
     params.strike = 100.0
     params.spot = 100.0
     params.maturity = 1.0
@@ -100,7 +100,7 @@ def test_american_option_price_with_accuracy():
     """Test american_option_price with accuracy profile"""
     print("Testing american_option_price with accuracy profile...")
 
-    params = mango_option.AmericanOptionParams()
+    params = mango_option.PricingParams()
     params.strike = 100.0
     params.spot = 100.0
     params.maturity = 1.0
@@ -124,7 +124,7 @@ def test_american_option_discrete_dividends():
     """Test american_option_price with discrete dividends"""
     print("Testing american_option_price with discrete dividends...")
 
-    params = mango_option.AmericanOptionParams()
+    params = mango_option.PricingParams()
     params.strike = 100.0
     params.spot = 100.0
     params.maturity = 1.0
@@ -152,7 +152,7 @@ def test_american_option_yield_curve():
     """Test american_option_price with yield curve rate"""
     print("Testing american_option_price with yield curve...")
 
-    params = mango_option.AmericanOptionParams()
+    params = mango_option.PricingParams()
     params.strike = 100.0
     params.spot = 100.0
     params.maturity = 1.0
@@ -174,7 +174,7 @@ def test_batch_solver():
 
     batch = []
     for K in [90.0, 95.0, 100.0, 105.0, 110.0]:
-        p = mango_option.AmericanOptionParams()
+        p = mango_option.PricingParams()
         p.spot = 100.0
         p.strike = K
         p.maturity = 1.0
@@ -206,7 +206,7 @@ def test_batch_solver_per_option_grids():
 
     batch = []
     for T in [0.25, 0.5, 1.0]:
-        p = mango_option.AmericanOptionParams()
+        p = mango_option.PricingParams()
         p.spot = 100.0
         p.strike = 100.0
         p.maturity = T

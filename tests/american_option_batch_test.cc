@@ -6,7 +6,7 @@ using namespace mango;
 
 TEST(BatchAmericanOptionSolver, NormalizedEligibility) {
     // Test eligible batch: varying strikes with same maturity
-    std::vector<AmericanOptionParams> eligible_params;
+    std::vector<PricingParams> eligible_params;
     double spot = 100.0;
     std::vector<double> strikes = {90, 95, 100, 105, 110};
 
@@ -40,7 +40,7 @@ TEST(BatchAmericanOptionSolver, NormalizedEligibility) {
 
 TEST(BatchAmericanOptionSolver, NormalizedIneligibleDividends) {
     // Test ineligible batch (discrete dividends)
-    std::vector<AmericanOptionParams> ineligible_params;
+    std::vector<PricingParams> ineligible_params;
     double spot = 100.0;
 
     for (int i = 0; i < 5; ++i) {
@@ -66,7 +66,7 @@ TEST(BatchAmericanOptionSolver, NormalizedIneligibleDividends) {
 
 TEST(BatchAmericanOptionSolver, DisableNormalizedOptimization) {
     // Test forcing regular path
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     double spot = 100.0;
 
     for (int i = 0; i < 5; ++i) {
@@ -100,7 +100,7 @@ TEST(BatchAmericanOptionSolver, DisableNormalizedOptimization) {
 //      allocation. This resulted in 100% PDE failure rate for production configs.
 TEST(AmericanOptionBatch, RegressionIssue272_WorkspaceGridSizeConsistency) {
     // Create a batch that uses shared grid with varying strikes
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {85.0, 92.5, 100.0, 107.5, 115.0}) {
         params.push_back(PricingParams(
             100.0, K, 1.0, 0.05, 0.02,
@@ -127,7 +127,7 @@ TEST(AmericanOptionBatch, RegressionIssue272_WorkspaceGridSizeConsistency) {
 // Regression: Per-option grid path must also track solver_grid_config
 // Bug: Issue 272 - the fix must cover all code paths including per-option grids
 TEST(AmericanOptionBatch, RegressionIssue272_PerOptionGridConsistency) {
-    std::vector<AmericanOptionParams> params;
+    std::vector<PricingParams> params;
     for (double K : {90.0, 100.0, 110.0}) {
         params.push_back(PricingParams(
             100.0, K, 1.0, 0.05, 0.02,

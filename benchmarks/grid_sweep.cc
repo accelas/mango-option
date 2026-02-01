@@ -59,7 +59,7 @@ int main() {
     fprintf(stderr, "Computing reference prices...\n");
     std::vector<IVQuery> iv_queries;
     for (auto& tc : test_cases) {
-        AmericanOptionParams params(spot, tc.strike, tc.maturity, rate, div_yield,
+        PricingParams params(spot, tc.strike, tc.maturity, rate, div_yield,
                                      OptionType::PUT, tc.vol_true);
         auto [gs, td] = estimate_grid_for_option(params, grid_accuracy_profile(GridAccuracyProfile::High));
         std::pmr::synchronized_pool_resource pool;

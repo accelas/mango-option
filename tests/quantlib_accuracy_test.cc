@@ -102,7 +102,7 @@ void test_scenario(
     SCOPED_TRACE(name);
 
     // Mango-Option pricing with auto-estimation (production mode)
-    AmericanOptionParams mango_params(
+    PricingParams mango_params(
         spot, strike, maturity, rate, dividend_yield,
         is_call ? OptionType::CALL : OptionType::PUT, volatility);
 
@@ -205,7 +205,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.20, 0.05, 0.02, false,
         1001, 10000);
 
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation (production mode)
@@ -241,7 +241,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
 // ============================================================================
 
 TEST(QuantLibAccuracyTest, Greeks_ATM) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation (production mode)

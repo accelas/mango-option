@@ -61,8 +61,8 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     std::cout << "\nTest 2: use_shared_grid=true, WITH custom_grid" << std::endl;
     GridSpec<double> user_grid = adv_grid1.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), adv_grid1.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     auto result2 = solver.solve_batch(batch, true, nullptr, custom_grid);
     std::cout << "  Failed count: " << result2.failed_count << std::endl;
@@ -111,8 +111,8 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     const auto& edge_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridSpec<double> user_grid = edge_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), edge_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     // Test with custom_grid
     BatchAmericanOptionSolver solver;
@@ -186,8 +186,8 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     const auto& sim_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridSpec<double> user_grid = sim_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), sim_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     std::cout << "\nCustom grid specification:" << std::endl;
     std::cout << "  Spatial: [" << user_grid.x_min() << ", " << user_grid.x_max()

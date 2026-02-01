@@ -264,20 +264,20 @@ PYBIND11_MODULE(mango_option, m) {
 
     // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
 
-    // AmericanOptionParams structure
-    py::class_<mango::AmericanOptionParams>(m, "AmericanOptionParams")
+    // PricingParams structure
+    py::class_<mango::PricingParams>(m, "PricingParams")
         .def(py::init<>())
-        .def_readwrite("strike", &mango::AmericanOptionParams::strike)
-        .def_readwrite("spot", &mango::AmericanOptionParams::spot)
-        .def_readwrite("maturity", &mango::AmericanOptionParams::maturity)
-        .def_readwrite("volatility", &mango::AmericanOptionParams::volatility)
+        .def_readwrite("strike", &mango::PricingParams::strike)
+        .def_readwrite("spot", &mango::PricingParams::spot)
+        .def_readwrite("maturity", &mango::PricingParams::maturity)
+        .def_readwrite("volatility", &mango::PricingParams::volatility)
         .def_property("rate",
-            [](const mango::AmericanOptionParams& p) { return rate_spec_to_python(p.rate); },
-            [](mango::AmericanOptionParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
+            [](const mango::PricingParams& p) { return rate_spec_to_python(p.rate); },
+            [](mango::PricingParams& p, const py::object& obj) { p.rate = python_to_rate_spec(obj); },
             "Risk-free rate (float or YieldCurve)")
-        .def_readwrite("dividend_yield", &mango::AmericanOptionParams::dividend_yield)
-        .def_readwrite("type", &mango::AmericanOptionParams::type)
-        .def_readwrite("discrete_dividends", &mango::AmericanOptionParams::discrete_dividends);
+        .def_readwrite("dividend_yield", &mango::PricingParams::dividend_yield)
+        .def_readwrite("type", &mango::PricingParams::type)
+        .def_readwrite("discrete_dividends", &mango::PricingParams::discrete_dividends);
 
     // AmericanOptionResult structure
     py::class_<mango::AmericanOptionResult>(m, "AmericanOptionResult")
@@ -292,7 +292,7 @@ PYBIND11_MODULE(mango_option, m) {
 
     m.def(
         "american_option_price",
-        [](const mango::AmericanOptionParams& params,
+        [](const mango::PricingParams& params,
            std::optional<mango::GridAccuracyProfile> accuracy_profile) {
             // Validate parameters before grid estimation to avoid
             // division-by-zero or extreme allocations
@@ -341,8 +341,8 @@ PYBIND11_MODULE(mango_option, m) {
             }
 
             mango::AmericanOptionSolver solver(
-                params, workspace_result.value(), std::nullopt,
-                std::make_pair(grid_spec, time_domain));
+                params, workspace_result.value(),
+                mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
             auto solve_result = solver.solve();
             if (!solve_result) {
                 auto error = solve_result.error();
@@ -363,7 +363,7 @@ PYBIND11_MODULE(mango_option, m) {
             (via params.discrete_dividends).
 
             Args:
-                params: AmericanOptionParams with contract and market parameters.
+                params: PricingParams with contract and market parameters.
                 accuracy: Optional GridAccuracyProfile (LOW/MEDIUM/HIGH/ULTRA).
                           If not specified, uses default parameters.
 
@@ -439,7 +439,7 @@ PYBIND11_MODULE(mango_option, m) {
             "Enable/disable normalized chain optimization")
         .def("solve_batch",
             [](mango::BatchAmericanOptionSolver& self,
-               const std::vector<mango::AmericanOptionParams>& params,
+               const std::vector<mango::PricingParams>& params,
                bool use_shared_grid) {
                 auto batch_result = self.solve_batch(params, use_shared_grid);
 
@@ -464,7 +464,7 @@ PYBIND11_MODULE(mango_option, m) {
                 The normalized path solves one PDE and reuses it for all strikes.
 
                 Args:
-                    params: List of AmericanOptionParams
+                    params: List of PricingParams
                     use_shared_grid: If True, all options share one global grid
                                      (required for normalized chain optimization)
 

@@ -79,7 +79,7 @@ TEST_F(AmericanOptionNewAPITest, SolveWithSnapshots) {
 
     // NEW API: Pass snapshot times
     std::vector<double> snapshot_times = {0.0, 0.5, 1.0};
-    AmericanOptionSolver solver(params, workspace_result.value(), snapshot_times);
+    AmericanOptionSolver solver(params, workspace_result.value(), std::nullopt, std::span<const double>(snapshot_times));
 
     auto result = solver.solve();
     ASSERT_TRUE(result.has_value());

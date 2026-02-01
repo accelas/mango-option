@@ -47,7 +47,7 @@ struct BatchAmericanOptionResult {
 ///
 /// **Basic usage (per-option grids):**
 /// ```cpp
-/// std::vector<AmericanOptionParams> batch;
+/// std::vector<PricingParams> batch;
 /// batch.emplace_back(spot, strike, maturity, rate, dividend_yield, type, sigma);
 ///
 /// BatchAmericanOptionSolver solver;
@@ -195,17 +195,17 @@ public:
     ///                    When nullopt, uses grid_accuracy_ member for estimation.
     /// @return Batch result with individual results and failure count
     BatchAmericanOptionResult solve_batch(
-        std::span<const AmericanOptionParams> params,
+        std::span<const PricingParams> params,
         bool use_shared_grid = false,
         SetupCallback setup = nullptr,
-        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+        std::optional<PDEGridSpec> custom_grid = std::nullopt);
 
     /// Solve a batch of American options (vector overload)
     BatchAmericanOptionResult solve_batch(
-        const std::vector<AmericanOptionParams>& params,
+        const std::vector<PricingParams>& params,
         bool use_shared_grid = false,
         SetupCallback setup = nullptr,
-        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt)
+        std::optional<PDEGridSpec> custom_grid = std::nullopt)
     {
         return solve_batch(std::span{params}, use_shared_grid, setup, custom_grid);
     }
@@ -224,37 +224,37 @@ private:
 
     /// Regular batch solving (fallback path)
     BatchAmericanOptionResult solve_regular_batch(
-        std::span<const AmericanOptionParams> params,
+        std::span<const PricingParams> params,
         bool use_shared_grid = false,
         SetupCallback setup = nullptr,
-        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+        std::optional<PDEGridSpec> custom_grid = std::nullopt);
 
     /// Regular batch solving (vector overload)
     BatchAmericanOptionResult solve_regular_batch(
-        const std::vector<AmericanOptionParams>& params,
+        const std::vector<PricingParams>& params,
         bool use_shared_grid = false,
         SetupCallback setup = nullptr,
-        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+        std::optional<PDEGridSpec> custom_grid = std::nullopt);
 
     /// Check if batch qualifies for normalized solving
     bool is_normalized_eligible(
-        std::span<const AmericanOptionParams> params,
+        std::span<const PricingParams> params,
         bool use_shared_grid) const;
 
     /// Trace why normalized path wasn't used
     void trace_ineligibility_reason(
-        std::span<const AmericanOptionParams> params,
+        std::span<const PricingParams> params,
         bool use_shared_grid) const;
 
     /// Group options by PDE parameters for normalized solving
     std::vector<PDEParameterGroup> group_by_pde_parameters(
-        std::span<const AmericanOptionParams> params) const;
+        std::span<const PricingParams> params) const;
 
     /// Fast path: normalized chain solving with PDE grouping
     BatchAmericanOptionResult solve_normalized_chain(
-        std::span<const AmericanOptionParams> params,
+        std::span<const PricingParams> params,
         SetupCallback setup,
-        std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid = std::nullopt);
+        std::optional<PDEGridSpec> custom_grid = std::nullopt);
 };
 
 /// Solve a single American option with automatic grid determination
@@ -268,7 +268,7 @@ private:
 /// @param params Option parameters
 /// @return Expected containing result on success, error on failure
 inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
-    const AmericanOptionParams& params)
+    const PricingParams& params)
 {
     // Estimate grid for this option
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);

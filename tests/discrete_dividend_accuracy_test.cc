@@ -75,8 +75,8 @@ double solve_mango(const PricingParams& params,
     std::pmr::vector<double> buffer(
         PDEWorkspace::required_size(n), std::pmr::get_default_resource());
     auto ws = PDEWorkspace::from_buffer(buffer, n).value();
-    AmericanOptionSolver solver(params, ws, std::nullopt,
-                                std::make_pair(grid_spec, time_domain));
+    AmericanOptionSolver solver(params, ws,
+                                ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
     auto result = solver.solve();
     return result->value();
 }

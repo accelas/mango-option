@@ -181,7 +181,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
         auto missing_indices = cache_.get_missing_indices(all_pairs);
 
         // Build batch of params for missing pairs only
-        std::vector<AmericanOptionParams> missing_params;
+        std::vector<PricingParams> missing_params;
         missing_params.reserve(missing_indices.size());
         for (size_t idx : missing_indices) {
             missing_params.push_back(all_params[idx]);
@@ -218,7 +218,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
 
             // Compute min required width from ALL params (not just missing_params).
             // Using all_params ensures consistent domain coverage across iterations.
-            auto sigma_sqrt_tau = [](const AmericanOptionParams& p) {
+            auto sigma_sqrt_tau = [](const PricingParams& p) {
                 return p.volatility * std::sqrt(p.maturity);
             };
             const double max_sigma_sqrt_tau = std::ranges::max(
@@ -237,7 +237,7 @@ AdaptiveGridBuilder::build(const OptionChain& chain,
                 // Grid meets constraints: pass exact grid_spec + TimeDomain
                 const double max_maturity = maturity_grid.back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                auto custom_grid = std::make_pair(grid_spec, time_domain);
+                PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
                 fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
             } else {
                 // Grid violates constraints: use GridAccuracyParams with proper bounds
@@ -602,7 +602,7 @@ std::optional<double> AdaptiveGridBuilder::compute_error_metric(
 }
 
 BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
-    const std::vector<AmericanOptionParams>& all_params,
+    const std::vector<PricingParams>& all_params,
     const std::vector<size_t>& fresh_indices,
     const BatchAmericanOptionResult& fresh_results) const
 {
@@ -649,7 +649,7 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
             if (cached) {
                 // Cache stores shared_ptr<AmericanOptionResult>
                 // We can create a new AmericanOptionResult that shares the same grid
-                // AmericanOptionParams is an alias for PricingParams, so we can pass it directly
+                // PricingParams is an alias for PricingParams, so we can pass it directly
                 merged.results.push_back(AmericanOptionResult(
                     cached->grid(), all_params[i]));
             } else {

@@ -135,7 +135,7 @@ inline PricingValidationResult validate_pricing(
     PricingValidationResult validation;
 
     // Mango-Option pricing with auto-estimation
-    AmericanOptionParams mango_params(
+    PricingParams mango_params(
         scenario.spot, scenario.strike, scenario.maturity,
         scenario.rate, scenario.dividend_yield,
         scenario.is_call ? OptionType::CALL : OptionType::PUT,

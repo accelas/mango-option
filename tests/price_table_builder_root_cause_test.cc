@@ -45,8 +45,8 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     const auto& narrow_explicit = std::get<ExplicitPDEGrid>(config_narrow.pde_grid);
     GridSpec<double> narrow_grid = narrow_explicit.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), narrow_explicit.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_narrow =
-        std::make_pair(narrow_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid_narrow =
+        ExplicitPDEGrid{narrow_grid, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver_narrow;
     GridAccuracyParams accuracy;
@@ -67,8 +67,8 @@ TEST(PriceTableBuilderRootCauseTest, GridWidthExceedsLimit) {
     auto batch2 = builder_wide.make_batch_for_testing(axes);
     GridSpec<double> wide_grid = explicit_grid.grid_spec;
     auto time_domain2 = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), explicit_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_wide =
-        std::make_pair(wide_grid, time_domain2);
+    std::optional<PDEGridSpec> custom_grid_wide =
+        ExplicitPDEGrid{wide_grid, time_domain2.n_steps(), {}};
 
     BatchAmericanOptionSolver solver_wide;
     solver_wide.set_grid_accuracy(accuracy);

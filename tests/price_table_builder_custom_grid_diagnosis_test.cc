@@ -102,8 +102,8 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
 
     // Try solving with custom_grid
     std::cout << "\n=== Test 2: WITH custom_grid ===" << std::endl;
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
     BatchAmericanOptionSolver solver2;
     solver2.set_grid_accuracy(accuracy);
     solver2.set_snapshot_times(axes.grids[1]);

@@ -63,8 +63,8 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     const auto& cg_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
     GridSpec<double> user_grid = cg_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), cg_grid.n_time);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid =
-        std::make_pair(user_grid, time_domain);
+    std::optional<PDEGridSpec> custom_grid =
+        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
 
     // Create a BatchAmericanOptionSolver to test with custom_grid
     BatchAmericanOptionSolver solver;

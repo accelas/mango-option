@@ -92,7 +92,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 // ============================================================================
 
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -131,7 +131,7 @@ static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         110.0,  // spot (OTM put)
         100.0,  // strike
         0.25,   // maturity
@@ -170,7 +170,7 @@ static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         90.0,   // spot (ITM put)
         100.0,  // strike
         2.0,    // maturity
@@ -209,7 +209,7 @@ static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
 BENCHMARK(BM_AmericanPut_ITM_2Y);
 
 static void BM_AmericanCall_WithDividends(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -354,7 +354,7 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 // ============================================================================
 
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -418,12 +418,12 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
     size_t batch_size = state.range(0);
 
     // Generate batch of strike prices around ATM
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(batch_size);
 
     for (size_t i = 0; i < batch_size; ++i) {
         double strike = 90.0 + i * 0.5;  // Strikes from 90 to 90 + batch_size*0.5
-        batch.push_back(AmericanOptionParams(
+        batch.push_back(PricingParams(
             100.0,  // spot
             strike, // strike
             1.0,    // maturity

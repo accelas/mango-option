@@ -20,9 +20,9 @@ using namespace mango;
 // normalized option, not for original option indices
 TEST(NormalizedSolverRegressionTest, SetupCallbackDisablesNormalizedPath) {
     // Create batch of options that would be eligible for normalized solver
-    std::vector<AmericanOptionParams> batch(5);
+    std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0 + i * 10.0,        // Varying spot (different moneyness)
             100.0,                    // Same strike
             1.0,                      // Same maturity
@@ -81,8 +81,8 @@ TEST(NormalizedSolverRegressionTest, PriceTableSnapshotRegistration) {
     };
 
     // Create a simple batch
-    std::vector<AmericanOptionParams> batch(1);
-    batch[0] = AmericanOptionParams(100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
+    std::vector<PricingParams> batch(1);
+    batch[0] = PricingParams(100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     BatchAmericanOptionSolver solver;
     auto result = solver.solve_batch(batch, false, snapshot_callback);
@@ -101,7 +101,7 @@ TEST(NormalizedSolverRegressionTest, PriceTableSnapshotRegistration) {
 
 // Test that set_snapshot_times() works correctly
 TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,          // spot
         100.0,          // strike
         1.0,            // maturity
@@ -124,9 +124,8 @@ TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
 
     // Create solver with custom grid to avoid auto-estimation
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, params.maturity, 100);
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> custom_grid_config =
-        std::make_pair(grid_spec, time_domain);
-    AmericanOptionSolver solver(params, workspace, std::nullopt, custom_grid_config);
+    AmericanOptionSolver solver(params, workspace,
+        ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
 
     // Set snapshot times using the new method
     std::vector<double> snapshot_times = {0.25, 0.5, 0.75, 1.0};
@@ -153,9 +152,9 @@ TEST(NormalizedSolverRegressionTest, SetSnapshotTimesMethod) {
 // Test that normalized solver is NOT used when callback is provided
 TEST(NormalizedSolverRegressionTest, CallbackForcesRegularBatch) {
     // Create batch that would be eligible for normalized solver
-    std::vector<AmericanOptionParams> batch(3);
+    std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0 + i * 10.0,  // Varying spot
             100.0,             // Same strike
             1.0,               // Same maturity
@@ -191,9 +190,9 @@ TEST(NormalizedSolverRegressionTest, CallbackForcesRegularBatch) {
 // Test that normalized solver WORKS with snapshot_times (via dedicated API)
 TEST(NormalizedSolverRegressionTest, NormalizedPathWorksWithSnapshots) {
     // Create batch eligible for normalized solver
-    std::vector<AmericanOptionParams> batch(5);
+    std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0 + i * 10.0,  // Varying spot
             100.0,             // Same strike
             1.0,               // Same maturity

@@ -55,7 +55,7 @@ double IVSolverFDM::estimate_lower_bound() const {
 
 double IVSolverFDM::objective_function(const IVQuery& query, double volatility) const {
     // Create American option parameters
-    AmericanOptionParams option_params;
+    PricingParams option_params;
     option_params.strike = query.strike;
     option_params.spot = query.spot;
     option_params.maturity = query.maturity;
@@ -113,11 +113,10 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     // Create solver and solve — always pass grid config to ensure the solver
     // uses the same grid we computed (matching the workspace size)
     try {
-        auto custom_grid_config = std::make_pair(grid_spec, time_domain);
+        auto explicit_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
 
         AmericanOptionSolver solver(option_params, pde_workspace_result.value(),
-                                    std::nullopt,  // snapshot_times
-                                    custom_grid_config);
+                                    PDEGridSpec{explicit_grid});
         // Surface always collected for value_at()
         auto price_result = solver.solve();
 

@@ -19,8 +19,8 @@ namespace bdata = mango::benchmark_data;
 namespace {
 
 // Helper to convert market data to solver params
-AmericanOptionParams make_params(const bdata::RealOptionData& opt, double vol = 0.20) {
-    return AmericanOptionParams(
+PricingParams make_params(const bdata::RealOptionData& opt, double vol = 0.20) {
+    return PricingParams(
         bdata::SPOT,               // spot
         opt.strike,                // strike
         opt.maturity,              // maturity
@@ -103,7 +103,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
 
 TEST(RealMarketDataTest, BatchPutPricing) {
     // Batch price puts using parallel solver
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(bdata::REAL_PUTS.size());
 
     for (const auto& opt : bdata::REAL_PUTS) {
@@ -127,7 +127,7 @@ TEST(RealMarketDataTest, BatchPutPricing) {
 
 TEST(RealMarketDataTest, BatchCallPricing) {
     // Batch price calls
-    std::vector<AmericanOptionParams> batch;
+    std::vector<PricingParams> batch;
     batch.reserve(bdata::REAL_CALLS.size());
 
     for (const auto& opt : bdata::REAL_CALLS) {

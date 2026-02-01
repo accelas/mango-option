@@ -64,7 +64,7 @@ private:
     /// @param fresh_results Fresh solve results (parallel to fresh_indices)
     /// @return Merged batch result with all_params.size() entries
     BatchAmericanOptionResult merge_results(
-        const std::vector<AmericanOptionParams>& all_params,
+        const std::vector<PricingParams>& all_params,
         const std::vector<size_t>& fresh_indices,
         const BatchAmericanOptionResult& fresh_results) const;
 };

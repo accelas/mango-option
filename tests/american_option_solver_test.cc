@@ -17,7 +17,7 @@ namespace mango {
 namespace {
 
 TEST(AmericanOptionSolverTest, ConstructorValidation) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -37,7 +37,7 @@ TEST(AmericanOptionSolverTest, ConstructorValidation) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidStrike) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,   // spot
         -100.0,  // strike (Invalid)
         1.0,     // maturity
@@ -56,7 +56,7 @@ TEST(AmericanOptionSolverTest, InvalidStrike) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidSpot) {
-    AmericanOptionParams params(
+    PricingParams params(
         0.0,    // spot (Invalid)
         100.0,  // strike
         1.0,    // maturity
@@ -75,7 +75,7 @@ TEST(AmericanOptionSolverTest, InvalidSpot) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidMaturity) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         -1.0,   // maturity (Invalid)
@@ -94,7 +94,7 @@ TEST(AmericanOptionSolverTest, InvalidMaturity) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidVolatility) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -114,7 +114,7 @@ TEST(AmericanOptionSolverTest, InvalidVolatility) {
 
 TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
     // Negative rates are valid (EUR, JPY, CHF markets)
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -133,7 +133,7 @@ TEST(AmericanOptionSolverTest, NegativeRateAllowed) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidDividendYield) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -152,7 +152,7 @@ TEST(AmericanOptionSolverTest, InvalidDividendYield) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridNSpace) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -178,7 +178,7 @@ TEST(AmericanOptionSolverTest, InvalidGridNTime) {
 }
 
 TEST(AmericanOptionSolverTest, InvalidGridBounds) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -195,7 +195,7 @@ TEST(AmericanOptionSolverTest, InvalidGridBounds) {
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividends) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -220,7 +220,7 @@ TEST(AmericanOptionSolverTest, DiscreteDividends) {
 
 TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     // Should reject negative time
-    AmericanOptionParams params1(
+    PricingParams params1(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -241,7 +241,7 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
     }, std::invalid_argument);
 
     // Should reject time beyond maturity
-    AmericanOptionParams params2(
+    PricingParams params2(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -260,7 +260,7 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidTime) {
 }
 
 TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -283,7 +283,7 @@ TEST(AmericanOptionSolverTest, DiscreteDividendInvalidAmount) {
 }
 
 TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -315,7 +315,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutNoDiv) {
 }
 
 TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -336,7 +336,7 @@ TEST(AmericanOptionSolverTest, GetSolutionBeforeSolve) {
 }
 
 TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -367,7 +367,7 @@ TEST(AmericanOptionSolverTest, DeltaIsReasonable) {
 }
 
 TEST(AmericanOptionSolverTest, GammaIsComputed) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -403,7 +403,7 @@ TEST(AmericanOptionSolverTest, GammaIsComputed) {
 TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
     // Test American call option with discrete dividends
     // Dividends make early exercise more attractive for calls
-    AmericanOptionParams params(
+    PricingParams params(
         110.0,  // spot (ITM call)
         100.0,  // strike
         1.0,    // maturity
@@ -450,7 +450,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanCallWithDiscreteDividends) {
 TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
     // Test American put option with discrete dividends
     // Dividends make early exercise less attractive for puts
-    AmericanOptionParams params(
+    PricingParams params(
         90.0,   // spot (ITM put)
         100.0,  // strike
         1.0,    // maturity
@@ -512,7 +512,7 @@ TEST(AmericanOptionSolverTest, SolveAmericanPutWithDiscreteDividends) {
 TEST(AmericanOptionSolverTest, HybridDividendModel) {
     // Test using both continuous and discrete dividends simultaneously
     // This models a stock with continuous yield + known discrete payments
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -558,9 +558,9 @@ TEST(AmericanOptionSolverTest, HybridDividendModel) {
 }
 
 TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
-    std::vector<AmericanOptionParams> batch(5);
+    std::vector<PricingParams> batch(5);
     for (size_t i = 0; i < 5; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0,                   // spot
             100.0,                   // strike
             1.0,                     // maturity
@@ -599,9 +599,9 @@ TEST(BatchAmericanOptionSolverTest, SetupCallbackInvoked) {
 }
 
 TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
-    std::vector<AmericanOptionParams> batch(3);
+    std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0,          // spot
             100.0,          // strike
             1.0,            // maturity
@@ -644,9 +644,9 @@ TEST(BatchAmericanOptionSolverTest, ExtractPricesFromSurface) {
 }
 
 TEST(BatchAmericanOptionSolverTest, NoCallbackBackwardCompatible) {
-    std::vector<AmericanOptionParams> batch(3);
+    std::vector<PricingParams> batch(3);
     for (size_t i = 0; i < 3; ++i) {
-        batch[i] = AmericanOptionParams(
+        batch[i] = PricingParams(
             100.0,          // spot
             100.0,          // strike
             1.0,            // maturity

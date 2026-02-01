@@ -197,14 +197,14 @@ public:
         OptionType type = OptionType::PUT);
 
     /// For testing: expose make_batch method
-    [[nodiscard]] std::vector<AmericanOptionParams> make_batch_for_testing(
+    [[nodiscard]] std::vector<PricingParams> make_batch_for_testing(
         const PriceTableAxes<N>& axes) const {
         return make_batch(axes);
     }
 
     /// For testing: expose solve_batch method
     [[nodiscard]] BatchAmericanOptionResult solve_batch_for_testing(
-        const std::vector<AmericanOptionParams>& batch,
+        const std::vector<PricingParams>& batch,
         const PriceTableAxes<N>& axes) const {
         return solve_batch(batch, axes);
     }
@@ -248,9 +248,9 @@ public:
     // These methods expose internal functionality for incremental builds.
     // =========================================================================
 
-    /// Internal API: generate batch of AmericanOptionParams from axes
+    /// Internal API: generate batch of PricingParams from axes
     /// Used by AdaptiveGridBuilder for incremental builds
-    [[nodiscard]] std::vector<AmericanOptionParams> make_batch_internal(
+    [[nodiscard]] std::vector<PricingParams> make_batch_internal(
         const PriceTableAxes<N>& axes) const {
         return make_batch(axes);
     }
@@ -258,7 +258,7 @@ public:
     /// Internal API: solve batch of options
     /// Used by AdaptiveGridBuilder for incremental builds
     [[nodiscard]] BatchAmericanOptionResult solve_batch_internal(
-        const std::vector<AmericanOptionParams>& batch,
+        const std::vector<PricingParams>& batch,
         const PriceTableAxes<N>& axes) const {
         return solve_batch(batch, axes);
     }
@@ -299,18 +299,18 @@ private:
         std::vector<double> coefficients;
         BSplineFittingStats<double, N> stats;
     };
-    /// Generate batch of AmericanOptionParams from axes
-    [[nodiscard]] std::vector<AmericanOptionParams> make_batch(
+    /// Generate batch of PricingParams from axes
+    [[nodiscard]] std::vector<PricingParams> make_batch(
         const PriceTableAxes<N>& axes) const;
 
     /// Estimate PDE grid from batch parameters using pde_accuracy config
     [[nodiscard]] std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
-        const std::vector<AmericanOptionParams>& batch,
+        const std::vector<PricingParams>& batch,
         const PriceTableAxes<N>& axes) const;
 
     /// Solve batch of options with snapshot registration
     [[nodiscard]] BatchAmericanOptionResult solve_batch(
-        const std::vector<AmericanOptionParams>& batch,
+        const std::vector<PricingParams>& batch,
         const PriceTableAxes<N>& axes) const;
 
     /// Extract PriceTensor from batch results using cubic spline interpolation

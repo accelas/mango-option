@@ -15,7 +15,7 @@ The module is built as `mango_option.so` in `bazel-bin/src/python/`.
 ```python
 import mango_option as mo
 
-params = mo.AmericanOptionParams()
+params = mo.PricingParams()
 params.spot = 100.0
 params.strike = 100.0
 params.maturity = 1.0
@@ -74,7 +74,7 @@ Note: The discrete dividends field is plumbed through to the C++ solver. The sol
 # Build a batch of puts at different strikes
 batch = []
 for K in [90, 95, 100, 105, 110]:
-    p = mo.AmericanOptionParams()
+    p = mo.PricingParams()
     p.spot = 100.0
     p.strike = K
     p.maturity = 1.0
@@ -200,7 +200,7 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 
 | Class | Purpose |
 |-------|---------|
-| `AmericanOptionParams` | Option contract parameters (spot, strike, maturity, volatility, rate, dividend_yield, type, discrete_dividends) |
+| `PricingParams` | Option contract parameters (spot, strike, maturity, volatility, rate, dividend_yield, type, discrete_dividends) |
 | `AmericanOptionResult` | Pricing result with `value_at(spot)`, `delta()`, `gamma()`, `theta()` |
 | `BatchAmericanOptionSolver` | Parallel batch pricing with normalized chain optimization |
 | `GridAccuracyParams` | Fine-grained grid control (tol, n_sigma, alpha, spatial/time limits) |

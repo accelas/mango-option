@@ -81,7 +81,7 @@ double price_american_option_quantlib(
 // ============================================================================
 
 static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
@@ -141,7 +141,7 @@ BENCHMARK(BM_QuantLib_AmericanPut_ATM);
 // ----------------------------------------------------------------------------
 
 static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         110.0,  // spot
         100.0,  // strike
         0.25,   // maturity
@@ -201,7 +201,7 @@ BENCHMARK(BM_QuantLib_AmericanPut_OTM);
 // ----------------------------------------------------------------------------
 
 static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         90.0,   // spot
         100.0,  // strike
         2.0,    // maturity
@@ -263,7 +263,7 @@ BENCHMARK(BM_QuantLib_AmericanPut_ITM);
 // ============================================================================
 
 static void BM_Mango_GridResolution(benchmark::State& state) {
-    AmericanOptionParams params(
+    PricingParams params(
         100.0,  // spot
         100.0,  // strike
         1.0,    // maturity
