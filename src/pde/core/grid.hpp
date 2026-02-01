@@ -800,13 +800,32 @@ convert_times_to_indices(std::span<const double> times,
                 t));
         }
 
-        // Convert to nearest state index
-        double step_exact = (t - t_start) / dt;
-        size_t state_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
-        state_idx = std::min(state_idx, n_steps);  // Clamp to n_steps
+        size_t state_idx;
+        double snapped_t;
+
+        if (time_domain.has_time_points()) {
+            // Non-uniform: binary search through stored time points
+            const auto& pts = time_domain.time_points_ref();
+            double tol = dt * 1e-6;  // relative tolerance for snap-to-grid
+            auto it = std::lower_bound(pts.begin(), pts.end(), t - tol);
+            size_t idx = static_cast<size_t>(std::distance(pts.begin(), it));
+            // Find nearest point
+            if (idx > 0 && (idx == pts.size() ||
+                std::abs(pts[idx-1] - t) < std::abs(pts[idx] - t))) {
+                idx--;
+            }
+            state_idx = std::min(idx, n_steps);
+            snapped_t = pts[state_idx];
+        } else {
+            // Uniform: existing arithmetic path
+            double step_exact = (t - t_start) / dt;
+            state_idx = static_cast<size_t>(std::floor(step_exact + 0.5));
+            state_idx = std::min(state_idx, n_steps);
+            snapped_t = t_start + state_idx * dt;
+        }
 
         indices.push_back(state_idx);
-        snapped_times.push_back(t_start + state_idx * dt);
+        snapped_times.push_back(snapped_t);
     }
 
     // Sort and deduplicate
