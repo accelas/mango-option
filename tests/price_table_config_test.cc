@@ -10,11 +10,8 @@ TEST(PriceTableConfigTest, DefaultValues) {
     EXPECT_EQ(config.option_type, OptionType::PUT);
     EXPECT_DOUBLE_EQ(config.dividend_yield, 0.0);
     EXPECT_TRUE(config.discrete_dividends.empty());
-    // Default PDE grid is ExplicitPDEGrid with 101 points and 1000 time steps
-    ASSERT_TRUE(std::holds_alternative<ExplicitPDEGrid>(config.pde_grid));
-    auto& grid = std::get<ExplicitPDEGrid>(config.pde_grid);
-    EXPECT_EQ(grid.n_time, 1000);
-    EXPECT_EQ(grid.grid_spec.n_points(), 101);
+    // Default PDE grid is GridAccuracyParams (auto-estimated)
+    ASSERT_TRUE(std::holds_alternative<GridAccuracyParams>(config.pde_grid));
 }
 
 TEST(PriceTableConfigTest, WithDiscreteDividends) {

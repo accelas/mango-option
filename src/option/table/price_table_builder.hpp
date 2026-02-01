@@ -117,7 +117,7 @@ public:
         std::vector<double> volatility,
         std::vector<double> rate,
         double K_ref,
-        PDEGridSpec pde_grid = ExplicitPDEGrid{},
+        PDEGridSpec pde_grid = GridAccuracyParams{},
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0);
@@ -145,7 +145,7 @@ public:
         std::vector<double> maturities,
         std::vector<double> volatilities,
         std::vector<double> rates,
-        PDEGridSpec pde_grid = ExplicitPDEGrid{},
+        PDEGridSpec pde_grid = GridAccuracyParams{},
         OptionType type = OptionType::PUT,
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0);
@@ -164,7 +164,7 @@ public:
     static Setup
     from_grid(
         const OptionGrid& chain,
-        PDEGridSpec pde_grid = ExplicitPDEGrid{},
+        PDEGridSpec pde_grid = GridAccuracyParams{},
         OptionType type = OptionType::PUT,
         double max_failure_rate = 0.0);
 
@@ -182,7 +182,7 @@ public:
     static Setup
     from_grid_auto(
         const OptionGrid& chain,
-        PDEGridSpec pde_grid = ExplicitPDEGrid{},
+        PDEGridSpec pde_grid = GridAccuracyParams{},
         OptionType type = OptionType::PUT,
         const PriceTableGridAccuracyParams<4>& accuracy = {});
 
