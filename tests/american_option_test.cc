@@ -324,6 +324,29 @@ TEST_F(AmericanOptionPricingTest, NormalizedChainFallsBackWithDividends) {
 }
 
 // ===========================================================================
+// Regression: create() must validate workspace/grid at construction time
+// Bug: Mismatch between workspace size and grid was only caught at solve()
+// ===========================================================================
+
+TEST(AmericanOptionTest, CreateRejectsMismatchedWorkspace) {
+    // #306: Mismatch should fail at create(), not at solve()
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .type = OptionType::PUT},
+        0.20);
+
+    // Create a workspace that is deliberately too small (10 points)
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(10));
+    auto ws = PDEWorkspace::from_buffer(buffer, 10);
+    ASSERT_TRUE(ws.has_value());
+
+    // create() should now fail because auto-estimated grid needs ~100+ points
+    auto result = AmericanOptionSolver::create(params, ws.value());
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ValidationErrorCode::InvalidGridSize);
+}
+
+// ===========================================================================
 // solve_american_option_auto accessible from primary header
 // ===========================================================================
 

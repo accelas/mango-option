@@ -190,7 +190,7 @@ public:
     create(const PricingParams& params,
            PDEWorkspace workspace,
            std::optional<PDEGridSpec> grid = std::nullopt,
-           std::optional<std::span<const double>> snapshot_times = std::nullopt) noexcept;
+           std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     /**
      * Set snapshot times for solution recording.
@@ -223,7 +223,7 @@ public:
 private:
     AmericanOptionSolver(const PricingParams& params,
                         PDEWorkspace workspace,
-                        std::optional<PDEGridSpec> grid = std::nullopt,
+                        std::pair<GridSpec<double>, TimeDomain> grid_config,
                         std::optional<std::span<const double>> snapshot_times = std::nullopt);
 
     // Parameters
@@ -236,8 +236,8 @@ private:
     std::vector<double> snapshot_times_;
 
     // Resolved grid configuration (GridSpec + TimeDomain)
-    // Resolved from PDEGridSpec at construction time
-    std::optional<std::pair<GridSpec<double>, TimeDomain>> grid_config_;
+    // Always resolved at create() time — never empty
+    std::pair<GridSpec<double>, TimeDomain> grid_config_;
 
     // TR-BDF2 configuration for the PDE solver
     TRBDF2Config trbdf2_config_;
