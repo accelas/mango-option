@@ -105,12 +105,15 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
         dx_span[i] = grid_points[i + 1] - grid_points[i];
     }
 
-    // Pre-allocate spline for dividend events (zero-alloc after first build)
+    // Pre-allocate spline for dividend events (zero-alloc after first build).
+    // Use a workspace scratch buffer as dummy y-data to avoid a heap allocation.
     CubicSpline<double> dividend_spline;
     if (!params_.discrete_dividends.empty()) {
         auto x = grid->x();
-        std::vector<double> dummy(x.size(), 0.0);
-        [[maybe_unused]] auto err = dividend_spline.build(x, std::span<const double>(dummy));
+        auto scratch = workspace_.reserved1();
+        std::fill(scratch.begin(), scratch.end(), 0.0);
+        [[maybe_unused]] auto err = dividend_spline.build(
+            x, std::span<const double>(scratch.data(), x.size()));
     }
 
     // Create appropriate PDE solver (put vs call)
