@@ -82,14 +82,9 @@ double price_american_option_quantlib(
 
 static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+        0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -142,14 +137,9 @@ BENCHMARK(BM_QuantLib_AmericanPut_ATM);
 
 static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
     PricingParams params(
-        110.0,  // spot
-        100.0,  // strike
-        0.25,   // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.30    // volatility
-    );
+        OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25,
+            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+        0.30);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -202,14 +192,9 @@ BENCHMARK(BM_QuantLib_AmericanPut_OTM);
 
 static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
     PricingParams params(
-        90.0,   // spot
-        100.0,  // strike
-        2.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.25    // volatility
-    );
+        OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0,
+            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+        0.25);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
@@ -264,14 +249,9 @@ BENCHMARK(BM_QuantLib_AmericanPut_ITM);
 
 static void BM_Mango_GridResolution(benchmark::State& state) {
     PricingParams params(
-        100.0,  // spot
-        100.0,  // strike
-        1.0,    // maturity
-        0.05,   // rate
-        0.02,   // dividend_yield
-        OptionType::PUT,
-        0.20    // volatility
-    );
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .type = OptionType::PUT},
+        0.20);
 
     auto [grid_spec, time_domain] = estimate_grid_for_option(params);
 
