@@ -1472,11 +1472,14 @@ cc_test(
 cc_test(
     name = "iv_solver_factory_test",
     size = "medium",
+    timeout = "moderate",
     srcs = ["iv_solver_factory_test.cc"],
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
         "//src/option:iv_solver_factory",
+        "//src/option:american_option",
+        "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
 )

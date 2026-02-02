@@ -202,9 +202,11 @@ auto iv_result = iv_solver.solve(iv_query);
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
-    .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-    .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
-    .rate_grid = {0.02, 0.05},
+    .grid = mango::ManualGrid{
+        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    },
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
         .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},

@@ -231,6 +231,8 @@ cc_library(
     hdrs = ["iv_solver_factory.hpp"],
     deps = [
         ":interpolated_iv_solver",
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table:adaptive_grid_types",
         "//src/option/table:american_price_surface",
         "//src/option/table:segmented_multi_kref_surface",
         "//src/option/table:segmented_multi_kref_builder",

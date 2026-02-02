@@ -526,9 +526,11 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
-    .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-    .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
-    .rate_grid = {0.02, 0.03, 0.05, 0.07},
+    .grid = mango::ManualGrid{
+        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    },
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
         .discrete_dividends = {
@@ -541,21 +543,23 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-The factory dispatches on the `path` variant:
+The factory dispatches on two orthogonal variants:
 
-- **`StandardIVPath`** — no discrete dividends. Builds a single `AmericanPriceSurface` with a maturity grid. Use this for continuous-dividend options.
-- **`SegmentedIVPath`** — discrete dividends present. Builds a `SegmentedMultiKRefSurface` with backward chaining. Use this when dividends are known.
+- **`path`**: `StandardIVPath` (continuous dividends) or `SegmentedIVPath` (discrete dividends)
+- **`grid`**: `ManualGrid` (explicit grid points) or `AdaptiveGrid` (automatic density tuning to target IV accuracy)
 
-### Standard Path (No Discrete Dividends)
+### Standard Path with Manual Grid
 
 ```cpp
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.02,
-    .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-    .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
-    .rate_grid = {0.02, 0.03, 0.05, 0.07},
+    .grid = mango::ManualGrid{
+        .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
+        .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
+        .rate = {0.02, 0.03, 0.05, 0.07},
+    },
     .path = mango::StandardIVPath{
         .maturity_grid = {0.1, 0.25, 0.5, 1.0},
     },
@@ -563,6 +567,30 @@ mango::IVSolverFactoryConfig config{
 
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
+
+### Standard Path with Adaptive Grid
+
+Instead of choosing grid points manually, specify a target IV accuracy:
+
+```cpp
+mango::IVSolverFactoryConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .dividend_yield = 0.02,
+    .grid = mango::AdaptiveGrid{
+        .params = {.target_iv_error = 0.001},
+    },
+    .path = mango::StandardIVPath{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+};
+
+auto solver = mango::make_interpolated_iv_solver(config);
+```
+
+`AdaptiveGrid` includes sensible domain-bound defaults (moneyness 0.7–1.3, vol 0.05–0.50, rate 0.01–0.10). The builder iteratively refines grid density, validating via Latin Hypercube sampling against fresh PDE solves, until the target is met.
+
+> **Note:** `AdaptiveGrid` currently supports `StandardIVPath` only. For `SegmentedIVPath`, use `ManualGrid`. See [#320](https://github.com/accelas/mango-option/issues/320) for planned adaptive support on the segmented path.
 
 ### Querying the Solver
 
