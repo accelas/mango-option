@@ -13,9 +13,10 @@ Practical examples and common usage patterns for the mango-option library.
 4. [Price Table Pre-Computation](#price-table-pre-computation)
 5. [Discrete Dividends](#discrete-dividends)
 6. [Batch Processing](#batch-processing)
-7. [Custom PDE Solving](#custom-pde-solving)
-8. [Error Handling Patterns](#error-handling-patterns)
-9. [Advanced Topics](#advanced-topics)
+7. [Choosing an Approach](#choosing-an-approach)
+8. [Custom PDE Solving](#custom-pde-solving)
+9. [Error Handling Patterns](#error-handling-patterns)
+10. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -587,17 +588,6 @@ if (result.has_value()) {
 - **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest.
 - **Continuous yield** applies inside each segment's PDE. Discrete dividends operate at segment boundaries. Both can be used together.
 
-### Choosing an Approach
-
-| Scenario | Approach | Latency |
-|---|---|---|
-| Price one option with dividends | `solve_american_option(params)` | ~5–20ms |
-| Price one option without dividends | `solve_american_option(params)` | ~5–20ms |
-| IV surface (no dividends) | `make_interpolated_iv_solver` + `StandardIVPath` | ~3.5μs/query |
-| IV surface (with dividends) | `make_interpolated_iv_solver` + `SegmentedIVPath` | ~3.5μs/query |
-
-Use the FDM solver for individual prices or when you need per-option control (custom grids, yield curves). Use the segmented surface builder when you need to evaluate many IV queries against the same dividend schedule — the upfront build cost is amortized across thousands of queries. The continuous yield approximation avoids temporal events entirely, at the cost of accuracy near dividend dates.
-
 ---
 
 ## Batch Processing
@@ -730,6 +720,33 @@ for (const auto& coords : queries) {
 ```
 
 Use FDM batch when you need exact PDE accuracy or have few queries. Use the price surface when you have many queries against the same parameter space and can tolerate interpolation error (see [Interpolated Greek Accuracy](#interpolated-greek-accuracy)).
+
+---
+
+## Choosing an Approach
+
+### Pricing
+
+| Scenario | Approach | Latency |
+|---|---|---|
+| Single option | `solve_american_option(params)` | ~5–20ms |
+| Single option with discrete dividends | `solve_american_option(params)` with `Dividend` list | ~5–20ms |
+| Batch (same parameters, varying strikes) | `BatchAmericanOptionSolver` with chain solving | ~5–20ms total (1 PDE) |
+| Batch (mixed parameters) | `BatchAmericanOptionSolver` | ~5–20ms per group |
+| Many queries, same parameter space | Pre-compute price table, query `AmericanPriceSurface` | ~500ns/query |
+
+### Implied Volatility
+
+| Scenario | Approach | Latency |
+|---|---|---|
+| Single option | `IVSolver::solve(query)` | ~19ms |
+| Batch (independent queries) | `IVSolver::solve_batch(queries)` | ~19ms each (parallelized) |
+| Many queries, no dividends | `make_interpolated_iv_solver` + `StandardIVPath` | ~3.5μs/query |
+| Many queries, with dividends | `make_interpolated_iv_solver` + `SegmentedIVPath` | ~3.5μs/query |
+
+**When to use FDM vs interpolated:** FDM solves a full PDE per query — use it for small batches or when you need exact accuracy. Interpolated solvers query a pre-computed B-spline surface — use them when amortizing build cost over thousands of queries. See [Interpolated Greek Accuracy](#interpolated-greek-accuracy) for error bounds.
+
+**When to use continuous yield vs discrete dividends:** Continuous yield avoids temporal events and is compatible with chain solving and price tables. Discrete dividends are exact but require the segmented surface path for interpolated IV. Use continuous yield when dividend timing is unimportant.
 
 ---
 
