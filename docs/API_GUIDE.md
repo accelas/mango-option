@@ -498,9 +498,9 @@ mango::PricingParams params(
 
 This solves a single smooth PDE without temporal events. The tradeoff: continuous yield spreads the dividend effect uniformly across maturity, which misprices options with maturities near dividend dates.
 
-### Segmented Surfaces for IV (Discrete Dividends)
+### Segmented Surfaces for Price Tables (Discrete Dividends)
 
-When computing implied volatility for many options that share the same dividend schedule — the typical case when calibrating a vol surface from market data — the FDM solver is too slow per query. The segmented surface builder pre-computes price surfaces that can be queried in microseconds.
+The [Price Table Pre-Computation](#price-table-pre-computation) workflow assumes scale invariance in strike, which breaks with discrete dividends. The segmented surface builder is the price table equivalent for discrete dividends — it pre-computes price surfaces that can be queried in microseconds, enabling fast interpolated IV over a dividend schedule.
 
 **Why segmentation?** A single B-spline surface cannot fit the discontinuity at a dividend date. The builder splits the maturity axis into segments separated by dividend dates and solves each independently.
 
