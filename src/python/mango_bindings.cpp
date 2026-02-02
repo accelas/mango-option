@@ -256,7 +256,7 @@ PYBIND11_MODULE(mango_option, m) {
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 
-    // AnyIVSolver class (now using FDM solver with std::expected)
+    // IVSolver class (FDM-based IV solver with std::expected)
     py::class_<mango::IVSolver>(m, "IVSolver")
         .def(py::init<const mango::IVSolverConfig&>(),
              py::arg("config"))

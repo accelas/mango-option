@@ -19,7 +19,7 @@ std::shared_ptr<AmericanOptionResult> make_dummy_result() {
     params.dividend_yield = 0.0;
     params.option_type = OptionType::PUT;
 
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     if (result.has_value()) {
         return std::make_shared<AmericanOptionResult>(std::move(result.value()));
     }

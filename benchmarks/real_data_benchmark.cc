@@ -1067,7 +1067,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         const double sigma_synth = 0.20;
         for (double K : {703.0, 708.0, 725.0}) {
             PricingParams p(OptionSpec{.spot = SPOT, .strike = K, .maturity = iv_fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .option_type = OptionType::PUT}, sigma_synth);
-            auto result = solve_american_option_auto(p);
+            auto result = solve_american_option(p);
             if (!result) continue;
             double price = result->value_at(SPOT);
             if (price > 0.0) {

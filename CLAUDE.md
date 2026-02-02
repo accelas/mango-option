@@ -87,7 +87,7 @@ mango::PricingParams params(
     0.20);  // volatility
 
 // Convenience API: auto grid, auto workspace
-auto result = mango::solve_american_option_auto(params);
+auto result = mango::solve_american_option(params);
 
 if (result.has_value()) {
     std::cout << "Price: " << result->value_at(100.0) << "\n";

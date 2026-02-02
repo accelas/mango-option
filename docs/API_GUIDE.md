@@ -37,7 +37,7 @@ int main() {
         0.20);  // volatility
 
     // Solve (auto grid, auto workspace)
-    auto result = mango::solve_american_option_auto(params);
+    auto result = mango::solve_american_option(params);
 
     if (result.has_value()) {
         std::cout << "Price: " << result->value_at(100.0) << "\n";
@@ -107,7 +107,7 @@ mango::PricingParams params(
     0.25);  // volatility
 
 // Solve (auto grid, auto workspace)
-auto result = mango::solve_american_option_auto(params);
+auto result = mango::solve_american_option(params);
 
 if (result.has_value()) {
     double price = result->value_at(105.0);

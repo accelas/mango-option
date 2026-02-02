@@ -9,7 +9,7 @@ using namespace mango;
 // Test for new std::expected signature (Task 2.1)
 // NOTE: This test calls solve() directly to verify the new signature,
 // bypassing the base class which still returns IVResult (will be updated in Task 3).
-TEST(IVSolverFDMExpected, ReturnsExpectedType) {
+TEST(IVSolverExpected, ReturnsExpectedType) {
     // Simple test to verify std::expected signature compiles
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
@@ -35,7 +35,7 @@ TEST(IVSolverFDMExpected, ReturnsExpectedType) {
 
 // Arbitrage and boundary validation tests (unique to std::expected API)
 
-TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
+TEST(IVSolverExpected, ValidationArbitrageCallExceedsSpot) {
     // Call price cannot exceed spot price
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 150.0);
@@ -49,7 +49,7 @@ TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
     // Error code checked above
 }
 
-TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
+TEST(IVSolverExpected, ValidationArbitragePutExceedsStrike) {
     // Put price cannot exceed strike price
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 150.0);
@@ -63,7 +63,7 @@ TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
     // Error code checked above
 }
 
-TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
+TEST(IVSolverExpected, ValidationPriceBelowIntrinsicCall) {
     // Market price must be >= intrinsic value
     // For call: intrinsic = max(S - K, 0) = max(110 - 100, 0) = 10
     IVQuery query(
@@ -78,7 +78,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
     // Error code checked above
 }
 
-TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
+TEST(IVSolverExpected, ValidationPriceBelowIntrinsicPut) {
     // Market price must be >= intrinsic value
     // For put: intrinsic = max(K - S, 0) = max(110 - 100, 0) = 10
     IVQuery query(
@@ -93,7 +93,7 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
     // Error code checked above
 }
 
-TEST(IVSolverFDMExpected, ValidationZeroSpot) {
+TEST(IVSolverExpected, ValidationZeroSpot) {
     IVQuery query(
         OptionSpec{.spot = 0.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
@@ -106,7 +106,7 @@ TEST(IVSolverFDMExpected, ValidationZeroSpot) {
     // Error code checked above
 }
 
-TEST(IVSolverFDMExpected, ValidationZeroStrike) {
+TEST(IVSolverExpected, ValidationZeroStrike) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 0.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
@@ -121,7 +121,7 @@ TEST(IVSolverFDMExpected, ValidationZeroStrike) {
 
 // Task 2.3 Brent Solver Integration Tests
 
-TEST(IVSolverFDMExpected, SolvesATMPut) {
+TEST(IVSolverExpected, SolvesATMPut) {
     // ATM American put - typical case
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
@@ -137,7 +137,7 @@ TEST(IVSolverFDMExpected, SolvesATMPut) {
     EXPECT_LT(result->final_error, 1e-4);  // Converged
 }
 
-TEST(IVSolverFDMExpected, SolvesITMPut) {
+TEST(IVSolverExpected, SolvesITMPut) {
     // ITM put - K > S
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0);
@@ -151,7 +151,7 @@ TEST(IVSolverFDMExpected, SolvesITMPut) {
     EXPECT_LT(result->implied_vol, 1.0);
 }
 
-TEST(IVSolverFDMExpected, SolvesOTMPut) {
+TEST(IVSolverExpected, SolvesOTMPut) {
     // OTM put - K < S
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0);
@@ -165,7 +165,7 @@ TEST(IVSolverFDMExpected, SolvesOTMPut) {
     EXPECT_LT(result->implied_vol, 1.0);
 }
 
-TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
+TEST(IVSolverExpected, ConvergenceFailureMaxIterations) {
     // Artificially low max_iter to force failure
     IVSolverConfig config;
     config.root_config.max_iter = 2;  // Too few iterations
@@ -181,7 +181,7 @@ TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
     EXPECT_GT(result.error().iterations, 0);
 }
 
-TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
+TEST(IVSolverExpected, RealisticVolatilityValues) {
     // Test with known market scenario
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5, .rate = 0.03, .option_type = OptionType::PUT}, 5.0);
@@ -205,7 +205,7 @@ TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
 
 // Task 3.2 Batch Solver Tests
 
-TEST(IVSolverFDMExpected, BatchSolveAllSuccess) {
+TEST(IVSolverExpected, BatchSolveAllSuccess) {
     // Batch of 3 valid queries
     std::vector<IVQuery> queries = {
         IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0),
@@ -230,7 +230,7 @@ TEST(IVSolverFDMExpected, BatchSolveAllSuccess) {
     }
 }
 
-TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
+TEST(IVSolverExpected, BatchSolveMixedResults) {
     // Mix of valid and invalid queries
     std::vector<IVQuery> queries = {
         // Valid query
@@ -258,7 +258,7 @@ TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
     ASSERT_TRUE(batch_result.results[2].has_value());
 }
 
-TEST(IVSolverFDMExpected, BatchSolveEmptyBatch) {
+TEST(IVSolverExpected, BatchSolveEmptyBatch) {
     std::vector<IVQuery> queries;  // Empty
 
     IVSolverConfig config;

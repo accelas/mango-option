@@ -214,11 +214,11 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.0, .amount = 5.0}, {.calendar_time = 1.0, .amount = 5.0}});
 
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
 
     PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
-    auto result_no_div = solve_american_option_auto(no_div);
+    auto result_no_div = solve_american_option(no_div);
     ASSERT_TRUE(result_no_div.has_value());
 
     EXPECT_NEAR(result->value(), result_no_div->value(), 1e-10)

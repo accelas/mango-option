@@ -266,7 +266,7 @@ static_assert(OptionSolver<AmericanOptionSolver>);
 ///
 /// @param params Option parameters
 /// @return Expected containing result on success, error on failure
-inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
+inline std::expected<AmericanOptionResult, SolverError> solve_american_option(
     const PricingParams& params)
 {
     // Estimate grid for this option

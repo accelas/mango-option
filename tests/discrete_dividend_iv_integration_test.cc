@@ -44,7 +44,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
             .rate = 0.05, .option_type = OptionType::PUT},
         0.20, {{.calendar_time = 0.5, .amount = 2.0}});
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     double market_price = price_result->value();
     EXPECT_GT(market_price, 0.0) << "FDM price should be positive";
@@ -77,7 +77,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
             .rate = 0.05, .option_type = OptionType::PUT},
         0.25, {{.calendar_time = 0.5, .amount = 2.0}});
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     EXPECT_GT(price_result->value(), 0.0);
 
@@ -112,7 +112,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
             OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = tau,
                 .rate = 0.05, .option_type = OptionType::PUT}, 0.20, divs);
 
-        auto price_result = solve_american_option_auto(params);
+        auto price_result = solve_american_option(params);
         ASSERT_TRUE(price_result.has_value());
         EXPECT_GT(price_result->value(), 0.0);
 
@@ -145,7 +145,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.3,
             .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     EXPECT_GT(price_result->value(), 0.0);
 
@@ -175,7 +175,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
             .rate = 0.03, .option_type = OptionType::PUT},
         0.35, {{.calendar_time = 0.5, .amount = 2.0}});
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     EXPECT_GT(price_result->value(), 0.0);
 
@@ -219,7 +219,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
 
     IVQuery query;
