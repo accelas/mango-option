@@ -112,3 +112,80 @@ TEST(SegmentedMultiKRefSurfaceTest, CreateRejectsEmptyEntries) {
     auto result = SegmentedMultiKRefSurface::create(std::move(entries));
     ASSERT_FALSE(result.has_value());
 }
+
+// ===========================================================================
+// Regression tests for C1 smoothness at K_ref boundaries
+// These detect C0 kinks from piecewise linear interpolation (< 4 K_ref points)
+// ===========================================================================
+
+// Numerical derivative smoothness test at K_ref boundaries
+TEST(SegmentedMultiKRefSurfaceTest, C1SmoothnessAtKRefBoundary) {
+    auto s80 = build_surface(80.0);
+    auto s100 = build_surface(100.0);
+    auto s120 = build_surface(120.0);
+
+    std::vector<SegmentedMultiKRefSurface::Entry> entries;
+    entries.push_back({80.0, std::move(s80)});
+    entries.push_back({100.0, std::move(s100)});
+    entries.push_back({120.0, std::move(s120)});
+
+    auto surface = SegmentedMultiKRefSurface::create(std::move(entries));
+    ASSERT_TRUE(surface.has_value());
+
+    // Use off-boundary points to avoid the exact-match branch in price()
+    constexpr double spot = 100.0, tau = 0.5, sigma = 0.20, rate = 0.05;
+    constexpr double h = 0.5;
+
+    // 4-point stencil near K_ref=100
+    double K = 100.0;
+    double p_minus2h = surface->price(spot, K - 2*h, tau, sigma, rate);
+    double p_minus_h = surface->price(spot, K - h, tau, sigma, rate);
+    double p_plus_h  = surface->price(spot, K + h, tau, sigma, rate);
+    double p_plus2h  = surface->price(spot, K + 2*h, tau, sigma, rate);
+
+    double deriv_left  = (p_minus_h - p_minus2h) / h;
+    double deriv_right = (p_plus2h - p_plus_h) / h;
+
+    double avg_deriv = 0.5 * (std::abs(deriv_left) + std::abs(deriv_right));
+    if (avg_deriv > 1e-10) {
+        double rel_diff = std::abs(deriv_left - deriv_right) / avg_deriv;
+        EXPECT_LT(rel_diff, 0.10)
+            << "Derivative discontinuity at K_ref=100: "
+            << "left=" << deriv_left << " right=" << deriv_right;
+    }
+}
+
+// Also test vega smoothness at K_ref boundaries
+TEST(SegmentedMultiKRefSurfaceTest, VegaSmoothnessAtKRefBoundary) {
+    auto s80 = build_surface(80.0);
+    auto s100 = build_surface(100.0);
+    auto s120 = build_surface(120.0);
+
+    std::vector<SegmentedMultiKRefSurface::Entry> entries;
+    entries.push_back({80.0, std::move(s80)});
+    entries.push_back({100.0, std::move(s100)});
+    entries.push_back({120.0, std::move(s120)});
+
+    auto surface = SegmentedMultiKRefSurface::create(std::move(entries));
+    ASSERT_TRUE(surface.has_value());
+
+    constexpr double spot = 100.0, tau = 0.5, sigma = 0.20, rate = 0.05;
+    constexpr double h = 0.5;
+
+    double K = 100.0;
+    double v_minus2h = surface->vega(spot, K - 2*h, tau, sigma, rate);
+    double v_minus_h = surface->vega(spot, K - h, tau, sigma, rate);
+    double v_plus_h  = surface->vega(spot, K + h, tau, sigma, rate);
+    double v_plus2h  = surface->vega(spot, K + 2*h, tau, sigma, rate);
+
+    double deriv_left  = (v_minus_h - v_minus2h) / h;
+    double deriv_right = (v_plus2h - v_plus_h) / h;
+
+    double avg_deriv = 0.5 * (std::abs(deriv_left) + std::abs(deriv_right));
+    if (avg_deriv > 1e-10) {
+        double rel_diff = std::abs(deriv_left - deriv_right) / avg_deriv;
+        EXPECT_LT(rel_diff, 0.10)
+            << "Vega derivative discontinuity at K_ref=100: "
+            << "left=" << deriv_left << " right=" << deriv_right;
+    }
+}
