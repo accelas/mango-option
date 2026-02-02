@@ -63,7 +63,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     accuracy.max_spatial_points = std::max(diag_grid.grid_spec.n_points(), size_t(1200));
     accuracy.max_time_steps = diag_grid.n_time;
 
-    auto [auto_grid, auto_time] = estimate_grid_for_option(params, accuracy);
+    auto [auto_grid, auto_time] = estimate_pde_grid(params, accuracy);
     std::cout << "\nAuto-estimated grid for these params:" << std::endl;
     std::cout << "  x_min: " << auto_grid.x_min() << std::endl;
     std::cout << "  x_max: " << auto_grid.x_max() << std::endl;

@@ -178,7 +178,7 @@ static void BM_README_AmericanSingle(benchmark::State& state) {
         0.20);
 
     // Use automatic grid estimation
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -237,7 +237,7 @@ static void BM_README_AmericanSequential(benchmark::State& state) {
         // Sequential processing - no batch API
         for (size_t idx = 0; idx < batch.size(); ++idx) {
             const auto& params = batch[idx];
-            auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+            auto [grid_spec, time_domain] = estimate_pde_grid(params);
             size_t n = grid_spec.n_points();
             std::pmr::synchronized_pool_resource pool;
             std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
@@ -353,13 +353,13 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     IVSolverFDM solver(config);
 
     // Get grid dimensions for typical case (σ=0.20 for ATM put)
-    // The solver uses estimate_grid_for_option() which bases grid on current σ
+    // The solver uses estimate_pde_grid() which bases grid on current σ
     PricingParams sample_params(
         OptionSpec{.spot = query.spot, .strike = query.strike,
             .maturity = query.maturity, .rate = query.rate,
             .dividend_yield = query.dividend_yield, .option_type = query.option_type},
         0.20);  // Typical IV ~20%
-    auto [grid_spec, time_domain] = estimate_grid_for_option(sample_params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(sample_params);
 
     auto run_once = [&]() {
         auto result = solver.solve(query);
@@ -470,7 +470,7 @@ static void BM_README_NormalizedChain(benchmark::State& state) {
     }
 
     // Get shared grid dimensions
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(params);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(params);
     const size_t n_options = params.size();
 
     for (auto _ : state) {

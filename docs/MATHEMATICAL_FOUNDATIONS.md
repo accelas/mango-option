@@ -330,7 +330,7 @@ Each cluster specifies a center, alpha, and weight. Clusters closer than 0.3/alp
 
 ### Automatic PDE Grid Estimation
 
-`estimate_grid_for_option()` builds a sinh grid tailored to a specific option. The logic:
+`estimate_pde_grid()` builds a sinh grid tailored to a specific option. The logic:
 
 **Domain bounds.** Extend +/- n_sigma standard deviations from the current log-moneyness:
 

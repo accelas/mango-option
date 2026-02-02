@@ -176,7 +176,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 static void BM_RealData_AmericanSingle(benchmark::State& state) {
     auto params = make_params(ATM_PUT);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
@@ -224,7 +224,7 @@ static void BM_RealData_AmericanSequential(benchmark::State& state) {
 
     auto run_once = [&]() {
         for (const auto& params : batch) {
-            auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+            auto [grid_spec, time_domain] = estimate_pde_grid(params);
             size_t n = grid_spec.n_points();
             std::pmr::synchronized_pool_resource pool;
             std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);

@@ -189,7 +189,7 @@ public:
     /// Top-level wrapper: estimate both price table grids and PDE grid from profiles
     ///
     /// Uses grid estimation for table axes (m, tau, sigma, r) and
-    /// computes a PDE grid/time domain via compute_global_grid_for_batch().
+    /// computes a PDE grid/time domain via estimate_batch_pde_grid().
     ///
     /// @param chain Option grid (provides domain bounds)
     /// @param grid_profile Accuracy profile for price table grid estimation

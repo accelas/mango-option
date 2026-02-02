@@ -98,7 +98,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
 
     auto pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High);
 
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(pde_params, pde_accuracy);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(pde_params, pde_accuracy);
 
     const double dividend_yield = scenarios.front().dividend_yield;
     for (const auto& scenario : scenarios) {
@@ -215,7 +215,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
@@ -247,7 +247,7 @@ TEST(QuantLibBatchTest, Greeks_ATM) {
     PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;

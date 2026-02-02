@@ -63,7 +63,7 @@ int main() {
             OptionSpec{.spot = spot, .strike = tc.strike, .maturity = tc.maturity,
                 .rate = rate, .dividend_yield = div_yield, .option_type = OptionType::PUT},
             tc.vol_true);
-        auto [gs, td] = estimate_grid_for_option(params, make_grid_accuracy(GridAccuracyProfile::High));
+        auto [gs, td] = estimate_pde_grid(params, make_grid_accuracy(GridAccuracyProfile::High));
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buf(PDEWorkspace::required_size(gs.n_points()), &pool);
         auto ws = PDEWorkspace::from_buffer(buf, gs.n_points()).value();

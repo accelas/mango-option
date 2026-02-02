@@ -164,7 +164,7 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
 // ===========================================================================
 
 // Regression: Auto-estimated PDE grid must cover wide moneyness axes
-// Bug: compute_global_grid_for_batch() used spot=strike=K_ref (x0=0) and
+// Bug: estimate_batch_pde_grid() used spot=strike=K_ref (x0=0) and
 // sized the domain solely from n_sigma * σ√T.  Wide moneyness axes could
 // fall outside the PDE grid, causing extrapolation failures in extract_tensor.
 TEST(PriceTableBuilderCustomGridTest, AutoGridCoversWideMoneyness) {

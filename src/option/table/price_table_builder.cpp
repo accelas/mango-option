@@ -235,7 +235,7 @@ PriceTableBuilder<N>::estimate_pde_grid(
     auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
     ensure_moneyness_coverage<N>(accuracy, batch, axes);
 
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(
         std::span<const PricingParams>(batch), accuracy);
 
     // Extend time domain to cover max maturity from axes

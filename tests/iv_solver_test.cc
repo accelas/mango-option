@@ -203,7 +203,7 @@ TEST_F(IVSolverTest, ExplicitGrid201Points) {
 // ===========================================================================
 
 // Regression: IVSolverFDM must respect grid accuracy in config
-// Bug: objective_function() called estimate_grid_for_option() with default
+// Bug: objective_function() called estimate_pde_grid() with default
 // GridAccuracyParams, ignoring config_.grid. This caused a ~2-4 bps
 // IV error floor that could not be reduced.
 TEST_F(IVSolverTest, GridAccuracyReducesError) {

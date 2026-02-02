@@ -142,7 +142,7 @@ inline PricingValidationResult validate_pricing(
             .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         scenario.volatility);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;

@@ -781,8 +781,8 @@ if (!validation_result.has_value()) {
 std::vector<mango::PricingParams> params_batch = { /* ... */ };
 std::vector<std::expected<mango::AmericanOptionResult, mango::SolverError>> results(params_batch.size());
 
-// Shared grid for all options (requires compute_global_grid_for_batch)
-auto [grid_spec, time_domain] = mango::compute_global_grid_for_batch(params_batch);
+// Shared grid for all options (requires estimate_batch_pde_grid)
+auto [grid_spec, time_domain] = mango::estimate_batch_pde_grid(params_batch);
 size_t n = grid_spec.n_points();
 
 #pragma omp parallel for
@@ -914,7 +914,7 @@ mango::GridAccuracyParams accuracy{
     .max_time_steps = 5000
 };
 
-auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy);
+auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 ```
 
 **Tolerance guidelines:**

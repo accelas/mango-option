@@ -70,7 +70,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     std::visit([&](const auto& grid_variant) {
         using T = std::decay_t<decltype(grid_variant)>;
         if constexpr (std::is_same_v<T, GridAccuracyParams>) {
-            auto [auto_grid, auto_td] = estimate_grid_for_option(option_params, grid_variant);
+            auto [auto_grid, auto_td] = estimate_pde_grid(option_params, grid_variant);
             grid_spec = auto_grid;
             time_domain = auto_td;
         } else if constexpr (std::is_same_v<T, PDEGridConfig>) {

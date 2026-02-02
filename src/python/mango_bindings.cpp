@@ -354,7 +354,7 @@ PYBIND11_MODULE(mango_option, m) {
             }
 
             // Estimate grid automatically (sinh-spaced, clustered near strike)
-            auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy);
+            auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 
             // Allocate workspace buffer
             size_t n = grid_spec.n_points();

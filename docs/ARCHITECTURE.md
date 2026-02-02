@@ -160,7 +160,7 @@ Why not exceptions? The solver runs in tight loops (batch pricing, Brent iterati
 
 ### Grid Auto-Estimation
 
-`estimate_grid_for_option()` selects grid size and time steps based on volatility, maturity, and moneyness. A typical result is 101 spatial points and 498 time steps. This avoids requiring the user to understand numerical parameters while still allowing override for fine-grained control.
+`estimate_pde_grid()` selects grid size and time steps based on volatility, maturity, and moneyness. A typical result is 101 spatial points and 498 time steps. This avoids requiring the user to understand numerical parameters while still allowing override for fine-grained control.
 
 ---
 

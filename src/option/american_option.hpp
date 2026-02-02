@@ -37,7 +37,7 @@ namespace mango {
  * @param accuracy Grid accuracy parameters (optional)
  * @return Pair of (GridSpec, TimeDomain) for consistent discretization
  */
-inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
+inline std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     const PricingParams& params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
@@ -112,7 +112,7 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
  * @param accuracy Grid accuracy parameters (optional)
  * @return Pair of (GridSpec, TimeDomain) covering all options
  */
-inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
+inline std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
     std::span<const PricingParams> params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
@@ -131,7 +131,7 @@ inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
 
     // Estimate grid for each option and take union/maximum
     for (const auto& p : params) {
-        auto [grid_spec, time_domain] = estimate_grid_for_option(p, accuracy);
+        auto [grid_spec, time_domain] = estimate_pde_grid(p, accuracy);
         global_x_min = std::min(global_x_min, grid_spec.x_min());
         global_x_max = std::max(global_x_max, grid_spec.x_max());
         global_Nx = std::max(global_Nx, grid_spec.n_points());
@@ -270,7 +270,7 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     const PricingParams& params)
 {
     // Estimate grid for this option
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate workspace buffer (local, temporary)
     size_t n = grid_spec.n_points();

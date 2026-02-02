@@ -12,7 +12,7 @@ Microarchitectural profiling of the American option PDE solver using `perf stat`
 
 ### Workload
 
-Two benchmarks from `//benchmarks:real_data_benchmark`, both using `estimate_grid_for_option()` for automatic sinh-spaced grid estimation:
+Two benchmarks from `//benchmarks:real_data_benchmark`, both using `estimate_pde_grid()` for automatic sinh-spaced grid estimation:
 
 | Benchmark | Description | Options | Grid per option |
 |-----------|-------------|---------|-----------------|

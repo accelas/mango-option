@@ -132,7 +132,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
 
     auto solve_price = [&](double K, double tau) -> double {
         PricingParams p{OptionSpec{.spot = spot, .strike = K, .maturity = tau, .rate = rate, .dividend_yield = fix.dividend_yield, .option_type = OptionType::PUT}, sigma};
-        auto [gs, td] = estimate_grid_for_option(p);
+        auto [gs, td] = estimate_pde_grid(p);
         size_t n = gs.n_points();
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buf(PDEWorkspace::required_size(n), &pool);
@@ -149,7 +149,7 @@ static void BM_InterpolationGreekAccuracy(benchmark::State& state) {
     for (double K : strikes) {
         for (double tau : maturities) {
             PricingParams params{OptionSpec{.spot = spot, .strike = K, .maturity = tau, .rate = rate, .dividend_yield = fix.dividend_yield, .option_type = OptionType::PUT}, sigma};
-            auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+            auto [grid_spec, time_domain] = estimate_pde_grid(params);
             size_t n = grid_spec.n_points();
             std::pmr::synchronized_pool_resource pool;
             std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);

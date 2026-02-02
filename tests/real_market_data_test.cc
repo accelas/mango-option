@@ -38,7 +38,7 @@ TEST(RealMarketDataTest, ATMPutPricing) {
     // Price the ATM put option from real market data
     auto params = make_params(bdata::ATM_PUT);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
@@ -65,7 +65,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
         const auto& opt = bdata::REAL_PUTS[i];
         auto params = make_params(opt);
 
-        auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+        auto [grid_spec, time_domain] = estimate_pde_grid(params);
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
         auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
@@ -171,7 +171,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     // Now price with computed IV
     auto params = make_params(bdata::ATM_PUT, iv);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());

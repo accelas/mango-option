@@ -94,7 +94,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -125,7 +125,7 @@ BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.30};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -156,7 +156,7 @@ BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.25};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -191,7 +191,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         {Dividend{0.25, 2.0}, Dividend{0.5, 2.0}, Dividend{0.75, 2.0}}
     };
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -323,7 +323,7 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -385,7 +385,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
         batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(batch);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch);
     (void)time_domain;  // Not used in this benchmark
 
     // Allocate buffer for workspace

@@ -107,7 +107,7 @@ void test_scenario(
         is_call ? OptionType::CALL : OptionType::PUT, volatility);
 
     // Use automatic grid estimation (matches production usage)
-    auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
 
     // Allocate workspace buffer
     size_t n = grid_spec.n_points();
@@ -209,7 +209,7 @@ TEST(QuantLibAccuracyTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation (production mode)
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate workspace buffer
     size_t n = grid_spec.n_points();
@@ -245,7 +245,7 @@ TEST(QuantLibAccuracyTest, Greeks_ATM) {
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation (production mode)
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate workspace buffer
     size_t n = grid_spec.n_points();
