@@ -664,13 +664,12 @@ auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
 
 ### Chain Solving (Normalized Batch Optimization)
 
-When a batch of options share the same PDE parameters (σ, r, q, maturity, option type) and differ only in strike, the solver exploits a scale-invariance property of the Black-Scholes PDE: the normalized PDE with S = K = 1 has the same solution shape for all strikes. The solver solves this single normalized PDE once, then rescales the solution for each option's actual S/K ratio, yielding up to **19,000× speedup** over solving each option independently.
+The solver exploits a scale-invariance property of the Black-Scholes PDE: the normalized PDE with S = K = 1 has the same solution shape for all strikes sharing the same PDE parameters. The solver groups options by (σ, r, q, maturity, option type), solves one normalized PDE per group, then rescales each solution for the option's actual S/K ratio — yielding up to **19,000× speedup** over solving each option independently.
 
-This optimization is automatic — `solve_batch()` routes eligible batches to the normalized path. When a batch contains options with different volatilities or rates, the solver groups them by PDE parameters and solves one normalized PDE per group.
+This optimization is automatic — `solve_batch()` routes eligible batches to the normalized path. A batch with mixed maturities, volatilities, or rates produces multiple groups, each solved with a single normalized PDE.
 
 **Eligibility requirements:**
 - `use_shared_grid = true`
-- Same option type and maturity across the batch
 - No discrete dividends (these break scale invariance)
 - Positive spot and strike values
 - Grid spacing and domain width within stability constraints

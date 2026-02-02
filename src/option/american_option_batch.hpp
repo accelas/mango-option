@@ -172,7 +172,8 @@ public:
     /// Solve a batch of American options with automatic routing
     ///
     /// Automatically routes to normalized chain solver when eligible
-    /// (varying strikes, same maturity, no discrete dividends).
+    /// (no discrete dividends, no SetupCallback). Options are grouped by
+    /// PDE parameters (σ, r, q, type, maturity) — one normalized PDE per group.
     ///
     /// **Snapshot Registration:**
     /// Use `set_snapshot_times()` before calling solve_batch() to register

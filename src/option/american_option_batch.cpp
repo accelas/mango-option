@@ -47,14 +47,7 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
         }
     }
 
-    // 3. All options must have same maturity
-    for (size_t i = 1; i < params.size(); ++i) {
-        if (std::abs(params[i].maturity - first.maturity) > 1e-10) {
-            return false;
-        }
-    }
-
-    // 4. No discrete dividends
+    // 3. No discrete dividends
     // TODO(discrete-dividends): Remove this rejection once discrete dividend
     // support is implemented via maturity segmentation with per-segment tables.
     for (const auto& p : params) {
@@ -148,16 +141,6 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
             MANGO_TRACE_NORMALIZED_INELIGIBLE(
                 static_cast<int>(NormalizedIneligibilityReason::MISMATCHED_OPTION_TYPE),
                 static_cast<int>(params[i].option_type));
-            return;
-        }
-    }
-
-    // Check maturity consistency
-    for (size_t i = 1; i < params.size(); ++i) {
-        if (std::abs(params[i].maturity - first.maturity) > 1e-10) {
-            MANGO_TRACE_NORMALIZED_INELIGIBLE(
-                static_cast<int>(NormalizedIneligibilityReason::MISMATCHED_MATURITY),
-                params[i].maturity);
             return;
         }
     }
