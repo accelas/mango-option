@@ -14,7 +14,7 @@ TEST(AmericanOptionSolverTest, CustomInitialCondition) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate workspace buffer
     size_t n = grid_spec.n_points();
@@ -41,7 +41,7 @@ TEST(AmericanOptionSolverTest, DefaultPayoffStillWorks) {
     PricingParams params(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(n),

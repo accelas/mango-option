@@ -37,7 +37,7 @@ int main() {
         0.20);  // volatility
 
     // Solve (auto grid, auto workspace)
-    auto result = mango::solve_american_option_auto(params);
+    auto result = mango::solve_american_option(params);
 
     if (result.has_value()) {
         std::cout << "Price: " << result->value_at(100.0) << "\n";
@@ -52,7 +52,7 @@ int main() {
 ### Minimal IV Calculation Example
 
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <iostream>
 
 int main() {
@@ -70,7 +70,7 @@ int main() {
     mango::IVQuery query(spec, 10.45);
 
     // Solve
-    mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
+    mango::IVSolver solver(mango::IVSolverConfig{});
     auto result = solver.solve(query);
 
     if (result.has_value()) {
@@ -107,7 +107,7 @@ mango::PricingParams params(
     0.25);  // volatility
 
 // Solve (auto grid, auto workspace)
-auto result = mango::solve_american_option_auto(params);
+auto result = mango::solve_american_option(params);
 
 if (result.has_value()) {
     double price = result->value_at(105.0);
@@ -141,10 +141,10 @@ std::pmr::synchronized_pool_resource pool;
 std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
 auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
 
-// Pass custom grid to solver via ExplicitPDEGrid
+// Pass custom grid to solver via PDEGridConfig
 auto solver = mango::AmericanOptionSolver::create(
     params, workspace,
-    mango::ExplicitPDEGrid{.grid_spec = grid_spec, .n_time = n_time}
+    mango::PDEGridConfig{.grid_spec = grid_spec, .n_time = n_time}
 ).value();
 
 auto result = solver.solve();
@@ -181,8 +181,8 @@ mango::OptionSpec spec{
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-// The make_iv_solver factory dispatches on the path variant
-mango::IVSolverConfig config{
+// The make_interpolated_iv_solver factory dispatches on the path variant
+mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -197,7 +197,7 @@ mango::IVSolverConfig config{
     },
 };
 
-auto solver = mango::make_iv_solver(config);
+auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 
@@ -212,7 +212,7 @@ See [Discrete Dividend IV](#discrete-dividend-iv) for the full workflow.
 **Uses Brent's method with nested PDE pricing:**
 
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 
 // Option specification
 mango::OptionSpec spec{
@@ -228,7 +228,7 @@ mango::OptionSpec spec{
 mango::IVQuery query(spec, 10.45);
 
 // Configure solver (optional)
-mango::IVSolverFDMConfig config{
+mango::IVSolverConfig config{
     .root_config = mango::RootFindingConfig{
         .max_iter = 100,
         .tolerance = 1e-6
@@ -238,7 +238,7 @@ mango::IVSolverFDMConfig config{
 };
 
 // Solve
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 
 if (result.has_value()) {
@@ -281,7 +281,7 @@ for (const auto& [strike, price] : market_data) {
 }
 
 // Solve batch (OpenMP parallel)
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto batch = solver.solve_batch(queries);
 
 std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
@@ -304,7 +304,7 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 **Control PDE accuracy via GridAccuracyParams (recommended):**
 
 ```cpp
-mango::IVSolverFDMConfig config{
+mango::IVSolverConfig config{
     .grid = mango::GridAccuracyParams{
         .tol = 1e-4,                // Tighter truncation error
         .min_spatial_points = 200,
@@ -312,7 +312,7 @@ mango::IVSolverFDMConfig config{
     }
 };
 
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 ```
 
@@ -321,14 +321,14 @@ auto result = solver.solve(query);
 ```cpp
 auto grid_spec = mango::GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.5).value();
 
-mango::IVSolverFDMConfig config{
-    .grid = mango::ExplicitPDEGrid{
+mango::IVSolverConfig config{
+    .grid = mango::PDEGridConfig{
         .grid_spec = grid_spec,
         .n_time = 2000
     }
 };
 
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 ```
 
@@ -483,13 +483,13 @@ surface = mo.build_price_table_surface_from_grid(
 
 †Deep-ITM and deep-OTM options share the same low-vega characteristic: vega is near zero, so even a tiny price error (< $0.01) maps to thousands of bps in IV space. The actual price-relative error remains small — deep-ITM price RMSE is < $0.001 across all profiles. **Price RMSE is the stable metric** across all moneyness regimes.
 
-### Using Price Surface with IVSolverInterpolated
+### Using Price Surface with InterpolatedIVSolver
 
 ```cpp
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 
 // Create IV solver from AmericanPriceSurface
-auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
 
 // Solve IV — internally uses EEP reconstruction + Newton iteration
 auto iv_result = iv_solver.solve(iv_query);
@@ -539,13 +539,13 @@ if (result.has_value()) {
 
 ### Factory-Based Solver Creation
 
-The `make_iv_solver` factory builds an interpolated IV solver that automatically handles discrete dividends. When no dividends are specified, it takes the standard single-surface path. When dividends are present, it builds a segmented surface with backward chaining.
+The `make_interpolated_iv_solver` factory builds an interpolated IV solver that automatically handles discrete dividends. When no dividends are specified, it takes the standard single-surface path. When dividends are present, it builds a segmented surface with backward chaining.
 
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
 // Standard path (no discrete dividends):
-mango::IVSolverConfig config{
+mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.02,
@@ -558,7 +558,7 @@ mango::IVSolverConfig config{
 };
 
 // Segmented path (with discrete dividends):
-mango::IVSolverConfig div_config{
+mango::IVSolverFactoryConfig div_config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -573,7 +573,7 @@ mango::IVSolverConfig div_config{
     },
 };
 
-auto solver = mango::make_iv_solver(config);
+auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
 ### Solving IV Queries
@@ -753,7 +753,7 @@ if (!result.has_value()) {
 **Compose validations with .and_then():**
 
 ```cpp
-// Inside IVSolverFDM
+// Inside IVSolver
 auto validate_query(const IVQuery& query) const
     -> std::expected<std::monostate, IVError>
 {
@@ -781,8 +781,8 @@ if (!validation_result.has_value()) {
 std::vector<mango::PricingParams> params_batch = { /* ... */ };
 std::vector<std::expected<mango::AmericanOptionResult, mango::SolverError>> results(params_batch.size());
 
-// Shared grid for all options (requires compute_global_grid_for_batch)
-auto [grid_spec, time_domain] = mango::compute_global_grid_for_batch(params_batch);
+// Shared grid for all options (requires estimate_batch_pde_grid)
+auto [grid_spec, time_domain] = mango::estimate_batch_pde_grid(params_batch);
 size_t n = grid_spec.n_points();
 
 #pragma omp parallel for
@@ -803,7 +803,7 @@ for (size_t i = 0; i < params_batch.size(); ++i) {
 ```cpp
 std::vector<mango::IVQuery> queries = load_market_data();
 
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto batch = solver.solve_batch(queries);
 
 // Results and statistics
@@ -914,7 +914,7 @@ mango::GridAccuracyParams accuracy{
     .max_time_steps = 5000
 };
 
-auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy);
+auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 ```
 
 **Tolerance guidelines:**

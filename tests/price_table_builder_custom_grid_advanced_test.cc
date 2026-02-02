@@ -16,7 +16,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -46,7 +46,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
 
     // Create solver and check normalized eligibility
     BatchAmericanOptionSolver solver;
-    const auto& adv_grid1 = std::get<ExplicitPDEGrid>(config.pde_grid);
+    const auto& adv_grid1 = std::get<PDEGridConfig>(config.pde_grid);
     GridAccuracyParams accuracy;
     accuracy.min_spatial_points = std::min(adv_grid1.grid_spec.n_points(), size_t(100));
     accuracy.max_spatial_points = std::max(adv_grid1.grid_spec.n_points(), size_t(1200));
@@ -65,7 +65,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, NormalizedChainWithCustomGrid) {
     GridSpec<double> user_grid = adv_grid1.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), adv_grid1.n_time);
     std::optional<PDEGridSpec> custom_grid =
-        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
+        PDEGridConfig{user_grid, time_domain.n_steps(), {}};
 
     auto result2 = solver.solve_batch(batch, true, nullptr, custom_grid);
     std::cout << "  Failed count: " << result2.failed_count << std::endl;
@@ -85,7 +85,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -111,11 +111,11 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, EdgeCaseLogMoneyness) {
               << ", strike=" << batch[0].strike << std::endl;
 
     // Create custom grid
-    const auto& edge_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    const auto& edge_grid = std::get<PDEGridConfig>(config.pde_grid);
     GridSpec<double> user_grid = edge_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), edge_grid.n_time);
     std::optional<PDEGridSpec> custom_grid =
-        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
+        PDEGridConfig{user_grid, time_domain.n_steps(), {}};
 
     // Test with custom_grid
     BatchAmericanOptionSolver solver;
@@ -158,7 +158,7 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -186,11 +186,11 @@ TEST(PriceTableBuilderCustomGridAdvancedTest, SimulatePlanModification) {
     std::cout << "Batch size: " << batch.size() << std::endl;
 
     // Create custom_grid as plan specifies
-    const auto& sim_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    const auto& sim_grid = std::get<PDEGridConfig>(config.pde_grid);
     GridSpec<double> user_grid = sim_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), sim_grid.n_time);
     std::optional<PDEGridSpec> custom_grid =
-        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
+        PDEGridConfig{user_grid, time_domain.n_steps(), {}};
 
     std::cout << "\nCustom grid specification:" << std::endl;
     std::cout << "  Spatial: [" << user_grid.x_min() << ", " << user_grid.x_max()

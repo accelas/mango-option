@@ -69,12 +69,12 @@ auto vol_range = surface.volatility_range();
 auto rate_range = surface.rate_range();
 
 // Configure solver
-IVSolverConfig config;
+IVSolverFactoryConfig config;
 config.max_iterations = 50;
 config.tolerance = 1e-6;
 
 // Create solver (lightweight, no heavy computation)
-IVSolverInterpolated iv_solver(surface, config);
+InterpolatedIVSolver iv_solver(surface, config);
 ```
 
 **Key Point**: IV solver creation is cheap. The expensive work was done in Step 2.
@@ -109,7 +109,7 @@ for (const auto& option : market_data) {
 ### What Works Well
 
 1. **Builder pattern is intuitive**: `create()` → `precompute()` → use result
-2. **Structured config**: `IVSolverConfig` makes parameters discoverable
+2. **Structured config**: `IVSolverFactoryConfig` makes parameters discoverable
 3. **Clear ownership**: `PriceTableSurface` wraps the evaluator and its metadata
 4. **Range-based validation**: Grid bounds prevent out-of-range queries
 5. **Result types**: `IVResult` provides rich diagnostics (convergence, iterations, error)
@@ -130,7 +130,7 @@ auto builder = PriceTable4DBuilder::from_strikes(
     // Automatically computes moneyness and K_ref
 
 // Idea: IV solver with automatic bounds extraction
-IVSolverInterpolated iv_solver(price_table);
+InterpolatedIVSolver iv_solver(price_table);
     // Extracts all bounds from price table metadata
 
 // Idea: Batch IV solving
@@ -201,5 +201,5 @@ This benchmark identified several API usability issues:
 - **Source**: `benchmarks/market_iv_e2e_benchmark.cc`
 - **Data script**: `scripts/fetch_cboe_data.py`
 - **Price table builder**: `src/option/price_table_4d_builder.hpp`
-- **IV solver**: `src/option/iv_solver_interpolated.hpp`
+- **IV solver**: `src/option/interpolated_iv_solver.hpp`
 - **Chain solver**: `src/option/normalized_chain_solver.hpp`

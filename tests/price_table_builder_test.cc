@@ -15,7 +15,7 @@ using Access = testing::PriceTableBuilderAccess<4>;
 TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
     // Use default grid estimator (auto-estimation) with reduced time steps
     PriceTableConfig config{
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100}  // Reduce from default 1000 for faster test
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100}  // Reduce from default 1000 for faster test
     };
     PriceTableBuilder<4> builder(config);
 
@@ -42,7 +42,7 @@ TEST(PriceTableBuilderTest, MakeBatchIteratesVolatilityAndRateOnly) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 1000},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 1000},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -106,7 +106,7 @@ TEST(PriceTableBuilderTest, SolveBatchRegistersMaturitySnapshots) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -141,7 +141,7 @@ TEST(PriceTableBuilderTest, ExtractTensorInterpolatesSurfaces) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -224,7 +224,7 @@ TEST(PriceTableBuilderTest, FromVectorsRejectsInvalidMaxFailureRate) {
         {0.2, 0.3},       // volatility
         {0.05},           // rate
         100.0,            // K_ref
-        mango::ExplicitPDEGrid{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 500},
+        mango::PDEGridConfig{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 500},
         mango::OptionType::PUT,
         0.0,              // dividend_yield
         1.5               // max_failure_rate - INVALID
@@ -392,7 +392,7 @@ TEST(PriceTableBuilderTest, BuildPopulatesTotalSlicesAndPoints) {
     auto result = mango::PriceTableBuilder<4>::from_vectors(
         {0.8, 0.9, 1.0, 1.1}, {0.25, 0.5, 0.75, 1.0}, {0.15, 0.2, 0.25, 0.3}, {0.02, 0.04, 0.06, 0.08},
         100.0,
-        mango::ExplicitPDEGrid{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 500});
+        mango::PDEGridConfig{mango::GridSpec<double>::uniform(-3.0, 3.0, 51).value(), 500});
     ASSERT_TRUE(result.has_value());
     auto& [builder, axes] = result.value();
 
@@ -411,7 +411,7 @@ TEST(PriceTableBuilderTest, DefaultModeProducesEEPMetadata) {
         {0.15, 0.20, 0.25, 0.30},
         {0.02, 0.04, 0.06, 0.08},
         100.0,
-        ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
+        PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         OptionType::PUT);
     ASSERT_TRUE(setup.has_value());
     auto& [builder, axes] = setup.value();

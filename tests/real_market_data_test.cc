@@ -11,7 +11,7 @@
 #include "benchmarks/real_market_data.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 
 using namespace mango;
 namespace bdata = mango::benchmark_data;
@@ -38,7 +38,7 @@ TEST(RealMarketDataTest, ATMPutPricing) {
     // Price the ATM put option from real market data
     auto params = make_params(bdata::ATM_PUT);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
@@ -65,7 +65,7 @@ TEST(RealMarketDataTest, PutPricingAcrossStrikes) {
         const auto& opt = bdata::REAL_PUTS[i];
         auto params = make_params(opt);
 
-        auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+        auto [grid_spec, time_domain] = estimate_pde_grid(params);
         std::pmr::synchronized_pool_resource pool;
         std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
         auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());
@@ -141,11 +141,11 @@ TEST(RealMarketDataTest, IVCalculationFDM) {
     // Calculate IV for ATM put using FDM solver
     auto query = make_iv_query(bdata::ATM_PUT);
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-4;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value())
@@ -161,8 +161,8 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     // Verify IV calculation produces consistent prices
     auto query = make_iv_query(bdata::ATM_PUT);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM iv_solver(config);
+    IVSolverConfig config;
+    IVSolver iv_solver(config);
     auto iv_result = iv_solver.solve(query);
     ASSERT_TRUE(iv_result.has_value());
 
@@ -171,7 +171,7 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     // Now price with computed IV
     auto params = make_params(bdata::ATM_PUT, iv);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(grid_spec.n_points()), &pool);
     auto workspace = PDEWorkspace::from_buffer(buffer, grid_spec.n_points());

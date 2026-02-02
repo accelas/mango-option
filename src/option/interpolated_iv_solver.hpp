@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @file iv_solver_interpolated.hpp
+ * @file interpolated_iv_solver.hpp
  * @brief Implied volatility solver using B-spline price interpolation
  *
  * Solves for implied volatility using Newton's method with interpolated
@@ -10,7 +10,7 @@
  * Usage:
  *   // After building price table
  *   auto surface_result = PriceTableSurface::create(...);
- *   auto solver = IVSolverInterpolatedStandard::create(surface_result.value());
+ *   auto solver = DefaultInterpolatedIVSolver::create(surface_result.value());
  *
  *   // Solve for IV
  *   OptionSpec spec{
@@ -65,7 +65,7 @@
 namespace mango {
 
 /// Configuration for interpolation-based IV solver
-struct IVSolverInterpolatedConfig {
+struct InterpolatedIVSolverConfig {
     size_t max_iter = 50;          ///< Maximum Newton iterations
     double tolerance = 1e-6;       ///< Price convergence tolerance
     double sigma_min = 0.01;       ///< Minimum volatility (1%)
@@ -82,12 +82,12 @@ struct IVSolverInterpolatedConfig {
 /// Rate handling: The price surface uses a scalar rate axis (designed for SOFR/flat rates).
 /// When a YieldCurve is provided, it is collapsed to a zero rate: -ln(D(T))/T.
 /// This provides a reasonable approximation but does not capture term structure dynamics.
-/// For full yield curve support, use IVSolverFDM instead.
+/// For full yield curve support, use IVSolver instead.
 /// When rate approximation is used, IVSuccess::used_rate_approximation is set to true.
 ///
 /// @tparam Surface A type satisfying the PriceSurface concept
 template <PriceSurface Surface>
-class IVSolverInterpolated {
+class InterpolatedIVSolver {
 public:
     /// Create solver from a PriceSurface
     ///
@@ -96,9 +96,9 @@ public:
     /// @param surface Pre-built price surface
     /// @param config Solver configuration
     /// @return IV solver or ValidationError
-    static std::expected<IVSolverInterpolated, ValidationError> create(
+    static std::expected<InterpolatedIVSolver, ValidationError> create(
         Surface surface,
-        const IVSolverInterpolatedConfig& config = {});
+        const InterpolatedIVSolverConfig& config = {});
 
     /// Solve for implied volatility (single query)
     ///
@@ -118,7 +118,7 @@ public:
 
 private:
     /// Private constructor (use create() factory method)
-    IVSolverInterpolated(
+    InterpolatedIVSolver(
         Surface surface,
         std::pair<double, double> m_range,
         std::pair<double, double> tau_range,
@@ -126,7 +126,7 @@ private:
         std::pair<double, double> r_range,
         OptionType option_type,
         double dividend_yield,
-        const IVSolverInterpolatedConfig& config)
+        const InterpolatedIVSolverConfig& config)
         : surface_(std::move(surface))
         , m_range_(m_range)
         , tau_range_(tau_range)
@@ -139,7 +139,7 @@ private:
 
     Surface surface_;
     std::pair<double, double> m_range_, tau_range_, sigma_range_, r_range_;
-    IVSolverInterpolatedConfig config_;
+    InterpolatedIVSolverConfig config_;
     OptionType option_type_;
     double dividend_yield_;
 
@@ -170,18 +170,18 @@ private:
     std::pair<double, double> adaptive_bounds(const IVQuery& query) const;
 };
 
-/// Type alias for backward compatibility: IVSolverInterpolated with AmericanPriceSurface
-using IVSolverInterpolatedStandard = IVSolverInterpolated<AmericanPriceSurface>;
+/// Type alias for backward compatibility: InterpolatedIVSolver with AmericanPriceSurface
+using DefaultInterpolatedIVSolver = InterpolatedIVSolver<AmericanPriceSurface>;
 
 // =====================================================================
 // Template implementation (must be in header for template instantiation)
 // =====================================================================
 
 template <PriceSurface Surface>
-std::expected<IVSolverInterpolated<Surface>, ValidationError>
-IVSolverInterpolated<Surface>::create(
+std::expected<InterpolatedIVSolver<Surface>, ValidationError>
+InterpolatedIVSolver<Surface>::create(
     Surface surface,
-    const IVSolverInterpolatedConfig& config)
+    const InterpolatedIVSolverConfig& config)
 {
     // Use concept accessors for bounds extraction
     auto m_range = std::make_pair(surface.m_min(), surface.m_max());
@@ -200,7 +200,7 @@ IVSolverInterpolated<Surface>::create(
     auto option_type = surface.option_type();
     auto dividend_yield = surface.dividend_yield();
 
-    return IVSolverInterpolated(
+    return InterpolatedIVSolver(
         std::move(surface),
         m_range,
         tau_range,
@@ -212,7 +212,7 @@ IVSolverInterpolated<Surface>::create(
 }
 
 template <PriceSurface Surface>
-double IVSolverInterpolated<Surface>::eval_price(
+double InterpolatedIVSolver<Surface>::eval_price(
     double moneyness, double maturity, double vol, double rate, double strike) const
 {
     double spot = moneyness * strike;
@@ -220,7 +220,7 @@ double IVSolverInterpolated<Surface>::eval_price(
 }
 
 template <PriceSurface Surface>
-double IVSolverInterpolated<Surface>::compute_vega(
+double InterpolatedIVSolver<Surface>::compute_vega(
     double moneyness, double maturity, double vol, double rate, double strike) const
 {
     double spot = moneyness * strike;
@@ -229,7 +229,7 @@ double IVSolverInterpolated<Surface>::compute_vega(
 
 template <PriceSurface Surface>
 std::optional<ValidationError>
-IVSolverInterpolated<Surface>::validate_query(const IVQuery& query) const
+InterpolatedIVSolver<Surface>::validate_query(const IVQuery& query) const
 {
     if (query.option_type != option_type_) {
         return ValidationError{ValidationErrorCode::OptionTypeMismatch,
@@ -252,7 +252,7 @@ IVSolverInterpolated<Surface>::validate_query(const IVQuery& query) const
 
 template <PriceSurface Surface>
 std::pair<double, double>
-IVSolverInterpolated<Surface>::adaptive_bounds(const IVQuery& query) const
+InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
 {
     // Compute intrinsic value based on option type
     double intrinsic;
@@ -288,7 +288,7 @@ IVSolverInterpolated<Surface>::adaptive_bounds(const IVQuery& query) const
 
 template <PriceSurface Surface>
 std::expected<IVSuccess, IVError>
-IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
+InterpolatedIVSolver<Surface>::solve(const IVQuery& query) const noexcept
 {
     // Validate input using centralized validation
     auto error = validate_query(query);
@@ -318,7 +318,7 @@ IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
     // reflects the rate at maturity, not the integrated discount factor
     //
     // Note: When a YieldCurve is provided, we collapse it to a single zero rate.
-    // This loses term structure dynamics. For full curve support, use IVSolverFDM.
+    // This loses term structure dynamics. For full curve support, use IVSolver.
     const bool rate_is_curve = is_yield_curve(query.rate);
     double rate_value = get_zero_rate(query.rate, query.maturity);
 
@@ -386,7 +386,7 @@ IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
 
 template <PriceSurface Surface>
 BatchIVResult
-IVSolverInterpolated<Surface>::solve_batch(const std::vector<IVQuery>& queries) const noexcept
+InterpolatedIVSolver<Surface>::solve_batch(const std::vector<IVQuery>& queries) const noexcept
 {
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;

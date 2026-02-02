@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/math/root_finding.hpp"
 #include "src/option/american_option.hpp"
 #include "src/pde/core/pde_workspace.hpp"
@@ -14,12 +14,12 @@
 
 namespace mango {
 
-IVSolverFDM::IVSolverFDM(const IVSolverFDMConfig& config)
+IVSolver::IVSolver(const IVSolverConfig& config)
     : config_(config) {
     // Constructor - just stores configuration
 }
 
-double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
+double IVSolver::estimate_upper_bound(const IVQuery& query) const {
     // For American options, use intrinsic value approximation
     // Upper bound based on the relationship: V_market ≈ Intrinsic + Time Value
     // For deep ITM options, time value is small, so high vol is unlikely
@@ -46,13 +46,13 @@ double IVSolverFDM::estimate_upper_bound(const IVQuery& query) const {
     }
 }
 
-double IVSolverFDM::estimate_lower_bound() const {
+double IVSolver::estimate_lower_bound() const {
     // Lower bound: typically 1% volatility
     // No asset has zero volatility, and very low vol is rare
     return 0.01;  // 1%
 }
 
-double IVSolverFDM::objective_function(const IVQuery& query, double volatility) const {
+double IVSolver::objective_function(const IVQuery& query, double volatility) const {
     // Create American option parameters
     PricingParams option_params;
     option_params.strike = query.strike;
@@ -70,10 +70,10 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
     std::visit([&](const auto& grid_variant) {
         using T = std::decay_t<decltype(grid_variant)>;
         if constexpr (std::is_same_v<T, GridAccuracyParams>) {
-            auto [auto_grid, auto_td] = estimate_grid_for_option(option_params, grid_variant);
+            auto [auto_grid, auto_td] = estimate_pde_grid(option_params, grid_variant);
             grid_spec = auto_grid;
             time_domain = auto_td;
-        } else if constexpr (std::is_same_v<T, ExplicitPDEGrid>) {
+        } else if constexpr (std::is_same_v<T, PDEGridConfig>) {
             grid_spec = grid_variant.grid_spec;
             if (grid_variant.mandatory_times.empty()) {
                 time_domain = TimeDomain::from_n_steps(0.0, query.maturity, grid_variant.n_time);
@@ -110,7 +110,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve — always pass grid config to ensure the solver
     // uses the same grid we computed (matching the workspace size)
-    auto explicit_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    auto explicit_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
     auto solver_result = AmericanOptionSolver::create(
         option_params, pde_workspace_result.value(), PDEGridSpec{explicit_grid});
@@ -140,7 +140,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
 // Validate query using centralized validation
 std::expected<std::monostate, IVError>
-IVSolverFDM::validate_query(const IVQuery& query) const {
+IVSolver::validate_query(const IVQuery& query) const {
     // Use centralized IV query validation (option spec + market price + arbitrage)
     auto validation = validate_iv_query(query);
     if (!validation.has_value()) {
@@ -151,7 +151,7 @@ IVSolverFDM::validate_query(const IVQuery& query) const {
 }
 
 std::expected<IVSuccess, IVError>
-IVSolverFDM::solve_brent(const IVQuery& query) const {
+IVSolver::solve_brent(const IVQuery& query) const {
     // Adaptive bounds logic
     double intrinsic = (query.option_type == OptionType::CALL)
         ? std::max(0.0, query.spot - query.strike)
@@ -219,13 +219,13 @@ IVSolverFDM::solve_brent(const IVQuery& query) const {
     };
 }
 
-std::expected<IVSuccess, IVError> IVSolverFDM::solve(const IVQuery& query) const {
+std::expected<IVSuccess, IVError> IVSolver::solve(const IVQuery& query) const {
     // C++23 monadic validation pipeline: validate → solve
     return validate_query(query)
         .and_then([this, &query](auto) { return solve_brent(query); });
 }
 
-BatchIVResult IVSolverFDM::solve_batch(const std::vector<IVQuery>& queries) const {
+BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
     std::vector<std::expected<IVSuccess, IVError>> results(queries.size());
     size_t failed_count = 0;
 
@@ -241,7 +241,7 @@ BatchIVResult IVSolverFDM::solve_batch(const std::vector<IVQuery>& queries) cons
         }
     } else {
         // Parallel path: each IV solve is independent (different PDE workspaces)
-        // Mirrors IVSolverInterpolated::solve_batch pattern
+        // Mirrors InterpolatedIVSolver::solve_batch pattern
         MANGO_PRAGMA_PARALLEL_FOR
         for (size_t i = 0; i < queries.size(); ++i) {
             results[i] = solve(queries[i]);

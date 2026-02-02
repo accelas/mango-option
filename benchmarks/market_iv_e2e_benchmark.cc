@@ -25,7 +25,7 @@
  *     {0.15, 0.20, 0.25, 0.30, 0.40},          // volatility
  *     {0.02, 0.03, 0.04, 0.05},                // rate
  *     100.0,                                    // K_ref
- *     ExplicitPDEGrid{grid_spec, 1000},
+ *     PDEGridConfig{grid_spec, 1000},
  *     OptionType::PUT,
  *     dividend).value();
  *
@@ -34,7 +34,7 @@
  *
  * // Step 3: Create IV solver from surface
  * auto aps = AmericanPriceSurface::create(result.value().surface, OptionType::PUT);
- * auto solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
+ * auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
  * const auto& iv_solver = solver_result.value();
  *
  * // Step 4: Solve for IV at any (S, K, T, r)
@@ -51,7 +51,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/american_price_surface.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
@@ -189,7 +189,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
             grid.volatilities,
             grid.rates,
             grid.K_ref,
-            ExplicitPDEGrid{grid_spec, 500},
+            PDEGridConfig{grid_spec, 500},
             OptionType::PUT,
             grid.dividend);
 
@@ -242,7 +242,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec, 500},
+        PDEGridConfig{grid_spec, 500},
         OptionType::PUT,
         grid.dividend);
 
@@ -271,7 +271,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
     }
 
     // API STEP 3: Create IV solver
-    IVSolverInterpolatedConfig solver_config;
+    InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
@@ -280,7 +280,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         state.SkipWithError("AmericanPriceSurface::create failed");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps), solver_config);
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps), solver_config);
     if (!iv_solver_result) {
         auto err = iv_solver_result.error();
         std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));
@@ -356,7 +356,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             grid.volatilities,
             grid.rates,
             grid.K_ref,
-            ExplicitPDEGrid{grid_spec, 500},
+            PDEGridConfig{grid_spec, 500},
             OptionType::PUT,
             grid.dividend);
 
@@ -386,7 +386,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             state.SkipWithError("AmericanPriceSurface::create failed");
             return;
         }
-        auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
+        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
         if (!iv_solver_result) {
             auto err = iv_solver_result.error();
             std::string error_msg = "Validation error code " + std::to_string(static_cast<int>(err.code));

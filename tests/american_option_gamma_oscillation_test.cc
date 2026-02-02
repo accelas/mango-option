@@ -28,7 +28,7 @@ bool run_gamma_oscillation_case(const SweepCase& test_case) {
             .rate = kRate, .dividend_yield = kDividendYield, .option_type = OptionType::PUT},
         test_case.vol);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     size_t n = grid_spec.n_points();
 
     std::vector<double> buffer(PDEWorkspace::required_size(n));

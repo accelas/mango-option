@@ -13,8 +13,8 @@
 #include "benchmarks/real_market_data.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/iv_solver_fdm.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
@@ -176,7 +176,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 static void BM_RealData_AmericanSingle(benchmark::State& state) {
     auto params = make_params(ATM_PUT);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
     std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
@@ -224,7 +224,7 @@ static void BM_RealData_AmericanSequential(benchmark::State& state) {
 
     auto run_once = [&]() {
         for (const auto& params : batch) {
-            auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+            auto [grid_spec, time_domain] = estimate_pde_grid(params);
             size_t n = grid_spec.n_points();
             std::pmr::synchronized_pool_resource pool;
             std::pmr::vector<double> buffer(PDEWorkspace::required_size(n), &pool);
@@ -302,11 +302,11 @@ static void BM_RealData_IV_FDM(benchmark::State& state) {
 
     IVQuery query(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .option_type = opt.is_call ? OptionType::CALL : OptionType::PUT}, opt.market_price);
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     auto run_once = [&]() {
         auto result = solver.solve(query);
@@ -337,7 +337,7 @@ static void BM_RealData_IV_BSpline(benchmark::State& state) {
     if (!aps) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
     if (!solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -499,7 +499,7 @@ static void BM_RealData_IVSmile_BuildTable(benchmark::State& state) {
     for (auto _ : state) {
         auto builder_result = PriceTableBuilder<4>::from_grid(
             fixture.chain,
-            ExplicitPDEGrid{fixture.grid_spec, 200},
+            PDEGridConfig{fixture.grid_spec, 200},
             OptionType::PUT,
             0.1   // allow 10% failure rate
         );
@@ -538,7 +538,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     // Build price table once (not timed)
     auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
-        ExplicitPDEGrid{fixture.grid_spec, 200},
+        PDEGridConfig{fixture.grid_spec, 200},
         OptionType::PUT,
         0.1
     );
@@ -557,7 +557,7 @@ static void BM_RealData_IVSmile_Query(benchmark::State& state) {
     if (!aps_query) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_query));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_query));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
@@ -607,10 +607,10 @@ static void BM_RealData_IVSmile_FDM(benchmark::State& state) {
         queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .option_type = OptionType::PUT}, opt.market_price));
     }
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Benchmark FDM IV calculation for entire smile
     for (auto _ : state) {
@@ -636,7 +636,7 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     // Build price table
     auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
-        ExplicitPDEGrid{fixture.grid_spec, 200},
+        PDEGridConfig{fixture.grid_spec, 200},
         OptionType::PUT,
         0.1
     );
@@ -655,17 +655,17 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     if (!aps_acc) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_acc));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_acc));
     if (!iv_solver_result) {
         throw std::runtime_error("Failed to create IV solver");
     }
     const auto& interp_solver = iv_solver_result.value();
 
     // Create FDM IV solver
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Prepare IV queries
     std::vector<IVQuery> queries;
@@ -796,7 +796,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     // Build price table
     auto builder_result = PriceTableBuilder<4>::from_grid(
         fixture.chain,
-        ExplicitPDEGrid{fixture.grid_spec, 200},
+        PDEGridConfig{fixture.grid_spec, 200},
         OptionType::PUT,
         0.1
     );
@@ -818,7 +818,7 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
         state.SkipWithError("Failed to create AmericanPriceSurface");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_dense));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_dense));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -826,10 +826,10 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     const auto& interp_solver = iv_solver_result.value();
 
     // Create FDM IV solver (ground truth)
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Prepare IV queries
     std::vector<IVQuery> queries;
@@ -903,7 +903,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     // Build price table with automatic grid estimation
     auto builder_result = PriceTableBuilder<4>::from_grid_auto(
         iv_fixture.chain,
-        ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
+        PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 200},
         OptionType::PUT,
         accuracy
     );
@@ -925,7 +925,7 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
         state.SkipWithError("Failed to create AmericanPriceSurface");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_est));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_est));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
@@ -933,10 +933,10 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     const auto& interp_solver = iv_solver_result.value();
 
     // Create FDM IV solver (ground truth)
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Prepare IV queries
     std::vector<IVQuery> queries;
@@ -1042,17 +1042,17 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         state.SkipWithError("Failed to create AmericanPriceSurface");
         return;
     }
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps_prof));
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps_prof));
     if (!iv_solver_result) {
         state.SkipWithError("Failed to create IV solver");
         return;
     }
     const auto& interp_solver = iv_solver_result.value();
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     std::vector<IVQuery> queries;
     for (const auto& opt : iv_fixture.smile_options) {
@@ -1067,7 +1067,7 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
         const double sigma_synth = 0.20;
         for (double K : {703.0, 708.0, 725.0}) {
             PricingParams p(OptionSpec{.spot = SPOT, .strike = K, .maturity = iv_fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .option_type = OptionType::PUT}, sigma_synth);
-            auto result = solve_american_option_auto(p);
+            auto result = solve_american_option(p);
             if (!result) continue;
             double price = result->value_at(SPOT);
             if (price > 0.0) {

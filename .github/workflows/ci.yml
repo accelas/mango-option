@@ -63,11 +63,12 @@ jobs:
         with:
           path: |
             ~/.cache/bazel
-          # Key on Bazel version and external deps only - BUILD file changes
-          # are handled by Bazel's internal action cache
-          key: debian-trixie-bazel-v3-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}
+          # Unique key per run so each CI job can save updated artifacts.
+          # restore-keys ensures partial cache hits from prior runs.
+          key: debian-trixie-bazel-v4-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-${{ github.sha }}
           restore-keys: |
-            debian-trixie-bazel-v3-
+            debian-trixie-bazel-v4-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-
+            debian-trixie-bazel-v4-
 
       - name: Build all targets
         run: bazel build //... --build_tag_filters=-benchmark

@@ -35,7 +35,7 @@ class CustomGridTest : public ::testing::Test {
 
 TEST_F(CustomGridTest, AutoEstimatedGrid) {
     auto params = make_atm_put();
-    auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = mango::estimate_pde_grid(params);
 
     EXPECT_GT(grid_spec.n_points(), 0u);
     EXPECT_GT(time_domain.n_steps(), 0u);
@@ -65,7 +65,7 @@ TEST_F(CustomGridTest, UniformGrid) {
 
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{uniform_spec.value(), time.n_steps(), {}}).value();
+        mango::PDEGridConfig{uniform_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -84,7 +84,7 @@ TEST_F(CustomGridTest, SinhSpacedGrid) {
 
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{sinh_spec.value(), time.n_steps(), {}}).value();
+        mango::PDEGridConfig{sinh_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -108,7 +108,7 @@ TEST_F(CustomGridTest, MultiSinhGrid) {
 
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{multi_sinh_spec.value(), time.n_steps(), {}}).value();
+        mango::PDEGridConfig{multi_sinh_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -128,7 +128,7 @@ TEST_F(CustomGridTest, FastAccuracyParams) {
         .max_time_steps = 500
     };
 
-    auto [grid, time_domain] = mango::estimate_grid_for_option(params, fast_accuracy);
+    auto [grid, time_domain] = mango::estimate_pde_grid(params, fast_accuracy);
     EXPECT_GE(grid.n_points(), 100u);
     EXPECT_LE(grid.n_points(), 200u);
 
@@ -155,7 +155,7 @@ TEST_F(CustomGridTest, HighAccuracyParams) {
         .max_time_steps = 5000
     };
 
-    auto [grid, time_domain] = mango::estimate_grid_for_option(params, high_accuracy);
+    auto [grid, time_domain] = mango::estimate_pde_grid(params, high_accuracy);
     EXPECT_GE(grid.n_points(), 300u);
 
     size_t n = grid.n_points();
@@ -164,7 +164,7 @@ TEST_F(CustomGridTest, HighAccuracyParams) {
 
     // Pass the estimated grid config to the solver
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{grid, time_domain.n_steps(), {}}).value();
+        mango::PDEGridConfig{grid, time_domain.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -175,7 +175,7 @@ TEST_F(CustomGridTest, AllGridTypesProduceSimilarPrices) {
     auto params = make_atm_put();
 
     // Auto-estimated
-    auto [auto_grid, auto_time] = mango::estimate_grid_for_option(params);
+    auto [auto_grid, auto_time] = mango::estimate_pde_grid(params);
     size_t n_auto = auto_grid.n_points();
     std::pmr::vector<double> auto_buf(mango::PDEWorkspace::required_size(n_auto), &pool);
     auto auto_ws = mango::PDEWorkspace::from_buffer(auto_buf, n_auto).value();
@@ -192,7 +192,7 @@ TEST_F(CustomGridTest, AllGridTypesProduceSimilarPrices) {
     auto sinh_ws = mango::PDEWorkspace::from_buffer(sinh_buf, n_sinh).value();
     mango::TimeDomain sinh_time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto sinh_solver = mango::AmericanOptionSolver::create(params, sinh_ws,
-        mango::ExplicitPDEGrid{sinh_spec.value(), sinh_time.n_steps(), {}}).value();
+        mango::PDEGridConfig{sinh_spec.value(), sinh_time.n_steps(), {}}).value();
     auto sinh_result = sinh_solver.solve();
     ASSERT_TRUE(sinh_result.has_value());
     double sinh_price = sinh_result->value();

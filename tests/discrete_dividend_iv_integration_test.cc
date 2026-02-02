@@ -9,7 +9,7 @@ using namespace mango;
 // ===========================================================================
 // End-to-end integration test: discrete dividend IV round-trip
 //
-// Pipeline: make_iv_solver (factory) -> segmented build -> IV solve
+// Pipeline: make_interpolated_iv_solver (factory) -> segmented build -> IV solve
 // Approach: Price an American option at known vol via FDM, then recover
 //           that vol using the interpolated IV solver.
 // ===========================================================================
@@ -17,7 +17,7 @@ using namespace mango;
 class DiscreteDividendIVIntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        IVSolverConfig config{
+        IVSolverFactoryConfig config{
             .option_type = OptionType::PUT,
             .spot = 100.0,
             .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -29,12 +29,12 @@ protected:
                 // Use default K_ref config (9 log-spaced points)
             },
         };
-        auto result = make_iv_solver(config);
+        auto result = make_interpolated_iv_solver(config);
         ASSERT_TRUE(result.has_value()) << "Failed to build solver";
-        solver_ = std::make_unique<IVSolver>(std::move(*result));
+        solver_ = std::make_unique<AnyIVSolver>(std::move(*result));
     }
 
-    std::unique_ptr<IVSolver> solver_;
+    std::unique_ptr<AnyIVSolver> solver_;
 };
 
 TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
@@ -44,7 +44,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ATMPutIVRoundTrip) {
             .rate = 0.05, .option_type = OptionType::PUT},
         0.20, {{.calendar_time = 0.5, .amount = 2.0}});
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     double market_price = price_result->value();
     EXPECT_GT(market_price, 0.0) << "FDM price should be positive";
@@ -77,7 +77,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, OTMPutIVRoundTrip) {
             .rate = 0.05, .option_type = OptionType::PUT},
         0.25, {{.calendar_time = 0.5, .amount = 2.0}});
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     EXPECT_GT(price_result->value(), 0.0);
 
@@ -112,7 +112,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, ITMPutIVRoundTrip) {
             OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = tau,
                 .rate = 0.05, .option_type = OptionType::PUT}, 0.20, divs);
 
-        auto price_result = solve_american_option_auto(params);
+        auto price_result = solve_american_option(params);
         ASSERT_TRUE(price_result.has_value());
         EXPECT_GT(price_result->value(), 0.0);
 
@@ -145,7 +145,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, NearExpiryIV) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.3,
             .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     EXPECT_GT(price_result->value(), 0.0);
 
@@ -175,7 +175,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
             .rate = 0.03, .option_type = OptionType::PUT},
         0.35, {{.calendar_time = 0.5, .amount = 2.0}});
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
     EXPECT_GT(price_result->value(), 0.0);
 
@@ -202,7 +202,7 @@ TEST_F(DiscreteDividendIVIntegrationTest, HighVolRoundTrip) {
 // ===========================================================================
 
 TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
-    IVSolverConfig config{
+    IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
@@ -211,7 +211,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         .rate_grid = {0.02, 0.03, 0.05, 0.07},
         .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
-    auto solver = make_iv_solver(config);
+    auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "No-dividend factory should succeed";
 
     // Price an option with continuous dividends via FDM for round-trip test
@@ -219,7 +219,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
-    auto price_result = solve_american_option_auto(params);
+    auto price_result = solve_american_option(params);
     ASSERT_TRUE(price_result.has_value());
 
     IVQuery query;

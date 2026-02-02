@@ -18,8 +18,8 @@
 #pragma once
 
 #include "src/option/american_option.hpp"
-#include "src/option/iv_solver_fdm.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include <gtest/gtest.h>
 #include <ql/quantlib.hpp>
 #include <vector>
@@ -142,7 +142,7 @@ inline PricingValidationResult validate_pricing(
             .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         scenario.volatility);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
@@ -222,11 +222,11 @@ inline IVValidationResult validate_iv_fdm(
             .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         ql_result.price);
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto iv_result = solver.solve(query);
 
     if (!iv_result.has_value()) {

@@ -51,7 +51,7 @@ std::optional<double> VolatilitySurface::iv_at(double strike, double tau) const 
 std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
     const OptionChain& chain,
     const MarketContext& ctx,
-    const mango::IVSolverInterpolatedStandard* solver,
+    const mango::DefaultInterpolatedIVSolver* solver,
     const IVComputeConfig& config,
     PriceSource price_source)
 {
