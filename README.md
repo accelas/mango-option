@@ -54,17 +54,15 @@ bazel test //...    # run all tests
 ```cpp
 #include "src/option/american_option.hpp"
 
-mango::AmericanOptionParams params(
-    100.0, 100.0, 1.0, 0.05, 0.02, mango::OptionType::PUT, 0.20);
+mango::PricingParams params(
+    mango::OptionSpec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = mango::OptionType::PUT},
+    0.20);  // volatility
 
-auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
-std::pmr::synchronized_pool_resource pool;
-std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(grid_spec.n_points()), &pool);
-auto workspace = mango::PDEWorkspace::from_buffer(buffer, grid_spec.n_points()).value();
-
-mango::AmericanOptionSolver solver(params, workspace);
-auto result = solver.solve();
-// result->value_at(spot), result->delta(), result->gamma(), ...
+auto result = mango::solve_american_option_auto(params);
+// result->value_at(100.0), result->delta(), result->gamma(), ...
 ```
 
 ### Python
@@ -72,10 +70,10 @@ auto result = solver.solve();
 ```python
 import mango_option as mo
 
-params = mo.AmericanOptionParams()
+params = mo.PricingParams()
 params.spot, params.strike, params.maturity = 100.0, 100.0, 1.0
 params.volatility, params.rate, params.dividend_yield = 0.20, 0.05, 0.02
-params.type = mo.OptionType.PUT
+params.option_type = mo.OptionType.PUT
 
 result = mo.american_option_price(params)
 # result.value_at(100.0), result.delta(), result.gamma()

@@ -79,27 +79,18 @@ mango-option/
 #include "src/option/american_option.hpp"
 
 // Define option parameters
-mango::PricingParams params{
-    .strike = 100.0,
-    .spot = 100.0,
-    .maturity = 1.0,
-    .volatility = 0.20,
-    .rate = 0.05,
-    .continuous_dividend_yield = 0.02,
-    .type = OptionType::PUT
-};
+mango::PricingParams params(
+    mango::OptionSpec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = mango::OptionType::PUT},
+    0.20);  // volatility
 
-// Auto-estimate grid (recommended)
-auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
-std::pmr::synchronized_pool_resource pool;
-auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
-
-// Solve
-mango::AmericanOptionSolver solver(params, workspace);
-auto result = solver.solve();
+// Convenience API: auto grid, auto workspace
+auto result = mango::solve_american_option_auto(params);
 
 if (result.has_value()) {
-    std::cout << "Price: " << result->price() << "\n";
+    std::cout << "Price: " << result->value_at(100.0) << "\n";
     std::cout << "Delta: " << result->delta() << "\n";
 }
 ```
@@ -177,7 +168,7 @@ TEST(RateSpecTest, TimeConversionForUpslopingCurve) {
 ```cpp
 #include "src/option/iv_solver_fdm.hpp"
 
-mango::IVQuery query{.option = spec, .market_price = 10.45};
+mango::IVQuery query(spec, 10.45);
 mango::IVSolverFDM solver(config);
 auto result = solver.solve(query);
 ```
@@ -216,7 +207,7 @@ mango::IVSolverConfig config{
     .rate_grid = {0.02, 0.05},
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
-        .discrete_dividends = {{0.25, 1.50}},
+        .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     },
 };
