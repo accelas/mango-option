@@ -11,10 +11,10 @@ Practical examples and common usage patterns for the mango-option library.
 2. [American Option Pricing](#american-option-pricing)
 3. [Implied Volatility Calculation](#implied-volatility-calculation)
 4. [Price Table Pre-Computation](#price-table-pre-computation)
-5. [Discrete Dividend IV](#discrete-dividend-iv)
-6. [Custom PDE Solving](#custom-pde-solving)
-7. [Error Handling Patterns](#error-handling-patterns)
-8. [Batch Processing](#batch-processing)
+5. [Discrete Dividends](#discrete-dividends)
+6. [Batch Processing](#batch-processing)
+7. [Custom PDE Solving](#custom-pde-solving)
+8. [Error Handling Patterns](#error-handling-patterns)
 9. [Advanced Topics](#advanced-topics)
 
 ---
@@ -167,42 +167,6 @@ if (result.has_value()) {
 }
 ```
 
-### Dividend Handling
-
-**Continuous dividends:**
-```cpp
-mango::OptionSpec spec{
-    // ...
-    .dividend_yield = 0.03,  // 3% continuous yield
-};
-```
-
-**Discrete dividends via IV solver factory:**
-```cpp
-#include "src/option/iv_solver_factory.hpp"
-
-// The make_interpolated_iv_solver factory dispatches on the path variant
-mango::IVSolverFactoryConfig config{
-    .option_type = mango::OptionType::PUT,
-    .spot = 100.0,
-    .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
-    .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
-    .rate_grid = {0.02, 0.03, 0.05, 0.07},
-    .path = mango::SegmentedIVPath{
-        .maturity = 1.0,
-        .discrete_dividends = {
-            mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
-            mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
-        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
-    },
-};
-
-auto solver = mango::make_interpolated_iv_solver(config);
-auto result = solver->solve(query);
-```
-
-See [Discrete Dividend IV](#discrete-dividend-iv) for the full workflow.
-
 ---
 
 ## Implied Volatility Calculation
@@ -257,44 +221,6 @@ if (result.has_value()) {
 
     if (error.last_vol) {
         std::cerr << "Last volatility tried: " << *error.last_vol << "\n";
-    }
-}
-```
-
-### Batch IV Calculation
-
-**Process multiple IV queries in parallel:**
-
-```cpp
-// Create batch of queries
-std::vector<mango::IVQuery> queries;
-for (const auto& [strike, price] : market_data) {
-    mango::OptionSpec spec{
-        .spot = 100.0,
-        .strike = strike,
-        .maturity = 0.25,
-        .rate = 0.03,
-        .dividend_yield = 0.0,
-        .option_type = mango::OptionType::CALL
-    };
-    queries.push_back(mango::IVQuery(spec, price));
-}
-
-// Solve batch (OpenMP parallel)
-mango::IVSolver solver(config);
-auto batch = solver.solve_batch(queries);
-
-std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
-std::cout << "Failed: " << batch.failed_count << "\n";
-
-// Process results
-for (size_t i = 0; i < batch.results.size(); ++i) {
-    if (batch.results[i].has_value()) {
-        std::cout << "Strike " << queries[i].option.strike
-                  << ": IV = " << batch.results[i]->implied_vol << "\n";
-    } else {
-        std::cerr << "Strike " << queries[i].option.strike
-                  << ": " << batch.results[i].error().message << "\n";
     }
 }
 ```
@@ -535,32 +461,93 @@ if (result.has_value()) {
 
 ---
 
-## Discrete Dividend IV
+## Discrete Dividends
 
-### Factory-Based Solver Creation
+A cash dividend at time t creates a discontinuity: at the ex-dividend instant, the spot drops by the dividend amount. Pricing must enforce the jump condition V(t⁻, S) = V(t⁺, S − D) at each dividend date. Mango-option uses **chain solving** for this — the PDE solution is chained through dividend events, solving backward from expiry and applying the jump at each dividend date.
 
-The `make_interpolated_iv_solver` factory builds an interpolated IV solver that automatically handles discrete dividends. When no dividends are specified, it takes the standard single-surface path. When dividends are present, it builds a segmented surface with backward chaining.
+Chain solving operates at two levels. The FDM solver chains through dividend events directly during a single PDE solve, which is the natural approach for pricing individual options. The segmented surface builder pre-computes chained price surfaces across a parameter grid, which amortizes PDE cost across many IV queries.
+
+### Chain Solving in the FDM Solver (Pricing)
+
+Pass discrete dividends to `PricingParams`:
+
+```cpp
+#include "src/option/american_option.hpp"
+
+mango::PricingParams params(
+    mango::OptionSpec{
+        .spot = 100.0,
+        .strike = 100.0,
+        .maturity = 1.0,
+        .rate = 0.05,
+        .dividend_yield = 0.01,   // continuous yield (enters PDE coefficients)
+        .option_type = mango::OptionType::PUT},
+    0.20,  // volatility
+    {      // discrete dividends (chain solved via temporal events)
+        mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
+        mango::Dividend{.calendar_time = 0.50, .amount = 1.50}
+    });
+
+auto result = mango::solve_american_option(params);
+```
+
+The solver chains through dividends as follows:
+
+1. `estimate_pde_grid()` inserts mandatory time steps at each dividend date and widens the spatial domain to accommodate post-dividend spot shifts.
+2. The PDE solver marches backward from T to 0. At each dividend time τ, a temporal event fires.
+3. The temporal event rebuilds a cubic spline from the current solution, then evaluates it at shifted log-moneyness x′ = ln(exp(x) − D/K) for each grid point — applying the jump condition.
+4. The solver continues to the next dividend or t = 0.
+
+Continuous and discrete dividends combine naturally: the continuous yield enters the Black-Scholes PDE coefficients, while discrete dividends operate through the temporal event chain.
+
+### Bypassing Chain Solving
+
+To avoid chain solving, approximate discrete dividends with a continuous dividend yield:
+
+```cpp
+// Approximate: convert discrete dividends to continuous yield
+double total_div = 3.00;    // sum of discrete dividends
+double T = 1.0;             // maturity
+double S = 100.0;           // spot
+double equiv_yield = total_div / (S * T);  // ~3% continuous yield
+
+mango::PricingParams params(
+    mango::OptionSpec{
+        .spot = S, .strike = 100.0, .maturity = T,
+        .rate = 0.05, .dividend_yield = equiv_yield,
+        .option_type = mango::OptionType::PUT},
+    0.20);  // no discrete dividends — no chain solving
+```
+
+This eliminates the temporal event chain and solves a single smooth PDE. The tradeoff: continuous yield spreads the dividend effect uniformly across maturity, which misprices options with maturities near dividend dates. Use the continuous approximation only when dividend timing is unimportant.
+
+### Chain Solving in the Segmented Surface Builder (IV)
+
+When computing implied volatility for many options that share the same dividend schedule — the typical case when calibrating a vol surface from market data — the FDM solver is too slow per query. The segmented surface builder pre-computes chained price surfaces that can be queried in microseconds.
+
+**Why segmentation?** A single B-spline surface cannot fit the discontinuity at a dividend date. The builder splits the maturity axis into segments separated by dividend dates and solves each independently.
+
+**How segments are chained.** The builder works backward from expiry:
+
+1. **Segment 0** (nearest to expiry, τ ∈ [0, τ₁]): Built with standard EEP (Early Exercise Premium) decomposition. The initial condition is the option payoff.
+
+2. **Segment k** (τ ∈ [τ_k, τ_{k+1}]): Built in raw-price mode. Its initial condition comes from the previous segment's surface, evaluated at the post-dividend spot: S_adj = S − D_k. This embeds the dividend jump into the chained initial condition, so no spot adjustment is needed at query time for these segments.
+
+The result is a `SegmentedPriceSurface` — an ordered list of segments that together cover [0, T]. At query time, the surface finds the segment covering the requested τ and evaluates it directly.
+
+**Why multiple K_ref values?** Cash dividends break the scale invariance that American options normally have in strike. A single reference-strike surface cannot accurately interpolate across strikes far from K_ref. The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in log(K_ref). The result is a `SegmentedMultiKRefSurface`.
+
+### Building a Segmented IV Solver
+
+The `make_interpolated_iv_solver` factory handles all the segmented construction:
 
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-// Standard path (no discrete dividends):
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
-    .dividend_yield = 0.02,
-    .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-    .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
-    .rate_grid = {0.02, 0.03, 0.05, 0.07},
-    .path = mango::StandardIVPath{
-        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
-    },
-};
-
-// Segmented path (with discrete dividends):
-mango::IVSolverFactoryConfig div_config{
-    .option_type = mango::OptionType::PUT,
-    .spot = 100.0,
+    .dividend_yield = 0.01,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
     .vol_grid = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
     .rate_grid = {0.02, 0.03, 0.05, 0.07},
@@ -576,9 +563,32 @@ mango::IVSolverFactoryConfig div_config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-### Solving IV Queries
+The factory dispatches on the `path` variant:
 
-The solver exposes the same interface regardless of whether dividends are present:
+- **`StandardIVPath`** — no discrete dividends. Builds a single `AmericanPriceSurface` with a maturity grid. Use this for continuous-dividend options.
+- **`SegmentedIVPath`** — discrete dividends present. Builds a `SegmentedMultiKRefSurface` with backward chaining. Use this when dividends are known.
+
+### Standard Path (No Discrete Dividends)
+
+```cpp
+mango::IVSolverFactoryConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .dividend_yield = 0.02,
+    .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
+    .vol_grid = {0.10, 0.15, 0.20, 0.30, 0.40},
+    .rate_grid = {0.02, 0.03, 0.05, 0.07},
+    .path = mango::StandardIVPath{
+        .maturity_grid = {0.1, 0.25, 0.5, 1.0},
+    },
+};
+
+auto solver = mango::make_interpolated_iv_solver(config);
+```
+
+### Querying the Solver
+
+Both paths produce an `AnyIVSolver` with the same interface:
 
 ```cpp
 mango::IVQuery query(
@@ -594,15 +604,111 @@ if (result.has_value()) {
     std::cout << "IV: " << result->implied_vol << "\n";
 }
 
-// Batch solving works the same way
+// Batch solving
 auto batch = solver->solve_batch(queries);
 ```
 
 ### Configuration Notes
 
-- **No dividends:** Use `StandardIVPath` with a `maturity_grid` (vector of maturities). The factory takes the standard single-surface path.
-- **With dividends:** Use `SegmentedIVPath` with a single `maturity`, `discrete_dividends`, and optional `kref_config`. The factory segments the time axis at each dividend date and chains surfaces backward.
-- **`kref_config`** is optional. When omitted, it defaults to three reference strikes at {0.8S, S, 1.2S}. Cash dividends break price homogeneity in strike, so multiple K_ref surfaces are built and interpolated to maintain accuracy.
+- **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest.
+- **Continuous yield** applies inside each segment's PDE. Discrete dividends operate at segment boundaries. Both can be used together.
+
+### Choosing an Approach
+
+| Scenario | Approach | Chain solving? | Latency |
+|---|---|---|---|
+| Price one option with dividends | `solve_american_option(params)` | FDM temporal events | ~5–20ms |
+| Price one option without dividends | `solve_american_option(params)` | No | ~5–20ms |
+| Price one option, avoid chain solving | Use continuous yield approximation | No | ~5–20ms |
+| IV surface (no dividends) | `make_interpolated_iv_solver` + `StandardIVPath` | No | ~3.5μs/query |
+| IV surface (with dividends) | `make_interpolated_iv_solver` + `SegmentedIVPath` | Segmented chaining | ~3.5μs/query |
+
+The FDM chain solver is the right choice for individual prices or when you need per-option control (custom grids, yield curves). The segmented surface builder is the right choice when you need to evaluate many queries against the same dividend schedule — the upfront build cost is amortized across thousands of queries. The continuous yield approximation avoids chain solving entirely, at the cost of accuracy near dividend dates.
+
+---
+
+## Batch Processing
+
+### American Option Batch
+
+**Parallel batch solver with automatic optimization:**
+
+```cpp
+#include "src/option/american_option_batch.hpp"
+
+// Build batch of options
+std::vector<mango::PricingParams> batch;
+for (double K : {90.0, 95.0, 100.0, 105.0, 110.0}) {
+    batch.emplace_back(
+        mango::OptionSpec{
+            .spot = 100.0, .strike = K, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02,
+            .option_type = mango::OptionType::PUT},
+        0.20);  // volatility
+}
+
+mango::BatchAmericanOptionSolver solver;
+auto results = solver.solve_batch(batch);
+
+std::cout << "Succeeded: " << (results.results.size() - results.failed_count) << "\n";
+
+for (size_t i = 0; i < results.results.size(); ++i) {
+    if (results.results[i].has_value()) {
+        std::cout << "Strike " << batch[i].strike
+                  << ": " << results.results[i]->value() << "\n";
+    }
+}
+```
+
+**Shared grid mode** solves all options on the same spatial grid (required for price table construction):
+
+```cpp
+auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
+```
+
+**Normalized chain optimization.** When the batch contains options that vary only in strike (same maturity, volatility, rate, no discrete dividends), the solver exploits PDE scale invariance. It solves one normalized PDE and rescales the solution per strike, yielding up to 19,000× speedup. This optimization is automatic — no configuration needed.
+
+**Grid accuracy and snapshots (fluent API):**
+
+```cpp
+mango::BatchAmericanOptionSolver solver;
+solver.set_grid_accuracy(mango::GridAccuracyParams{.tol = 1e-4})
+      .set_snapshot_times(std::span{maturity_grid});
+
+auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
+```
+
+### IV Batch
+
+**Use solve_batch() for parallel IV calculation:**
+
+```cpp
+std::vector<mango::IVQuery> queries;
+for (const auto& [strike, price] : market_data) {
+    mango::OptionSpec spec{
+        .spot = 100.0,
+        .strike = strike,
+        .maturity = 0.25,
+        .rate = 0.03,
+        .dividend_yield = 0.0,
+        .option_type = mango::OptionType::CALL
+    };
+    queries.push_back(mango::IVQuery(spec, price));
+}
+
+mango::IVSolver solver(config);
+auto batch = solver.solve_batch(queries);
+
+std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
+std::cout << "Failed: " << batch.failed_count << "\n";
+
+for (size_t i = 0; i < batch.results.size(); ++i) {
+    if (batch.results[i].has_value()) {
+        std::cout << "Strike " << queries[i].strike
+                  << ": IV = " << batch.results[i]->implied_vol << "\n";
+    }
+}
+```
 
 ---
 
@@ -766,57 +872,6 @@ auto validate_query(const IVQuery& query) const
 auto validation_result = validate_query(query);
 if (!validation_result.has_value()) {
     return std::unexpected(validation_result.error());  // Propagate error
-}
-```
-
----
-
-## Batch Processing
-
-### American Option Batch
-
-**Not yet implemented - use manual loop with OpenMP:**
-
-```cpp
-std::vector<mango::PricingParams> params_batch = { /* ... */ };
-std::vector<std::expected<mango::AmericanOptionResult, mango::SolverError>> results(params_batch.size());
-
-// Shared grid for all options (requires estimate_batch_pde_grid)
-auto [grid_spec, time_domain] = mango::estimate_batch_pde_grid(params_batch);
-size_t n = grid_spec.n_points();
-
-#pragma omp parallel for
-for (size_t i = 0; i < params_batch.size(); ++i) {
-    std::pmr::synchronized_pool_resource pool;
-    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
-    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
-
-    auto solver = mango::AmericanOptionSolver::create(params_batch[i], workspace).value();
-    results[i] = solver.solve();
-}
-```
-
-### IV Batch (Built-in)
-
-**Use solve_batch() for parallel IV calculation:**
-
-```cpp
-std::vector<mango::IVQuery> queries = load_market_data();
-
-mango::IVSolver solver(config);
-auto batch = solver.solve_batch(queries);
-
-// Results and statistics
-std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
-std::cout << "Failed: " << batch.failed_count << "\n";
-
-// Process individual results
-for (size_t i = 0; i < batch.results.size(); ++i) {
-    if (batch.results[i].has_value()) {
-        process_success(batch.results[i].value());
-    } else {
-        handle_error(batch.results[i].error());
-    }
 }
 ```
 
