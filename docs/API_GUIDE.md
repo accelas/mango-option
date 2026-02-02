@@ -463,11 +463,9 @@ if (result.has_value()) {
 
 ## Discrete Dividends
 
-A cash dividend at time t creates a discontinuity: at the ex-dividend instant, the spot drops by the dividend amount. Pricing must enforce the jump condition V(t⁻, S) = V(t⁺, S − D) at each dividend date. Mango-option uses **chain solving** for this — the PDE solution is chained through dividend events, solving backward from expiry and applying the jump at each dividend date.
+A cash dividend at time t creates a discontinuity: at the ex-dividend instant, the spot drops by the dividend amount. Pricing must enforce the jump condition V(t⁻, S) = V(t⁺, S − D) at each dividend date.
 
-Chain solving operates at two levels. The FDM solver chains through dividend events directly during a single PDE solve, which is the natural approach for pricing individual options. The segmented surface builder pre-computes chained price surfaces across a parameter grid, which amortizes PDE cost across many IV queries.
-
-### Chain Solving in the FDM Solver (Pricing)
+### Pricing with Discrete Dividends
 
 Pass discrete dividends to `PricingParams`:
 
@@ -483,7 +481,7 @@ mango::PricingParams params(
         .dividend_yield = 0.01,   // continuous yield (enters PDE coefficients)
         .option_type = mango::OptionType::PUT},
     0.20,  // volatility
-    {      // discrete dividends (chain solved via temporal events)
+    {      // discrete dividends
         mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
         mango::Dividend{.calendar_time = 0.50, .amount = 1.50}
     });
@@ -491,21 +489,20 @@ mango::PricingParams params(
 auto result = mango::solve_american_option(params);
 ```
 
-The solver chains through dividends as follows:
+The solver handles dividends via temporal events:
 
 1. `estimate_pde_grid()` inserts mandatory time steps at each dividend date and widens the spatial domain to accommodate post-dividend spot shifts.
 2. The PDE solver marches backward from T to 0. At each dividend time τ, a temporal event fires.
 3. The temporal event rebuilds a cubic spline from the current solution, then evaluates it at shifted log-moneyness x′ = ln(exp(x) − D/K) for each grid point — applying the jump condition.
 4. The solver continues to the next dividend or t = 0.
 
-Continuous and discrete dividends combine naturally: the continuous yield enters the Black-Scholes PDE coefficients, while discrete dividends operate through the temporal event chain.
+Continuous and discrete dividends combine naturally: the continuous yield enters the Black-Scholes PDE coefficients, while discrete dividends operate through the temporal event mechanism.
 
-### Bypassing Chain Solving
+### Continuous Yield Approximation
 
-To avoid chain solving, approximate discrete dividends with a continuous dividend yield:
+When discrete dividend timing is unimportant, approximate with a continuous yield:
 
 ```cpp
-// Approximate: convert discrete dividends to continuous yield
 double total_div = 3.00;    // sum of discrete dividends
 double T = 1.0;             // maturity
 double S = 100.0;           // spot
@@ -516,22 +513,22 @@ mango::PricingParams params(
         .spot = S, .strike = 100.0, .maturity = T,
         .rate = 0.05, .dividend_yield = equiv_yield,
         .option_type = mango::OptionType::PUT},
-    0.20);  // no discrete dividends — no chain solving
+    0.20);  // no discrete dividends
 ```
 
-This eliminates the temporal event chain and solves a single smooth PDE. The tradeoff: continuous yield spreads the dividend effect uniformly across maturity, which misprices options with maturities near dividend dates. Use the continuous approximation only when dividend timing is unimportant.
+This solves a single smooth PDE without temporal events. The tradeoff: continuous yield spreads the dividend effect uniformly across maturity, which misprices options with maturities near dividend dates.
 
-### Chain Solving in the Segmented Surface Builder (IV)
+### Segmented Surfaces for IV (Discrete Dividends)
 
-When computing implied volatility for many options that share the same dividend schedule — the typical case when calibrating a vol surface from market data — the FDM solver is too slow per query. The segmented surface builder pre-computes chained price surfaces that can be queried in microseconds.
+When computing implied volatility for many options that share the same dividend schedule — the typical case when calibrating a vol surface from market data — the FDM solver is too slow per query. The segmented surface builder pre-computes price surfaces that can be queried in microseconds.
 
 **Why segmentation?** A single B-spline surface cannot fit the discontinuity at a dividend date. The builder splits the maturity axis into segments separated by dividend dates and solves each independently.
 
-**How segments are chained.** The builder works backward from expiry:
+**How segments connect.** The builder works backward from expiry:
 
 1. **Segment 0** (nearest to expiry, τ ∈ [0, τ₁]): Built with standard EEP (Early Exercise Premium) decomposition. The initial condition is the option payoff.
 
-2. **Segment k** (τ ∈ [τ_k, τ_{k+1}]): Built in raw-price mode. Its initial condition comes from the previous segment's surface, evaluated at the post-dividend spot: S_adj = S − D_k. This embeds the dividend jump into the chained initial condition, so no spot adjustment is needed at query time for these segments.
+2. **Segment k** (τ ∈ [τ_k, τ_{k+1}]): Built in raw-price mode. Its initial condition comes from the previous segment's surface, evaluated at the post-dividend spot: S_adj = S − D_k. This embeds the dividend jump into the initial condition, so no spot adjustment is needed at query time for these segments.
 
 The result is a `SegmentedPriceSurface` — an ordered list of segments that together cover [0, T]. At query time, the surface finds the segment covering the requested τ and evaluates it directly.
 
@@ -615,15 +612,14 @@ auto batch = solver->solve_batch(queries);
 
 ### Choosing an Approach
 
-| Scenario | Approach | Chain solving? | Latency |
-|---|---|---|---|
-| Price one option with dividends | `solve_american_option(params)` | FDM temporal events | ~5–20ms |
-| Price one option without dividends | `solve_american_option(params)` | No | ~5–20ms |
-| Price one option, avoid chain solving | Use continuous yield approximation | No | ~5–20ms |
-| IV surface (no dividends) | `make_interpolated_iv_solver` + `StandardIVPath` | No | ~3.5μs/query |
-| IV surface (with dividends) | `make_interpolated_iv_solver` + `SegmentedIVPath` | Segmented chaining | ~3.5μs/query |
+| Scenario | Approach | Latency |
+|---|---|---|
+| Price one option with dividends | `solve_american_option(params)` | ~5–20ms |
+| Price one option without dividends | `solve_american_option(params)` | ~5–20ms |
+| IV surface (no dividends) | `make_interpolated_iv_solver` + `StandardIVPath` | ~3.5μs/query |
+| IV surface (with dividends) | `make_interpolated_iv_solver` + `SegmentedIVPath` | ~3.5μs/query |
 
-The FDM chain solver is the right choice for individual prices or when you need per-option control (custom grids, yield curves). The segmented surface builder is the right choice when you need to evaluate many queries against the same dividend schedule — the upfront build cost is amortized across thousands of queries. The continuous yield approximation avoids chain solving entirely, at the cost of accuracy near dividend dates.
+Use the FDM solver for individual prices or when you need per-option control (custom grids, yield curves). Use the segmented surface builder when you need to evaluate many IV queries against the same dividend schedule — the upfront build cost is amortized across thousands of queries. The continuous yield approximation avoids temporal events entirely, at the cost of accuracy near dividend dates.
 
 ---
 
@@ -666,9 +662,34 @@ for (size_t i = 0; i < results.results.size(); ++i) {
 auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
 ```
 
-**Normalized chain optimization.** When the batch contains options that vary only in strike (same maturity, volatility, rate, no discrete dividends), the solver exploits PDE scale invariance. It solves one normalized PDE and rescales the solution per strike, yielding up to 19,000× speedup. This optimization is automatic — no configuration needed.
+### Chain Solving (Normalized Batch Optimization)
 
-**Grid accuracy and snapshots (fluent API):**
+When a batch of options share the same PDE parameters (σ, r, q, maturity, option type) and differ only in strike, the solver exploits a scale-invariance property of the Black-Scholes PDE: the normalized PDE with S = K = 1 has the same solution shape for all strikes. The solver solves this single normalized PDE once, then rescales the solution for each option's actual S/K ratio, yielding up to **19,000× speedup** over solving each option independently.
+
+This optimization is automatic — `solve_batch()` routes eligible batches to the normalized path. When a batch contains options with different volatilities or rates, the solver groups them by PDE parameters and solves one normalized PDE per group.
+
+**Eligibility requirements:**
+- `use_shared_grid = true`
+- Same option type and maturity across the batch
+- No discrete dividends (these break scale invariance)
+- Positive spot and strike values
+- Grid spacing and domain width within stability constraints
+- No `SetupCallback` (per-option callbacks are incompatible with shared PDE solves)
+
+**Disabling chain solving:**
+
+```cpp
+// Force per-option PDE solves (for benchmarking or debugging)
+mango::BatchAmericanOptionSolver solver;
+solver.set_use_normalized(false);
+auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
+```
+
+Providing a `SetupCallback` also disables the normalized path, since per-option configuration is incompatible with solving a single shared PDE.
+
+### Grid Accuracy and Snapshots
+
+**Fluent API for batch configuration:**
 
 ```cpp
 mango::BatchAmericanOptionSolver solver;
