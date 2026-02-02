@@ -111,14 +111,14 @@ The interpolation path is 5,400x faster than FDM. You pre-compute a 4D price tab
 
 The table below shows the accuracy/speed tradeoff across grid density profiles, measured on real SPY option data (7-day puts, strikes from 88% to 107% of spot):
 
-| Profile | PDE solves | ATM IV err (bps) | Near-OTM IV err (bps) | Deep-OTM IV err (bps) | Price RMSE |
-|---|---:|---:|---:|---:|---:|
-| Low | 100 | 10.0 | 2.7 | 20.7 | $0.014 |
-| Medium | 240 | 4.4 | 3.0 | 22.5 | $0.008 |
-| High (default) | 495 | 0.1 | 2.8 | 22.2 | $0.005 |
-| Ultra | 812 | 0.2 | 3.3 | 22.6 | $0.005 |
+| Profile | PDE solves | ATM IV err (bps) | Near-OTM IV err (bps) | Deep-OTM IV err (bps) | Near-ITM IV err (bps) | Deep-ITM IV err (bps)† | Price RMSE |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Low | 100 | 10.4 | 2.8 | 20.7 | 13.9 | 2006 | $0.016 |
+| Medium | 240 | 2.7 | 2.9 | 22.7 | 1.1 | 2070 | $0.005 |
+| High (default) | 495 | 0.4 | 3.3 | 22.8 | 1.3 | 2023 | $0.005 |
+| Ultra | 812 | 0.3 | 2.9 | 22.0 | 0.8 | 2002 | $0.004 |
 
-IV error in bps is sensitive to vega: a constant ~$0.005 price error maps to <1 bps near-ATM but 20+ bps for deep OTM short-dated options where vega is tiny. Price RMSE is the stable metric across the full chain. Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control the density/speed tradeoff.
+†Deep-ITM and deep-OTM options share the same low-vega characteristic: vega is near zero, so even a tiny price error (< $0.01) maps to thousands of bps in IV space. The actual price-relative error remains small — deep-ITM price RMSE is < $0.001 across all profiles. **Price RMSE is the stable metric** across all moneyness regimes. Use `from_chain_auto_profile()` with Low/Medium/High/Ultra to control the density/speed tradeoff.
 
 For detailed profiling data, see [docs/PERF_ANALYSIS.md](docs/PERF_ANALYSIS.md).
 
