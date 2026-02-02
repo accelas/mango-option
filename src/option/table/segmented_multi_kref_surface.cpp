@@ -146,22 +146,27 @@ static double hermite_interp(const double* x, const double* y, size_t n,
     double m0 = ((2.0 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
     double m2 = ((2.0 * h1 + h0) * d1 - h1 * d0) / (h0 + h1);
 
-    // Interior slope
+    // Interior slope via Fritsch-Carlson rules
     double m1;
     if (d0 * d1 > 0.0) {
-        // Data is monotone over both intervals: weighted harmonic mean
+        // Monotone over both intervals: weighted harmonic mean
         const double w1 = 2.0 * h1 + h0;
         const double w2 = 2.0 * h0 + h1;
         m1 = (w1 + w2) / (w1 / d0 + w2 / d1);
+    } else if (d0 * d1 == 0.0) {
+        // At least one flat interval: FC requires m1 = 0 at the flat side
+        m1 = 0.0;
     } else {
-        // Non-monotone data: C1 central difference (no monotone force)
+        // Opposite signs (local extremum): C1 central difference
         m1 = (h0 * d1 + h1 * d0) / (h0 + h1);
     }
 
-    // Monotonicity limiter on ALL slopes (only when data is monotone)
-    if (d0 * d1 > 0.0) {
+    // Monotonicity limiter on endpoint and interior slopes
+    // Applied when data is monotone (d0*d1 > 0) or has a flat interval
+    // (d0*d1 == 0) to prevent overshoot near flat segments.
+    if (d0 * d1 >= 0.0 && (d0 != 0.0 || d1 != 0.0)) {
         auto limit = [](double& m, double d_near) {
-            if (m * d_near <= 0.0) { m = 0.0; return; }
+            if (d_near == 0.0 || m * d_near <= 0.0) { m = 0.0; return; }
             double lim = 3.0 * std::abs(d_near);
             if (std::abs(m) > lim) m = std::copysign(lim, m);
         };
