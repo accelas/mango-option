@@ -261,19 +261,46 @@ double SegmentedMultiKRefSurface::price(double spot, double strike,
                                          double rate) const {
     const size_t n = entries_.size();
 
-    // Single entry or strike outside K_ref range: use nearest entry
-    if (n == 1 || strike <= entries_.front().K_ref) {
+    // Single entry: use it directly
+    if (n == 1) {
         return entries_.front().surface.price(spot, strike, tau, sigma, rate);
     }
-    if (strike >= entries_.back().K_ref) {
+
+    // Extrapolation bounds in log space (one log-interval beyond range)
+    double log_K_min = std::log(entries_.front().K_ref);
+    double log_K_max = std::log(entries_.back().K_ref);
+    double log_left_spacing = std::log(entries_[1].K_ref) - log_K_min;
+    double log_right_spacing = log_K_max - std::log(entries_[n - 2].K_ref);
+    double log_strike = std::log(strike);
+
+    // Beyond extrapolation limit: clamp to nearest surface
+    if (log_strike < log_K_min - log_left_spacing) {
+        return entries_.front().surface.price(spot, strike, tau, sigma, rate);
+    }
+    if (log_strike > log_K_max + log_right_spacing) {
         return entries_.back().surface.price(spot, strike, tau, sigma, rate);
     }
 
-    size_t lo_idx = find_bracket(strike);
+    // Exact match at boundary K_refs
+    if (strike == entries_.front().K_ref) {
+        return entries_.front().surface.price(spot, strike, tau, sigma, rate);
+    }
+    if (strike == entries_.back().K_ref) {
+        return entries_.back().surface.price(spot, strike, tau, sigma, rate);
+    }
 
-    // Exact match
-    if (strike == entries_[lo_idx].K_ref) {
-        return entries_[lo_idx].surface.price(spot, strike, tau, sigma, rate);
+    // For strikes in the extrapolation zone or interior, use interpolation
+    size_t lo_idx;
+    if (strike < entries_.front().K_ref) {
+        lo_idx = 0;
+    } else if (strike > entries_.back().K_ref) {
+        lo_idx = n - 2;
+    } else {
+        lo_idx = find_bracket(strike);
+        // Exact match at interior K_ref
+        if (strike == entries_[lo_idx].K_ref) {
+            return entries_[lo_idx].surface.price(spot, strike, tau, sigma, rate);
+        }
     }
 
     return interp_across_krefs(entries_, strike, lo_idx, [&](size_t i) {
@@ -286,17 +313,40 @@ double SegmentedMultiKRefSurface::vega(double spot, double strike,
                                         double rate) const {
     const size_t n = entries_.size();
 
-    if (n == 1 || strike <= entries_.front().K_ref) {
+    if (n == 1) {
         return entries_.front().surface.vega(spot, strike, tau, sigma, rate);
     }
-    if (strike >= entries_.back().K_ref) {
+
+    double log_K_min = std::log(entries_.front().K_ref);
+    double log_K_max = std::log(entries_.back().K_ref);
+    double log_left_spacing = std::log(entries_[1].K_ref) - log_K_min;
+    double log_right_spacing = log_K_max - std::log(entries_[n - 2].K_ref);
+    double log_strike = std::log(strike);
+
+    if (log_strike < log_K_min - log_left_spacing) {
+        return entries_.front().surface.vega(spot, strike, tau, sigma, rate);
+    }
+    if (log_strike > log_K_max + log_right_spacing) {
         return entries_.back().surface.vega(spot, strike, tau, sigma, rate);
     }
 
-    size_t lo_idx = find_bracket(strike);
+    if (strike == entries_.front().K_ref) {
+        return entries_.front().surface.vega(spot, strike, tau, sigma, rate);
+    }
+    if (strike == entries_.back().K_ref) {
+        return entries_.back().surface.vega(spot, strike, tau, sigma, rate);
+    }
 
-    if (strike == entries_[lo_idx].K_ref) {
-        return entries_[lo_idx].surface.vega(spot, strike, tau, sigma, rate);
+    size_t lo_idx;
+    if (strike < entries_.front().K_ref) {
+        lo_idx = 0;
+    } else if (strike > entries_.back().K_ref) {
+        lo_idx = n - 2;
+    } else {
+        lo_idx = find_bracket(strike);
+        if (strike == entries_[lo_idx].K_ref) {
+            return entries_[lo_idx].surface.vega(spot, strike, tau, sigma, rate);
+        }
     }
 
     return interp_across_krefs(entries_, strike, lo_idx, [&](size_t i) {

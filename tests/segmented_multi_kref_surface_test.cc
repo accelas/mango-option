@@ -238,3 +238,46 @@ TEST(SegmentedMultiKRefSurfaceTest, C1SmoothnessAtEdgeIntervals) {
         EXPECT_TRUE(std::isfinite(v_p2));
     }
 }
+
+TEST(SegmentedMultiKRefSurfaceTest, SmoothExtrapolationOutsideRange) {
+    std::vector<SegmentedMultiKRefSurface::Entry> entries;
+    for (double K : {80.0, 100.0, 120.0}) {
+        entries.push_back({K, build_surface(K)});
+    }
+
+    auto surface = SegmentedMultiKRefSurface::create(std::move(entries));
+    ASSERT_TRUE(surface.has_value());
+
+    constexpr double spot = 100.0, tau = 0.5, sigma = 0.20, rate = 0.05;
+    constexpr double h = 0.5;
+
+    // Check price smoothness at the left boundary (K_ref=80)
+    {
+        double K = 80.0;
+        double p_m2 = surface->price(spot, K - 2*h, tau, sigma, rate);
+        double p_m1 = surface->price(spot, K - h, tau, sigma, rate);
+        double p_p1 = surface->price(spot, K + h, tau, sigma, rate);
+        double p_p2 = surface->price(spot, K + 2*h, tau, sigma, rate);
+
+        double deriv_left  = (p_m1 - p_m2) / h;
+        double deriv_right = (p_p2 - p_p1) / h;
+
+        double avg_deriv = 0.5 * (std::abs(deriv_left) + std::abs(deriv_right));
+        if (avg_deriv > 1e-10) {
+            double rel_diff = std::abs(deriv_left - deriv_right) / avg_deriv;
+            EXPECT_LT(rel_diff, 0.30)
+                << "Extrapolation kink at left boundary K=" << K
+                << ": left_deriv=" << deriv_left << " right_deriv=" << deriv_right;
+        }
+    }
+
+    // Extrapolated prices must be finite and non-negative
+    for (double K_out : {75.0, 70.0, 125.0, 130.0}) {
+        double p = surface->price(spot, K_out, tau, sigma, rate);
+        EXPECT_TRUE(std::isfinite(p)) << "K=" << K_out;
+        EXPECT_GE(p, 0.0) << "K=" << K_out;
+
+        double v = surface->vega(spot, K_out, tau, sigma, rate);
+        EXPECT_TRUE(std::isfinite(v)) << "vega K=" << K_out;
+    }
+}
