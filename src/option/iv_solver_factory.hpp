@@ -13,7 +13,7 @@
 #include <vector>
 #include <variant>
 #include <expected>
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/table/american_price_surface.hpp"
 #include "src/option/table/segmented_multi_kref_surface.hpp"
 #include "src/option/table/segmented_multi_kref_builder.hpp"
@@ -42,7 +42,7 @@ struct IVSolverFactoryConfig {
     std::vector<double> moneyness_grid;
     std::vector<double> vol_grid;
     std::vector<double> rate_grid;
-    IVSolverInterpolatedConfig solver_config;  ///< Newton config
+    InterpolatedIVSolverConfig solver_config;  ///< Newton config
     std::variant<StandardIVPath, SegmentedIVPath> path;
 };
 
@@ -56,15 +56,15 @@ public:
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
     /// Constructor from standard solver
-    explicit AnyIVSolver(IVSolverInterpolated<AmericanPriceSurface> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver);
 
     /// Constructor from segmented solver
-    explicit AnyIVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver);
+    explicit AnyIVSolver(InterpolatedIVSolver<SegmentedMultiKRefSurface> solver);
 
 private:
     using SolverVariant = std::variant<
-        IVSolverInterpolated<AmericanPriceSurface>,
-        IVSolverInterpolated<SegmentedMultiKRefSurface>
+        InterpolatedIVSolver<AmericanPriceSurface>,
+        InterpolatedIVSolver<SegmentedMultiKRefSurface>
     >;
     SolverVariant solver_;
 };

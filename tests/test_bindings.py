@@ -325,8 +325,8 @@ def test_price_table_surface():
 
 
 def test_iv_solver_interpolated():
-    """Test IVSolverInterpolated"""
-    print("Testing IVSolverInterpolated...")
+    """Test InterpolatedIVSolver"""
+    print("Testing InterpolatedIVSolver...")
 
     # Build a surface first
     axes = mango_option.PriceTableAxes4D()
@@ -350,12 +350,12 @@ def test_iv_solver_interpolated():
 
     # Create solver via AmericanPriceSurface
     aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
-    config = mango_option.IVSolverInterpolatedConfig()
+    config = mango_option.InterpolatedIVSolverConfig()
     config.max_iter = 50
     config.tolerance = 1e-6
 
-    solver = mango_option.IVSolverInterpolated.create(aps, config)
-    print("✓ Created IVSolverInterpolated via AmericanPriceSurface")
+    solver = mango_option.InterpolatedIVSolver.create(aps, config)
+    print("✓ Created InterpolatedIVSolver via AmericanPriceSurface")
 
     # Note: With random coefficients, the solver may not converge
     # but we can verify the API works
@@ -424,7 +424,7 @@ def test_error_handling():
 
 
 def test_surface_to_solver_integration():
-    """Verify PriceTableSurface correctly passes to IVSolverInterpolated"""
+    """Verify PriceTableSurface correctly passes to InterpolatedIVSolver"""
     print("Testing surface to solver integration...")
 
     # Build surface
@@ -447,12 +447,12 @@ def test_surface_to_solver_integration():
 
     surface = mango_option.PriceTableSurface4D.build(axes, coeffs, meta)
 
-    # Verify surface can be passed to IVSolverInterpolated via AmericanPriceSurface
+    # Verify surface can be passed to InterpolatedIVSolver via AmericanPriceSurface
     aps = mango_option.AmericanPriceSurface.create(surface, mango_option.OptionType.PUT)
-    config = mango_option.IVSolverInterpolatedConfig()
-    solver = mango_option.IVSolverInterpolated.create(aps, config)
+    config = mango_option.InterpolatedIVSolverConfig()
+    solver = mango_option.InterpolatedIVSolver.create(aps, config)
     assert solver is not None
-    print("✓ Surface correctly passes to IVSolverInterpolated via AmericanPriceSurface")
+    print("✓ Surface correctly passes to InterpolatedIVSolver via AmericanPriceSurface")
 
 
 if __name__ == "__main__":

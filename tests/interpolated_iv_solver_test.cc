@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 /**
  * @file iv_solver_interpolated_test.cc
- * @brief Tests for IVSolverInterpolated (B-spline based IV solver)
+ * @brief Tests for InterpolatedIVSolver (B-spline based IV solver)
  */
 
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/price_table_axes.hpp"
@@ -50,24 +50,24 @@ TEST_F(IVSolverInterpolatedTest, CreateFromAmericanPriceSurface) {
     auto aps = AmericanPriceSurface::create(surface_, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    auto result = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto result = DefaultInterpolatedIVSolver::create(std::move(*aps));
     ASSERT_TRUE(result.has_value()) << "Failed to create solver";
 }
 
 TEST_F(IVSolverInterpolatedTest, CreateWithConfig) {
-    IVSolverInterpolatedConfig config{
+    InterpolatedIVSolverConfig config{
         .max_iter = 100,
         .tolerance = 1e-8,
         .sigma_min = 0.05,
         .sigma_max = 2.0
     };
 
-    auto result = IVSolverInterpolatedStandard::create(make_aps(), config);
+    auto result = DefaultInterpolatedIVSolver::create(make_aps(), config);
     ASSERT_TRUE(result.has_value()) << "Failed to create solver with config";
 }
 
 TEST_F(IVSolverInterpolatedTest, SolveATMPut) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -89,7 +89,7 @@ TEST_F(IVSolverInterpolatedTest, SolveATMPut) {
 }
 
 TEST_F(IVSolverInterpolatedTest, SolveITMPut) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -106,7 +106,7 @@ TEST_F(IVSolverInterpolatedTest, SolveITMPut) {
 }
 
 TEST_F(IVSolverInterpolatedTest, SolveOTMPut) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -123,7 +123,7 @@ TEST_F(IVSolverInterpolatedTest, SolveOTMPut) {
 }
 
 TEST_F(IVSolverInterpolatedTest, RejectsInvalidQuery) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -137,7 +137,7 @@ TEST_F(IVSolverInterpolatedTest, RejectsInvalidQuery) {
 }
 
 TEST_F(IVSolverInterpolatedTest, RejectsNegativeMarketPrice) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -150,7 +150,7 @@ TEST_F(IVSolverInterpolatedTest, RejectsNegativeMarketPrice) {
 }
 
 TEST_F(IVSolverInterpolatedTest, BatchSolve) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -176,7 +176,7 @@ TEST_F(IVSolverInterpolatedTest, BatchSolve) {
 }
 
 TEST_F(IVSolverInterpolatedTest, BatchSolveAllSucceed) {
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -194,12 +194,12 @@ TEST_F(IVSolverInterpolatedTest, BatchSolveAllSucceed) {
 }
 
 TEST_F(IVSolverInterpolatedTest, ConvergenceWithinIterations) {
-    IVSolverInterpolatedConfig config{
+    InterpolatedIVSolverConfig config{
         .max_iter = 10,  // Limited iterations
         .tolerance = 1e-6
     };
 
-    auto solver_result = IVSolverInterpolatedStandard::create(make_aps(), config);
+    auto solver_result = DefaultInterpolatedIVSolver::create(make_aps(), config);
     ASSERT_TRUE(solver_result.has_value());
     auto& solver = solver_result.value();
 
@@ -234,7 +234,7 @@ TEST_F(IVSolverInterpolatedTest, SolveWithAmericanPriceSurface) {
     auto aps = AmericanPriceSurface::create(eep_surface.value(), OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    auto solver = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
     ASSERT_TRUE(solver.has_value());
 
     IVQuery query(
@@ -272,11 +272,11 @@ TEST_F(IVSolverInterpolatedTest, WorksWithSegmentedMultiKRefSurface) {
     ASSERT_TRUE(surface_result.has_value())
         << "SegmentedMultiKRefBuilder::build failed";
 
-    // Create IVSolverInterpolated<SegmentedMultiKRefSurface>
-    auto solver_result = IVSolverInterpolated<SegmentedMultiKRefSurface>::create(
+    // Create InterpolatedIVSolver<SegmentedMultiKRefSurface>
+    auto solver_result = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
         std::move(*surface_result));
     ASSERT_TRUE(solver_result.has_value())
-        << "IVSolverInterpolated<SegmentedMultiKRefSurface>::create failed";
+        << "InterpolatedIVSolver<SegmentedMultiKRefSurface>::create failed";
 
     auto& solver = solver_result.value();
 
@@ -298,14 +298,14 @@ TEST_F(IVSolverInterpolatedTest, WorksWithSegmentedMultiKRefSurface) {
     }
 }
 
-// Verify that IVSolverInterpolatedStandard alias works correctly
+// Verify that DefaultInterpolatedIVSolver alias works correctly
 TEST_F(IVSolverInterpolatedTest, StandardAliasMatchesExplicitTemplate) {
-    // IVSolverInterpolatedStandard is IVSolverInterpolated<AmericanPriceSurface>
+    // DefaultInterpolatedIVSolver is InterpolatedIVSolver<AmericanPriceSurface>
     static_assert(std::is_same_v<
-        IVSolverInterpolatedStandard,
-        IVSolverInterpolated<AmericanPriceSurface>>);
+        DefaultInterpolatedIVSolver,
+        InterpolatedIVSolver<AmericanPriceSurface>>);
 
-    auto solver = IVSolverInterpolatedStandard::create(make_aps());
+    auto solver = DefaultInterpolatedIVSolver::create(make_aps());
     ASSERT_TRUE(solver.has_value());
 }
 
@@ -313,7 +313,7 @@ TEST_F(IVSolverInterpolatedTest, StandardAliasMatchesExplicitTemplate) {
 // Regression tests for API safety
 // ===========================================================================
 
-// Regression: IVSolverInterpolated must reject queries with wrong option type
+// Regression: InterpolatedIVSolver must reject queries with wrong option type
 // Bug: solve() accepted any IVQuery regardless of type, returning wrong IV
 TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     // Build an EEP surface for PUT options
@@ -334,7 +334,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     auto aps = AmericanPriceSurface::create(table->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
-    auto solver = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
     ASSERT_TRUE(solver.has_value());
 
     // Query with CALL type against a PUT surface — must fail
@@ -347,7 +347,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsOptionTypeMismatch) {
     EXPECT_EQ(iv_result.error().code, IVErrorCode::OptionTypeMismatch);
 }
 
-// Regression: IVSolverInterpolated must reject queries with wrong dividend_yield
+// Regression: InterpolatedIVSolver must reject queries with wrong dividend_yield
 // Bug: AmericanPriceSurface bakes in dividend_yield at construction; callers
 // with a different yield got wrong prices silently
 TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
@@ -371,7 +371,7 @@ TEST(IVSolverInterpolatedRegressionTest, RejectsDividendYieldMismatch) {
     ASSERT_TRUE(aps.has_value());
     EXPECT_NEAR(aps->dividend_yield(), 0.02, 1e-12);
 
-    auto solver = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto solver = DefaultInterpolatedIVSolver::create(std::move(*aps));
     ASSERT_TRUE(solver.has_value());
 
     // Query with dividend_yield = 0.05 — must fail (surface was built with 0.02)

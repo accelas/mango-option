@@ -483,13 +483,13 @@ surface = mo.build_price_table_surface_from_grid(
 
 †Deep-ITM and deep-OTM options share the same low-vega characteristic: vega is near zero, so even a tiny price error (< $0.01) maps to thousands of bps in IV space. The actual price-relative error remains small — deep-ITM price RMSE is < $0.001 across all profiles. **Price RMSE is the stable metric** across all moneyness regimes.
 
-### Using Price Surface with IVSolverInterpolated
+### Using Price Surface with InterpolatedIVSolver
 
 ```cpp
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 
 // Create IV solver from AmericanPriceSurface
-auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
 
 // Solve IV — internally uses EEP reconstruction + Newton iteration
 auto iv_result = iv_solver.solve(iv_query);

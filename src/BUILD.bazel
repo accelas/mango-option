@@ -12,7 +12,7 @@
 #
 # - Pricing models: //src/option:BUILD.bazel
 #   (american_option, american_solver_workspace, price_table_4d_builder,
-#    iv_solver, iv_solver_interpolated, iv_types)
+#    iv_solver, interpolated_iv_solver, iv_types)
 #
 # - Utilities: //src/support:BUILD.bazel
 #   (expected, parallel, error_types)

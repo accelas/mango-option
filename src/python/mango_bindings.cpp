@@ -10,7 +10,7 @@
 #include <sstream>
 #include "src/option/option_spec.hpp"
 #include "src/option/iv_solver.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
@@ -271,7 +271,7 @@ PYBIND11_MODULE(mango_option, m) {
         py::arg("query"),
         "Solve for implied volatility. Returns (success: bool, result: IVSuccess, error: IVError)");
 
-    // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
+    // Note: Batch solver removed - users should use InterpolatedIVSolver for batch queries
 
     // Dividend structure (must be registered before PricingParams)
     py::class_<mango::Dividend>(m, "Dividend")
@@ -993,23 +993,23 @@ PYBIND11_MODULE(mango_option, m) {
         )pbdoc");
 
     // =========================================================================
-    // IVSolverInterpolated (fast IV solving using B-spline interpolation)
+    // InterpolatedIVSolver (fast IV solving using B-spline interpolation)
     // =========================================================================
 
-    // IVSolverInterpolatedConfig
-    py::class_<mango::IVSolverInterpolatedConfig>(m, "IVSolverInterpolatedConfig")
+    // InterpolatedIVSolverConfig
+    py::class_<mango::InterpolatedIVSolverConfig>(m, "InterpolatedIVSolverConfig")
         .def(py::init<>())
-        .def_readwrite("max_iter", &mango::IVSolverInterpolatedConfig::max_iter)
-        .def_readwrite("tolerance", &mango::IVSolverInterpolatedConfig::tolerance)
-        .def_readwrite("sigma_min", &mango::IVSolverInterpolatedConfig::sigma_min)
-        .def_readwrite("sigma_max", &mango::IVSolverInterpolatedConfig::sigma_max);
+        .def_readwrite("max_iter", &mango::InterpolatedIVSolverConfig::max_iter)
+        .def_readwrite("tolerance", &mango::InterpolatedIVSolverConfig::tolerance)
+        .def_readwrite("sigma_min", &mango::InterpolatedIVSolverConfig::sigma_min)
+        .def_readwrite("sigma_max", &mango::InterpolatedIVSolverConfig::sigma_max);
 
-    // IVSolverInterpolated
-    py::class_<mango::IVSolverInterpolatedStandard>(m, "IVSolverInterpolated")
+    // InterpolatedIVSolver
+    py::class_<mango::DefaultInterpolatedIVSolver>(m, "InterpolatedIVSolver")
         .def_static("create",
             [](mango::AmericanPriceSurface american_surface,
-               const mango::IVSolverInterpolatedConfig& config) {
-                auto result = mango::IVSolverInterpolatedStandard::create(
+               const mango::InterpolatedIVSolverConfig& config) {
+                auto result = mango::DefaultInterpolatedIVSolver::create(
                     std::move(american_surface), config);
                 if (!result.has_value()) {
                     throw py::value_error("Failed to create solver: validation error");
@@ -1017,7 +1017,7 @@ PYBIND11_MODULE(mango_option, m) {
                 return std::move(result.value());
             },
             py::arg("american_surface"),
-            py::arg("config") = mango::IVSolverInterpolatedConfig{},
+            py::arg("config") = mango::InterpolatedIVSolverConfig{},
             R"pbdoc(
                 Create an interpolation-based IV solver from an AmericanPriceSurface.
 
@@ -1026,13 +1026,13 @@ PYBIND11_MODULE(mango_option, m) {
                     config: Optional solver configuration
 
                 Returns:
-                    IVSolverInterpolated instance
+                    InterpolatedIVSolver instance
 
                 Raises:
                     ValueError: If validation fails
             )pbdoc")
         .def("solve",
-            [](const mango::IVSolverInterpolatedStandard& solver, const mango::IVQuery& query) {
+            [](const mango::DefaultInterpolatedIVSolver& solver, const mango::IVQuery& query) {
                 auto result = solver.solve(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
@@ -1057,7 +1057,7 @@ PYBIND11_MODULE(mango_option, m) {
                     Tuple of (success: bool, result: IVSuccess, error: IVError)
             )pbdoc")
         .def("solve_batch",
-            [](const mango::IVSolverInterpolatedStandard& solver, const std::vector<mango::IVQuery>& queries) {
+            [](const mango::DefaultInterpolatedIVSolver& solver, const std::vector<mango::IVQuery>& queries) {
                 auto batch_result = solver.solve_batch(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {

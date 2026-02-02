@@ -10,7 +10,7 @@
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/option/table/american_price_surface.hpp"
 #include "src/option/iv_solver.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include <cstdio>
 #include <chrono>
 #include <cmath>
@@ -138,7 +138,7 @@ int main() {
             printf("%-6zu APS CREATE FAILED\n", trial);
             continue;
         }
-        auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
+        auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
         if (!iv_solver_result) {
             printf("%-6zu IV SOLVER FAILED\n", trial);
             continue;

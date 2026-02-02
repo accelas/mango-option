@@ -9,11 +9,11 @@ namespace mango {
 // AnyIVSolver: type-erased wrapper
 // ---------------------------------------------------------------------------
 
-AnyIVSolver::AnyIVSolver(IVSolverInterpolated<AmericanPriceSurface> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver)
     : solver_(std::move(solver))
 {}
 
-AnyIVSolver::AnyIVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver)
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<SegmentedMultiKRefSurface> solver)
     : solver_(std::move(solver))
 {}
 
@@ -66,7 +66,7 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
         return std::unexpected(aps.error());
     }
 
-    auto solver = IVSolverInterpolated<AmericanPriceSurface>::create(
+    auto solver = InterpolatedIVSolver<AmericanPriceSurface>::create(
         std::move(*aps), config.solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{
@@ -98,7 +98,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         return std::unexpected(surface.error());
     }
 
-    auto solver = IVSolverInterpolated<SegmentedMultiKRefSurface>::create(
+    auto solver = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
         std::move(*surface), config.solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{

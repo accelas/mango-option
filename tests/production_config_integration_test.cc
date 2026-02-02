@@ -18,7 +18,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/table/american_price_surface.hpp"
 
 using namespace mango;
@@ -509,17 +509,17 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     ASSERT_TRUE(table_result.has_value());
 
     // Create IV solver from surface via AmericanPriceSurface
-    IVSolverInterpolatedConfig solver_config;
+    InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
     auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(
         std::move(*aps), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
-        << "IVSolverInterpolatedStandard::create failed";
+        << "DefaultInterpolatedIVSolver::create failed";
 
     // Test IV solve at a sample point
     const auto& iv_solver = iv_solver_result.value();

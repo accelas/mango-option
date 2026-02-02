@@ -241,7 +241,7 @@ BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
         }
     } else {
         // Parallel path: each IV solve is independent (different PDE workspaces)
-        // Mirrors IVSolverInterpolated::solve_batch pattern
+        // Mirrors InterpolatedIVSolver::solve_batch pattern
         MANGO_PRAGMA_PARALLEL_FOR
         for (size_t i = 0; i < queries.size(); ++i) {
             results[i] = solve(queries[i]);

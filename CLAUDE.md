@@ -177,7 +177,7 @@ auto result = solver.solve(query);
 ```cpp
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/american_price_surface.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 
 // Build price table (always uses EEP for ~5x better interpolation accuracy)
 auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
@@ -191,7 +191,7 @@ auto aps = mango::AmericanPriceSurface::create(
 double price = aps.price(spot, strike, tau, sigma, rate);
 
 // Create interpolated IV solver from AmericanPriceSurface
-auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
 auto iv_result = iv_solver.solve(iv_query);
 ```
 

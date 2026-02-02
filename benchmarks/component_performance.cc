@@ -15,7 +15,7 @@
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/math/bspline_nd_separable.hpp"
 #include "src/option/iv_solver.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/american_price_surface.hpp"
@@ -285,7 +285,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     if (!aps) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
 
     if (!solver_result) {
         auto err = solver_result.error();
