@@ -77,7 +77,7 @@ PriceTableBuilder<N>::build(const PriceTableAxes<N>& axes) {
 
     // Check PDE domain coverage (only for explicit grids; auto-estimated grids
     // are computed from batch parameters and always cover the needed domain)
-    if (auto* explicit_grid = std::get_if<ExplicitPDEGrid>(&config_.pde_grid)) {
+    if (auto* explicit_grid = std::get_if<PDEGridConfig>(&config_.pde_grid)) {
         const double x_min_requested = std::log(axes.grids[0].front());
         const double x_max_requested = std::log(axes.grids[0].back());
         const double x_min = explicit_grid->grid_spec.x_min();
@@ -235,7 +235,7 @@ PriceTableBuilder<N>::estimate_pde_grid(
     auto accuracy = std::get<GridAccuracyParams>(config_.pde_grid);
     ensure_moneyness_coverage<N>(accuracy, batch, axes);
 
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(
         std::span<const PricingParams>(batch), accuracy);
 
     // Extend time domain to cover max maturity from axes
@@ -274,7 +274,7 @@ PriceTableBuilder<N>::solve_batch(
         if constexpr (std::is_same_v<T, GridAccuracyParams>) {
             // Auto-estimate PDE grid from batch parameters
             auto [est_grid, est_td] = estimate_pde_grid(batch, axes);
-            PDEGridSpec custom_grid = ExplicitPDEGrid{est_grid, est_td.n_steps(), {}};
+            PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
             return solver.solve_batch(batch, true, setup_cb, custom_grid);
         } else {
             // Explicit grid: check solver stability constraints
@@ -316,7 +316,7 @@ PriceTableBuilder<N>::solve_batch(
             if (grid_meets_constraints) {
                 const double max_maturity = axes.grids[1].back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+                PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
                 return solver.solve_batch(batch, true, setup_cb, custom_grid);
             } else {
                 // Grid violates constraints: fall back to auto-estimation
@@ -763,7 +763,7 @@ PriceTableBuilder<4>::from_grid_auto_profile(
     }
 
     // Estimate optimal grids based on target accuracy profile
-    auto grid_params = grid_accuracy_profile(grid_profile);
+    auto grid_params = make_price_table_grid_accuracy(grid_profile);
     auto estimate = estimate_grid_from_grid_bounds(
         chain.strikes,
         chain.spot,
@@ -785,7 +785,7 @@ PriceTableBuilder<4>::from_grid_auto_profile(
         std::move(estimate.grids[2]),
         std::move(estimate.grids[3]),
         chain.spot,  // K_ref = spot
-        grid_accuracy_profile(pde_profile),
+        make_grid_accuracy(pde_profile),
         type,
         chain.dividend_yield,
         0.0  // max_failure_rate = 0 (strict)

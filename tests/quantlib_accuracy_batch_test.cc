@@ -74,7 +74,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     r_min -= 0.01;
     r_max += 0.01;
 
-    auto grid_params = grid_accuracy_profile(PriceTableGridProfile::High);
+    auto grid_params = make_price_table_grid_accuracy(PriceTableGridProfile::High);
 
     auto grid_estimate = estimate_grid_for_price_table(
         m_min, m_max, tau_min, tau_max, sigma_min, sigma_max, r_min, r_max, grid_params);
@@ -96,9 +96,9 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
             scenario.volatility));
     }
 
-    auto pde_accuracy = grid_accuracy_profile(GridAccuracyProfile::High);
+    auto pde_accuracy = make_grid_accuracy(GridAccuracyProfile::High);
 
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(pde_params, pde_accuracy);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(pde_params, pde_accuracy);
 
     const double dividend_yield = scenarios.front().dividend_yield;
     for (const auto& scenario : scenarios) {
@@ -112,7 +112,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
         vol_grid,
         rate_grid,
         100.0,  // K_ref
-        ExplicitPDEGrid{grid_spec, time_domain.n_steps()},
+        PDEGridConfig{grid_spec, time_domain.n_steps()},
         OptionType::PUT,
         dividend_yield,
         0.0);    // max_failure_rate
@@ -127,7 +127,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     const auto& price_table_result = precompute_result.value();
 
     // Create interpolated IV solver from surface
-    IVSolverInterpolatedConfig iv_config{
+    InterpolatedIVSolverConfig iv_config{
         .max_iter = 100,
         .tolerance = 1e-7,
         .sigma_min = 0.05,
@@ -135,7 +135,7 @@ TEST(QuantLibBatchTest, StandardScenarios_IV_Interpolated) {
     };
     auto aps = AmericanPriceSurface::create(price_table_result.surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(std::move(*aps), iv_config);
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps), iv_config);
     ASSERT_TRUE(iv_solver_result.has_value())
         << "Failed to create interpolated IV solver: " << iv_solver_result.error();
 
@@ -215,7 +215,7 @@ TEST(QuantLibBatchTest, GridConvergence) {
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
     // Use automatic grid estimation
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
@@ -247,7 +247,7 @@ TEST(QuantLibBatchTest, Greeks_ATM) {
     PricingParams params(
         100.0, 100.0, 1.0, 0.05, 0.02, OptionType::PUT, 0.20);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;

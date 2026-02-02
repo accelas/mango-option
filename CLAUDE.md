@@ -65,7 +65,7 @@ mango-option/
 **87 source files** organized into:
 - **//src/pde/core** - Grid, PDESolver, TimeDomain, boundary conditions
 - **//src/pde/operators** - BlackScholesPDE, LaplacianPDE, CenteredDifference
-- **//src/option** - AmericanOptionSolver, IVSolverFDM, price tables
+- **//src/option** - AmericanOptionSolver, IVSolver, price tables
 - **//src/math** - Root finding, B-splines, tridiagonal solvers
 - **//src/simple** - Market data integration (yfinance, Databento, IBKR)
 - **//src/python** - Python bindings (pybind11)
@@ -87,7 +87,7 @@ mango::PricingParams params(
     0.20);  // volatility
 
 // Convenience API: auto grid, auto workspace
-auto result = mango::solve_american_option_auto(params);
+auto result = mango::solve_american_option(params);
 
 if (result.has_value()) {
     std::cout << "Price: " << result->value_at(100.0) << "\n";
@@ -166,10 +166,10 @@ TEST(RateSpecTest, TimeConversionForUpslopingCurve) {
 
 **Pattern 1: American IV Calculation**
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 
 mango::IVQuery query(spec, 10.45);
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 ```
 
@@ -177,7 +177,7 @@ auto result = solver.solve(query);
 ```cpp
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/american_price_surface.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 
 // Build price table (always uses EEP for ~5x better interpolation accuracy)
 auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
@@ -191,7 +191,7 @@ auto aps = mango::AmericanPriceSurface::create(
 double price = aps.price(spot, strike, tau, sigma, rate);
 
 // Create interpolated IV solver from AmericanPriceSurface
-auto iv_solver = mango::IVSolverInterpolated::create(std::move(aps)).value();
+auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
 auto iv_result = iv_solver.solve(iv_query);
 ```
 
@@ -199,7 +199,7 @@ auto iv_result = iv_solver.solve(iv_query);
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-mango::IVSolverConfig config{
+mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -211,7 +211,7 @@ mango::IVSolverConfig config{
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     },
 };
-auto solver = mango::make_iv_solver(config);
+auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 

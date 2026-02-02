@@ -68,7 +68,7 @@ TEST(EEPIntegrationTest, ReconstructedPriceMatchesPDE) {
 
     // Direct PDE solve for comparison
     PricingParams params(OptionSpec{.spot = S, .strike = K, .maturity = tau, .rate = r, .option_type = OptionType::PUT}, sigma);
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     size_t n_space = grid_spec.n_points();
     size_t ws_size = PDEWorkspace::required_size(n_space);

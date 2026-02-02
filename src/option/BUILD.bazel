@@ -142,9 +142,9 @@ cc_library(
 )
 
 cc_library(
-    name = "iv_solver_interpolated",
-    srcs = ["iv_solver_interpolated.cpp"],
-    hdrs = ["iv_solver_interpolated.hpp"],
+    name = "interpolated_iv_solver",
+    srcs = ["interpolated_iv_solver.cpp"],
+    hdrs = ["interpolated_iv_solver.hpp"],
     deps = [
         ":american_option",
         ":iv_result",
@@ -200,9 +200,9 @@ cc_library(
 )
 
 cc_library(
-    name = "iv_solver_fdm",
-    srcs = ["iv_solver_fdm.cpp"],
-    hdrs = ["iv_solver_fdm.hpp"],
+    name = "iv_solver",
+    srcs = ["iv_solver.cpp"],
+    hdrs = ["iv_solver.hpp"],
     deps = [
         ":option_spec",
         ":iv_result",
@@ -230,7 +230,7 @@ cc_library(
     srcs = ["iv_solver_factory.cpp"],
     hdrs = ["iv_solver_factory.hpp"],
     deps = [
-        ":iv_solver_interpolated",
+        ":interpolated_iv_solver",
         "//src/option/table:american_price_surface",
         "//src/option/table:segmented_multi_kref_surface",
         "//src/option/table:segmented_multi_kref_builder",

@@ -34,14 +34,14 @@ struct GridAccuracyParams {
     size_t max_time_steps = 5000;
 };
 
-struct ExplicitPDEGrid {
+struct PDEGridConfig {
     GridSpec<double> grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value();
     size_t n_time = 1000;
     std::vector<double> mandatory_times = {};
 };
 
-using PDEGridSpec = std::variant<ExplicitPDEGrid, GridAccuracyParams>;
+using PDEGridSpec = std::variant<PDEGridConfig, GridAccuracyParams>;
 
-GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile);
+GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile);
 
 }  // namespace mango

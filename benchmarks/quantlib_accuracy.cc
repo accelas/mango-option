@@ -117,7 +117,7 @@ static void compare_scenario(
         volatility);
 
     // Create workspace (use automatic grid determination)
-    auto [grid_spec, time_domain] = estimate_grid_for_option(mango_params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(mango_params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -247,7 +247,7 @@ static void BM_Convergence_GridResolution(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -300,7 +300,7 @@ static void BM_Greeks_Accuracy_ATM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -617,7 +617,7 @@ static void BM_DiscreteDiv_SinglePayout_Call(benchmark::State& state) {
         dividends);
 
     // Create workspace (use automatic grid determination)
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -684,7 +684,7 @@ static void BM_DiscreteDiv_Quarterly_Put(benchmark::State& state) {
         volatility,
         dividends);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();

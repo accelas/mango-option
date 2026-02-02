@@ -9,8 +9,8 @@
 #include <pybind11/numpy.h>
 #include <sstream>
 #include "src/option/option_spec.hpp"
-#include "src/option/iv_solver_fdm.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
@@ -185,11 +185,11 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("jacobian_fd_epsilon", &mango::RootFindingConfig::jacobian_fd_epsilon)
         .def_readwrite("brent_tol_abs", &mango::RootFindingConfig::brent_tol_abs);
 
-    // IVSolverFDMConfig structure
-    py::class_<mango::IVSolverFDMConfig>(m, "IVSolverFDMConfig")
+    // IVSolverConfig structure
+    py::class_<mango::IVSolverConfig>(m, "IVSolverConfig")
         .def(py::init<>())
-        .def_readwrite("root_config", &mango::IVSolverFDMConfig::root_config)
-        .def_readwrite("batch_parallel_threshold", &mango::IVSolverFDMConfig::batch_parallel_threshold);
+        .def_readwrite("root_config", &mango::IVSolverConfig::root_config)
+        .def_readwrite("batch_parallel_threshold", &mango::IVSolverConfig::batch_parallel_threshold);
     // Note: PDEGridSpec variant binding deferred — Python users use default auto-estimation
 
     // IVSuccess structure (std::expected success type)
@@ -256,11 +256,11 @@ PYBIND11_MODULE(mango_option, m) {
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 
-    // IVSolver class (now using FDM solver with std::expected)
-    py::class_<mango::IVSolverFDM>(m, "IVSolverFDM")
-        .def(py::init<const mango::IVSolverFDMConfig&>(),
+    // IVSolver class (FDM-based IV solver with std::expected)
+    py::class_<mango::IVSolver>(m, "IVSolver")
+        .def(py::init<const mango::IVSolverConfig&>(),
              py::arg("config"))
-        .def("solve", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
+        .def("solve", [](const mango::IVSolver& solver, const mango::IVQuery& query) {
             auto result = solver.solve(query);
             if (result.has_value()) {
                 return py::make_tuple(true, result.value(), mango::IVError{});
@@ -271,7 +271,7 @@ PYBIND11_MODULE(mango_option, m) {
         py::arg("query"),
         "Solve for implied volatility. Returns (success: bool, result: IVSuccess, error: IVError)");
 
-    // Note: Batch solver removed - users should use IVSolverInterpolated for batch queries
+    // Note: Batch solver removed - users should use InterpolatedIVSolver for batch queries
 
     // Dividend structure (must be registered before PricingParams)
     py::class_<mango::Dividend>(m, "Dividend")
@@ -350,11 +350,11 @@ PYBIND11_MODULE(mango_option, m) {
 
             mango::GridAccuracyParams accuracy;
             if (accuracy_profile.has_value()) {
-                accuracy = mango::grid_accuracy_profile(accuracy_profile.value());
+                accuracy = mango::make_grid_accuracy(accuracy_profile.value());
             }
 
             // Estimate grid automatically (sinh-spaced, clustered near strike)
-            auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params, accuracy);
+            auto [grid_spec, time_domain] = mango::estimate_pde_grid(params, accuracy);
 
             // Allocate workspace buffer
             size_t n = grid_spec.n_points();
@@ -368,7 +368,7 @@ PYBIND11_MODULE(mango_option, m) {
 
             auto solver_result = mango::AmericanOptionSolver::create(
                 params, workspace_result.value(),
-                mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
+                mango::PDEGridConfig{grid_spec, time_domain.n_steps(), {}});
             if (!solver_result) {
                 throw py::value_error(
                     "Failed to create solver (validation error code " +
@@ -431,7 +431,7 @@ PYBIND11_MODULE(mango_option, m) {
         .def(py::init<>())
         .def("set_grid_accuracy",
             [](mango::BatchAmericanOptionSolver& self, mango::GridAccuracyProfile profile) {
-                self.set_grid_accuracy(mango::grid_accuracy_profile(profile));
+                self.set_grid_accuracy(mango::make_grid_accuracy(profile));
                 return &self;
             },
             py::arg("profile"),
@@ -993,23 +993,23 @@ PYBIND11_MODULE(mango_option, m) {
         )pbdoc");
 
     // =========================================================================
-    // IVSolverInterpolated (fast IV solving using B-spline interpolation)
+    // InterpolatedIVSolver (fast IV solving using B-spline interpolation)
     // =========================================================================
 
-    // IVSolverInterpolatedConfig
-    py::class_<mango::IVSolverInterpolatedConfig>(m, "IVSolverInterpolatedConfig")
+    // InterpolatedIVSolverConfig
+    py::class_<mango::InterpolatedIVSolverConfig>(m, "InterpolatedIVSolverConfig")
         .def(py::init<>())
-        .def_readwrite("max_iter", &mango::IVSolverInterpolatedConfig::max_iter)
-        .def_readwrite("tolerance", &mango::IVSolverInterpolatedConfig::tolerance)
-        .def_readwrite("sigma_min", &mango::IVSolverInterpolatedConfig::sigma_min)
-        .def_readwrite("sigma_max", &mango::IVSolverInterpolatedConfig::sigma_max);
+        .def_readwrite("max_iter", &mango::InterpolatedIVSolverConfig::max_iter)
+        .def_readwrite("tolerance", &mango::InterpolatedIVSolverConfig::tolerance)
+        .def_readwrite("sigma_min", &mango::InterpolatedIVSolverConfig::sigma_min)
+        .def_readwrite("sigma_max", &mango::InterpolatedIVSolverConfig::sigma_max);
 
-    // IVSolverInterpolated
-    py::class_<mango::IVSolverInterpolatedStandard>(m, "IVSolverInterpolated")
+    // InterpolatedIVSolver
+    py::class_<mango::DefaultInterpolatedIVSolver>(m, "InterpolatedIVSolver")
         .def_static("create",
             [](mango::AmericanPriceSurface american_surface,
-               const mango::IVSolverInterpolatedConfig& config) {
-                auto result = mango::IVSolverInterpolatedStandard::create(
+               const mango::InterpolatedIVSolverConfig& config) {
+                auto result = mango::DefaultInterpolatedIVSolver::create(
                     std::move(american_surface), config);
                 if (!result.has_value()) {
                     throw py::value_error("Failed to create solver: validation error");
@@ -1017,7 +1017,7 @@ PYBIND11_MODULE(mango_option, m) {
                 return std::move(result.value());
             },
             py::arg("american_surface"),
-            py::arg("config") = mango::IVSolverInterpolatedConfig{},
+            py::arg("config") = mango::InterpolatedIVSolverConfig{},
             R"pbdoc(
                 Create an interpolation-based IV solver from an AmericanPriceSurface.
 
@@ -1026,13 +1026,13 @@ PYBIND11_MODULE(mango_option, m) {
                     config: Optional solver configuration
 
                 Returns:
-                    IVSolverInterpolated instance
+                    InterpolatedIVSolver instance
 
                 Raises:
                     ValueError: If validation fails
             )pbdoc")
         .def("solve",
-            [](const mango::IVSolverInterpolatedStandard& solver, const mango::IVQuery& query) {
+            [](const mango::DefaultInterpolatedIVSolver& solver, const mango::IVQuery& query) {
                 auto result = solver.solve(query);
                 if (result.has_value()) {
                     return py::make_tuple(true, result.value(), mango::IVError{});
@@ -1048,7 +1048,7 @@ PYBIND11_MODULE(mango_option, m) {
 
                 Note: When a YieldCurve is provided, it is collapsed to zero rate: -ln(D(T))/T.
                 This provides a reasonable approximation but does not capture term structure
-                dynamics. For full yield curve support, use IVSolverFDM instead.
+                dynamics. For full yield curve support, use IVSolver instead.
 
                 Args:
                     query: IVQuery with option parameters and market price
@@ -1057,7 +1057,7 @@ PYBIND11_MODULE(mango_option, m) {
                     Tuple of (success: bool, result: IVSuccess, error: IVError)
             )pbdoc")
         .def("solve_batch",
-            [](const mango::IVSolverInterpolatedStandard& solver, const std::vector<mango::IVQuery>& queries) {
+            [](const mango::DefaultInterpolatedIVSolver& solver, const std::vector<mango::IVQuery>& queries) {
                 auto batch_result = solver.solve_batch(queries);
                 py::list results;
                 for (const auto& r : batch_result.results) {

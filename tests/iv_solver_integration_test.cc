@@ -5,7 +5,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <string>
 
 using namespace mango;
@@ -20,7 +20,7 @@ TEST(IVSolverIntegration, FullWorkflowSuccess) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDMConfig config{
+    IVSolverConfig config{
         .root_config = RootFindingConfig{
             .max_iter = 100,
             .tolerance = 1e-6
@@ -28,7 +28,7 @@ TEST(IVSolverIntegration, FullWorkflowSuccess) {
 
     };
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     // Verify success
@@ -48,7 +48,7 @@ TEST(IVSolverIntegration, ValidationErrorPath) {
         OptionSpec{.spot = -100.0, .strike = 100.0, .maturity = 1.0,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDM solver(IVSolverFDMConfig{});
+    IVSolver solver(IVSolverConfig{});
     auto result = solver.solve(query);
 
     // Verify failure with correct error code
@@ -63,7 +63,7 @@ TEST(IVSolverIntegration, ArbitrageErrorPath) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 150.0);
 
-    IVSolverFDM solver(IVSolverFDMConfig{});
+    IVSolver solver(IVSolverConfig{});
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -89,7 +89,7 @@ TEST(IVSolverIntegration, BatchProcessingWorkflow) {
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 15.0));
 
-    IVSolverFDM solver(IVSolverFDMConfig{});
+    IVSolver solver(IVSolverConfig{});
     auto batch = solver.solve_batch(queries);
 
     // Check batch statistics
@@ -110,7 +110,7 @@ TEST(IVSolverIntegration, MonadicErrorPropagation) {
         OptionSpec{.spot = -100.0, .strike = -50.0, .maturity = 1.0,
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDM solver(IVSolverFDMConfig{});
+    IVSolver solver(IVSolverConfig{});
     auto result = solver.solve(query);
 
     // Should stop at first validation error (spot)
@@ -120,7 +120,7 @@ TEST(IVSolverIntegration, MonadicErrorPropagation) {
 }
 
 TEST(IVSolverIntegration, ITMOTMScenarios) {
-    IVSolverFDM solver(IVSolverFDMConfig{});
+    IVSolver solver(IVSolverConfig{});
 
     // ITM put (K > S)
     auto itm_result = solver.solve(IVQuery(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 15.0));

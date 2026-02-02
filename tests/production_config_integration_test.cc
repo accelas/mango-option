@@ -18,7 +18,7 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/table/american_price_surface.hpp"
 
 using namespace mango;
@@ -109,7 +109,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec, 500},
+        PDEGridConfig{grid_spec, 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -145,7 +145,7 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 300},
+        PDEGridConfig{grid_spec_result.value(), 300},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -170,7 +170,7 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 1000},
+        PDEGridConfig{grid_spec_result.value(), 1000},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -194,7 +194,7 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 500},
+        PDEGridConfig{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -232,7 +232,7 @@ TEST_P(BatchSolverGridSizeTest, SharedGrid_ExplicitSize) {
 
     // Create custom grid config
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, /*use_shared_grid=*/true, nullptr, custom_grid);
@@ -263,7 +263,7 @@ TEST_P(BatchSolverGridSizeTest, PerOptionGrid_ExplicitSize) {
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, /*use_shared_grid=*/false, nullptr, custom_grid);
@@ -463,7 +463,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 500},
+        PDEGridConfig{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -498,7 +498,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 500},
+        PDEGridConfig{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -509,17 +509,17 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
     ASSERT_TRUE(table_result.has_value());
 
     // Create IV solver from surface via AmericanPriceSurface
-    IVSolverInterpolatedConfig solver_config;
+    InterpolatedIVSolverConfig solver_config;
     solver_config.max_iter = 50;
     solver_config.tolerance = 1e-6;
 
     auto aps = AmericanPriceSurface::create(table_result->surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
-    auto iv_solver_result = IVSolverInterpolatedStandard::create(
+    auto iv_solver_result = DefaultInterpolatedIVSolver::create(
         std::move(*aps), solver_config);
 
     ASSERT_TRUE(iv_solver_result.has_value())
-        << "IVSolverInterpolatedStandard::create failed";
+        << "DefaultInterpolatedIVSolver::create failed";
 
     // Test IV solve at a sample point
     const auto& iv_solver = iv_solver_result.value();

@@ -25,7 +25,7 @@ All three paths share the same PDE solver core. The interpolated path adds a pre
 
 ```mermaid
 graph TD
-    IV[IVSolverFDM] -->|Brent's method| ROOT[Root Finding]
+    IV[IVSolver] -->|Brent's method| ROOT[Root Finding]
     IV --> AO[AmericanOptionSolver]
     AO --> PDE[PDESolver CRTP]
     PDE --> OPS[SpatialOperator]
@@ -37,7 +37,7 @@ graph TD
     EEP -->|stored in| SURFACE
     APS[AmericanPriceSurface] -->|reconstructs via| SURFACE
     APS -->|adds back| EU[EuropeanOptionSolver]
-    IVFAST[IVSolverInterpolated] -->|Newton on surface| ROOT
+    IVFAST[InterpolatedIVSolver] -->|Newton on surface| ROOT
     IVFAST -->|Query| APS
 ```
 
@@ -160,23 +160,23 @@ Why not exceptions? The solver runs in tight loops (batch pricing, Brent iterati
 
 ### Grid Auto-Estimation
 
-`estimate_grid_for_option()` selects grid size and time steps based on volatility, maturity, and moneyness. A typical result is 101 spatial points and 498 time steps. This avoids requiring the user to understand numerical parameters while still allowing override for fine-grained control.
+`estimate_pde_grid()` selects grid size and time steps based on volatility, maturity, and moneyness. A typical result is 101 spatial points and 498 time steps. This avoids requiring the user to understand numerical parameters while still allowing override for fine-grained control.
 
 ---
 
 ## 3. Implied Volatility Solvers
 
-### FDM-Based (IVSolverFDM)
+### FDM-Based (IVSolver)
 
 The FDM solver wraps Brent's root-finding method around the American option solver. Given a market price, it searches for the volatility that makes the model price match:
 
 ```
-IVSolverFDM → Brent's method → AmericanOptionSolver (5-8 calls) → price
+IVSolver → Brent's method → AmericanOptionSolver (5-8 calls) → price
 ```
 
 Each Brent iteration solves the PDE from scratch (no warm-starting), so total time is ~5-8 PDE solves. Adaptive volatility bounds narrow the search based on intrinsic value. Typical latency: ~19ms per IV on a 101x498 grid.
 
-### Interpolated (IVSolverInterpolated)
+### Interpolated (InterpolatedIVSolver)
 
 The interpolated solver replaces the nested PDE solve with a lookup into a pre-computed 4D B-spline surface. Newton iteration on the smooth surface converges in 3-5 iterations, each requiring only a surface evaluation (~193ns). Total IV solve: ~3.5us — a 5,400x speedup over FDM.
 
@@ -261,7 +261,7 @@ Cash dividends break the price homogeneity assumption that underpins the standar
 The library handles discrete dividends by splitting the time axis at each dividend date and solving backward through each segment. The component hierarchy:
 
 ```
-IVSolverInterpolated<SegmentedMultiKRefSurface>
+InterpolatedIVSolver<SegmentedMultiKRefSurface>
   └── SegmentedMultiKRefSurface
         └── SegmentedPriceSurface (one per K_ref)
               └── AmericanPriceSurface segments (one per time segment)
@@ -278,12 +278,12 @@ IVSolverInterpolated<SegmentedMultiKRefSurface>
 
 ### PriceSurface Concept
 
-The `PriceSurface` concept type-erases the two solver paths so that `IVSolverInterpolated` works with either:
+The `PriceSurface` concept type-erases the two solver paths so that `InterpolatedIVSolver` works with either:
 
 - `AmericanPriceSurface` — single EEP surface (no dividends)
 - `SegmentedMultiKRefSurface` — segmented multi-K_ref surface (with dividends)
 
-Both satisfy the same interface: `price(spot, strike, tau, sigma, rate)` and `vega(spot, strike, tau, sigma, rate)`. The `make_iv_solver` factory selects the appropriate path based on whether `discrete_dividends` is empty.
+Both satisfy the same interface: `price(spot, strike, tau, sigma, rate)` and `vega(spot, strike, tau, sigma, rate)`. The `make_interpolated_iv_solver` factory selects the appropriate path based on whether `discrete_dividends` is empty.
 
 ---
 

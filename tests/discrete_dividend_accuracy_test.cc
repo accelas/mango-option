@@ -70,13 +70,13 @@ double price_american_discrete_div_quantlib(
 // Helper: solve with mango at a given accuracy profile
 double solve_mango(const PricingParams& params,
                    const GridAccuracyParams& accuracy = GridAccuracyParams{}) {
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params, accuracy);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
     size_t n = grid_spec.n_points();
     std::pmr::vector<double> buffer(
         PDEWorkspace::required_size(n), std::pmr::get_default_resource());
     auto ws = PDEWorkspace::from_buffer(buffer, n).value();
     auto solver = AmericanOptionSolver::create(params, ws,
-                                ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}}).value();
+                                PDEGridConfig{grid_spec, time_domain.n_steps(), {}}).value();
     auto result = solver.solve();
     return result->value();
 }
@@ -93,7 +93,7 @@ TEST(DiscreteDividendAccuracyTest, PutSingleDividendVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.5, .amount = 3.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.20, 0.05, {{0.5, 3.0}}, false);
 
@@ -109,7 +109,7 @@ TEST(DiscreteDividendAccuracyTest, CallSingleDividendVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.25,
                          {{.calendar_time = 0.3, .amount = 4.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.25, 0.05, {{0.3, 4.0}}, true);
 
@@ -124,7 +124,7 @@ TEST(DiscreteDividendAccuracyTest, MultipleDividendsVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 95.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.25, .amount = 2.0}, {.calendar_time = 0.75, .amount = 2.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         95.0, 100.0, 1.0, 0.20, 0.05, {{0.25, 2.0}, {0.75, 2.0}}, false);
 
@@ -139,7 +139,7 @@ TEST(DiscreteDividendAccuracyTest, LargeDividendVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.30,
                          {{.calendar_time = 0.5, .amount = 15.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.30, 0.05, {{0.5, 15.0}}, false);
 
@@ -155,7 +155,7 @@ TEST(DiscreteDividendAccuracyTest, DividendNearExpiryVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.9, .amount = 2.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.20, 0.05, {{0.9, 2.0}}, false);
 
@@ -173,9 +173,9 @@ TEST(DiscreteDividendAccuracyTest, GridConvergence) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.5, .amount = 3.0}});
 
-    double p_low  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Low));
-    double p_med  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
-    double p_high = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::High));
+    double p_low  = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Low));
+    double p_med  = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
+    double p_high = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::High));
 
     // Successive differences should shrink
     double diff_1 = std::abs(p_med - p_low);
@@ -199,7 +199,7 @@ TEST(DiscreteDividendAccuracyTest, EventAlignsWithMandatoryTimePoint) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.3, .amount = 2.0}});
 
-    auto [grid_spec, td] = estimate_grid_for_option(params);
+    auto [grid_spec, td] = estimate_pde_grid(params);
     auto pts = td.time_points();
 
     double tau_div = 0.7;  // tau = T - t_cal = 1.0 - 0.3
@@ -214,11 +214,11 @@ TEST(DiscreteDividendAccuracyTest, DividendAtBoundariesIgnored) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.0, .amount = 5.0}, {.calendar_time = 1.0, .amount = 5.0}});
 
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
 
     PricingParams no_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20);
-    auto result_no_div = solve_american_option_auto(no_div);
+    auto result_no_div = solve_american_option(no_div);
     ASSERT_TRUE(result_no_div.has_value());
 
     EXPECT_NEAR(result->value(), result_no_div->value(), 1e-10)
@@ -232,7 +232,7 @@ TEST(DiscreteDividendAccuracyTest, SharedGridBatchIncludesDividendTimePoints) {
     batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                        std::vector<Dividend>{{.calendar_time = 0.4, .amount = 3.0}}));
 
-    auto [grid_spec, td] = compute_global_grid_for_batch(batch);
+    auto [grid_spec, td] = estimate_batch_pde_grid(batch);
     auto pts = td.time_points();
 
     double tau_div = 0.6;  // tau = T - t_cal = 1.0 - 0.4

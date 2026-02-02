@@ -115,5 +115,5 @@ The `DISABLED_StandardScenarios_IV_Interpolated` test validates the B-spline-bas
 - **mango-option** - Option pricing library
   - `american_option` - FDM pricing solver
   - `iv_solver_fdm` - FDM-based IV solver
-  - `iv_solver_interpolated` - B-spline IV solver
+  - `interpolated_iv_solver` - B-spline IV solver
   - `price_table_4d_builder` - Price table construction

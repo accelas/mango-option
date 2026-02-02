@@ -7,8 +7,8 @@
 #pragma once
 
 #include "src/simple/option_chain.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
+#include "src/option/iv_solver.hpp"
 #include <expected>
 #include <memory>
 #include <ranges>
@@ -98,7 +98,7 @@ enum class PriceSource {
 std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
     const OptionChain& chain,
     const MarketContext& ctx,
-    const mango::IVSolverInterpolatedStandard* solver = nullptr,
+    const mango::DefaultInterpolatedIVSolver* solver = nullptr,
     const IVComputeConfig& config = {},
     PriceSource price_source = PriceSource::Mid);
 

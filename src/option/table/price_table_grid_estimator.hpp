@@ -295,7 +295,7 @@ inline PriceTableGridEstimate<4> estimate_grid_from_grid_bounds(
         params);
 }
 
-inline PriceTableGridAccuracyParams<4> grid_accuracy_profile(
+inline PriceTableGridAccuracyParams<4> make_price_table_grid_accuracy(
     PriceTableGridProfile profile)
 {
     PriceTableGridAccuracyParams<4> params;

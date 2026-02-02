@@ -71,7 +71,7 @@ bool BatchAmericanOptionSolver::is_normalized_eligible(
     }
 
     // 6. Grid constraints (dx, width, margins)
-    auto [grid_spec, time_domain] = estimate_grid_for_option(first, grid_accuracy_);
+    auto [grid_spec, time_domain] = estimate_pde_grid(first, grid_accuracy_);
     (void)time_domain;  // Not used in eligibility check
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
@@ -183,7 +183,7 @@ void BatchAmericanOptionSolver::trace_ineligibility_reason(
     }
 
     // Check grid constraints
-    auto [grid_spec, time_domain] = estimate_grid_for_option(first, grid_accuracy_);
+    auto [grid_spec, time_domain] = estimate_pde_grid(first, grid_accuracy_);
     (void)time_domain;  // Not used in trace function
     double x_min = grid_spec.x_min();
     double x_max = grid_spec.x_max();
@@ -429,7 +429,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         return std::visit([&](const auto& v) -> std::pair<GridSpec<double>, TimeDomain> {
             using T = std::decay_t<decltype(v)>;
             if constexpr (std::is_same_v<T, GridAccuracyParams>) {
-                return estimate_grid_for_option(p, v);
+                return estimate_pde_grid(p, v);
             } else {
                 auto td = v.mandatory_times.empty()
                     ? TimeDomain::from_n_steps(0.0, p.maturity, v.n_time)
@@ -454,7 +454,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
             shared_grid = resolved_custom_grid;
         } else {
             // Existing path: use grid_accuracy_ member to estimate grid
-            shared_grid = compute_global_grid_for_batch(params, grid_accuracy_);
+            shared_grid = estimate_batch_pde_grid(params, grid_accuracy_);
         }
     }
 
@@ -476,7 +476,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
         } else {
             // Estimate based on all options
             for (const auto& p : params) {
-                auto [grid_spec, time_domain] = estimate_grid_for_option(p, grid_accuracy_);
+                auto [grid_spec, time_domain] = estimate_pde_grid(p, grid_accuracy_);
                 size_t n = grid_spec.n_points();
                 workspace_size_bytes = std::max(workspace_size_bytes, AmericanPDEWorkspace::required_bytes(n));
             }
@@ -530,7 +530,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                 // Per-option grid: create workspace for this option
                 auto [grid_spec, time_domain] = resolved_custom_grid.has_value()
                     ? resolved_custom_grid.value()
-                    : estimate_grid_for_option(params[i], grid_accuracy_);
+                    : estimate_pde_grid(params[i], grid_accuracy_);
 
                 solver_grid_config = std::make_pair(grid_spec, time_domain);
 
@@ -557,7 +557,7 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
                     ? shared_grid.value()
                     : (resolved_custom_grid.has_value()
                         ? resolved_custom_grid.value()
-                        : estimate_grid_for_option(params[i], grid_accuracy_));
+                        : estimate_pde_grid(params[i], grid_accuracy_));
 
                 // Update solver_grid_config for fallback path
                 solver_grid_config = std::make_pair(grid_spec, time_domain);
@@ -591,11 +591,11 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
 
             // Create solver using PDEWorkspace API with explicit grid config
             // This ensures workspace size matches the grid that will be used
-            // Convert resolved pair to ExplicitPDEGrid for new constructor API
+            // Convert resolved pair to PDEGridConfig for new constructor API
             std::optional<PDEGridSpec> solver_grid_spec;
             if (solver_grid_config.has_value()) {
                 auto& [gs, td] = *solver_grid_config;
-                solver_grid_spec = ExplicitPDEGrid{gs, td.n_steps(), {}};
+                solver_grid_spec = PDEGridConfig{gs, td.n_steps(), {}};
             }
             auto solver_result = AmericanOptionSolver::create(params[i], *workspace_ptr, solver_grid_spec);
             if (!solver_result) {

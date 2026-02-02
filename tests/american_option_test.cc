@@ -19,7 +19,7 @@ protected:
 
     [[nodiscard]] AmericanOptionResult Solve(const PricingParams& params) const {
         // Use convenience function that creates appropriately-sized workspace
-        auto result = solve_american_option_auto(params);
+        auto result = solve_american_option(params);
         if (!result) {
             const auto& error = result.error();
             ADD_FAILURE() << "Solver failed: " << error
@@ -41,7 +41,7 @@ TEST_F(AmericanOptionPricingTest, SolverWithPMRWorkspace) {
             .rate = 0.03, .option_type = OptionType::PUT}, 0.25);
 
     // Use convenience function that automatically sizes the workspace
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->converged);
 }
@@ -137,7 +137,7 @@ TEST_F(AmericanOptionPricingTest, BatchSolverMatchesSingleSolver) {
     for (size_t i = 0; i < params.size(); ++i) {
         ASSERT_TRUE(batch_result.results[i].has_value()) << "Batch solve failed for index " << i;
 
-        auto single_result = solve_american_option_auto(params[i]);
+        auto single_result = solve_american_option(params[i]);
         ASSERT_TRUE(single_result.has_value()) << "Single solve failed for index " << i;
         ASSERT_TRUE(single_result->converged);
 
@@ -155,7 +155,7 @@ TEST_F(AmericanOptionPricingTest, PutImmediateExerciseAtBoundary) {
             .rate = 0.05, .option_type = OptionType::PUT}, 0.2);
 
     // Use convenience function - it will automatically size the grid appropriately
-    auto result_exp = solve_american_option_auto(params);
+    auto result_exp = solve_american_option(params);
     ASSERT_TRUE(result_exp.has_value()) << result_exp.error();
     AmericanOptionResult result = std::move(result_exp.value());
     ASSERT_TRUE(result.converged);
@@ -201,7 +201,7 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
             .rate = curve, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
     // Solve with yield curve
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value()) << "Solver failed with yield curve";
     ASSERT_TRUE(result->converged);
 
@@ -215,7 +215,7 @@ TEST_F(AmericanOptionPricingTest, PricingWithYieldCurve) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
             .rate = 0.055, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
 
-    auto flat_result = solve_american_option_auto(flat_params);
+    auto flat_result = solve_american_option(flat_params);
     ASSERT_TRUE(flat_result.has_value()) << "Solver failed with flat rate";
     ASSERT_TRUE(flat_result->converged);
 
@@ -232,8 +232,8 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendPutPriceHigherThanNoDividend) 
     PricingParams with_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                                   {{.calendar_time = 0.5, .amount = 3.0}});
 
-    auto result_no_div = solve_american_option_auto(no_div);
-    auto result_with_div = solve_american_option_auto(with_div);
+    auto result_no_div = solve_american_option(no_div);
+    auto result_with_div = solve_american_option(with_div);
 
     ASSERT_TRUE(result_no_div.has_value());
     ASSERT_TRUE(result_with_div.has_value());
@@ -247,8 +247,8 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendCallPriceLowerThanNoDividend) 
     PricingParams with_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.20,
                                   {{.calendar_time = 0.5, .amount = 3.0}});
 
-    auto result_no_div = solve_american_option_auto(no_div);
-    auto result_with_div = solve_american_option_auto(with_div);
+    auto result_no_div = solve_american_option(no_div);
+    auto result_with_div = solve_american_option(with_div);
 
     ASSERT_TRUE(result_no_div.has_value());
     ASSERT_TRUE(result_with_div.has_value());
@@ -261,7 +261,7 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendCallLargeDividend) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.30,
                                 {{.calendar_time = 0.5, .amount = 50.0}});
 
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
     EXPECT_GE(result->value_at(params.spot), 0.0);
     EXPECT_TRUE(std::isfinite(result->value_at(params.spot)));
@@ -273,8 +273,8 @@ TEST_F(AmericanOptionPricingTest, DiscreteDividendMultiple) {
     PricingParams two_div(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                                  {{.calendar_time = 0.3, .amount = 2.0}, {.calendar_time = 0.7, .amount = 2.0}});
 
-    auto result_one = solve_american_option_auto(one_div);
-    auto result_two = solve_american_option_auto(two_div);
+    auto result_one = solve_american_option(one_div);
+    auto result_two = solve_american_option(two_div);
 
     ASSERT_TRUE(result_one.has_value());
     ASSERT_TRUE(result_two.has_value());
@@ -347,7 +347,7 @@ TEST(AmericanOptionTest, CreateRejectsMismatchedWorkspace) {
 }
 
 // ===========================================================================
-// solve_american_option_auto accessible from primary header
+// solve_american_option accessible from primary header
 // ===========================================================================
 
 TEST(AmericanOptionTest, SolveAutoFromPrimaryHeader) {
@@ -355,7 +355,7 @@ TEST(AmericanOptionTest, SolveAutoFromPrimaryHeader) {
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
                    .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
-    auto result = solve_american_option_auto(params);
+    auto result = solve_american_option(params);
     ASSERT_TRUE(result.has_value());
     EXPECT_NEAR(result->value_at(100.0), 6.35, 0.5);
 }

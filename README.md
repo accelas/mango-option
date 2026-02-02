@@ -61,7 +61,7 @@ mango::PricingParams params(
         .option_type = mango::OptionType::PUT},
     0.20);  // volatility
 
-auto result = mango::solve_american_option_auto(params);
+auto result = mango::solve_american_option(params);
 // result->value_at(100.0), result->delta(), result->gamma(), ...
 ```
 

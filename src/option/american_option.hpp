@@ -37,7 +37,7 @@ namespace mango {
  * @param accuracy Grid accuracy parameters (optional)
  * @return Pair of (GridSpec, TimeDomain) for consistent discretization
  */
-inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
+inline std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     const PricingParams& params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
@@ -112,7 +112,7 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_grid_for_option(
  * @param accuracy Grid accuracy parameters (optional)
  * @return Pair of (GridSpec, TimeDomain) covering all options
  */
-inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
+inline std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
     std::span<const PricingParams> params,
     const GridAccuracyParams& accuracy = GridAccuracyParams{})
 {
@@ -131,7 +131,7 @@ inline std::pair<GridSpec<double>, TimeDomain> compute_global_grid_for_batch(
 
     // Estimate grid for each option and take union/maximum
     for (const auto& p : params) {
-        auto [grid_spec, time_domain] = estimate_grid_for_option(p, accuracy);
+        auto [grid_spec, time_domain] = estimate_pde_grid(p, accuracy);
         global_x_min = std::min(global_x_min, grid_spec.x_min());
         global_x_max = std::max(global_x_max, grid_spec.x_max());
         global_Nx = std::max(global_Nx, grid_spec.n_points());
@@ -181,7 +181,7 @@ public:
      *
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
-     * @param grid Optional grid specification (GridAccuracyParams or ExplicitPDEGrid).
+     * @param grid Optional grid specification (GridAccuracyParams or PDEGridConfig).
      *             When nullopt, auto-estimates from option parameters.
      * @param snapshot_times Optional times to record solution snapshots
      * @return AmericanOptionSolver on success, ValidationError on failure
@@ -266,11 +266,11 @@ static_assert(OptionSolver<AmericanOptionSolver>);
 ///
 /// @param params Option parameters
 /// @return Expected containing result on success, error on failure
-inline std::expected<AmericanOptionResult, SolverError> solve_american_option_auto(
+inline std::expected<AmericanOptionResult, SolverError> solve_american_option(
     const PricingParams& params)
 {
     // Estimate grid for this option
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate workspace buffer (local, temporary)
     size_t n = grid_spec.n_points();
@@ -299,7 +299,7 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     // Buffer stays alive during solve(), result contains Grid with solution
     auto solver_result = AmericanOptionSolver::create(
         params, workspace_result.value(),
-        ExplicitPDEGrid{.grid_spec = grid_spec, .n_time = time_domain.n_steps(),
+        PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps(),
                         .mandatory_times = std::move(mandatory_tau)});
     if (!solver_result) {
         return std::unexpected(SolverError{

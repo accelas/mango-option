@@ -14,8 +14,8 @@
 #include "src/option/american_option.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/math/bspline_nd_separable.hpp"
-#include "src/option/iv_solver_fdm.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "src/option/iv_solver.hpp"
+#include "src/option/interpolated_iv_solver.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/american_price_surface.hpp"
@@ -94,7 +94,7 @@ const AnalyticSurfaceFixture& GetAnalyticSurfaceFixture() {
 static void BM_AmericanPut_ATM_1Y(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -125,7 +125,7 @@ BENCHMARK(BM_AmericanPut_ATM_1Y)->Arg(101)->Arg(201)->Arg(501);
 static void BM_AmericanPut_OTM_3M(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.30};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -156,7 +156,7 @@ BENCHMARK(BM_AmericanPut_OTM_3M)->Arg(500)->Arg(1000)->Arg(2000);
 static void BM_AmericanPut_ITM_2Y(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.25};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -191,7 +191,7 @@ static void BM_AmericanCall_WithDividends(benchmark::State& state) {
         {Dividend{0.25, 2.0}, Dividend{0.5, 2.0}, Dividend{0.75, 2.0}}
     };
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -226,11 +226,11 @@ BENCHMARK(BM_AmericanCall_WithDividends);
 static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
     IVQuery query{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 6.0};
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (auto _ : state) {
         auto result = solver.solve(query);
@@ -244,11 +244,11 @@ BENCHMARK(BM_ImpliedVol_ATM_Put);
 static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
     IVQuery query{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .option_type = OptionType::PUT}, 0.80};
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (auto _ : state) {
         auto result = solver.solve(query);
@@ -262,11 +262,11 @@ BENCHMARK(BM_ImpliedVol_OTM_Put);
 static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     IVQuery query{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0};
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (auto _ : state) {
         auto result = solver.solve(query);
@@ -285,7 +285,7 @@ static void BM_ImpliedVol_BSplineSurface(benchmark::State& state) {
     if (!aps) {
         throw std::runtime_error("Failed to create AmericanPriceSurface");
     }
-    auto solver_result = IVSolverInterpolatedStandard::create(std::move(*aps));
+    auto solver_result = DefaultInterpolatedIVSolver::create(std::move(*aps));
 
     if (!solver_result) {
         auto err = solver_result.error();
@@ -323,7 +323,7 @@ BENCHMARK(BM_ImpliedVol_BSplineSurface);
 static void BM_AmericanPut_GridResolution(benchmark::State& state) {
     PricingParams params{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20};
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -385,7 +385,7 @@ static void BM_AmericanPut_Batch(benchmark::State& state) {
         batch.push_back(PricingParams(OptionSpec{.spot = 100.0, .strike = strike, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
     }
 
-    auto [grid_spec, time_domain] = compute_global_grid_for_batch(batch);
+    auto [grid_spec, time_domain] = estimate_batch_pde_grid(batch);
     (void)time_domain;  // Not used in this benchmark
 
     // Allocate buffer for workspace
@@ -437,11 +437,11 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
         batch.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, market_price));
     }
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     for (auto _ : state) {
         std::vector<std::expected<IVSuccess, IVError>> results;
         results.reserve(batch_size);

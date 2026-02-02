@@ -17,7 +17,7 @@
 
 namespace mango {
 
-// Note: estimate_grid_for_option() is now defined in american_option.hpp
+// Note: estimate_pde_grid() is now defined in american_option.hpp
 
 // Helper for std::visit with multiple lambdas
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
@@ -28,13 +28,13 @@ static std::pair<GridSpec<double>, TimeDomain> resolve_grid(
     const std::optional<PDEGridSpec>& grid)
 {
     if (!grid.has_value()) {
-        return estimate_grid_for_option(params);
+        return estimate_pde_grid(params);
     }
     return std::visit(overloaded{
         [&](const GridAccuracyParams& acc) {
-            return estimate_grid_for_option(params, acc);
+            return estimate_pde_grid(params, acc);
         },
-        [&](const ExplicitPDEGrid& eg) {
+        [&](const PDEGridConfig& eg) {
             auto td = eg.mandatory_times.empty()
                 ? TimeDomain::from_n_steps(0.0, params.maturity, eg.n_time)
                 : TimeDomain::with_mandatory_points(0.0, params.maturity,

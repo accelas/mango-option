@@ -5,8 +5,8 @@ pybind_extension(
     name = "mango_option",
     srcs = ["mango_bindings.cpp"],
     deps = [
-        "//src/option:iv_solver_fdm",
-        "//src/option:iv_solver_interpolated",
+        "//src/option:iv_solver",
+        "//src/option:interpolated_iv_solver",
         "//src/option:american_option",
         "//src/option:american_option_batch",
         "//src/option:option_grid",

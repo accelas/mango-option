@@ -86,7 +86,7 @@ static void BM_Mango_AmericanPut_ATM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -141,7 +141,7 @@ static void BM_Mango_AmericanPut_OTM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.30);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -196,7 +196,7 @@ static void BM_Mango_AmericanPut_ITM(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.25);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();
@@ -253,7 +253,7 @@ static void BM_Mango_GridResolution(benchmark::State& state) {
             .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT},
         0.20);
 
-    auto [grid_spec, time_domain] = estimate_grid_for_option(params);
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
 
     // Allocate buffer for workspace
     size_t n = grid_spec.n_points();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <cmath>
 
 using namespace mango;
@@ -13,7 +13,7 @@ protected:
             OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
                 .rate = 0.05, .option_type = OptionType::PUT}, 10.45);
 
-        config = IVSolverFDMConfig{
+        config = IVSolverConfig{
             .root_config = RootFindingConfig{
                 .max_iter = 100,
                 .tolerance = 1e-6,
@@ -23,13 +23,13 @@ protected:
     }
 
     IVQuery query;
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
 };
 
 // Test 2: Basic ATM put IV calculation
 // Re-enabled: ProjectedThomas is now the default (PR #200)
 TEST_F(IVSolverTest, ATMPutIVCalculation) {
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     auto result = solver.solve(query);
 
@@ -43,7 +43,7 @@ TEST_F(IVSolverTest, ATMPutIVCalculation) {
 TEST_F(IVSolverTest, InvalidSpotPrice) {
     query.spot = -100.0;  // Invalid
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -55,7 +55,7 @@ TEST_F(IVSolverTest, InvalidSpotPrice) {
 TEST_F(IVSolverTest, InvalidStrike) {
     query.strike = 0.0;  // Invalid
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -67,7 +67,7 @@ TEST_F(IVSolverTest, InvalidStrike) {
 TEST_F(IVSolverTest, InvalidTimeToMaturity) {
     query.maturity = -1.0;  // Invalid
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -79,7 +79,7 @@ TEST_F(IVSolverTest, InvalidTimeToMaturity) {
 TEST_F(IVSolverTest, InvalidMarketPrice) {
     query.market_price = -5.0;  // Invalid
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -92,7 +92,7 @@ TEST_F(IVSolverTest, ITMPutIVCalculation) {
     query.strike = 110.0;  // In the money
     query.market_price = 15.0;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
@@ -104,7 +104,7 @@ TEST_F(IVSolverTest, OTMPutIVCalculation) {
     query.strike = 90.0;  // Out of the money
     query.market_price = 2.5;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
@@ -117,7 +117,7 @@ TEST_F(IVSolverTest, DeepITMPutIVCalculation) {
     query.strike = 100.0;
     query.market_price = 54.5;  // Realistic: intrinsic=50 + time value ~4.5
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value()) << "Deep ITM should converge with adaptive grid";
@@ -131,7 +131,7 @@ TEST_F(IVSolverTest, DeepOTMPutIVCalculation) {
     query.strike = 100.0;
     query.market_price = 1.0;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     // Should converge with adaptive grid
@@ -146,7 +146,7 @@ TEST_F(IVSolverTest, ATMCallIVCalculation) {
     query.option_type = OptionType::CALL;
     query.market_price = 10.0;  // ATM call price
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value()) << "ATM call should converge";
@@ -155,11 +155,11 @@ TEST_F(IVSolverTest, ATMCallIVCalculation) {
     EXPECT_LT(result->implied_vol, 0.35);
 }
 
-// Test 12: ExplicitPDEGrid with minimal spatial points
+// Test 12: PDEGridConfig with minimal spatial points
 TEST_F(IVSolverTest, ExplicitGridMinimalPoints) {
-    config.grid = ExplicitPDEGrid{
+    config.grid = PDEGridConfig{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 11, 2.0).value(), 50};
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
     // Minimal grid should still produce a result (possibly less accurate)
     ASSERT_TRUE(result.has_value());
@@ -167,11 +167,11 @@ TEST_F(IVSolverTest, ExplicitGridMinimalPoints) {
     EXPECT_LT(result->implied_vol, 0.5);
 }
 
-// Test 13: ExplicitPDEGrid with few time steps
+// Test 13: PDEGridConfig with few time steps
 TEST_F(IVSolverTest, ExplicitGridFewTimeSteps) {
-    config.grid = ExplicitPDEGrid{
+    config.grid = PDEGridConfig{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value(), 10};
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
     // Few time steps — solver should still produce a result
     ASSERT_TRUE(result.has_value());
@@ -186,11 +186,11 @@ TEST_F(IVSolverTest, GridSpecRejectsInvalidBounds) {
     ASSERT_FALSE(bad_grid.has_value());
 }
 
-// Test 15: ExplicitPDEGrid with 201 points
+// Test 15: PDEGridConfig with 201 points
 TEST_F(IVSolverTest, ExplicitGrid201Points) {
-    config.grid = ExplicitPDEGrid{
+    config.grid = PDEGridConfig{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0).value(), 1000};
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
     ASSERT_TRUE(result.has_value());
     EXPECT_GT(result->implied_vol, 0.1);
@@ -202,8 +202,8 @@ TEST_F(IVSolverTest, ExplicitGrid201Points) {
 // Regression tests
 // ===========================================================================
 
-// Regression: IVSolverFDM must respect grid accuracy in config
-// Bug: objective_function() called estimate_grid_for_option() with default
+// Regression: IVSolver must respect grid accuracy in config
+// Bug: objective_function() called estimate_pde_grid() with default
 // GridAccuracyParams, ignoring config_.grid. This caused a ~2-4 bps
 // IV error floor that could not be reduced.
 TEST_F(IVSolverTest, GridAccuracyReducesError) {
@@ -214,20 +214,20 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
     // demonstrating that grid_accuracy actually flows through.
 
     // Default accuracy
-    IVSolverFDMConfig default_config = config;
-    IVSolverFDM solver_default(default_config);
+    IVSolverConfig default_config = config;
+    IVSolver solver_default(default_config);
     auto result_default = solver_default.solve(query);
     ASSERT_TRUE(result_default.has_value())
         << "Default accuracy failed with error code: "
         << static_cast<int>(result_default.error().code);
 
     // Finer grid: tol=5e-3 (vs default 1e-2), min 150 points (vs default 100)
-    IVSolverFDMConfig finer_config = config;
+    IVSolverConfig finer_config = config;
     auto finer_accuracy = GridAccuracyParams{};
     finer_accuracy.tol = 5e-3;
     finer_accuracy.min_spatial_points = 150;
     finer_config.grid = finer_accuracy;
-    IVSolverFDM solver_finer(finer_config);
+    IVSolver solver_finer(finer_config);
     auto result_finer = solver_finer.solve(query);
     ASSERT_TRUE(result_finer.has_value())
         << "Finer accuracy failed with error code: "
