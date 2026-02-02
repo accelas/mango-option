@@ -29,29 +29,18 @@ Practical examples and common usage patterns for the mango-option library.
 
 int main() {
     // Option parameters
-    mango::PricingParams params{
-        .strike = 100.0,
-        .spot = 100.0,
-        .maturity = 1.0,
-        .volatility = 0.20,
-        .rate = 0.05,
-        .continuous_dividend_yield = 0.02,
-        .type = mango::OptionType::PUT
-    };
+    mango::PricingParams params(
+        mango::OptionSpec{
+            .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02,
+            .option_type = mango::OptionType::PUT},
+        0.20);  // volatility
 
-    // Auto-estimate grid
-    auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
-
-    // Create workspace
-    std::pmr::synchronized_pool_resource pool;
-    auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
-
-    // Solve
-    mango::AmericanOptionSolver solver(params, workspace);
-    auto result = solver.solve();
+    // Solve (auto grid, auto workspace)
+    auto result = mango::solve_american_option_auto(params);
 
     if (result.has_value()) {
-        std::cout << "Price: " << result->price() << "\n";
+        std::cout << "Price: " << result->value_at(100.0) << "\n";
         std::cout << "Delta: " << result->delta() << "\n";
         std::cout << "Gamma: " << result->gamma() << "\n";
     }
@@ -74,11 +63,11 @@ int main() {
         .maturity = 1.0,
         .rate = 0.05,
         .dividend_yield = 0.02,
-        .type = mango::OptionType::PUT
+        .option_type = mango::OptionType::PUT
     };
 
     // IV query
-    mango::IVQuery query{.option = spec, .market_price = 10.45};
+    mango::IVQuery query(spec, 10.45);
 
     // Solve
     mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
@@ -107,29 +96,21 @@ int main() {
 #include "src/option/american_option.hpp"
 
 // Define option
-mango::PricingParams params{
-    .strike = 100.0,
-    .spot = 105.0,          // 5% ITM put
-    .maturity = 0.5,        // 6 months
-    .volatility = 0.25,
-    .rate = 0.03,
-    .continuous_dividend_yield = 0.01,
-    .type = mango::OptionType::PUT
-};
+mango::PricingParams params(
+    mango::OptionSpec{
+        .spot = 105.0,          // 5% ITM put
+        .strike = 100.0,
+        .maturity = 0.5,        // 6 months
+        .rate = 0.03,
+        .dividend_yield = 0.01,
+        .option_type = mango::OptionType::PUT},
+    0.25);  // volatility
 
-// Auto-estimate grid (accounts for σ, T, moneyness)
-auto [grid_spec, time_domain] = mango::estimate_grid_for_option(params);
-
-// Create workspace
-std::pmr::synchronized_pool_resource pool;
-auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
-
-// Solve
-mango::AmericanOptionSolver solver(params, workspace);
-auto result = solver.solve();
+// Solve (auto grid, auto workspace)
+auto result = mango::solve_american_option_auto(params);
 
 if (result.has_value()) {
-    double price = result->price();
+    double price = result->value_at(105.0);
     double delta = result->delta();
     double gamma = result->gamma();
 
@@ -154,18 +135,17 @@ auto grid_spec = mango::GridSpec<double>::sinh_spaced(
 
 size_t n_time = 2000;  // Temporal resolution
 
-// Create workspace with custom grid
+// Create workspace
+size_t n = grid_spec.n_points();
 std::pmr::synchronized_pool_resource pool;
-auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
+std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
+auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
 
-// Pass custom grid to solver
-mango::AmericanOptionSolver solver(
-    params,
-    workspace,
-    std::nullopt,           // No snapshots
-    grid_spec,              // Custom grid
-    n_time                  // Custom time steps
-);
+// Pass custom grid to solver via ExplicitPDEGrid
+auto solver = mango::AmericanOptionSolver::create(
+    params, workspace,
+    mango::ExplicitPDEGrid{.grid_spec = grid_spec, .n_time = n_time}
+).value();
 
 auto result = solver.solve();
 ```
@@ -191,9 +171,9 @@ if (result.has_value()) {
 
 **Continuous dividends:**
 ```cpp
-mango::PricingParams params{
+mango::OptionSpec spec{
     // ...
-    .continuous_dividend_yield = 0.03,  // 3% continuous yield
+    .dividend_yield = 0.03,  // 3% continuous yield
 };
 ```
 
@@ -210,7 +190,9 @@ mango::IVSolverConfig config{
     .rate_grid = {0.02, 0.03, 0.05, 0.07},
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
-        .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},
+        .discrete_dividends = {
+            mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
+            mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     },
 };
@@ -239,11 +221,11 @@ mango::OptionSpec spec{
     .maturity = 1.0,
     .rate = 0.05,
     .dividend_yield = 0.02,
-    .type = mango::OptionType::PUT
+    .option_type = mango::OptionType::PUT
 };
 
 // IV query with market price
-mango::IVQuery query{.option = spec, .market_price = 10.45};
+mango::IVQuery query(spec, 10.45);
 
 // Configure solver (optional)
 mango::IVSolverFDMConfig config{
@@ -252,7 +234,7 @@ mango::IVSolverFDMConfig config{
         .tolerance = 1e-6
     },
     // Control PDE grid accuracy (higher accuracy = lower IV error, slower)
-    .grid_accuracy = mango::GridAccuracyParams{.tol = 1e-3}
+    .grid = mango::GridAccuracyParams{.tol = 1e-3}
 };
 
 // Solve
@@ -293,9 +275,9 @@ for (const auto& [strike, price] : market_data) {
         .maturity = 0.25,
         .rate = 0.03,
         .dividend_yield = 0.0,
-        .type = mango::OptionType::CALL
+        .option_type = mango::OptionType::CALL
     };
-    queries.push_back({.option = spec, .market_price = price});
+    queries.push_back(mango::IVQuery(spec, price));
 }
 
 // Solve batch (OpenMP parallel)
@@ -323,7 +305,7 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 
 ```cpp
 mango::IVSolverFDMConfig config{
-    .grid_accuracy = mango::GridAccuracyParams{
+    .grid = mango::GridAccuracyParams{
         .tol = 1e-4,                // Tighter truncation error
         .min_spatial_points = 200,
         .max_spatial_points = 800
@@ -334,16 +316,16 @@ mango::IVSolverFDM solver(config);
 auto result = solver.solve(query);
 ```
 
-**Override auto-estimation with manual grid (advanced):**
+**Override auto-estimation with explicit grid (advanced):**
 
 ```cpp
+auto grid_spec = mango::GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.5).value();
+
 mango::IVSolverFDMConfig config{
-    .use_manual_grid = true,
-    .grid_n_space = 201,
-    .grid_n_time = 2000,
-    .grid_x_min = -3.0,
-    .grid_x_max = 3.0,
-    .grid_alpha = 2.5
+    .grid = mango::ExplicitPDEGrid{
+        .grid_spec = grid_spec,
+        .n_time = 2000
+    }
 };
 
 mango::IVSolverFDM solver(config);
@@ -584,7 +566,9 @@ mango::IVSolverConfig div_config{
     .rate_grid = {0.02, 0.03, 0.05, 0.07},
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
-        .discrete_dividends = {{0.25, 1.50}, {0.50, 1.50}},
+        .discrete_dividends = {
+            mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
+            mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     },
 };
@@ -597,13 +581,12 @@ auto solver = mango::make_iv_solver(config);
 The solver exposes the same interface regardless of whether dividends are present:
 
 ```cpp
-mango::IVQuery query;
-query.spot = 100.0;
-query.strike = 95.0;
-query.maturity = 0.5;
-query.rate = mango::RateSpec{0.05};
-query.type = mango::OptionType::PUT;
-query.market_price = 7.5;
+mango::IVQuery query(
+    mango::OptionSpec{
+        .spot = 100.0, .strike = 95.0, .maturity = 0.5,
+        .rate = 0.05, .dividend_yield = 0.0,
+        .option_type = mango::OptionType::PUT},
+    7.5);  // market price
 
 auto result = solver->solve(query);
 
@@ -674,8 +657,10 @@ int main() {
     auto grid = std::make_shared<mango::Grid<double>>(grid_spec.generate(), time);
 
     // Create workspace
+    size_t n = grid_spec.n_points();
     std::pmr::synchronized_pool_resource pool;
-    auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
+    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
+    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
 
     // Create solver
     HeatSolver solver(grid, workspace, 0.1);  // D = 0.1
@@ -798,13 +783,15 @@ std::vector<std::expected<mango::AmericanOptionResult, mango::SolverError>> resu
 
 // Shared grid for all options (requires compute_global_grid_for_batch)
 auto [grid_spec, time_domain] = mango::compute_global_grid_for_batch(params_batch);
+size_t n = grid_spec.n_points();
 
 #pragma omp parallel for
 for (size_t i = 0; i < params_batch.size(); ++i) {
     std::pmr::synchronized_pool_resource pool;
-    auto workspace = mango::PDEWorkspace::create(grid_spec, &pool).value();
+    std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
+    auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
 
-    mango::AmericanOptionSolver solver(params_batch[i], workspace);
+    auto solver = mango::AmericanOptionSolver::create(params_batch[i], workspace).value();
     results[i] = solver.solve();
 }
 ```
