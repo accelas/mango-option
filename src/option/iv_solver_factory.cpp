@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "src/option/iv_solver_factory.hpp"
+#include "src/option/table/adaptive_grid_builder.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include <type_traits>
 
@@ -30,44 +31,20 @@ BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) cons
 }
 
 // ---------------------------------------------------------------------------
-// Factory: standard path (no discrete dividends)
+// Helper: wrap surface into AnyIVSolver
 // ---------------------------------------------------------------------------
 
 static std::expected<AnyIVSolver, ValidationError>
-build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) {
-    // Use spot as K_ref (ATM reference strike)
-    double K_ref = config.spot;
-
-    auto setup = PriceTableBuilder<4>::from_vectors(
-        config.moneyness_grid,
-        path.maturity_grid,
-        config.vol_grid,
-        config.rate_grid,
-        K_ref,
-        GridAccuracyParams{},
-        config.option_type,
-        config.dividend_yield);
-
-    if (!setup.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    auto& [builder, axes] = *setup;
-    auto table_result = builder.build(axes);
-    if (!table_result.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    auto aps = AmericanPriceSurface::create(
-        table_result->surface, config.option_type);
+wrap_surface(std::shared_ptr<const PriceTableSurface<4>> surface,
+             OptionType option_type,
+             const InterpolatedIVSolverConfig& solver_config) {
+    auto aps = AmericanPriceSurface::create(surface, option_type);
     if (!aps.has_value()) {
         return std::unexpected(aps.error());
     }
 
     auto solver = InterpolatedIVSolver<AmericanPriceSurface>::create(
-        std::move(*aps), config.solver_config);
+        std::move(*aps), solver_config);
     if (!solver.has_value()) {
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
@@ -77,19 +54,97 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 }
 
 // ---------------------------------------------------------------------------
+// Factory: standard path with adaptive grid refinement
+// ---------------------------------------------------------------------------
+
+static std::expected<AnyIVSolver, ValidationError>
+build_standard_adaptive(const IVSolverFactoryConfig& config,
+                        const StandardIVPath& path,
+                        const AdaptiveGrid& grid) {
+    OptionGrid chain;
+    chain.spot = config.spot;
+    chain.dividend_yield = config.dividend_yield;
+
+    chain.strikes.reserve(grid.moneyness.size());
+    for (double m : grid.moneyness) {
+        chain.strikes.push_back(config.spot / m);
+    }
+    chain.maturities = path.maturity_grid;
+    chain.implied_vols = grid.vol;
+    chain.rates = grid.rate;
+
+    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
+    if (!grid_spec.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    AdaptiveGridBuilder builder(grid.params);
+    auto result = builder.build(chain, *grid_spec, 500, config.option_type);
+
+    if (!result.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
+    return wrap_surface(result->surface, config.option_type, config.solver_config);
+}
+
+// ---------------------------------------------------------------------------
+// Factory: standard path (dispatch manual vs adaptive)
+// ---------------------------------------------------------------------------
+
+static std::expected<AnyIVSolver, ValidationError>
+build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) {
+    return std::visit([&](const auto& grid) -> std::expected<AnyIVSolver, ValidationError> {
+        using G = std::decay_t<decltype(grid)>;
+        if constexpr (std::is_same_v<G, AdaptiveGrid>) {
+            return build_standard_adaptive(config, path, grid);
+        }
+
+        // Manual grid: build price table directly
+        auto setup = PriceTableBuilder<4>::from_vectors(
+            grid.moneyness, path.maturity_grid, grid.vol, grid.rate,
+            config.spot, GridAccuracyParams{}, config.option_type,
+            config.dividend_yield);
+        if (!setup.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        auto& [builder, axes] = *setup;
+        auto table_result = builder.build(axes);
+        if (!table_result.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        return wrap_surface(table_result->surface, config.option_type,
+                            config.solver_config);
+    }, config.grid);
+}
+
+// ---------------------------------------------------------------------------
 // Factory: segmented path (discrete dividends)
 // ---------------------------------------------------------------------------
 
 static std::expected<AnyIVSolver, ValidationError>
 build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path) {
+    // Segmented path requires ManualGrid
+    const auto* manual = std::get_if<ManualGrid>(&config.grid);
+    if (!manual) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+
     SegmentedMultiKRefBuilder::Config seg_config{
         .spot = config.spot,
         .option_type = config.option_type,
         .dividends = {.dividend_yield = config.dividend_yield, .discrete_dividends = path.discrete_dividends},
-        .moneyness_grid = config.moneyness_grid,
+        .moneyness_grid = manual->moneyness,
         .maturity = path.maturity,
-        .vol_grid = config.vol_grid,
-        .rate_grid = config.rate_grid,
+        .vol_grid = manual->vol,
+        .rate_grid = manual->rate,
         .kref_config = path.kref_config,
     };
 
