@@ -91,41 +91,6 @@ build_standard_adaptive(const IVSolverFactoryConfig& config,
 }
 
 // ---------------------------------------------------------------------------
-// Factory: standard path with manual grid
-// ---------------------------------------------------------------------------
-
-static std::expected<AnyIVSolver, ValidationError>
-build_standard_manual(const IVSolverFactoryConfig& config,
-                      const StandardIVPath& path,
-                      const ManualGrid& grid) {
-    double K_ref = config.spot;
-
-    auto setup = PriceTableBuilder<4>::from_vectors(
-        grid.moneyness,
-        path.maturity_grid,
-        grid.vol,
-        grid.rate,
-        K_ref,
-        GridAccuracyParams{},
-        config.option_type,
-        config.dividend_yield);
-
-    if (!setup.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    auto& [builder, axes] = *setup;
-    auto table_result = builder.build(axes);
-    if (!table_result.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    return wrap_surface(table_result->surface, config.option_type, config.solver_config);
-}
-
-// ---------------------------------------------------------------------------
 // Factory: standard path (dispatch manual vs adaptive)
 // ---------------------------------------------------------------------------
 
@@ -136,7 +101,25 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
         if constexpr (std::is_same_v<G, AdaptiveGrid>) {
             return build_standard_adaptive(config, path, grid);
         } else {
-            return build_standard_manual(config, path, grid);
+            // Manual grid: build price table directly
+            auto setup = PriceTableBuilder<4>::from_vectors(
+                grid.moneyness, path.maturity_grid, grid.vol, grid.rate,
+                config.spot, GridAccuracyParams{}, config.option_type,
+                config.dividend_yield);
+            if (!setup.has_value()) {
+                return std::unexpected(ValidationError{
+                    ValidationErrorCode::InvalidGridSize, 0.0});
+            }
+
+            auto& [builder, axes] = *setup;
+            auto table_result = builder.build(axes);
+            if (!table_result.has_value()) {
+                return std::unexpected(ValidationError{
+                    ValidationErrorCode::InvalidGridSize, 0.0});
+            }
+
+            return wrap_surface(table_result->surface, config.option_type,
+                                config.solver_config);
         }
     }, config.grid);
 }

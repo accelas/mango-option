@@ -575,61 +575,136 @@ Cash dividends break the scale invariance that American options normally have in
 
 ## 10. Price Table Grid Estimation
 
-The 4D grid density directly controls IV accuracy. Too coarse and the B-spline interpolation introduces significant error; too fine and pre-computation takes days.
+The 4D grid density directly controls IV accuracy. Too coarse and the B-spline interpolation introduces significant error; too fine and pre-computation becomes prohibitively expensive. The challenge is choosing per-axis point counts that hit a target accuracy without wasting PDE solves.
 
 The library offers two grid specification modes:
 
-- **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). This gives full control over placement and density but requires domain expertise to balance accuracy against build cost.
-- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement (described below), validated against fresh PDE solves. This removes the need for manual tuning at the cost of additional PDE solves during construction.
+- **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). Predefined accuracy profiles translate a qualitative accuracy level into concrete grid sizes derived from the curvature-based formula below.
+- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This removes the need for manual tuning at the cost of additional PDE solves during construction.
 
 Both modes share the same maturity grid (supplied via the path configuration) and produce the same `PriceTableSurface<4>` — the difference is only in how the per-axis point counts are chosen.
 
 ### Curvature-Based Budget Allocation
 
-The cubic B-spline interpolation error is $O(h^4f^{(4)}(x))$, where $h$ is the grid spacing and $f^{(4)}$ is the fourth derivative. Dimensions with higher curvature need finer grids.
+Cubic B-spline interpolation error on a uniform grid of spacing $h$ is bounded by
 
-Each dimension receives points proportional to its curvature weight:
+$$\|f - s\|_\infty \leq C \cdot h^4 \cdot \|f^{(4)}\|_\infty$$
 
-| Dimension | Weight | Rationale |
-|-----------|--------|-----------|
-| Volatility ($\sigma$) | 1.5 | Highest curvature — vega non-linearity |
-| Moneyness ($m$) | 1.0 | Moderate — log-transform handles ATM peak |
-| Maturity ($\tau$) | 1.0 | Baseline — $\sqrt{\tau}$ behavior |
-| Rate ($r$) | 0.6 | Lowest — nearly linear discounting |
+where $f^{(4)}$ is the fourth derivative (curvature) of the underlying function and $C$ is a constant depending on the spline order. Inverting for grid spacing: to achieve error $\varepsilon$, we need $h \sim \varepsilon^{1/4}$, so the number of points scales as $n \sim \varepsilon^{-1/4}$.
 
-The formula:
+In a multi-dimensional price table, the four axes have very different curvature profiles. The American option price surface is most non-linear in volatility (vega curvature), moderately non-linear in moneyness (gamma peak near ATM, dampened by log-transform) and maturity ($\sqrt{\tau}$ behavior), and nearly linear in the risk-free rate (discounting). We assign curvature weights $w_d$ to reflect this:
 
-$$n_\text{base} = \left(\frac{s}{\varepsilon_\text{target}}\right)^{1/4}, \qquad n_\text{dim} = \text{clamp}(n_\text{base} \cdot w_\text{dim},\; 4,\; 50)$$
+| Dimension | Weight $w_d$ | Rationale |
+|-----------|:---:|-----------|
+| Moneyness ($m$) | 1.0 | Moderate curvature; log-transform absorbs ATM peak |
+| Maturity ($\tau$) | 1.0 | Baseline; $\sqrt{\tau}$ dependence |
+| Volatility ($\sigma$) | 2.5 | Highest curvature — vega non-linearity, vanna, volga |
+| Rate ($r$) | 0.6 | Nearly linear discounting effect |
 
-where $s \approx 2.0$ (calibrated empirically) and $\varepsilon_\text{target}$ is the desired IV accuracy (e.g., 0.001 for 10 bps).
+The per-dimension point count is:
 
-Grid spacing strategies vary by dimension:
-- **Moneyness**: log-uniform (matches the log-price coordinate)
-- **Maturity**: $\sqrt{\tau}$-uniform (concentrates near short expiries where theta is steepest)
-- **Volatility**: uniform (highest curvature needs regular spacing)
-- **Rate**: uniform (nearly linear response)
+$$n_\text{base} = \left(\frac{s}{\varepsilon_\text{target}}\right)^{1/4}, \qquad n_d = \text{clamp}\!\left(\lceil n_\text{base} \cdot w_d \rceil,\; 4,\; n_\text{max}\right)$$
+
+where $s = 2.0$ is a scale factor calibrated from benchmark data. The calibration reference: a grid of $13 \times 18 \times 8$ (moneyness $\times$ volatility $\times$ rate) achieves approximately 4.3 bps average IV error. With weights $[1.0, 1.0, 2.5, 0.6]$ and $n_\text{base} = 12$, the formula reproduces $n_\sigma = \lceil 12 \times 2.5 \rceil = 30$ for the volatility axis. The fourth-root relationship means accuracy improves slowly with grid size (halving the error requires $16\times$ the points), so the weights matter more than raw point count.
+
+**Grid spacing strategies.** The distribution of points within each axis exploits the coordinate transform used internally:
+
+- **Moneyness**: log-uniform spacing. Points are uniform in $\log(m)$, matching the log-moneyness coordinate used by the B-spline. This concentrates points near ATM where gamma peaks.
+- **Maturity**: $\sqrt{\tau}$-uniform spacing. Points are uniform in $\sqrt{\tau}$, concentrating near short expiries where theta is steepest and the early exercise boundary moves fastest.
+- **Volatility**: uniform spacing. The price surface's dependence on $\sigma$ has the highest fourth derivative; regular spacing is the safest choice for the B-spline error bound.
+- **Rate**: uniform spacing. Nearly linear dependence means uniform spacing wastes the fewest points.
+
+### Predefined Accuracy Profiles
+
+For manual grid construction, four profiles translate a qualitative accuracy level into concrete `PriceTableGridAccuracyParams`. Each profile sets $\varepsilon_\text{target}$ and $n_\text{max}$; the curvature-based formula above then determines the per-axis point counts.
+
+| Profile | $\varepsilon_\text{target}$ | $n_\text{max}$ | Typical grid $(m \times \tau \times \sigma \times r)$ | Estimated PDE solves |
+|---------|:---:|:---:|:---:|:---:|
+| Low | $5 \times 10^{-4}$ (50 bps) | 80 | $8 \times 8 \times 20 \times 5$ | ~100 |
+| Medium | $1 \times 10^{-4}$ (10 bps) | 120 | $12 \times 12 \times 30 \times 8$ | ~240 |
+| High | $2 \times 10^{-5}$ (2 bps) | 160 | $18 \times 18 \times 45 \times 11$ | ~495 |
+| Ultra | $7 \times 10^{-6}$ (0.7 bps) | 200 | $24 \times 24 \times 58 \times 14$ | ~812 |
+
+All profiles use the same curvature weights $[1.0,\, 1.0,\, 2.5,\, 0.6]$ and minimum of 4 points per axis (the cubic B-spline minimum). The "typical grid" column shows approximate sizes from the formula; actual sizes depend on domain bounds.
+
+The computational cost scales as $n_\sigma \times n_r$ PDE solves (one solve per volatility-rate pair, shared across all moneyness and maturity points via snapshot extraction). Moving from Medium to High roughly doubles the PDE solve count.
 
 ### Adaptive Grid Refinement
 
-When the initial estimate isn't accurate enough, iterative refinement improves it:
+The adaptive builder automates grid selection by iteratively refining an initial seed grid until a target IV error is met, using fresh PDE solves for validation at each iteration. The algorithm has five stages per iteration.
 
-1. Build initial grid from curvature-based estimate
-2. Sample $N$ validation points via Latin Hypercube
-3. For each sample:
-   - Evaluate price from B-spline surface
-   - Solve a fresh PDE for the reference price
-   - Compute IV error
-4. If $\max(\text{error}) \leq \varepsilon_\text{target}$: done
-5. Else: refine the dimension with highest error attribution
-6. Repeat until target met or max iterations reached
+#### Stage 1: Seed Grid
 
-The key detail is step 3: validation uses fresh PDE solves, not the spline itself. This prevents the refinement from chasing its own tail.
+The initial grid is a small uniform grid: 5 points each for moneyness, maturity, and volatility, and 4 points for rate (the B-spline minimum). Domain bounds are extracted from the input option chain's strikes, maturities, implied volatilities, and rates. Each dimension's bounds are expanded by a minimum spread to ensure the linspace produces distinct points:
 
-**Error attribution** identifies which dimension to refine by computing partial derivative sensitivity — the dimension contributing the most error gets more points. The refinement factor is ~1.3× (geometric growth), and convergence typically takes 2–3 iterations for a 5 bps target.
+| Dimension | Minimum spread | Rationale |
+|-----------|:---:|-----------|
+| Moneyness | 0.10 | $\pm 5\%$ around ATM |
+| Maturity | 0.50 years | $\pm 0.25$ years |
+| Volatility | 0.10 | $\pm 5\%$ vol |
+| Rate | 0.04 | $\pm 2\%$ rate |
 
-**Low-vega handling.** Deep ITM/OTM options have near-zero vega, making IV error numerically unstable. The error metric switches to price-scaled error in these regions:
+Lower bounds for moneyness, maturity, and volatility are clamped to $10^{-6}$ to avoid negative or zero values that the B-spline fitting rejects.
 
-$$\text{error} = \begin{cases} |\sigma_\text{interp} - \sigma_\text{ref}| & \text{if } \nu > \nu_\text{floor} \\ |P_\text{interp} - P_\text{ref}| / \nu_\text{floor} & \text{otherwise} \end{cases}$$
+#### Stage 2: Build Price Table
+
+At each iteration, a full `PriceTableSurface<4>` is built from the current grid vectors. The builder computes batch PDE solves for all $(\sigma, r)$ parameter pairs, extracts price snapshots at each maturity, fits the 4D B-spline, and produces the surface.
+
+A slice cache keyed by $(\sigma, r)$ pairs (rounded to 6 decimal places) avoids re-solving PDE slices that were computed in previous iterations. When a grid refinement changes only one dimension (e.g., adding moneyness points), all previously computed $(\sigma, r)$ slices remain valid. The cache is invalidated only if the maturity grid changes, since maturity affects the PDE time-stepping.
+
+#### Stage 3: Validation via Latin Hypercube Sampling
+
+The validation step compares the B-spline surface against fresh PDE reference solves at $N$ random points (default $N = 64$). The key design choice: validation solves are independent of the table's own PDE solves. The surface cannot validate itself — fresh solves prevent the refinement from chasing interpolation artifacts.
+
+**Latin Hypercube Sampling (LHS)** generates the validation points. In standard Monte Carlo, random points can cluster in some regions and leave others unsampled. LHS avoids this by stratifying each dimension independently: for $N$ samples, dimension $d$ is divided into $N$ equal strata, and each stratum contains exactly one sample. The position within each stratum is chosen uniformly at random, and strata are shuffled independently per dimension.
+
+Formally, for dimension $d$ with permutation $\pi_d$ of $\{0, \ldots, N-1\}$:
+
+$$x_i^{(d)} = \frac{\pi_d(i) + U_i^{(d)}}{N}, \qquad U_i^{(d)} \sim \text{Uniform}(0, 1)$$
+
+This guarantees that projecting all $N$ points onto any single axis produces exactly one point per stratum — no clustering, no gaps.
+
+After the first iteration, the sampling becomes **two-phase**: half the budget ($N/2$ points) uses standard LHS for broad coverage, and the other half uses **targeted sampling** focused on bins that had high errors in the previous iteration. Targeted samples are drawn from the problematic bins' sub-intervals, concentrating validation where it matters most.
+
+#### Stage 4: Error Metric
+
+For each validation point, the error metric converts the price difference between the B-spline surface and the fresh PDE solve into an IV-equivalent error:
+
+$$\text{error} = \begin{cases} \displaystyle\frac{|P_\text{interp} - P_\text{ref}|}{\nu} & \text{if } \nu \geq \nu_\text{floor} \\[10pt] \displaystyle\frac{|P_\text{interp} - P_\text{ref}|}{\nu_\text{floor}} & \text{if } \nu < \nu_\text{floor} \text{ and } |P_\text{interp} - P_\text{ref}| > \varepsilon_\text{target} \cdot \nu_\text{floor} \\[10pt] \text{(skip)} & \text{otherwise} \end{cases}$$
+
+where $\nu$ is the European Black-Scholes vega at the sample point and $\nu_\text{floor} = 10^{-4}$.
+
+The first case is the standard first-order Taylor approximation $\Delta\sigma \approx \Delta P / \nu$. The second case handles deep ITM/OTM options where vega is near zero and IV is numerically ill-defined; here the floor prevents division by a tiny number. The third case skips samples where the price error is small enough that even with the floor, the point would pass — these are uninteresting for refinement decisions.
+
+Using European vega (instead of the true American vega) is a deliberate approximation. For ATM and OTM options the two are nearly identical. For deep ITM American puts, European vega overestimates vega, which underestimates the IV error — a conservative choice that may slightly under-refine those regions. Computing true American vega would require two additional PDE solves per validation point, an unacceptable cost.
+
+**Convergence check.** If $\max(\text{error}) \leq \varepsilon_\text{target}$ across all validation points, the grid is accurate enough and the algorithm terminates. Otherwise, the error data is passed to the error attribution stage.
+
+#### Stage 5: Error Attribution and Targeted Refinement
+
+The goal is to answer: *which dimension should receive more grid points?* Adding points uniformly across all dimensions is wasteful — typically one dimension dominates the error.
+
+**Bin-based error tracking.** Each dimension is divided into $B = 5$ equal-width bins over its normalized $[0, 1]$ range. For every validation point where the error exceeds $\varepsilon_\text{target}$, the algorithm increments the bin count for each dimension at the point's position and accumulates the error mass:
+
+$$\text{bin\_counts}[d][\lfloor p_d \cdot B \rfloor] \mathrel{+}= 1, \qquad \text{error\_mass}[d] \mathrel{+}= e$$
+
+where $p_d \in [0, 1]$ is the normalized position in dimension $d$ and $e$ is the IV error.
+
+**Dimension selection.** The worst dimension is the one with the highest score:
+
+$$\text{score}_d = \underbrace{\frac{\max_b\, \text{bin\_counts}[d][b]}{\sum_b \text{bin\_counts}[d][b]}}_{\text{concentration}} \times \underbrace{\text{error\_mass}[d]}_{\text{magnitude}}$$
+
+The concentration ratio measures how localized the errors are in that dimension. If errors are spread uniformly across all 5 bins, concentration is $1/5 = 0.2$; if all errors fall in one bin, concentration is $1.0$. Multiplying by error mass ensures the algorithm prefers dimensions with both localized *and* large errors — a dimension with one tiny error in one bin scores lower than a dimension with many large errors concentrated in two bins.
+
+**Targeted midpoint insertion.** Once the worst dimension is identified, the algorithm inserts midpoints between existing grid points, but only in regions corresponding to problematic bins (bins with $\geq 2$ high-error samples). This avoids wasting points in regions that are already well-resolved. The total number of new points per iteration is bounded by:
+
+$$n_\text{new} \leq \lfloor n_\text{current} \times (f - 1) \rfloor$$
+
+where $f = 1.3$ is the refinement factor (30% geometric growth), and the absolute ceiling is $n_\text{max} = 50$ points per dimension (configurable). This geometric growth prevents runaway grid inflation.
+
+If no problematic bins are identified (errors are spread uniformly), the algorithm falls back to uniform midpoint insertion across the entire dimension.
+
+**Iteration budget.** The default maximum is 5 iterations. Convergence typically occurs in 2–3 iterations for a 5 bps target, since each iteration both adds points where needed and benefits from the slice cache (only new $(\sigma, r)$ pairs require fresh PDE solves). The total PDE solve cost is the sum of table solves (new slices only, thanks to caching) plus validation solves ($N$ per iteration).
 
 ---
 
