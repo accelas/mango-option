@@ -665,9 +665,18 @@ auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
 
 Providing a `SetupCallback` also disables the normalized path, since per-option configuration is incompatible with solving a single shared PDE.
 
-### Grid Accuracy and Snapshots
+### Batch Solver Configuration
 
-**Fluent API for batch configuration:**
+`BatchAmericanOptionSolver` exposes a fluent API for configuring all options in the batch uniformly. These settings are applied before solving and are compatible with the normalized chain path.
+
+| Method | Effect |
+|---|---|
+| `set_grid_accuracy(params)` | Control PDE spatial/temporal resolution (see [Grid Accuracy Tuning](#grid-accuracy-tuning)) |
+| `set_snapshot_times(times)` | Record solution at specific times — required for price table construction |
+| `set_use_normalized(false)` | Disable chain solving, force per-option PDE solves |
+| `set_trbdf2_config(config)` | Override TR-BDF2 time-stepper tolerances |
+
+Using `set_snapshot_times()` on the batch solver is the recommended way to register snapshots. The alternative — registering per-option via `SetupCallback` — disables the normalized chain path because a shared PDE cannot honor per-option callbacks.
 
 ```cpp
 mango::BatchAmericanOptionSolver solver;
