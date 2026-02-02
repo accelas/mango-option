@@ -9,7 +9,6 @@
 #include <cmath>
 #include <algorithm>
 #include <memory>
-#include <memory_resource>
 #include <type_traits>
 #include <variant>
 
@@ -86,21 +85,20 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
         }
     }, config_.grid);
 
-    // Thread-local workspace cache to avoid repeated allocations during Brent iterations
-    // Each thread (or serial context) maintains its own cache, avoiding data races
-    thread_local std::unordered_map<size_t, std::pmr::vector<double>> workspace_cache;
+    // Single grow-only buffer per thread — avoids unordered_map overhead.
+    // Grid size may vary across Brent iterations (volatility changes grid estimation)
+    // but a single buffer that grows to the max is simpler and faster.
+    thread_local std::vector<double> workspace_buffer;
 
     size_t n = grid_spec.n_points();
     size_t required_size = PDEWorkspace::required_size(n);
 
-    // Reuse cached buffer if available and large enough, otherwise create new one
-    auto& buffer = workspace_cache[n];
-    if (buffer.size() < required_size) {
-        buffer.resize(required_size);
+    if (workspace_buffer.size() < required_size) {
+        workspace_buffer.resize(required_size);
     }
 
     auto pde_workspace_result = PDEWorkspace::from_buffer(
-        std::span<double>(buffer.data(), buffer.size()), n);
+        std::span<double>(workspace_buffer.data(), workspace_buffer.size()), n);
     if (!pde_workspace_result.has_value()) {
         last_solver_error_ = SolverError{
             .code = SolverErrorCode::InvalidConfiguration,

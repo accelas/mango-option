@@ -246,6 +246,30 @@ TEST_F(BSplineNDTest, CoefficientSizeMismatch) {
     EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::CoefficientSizeMismatch);
 }
 
+/// Test that NaN coefficients are rejected
+TEST_F(BSplineNDTest, CreateRejectsNaNCoefficients) {
+    auto grid = create_uniform_grid(0.0, 3.0, 4);
+    auto knots = create_clamped_knots(grid);
+    std::vector<double> coeffs = {1.0, 2.0, std::numeric_limits<double>::quiet_NaN(), 4.0};
+
+    auto result = BSplineND<double, 1>::create(
+        {grid}, {knots}, std::move(coeffs));
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::NaNInput);
+}
+
+/// Test that Inf coefficients are rejected
+TEST_F(BSplineNDTest, CreateRejectsInfCoefficients) {
+    auto grid = create_uniform_grid(0.0, 3.0, 4);
+    auto knots = create_clamped_knots(grid);
+    std::vector<double> coeffs = {1.0, std::numeric_limits<double>::infinity(), 3.0, 4.0};
+
+    auto result = BSplineND<double, 1>::create(
+        {grid}, {knots}, std::move(coeffs));
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, mango::InterpolationErrorCode::NaNInput);
+}
+
 // ===========================================================================
 // Second derivative tests
 // ===========================================================================

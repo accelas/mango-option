@@ -75,7 +75,7 @@ template<std::floating_point T>
 
             // Clamp to interior of interval (avoid coinciding with data sites)
             const T spacing = right - left;
-            const T eps = std::max(T{1e-12} * spacing,
+            const T eps = std::max(T{128} * std::numeric_limits<T>::epsilon() * spacing,
                                   std::numeric_limits<T>::epsilon() *
                                       std::max(std::abs(right), T{1}));
             knot = std::clamp(knot, left + eps, right - eps);
@@ -170,7 +170,7 @@ void cubic_basis_nonuniform(
     const int n = static_cast<int>(t.size());
 
     // Exact interpolation at right boundary (avoids numerical errors)
-    if (std::abs(x - t.back()) < T{1e-14}) {
+    if (std::abs(x - t.back()) < T{64} * std::numeric_limits<T>::epsilon() * std::max(std::abs(t.back()), T{1})) {
         N[0] = T{1};
         N[1] = T{0};
         N[2] = T{0};

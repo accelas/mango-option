@@ -139,6 +139,19 @@ public:
             }
         }
 
+        // Verify stride computation won't overflow
+        size_t stride_check = 1;
+        for (size_t i = N; i > 0; --i) {
+            auto result = safe_multiply(stride_check, grids[i - 1].size());
+            if (!result.has_value()) {
+                return std::unexpected(InterpolationError{
+                    InterpolationErrorCode::ValueSizeMismatch,
+                    grids[i - 1].size(),
+                    i - 1});
+            }
+            stride_check = result.value();
+        }
+
         // All grids valid, create fitter
         return BSplineNDSeparable(std::move(grids));
     }
