@@ -11,46 +11,79 @@ on:
       - master
 
 jobs:
-  build-and-test:
-    name: Build and Test
+  # Build the CI Docker image if Dockerfile changed, otherwise use cached
+  docker-image:
+    name: CI Image
     runs-on: ubuntu-latest
-    container:
-      image: debian:trixie
-
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
     steps:
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y git wget ca-certificates build-essential clang systemtap-sdt-dev libquantlib0-dev liblapacke-dev python3 python3-numpy python3-dev
-
-          # Add Apache Arrow repository
-          wget https://apache.jfrog.io/artifactory/arrow/debian/apache-arrow-apt-source-latest-trixie.deb
-          apt-get install -y ./apache-arrow-apt-source-latest-trixie.deb
-          apt-get update
-
-          # Install Arrow
-          apt-get install -y libarrow-dev
-
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Cache Bazelisk binary
-        id: cache-bazelisk
-        uses: actions/cache@v4
+      - name: Set image name
+        id: image
+        run: echo "name=ghcr.io/${{ github.repository }}/ci-env:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Check if image exists
+        id: check
+        run: |
+          if docker pull ghcr.io/${{ github.repository }}/ci-env:latest 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check Dockerfile changes
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q '.github/Dockerfile'; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.exists != 'true' || steps.diff.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.check.outputs.exists != 'true' || steps.diff.outputs.changed == 'true'
+        uses: docker/login-action@v3
         with:
-          path: ~/.bazelisk-cache
-          key: bazelisk-binary-${{ runner.os }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Bazelisk
-        if: steps.cache-bazelisk.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ~/.bazelisk-cache
-          wget -q https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O ~/.bazelisk-cache/bazelisk
-          chmod +x ~/.bazelisk-cache/bazelisk
+      - name: Build and push image
+        if: steps.check.outputs.exists != 'true' || steps.diff.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .github
+          file: .github/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/ci-env:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Setup Bazelisk in PATH
-        run: |
-          ln -sf ~/.bazelisk-cache/bazelisk /usr/local/bin/bazel
+  build-and-test:
+    name: Build and Test
+    needs: docker-image
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-env:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Cache Bazel versions
         uses: actions/cache@v4
@@ -65,10 +98,10 @@ jobs:
             ~/.cache/bazel
           # Unique key per run so each CI job can save updated artifacts.
           # restore-keys ensures partial cache hits from prior runs.
-          key: debian-trixie-bazel-v4-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-${{ github.sha }}
+          key: bazel-v5-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-${{ github.sha }}
           restore-keys: |
-            debian-trixie-bazel-v4-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-
-            debian-trixie-bazel-v4-
+            bazel-v5-${{ hashFiles('.bazelversion', 'MODULE.bazel') }}-
+            bazel-v5-
 
       - name: Build all targets
         run: bazel build //... --build_tag_filters=-benchmark
@@ -78,8 +111,6 @@ jobs:
 
       - name: Build benchmarks
         run: |
-          # Build all benchmarks to ensure they compile
-          # (tagged as manual, so not built by //...)
           bazel build //benchmarks:component_performance
           bazel build //benchmarks:readme_benchmarks
           bazel build //benchmarks:quantlib_performance
@@ -90,8 +121,6 @@ jobs:
 
       - name: Run test suite
         run: |
-          # Run all tests except those tagged as manual
-          # (manual tests are benchmarks and diagnostic tools)
           bazel test //tests/... --test_output=errors --test_tag_filters=-manual
 
       - name: Display test results
