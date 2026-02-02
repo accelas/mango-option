@@ -23,6 +23,65 @@ static SegmentedPriceSurface build_surface(double K_ref) {
     return SegmentedPriceTableBuilder::build(config).value();
 }
 
+// Diagnostic: measure cross-surface disagreement at K_ref boundaries
+struct BoundaryDiagnostics {
+    double max_price_diff = 0.0;   // max |P_left(K) - P_right(K)| / K
+    double mean_price_diff = 0.0;
+    size_t sample_count = 0;
+};
+
+static BoundaryDiagnostics measure_boundary_disagreement(
+    const std::vector<SegmentedMultiKRefSurface::Entry>& entries,
+    double spot) {
+    BoundaryDiagnostics result;
+    if (entries.size() < 2) return result;
+
+    std::vector<double> taus = {0.25, 0.5, 0.75};
+    std::vector<double> sigmas = {0.15, 0.20, 0.30};
+    std::vector<double> rates = {0.03, 0.05, 0.07};
+
+    double sum_diff = 0.0;
+    size_t count = 0;
+
+    for (size_t i = 0; i + 1 < entries.size(); ++i) {
+        double K = entries[i + 1].K_ref;
+        for (double tau : taus) {
+            for (double sigma : sigmas) {
+                for (double rate : rates) {
+                    double p_left = entries[i].surface.price(spot, K, tau, sigma, rate);
+                    double p_right = entries[i + 1].surface.price(spot, K, tau, sigma, rate);
+                    double diff = std::abs(p_left - p_right) / K;
+                    result.max_price_diff = std::max(result.max_price_diff, diff);
+                    sum_diff += diff;
+                    count++;
+                }
+            }
+        }
+    }
+
+    result.mean_price_diff = count > 0 ? sum_diff / count : 0.0;
+    result.sample_count = count;
+    return result;
+}
+
+TEST(SegmentedMultiKRefSurfaceTest, BoundaryDisagreementMetric) {
+    std::vector<SegmentedMultiKRefSurface::Entry> entries;
+    entries.push_back({80.0, build_surface(80.0)});
+    entries.push_back({100.0, build_surface(100.0)});
+    entries.push_back({120.0, build_surface(120.0)});
+
+    auto diag = measure_boundary_disagreement(entries, 100.0);
+
+    EXPECT_TRUE(std::isfinite(diag.max_price_diff));
+    EXPECT_GE(diag.sample_count, 1u);
+
+    // RecordProperty makes values visible in test XML output without stdout noise
+    ::testing::Test::RecordProperty("max_price_diff",
+        std::to_string(diag.max_price_diff));
+    ::testing::Test::RecordProperty("mean_price_diff",
+        std::to_string(diag.mean_price_diff));
+}
+
 TEST(SegmentedMultiKRefSurfaceTest, StrikeInterpolation) {
     auto s80 = build_surface(80.0);
     auto s100 = build_surface(100.0);
