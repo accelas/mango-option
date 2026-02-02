@@ -421,26 +421,6 @@ auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
 auto iv_result = iv_solver.solve(iv_query);
 ```
 
-### Batch Queries on Price Surface
-
-**Evaluate many points efficiently:**
-
-```cpp
-auto surface = result->surface;
-
-std::vector<std::array<double, 4>> queries = {
-    {1.00, 0.25, 0.20, 0.05},  // ATM, 3M, 20% vol, 5% rate
-    {0.95, 0.50, 0.25, 0.03},  // ITM, 6M, 25% vol, 3% rate
-    {1.10, 1.00, 0.15, 0.02},  // OTM, 1Y, 15% vol, 2% rate
-};
-
-for (const auto& coords : queries) {
-    double price = surface->value(coords);
-    double vega = surface->partial(2, coords);  // ∂price/∂σ
-    std::cout << "m=" << coords[0] << ", price=" << price << ", vega=" << vega << "\n";
-}
-```
-
 ### Build Diagnostics
 
 **Access performance and quality metrics:**
@@ -726,6 +706,26 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
         std::cout << "Strike " << queries[i].strike
                   << ": IV = " << batch.results[i]->implied_vol << "\n";
     }
+}
+```
+
+### Price Surface Batch Queries
+
+**Evaluate many points on a pre-computed surface:**
+
+```cpp
+auto surface = result->surface;
+
+std::vector<std::array<double, 4>> queries = {
+    {1.00, 0.25, 0.20, 0.05},  // ATM, 3M, 20% vol, 5% rate
+    {0.95, 0.50, 0.25, 0.03},  // ITM, 6M, 25% vol, 3% rate
+    {1.10, 1.00, 0.15, 0.02},  // OTM, 1Y, 15% vol, 2% rate
+};
+
+for (const auto& coords : queries) {
+    double price = surface->value(coords);
+    double vega = surface->partial(2, coords);  // ∂price/∂σ
+    std::cout << "m=" << coords[0] << ", price=" << price << ", vega=" << vega << "\n";
 }
 ```
 
