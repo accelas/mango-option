@@ -266,6 +266,11 @@ double SegmentedMultiKRefSurface::price(double spot, double strike,
                                          double rate) const {
     const size_t n = entries_.size();
 
+    // Guard: non-positive strike can't be log-transformed; use nearest surface
+    if (strike <= 0.0) {
+        return entries_.front().surface.price(spot, strike, tau, sigma, rate);
+    }
+
     // Single entry: use it directly
     if (n == 1) {
         return entries_.front().surface.price(spot, strike, tau, sigma, rate);
@@ -317,6 +322,11 @@ double SegmentedMultiKRefSurface::vega(double spot, double strike,
                                         double tau, double sigma,
                                         double rate) const {
     const size_t n = entries_.size();
+
+    // Guard: non-positive strike can't be log-transformed; use nearest surface
+    if (strike <= 0.0) {
+        return entries_.front().surface.vega(spot, strike, tau, sigma, rate);
+    }
 
     if (n == 1) {
         return entries_.front().surface.vega(spot, strike, tau, sigma, rate);
