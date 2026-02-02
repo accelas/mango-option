@@ -13,8 +13,8 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 2. [Spatial Discretization](#2-spatial-discretization)
 3. [TR-BDF2 Time Stepping](#3-tr-bdf2-time-stepping)
 4. [American Option Constraints](#4-american-option-constraints)
-5. [Grid Generation](#5-grid-generation)
-6. [Discrete Dividends](#6-discrete-dividends)
+5. [Discrete Dividends](#5-discrete-dividends)
+6. [Grid Generation](#6-grid-generation)
 
 **Part II — Price Tables & Interpolation:** Pre-computing prices across parameter space for fast queries.
 
@@ -106,7 +106,7 @@ Both are second-order accurate, meaning halving $\Delta x$ reduces the error by 
 
 ### Non-Uniform Grids
 
-Sinh-spaced grids (section 5) have variable spacing. The finite difference weights must account for this:
+Sinh-spaced grids (section 6) have variable spacing. The finite difference weights must account for this:
 
 $$\left.\frac{\partial^2 u}{\partial x^2}\right|_i = w_\text{left} u_{i-1} + w_\text{center} u_i + w_\text{right} u_{i+1}$$
 
@@ -266,7 +266,62 @@ For puts, the exercise region is $S < S^*$ (deep ITM). For calls, it's $S > S^*$
 
 ---
 
-## 5. Grid Generation
+## 5. Discrete Dividends
+
+Sections 1–4 assume a continuous dividend yield $d$ that enters the PDE coefficients. Real equities pay discrete cash dividends at known dates. A dividend $D$ paid at calendar time $t_d$ causes the spot to drop: $S(t_d^+) = S(t_d^-) - D$. The option value must satisfy the jump condition across the dividend:
+
+$$V(S, t_d^-) = V(S - D, t_d^+)$$
+
+This cannot be handled by adjusting the PDE coefficients — it requires modifying the solution at discrete points in time.
+
+### Temporal Events
+
+The solver handles discrete dividends as **temporal events**: callbacks that modify the solution vector at mandatory time steps. The time grid is constructed so that each dividend date $t_d$ falls exactly on a time step boundary (converted to backward time $\tau_d = T - t_d$).
+
+At each dividend event, the solver:
+
+1. Completes the TR-BDF2 step up to $\tau_d$
+2. Applies the jump condition (see below)
+3. Re-applies boundary conditions and obstacle constraints
+4. Continues the PDE solve to the next event or $\tau = T$
+
+### The Jump Condition in Log-Moneyness
+
+In log-moneyness coordinates $x = \ln(S/K)$, the spot drop $S \to S - D$ maps to a nonlinear shift. Define the normalized dividend $\delta = D/K$. For each grid point $x_i$:
+
+$$x_i' = \ln\!\big(e^{x_i} - \delta\big)$$
+
+The jump condition becomes:
+
+$$u_i \leftarrow \hat{u}(x_i')$$
+
+where $\hat{u}$ is a cubic spline interpolant of the current solution. The spline is rebuilt from the solution vector at each dividend event (reusing the same grid, so the rebuild is $O(n)$ with zero allocation).
+
+**Boundary cases.** When $e^{x_i} \leq \delta$ (the spot drops to zero or below after the dividend), the spline cannot be evaluated. The solver uses a fallback:
+- Put: $u_i = 1.0$ (normalized deep ITM value — exercise is certain)
+- Call: $u_i = 0.0$ (worthless)
+
+When $x_i'$ falls below the grid domain $x_\min$, the same fallback applies. When $x_i'$ exceeds $x_\max$, it is clamped to $x_\max$.
+
+### Grid Adjustments
+
+Discrete dividends require two modifications to the grid estimation (section 6).
+
+**Domain widening.** The shift $x \to \ln(e^x - \delta)$ moves points leftward. Without adjustment, points near $x_\min$ would shift outside the domain. The estimator extends the left boundary:
+
+$$x_\min' = \begin{cases} \ln\!\big(e^{x_\min} - \delta_\max\big) & \text{if } e^{x_\min} > \delta_\max \\ x_\min - 1 & \text{otherwise (conservative extension)} \end{cases}$$
+
+where $\delta_\max = \max_k D_k / K$ is the largest normalized dividend.
+
+**Mandatory time steps.** Each dividend date $\tau_d$ is inserted as a mandatory point in the time grid. The interval between consecutive dividends (or between a dividend and the domain boundary) is subdivided uniformly with $\Delta t \leq \Delta t_\text{target}$, ensuring temporal accuracy is maintained within each segment.
+
+### Interaction with Continuous Yield
+
+Continuous and discrete dividends combine naturally. The continuous yield $d$ enters the Black-Scholes PDE coefficients (drift term $r - d - \sigma^2/2$) and is active throughout the solve. Discrete dividends operate orthogonally through temporal events. The two mechanisms do not interfere.
+
+---
+
+## 6. Grid Generation
 
 The grid determines both accuracy and cost. Too coarse and the solution is inaccurate; too fine and the solve is slow. The library provides three grid types and an automatic estimation strategy.
 
@@ -338,61 +393,6 @@ With $c_t = 0.75$ and $\alpha = 2.0$, this ensures temporal error doesn't domina
 | max_time_steps | 5000 | Upper bound on $N_t$ |
 
 For a short-dated SPY option ($\sigma \approx 0.15$, $T \approx 0.09$), the defaults produce a $101 \times 150$ grid.
-
----
-
-## 6. Discrete Dividends
-
-Sections 1–5 assume a continuous dividend yield $d$ that enters the PDE coefficients. Real equities pay discrete cash dividends at known dates. A dividend $D$ paid at calendar time $t_d$ causes the spot to drop: $S(t_d^+) = S(t_d^-) - D$. The option value must satisfy the jump condition across the dividend:
-
-$$V(S, t_d^-) = V(S - D, t_d^+)$$
-
-This cannot be handled by adjusting the PDE coefficients — it requires modifying the solution at discrete points in time.
-
-### Temporal Events
-
-The solver handles discrete dividends as **temporal events**: callbacks that modify the solution vector at mandatory time steps. The time grid is constructed so that each dividend date $t_d$ falls exactly on a time step boundary (converted to backward time $\tau_d = T - t_d$).
-
-At each dividend event, the solver:
-
-1. Completes the TR-BDF2 step up to $\tau_d$
-2. Applies the jump condition (see below)
-3. Re-applies boundary conditions and obstacle constraints
-4. Continues the PDE solve to the next event or $\tau = T$
-
-### The Jump Condition in Log-Moneyness
-
-In log-moneyness coordinates $x = \ln(S/K)$, the spot drop $S \to S - D$ maps to a nonlinear shift. Define the normalized dividend $\delta = D/K$. For each grid point $x_i$:
-
-$$x_i' = \ln\!\big(e^{x_i} - \delta\big)$$
-
-The jump condition becomes:
-
-$$u_i \leftarrow \hat{u}(x_i')$$
-
-where $\hat{u}$ is a cubic spline interpolant of the current solution. The spline is rebuilt from the solution vector at each dividend event (reusing the same grid, so the rebuild is $O(n)$ with zero allocation).
-
-**Boundary cases.** When $e^{x_i} \leq \delta$ (the spot drops to zero or below after the dividend), the spline cannot be evaluated. The solver uses a fallback:
-- Put: $u_i = 1.0$ (normalized deep ITM value — exercise is certain)
-- Call: $u_i = 0.0$ (worthless)
-
-When $x_i'$ falls below the grid domain $x_\min$, the same fallback applies. When $x_i'$ exceeds $x_\max$, it is clamped to $x_\max$.
-
-### Grid Adjustments
-
-Discrete dividends require two modifications to the grid estimation from section 5.
-
-**Domain widening.** The shift $x \to \ln(e^x - \delta)$ moves points leftward. Without adjustment, points near $x_\min$ would shift outside the domain. The estimator extends the left boundary:
-
-$$x_\min' = \begin{cases} \ln\!\big(e^{x_\min} - \delta_\max\big) & \text{if } e^{x_\min} > \delta_\max \\ x_\min - 1 & \text{otherwise (conservative extension)} \end{cases}$$
-
-where $\delta_\max = \max_k D_k / K$ is the largest normalized dividend.
-
-**Mandatory time steps.** Each dividend date $\tau_d$ is inserted as a mandatory point in the time grid. The interval between consecutive dividends (or between a dividend and the domain boundary) is subdivided uniformly with $\Delta t \leq \Delta t_\text{target}$, ensuring temporal accuracy is maintained within each segment.
-
-### Interaction with Continuous Yield
-
-Continuous and discrete dividends combine naturally. The continuous yield $d$ enters the Black-Scholes PDE coefficients (drift term $r - d - \sigma^2/2$) and is active throughout the solve. Discrete dividends operate orthogonally through temporal events. The two mechanisms do not interfere.
 
 ---
 
@@ -543,7 +543,7 @@ When accuracy is critical, use the PDE solver directly (`AmericanOptionSolver`).
 
 ## 9. Segmented Price Surfaces
 
-Discrete dividends (section 6) break the smoothness that B-spline interpolation requires. A single surface cannot fit the price discontinuity at a dividend date. The segmented surface builder solves this by partitioning the maturity axis at dividend dates and fitting a separate B-spline surface per segment.
+Discrete dividends (section 5) break the smoothness that B-spline interpolation requires. A single surface cannot fit the price discontinuity at a dividend date. The segmented surface builder solves this by partitioning the maturity axis at dividend dates and fitting a separate B-spline surface per segment.
 
 ### Maturity Partitioning
 
@@ -559,7 +559,7 @@ where $\tau_k = T - t_k$. Each segment covers $[\tau_{k+1}, \tau_k]$ and has its
 
 $$V_k(m, \sigma, r)\big|_{\tau = \tau_{N-k+1}} = V_{k-1}\!\left(m + \frac{D_{N-k+1}}{K_\text{ref}},\; \sigma,\; r\right)\bigg|_{\tau = \tau_{N-k+1}}$$
 
-The moneyness shift $m \to m + D/K_\text{ref}$ accounts for the spot being higher before the dividend — the same jump condition as in the PDE solver (section 6), expressed in moneyness coordinates.
+The moneyness shift $m \to m + D/K_\text{ref}$ accounts for the spot being higher before the dividend — the same jump condition as in the PDE solver (section 5), expressed in moneyness coordinates.
 
 ### Query-Time Evaluation
 
@@ -685,7 +685,7 @@ $$\varepsilon_\text{total} \sim C_x\Delta x^2 + C_t\Delta t^2 + \varepsilon_\tex
 - **Temporal**: $O(\Delta t^2)$ from TR-BDF2
 - **Obstacle**: the projection is non-expansive (doesn't amplify errors) and the free boundary is Lipschitz continuous (Kinderlehrer-Stampacchia)
 
-The grid estimation strategy (section 5) balances these by coupling $\Delta t$ to $\Delta x_\min$, ensuring neither dominates.
+The grid estimation strategy (section 6) balances these by coupling $\Delta t$ to $\Delta x_\min$, ensuring neither dominates.
 
 ### Grid Independence
 
