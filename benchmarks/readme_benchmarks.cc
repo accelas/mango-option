@@ -2,7 +2,7 @@
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/math/bspline_nd_separable.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
@@ -345,12 +345,12 @@ static void BM_README_IV_FDM(benchmark::State& state) {
     query.market_price = 6.08;
 
     // Use default config with automatic grid estimation
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     // Uses default auto-estimation via GridAccuracyParams
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     // Get grid dimensions for typical case (σ=0.20 for ATM put)
     // The solver uses estimate_pde_grid() which bases grid on current σ

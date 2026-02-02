@@ -3,9 +3,9 @@
  * @file iv_solver_factory.hpp
  * @brief Factory function that hides the two IV solver paths
  *
- * Provides make_iv_solver() which builds the appropriate price surface
+ * Provides make_interpolated_iv_solver() which builds the appropriate price surface
  * (AmericanPriceSurface for continuous dividends, SegmentedMultiKRefSurface
- * for discrete dividends) and wraps it in a type-erased IVSolver.
+ * for discrete dividends) and wraps it in a type-erased AnyIVSolver.
  */
 
 #pragma once
@@ -35,7 +35,7 @@ struct SegmentedIVPath {
 };
 
 /// Configuration for the IV solver factory
-struct IVSolverConfig {
+struct IVSolverFactoryConfig {
     OptionType option_type = OptionType::PUT;
     double spot = 100.0;
     double dividend_yield = 0.0;
@@ -47,7 +47,7 @@ struct IVSolverConfig {
 };
 
 /// Type-erased IV solver wrapping either path
-class IVSolver {
+class AnyIVSolver {
 public:
     /// Solve for implied volatility (single query)
     std::expected<IVSuccess, IVError> solve(const IVQuery& query) const;
@@ -56,10 +56,10 @@ public:
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
     /// Constructor from standard solver
-    explicit IVSolver(IVSolverInterpolated<AmericanPriceSurface> solver);
+    explicit AnyIVSolver(IVSolverInterpolated<AmericanPriceSurface> solver);
 
     /// Constructor from segmented solver
-    explicit IVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver);
+    explicit AnyIVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver);
 
 private:
     using SolverVariant = std::variant<
@@ -75,7 +75,7 @@ private:
 /// If path holds SegmentedIVPath, uses the SegmentedMultiKRefSurface path.
 ///
 /// @param config Solver configuration
-/// @return Type-erased IVSolver or ValidationError
-std::expected<IVSolver, ValidationError> make_iv_solver(const IVSolverConfig& config);
+/// @return Type-erased AnyIVSolver or ValidationError
+std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config);
 
 }  // namespace mango

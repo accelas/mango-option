@@ -200,9 +200,9 @@ cc_library(
 )
 
 cc_library(
-    name = "iv_solver_fdm",
-    srcs = ["iv_solver_fdm.cpp"],
-    hdrs = ["iv_solver_fdm.hpp"],
+    name = "iv_solver",
+    srcs = ["iv_solver.cpp"],
+    hdrs = ["iv_solver.hpp"],
     deps = [
         ":option_spec",
         ":iv_result",

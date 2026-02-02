@@ -14,7 +14,7 @@
 #include "src/option/american_option.hpp"
 #include "src/pde/core/pde_workspace.hpp"
 #include "src/math/bspline_nd_separable.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/price_table_surface.hpp"
@@ -226,11 +226,11 @@ BENCHMARK(BM_AmericanCall_WithDividends);
 static void BM_ImpliedVol_ATM_Put(benchmark::State& state) {
     IVQuery query{OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 6.0};
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (auto _ : state) {
         auto result = solver.solve(query);
@@ -244,11 +244,11 @@ BENCHMARK(BM_ImpliedVol_ATM_Put);
 static void BM_ImpliedVol_OTM_Put(benchmark::State& state) {
     IVQuery query{OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 0.25, .rate = 0.05, .option_type = OptionType::PUT}, 0.80};
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (auto _ : state) {
         auto result = solver.solve(query);
@@ -262,11 +262,11 @@ BENCHMARK(BM_ImpliedVol_OTM_Put);
 static void BM_ImpliedVol_ITM_Put(benchmark::State& state) {
     IVQuery query{OptionSpec{.spot = 90.0, .strike = 100.0, .maturity = 2.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0};
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (auto _ : state) {
         auto result = solver.solve(query);
@@ -437,11 +437,11 @@ static void BM_ImpliedVol_Batch(benchmark::State& state) {
         batch.push_back(IVQuery(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, market_price));
     }
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     for (auto _ : state) {
         std::vector<std::expected<IVSuccess, IVError>> results;
         results.reserve(batch_size);

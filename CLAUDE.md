@@ -65,7 +65,7 @@ mango-option/
 **87 source files** organized into:
 - **//src/pde/core** - Grid, PDESolver, TimeDomain, boundary conditions
 - **//src/pde/operators** - BlackScholesPDE, LaplacianPDE, CenteredDifference
-- **//src/option** - AmericanOptionSolver, IVSolverFDM, price tables
+- **//src/option** - AmericanOptionSolver, IVSolver, price tables
 - **//src/math** - Root finding, B-splines, tridiagonal solvers
 - **//src/simple** - Market data integration (yfinance, Databento, IBKR)
 - **//src/python** - Python bindings (pybind11)
@@ -166,10 +166,10 @@ TEST(RateSpecTest, TimeConversionForUpslopingCurve) {
 
 **Pattern 1: American IV Calculation**
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 
 mango::IVQuery query(spec, 10.45);
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 ```
 
@@ -199,7 +199,7 @@ auto iv_result = iv_solver.solve(iv_query);
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-mango::IVSolverConfig config{
+mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -211,7 +211,7 @@ mango::IVSolverConfig config{
         .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
     },
 };
-auto solver = mango::make_iv_solver(config);
+auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 

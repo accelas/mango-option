@@ -37,7 +37,7 @@ cc_binary(
     linkstatic = True,  # Static link our library code
     deps = [
         "//src/option:american_option",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:option_spec",
         "//src/math:bspline_nd_separable",
         "//src/option:iv_solver_interpolated",
@@ -69,7 +69,7 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
@@ -101,7 +101,7 @@ cc_binary(
         ":real_market_data",
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "//src/option:option_grid",
         "//src/option/table:price_table_builder",
@@ -130,7 +130,7 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/option:american_option",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",

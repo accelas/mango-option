@@ -8,7 +8,7 @@
 
 #include "src/simple/option_chain.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <expected>
 #include <memory>
 #include <ranges>

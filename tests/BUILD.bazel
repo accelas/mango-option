@@ -553,7 +553,7 @@ cc_test(
     name = "iv_solver_test",
     srcs = ["iv_solver_test.cc"],
     deps = [
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "@googletest//:gtest_main",
     ],
     copts = [
@@ -566,7 +566,7 @@ cc_test(
     name = "iv_solver_expected_test",
     srcs = ["iv_solver_expected_test.cc"],
     deps = [
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_result",
         "//src/support:error_types",
         "@googletest//:gtest_main",
@@ -585,7 +585,7 @@ cc_test(
 #     size = "small",
 #     srcs = ["iv_solver_property_test.cc"],
 #     deps = [
-#         "//src/option:iv_solver_fdm",
+#         "//src/option:iv_solver",
 #         "@googletest//:gtest",
 #         "@googletest//:gtest_main",
 #     ],
@@ -715,7 +715,7 @@ cc_test(
         "//benchmarks:real_market_data",
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "@googletest//:gtest_main",
     ],
 )
@@ -888,7 +888,7 @@ cc_test(
     srcs = ["quantlib_accuracy_test.cc"],
     deps = [
         "//src/option:american_option",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "@googletest//:gtest_main",
     ],
     linkopts = ["-lQuantLib"],
@@ -905,7 +905,7 @@ cc_test(
     ],
     deps = [
         "//src/option:american_option",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
@@ -1061,7 +1061,7 @@ cc_test(
     deps = [
         "//src/option:american_option",
         "//src/option:american_option_batch",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_solver_interpolated",
         "@googletest//:gtest_main",
     ],
@@ -1102,7 +1102,7 @@ cc_test(
     name = "iv_solver_integration_test",
     srcs = ["iv_solver_integration_test.cc"],
     deps = [
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
         "//src/option:iv_result",
         "//src/support:error_types",
         "@googletest//:gtest_main",

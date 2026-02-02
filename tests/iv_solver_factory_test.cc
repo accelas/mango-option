@@ -5,7 +5,7 @@
 using namespace mango;
 
 TEST(IVSolverFactoryTest, NoDividendsUsesStandardPath) {
-    IVSolverConfig config{
+    IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
@@ -15,7 +15,7 @@ TEST(IVSolverFactoryTest, NoDividendsUsesStandardPath) {
         .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
 
-    auto solver = make_iv_solver(config);
+    auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "Factory should succeed with no dividends";
 
     IVQuery query;
@@ -36,7 +36,7 @@ TEST(IVSolverFactoryTest, NoDividendsUsesStandardPath) {
 }
 
 TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
-    IVSolverConfig config{
+    IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -49,7 +49,7 @@ TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
         },
     };
 
-    auto solver = make_iv_solver(config);
+    auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value()) << "Factory should succeed with discrete dividends";
 
     IVQuery query;
@@ -69,7 +69,7 @@ TEST(IVSolverFactoryTest, DiscreteDividendsUsesSegmentedPath) {
 }
 
 TEST(IVSolverFactoryTest, BatchSolveWorks) {
-    IVSolverConfig config{
+    IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
@@ -79,7 +79,7 @@ TEST(IVSolverFactoryTest, BatchSolveWorks) {
         .path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 1.0}},
     };
 
-    auto solver = make_iv_solver(config);
+    auto solver = make_interpolated_iv_solver(config);
     ASSERT_TRUE(solver.has_value());
 
     std::vector<IVQuery> queries(3);

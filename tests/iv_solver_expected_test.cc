@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_result.hpp"
 #include "src/support/error_types.hpp"
 
@@ -14,8 +14,8 @@ TEST(IVSolverFDMExpected, ReturnsExpectedType) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
 
     // Call solve() directly (not solve() which goes through base class)
     auto result = solver.solve(query);
@@ -40,8 +40,8 @@ TEST(IVSolverFDMExpected, ValidationArbitrageCallExceedsSpot) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 150.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -54,8 +54,8 @@ TEST(IVSolverFDMExpected, ValidationArbitragePutExceedsStrike) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 150.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -69,8 +69,8 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicCall) {
     IVQuery query(
         OptionSpec{.spot = 110.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 5.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -84,8 +84,8 @@ TEST(IVSolverFDMExpected, ValidationPriceBelowIntrinsicPut) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 5.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -97,8 +97,8 @@ TEST(IVSolverFDMExpected, ValidationZeroSpot) {
     IVQuery query(
         OptionSpec{.spot = 0.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -110,8 +110,8 @@ TEST(IVSolverFDMExpected, ValidationZeroStrike) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 0.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -126,8 +126,8 @@ TEST(IVSolverFDMExpected, SolvesATMPut) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
@@ -142,8 +142,8 @@ TEST(IVSolverFDMExpected, SolvesITMPut) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 110.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 15.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
@@ -156,8 +156,8 @@ TEST(IVSolverFDMExpected, SolvesOTMPut) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
@@ -167,13 +167,13 @@ TEST(IVSolverFDMExpected, SolvesOTMPut) {
 
 TEST(IVSolverFDMExpected, ConvergenceFailureMaxIterations) {
     // Artificially low max_iter to force failure
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 2;  // Too few iterations
 
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 10.0);
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_FALSE(result.has_value());
@@ -186,8 +186,8 @@ TEST(IVSolverFDMExpected, RealisticVolatilityValues) {
     IVQuery query(
         OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.5, .rate = 0.03, .option_type = OptionType::PUT}, 5.0);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value());
@@ -213,8 +213,8 @@ TEST(IVSolverFDMExpected, BatchSolveAllSuccess) {
         IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0)
     };
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto batch_result = solver.solve_batch(queries);
 
     EXPECT_TRUE(batch_result.all_succeeded());
@@ -241,8 +241,8 @@ TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
         IVQuery(OptionSpec{.spot = 100.0, .strike = 90.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 3.0)
     };
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto batch_result = solver.solve_batch(queries);
 
     EXPECT_FALSE(batch_result.all_succeeded());
@@ -261,8 +261,8 @@ TEST(IVSolverFDMExpected, BatchSolveMixedResults) {
 TEST(IVSolverFDMExpected, BatchSolveEmptyBatch) {
     std::vector<IVQuery> queries;  // Empty
 
-    IVSolverFDMConfig config;
-    IVSolverFDM solver(config);
+    IVSolverConfig config;
+    IVSolver solver(config);
     auto batch_result = solver.solve_batch(queries);
 
     EXPECT_TRUE(batch_result.all_succeeded());

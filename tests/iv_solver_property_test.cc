@@ -5,7 +5,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <cmath>
 #include <vector>
 
@@ -13,11 +13,11 @@ using namespace mango;
 
 // Simple test that IV solver can be constructed and used
 TEST(IVSolverPropertyTest, BasicConstruction) {
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     // Just verify construction succeeded
     SUCCEED();
@@ -25,7 +25,7 @@ TEST(IVSolverPropertyTest, BasicConstruction) {
 
 // Test IV is always positive when found
 TEST(IVSolverPropertyTest, IVAlwaysPositive) {
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
@@ -36,7 +36,7 @@ TEST(IVSolverPropertyTest, IVAlwaysPositive) {
         {100.0, 100.0, 2.0, 15.0},
     };
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (const auto& [spot, strike, maturity, price] : test_cases) {
         IVQuery query(spot, strike, maturity, 0.05, 0.02, OptionType::PUT, price);
@@ -56,14 +56,14 @@ TEST(IVSolverPropertyTest, IVAlwaysPositive) {
 
 // Test IV is within bounds
 TEST(IVSolverPropertyTest, IVWithinBounds) {
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
     constexpr double vol_lower = 0.01;
     constexpr double vol_upper = 3.0;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     IVQuery query(100.0, 100.0, 1.0, 0.05, 0.0, OptionType::PUT, 10.0);
     auto result = solver.solve(query);
@@ -76,7 +76,7 @@ TEST(IVSolverPropertyTest, IVWithinBounds) {
 
 // Test no NaN/Inf results
 TEST(IVSolverPropertyTest, NeverProducesNaNOrInf) {
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
@@ -86,7 +86,7 @@ TEST(IVSolverPropertyTest, NeverProducesNaNOrInf) {
         IVQuery(OptionSpec{.spot = 100.0, .strike = 80.0, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 5.0),
     };
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     for (const auto& query : queries) {
         auto result = solver.solve(query);

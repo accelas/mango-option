@@ -9,7 +9,7 @@
 #include <pybind11/numpy.h>
 #include <sstream>
 #include "src/option/option_spec.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/option_grid.hpp"
@@ -185,11 +185,11 @@ PYBIND11_MODULE(mango_option, m) {
         .def_readwrite("jacobian_fd_epsilon", &mango::RootFindingConfig::jacobian_fd_epsilon)
         .def_readwrite("brent_tol_abs", &mango::RootFindingConfig::brent_tol_abs);
 
-    // IVSolverFDMConfig structure
-    py::class_<mango::IVSolverFDMConfig>(m, "IVSolverFDMConfig")
+    // IVSolverConfig structure
+    py::class_<mango::IVSolverConfig>(m, "IVSolverConfig")
         .def(py::init<>())
-        .def_readwrite("root_config", &mango::IVSolverFDMConfig::root_config)
-        .def_readwrite("batch_parallel_threshold", &mango::IVSolverFDMConfig::batch_parallel_threshold);
+        .def_readwrite("root_config", &mango::IVSolverConfig::root_config)
+        .def_readwrite("batch_parallel_threshold", &mango::IVSolverConfig::batch_parallel_threshold);
     // Note: PDEGridSpec variant binding deferred — Python users use default auto-estimation
 
     // IVSuccess structure (std::expected success type)
@@ -256,11 +256,11 @@ PYBIND11_MODULE(mango_option, m) {
         .value("PDESolveFailed", mango::IVErrorCode::PDESolveFailed)
         .export_values();
 
-    // IVSolver class (now using FDM solver with std::expected)
-    py::class_<mango::IVSolverFDM>(m, "IVSolverFDM")
-        .def(py::init<const mango::IVSolverFDMConfig&>(),
+    // AnyIVSolver class (now using FDM solver with std::expected)
+    py::class_<mango::IVSolver>(m, "IVSolver")
+        .def(py::init<const mango::IVSolverConfig&>(),
              py::arg("config"))
-        .def("solve", [](const mango::IVSolverFDM& solver, const mango::IVQuery& query) {
+        .def("solve", [](const mango::IVSolver& solver, const mango::IVQuery& query) {
             auto result = solver.solve(query);
             if (result.has_value()) {
                 return py::make_tuple(true, result.value(), mango::IVError{});
@@ -1048,7 +1048,7 @@ PYBIND11_MODULE(mango_option, m) {
 
                 Note: When a YieldCurve is provided, it is collapsed to zero rate: -ln(D(T))/T.
                 This provides a reasonable approximation but does not capture term structure
-                dynamics. For full yield curve support, use IVSolverFDM instead.
+                dynamics. For full yield curve support, use IVSolver instead.
 
                 Args:
                     query: IVQuery with option parameters and market price

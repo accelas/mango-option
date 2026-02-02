@@ -18,7 +18,7 @@
 #pragma once
 
 #include "src/option/american_option.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include <gtest/gtest.h>
 #include <ql/quantlib.hpp>
@@ -222,11 +222,11 @@ inline IVValidationResult validate_iv_fdm(
             .option_type = scenario.is_call ? OptionType::CALL : OptionType::PUT},
         ql_result.price);
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto iv_result = solver.solve(query);
 
     if (!iv_result.has_value()) {

@@ -6,24 +6,24 @@
 namespace mango {
 
 // ---------------------------------------------------------------------------
-// IVSolver: type-erased wrapper
+// AnyIVSolver: type-erased wrapper
 // ---------------------------------------------------------------------------
 
-IVSolver::IVSolver(IVSolverInterpolated<AmericanPriceSurface> solver)
+AnyIVSolver::AnyIVSolver(IVSolverInterpolated<AmericanPriceSurface> solver)
     : solver_(std::move(solver))
 {}
 
-IVSolver::IVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver)
+AnyIVSolver::AnyIVSolver(IVSolverInterpolated<SegmentedMultiKRefSurface> solver)
     : solver_(std::move(solver))
 {}
 
-std::expected<IVSuccess, IVError> IVSolver::solve(const IVQuery& query) const {
+std::expected<IVSuccess, IVError> AnyIVSolver::solve(const IVQuery& query) const {
     return std::visit([&](const auto& solver) {
         return solver.solve(query);
     }, solver_);
 }
 
-BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
+BatchIVResult AnyIVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
     return std::visit([&](const auto& solver) {
         return solver.solve_batch(queries);
     }, solver_);
@@ -33,8 +33,8 @@ BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {
 // Factory: standard path (no discrete dividends)
 // ---------------------------------------------------------------------------
 
-static std::expected<IVSolver, ValidationError>
-build_standard(const IVSolverConfig& config, const StandardIVPath& path) {
+static std::expected<AnyIVSolver, ValidationError>
+build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) {
     // Use spot as K_ref (ATM reference strike)
     double K_ref = config.spot;
 
@@ -73,15 +73,15 @@ build_standard(const IVSolverConfig& config, const StandardIVPath& path) {
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return IVSolver(std::move(*solver));
+    return AnyIVSolver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
 // Factory: segmented path (discrete dividends)
 // ---------------------------------------------------------------------------
 
-static std::expected<IVSolver, ValidationError>
-build_segmented(const IVSolverConfig& config, const SegmentedIVPath& path) {
+static std::expected<AnyIVSolver, ValidationError>
+build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path) {
     SegmentedMultiKRefBuilder::Config seg_config{
         .spot = config.spot,
         .option_type = config.option_type,
@@ -105,15 +105,15 @@ build_segmented(const IVSolverConfig& config, const SegmentedIVPath& path) {
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
 
-    return IVSolver(std::move(*solver));
+    return AnyIVSolver(std::move(*solver));
 }
 
 // ---------------------------------------------------------------------------
 // Public factory
 // ---------------------------------------------------------------------------
 
-std::expected<IVSolver, ValidationError> make_iv_solver(const IVSolverConfig& config) {
-    return std::visit([&](const auto& path) -> std::expected<IVSolver, ValidationError> {
+std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config) {
+    return std::visit([&](const auto& path) -> std::expected<AnyIVSolver, ValidationError> {
         using T = std::decay_t<decltype(path)>;
         if constexpr (std::is_same_v<T, StandardIVPath>) {
             return build_standard(config, path);

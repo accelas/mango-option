@@ -74,7 +74,7 @@ cc_library(
     deps = [
         ":option_chain",
         "//src/option:iv_solver_interpolated",
-        "//src/option:iv_solver_fdm",
+        "//src/option:iv_solver",
     ],
 )
 

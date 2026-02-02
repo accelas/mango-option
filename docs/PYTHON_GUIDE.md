@@ -122,13 +122,13 @@ solver.set_grid_accuracy_params(accuracy)
 Solves for IV by repeatedly pricing with the PDE solver and root-finding:
 
 ```python
-config = mo.IVSolverFDMConfig()
+config = mo.IVSolverConfig()
 
 # Optional: control PDE grid accuracy (higher accuracy = lower IV error)
 config.grid_accuracy = mo.GridAccuracyParams()
 config.grid_accuracy.tol = 1e-3  # Medium accuracy (~0.02 bps IV error)
 
-solver = mo.IVSolverFDM(config)
+solver = mo.IVSolver(config)
 
 query = mo.IVQuery(
     spot=100.0, strike=100.0, maturity=1.0,
@@ -206,8 +206,8 @@ workspace = mo.PriceTableWorkspace.load("spy_puts.arrow")
 | `GridAccuracyParams` | Fine-grained grid control (tol, n_sigma, alpha, spatial/time limits) |
 | `YieldCurve` | Term structure via `flat(rate)` or `from_discounts(tenors, discounts)` |
 | `IVQuery` | IV solver input (inherits OptionSpec + market_price) |
-| `IVSolverFDMConfig` | IV solver config with `root_config`, `grid_accuracy`, manual grid overrides |
-| `IVSolverFDM` | PDE-based IV solver |
+| `IVSolverConfig` | IV solver config with `root_config`, `grid_accuracy`, manual grid overrides |
+| `IVSolver` | PDE-based IV solver |
 | `IVSolverInterpolated` | Fast B-spline interpolation IV solver |
 | `OptionGrid` | Container for chain data (spot, strikes, maturities, vols, rates) |
 | `PriceTableSurface4D` | 4D B-spline surface with `value(m, tau, sigma, r)` and `partial(axis, ...)` |

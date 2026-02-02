@@ -20,7 +20,7 @@ namespace mango {
 /// Rate specification: constant or yield curve
 ///
 /// Full yield curve support is available in the FDM solver (AmericanOptionSolver,
-/// IVSolverFDM) where the time-varying rate flows through the PDE discretization.
+/// IVSolver) where the time-varying rate flows through the PDE discretization.
 ///
 /// Limitation: Interpolation-based solvers (IVSolverInterpolated, PriceTableSurface)
 /// use a scalar rate axis. When a YieldCurve is provided, it is collapsed to a

@@ -69,7 +69,7 @@ auto vol_range = surface.volatility_range();
 auto rate_range = surface.rate_range();
 
 // Configure solver
-IVSolverConfig config;
+IVSolverFactoryConfig config;
 config.max_iterations = 50;
 config.tolerance = 1e-6;
 
@@ -109,7 +109,7 @@ for (const auto& option : market_data) {
 ### What Works Well
 
 1. **Builder pattern is intuitive**: `create()` → `precompute()` → use result
-2. **Structured config**: `IVSolverConfig` makes parameters discoverable
+2. **Structured config**: `IVSolverFactoryConfig` makes parameters discoverable
 3. **Clear ownership**: `PriceTableSurface` wraps the evaluator and its metadata
 4. **Range-based validation**: Grid bounds prevent out-of-range queries
 5. **Result types**: `IVResult` provides rich diagnostics (convergence, iterations, error)

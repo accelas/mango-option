@@ -13,7 +13,7 @@
 #include "benchmarks/real_market_data.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include "src/option/option_grid.hpp"
 #include "src/option/table/price_table_builder.hpp"
@@ -302,11 +302,11 @@ static void BM_RealData_IV_FDM(benchmark::State& state) {
 
     IVQuery query(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = opt.maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .option_type = opt.is_call ? OptionType::CALL : OptionType::PUT}, opt.market_price);
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
 
     auto run_once = [&]() {
         auto result = solver.solve(query);
@@ -607,10 +607,10 @@ static void BM_RealData_IVSmile_FDM(benchmark::State& state) {
         queries.push_back(IVQuery(OptionSpec{.spot = SPOT, .strike = opt.strike, .maturity = fixture.target_maturity, .rate = RISK_FREE_RATE, .dividend_yield = DIVIDEND_YIELD, .option_type = OptionType::PUT}, opt.market_price));
     }
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Benchmark FDM IV calculation for entire smile
     for (auto _ : state) {
@@ -662,10 +662,10 @@ static void BM_RealData_IVSmile_Accuracy(benchmark::State& state) {
     const auto& interp_solver = iv_solver_result.value();
 
     // Create FDM IV solver
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Prepare IV queries
     std::vector<IVQuery> queries;
@@ -826,10 +826,10 @@ static void BM_RealData_GridDensity(benchmark::State& state) {
     const auto& interp_solver = iv_solver_result.value();
 
     // Create FDM IV solver (ground truth)
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Prepare IV queries
     std::vector<IVQuery> queries;
@@ -933,10 +933,10 @@ static void BM_RealData_GridEstimator(benchmark::State& state) {
     const auto& interp_solver = iv_solver_result.value();
 
     // Create FDM IV solver (ground truth)
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     // Prepare IV queries
     std::vector<IVQuery> queries;
@@ -1049,10 +1049,10 @@ static void BM_RealData_GridProfiles(benchmark::State& state) {
     }
     const auto& interp_solver = iv_solver_result.value();
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
-    IVSolverFDM fdm_solver(config);
+    IVSolver fdm_solver(config);
 
     std::vector<IVQuery> queries;
     for (const auto& opt : iv_fixture.smile_options) {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @file iv_solver_fdm.hpp
+ * @file iv_solver.hpp
  * @brief FDM-based implied volatility solver with std::expected error handling
  *
  * The FDMIVSolver uses finite difference methods (FDM) to price American options
@@ -45,7 +45,7 @@
 namespace mango {
 
 /// Configuration for FDM-based IV solver
-struct IVSolverFDMConfig {
+struct IVSolverConfig {
     /// Root-finding configuration (Brent's method parameters)
     RootFindingConfig root_config;
 
@@ -90,11 +90,11 @@ struct IVSolverFDMConfig {
 ///
 /// IVQuery query{.option = spec, .market_price = 10.45};
 ///
-/// IVSolverFDMConfig config{
+/// IVSolverConfig config{
 ///     .root_config = RootFindingConfig{.max_iter = 100, .tolerance = 1e-6}
 /// };
 ///
-/// IVSolverFDM solver(config);
+/// IVSolver solver(config);
 /// auto result = solver.solve(query);
 ///
 /// if (result.has_value()) {
@@ -131,12 +131,12 @@ struct IVSolverFDMConfig {
 /// - algo_complete: IV calculation completes
 /// - validation_error: Input validation failures
 /// - convergence_failed: Non-convergence diagnostics
-class IVSolverFDM {
+class IVSolver {
 public:
     /// Construct solver with configuration
     ///
     /// @param config Solver configuration (root-finding and grid settings)
-    explicit IVSolverFDM(const IVSolverFDMConfig& config);
+    explicit IVSolver(const IVSolverConfig& config);
 
     /// Solve for implied volatility (single query)
     /// Uses Brent's method to find the volatility that makes the
@@ -167,7 +167,7 @@ public:
     BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
 
 private:
-    IVSolverFDMConfig config_;
+    IVSolverConfig config_;
     mutable std::optional<SolverError> last_solver_error_;
 
     /// Estimate upper bound for volatility search using intrinsic value approximation

@@ -52,7 +52,7 @@ int main() {
 ### Minimal IV Calculation Example
 
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <iostream>
 
 int main() {
@@ -70,7 +70,7 @@ int main() {
     mango::IVQuery query(spec, 10.45);
 
     // Solve
-    mango::IVSolverFDM solver(mango::IVSolverFDMConfig{});
+    mango::IVSolver solver(mango::IVSolverConfig{});
     auto result = solver.solve(query);
 
     if (result.has_value()) {
@@ -181,8 +181,8 @@ mango::OptionSpec spec{
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
-// The make_iv_solver factory dispatches on the path variant
-mango::IVSolverConfig config{
+// The make_interpolated_iv_solver factory dispatches on the path variant
+mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -197,7 +197,7 @@ mango::IVSolverConfig config{
     },
 };
 
-auto solver = mango::make_iv_solver(config);
+auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 
@@ -212,7 +212,7 @@ See [Discrete Dividend IV](#discrete-dividend-iv) for the full workflow.
 **Uses Brent's method with nested PDE pricing:**
 
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 
 // Option specification
 mango::OptionSpec spec{
@@ -228,7 +228,7 @@ mango::OptionSpec spec{
 mango::IVQuery query(spec, 10.45);
 
 // Configure solver (optional)
-mango::IVSolverFDMConfig config{
+mango::IVSolverConfig config{
     .root_config = mango::RootFindingConfig{
         .max_iter = 100,
         .tolerance = 1e-6
@@ -238,7 +238,7 @@ mango::IVSolverFDMConfig config{
 };
 
 // Solve
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 
 if (result.has_value()) {
@@ -281,7 +281,7 @@ for (const auto& [strike, price] : market_data) {
 }
 
 // Solve batch (OpenMP parallel)
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto batch = solver.solve_batch(queries);
 
 std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
@@ -304,7 +304,7 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 **Control PDE accuracy via GridAccuracyParams (recommended):**
 
 ```cpp
-mango::IVSolverFDMConfig config{
+mango::IVSolverConfig config{
     .grid = mango::GridAccuracyParams{
         .tol = 1e-4,                // Tighter truncation error
         .min_spatial_points = 200,
@@ -312,7 +312,7 @@ mango::IVSolverFDMConfig config{
     }
 };
 
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 ```
 
@@ -321,14 +321,14 @@ auto result = solver.solve(query);
 ```cpp
 auto grid_spec = mango::GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.5).value();
 
-mango::IVSolverFDMConfig config{
+mango::IVSolverConfig config{
     .grid = mango::PDEGridConfig{
         .grid_spec = grid_spec,
         .n_time = 2000
     }
 };
 
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto result = solver.solve(query);
 ```
 
@@ -539,13 +539,13 @@ if (result.has_value()) {
 
 ### Factory-Based Solver Creation
 
-The `make_iv_solver` factory builds an interpolated IV solver that automatically handles discrete dividends. When no dividends are specified, it takes the standard single-surface path. When dividends are present, it builds a segmented surface with backward chaining.
+The `make_interpolated_iv_solver` factory builds an interpolated IV solver that automatically handles discrete dividends. When no dividends are specified, it takes the standard single-surface path. When dividends are present, it builds a segmented surface with backward chaining.
 
 ```cpp
 #include "src/option/iv_solver_factory.hpp"
 
 // Standard path (no discrete dividends):
-mango::IVSolverConfig config{
+mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.02,
@@ -558,7 +558,7 @@ mango::IVSolverConfig config{
 };
 
 // Segmented path (with discrete dividends):
-mango::IVSolverConfig div_config{
+mango::IVSolverFactoryConfig div_config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
@@ -573,7 +573,7 @@ mango::IVSolverConfig div_config{
     },
 };
 
-auto solver = mango::make_iv_solver(config);
+auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
 ### Solving IV Queries
@@ -753,7 +753,7 @@ if (!result.has_value()) {
 **Compose validations with .and_then():**
 
 ```cpp
-// Inside IVSolverFDM
+// Inside IVSolver
 auto validate_query(const IVQuery& query) const
     -> std::expected<std::monostate, IVError>
 {
@@ -803,7 +803,7 @@ for (size_t i = 0; i < params_batch.size(); ++i) {
 ```cpp
 std::vector<mango::IVQuery> queries = load_market_data();
 
-mango::IVSolverFDM solver(config);
+mango::IVSolver solver(config);
 auto batch = solver.solve_batch(queries);
 
 // Results and statistics

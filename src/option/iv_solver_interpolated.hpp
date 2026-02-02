@@ -82,7 +82,7 @@ struct IVSolverInterpolatedConfig {
 /// Rate handling: The price surface uses a scalar rate axis (designed for SOFR/flat rates).
 /// When a YieldCurve is provided, it is collapsed to a zero rate: -ln(D(T))/T.
 /// This provides a reasonable approximation but does not capture term structure dynamics.
-/// For full yield curve support, use IVSolverFDM instead.
+/// For full yield curve support, use IVSolver instead.
 /// When rate approximation is used, IVSuccess::used_rate_approximation is set to true.
 ///
 /// @tparam Surface A type satisfying the PriceSurface concept
@@ -318,7 +318,7 @@ IVSolverInterpolated<Surface>::solve(const IVQuery& query) const noexcept
     // reflects the rate at maturity, not the integrated discount factor
     //
     // Note: When a YieldCurve is provided, we collapse it to a single zero rate.
-    // This loses term structure dynamics. For full curve support, use IVSolverFDM.
+    // This loses term structure dynamics. For full curve support, use IVSolver.
     const bool rate_is_curve = is_yield_curve(query.rate);
     double rate_value = get_zero_rate(query.rate, query.maturity);
 

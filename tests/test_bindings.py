@@ -56,11 +56,11 @@ def test_iv_query():
 
 
 def test_iv_solver_fdm():
-    """Test IVSolverFDM"""
-    print("Testing IVSolverFDM...")
+    """Test IVSolver (FDM-based)"""
+    print("Testing IVSolver...")
 
-    config = mango_option.IVSolverFDMConfig()
-    solver = mango_option.IVSolverFDM(config)
+    config = mango_option.IVSolverConfig()
+    solver = mango_option.IVSolver(config)
 
     query = mango_option.IVQuery()
     query.spot = 100.0
@@ -73,9 +73,9 @@ def test_iv_solver_fdm():
 
     success, result, error = solver.solve(query)
     if success:
-        print(f"✓ IVSolverFDM solved: IV = {result.implied_vol:.4f}")
+        print(f"✓ IVSolver solved: IV = {result.implied_vol:.4f}")
     else:
-        print(f"✓ IVSolverFDM ran (error: {error.message})")
+        print(f"✓ IVSolver ran (error: {error.message})")
 
 
 def test_american_option_price():

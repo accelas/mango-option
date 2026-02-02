@@ -16,7 +16,7 @@
  */
 
 #include "src/option/american_option.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <memory_resource>
@@ -313,12 +313,12 @@ void test_iv_scenario(
         ql_result.price
     };
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-6;
     // Note: using auto-estimation (default GridAccuracyParams)
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto iv_result = solver.solve(query);
 
     ASSERT_TRUE(iv_result.converged)

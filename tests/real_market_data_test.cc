@@ -11,7 +11,7 @@
 #include "benchmarks/real_market_data.hpp"
 #include "src/option/american_option.hpp"
 #include "src/option/american_option_batch.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 
 using namespace mango;
 namespace bdata = mango::benchmark_data;
@@ -141,11 +141,11 @@ TEST(RealMarketDataTest, IVCalculationFDM) {
     // Calculate IV for ATM put using FDM solver
     auto query = make_iv_query(bdata::ATM_PUT);
 
-    IVSolverFDMConfig config;
+    IVSolverConfig config;
     config.root_config.max_iter = 100;
     config.root_config.tolerance = 1e-4;
 
-    IVSolverFDM solver(config);
+    IVSolver solver(config);
     auto result = solver.solve(query);
 
     ASSERT_TRUE(result.has_value())
@@ -161,8 +161,8 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     // Verify IV calculation produces consistent prices
     auto query = make_iv_query(bdata::ATM_PUT);
 
-    IVSolverFDMConfig config;
-    IVSolverFDM iv_solver(config);
+    IVSolverConfig config;
+    IVSolver iv_solver(config);
     auto iv_result = iv_solver.solve(query);
     ASSERT_TRUE(iv_result.has_value());
 

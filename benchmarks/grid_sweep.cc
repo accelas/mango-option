@@ -9,7 +9,7 @@
 #include "src/option/table/price_table_surface.hpp"
 #include "src/option/table/price_table_grid_estimator.hpp"
 #include "src/option/table/american_price_surface.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "src/option/iv_solver.hpp"
 #include "src/option/iv_solver_interpolated.hpp"
 #include <cstdio>
 #include <chrono>
@@ -35,11 +35,11 @@ int main() {
     std::vector<double> rates = {0.02, 0.04, 0.06};
 
     // FDM solver as ground truth (High accuracy)
-    IVSolverFDMConfig fdm_config;
+    IVSolverConfig fdm_config;
     fdm_config.root_config.max_iter = 100;
     fdm_config.root_config.tolerance = 1e-8;
     fdm_config.grid = make_grid_accuracy(GridAccuracyProfile::High);
-    IVSolverFDM fdm_solver(fdm_config);
+    IVSolver fdm_solver(fdm_config);
 
     // Test queries: puts at various moneyness × maturity
     struct Query {
