@@ -492,14 +492,14 @@ surface = mo.build_price_table_surface_from_grid(
 
 **Real data benchmark (SPY 7-day puts, auto-grid profiles with EEP decomposition):**
 
-| Profile | PDE solves | ATM (bps) | Near-OTM (bps) | Deep-OTM (bps) | Price RMSE |
-|---|---:|---:|---:|---:|---:|
-| Low | 100 | 10.0 | 2.7 | 20.7 | $0.014 |
-| Medium | 240 | 4.4 | 3.0 | 22.5 | $0.008 |
-| High (default) | 495 | 0.1 | 2.8 | 22.2 | $0.005 |
-| Ultra | 812 | 0.2 | 3.3 | 22.6 | $0.005 |
+| Profile | PDE solves | ATM (bps) | Near-OTM (bps) | Deep-OTM (bps) | Near-ITM (bps) | Deep-ITM (bps)† | Price RMSE |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Low | 100 | 10.4 | 2.8 | 20.7 | 13.9 | 2006 | $0.016 |
+| Medium | 240 | 2.7 | 2.9 | 22.7 | 1.1 | 2070 | $0.005 |
+| High (default) | 495 | 0.4 | 3.3 | 22.8 | 1.3 | 2023 | $0.005 |
+| Ultra | 812 | 0.3 | 2.9 | 22.0 | 0.8 | 2002 | $0.004 |
 
-IV error in bps varies with vega: a constant ~$0.005 price error maps to <1 bps near-ATM but 20+ bps for deep OTM short-dated options where vega is tiny. Price RMSE is the stable metric.
+†Deep-ITM and deep-OTM options share the same low-vega characteristic: vega is near zero, so even a tiny price error (< $0.01) maps to thousands of bps in IV space. The actual price-relative error remains small — deep-ITM price RMSE is < $0.001 across all profiles. **Price RMSE is the stable metric** across all moneyness regimes.
 
 ### Using Price Surface with IVSolverInterpolated
 
