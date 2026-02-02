@@ -582,8 +582,6 @@ if (result.has_value()) {
 }
 ```
 
-For batch IV queries, see [Batch Processing § IV Batch](#iv-batch).
-
 ### Configuration Notes
 
 - **`kref_config`** is optional. When omitted, the builder selects reference strikes automatically at log-spaced intervals around the spot. Explicit K_refs are useful when you know the strike range of interest.
