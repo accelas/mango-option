@@ -125,6 +125,70 @@ static double catmull_rom(const std::array<double, 4>& x,
          + (u3 - u2)                     * m2;
 }
 
+// C1 Hermite interpolation (Fritsch-Carlson) for n=2 or n=3 points.
+// x[] are strictly increasing positions in log(K_ref) space.
+// y[] are normalized values (value/K_ref).
+// t can be inside or outside [x[0], x[n-1]] (extrapolation supported).
+static double hermite_interp(const double* x, const double* y, size_t n,
+                             double t) {
+    if (n == 2) {
+        double u = (t - x[0]) / (x[1] - x[0]);
+        return (1.0 - u) * y[0] + u * y[1];
+    }
+
+    // n == 3: Full Fritsch-Carlson for non-uniform spacing
+    const double h0 = x[1] - x[0];
+    const double h1 = x[2] - x[1];
+    const double d0 = (y[1] - y[0]) / h0;
+    const double d1 = (y[2] - y[1]) / h1;
+
+    // Weighted endpoint slopes (correct for non-uniform spacing)
+    double m0 = ((2.0 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
+    double m2 = ((2.0 * h1 + h0) * d1 - h1 * d0) / (h0 + h1);
+
+    // Interior slope
+    double m1;
+    if (d0 * d1 > 0.0) {
+        // Data is monotone over both intervals: weighted harmonic mean
+        const double w1 = 2.0 * h1 + h0;
+        const double w2 = 2.0 * h0 + h1;
+        m1 = (w1 + w2) / (w1 / d0 + w2 / d1);
+    } else {
+        // Non-monotone data: C1 central difference (no monotone force)
+        m1 = (h0 * d1 + h1 * d0) / (h0 + h1);
+    }
+
+    // Monotonicity limiter on ALL slopes (only when data is monotone)
+    if (d0 * d1 > 0.0) {
+        auto limit = [](double& m, double d_near) {
+            if (m * d_near <= 0.0) { m = 0.0; return; }
+            double lim = 3.0 * std::abs(d_near);
+            if (std::abs(m) > lim) m = std::copysign(lim, m);
+        };
+        limit(m0, d0);
+        limit(m1, d0);
+        limit(m1, d1);
+        limit(m2, d1);
+    }
+
+    // Choose interval (supports extrapolation: t can be outside [x[0], x[2]])
+    size_t i = (t <= x[1]) ? 0 : 1;
+
+    const double hi = x[i + 1] - x[i];
+    const double u = (t - x[i]) / hi;
+    const double u2 = u * u;
+    const double u3 = u2 * u;
+
+    const double mi  = (i == 0) ? m0 : m1;
+    const double mi1 = (i == 0) ? m1 : m2;
+
+    // Hermite basis (slopes scaled by interval width)
+    return (2.0 * u3 - 3.0 * u2 + 1.0) * y[i]
+         + (u3 - 2.0 * u2 + u)          * (mi * hi)
+         + (-2.0 * u3 + 3.0 * u2)       * y[i + 1]
+         + (u3 - u2)                     * (mi1 * hi);
+}
+
 // Find the index of the lower bracketing entry for a given strike.
 // Returns the index i such that entries_[i].K_ref <= strike < entries_[i+1].K_ref.
 size_t SegmentedMultiKRefSurface::find_bracket(double strike) const {
@@ -145,14 +209,15 @@ static double interp_across_krefs(
     const size_t n = entries.size();
     const double log_strike = std::log(strike);
 
-    // Need at least 4 points for Catmull-Rom; fall back to linear otherwise
+    // C1 Hermite for 2-3 points (Fritsch-Carlson for n=3, linear for n=2)
     if (n < 4) {
-        size_t hi_idx = lo_idx + 1;
-        double w = (strike - entries[lo_idx].K_ref) /
-                   (entries[hi_idx].K_ref - entries[lo_idx].K_ref);
-        double v_lo = eval_fn(lo_idx) / entries[lo_idx].K_ref;
-        double v_hi = eval_fn(hi_idx) / entries[hi_idx].K_ref;
-        return ((1.0 - w) * v_lo + w * v_hi) * strike;
+        std::array<double, 3> xs, ys;
+        for (size_t i = 0; i < n; ++i) {
+            xs[i] = std::log(entries[i].K_ref);
+            ys[i] = eval_fn(i) / entries[i].K_ref;
+        }
+        double result = hermite_interp(xs.data(), ys.data(), n, log_strike);
+        return std::max(result, 0.0) * strike;  // clamp non-negative
     }
 
     // Select 4 entries centered on the bracket [lo_idx, lo_idx+1]
