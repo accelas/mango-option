@@ -8,9 +8,9 @@ namespace {
 TEST(AdaptiveGridParamsTest, DefaultValues) {
     AdaptiveGridParams params;
 
-    EXPECT_DOUBLE_EQ(params.target_iv_error, 0.0005);  // 5 bps
+    EXPECT_DOUBLE_EQ(params.target_iv_error, 2e-5);  // 2 bps (High profile)
     EXPECT_EQ(params.max_iter, 5);
-    EXPECT_EQ(params.max_points_per_dim, 50);
+    EXPECT_EQ(params.max_points_per_dim, 160);
     EXPECT_EQ(params.validation_samples, 64);
     EXPECT_DOUBLE_EQ(params.refinement_factor, 1.3);
     EXPECT_EQ(params.lhs_seed, 42);

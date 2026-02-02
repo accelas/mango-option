@@ -12,15 +12,18 @@
 namespace mango {
 
 /// Configuration for adaptive grid refinement
+///
+/// Defaults match the High accuracy profile (2 bps target).
+/// See PriceTableGridProfile::High in price_table_grid_estimator.hpp.
 struct AdaptiveGridParams {
-    /// Target IV error in absolute terms (default: 5 bps = 0.0005)
-    double target_iv_error = 0.0005;
+    /// Target IV error in absolute terms (default: 2 bps = 2e-5, High profile)
+    double target_iv_error = 2e-5;
 
     /// Maximum refinement iterations (default: 5)
     size_t max_iter = 5;
 
-    /// Maximum points per dimension ceiling (default: 50)
-    size_t max_points_per_dim = 50;
+    /// Maximum points per dimension ceiling (default: 160, High profile)
+    size_t max_points_per_dim = 160;
 
     /// Number of validation FD solves per iteration (default: 64)
     size_t validation_samples = 64;
