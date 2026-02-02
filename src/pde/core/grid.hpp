@@ -241,50 +241,25 @@ private:
         const size_t n = points.size();
         if (n < 2) return;
 
-        // Clamp endpoints
-        points[0] = x_min;
-        points[n-1] = x_max;
-
-        // Iterative monotonicity enforcement (max 100 passes)
-        for (int pass = 0; pass < 100; ++pass) {
-            bool modified = false;
-
-            for (size_t i = 1; i < n; ++i) {
-                if (points[i] <= points[i-1]) {
-                    // Fix violation: interpolate between neighbors
-                    T right = (i < n-1) ? points[i+1] : x_max;
-                    points[i] = (points[i-1] + right) / T(2.0);
-                    modified = true;
-                }
-            }
-
-            if (!modified) break;
-        }
-
-        // Final pass: ensure minimum spacing (avoid dx → 0)
         const T min_spacing = (x_max - x_min) / static_cast<T>(n * 100);
 
         // Clamp endpoints
         points[0] = x_min;
         points[n-1] = x_max;
 
-        // Backward pass: ensure no point exceeds the next point minus min_spacing
-        for (size_t i = n - 1; i > 1; --i) {
-            if (points[i-1] >= points[i] - min_spacing) {
-                points[i-1] = points[i] - min_spacing;
-            }
-        }
-
-        // Forward pass: ensure no point is less than previous point plus min_spacing
+        // Forward pass: ensure strictly increasing with minimum spacing
         for (size_t i = 1; i < n - 1; ++i) {
             if (points[i] <= points[i-1] + min_spacing) {
                 points[i] = points[i-1] + min_spacing;
             }
         }
 
-        // Final clamp of endpoints
-        points[0] = x_min;
-        points[n-1] = x_max;
+        // Backward pass: ensure last interior point doesn't exceed x_max - min_spacing
+        for (size_t i = n - 2; i > 0; --i) {
+            if (points[i] >= points[i+1] - min_spacing) {
+                points[i] = points[i+1] - min_spacing;
+            }
+        }
     }
 
     Type type_;
@@ -325,7 +300,7 @@ public:
     T x_max() const { return data_[data_.size() - 1]; }
 
     // Check if grid is uniform (within tolerance)
-    bool is_uniform(T tolerance = T(1e-10)) const {
+    bool is_uniform(T tolerance = T(100) * std::numeric_limits<T>::epsilon()) const {
         if (data_.size() < 2) return true;
         const T expected_dx = (x_max() - x_min()) / static_cast<T>(data_.size() - 1);
         for (size_t i = 1; i < data_.size(); ++i) {
@@ -734,7 +709,7 @@ private:
 
         // Check uniformity (within tolerance)
         const T expected_dx = (grid.x_max() - grid.x_min()) / static_cast<T>(n - 1);
-        constexpr T tolerance = T(1e-10);
+        const T tolerance = T(100) * std::numeric_limits<T>::epsilon();
         bool is_uniform = true;
 
         for (size_t i = 1; i < n; ++i) {

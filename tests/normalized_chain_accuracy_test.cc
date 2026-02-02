@@ -153,7 +153,7 @@ TEST(NormalizedChainAccuracy, QuantLibComparison_ATM_Chain) {
         double delta_error = std::abs(delta_val - ql_result.delta);
         double delta_rel = (delta_error / std::abs(ql_result.delta)) * 100.0;
 
-        EXPECT_LT(delta_rel, 10.0)  // Within 10%
+        EXPECT_LT(delta_rel, 9.0)  // Within 9%
             << "Mango delta: " << delta_val
             << "\nQuantLib delta: " << ql_result.delta
             << "\nError: " << delta_rel << "%";
