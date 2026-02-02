@@ -14,17 +14,18 @@ Mathematical formulations and numerical methods underlying the mango-option libr
 3. [TR-BDF2 Time Stepping](#3-tr-bdf2-time-stepping)
 4. [American Option Constraints](#4-american-option-constraints)
 5. [Grid Generation](#5-grid-generation)
+6. [Discrete Dividends](#6-discrete-dividends)
 
 **Part II — Price Tables & Interpolation:** Pre-computing prices across parameter space for fast queries.
 
-6. [B-Spline Interpolation](#6-b-spline-interpolation)
-7. [EEP Decomposition](#7-eep-decomposition)
-8. [Price Table Grid Estimation](#8-price-table-grid-estimation)
-9. [Implied Volatility](#9-implied-volatility)
+7. [B-Spline Interpolation](#7-b-spline-interpolation)
+8. [EEP Decomposition](#8-eep-decomposition)
+9. [Price Table Grid Estimation](#9-price-table-grid-estimation)
+10. [Implied Volatility](#10-implied-volatility)
 
 **Part III — Analysis**
 
-10. [Convergence Analysis](#10-convergence-analysis)
+11. [Convergence Analysis](#11-convergence-analysis)
 
 ---
 
@@ -40,11 +41,17 @@ The sections below follow the computation pipeline: formulate the PDE, discretiz
 
 ### Backward Time Formulation
 
-An American option's value $V(S, t)$ satisfies the Black-Scholes PDE. We work in backward time $\tau = T - t$ (time remaining to maturity), which turns the problem into a forward-in-time evolution — easier to reason about numerically:
+An American option's value $V(S, t)$ satisfies the Black-Scholes PDE in the **continuation region** (where holding is optimal). In the **exercise region** (where immediate exercise is optimal), $V$ equals the intrinsic value. Together, these form a variational inequality — the American option problem:
+
+$$\frac{\partial V}{\partial \tau} \geq \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - d)\,S\,\frac{\partial V}{\partial S} - rV, \qquad V \geq \psi, \qquad \left(\frac{\partial V}{\partial \tau} - \mathcal{L}V\right)(V - \psi) = 0$$
+
+where $\psi$ is the intrinsic (payoff) value and $\mathcal{L}$ is the Black-Scholes operator. The complementarity condition (third equation) says: at each point, either the PDE holds as equality (continuation) or the option is at intrinsic (exercise), but not both. The boundary between these regions — the **early exercise boundary** — is a free boundary that emerges from the solution (section 4).
+
+For the numerical method, we work in backward time $\tau = T - t$ (time remaining to maturity), which turns the problem into a forward-in-time evolution. In the continuation region, $V$ satisfies:
 
 $$\frac{\partial V}{\partial \tau} = \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - d)\,S\,\frac{\partial V}{\partial S} - rV$$
 
-with initial condition $V(S, 0) = \text{payoff}(S)$ and the American constraint $V \geq \text{intrinsic}$ at all times.
+with initial condition $V(S, 0) = \psi(S)$ and the constraint $V \geq \psi$ enforced at every time step (section 4).
 
 Here $S$ is the spot price, $\sigma$ the volatility, $r$ the risk-free rate, and $d$ the continuous dividend yield. The three terms on the right have intuitive meanings: diffusion (volatility spreads the distribution), drift (the risk-neutral growth rate), and discounting (a dollar tomorrow is worth less today).
 
@@ -333,6 +340,85 @@ For a short-dated SPY option ($\sigma \approx 0.15$, $T \approx 0.09$), the defa
 
 ---
 
+## 6. Discrete Dividends
+
+Sections 1–5 assume a continuous dividend yield $d$ that enters the PDE coefficients. Real equities pay discrete cash dividends at known dates. A dividend $D$ paid at calendar time $t_d$ causes the spot to drop: $S(t_d^+) = S(t_d^-) - D$. The option value must satisfy the jump condition across the dividend:
+
+$$V(S, t_d^-) = V(S - D, t_d^+)$$
+
+This cannot be handled by adjusting the PDE coefficients — it requires modifying the solution at discrete points in time.
+
+### Temporal Events
+
+The solver handles discrete dividends as **temporal events**: callbacks that modify the solution vector at mandatory time steps. The time grid is constructed so that each dividend date $t_d$ falls exactly on a time step boundary (converted to backward time $\tau_d = T - t_d$).
+
+At each dividend event, the solver:
+
+1. Completes the TR-BDF2 step up to $\tau_d$
+2. Applies the jump condition (see below)
+3. Re-applies boundary conditions and obstacle constraints
+4. Continues the PDE solve to the next event or $\tau = T$
+
+### The Jump Condition in Log-Moneyness
+
+In log-moneyness coordinates $x = \ln(S/K)$, the spot drop $S \to S - D$ maps to a nonlinear shift. Define the normalized dividend $\delta = D/K$. For each grid point $x_i$:
+
+$$x_i' = \ln\!\big(e^{x_i} - \delta\big)$$
+
+The jump condition becomes:
+
+$$u_i \leftarrow \hat{u}(x_i')$$
+
+where $\hat{u}$ is a cubic spline interpolant of the current solution. The spline is rebuilt from the solution vector at each dividend event (reusing the same grid, so the rebuild is $O(n)$ with zero allocation).
+
+**Boundary cases.** When $e^{x_i} \leq \delta$ (the spot drops to zero or below after the dividend), the spline cannot be evaluated. The solver uses a fallback:
+- Put: $u_i = 1.0$ (normalized deep ITM value — exercise is certain)
+- Call: $u_i = 0.0$ (worthless)
+
+When $x_i'$ falls below the grid domain $x_\min$, the same fallback applies. When $x_i'$ exceeds $x_\max$, it is clamped to $x_\max$.
+
+### Grid Adjustments
+
+Discrete dividends require two modifications to the grid estimation from section 5.
+
+**Domain widening.** The shift $x \to \ln(e^x - \delta)$ moves points leftward. Without adjustment, points near $x_\min$ would shift outside the domain. The estimator extends the left boundary:
+
+$$x_\min' = \begin{cases} \ln\!\big(e^{x_\min} - \delta_\max\big) & \text{if } e^{x_\min} > \delta_\max \\ x_\min - 1 & \text{otherwise (conservative extension)} \end{cases}$$
+
+where $\delta_\max = \max_k D_k / K$ is the largest normalized dividend.
+
+**Mandatory time steps.** Each dividend date $\tau_d$ is inserted as a mandatory point in the time grid. The interval between consecutive dividends (or between a dividend and the domain boundary) is subdivided uniformly with $\Delta t \leq \Delta t_\text{target}$, ensuring temporal accuracy is maintained within each segment.
+
+### Interaction with Continuous Yield
+
+Continuous and discrete dividends combine naturally. The continuous yield $d$ enters the Black-Scholes PDE coefficients (drift term $r - d - \sigma^2/2$) and is active throughout the solve. Discrete dividends operate orthogonally through temporal events. The two mechanisms do not interfere.
+
+### Segmented Price Surfaces
+
+For pre-computed price tables (Part II), discrete dividends break the smoothness that B-spline interpolation requires. A single surface cannot fit the price discontinuity at a dividend date.
+
+The segmented surface builder partitions the maturity axis at dividend dates. For $N$ dividends at calendar times $t_1 < t_2 < \cdots < t_N$, the backward-time boundaries are:
+
+$$0 = \tau_0 < \tau_N < \tau_{N-1} < \cdots < \tau_1 < T$$
+
+where $\tau_k = T - t_k$. Each segment covers $[\tau_{k+1}, \tau_k]$ and has its own B-spline surface.
+
+**Segment 0** ($\tau \in [0, \tau_N]$, nearest to expiry): built in EEP mode with the payoff as initial condition.
+
+**Segment $k > 0$** ($\tau \in [\tau_{N-k+1}, \tau_{N-k}]$): built in raw-price mode. Its initial condition is the previous segment's surface evaluated at the post-dividend spot:
+
+$$V_k(m, \sigma, r)\big|_{\tau = \tau_{N-k+1}} = V_{k-1}\!\left(m + \frac{D_{N-k+1}}{K_\text{ref}},\; \sigma,\; r\right)\bigg|_{\tau = \tau_{N-k+1}}$$
+
+The moneyness shift $m \to m + D/K_\text{ref}$ accounts for the spot being higher before the dividend — the same jump condition as in the PDE solver, expressed in moneyness coordinates.
+
+At query time, the surface finds the segment covering the requested $\tau$ and evaluates it directly. For the EEP segment, a spot adjustment subtracts dividends that will be paid between the query time and the segment boundary:
+
+$$S_\text{adj} = S - \sum_{\{k : t_\text{query} < t_k \leq t_\text{boundary}\}} D_k$$
+
+**Why multiple $K_\text{ref}$ values?** Cash dividends break the scale invariance that American options normally have in strike (the EEP decomposition assumes $P \propto K$, which fails when $D/K$ varies with $K$). The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in $\ln(K_\text{ref})$, producing a `SegmentedMultiKRefSurface`.
+
+---
+
 # Part II — Price Tables & Interpolation
 
 Part I gave us a PDE solver that prices one option in ~1–2ms. For implied volatility — which requires pricing the option repeatedly at different volatilities until the price matches the market — this is too slow. A single IV solve takes ~15ms (5–8 Brent iterations × 2ms each), and a trading desk needs thousands of IVs per second.
@@ -341,7 +427,7 @@ The solution: pre-compute prices across a 4D parameter grid (moneyness, maturity
 
 ---
 
-## 6. B-Spline Interpolation
+## 7. B-Spline Interpolation
 
 ### Why B-Splines?
 
@@ -411,7 +497,7 @@ Each derivative costs the same as a price evaluation (~500ns) because we evaluat
 
 ---
 
-## 7. EEP Decomposition
+## 8. EEP Decomposition
 
 The price table does not store raw American option prices. Instead, it stores the **Early Exercise Premium** (EEP): the difference between the American and European prices.
 
@@ -478,7 +564,7 @@ When accuracy is critical, use the PDE solver directly (`AmericanOptionSolver`).
 
 ---
 
-## 8. Price Table Grid Estimation
+## 9. Price Table Grid Estimation
 
 The 4D grid density directly controls IV accuracy. Too coarse and the B-spline interpolation introduces significant error; too fine and pre-computation takes days. The library provides both automatic estimation and iterative refinement.
 
@@ -531,7 +617,7 @@ $$\text{error} = \begin{cases} |\sigma_\text{interp} - \sigma_\text{ref}| & \tex
 
 ---
 
-## 9. Implied Volatility
+## 10. Implied Volatility
 
 Implied volatility is the volatility that, when plugged into the pricing model, reproduces the observed market price. Computing it requires inverting the price-to-volatility mapping — a root-finding problem.
 
@@ -559,7 +645,7 @@ Each iteration calls the PDE solver (~2ms), so a single IV solve costs ~15ms. Ac
 
 ### Interpolated IV (Newton on B-Spline Surface)
 
-The fast approach: pre-compute a 4D price table (Part II, sections 6–7), then solve for IV using Newton's method on the B-spline surface.
+The fast approach: pre-compute a 4D price table (Part II, sections 7–8), then solve for IV using Newton's method on the B-spline surface.
 
 $$\sigma_{k+1} = \sigma_k - \frac{P(m, \tau, \sigma_k, r) - V_\text{market}}{\partial P / \partial\sigma\,(m, \tau, \sigma_k, r)}$$
 
@@ -578,7 +664,7 @@ The interpolated solver is ~5,000× faster, at the cost of pre-computation time 
 
 # Part III — Analysis
 
-## 10. Convergence Analysis
+## 11. Convergence Analysis
 
 ### Overall Error Budget
 
@@ -610,7 +696,7 @@ Typical behavior:
 
 For the B-spline price tables, the additional interpolation error is $O(h^4)$ per dimension. The separable fitting preserves this order. In practice, the dominant error source is the volatility dimension (highest curvature), which is why it receives 1.5× weight in the grid budget.
 
-Adaptive refinement (section 7) provides a verified error bound by testing against fresh PDE solves at random parameter combinations.
+Adaptive refinement (section 8) provides a verified error bound by testing against fresh PDE solves at random parameter combinations.
 
 ---
 
