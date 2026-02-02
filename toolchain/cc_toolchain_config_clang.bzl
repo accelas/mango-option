@@ -167,25 +167,6 @@ def _impl(ctx):
         ],
     )
 
-    # Treat warnings as errors
-    werror_feature = feature(
-        name = "werror",
-        enabled = True,
-        flag_sets = [
-            flag_set(
-                actions = [
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                ],
-                flag_groups = [
-                    flag_group(
-                        flags = ["-Werror"],
-                    ),
-                ],
-            ),
-        ],
-    )
-
     # Baseline x86-64 ISA for portable binaries
     baseline_isa_feature = feature(
         name = "baseline_isa",
@@ -278,7 +259,6 @@ def _impl(ctx):
             opt_feature,
             compile_mode_feature,
             warnings_feature,
-            werror_feature,
             baseline_isa_feature,
             default_link_flags_feature,
             preprocessor_defines_feature,

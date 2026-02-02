@@ -63,6 +63,46 @@ TEST(BatchAmericanOptionSolver, DisableNormalizedOptimization) {
     EXPECT_EQ(result.results.size(), 5);
 }
 
+TEST(BatchAmericanOptionSolver, NormalizedMixedMaturities) {
+    // Mixed maturities should be grouped into separate PDE groups,
+    // each solved with a single normalized PDE
+    std::vector<PricingParams> params;
+    double spot = 100.0;
+
+    // Group 1: maturity = 0.5, varying strikes
+    for (double K : {90.0, 100.0, 110.0}) {
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = 0.5, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
+    }
+    // Group 2: maturity = 1.0, varying strikes
+    for (double K : {90.0, 100.0, 110.0}) {
+        params.push_back(PricingParams(OptionSpec{.spot = spot, .strike = K, .maturity = 1.0, .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20));
+    }
+
+    BatchAmericanOptionSolver solver;
+    auto result = solver.solve_batch(params, /*use_shared_grid=*/true);
+
+    EXPECT_EQ(result.failed_count, 0);
+    EXPECT_EQ(result.results.size(), 6);
+
+    for (size_t i = 0; i < result.results.size(); ++i) {
+        ASSERT_TRUE(result.results[i].has_value())
+            << "Option " << i << " failed";
+        EXPECT_GT(result.results[i]->value(), 0.0);
+    }
+
+    // Cross-check: normalized results should match individual solves
+    for (size_t i = 0; i < params.size(); ++i) {
+        auto individual = solve_american_option(params[i]);
+        ASSERT_TRUE(individual.has_value());
+        double normalized_price = result.results[i]->value();
+        double individual_price = individual->value();
+        EXPECT_NEAR(normalized_price, individual_price, 0.05)
+            << "Option " << i << " (K=" << params[i].strike
+            << ", T=" << params[i].maturity << "): normalized="
+            << normalized_price << " vs individual=" << individual_price;
+    }
+}
+
 // ===========================================================================
 // Regression tests for bugs found during code review
 // ===========================================================================
