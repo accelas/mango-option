@@ -600,10 +600,9 @@ auto result = solver->solve(query);
 if (result.has_value()) {
     std::cout << "IV: " << result->implied_vol << "\n";
 }
-
-// Batch solving
-auto batch = solver->solve_batch(queries);
 ```
+
+For batch IV queries, see [Batch Processing § IV Batch](#iv-batch).
 
 ### Configuration Notes
 
