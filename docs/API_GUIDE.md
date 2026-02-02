@@ -677,29 +677,24 @@ solver.set_grid_accuracy(mango::GridAccuracyParams{.tol = 1e-4})
 auto results = solver.solve_batch(batch, /*use_shared_grid=*/true);
 ```
 
-### IV Batch
+### IV and Price Surface Batch Queries
 
-**Use solve_batch() for parallel IV calculation:**
+Two batch query modes serve different latency/accuracy tradeoffs.
+
+**FDM batch** — each query solves a full PDE (~19ms each, OpenMP-parallelized):
 
 ```cpp
 std::vector<mango::IVQuery> queries;
 for (const auto& [strike, price] : market_data) {
-    mango::OptionSpec spec{
-        .spot = 100.0,
-        .strike = strike,
-        .maturity = 0.25,
-        .rate = 0.03,
-        .dividend_yield = 0.0,
-        .option_type = mango::OptionType::CALL
-    };
-    queries.push_back(mango::IVQuery(spec, price));
+    queries.push_back(mango::IVQuery(
+        mango::OptionSpec{.spot = 100.0, .strike = strike, .maturity = 0.25,
+            .rate = 0.03, .dividend_yield = 0.0,
+            .option_type = mango::OptionType::CALL},
+        price));
 }
 
 mango::IVSolver solver(config);
 auto batch = solver.solve_batch(queries);
-
-std::cout << "Succeeded: " << (batch.results.size() - batch.failed_count) << "\n";
-std::cout << "Failed: " << batch.failed_count << "\n";
 
 for (size_t i = 0; i < batch.results.size(); ++i) {
     if (batch.results[i].has_value()) {
@@ -709,9 +704,7 @@ for (size_t i = 0; i < batch.results.size(); ++i) {
 }
 ```
 
-### Price Surface Batch Queries
-
-**Evaluate many points on a pre-computed surface:**
+**Price surface batch** — queries a pre-computed B-spline surface (~500ns each):
 
 ```cpp
 auto surface = result->surface;
@@ -728,6 +721,8 @@ for (const auto& coords : queries) {
     std::cout << "m=" << coords[0] << ", price=" << price << ", vega=" << vega << "\n";
 }
 ```
+
+Use FDM batch when you need exact PDE accuracy or have few queries. Use the price surface when you have many queries against the same parameter space and can tolerate interpolation error (see [Interpolated Greek Accuracy](#interpolated-greek-accuracy)).
 
 ---
 
