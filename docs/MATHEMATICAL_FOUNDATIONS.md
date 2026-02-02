@@ -40,43 +40,39 @@ The sections below follow the computation pipeline: formulate the PDE, discretiz
 
 ### Backward Time Formulation
 
-An American option's value V(S, t) satisfies the Black-Scholes PDE. We work in backward time tau = T - t (time remaining to maturity), which turns the problem into a forward-in-time evolution — easier to reason about numerically:
+An American option's value $V(S, t)$ satisfies the Black-Scholes PDE. We work in backward time $\tau = T - t$ (time remaining to maturity), which turns the problem into a forward-in-time evolution — easier to reason about numerically:
 
-```
-dV/dtau = (1/2) sigma^2 S^2 d^2V/dS^2 + (r - d) S dV/dS - rV
-```
+$$\frac{\partial V}{\partial \tau} = \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - d)\,S\,\frac{\partial V}{\partial S} - rV$$
 
-with initial condition V(S, 0) = payoff(S) and the American constraint V >= intrinsic at all times.
+with initial condition $V(S, 0) = \text{payoff}(S)$ and the American constraint $V \geq \text{intrinsic}$ at all times.
 
-Here S is the spot price, sigma the volatility, r the risk-free rate, and d the continuous dividend yield. The three terms on the right have intuitive meanings: diffusion (volatility spreads the distribution), drift (the risk-neutral growth rate), and discounting (a dollar tomorrow is worth less today).
+Here $S$ is the spot price, $\sigma$ the volatility, $r$ the risk-free rate, and $d$ the continuous dividend yield. The three terms on the right have intuitive meanings: diffusion (volatility spreads the distribution), drift (the risk-neutral growth rate), and discounting (a dollar tomorrow is worth less today).
 
 ### Log-Price Transformation
 
-Working directly in S is inconvenient — the coefficients depend on S, and the domain is [0, infinity). Substituting x = ln(S/K) fixes both problems:
+Working directly in $S$ is inconvenient — the coefficients depend on $S$, and the domain is $[0, \infty)$. Substituting $x = \ln(S/K)$ fixes both problems:
 
-```
-dV/dtau = (sigma^2 / 2) d^2V/dx^2 + (r - d - sigma^2/2) dV/dx - rV
-```
+$$\frac{\partial V}{\partial \tau} = \frac{\sigma^2}{2}\frac{\partial^2 V}{\partial x^2} + \left(r - d - \frac{\sigma^2}{2}\right)\frac{\partial V}{\partial x} - rV$$
 
-Now all coefficients are constants, x = 0 corresponds to at-the-money (S = K), and the domain is symmetric around the strike. This is the form we actually discretize and solve.
+Now all coefficients are constants, $x = 0$ corresponds to at-the-money ($S = K$), and the domain is symmetric around the strike. This is the form we actually discretize and solve.
 
 ### Boundary Conditions
 
 At the edges of our finite computational domain:
 
-**Left boundary** (x -> -infinity, S -> 0):
-- Call: V = 0 (worthless far out-of-the-money)
-- Put: V = K e^{-r tau} (deep in-the-money, exercise is certain)
+**Left boundary** ($x \to -\infty$, $S \to 0$):
+- Call: $V = 0$ (worthless far out-of-the-money)
+- Put: $V = Ke^{-r\tau}$ (deep in-the-money, exercise is certain)
 
-**Right boundary** (x -> +infinity, S -> infinity):
-- Call: V ~ S (deep in-the-money)
-- Put: V = 0 (worthless far out-of-the-money)
+**Right boundary** ($x \to +\infty$, $S \to \infty$):
+- Call: $V \sim S$ (deep in-the-money)
+- Put: $V = 0$ (worthless far out-of-the-money)
 
-**Terminal condition** (tau = 0, i.e., at maturity):
-```
-Call: V(x, 0) = K max(e^x - 1, 0)
-Put:  V(x, 0) = K max(1 - e^x, 0)
-```
+**Terminal condition** ($\tau = 0$, i.e., at maturity):
+
+$$\text{Call: } V(x, 0) = K\max(e^x - 1,\; 0)$$
+
+$$\text{Put: } V(x, 0) = K\max(1 - e^x,\; 0)$$
 
 This terminal condition is the starting point for our backward-in-time solve.
 
@@ -88,98 +84,82 @@ With the PDE in log-price coordinates, we need to approximate the spatial deriva
 
 ### Centered Finite Differences
 
-On a uniform grid with spacing dx, the standard second-order approximations are:
+On a uniform grid with spacing $\Delta x$, the standard second-order approximations are:
 
 **Second derivative:**
-```
-d^2u/dx^2 |_i ~ (u_{i+1} - 2 u_i + u_{i-1}) / dx^2     error: O(dx^2)
-```
+
+$$\left.\frac{\partial^2 u}{\partial x^2}\right|_i \approx \frac{u_{i+1} - 2u_i + u_{i-1}}{\Delta x^2} \qquad \text{error: } O(\Delta x^2)$$
 
 **First derivative:**
-```
-du/dx |_i ~ (u_{i+1} - u_{i-1}) / (2 dx)                 error: O(dx^2)
-```
 
-Both are second-order accurate, meaning halving dx reduces the error by 4x. This is important for the grid estimation strategy later.
+$$\left.\frac{\partial u}{\partial x}\right|_i \approx \frac{u_{i+1} - u_{i-1}}{2\Delta x} \qquad \text{error: } O(\Delta x^2)$$
+
+Both are second-order accurate, meaning halving $\Delta x$ reduces the error by 4×. This is important for the grid estimation strategy later.
 
 ### Non-Uniform Grids
 
 Sinh-spaced grids (section 5) have variable spacing. The finite difference weights must account for this:
 
-```
-d^2u/dx^2 |_i = w_left u_{i-1} + w_center u_i + w_right u_{i+1}
-```
+$$\left.\frac{\partial^2 u}{\partial x^2}\right|_i = w_\text{left}\, u_{i-1} + w_\text{center}\, u_i + w_\text{right}\, u_{i+1}$$
 
-where the weights depend on the local spacings dx_{i-1} and dx_i. The truncation error remains O(dx^2) as long as the spacing varies smoothly — which sinh grids guarantee by construction.
+where the weights depend on the local spacings $\Delta x_{i-1}$ and $\Delta x_i$. The truncation error remains $O(\Delta x^2)$ as long as the spacing varies smoothly — which sinh grids guarantee by construction.
 
 ### Assembling the Spatial Operator
 
-Combining the second derivative, first derivative, and zeroth-order terms from the Black-Scholes PDE into a single operator L:
+Combining the second derivative, first derivative, and zeroth-order terms from the Black-Scholes PDE into a single operator $\mathcal{L}$:
 
-```
-L(u)_i = (sigma^2/2) d^2u/dx^2 |_i + (r - d - sigma^2/2) du/dx |_i - r u_i
-```
+$$\mathcal{L}(u)_i = \frac{\sigma^2}{2}\left.\frac{\partial^2 u}{\partial x^2}\right|_i + \left(r - d - \frac{\sigma^2}{2}\right)\left.\frac{\partial u}{\partial x}\right|_i - r\,u_i$$
 
-This produces a tridiagonal matrix: each grid point couples only to its immediate neighbors. This structure is what makes the solve fast — O(n) per linear solve instead of O(n^3).
+This produces a tridiagonal matrix: each grid point couples only to its immediate neighbors. This structure is what makes the solve fast — $O(n)$ per linear solve instead of $O(n^3)$.
 
 ---
 
 ## 3. TR-BDF2 Time Stepping
 
-We now have a spatial discretization L. The PDE becomes a system of ODEs:
+We now have a spatial discretization $\mathcal{L}$. The PDE becomes a system of ODEs:
 
-```
-du/dtau = L(u)
-```
+$$\frac{du}{d\tau} = \mathcal{L}(u)$$
 
-We need to march this forward in tau from the terminal payoff. The choice of time-stepping scheme matters a lot for stability and accuracy.
+We need to march this forward in $\tau$ from the terminal payoff. The choice of time-stepping scheme matters a lot for stability and accuracy.
 
 ### Why TR-BDF2?
 
-Explicit methods (forward Euler, RK4) require tiny time steps for stability — the CFL condition forces dt ~ dx^2 for diffusion problems, which is impractical with fine grids. Implicit methods remove this restriction but typically sacrifice either accuracy or damping properties.
+Explicit methods (forward Euler, RK4) require tiny time steps for stability — the CFL condition forces $\Delta t \sim \Delta x^2$ for diffusion problems, which is impractical with fine grids. Implicit methods remove this restriction but typically sacrifice either accuracy or damping properties.
 
 TR-BDF2 is a composite two-stage scheme that gives us everything:
 - **L-stable**: spurious high-frequency modes decay exponentially
-- **Second-order accurate**: O(dt^2) global error
-- **Unconditionally stable**: dt is limited only by accuracy, not stability
+- **Second-order accurate**: $O(\Delta t^2)$ global error
+- **Unconditionally stable**: $\Delta t$ is limited only by accuracy, not stability
 
 ### The Two-Stage Scheme
 
-Each time step from t_n to t_{n+1} proceeds in two stages:
+Each time step from $t_n$ to $t_{n+1}$ proceeds in two stages:
 
-**Stage 1 — Trapezoidal rule** (advance to t_n + gamma dt):
-```
-u_stage = u_n + gamma dt [(1/2) L(u_n) + (1/2) L(u_stage)]
-```
+**Stage 1 — Trapezoidal rule** (advance to $t_n + \gamma\,\Delta t$):
 
-**Stage 2 — BDF2** (advance to t_{n+1}):
-```
-u_{n+1} = [(1+2gamma)/(1+gamma)] u_stage
-         - [gamma^2/(1+gamma)] u_n
-         + [dt/(1+gamma)] L(u_{n+1})
-```
+$$u_\text{stage} = u_n + \gamma\,\Delta t\left[\tfrac{1}{2}\mathcal{L}(u_n) + \tfrac{1}{2}\mathcal{L}(u_\text{stage})\right]$$
 
-The parameter gamma = 2 - sqrt(2) ~ 0.5858 is chosen specifically to make the scheme L-stable.
+**Stage 2 — BDF2** (advance to $t_{n+1}$):
+
+$$u_{n+1} = \frac{1+2\gamma}{1+\gamma}\,u_\text{stage} - \frac{\gamma^2}{1+\gamma}\,u_n + \frac{\Delta t}{1+\gamma}\,\mathcal{L}(u_{n+1})$$
+
+The parameter $\gamma = 2 - \sqrt{2} \approx 0.5858$ is chosen specifically to make the scheme L-stable.
 
 ### Newton Iteration for Implicit Stages
 
-Both stages are implicit — u_stage and u_{n+1} appear on both sides of their equations. We solve each by Newton's method.
+Both stages are implicit — $u_\text{stage}$ and $u_{n+1}$ appear on both sides of their equations. We solve each by Newton's method.
 
-Rearranging Stage 1 as F(u) = 0:
+Rearranging Stage 1 as $F(u) = 0$:
 
-```
-F(u) = u - u_n - gamma dt [(1/2) L(u_n) + (1/2) L(u)]
-```
+$$F(u) = u - u_n - \gamma\,\Delta t\left[\tfrac{1}{2}\mathcal{L}(u_n) + \tfrac{1}{2}\mathcal{L}(u)\right]$$
 
 Newton's iteration:
-```
-J delta_u = -F(u^k)
-u^{k+1} = u^k + delta_u
-```
 
-where J = I - (gamma dt / 2) dL/du is the Jacobian. Since L is tridiagonal, so is J — each Newton step costs just one tridiagonal solve via the Thomas algorithm (O(n)).
+$$J\,\delta u = -F(u^k), \qquad u^{k+1} = u^k + \delta u$$
 
-Convergence is typically fast: 3-5 Newton iterations per implicit stage. The Jacobian is assembled analytically from the spatial operator coefficients, avoiding the cost of finite-difference Jacobian approximation.
+where $J = I - \frac{\gamma\,\Delta t}{2}\frac{\partial\mathcal{L}}{\partial u}$ is the Jacobian. Since $\mathcal{L}$ is tridiagonal, so is $J$ — each Newton step costs just one tridiagonal solve via the Thomas algorithm ($O(n)$).
+
+Convergence is typically fast: 3–5 Newton iterations per implicit stage. The Jacobian is assembled analytically from the spatial operator coefficients, avoiding the cost of finite-difference Jacobian approximation.
 
 ### Rannacher Startup
 
@@ -189,19 +169,19 @@ Rannacher (1984) showed that replacing the first TR-BDF2 step with backward Eule
 
 The implementation uses two half-steps of backward Euler:
 
-```
-Step 0 (Rannacher):
-  u^{1/2} = u^0 + (dt/2) L(u^{1/2})      [implicit Euler, half-step]
-  u^1     = u^{1/2} + (dt/2) L(u^1)       [implicit Euler, half-step]
+**Step 0 (Rannacher):**
 
-Steps 1 to N (standard TR-BDF2):
-  Stage 1: trapezoidal to t_n + gamma dt
-  Stage 2: BDF2 to t_{n+1}
-```
+$$u^{1/2} = u^0 + \tfrac{\Delta t}{2}\,\mathcal{L}(u^{1/2})$$
+
+$$u^1 = u^{1/2} + \tfrac{\Delta t}{2}\,\mathcal{L}(u^1)$$
+
+**Steps 1 to $N$ (standard TR-BDF2):**
+- Stage 1: trapezoidal to $t_n + \gamma\,\Delta t$
+- Stage 2: BDF2 to $t_{n+1}$
 
 Two half-steps rather than one full step preserve better accuracy while retaining the damping properties.
 
-Does this hurt the overall accuracy? Backward Euler is first-order, introducing O(dt) local error. But it applies to only one step out of N, so the global contribution is O(dt/N) = O(dt^2) — the same order as TR-BDF2. The overall second-order convergence is preserved.
+Does this hurt the overall accuracy? Backward Euler is first-order, introducing $O(\Delta t)$ local error. But it applies to only one step out of $N$, so the global contribution is $O(\Delta t / N) = O(\Delta t^2)$ — the same order as TR-BDF2. The overall second-order convergence is preserved.
 
 ---
 
@@ -213,13 +193,11 @@ European options just solve the PDE and read off the answer. American options ad
 
 At every grid point and every time step:
 
-```
-V(x, tau) >= psi(x)
-```
+$$V(x, \tau) \geq \psi(x)$$
 
-where psi(x) is the intrinsic value:
-- Call: psi(x) = max(K e^x - K, 0)
-- Put: psi(x) = max(K - K e^x, 0)
+where $\psi(x)$ is the intrinsic value:
+- Call: $\psi(x) = \max(Ke^x - K,\; 0)$
+- Put: $\psi(x) = \max(K - Ke^x,\; 0)$
 
 This turns the PDE into a **variational inequality** — a free boundary problem where the exercise boundary is part of the solution, not an input.
 
@@ -229,62 +207,54 @@ The question is: how do we enforce the obstacle constraint while solving the tri
 
 The naive approach — solve the unconstrained system, then project — breaks the tridiagonal coupling:
 
-```
-WRONG:
-  1. Solve A u = d ignoring the obstacle
-  2. Set u[i] = max(u[i], psi[i])
-  Result: A u != d at projected nodes. The solution is inconsistent.
-```
+> **WRONG:**
+> 1. Solve $Au = d$ ignoring the obstacle
+> 2. Set $u_i = \max(u_i, \psi_i)$
+>
+> Result: $Au \neq d$ at projected nodes. The solution is inconsistent.
 
 The Projected Thomas algorithm, due to Brennan & Schwartz (1977), does something more elegant. It enforces the constraint **during** backward substitution rather than after.
 
 **Forward elimination** (identical to standard Thomas):
-```
-c'[0] = c[0] / b[0]
-d'[0] = d[0] / b[0]
 
-For i = 1 to n-1:
-  denom = b[i] - a[i-1] c'[i-1]
-  c'[i] = c[i] / denom
-  d'[i] = (d[i] - a[i-1] d'[i-1]) / denom
-```
+$$c'_0 = \frac{c_0}{b_0}, \qquad d'_0 = \frac{d_0}{b_0}$$
+
+For $i = 1$ to $n-1$:
+
+$$w = b_i - a_{i-1}\,c'_{i-1}, \qquad c'_i = \frac{c_i}{w}, \qquad d'_i = \frac{d_i - a_{i-1}\,d'_{i-1}}{w}$$
 
 **Projected backward substitution** (the key difference):
-```
-u[n-1] = max(d'[n-1], psi[n-1])
 
-For i = n-2 down to 0:
-  unconstrained = d'[i] - c'[i] u[i+1]
-  u[i] = max(unconstrained, psi[i])
-```
+$$u_{n-1} = \max(d'_{n-1},\; \psi_{n-1})$$
 
-The max() at each step is the projection. Because the matrix A is an M-matrix (positive diagonal, non-positive off-diagonals — guaranteed by TR-BDF2's discretization), this projection is monotone and the algorithm converges in a **single pass**. Same O(n) cost as standard Thomas, no iteration needed.
+For $i = n-2$ down to $0$:
+
+$$u_i = \max\!\big(d'_i - c'_i\,u_{i+1},\;\; \psi_i\big)$$
+
+The $\max$ at each step is the projection. Because the matrix $A$ is an M-matrix (positive diagonal, non-positive off-diagonals — guaranteed by TR-BDF2's discretization), this projection is monotone and the algorithm converges in a **single pass**. Same $O(n)$ cost as standard Thomas, no iteration needed.
 
 ### Why This Works
 
-The insight is about information flow. In backward substitution, u[i] depends on u[i+1]. If we project u[i+1] upward (to the obstacle), this propagates correctly through the tridiagonal coupling — the constraint at one node affects its neighbors in a consistent way.
+The insight is about information flow. In backward substitution, $u_i$ depends on $u_{i+1}$. If we project $u_{i+1}$ upward (to the obstacle), this propagates correctly through the tridiagonal coupling — the constraint at one node affects its neighbors in a consistent way.
 
-For M-matrices, the off-diagonal elements are non-positive, so increasing u[i+1] can only decrease the unconstrained value at u[i]. This means the projection is monotone: once a node is clamped to the obstacle, nodes to its left see a larger u[i+1] and thus a smaller unconstrained value, making them more likely to also hit the obstacle. This is exactly the early-exercise region propagating inward from deep in-the-money.
+For M-matrices, the off-diagonal elements are non-positive, so increasing $u_{i+1}$ can only decrease the unconstrained value at $u_i$. This means the projection is monotone: once a node is clamped to the obstacle, nodes to its left see a larger $u_{i+1}$ and thus a smaller unconstrained value, making them more likely to also hit the obstacle. This is exactly the early-exercise region propagating inward from deep in-the-money.
 
 ### Deep ITM Locking
 
-One practical detail: for nodes deep in-the-money where psi is close to the maximum intrinsic value, numerical diffusion can erroneously lift the solution above intrinsic. We prevent this by converting deep ITM nodes to Dirichlet constraints:
+One practical detail: for nodes deep in-the-money where $\psi$ is close to the maximum intrinsic value, numerical diffusion can erroneously lift the solution above intrinsic. We prevent this by converting deep ITM nodes to Dirichlet constraints:
 
-```
-if psi[i] > 0.95 * max_intrinsic and u[i] ~ psi[i]:
-    lock row i to u[i] = psi[i]
-```
+$$\text{if } \psi_i > 0.95 \cdot \psi_\max \text{ and } u_i \approx \psi_i\text{: lock } u_i = \psi_i$$
 
 This ensures, for example, that a deep ITM put with intrinsic value 99.75 prices at 99.75 rather than being lifted to 115.97 by diffusion.
 
 ### The Early Exercise Boundary
 
-The free boundary S_exercise(tau) separates two regions:
+The free boundary $S^*(\tau)$ separates two regions:
 
-- **Continuation region**: V > psi (hold the option, it's worth more alive)
-- **Exercise region**: V = psi (exercise immediately)
+- **Continuation region**: $V > \psi$ (hold the option, it's worth more alive)
+- **Exercise region**: $V = \psi$ (exercise immediately)
 
-For puts, the exercise region is S < S_exercise (deep ITM). For calls, it's S > S_exercise. The Projected Thomas algorithm finds this boundary implicitly — we never compute it directly; it emerges from the constraint enforcement.
+For puts, the exercise region is $S < S^*$ (deep ITM). For calls, it's $S > S^*$. The Projected Thomas algorithm finds this boundary implicitly — we never compute it directly; it emerges from the constraint enforcement.
 
 ---
 
@@ -296,9 +266,7 @@ The grid determines both accuracy and cost. Too coarse and the solution is inacc
 
 Equally spaced points in log-moneyness:
 
-```
-x_i = x_min + i dx,    dx = (x_max - x_min) / (n-1)
-```
+$$x_i = x_\min + i\,\Delta x, \qquad \Delta x = \frac{x_\max - x_\min}{n - 1}$$
 
 Simple and useful for testing, but wasteful for option pricing: most of the interesting behavior (gamma peak, exercise boundary) is concentrated near the strike, while far OTM/ITM regions are nearly linear.
 
@@ -306,15 +274,14 @@ Simple and useful for testing, but wasteful for option pricing: most of the inte
 
 The workhorse grid for option pricing. A hyperbolic sine transformation concentrates points near a center while maintaining smooth spacing:
 
-```
-xi_i = -1 + 2i/(n-1)                       [uniform in [-1, 1]]
-x_i  = x_c + (Dx/alpha) sinh(alpha xi_i)   [sinh-spaced in x]
-```
+$$\xi_i = -1 + \frac{2i}{n-1} \qquad \text{(uniform in } [-1, 1]\text{)}$$
 
-where x_c is the center (typically 0 = ATM), Dx is the half-width, and alpha controls the concentration. With alpha = 2:
+$$x_i = x_c + \frac{\Delta x}{\alpha}\sinh(\alpha\,\xi_i) \qquad \text{(sinh-spaced in } x\text{)}$$
 
-- Spacing near center: dx_min ~ (Dx/n) exp(-alpha) — about 7x finer than uniform
-- Spacing at boundaries: dx_max ~ (Dx/n) exp(alpha) — about 7x coarser than uniform
+where $x_c$ is the center (typically $0$ = ATM), $\Delta x$ is the half-width, and $\alpha$ controls the concentration. With $\alpha = 2$:
+
+- Spacing near center: $\Delta x_\min \sim (\Delta x / n)\,e^{-\alpha}$ — about 7× finer than uniform
+- Spacing at boundaries: $\Delta x_\max \sim (\Delta x / n)\,e^{\alpha}$ — about 7× coarser than uniform
 
 This puts resolution where it matters (near the strike) and saves points where it doesn't (far tails). The spacing varies smoothly and monotonically, so the non-uniform finite difference weights remain well-conditioned.
 
@@ -322,62 +289,53 @@ This puts resolution where it matters (near the strike) and saves points where i
 
 When pricing across multiple strikes (e.g., for price tables), a single concentration center is insufficient. Multi-sinh grids superpose several sinh transformations:
 
-```
-x_i = sum_k w_k sinh_k(xi_i)     [normalized weights]
-```
+$$x_i = \sum_k w_k\,\text{sinh}_k(\xi_i) \qquad \text{(normalized weights)}$$
 
-Each cluster specifies a center, alpha, and weight. Clusters closer than 0.3/alpha_avg are automatically merged to avoid wasted resolution. Use this when strikes differ by more than ~20%.
+Each cluster specifies a center, $\alpha$, and weight. Clusters closer than $0.3/\bar{\alpha}$ are automatically merged to avoid wasted resolution. Use this when strikes differ by more than ~20%.
 
 ### Automatic PDE Grid Estimation
 
 `estimate_pde_grid()` builds a sinh grid tailored to a specific option. The logic:
 
-**Domain bounds.** Extend +/- n_sigma standard deviations from the current log-moneyness:
+**Domain bounds.** Extend $\pm n_\sigma$ standard deviations from the current log-moneyness:
 
-```
-x_min = ln(S/K) - n_sigma sigma sqrt(T)
-x_max = ln(S/K) + n_sigma sigma sqrt(T)
-```
+$$x_\min = \ln(S/K) - n_\sigma\,\sigma\sqrt{T}, \qquad x_\max = \ln(S/K) + n_\sigma\,\sigma\sqrt{T}$$
 
-With n_sigma = 5 (default), this covers >99.99997% of the terminal distribution. The width scales with sigma sqrt(T) — higher volatility or longer maturity automatically produces a wider domain.
+With $n_\sigma = 5$ (default), this covers >99.99997% of the terminal distribution. The width scales with $\sigma\sqrt{T}$ — higher volatility or longer maturity automatically produces a wider domain.
 
-**Spatial resolution.** The centered difference truncation error is O(dx^2). To achieve a target error proportional to tol:
+**Spatial resolution.** The centered difference truncation error is $O(\Delta x^2)$. To achieve a target error proportional to $\varepsilon$:
 
-```
-dx_target = sigma sqrt(tol)
-N_x = ceil((x_max - x_min) / dx_target)
-```
+$$\Delta x_\text{target} = \sigma\sqrt{\varepsilon}, \qquad N_x = \left\lceil\frac{x_\max - x_\min}{\Delta x_\text{target}}\right\rceil$$
 
-Scaling dx with sigma keeps N_x stable across volatilities: higher sigma widens the domain but proportionally coarsens the target spacing. The sqrt(tol) relationship means 10x better accuracy costs ~3.2x more points. N_x is clamped to [100, 1200].
+Scaling $\Delta x$ with $\sigma$ keeps $N_x$ stable across volatilities: higher $\sigma$ widens the domain but proportionally coarsens the target spacing. The $\sqrt{\varepsilon}$ relationship means 10× better accuracy costs ~3.2× more points. $N_x$ is clamped to $[100, 1200]$.
 
-**Temporal resolution.** TR-BDF2 is unconditionally stable, so there is no CFL constraint. But second-order accuracy requires dt ~ O(dx_min). The time step couples to the finest spatial spacing:
+**Temporal resolution.** TR-BDF2 is unconditionally stable, so there is no CFL constraint. But second-order accuracy requires $\Delta t \sim O(\Delta x_\min)$. The time step couples to the finest spatial spacing:
 
-```
-dt = c_t dx_min,    where dx_min ~ dx_avg exp(-alpha)
-N_t = ceil(T / dt)
-```
+$$\Delta t = c_t\,\Delta x_\min, \qquad \text{where } \Delta x_\min \sim \Delta x_\text{avg}\,e^{-\alpha}$$
 
-With c_t = 0.75 and alpha = 2.0, this ensures temporal error doesn't dominate spatial error in the clustered region where gradients are steepest.
+$$N_t = \left\lceil T / \Delta t \right\rceil$$
+
+With $c_t = 0.75$ and $\alpha = 2.0$, this ensures temporal error doesn't dominate spatial error in the clustered region where gradients are steepest.
 
 **Default parameters:**
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| n_sigma | 5.0 | Domain half-width in sigma sqrt(T) units |
-| alpha | 2.0 | Sinh clustering strength (~7x center-to-edge ratio) |
-| tol | 1e-2 | Spatial truncation error target |
-| c_t | 0.75 | Time-space coupling factor |
-| min_spatial_points | 100 | Lower bound on N_x |
-| max_spatial_points | 1200 | Upper bound on N_x |
-| max_time_steps | 5000 | Upper bound on N_t |
+| $n_\sigma$ | 5.0 | Domain half-width in $\sigma\sqrt{T}$ units |
+| $\alpha$ | 2.0 | Sinh clustering strength (~7× center-to-edge ratio) |
+| $\varepsilon$ | $10^{-2}$ | Spatial truncation error target |
+| $c_t$ | 0.75 | Time-space coupling factor |
+| min_spatial_points | 100 | Lower bound on $N_x$ |
+| max_spatial_points | 1200 | Upper bound on $N_x$ |
+| max_time_steps | 5000 | Upper bound on $N_t$ |
 
-For a short-dated SPY option (sigma ~ 0.15, T ~ 0.09), the defaults produce a 101 x 150 grid.
+For a short-dated SPY option ($\sigma \approx 0.15$, $T \approx 0.09$), the defaults produce a $101 \times 150$ grid.
 
 ---
 
 # Part II — Price Tables & Interpolation
 
-Part I gave us a PDE solver that prices one option in ~1-2ms. For implied volatility — which requires pricing the option repeatedly at different volatilities until the price matches the market — this is too slow. A single IV solve takes ~15ms (5-8 Brent iterations x 2ms each), and a trading desk needs thousands of IVs per second.
+Part I gave us a PDE solver that prices one option in ~1–2ms. For implied volatility — which requires pricing the option repeatedly at different volatilities until the price matches the market — this is too slow. A single IV solve takes ~15ms (5–8 Brent iterations × 2ms each), and a trading desk needs thousands of IVs per second.
 
 The solution: pre-compute prices across a 4D parameter grid (moneyness, maturity, volatility, rate), fit a B-spline surface, and evaluate the surface at ~500ns per query. This section covers the interpolation machinery, grid estimation, and IV extraction.
 
@@ -388,43 +346,37 @@ The solution: pre-compute prices across a 4D parameter grid (moneyness, maturity
 ### Why B-Splines?
 
 We need a smooth interpolant over a 4D grid of pre-computed prices. Requirements:
-- C^2 continuity (smooth Greeks via differentiation)
+- $C^2$ continuity (smooth Greeks via differentiation)
 - Local support (changing one region doesn't affect distant regions)
 - Fast evaluation (~hundreds of nanoseconds)
 
-Cubic B-splines satisfy all three. They provide C^2 continuity, each basis function is non-zero on only 4 adjacent intervals, and evaluation requires only local data.
+Cubic B-splines satisfy all three. They provide $C^2$ continuity, each basis function is non-zero on only 4 adjacent intervals, and evaluation requires only local data.
 
 ### Cubic B-Spline Basis
 
 The B-spline basis functions are defined recursively (Cox-de Boor):
 
-```
-N_{i,0}(x) = 1 if x in [t_i, t_{i+1}),  else 0
-N_{i,k}(x) = [(x - t_i)/(t_{i+k} - t_i)] N_{i,k-1}(x)
-            + [(t_{i+k+1} - x)/(t_{i+k+1} - t_{i+1})] N_{i+1,k-1}(x)
-```
+$$N_{i,0}(x) = \begin{cases} 1 & \text{if } x \in [t_i, t_{i+1}) \\ 0 & \text{otherwise} \end{cases}$$
+
+$$N_{i,k}(x) = \frac{x - t_i}{t_{i+k} - t_i}\,N_{i,k-1}(x) + \frac{t_{i+k+1} - x}{t_{i+k+1} - t_{i+1}}\,N_{i+1,k-1}(x)$$
 
 Key properties:
 - **Compact support**: each cubic basis function spans 4 intervals
-- **Partition of unity**: sum_i N_i(x) = 1 everywhere
-- **C^2 continuity**: two continuous derivatives (sufficient for delta, gamma, vega)
+- **Partition of unity**: $\sum_i N_i(x) = 1$ everywhere
+- **$C^2$ continuity**: two continuous derivatives (sufficient for delta, gamma, vega)
 - **Local control**: modifying one coefficient affects only 4 intervals
 
 ### Clamped Knot Vectors
 
-For n data points x_0 ... x_{n-1}, the clamped knot vector repeats the endpoints with multiplicity p+1 = 4:
+For $n$ data points $x_0, \ldots, x_{n-1}$, the clamped knot vector repeats the endpoints with multiplicity $p+1 = 4$:
 
-```
-t = [x_0, x_0, x_0, x_0,  t_1, ..., t_m,  x_{n-1}, x_{n-1}, x_{n-1}, x_{n-1}]
-```
+$$\mathbf{t} = [\underbrace{x_0, x_0, x_0, x_0}_{p+1},\; t_1, \ldots, t_m,\; \underbrace{x_{n-1}, x_{n-1}, x_{n-1}, x_{n-1}}_{p+1}]$$
 
 This forces the B-spline to interpolate exactly at the endpoints — essential for price tables where boundary values must be exact.
 
 Interior knots are placed proportionally between data sites, with epsilon clamping to avoid coinciding with data sites (which would make the collocation matrix singular):
 
-```
-knot = clamp(proportional_position, x[low] + eps, x[low+1] - eps)
-```
+$$t_j = \text{clamp}(t_j^\text{proportional},\; x_\text{low} + \epsilon,\; x_{\text{low}+1} - \epsilon)$$
 
 This satisfies the Schoenberg-Whitney condition, guaranteeing a non-singular collocation system.
 
@@ -432,30 +384,28 @@ This satisfies the Schoenberg-Whitney condition, guaranteeing a non-singular col
 
 The price table uses tensor-product B-splines:
 
-```
-P(m, tau, sigma, r) = sum_{i,j,k,l} c_{ijkl} N_i(m) N_j(tau) N_k(sigma) N_l(r)
-```
+$$P(m, \tau, \sigma, r) = \sum_{i,j,k,l} c_{ijkl}\,N_i(m)\,N_j(\tau)\,N_k(\sigma)\,N_l(r)$$
 
-Fitting all 4 dimensions simultaneously would require solving a dense (n_m n_tau n_sigma n_r)^2 system — completely impractical for a 50x30x20x10 grid (300K unknowns).
+Fitting all 4 dimensions simultaneously would require solving a dense $(n_m \cdot n_\tau \cdot n_\sigma \cdot n_r)^2$ system — completely impractical for a $50 \times 30 \times 20 \times 10$ grid (300K unknowns).
 
 The separable algorithm exploits the tensor-product structure with 4 sequential 1D fits:
 
-1. Fix (tau, sigma, r), fit moneyness for each slice -> c_{*,j,k,l}
-2. Fix (sigma, r), fit maturity on the coefficients from step 1 -> c_{*,*,k,l}
-3. Fix r, fit volatility -> c_{*,*,*,l}
-4. Fit rate -> c_{*,*,*,*}
+1. Fix $(\tau, \sigma, r)$, fit moneyness for each slice → $c_{*,j,k,l}$
+2. Fix $(\sigma, r)$, fit maturity on the coefficients from step 1 → $c_{*,*,k,l}$
+3. Fix $r$, fit volatility → $c_{*,*,*,l}$
+4. Fit rate → $c_{*,*,*,*}$
 
-Each 1D fit solves a banded collocation system. Cubic splines produce a 4-diagonal matrix, solved in O(n) via banded LU. The total cost is O(n_m n_tau n_sigma n_r) — linear in the grid size.
+Each 1D fit solves a banded collocation system. Cubic splines produce a 4-diagonal matrix, solved in $O(n)$ via banded LU. The total cost is $O(n_m \cdot n_\tau \cdot n_\sigma \cdot n_r)$ — linear in the grid size.
 
 ### Greeks via Differentiation
 
-A major benefit of B-splines: derivatives are analytic. To compute delta (dP/dm), differentiate the basis functions in m while leaving the others untouched:
+A major benefit of B-splines: derivatives are analytic. To compute delta ($\partial P / \partial m$), differentiate the basis functions in $m$ while leaving the others untouched:
 
-```
-dP/dm     = sum c_{ijkl} N_i'(m) N_j(tau) N_k(sigma) N_l(r)      [delta]
-dP/dsigma = sum c_{ijkl} N_i(m)  N_j(tau) N_k'(sigma) N_l(r)     [vega]
-d^2P/dm^2 = sum c_{ijkl} N_i''(m) N_j(tau) N_k(sigma) N_l(r)     [gamma]
-```
+$$\Delta = \frac{\partial P}{\partial m} = \sum c_{ijkl}\,N_i'(m)\,N_j(\tau)\,N_k(\sigma)\,N_l(r)$$
+
+$$\nu = \frac{\partial P}{\partial \sigma} = \sum c_{ijkl}\,N_i(m)\,N_j(\tau)\,N_k'(\sigma)\,N_l(r)$$
+
+$$\Gamma = \frac{\partial^2 P}{\partial m^2} = \sum c_{ijkl}\,N_i''(m)\,N_j(\tau)\,N_k(\sigma)\,N_l(r)$$
 
 Each derivative costs the same as a price evaluation (~500ns) because we evaluate one differentiated 1D basis and three undifferentiated ones.
 
@@ -469,70 +419,60 @@ The price table does not store raw American option prices. Instead, it stores th
 
 Any American option price can be written as:
 
-```
-P_Am(S, K, τ, σ, r) = EEP(m, τ, σ, r) · (K / K_ref) + P_Eu(S, K, τ, σ, r, q)
-```
+$$P_\text{Am}(S, K, \tau, \sigma, r) = \text{EEP}(m, \tau, \sigma, r) \cdot \frac{K}{K_\text{ref}} + P_\text{Eu}(S, K, \tau, \sigma, r, q)$$
 
-where m = S/K is moneyness, K_ref is a fixed reference strike, and q is the continuous dividend yield.
+where $m = S/K$ is moneyness, $K_\text{ref}$ is a fixed reference strike, and $q$ is the continuous dividend yield.
 
 This decomposition has three advantages:
 
-1. **Smoothness.** The EEP varies slowly across parameter space — it lacks the sharp kink at S = K that the full price inherits from the payoff. Smoother functions interpolate better.
+1. **Smoothness.** The EEP varies slowly across parameter space — it lacks the sharp kink at $S = K$ that the full price inherits from the payoff. Smoother functions interpolate better.
 
-2. **Strike homogeneity.** The EEP depends on strike only through moneyness m = S/K, so one 4D surface covers all strikes. The factor K/K_ref rescales back to absolute dollar terms.
+2. **Strike homogeneity.** The EEP depends on strike only through moneyness $m = S/K$, so one 4D surface covers all strikes. The factor $K/K_\text{ref}$ rescales back to absolute dollar terms.
 
-3. **European exactness.** The European component P_Eu is computed analytically (Black-Scholes), so interpolation error affects only the EEP — typically a small fraction of the total price.
+3. **European exactness.** The European component $P_\text{Eu}$ is computed analytically (Black-Scholes), so interpolation error affects only the EEP — typically a small fraction of the total price.
 
 ### Log-Moneyness Transform
 
-Internally, the B-spline interpolates in log-moneyness x = ln(m) rather than m. This provides symmetric resolution around ATM (where x = 0) and reduces interpolation error by 20–40% in the tails.
+Internally, the B-spline interpolates in log-moneyness $x = \ln(m)$ rather than $m$. This provides symmetric resolution around ATM (where $x = 0$) and reduces interpolation error by 20–40% in the tails.
 
-All user-facing APIs accept moneyness m; the transform is applied internally.
+All user-facing APIs accept moneyness $m$; the transform is applied internally.
 
 ### Greeks via Chain Rule
 
-Because the price is reconstructed from an interpolated EEP and an analytic European component, each Greek requires a chain rule through the decomposition. Let E(m, τ, σ, r) denote the EEP B-spline and g(x) = E(e^x, τ, σ, r) the EEP in log-moneyness.
+Because the price is reconstructed from an interpolated EEP and an analytic European component, each Greek requires a chain rule through the decomposition. Let $E(m, \tau, \sigma, r)$ denote the EEP B-spline and $g(x) = E(e^x, \tau, \sigma, r)$ the EEP in log-moneyness.
 
-**Delta** (∂P/∂S):
+**Delta** ($\partial P / \partial S$):
 
-```
-Δ = (1/K_ref) · ∂E/∂m + Δ_Eu
-```
+$$\Delta = \frac{1}{K_\text{ref}} \cdot \frac{\partial E}{\partial m} + \Delta_\text{Eu}$$
 
-where ∂E/∂m = g'(x)/m (chain rule from log-moneyness).
+where $\partial E / \partial m = g'(x) / m$ (chain rule from log-moneyness).
 
-**Gamma** (∂²P/∂S²):
+**Gamma** ($\partial^2 P / \partial S^2$):
 
-```
-γ = 1/(K_ref · K) · ∂²E/∂m² + γ_Eu
-```
+$$\Gamma = \frac{1}{K_\text{ref} \cdot K} \cdot \frac{\partial^2 E}{\partial m^2} + \Gamma_\text{Eu}$$
 
-where ∂²E/∂m² = (g''(x) − g'(x)) / m². Both g' and g'' are analytic B-spline derivatives (first and second order), so gamma avoids finite differencing entirely.
+where $\partial^2 E / \partial m^2 = (g''(x) - g'(x)) / m^2$. Both $g'$ and $g''$ are analytic B-spline derivatives (first and second order), so gamma avoids finite differencing entirely.
 
-**Theta** (∂P/∂t, calendar time):
+**Theta** ($\partial P / \partial t$, calendar time):
 
-```
-Θ = −(K/K_ref) · ∂E/∂τ + Θ_Eu
-```
+$$\Theta = -\frac{K}{K_\text{ref}} \cdot \frac{\partial E}{\partial \tau} + \Theta_\text{Eu}$$
 
-The sign flip converts from time-to-expiry τ to calendar time t. Both the EEP and European theta use the same convention (dV/dt, negative for time decay).
+The sign flip converts from time-to-expiry $\tau$ to calendar time $t$. Both the EEP and European theta use the same convention ($dV/dt$, negative for time decay).
 
-**Vega** (∂P/∂σ):
+**Vega** ($\partial P / \partial \sigma$):
 
-```
-ν = (K/K_ref) · ∂E/∂σ + ν_Eu
-```
+$$\nu = \frac{K}{K_\text{ref}} \cdot \frac{\partial E}{\partial \sigma} + \nu_\text{Eu}$$
 
 ### Measured Accuracy
 
-Interpolated Greeks vs. PDE solver reference across 20 (strike × maturity) combinations (S = 100, σ = 0.20, r = 0.05, q = 0.02):
+Interpolated Greeks vs. PDE solver reference across 20 (strike × maturity) combinations ($S = 100$, $\sigma = 0.20$, $r = 0.05$, $q = 0.02$):
 
 | Greek | Max Abs Error | Max Rel Error | Notes |
 |-------|---------------|---------------|-------|
-| Price | $0.086 | 1.9% | |
+| Price | \$0.086 | 1.9% | |
 | Delta | 0.0087 | 2.8% | |
-| Gamma | 0.0024 | 7.3% | Worst at short τ; < 1.3% for τ ≥ 0.5 |
-| Theta | $0.15 | 3.3% | |
+| Gamma | 0.0024 | 7.3% | Worst at short $\tau$; < 1.3% for $\tau \geq 0.5$ |
+| Theta | \$0.15 | 3.3% | |
 
 When accuracy is critical, use the PDE solver directly (`AmericanOptionSolver`).
 
@@ -544,28 +484,26 @@ The 4D grid density directly controls IV accuracy. Too coarse and the B-spline i
 
 ### Curvature-Based Budget Allocation
 
-The cubic B-spline interpolation error is O(h^4 f''''(x)), where h is the grid spacing and f'''' is the fourth derivative. Dimensions with higher curvature need finer grids.
+The cubic B-spline interpolation error is $O(h^4\,f^{(4)}(x))$, where $h$ is the grid spacing and $f^{(4)}$ is the fourth derivative. Dimensions with higher curvature need finer grids.
 
 Each dimension receives points proportional to its curvature weight:
 
 | Dimension | Weight | Rationale |
 |-----------|--------|-----------|
-| Volatility (sigma) | 1.5 | Highest curvature — vega non-linearity |
-| Moneyness (m) | 1.0 | Moderate — log-transform handles ATM peak |
-| Maturity (tau) | 1.0 | Baseline — sqrt(tau) behavior |
-| Rate (r) | 0.6 | Lowest — nearly linear discounting |
+| Volatility ($\sigma$) | 1.5 | Highest curvature — vega non-linearity |
+| Moneyness ($m$) | 1.0 | Moderate — log-transform handles ATM peak |
+| Maturity ($\tau$) | 1.0 | Baseline — $\sqrt{\tau}$ behavior |
+| Rate ($r$) | 0.6 | Lowest — nearly linear discounting |
 
 The formula:
-```
-base_points = (scale_factor / target_error)^{1/4}
-n_dim = clamp(base_points x weight_dim, 4, 50)
-```
 
-where scale_factor ~ 2.0 (calibrated empirically) and target_error is the desired IV accuracy (e.g., 0.001 for 10 bps).
+$$n_\text{base} = \left(\frac{s}{\varepsilon_\text{target}}\right)^{1/4}, \qquad n_\text{dim} = \text{clamp}(n_\text{base} \cdot w_\text{dim},\; 4,\; 50)$$
+
+where $s \approx 2.0$ (calibrated empirically) and $\varepsilon_\text{target}$ is the desired IV accuracy (e.g., 0.001 for 10 bps).
 
 Grid spacing strategies vary by dimension:
 - **Moneyness**: log-uniform (matches the log-price coordinate)
-- **Maturity**: sqrt(tau)-uniform (concentrates near short expiries where theta is steepest)
+- **Maturity**: $\sqrt{\tau}$-uniform (concentrates near short expiries where theta is steepest)
 - **Volatility**: uniform (highest curvature needs regular spacing)
 - **Rate**: uniform (nearly linear response)
 
@@ -573,30 +511,23 @@ Grid spacing strategies vary by dimension:
 
 When the initial estimate isn't accurate enough, iterative refinement improves it:
 
-```
 1. Build initial grid from curvature-based estimate
-2. Sample N validation points via Latin Hypercube
+2. Sample $N$ validation points via Latin Hypercube
 3. For each sample:
-   a. Evaluate price from B-spline surface
-   b. Solve a fresh PDE for the reference price
-   c. Compute IV error
-4. If max(error) <= target: done
+   - Evaluate price from B-spline surface
+   - Solve a fresh PDE for the reference price
+   - Compute IV error
+4. If $\max(\text{error}) \leq \varepsilon_\text{target}$: done
 5. Else: refine the dimension with highest error attribution
-6. Repeat until target met or max_iterations reached
-```
+6. Repeat until target met or max iterations reached
 
-The key detail is step 3b: validation uses fresh PDE solves, not the spline itself. This prevents the refinement from chasing its own tail.
+The key detail is step 3: validation uses fresh PDE solves, not the spline itself. This prevents the refinement from chasing its own tail.
 
-**Error attribution** identifies which dimension to refine by computing partial derivative sensitivity — the dimension contributing the most error gets more points. The refinement factor is ~1.3x (geometric growth), and convergence typically takes 2-3 iterations for a 5 bps target.
+**Error attribution** identifies which dimension to refine by computing partial derivative sensitivity — the dimension contributing the most error gets more points. The refinement factor is ~1.3× (geometric growth), and convergence typically takes 2–3 iterations for a 5 bps target.
 
 **Low-vega handling.** Deep ITM/OTM options have near-zero vega, making IV error numerically unstable. The error metric switches to price-scaled error in these regions:
 
-```
-if vega > vega_floor:
-    error = |IV_interpolated - IV_reference|
-else:
-    error = |price_interpolated - price_reference| / vega_floor
-```
+$$\text{error} = \begin{cases} |\sigma_\text{interp} - \sigma_\text{ref}| & \text{if } \nu > \nu_\text{floor} \\ |P_\text{interp} - P_\text{ref}| / \nu_\text{floor} & \text{otherwise} \end{cases}$$
 
 ---
 
@@ -610,42 +541,38 @@ The library provides two approaches with very different speed/accuracy tradeoffs
 
 The direct approach: use the PDE solver as a black box and find the root of
 
-```
-f(sigma) = V_model(sigma) - V_market = 0
-```
+$$f(\sigma) = V_\text{model}(\sigma) - V_\text{market} = 0$$
 
-We use Brent's method, which combines bisection, secant, and inverse quadratic interpolation. It requires a bracketing interval [sigma_lo, sigma_hi] where f changes sign, then iterates:
+We use Brent's method, which combines bisection, secant, and inverse quadratic interpolation. It requires a bracketing interval $[\sigma_\text{lo}, \sigma_\text{hi}]$ where $f$ changes sign, then iterates:
 
 1. Choose interpolation step (secant or inverse quadratic) if it's safe
 2. Fall back to bisection if interpolation fails or the bracket is too wide
-3. Stop when |f(sigma)| < tolerance or the bracket is smaller than epsilon
+3. Stop when $|f(\sigma)| < \varepsilon$ or the bracket is smaller than machine epsilon
 
 **Properties:**
 - Guaranteed convergence (as long as the root is bracketed)
 - Superlinear convergence rate (~1.6)
-- No derivatives required (important — dV/dsigma from the PDE is expensive)
-- Typically 5-8 iterations for sigma in [0.01, 3.0]
+- No derivatives required (important — $\partial V / \partial \sigma$ from the PDE is expensive)
+- Typically 5–8 iterations for $\sigma \in [0.01, 3.0]$
 
 Each iteration calls the PDE solver (~2ms), so a single IV solve costs ~15ms. Accurate but too slow for production use with thousands of queries.
 
 ### Interpolated IV (Newton on B-Spline Surface)
 
-The fast approach: pre-compute a 4D price table (Part II, sections 6-7), then solve for IV using Newton's method on the B-spline surface.
+The fast approach: pre-compute a 4D price table (Part II, sections 6–7), then solve for IV using Newton's method on the B-spline surface.
 
-```
-sigma_{k+1} = sigma_k - [P(m, tau, sigma_k, r) - V_market] / [dP/dsigma(m, tau, sigma_k, r)]
-```
+$$\sigma_{k+1} = \sigma_k - \frac{P(m, \tau, \sigma_k, r) - V_\text{market}}{\partial P / \partial\sigma\,(m, \tau, \sigma_k, r)}$$
 
-The key advantage: both P and dP/dsigma come from B-spline evaluation (~500ns each), not PDE solves. Newton's method converges quadratically (error squares each iteration), typically in 3-4 iterations.
+The key advantage: both $P$ and $\partial P / \partial\sigma$ come from B-spline evaluation (~500ns each), not PDE solves. Newton's method converges quadratically (error squares each iteration), typically in 3–4 iterations.
 
 **Performance comparison:**
 
 | Method | Time per IV | Use case |
 |--------|------------|----------|
 | FDM (Brent) | ~15ms | Ground truth, validation, few queries |
-| Interpolated (Newton) | ~3.5us | Production, many queries |
+| Interpolated (Newton) | ~3.5μs | Production, many queries |
 
-The interpolated solver is ~5,000x faster, at the cost of pre-computation time and interpolation error (typically 10-60 bps depending on grid profile).
+The interpolated solver is ~5,000× faster, at the cost of pre-computation time and interpolation error (typically 10–60 bps depending on grid profile).
 
 ---
 
@@ -657,33 +584,31 @@ The interpolated solver is ~5,000x faster, at the cost of pre-computation time a
 
 The total pricing error has three independent contributions:
 
-```
-error_total ~ C_x dx^2 + C_t dt^2 + C_obstacle
-```
+$$\varepsilon_\text{total} \sim C_x\,\Delta x^2 + C_t\,\Delta t^2 + \varepsilon_\text{obstacle}$$
 
-- **Spatial**: O(dx^2) from centered differences
-- **Temporal**: O(dt^2) from TR-BDF2
+- **Spatial**: $O(\Delta x^2)$ from centered differences
+- **Temporal**: $O(\Delta t^2)$ from TR-BDF2
 - **Obstacle**: the projection is non-expansive (doesn't amplify errors) and the free boundary is Lipschitz continuous (Kinderlehrer-Stampacchia)
 
-The grid estimation strategy (section 5) balances these by coupling dt to dx_min, ensuring neither dominates.
+The grid estimation strategy (section 5) balances these by coupling $\Delta t$ to $\Delta x_\min$, ensuring neither dominates.
 
 ### Grid Independence
 
 To verify convergence, refine the grid until results stabilize:
 
-1. Solve on coarse grid (n = 100, dt = 1e-3)
-2. Refine spatially (n = 200, dt = 1e-3)
-3. Refine temporally (n = 200, dt = 5e-4)
-4. Check |V_refined - V_coarse| < tolerance
+1. Solve on coarse grid ($n = 100$, $\Delta t = 10^{-3}$)
+2. Refine spatially ($n = 200$, $\Delta t = 10^{-3}$)
+3. Refine temporally ($n = 200$, $\Delta t = 5 \times 10^{-4}$)
+4. Check $|V_\text{refined} - V_\text{coarse}| < \varepsilon$
 
 Typical behavior:
-- ATM options: 1e-3 price error at n = 141, dt = 1e-3
+- ATM options: $10^{-3}$ price error at $n = 141$, $\Delta t = 10^{-3}$
 - Deep ITM/OTM: require finer grids (steep exercise boundaries)
-- Greeks: need 2-3x finer grids than prices (higher-order quantities are more sensitive)
+- Greeks: need 2–3× finer grids than prices (higher-order quantities are more sensitive)
 
 ### Interpolation Error (Price Tables)
 
-For the B-spline price tables, the additional interpolation error is O(h^4) per dimension. The separable fitting preserves this order. In practice, the dominant error source is the volatility dimension (highest curvature), which is why it receives 1.5x weight in the grid budget.
+For the B-spline price tables, the additional interpolation error is $O(h^4)$ per dimension. The separable fitting preserves this order. In practice, the dominant error source is the volatility dimension (highest curvature), which is why it receives 1.5× weight in the grid budget.
 
 Adaptive refinement (section 7) provides a verified error bound by testing against fresh PDE solves at random parameter combinations.
 
