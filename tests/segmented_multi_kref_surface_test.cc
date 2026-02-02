@@ -192,3 +192,49 @@ TEST(SegmentedMultiKRefSurfaceTest, VegaSmoothnessAtKRefBoundary) {
         EXPECT_TRUE(std::isfinite(deriv_right));
     }
 }
+
+TEST(SegmentedMultiKRefSurfaceTest, C1SmoothnessAtEdgeIntervals) {
+    // Asymmetric spacing makes edge clamping visible
+    std::vector<SegmentedMultiKRefSurface::Entry> entries;
+    for (double K : {70.0, 80.0, 100.0, 115.0, 140.0}) {
+        entries.push_back({K, build_surface(K)});
+    }
+
+    auto surface = SegmentedMultiKRefSurface::create(std::move(entries));
+    ASSERT_TRUE(surface.has_value());
+
+    constexpr double spot = 100.0, tau = 0.5, sigma = 0.20, rate = 0.05;
+    constexpr double h = 0.5;
+
+    // Check smoothness near edge K_refs
+    for (double K : {80.0, 115.0}) {
+        double p_m2 = surface->price(spot, K - 2*h, tau, sigma, rate);
+        double p_m1 = surface->price(spot, K - h, tau, sigma, rate);
+        double p_p1 = surface->price(spot, K + h, tau, sigma, rate);
+        double p_p2 = surface->price(spot, K + 2*h, tau, sigma, rate);
+
+        double deriv_left  = (p_m1 - p_m2) / h;
+        double deriv_right = (p_p2 - p_p1) / h;
+
+        double avg_deriv = 0.5 * (std::abs(deriv_left) + std::abs(deriv_right));
+        if (avg_deriv > 1e-10) {
+            double rel_diff = std::abs(deriv_left - deriv_right) / avg_deriv;
+            EXPECT_LT(rel_diff, 0.30)
+                << "Edge derivative discontinuity at K=" << K
+                << ": left=" << deriv_left << " right=" << deriv_right;
+        }
+    }
+
+    // Same for vega — just check finiteness (surface disagreement can cause sign changes)
+    for (double K : {80.0, 115.0}) {
+        double v_m2 = surface->vega(spot, K - 2*h, tau, sigma, rate);
+        double v_m1 = surface->vega(spot, K - h, tau, sigma, rate);
+        double v_p1 = surface->vega(spot, K + h, tau, sigma, rate);
+        double v_p2 = surface->vega(spot, K + 2*h, tau, sigma, rate);
+
+        EXPECT_TRUE(std::isfinite(v_m2));
+        EXPECT_TRUE(std::isfinite(v_m1));
+        EXPECT_TRUE(std::isfinite(v_p1));
+        EXPECT_TRUE(std::isfinite(v_p2));
+    }
+}

@@ -221,27 +221,39 @@ static double interp_across_krefs(
     }
 
     // Select 4 entries centered on the bracket [lo_idx, lo_idx+1]
-    // Clamp so indices stay in [0, n-1]
     size_t i1 = lo_idx;
-    size_t i0 = (i1 > 0) ? i1 - 1 : 0;
     size_t i2 = lo_idx + 1;
-    size_t i3 = (i2 + 1 < n) ? i2 + 1 : n - 1;
 
-    // If clamped, duplicate the edge point (degrades to quadratic at boundaries)
-    std::array<double, 4> x = {
-        std::log(entries[i0].K_ref),
-        std::log(entries[i1].K_ref),
-        std::log(entries[i2].K_ref),
-        std::log(entries[i3].K_ref),
-    };
-    std::array<double, 4> y = {
-        eval_fn(i0) / entries[i0].K_ref,
-        eval_fn(i1) / entries[i1].K_ref,
-        eval_fn(i2) / entries[i2].K_ref,
-        eval_fn(i3) / entries[i3].K_ref,
-    };
+    // Use virtual points at edges (linear extrapolation) instead of clamping
+    std::array<double, 4> x, y;
+    x[1] = std::log(entries[i1].K_ref);
+    x[2] = std::log(entries[i2].K_ref);
+    y[1] = eval_fn(i1) / entries[i1].K_ref;
+    y[2] = eval_fn(i2) / entries[i2].K_ref;
 
-    return catmull_rom(x, y, log_strike) * strike;
+    if (i1 > 0) {
+        size_t i0 = i1 - 1;
+        x[0] = std::log(entries[i0].K_ref);
+        y[0] = eval_fn(i0) / entries[i0].K_ref;
+    } else {
+        // Virtual left point: linear extrapolation from [i1, i2]
+        x[0] = 2.0 * x[1] - x[2];
+        y[0] = 2.0 * y[1] - y[2];
+    }
+
+    if (i2 + 1 < n) {
+        size_t i3 = i2 + 1;
+        x[3] = std::log(entries[i3].K_ref);
+        y[3] = eval_fn(i3) / entries[i3].K_ref;
+    } else {
+        // Virtual right point: linear extrapolation from [i1, i2]
+        x[3] = 2.0 * x[2] - x[1];
+        y[3] = 2.0 * y[2] - y[1];
+    }
+
+    // Clamp result to non-negative (Catmull-Rom can overshoot at edges)
+    double result = catmull_rom(x, y, log_strike);
+    return std::max(result, 0.0) * strike;
 }
 
 double SegmentedMultiKRefSurface::price(double spot, double strike,
