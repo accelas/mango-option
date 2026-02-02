@@ -100,27 +100,27 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
         using G = std::decay_t<decltype(grid)>;
         if constexpr (std::is_same_v<G, AdaptiveGrid>) {
             return build_standard_adaptive(config, path, grid);
-        } else {
-            // Manual grid: build price table directly
-            auto setup = PriceTableBuilder<4>::from_vectors(
-                grid.moneyness, path.maturity_grid, grid.vol, grid.rate,
-                config.spot, GridAccuracyParams{}, config.option_type,
-                config.dividend_yield);
-            if (!setup.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidGridSize, 0.0});
-            }
-
-            auto& [builder, axes] = *setup;
-            auto table_result = builder.build(axes);
-            if (!table_result.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidGridSize, 0.0});
-            }
-
-            return wrap_surface(table_result->surface, config.option_type,
-                                config.solver_config);
         }
+
+        // Manual grid: build price table directly
+        auto setup = PriceTableBuilder<4>::from_vectors(
+            grid.moneyness, path.maturity_grid, grid.vol, grid.rate,
+            config.spot, GridAccuracyParams{}, config.option_type,
+            config.dividend_yield);
+        if (!setup.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        auto& [builder, axes] = *setup;
+        auto table_result = builder.build(axes);
+        if (!table_result.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        return wrap_surface(table_result->surface, config.option_type,
+                            config.solver_config);
     }, config.grid);
 }
 
