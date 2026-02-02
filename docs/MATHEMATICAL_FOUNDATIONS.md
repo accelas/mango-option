@@ -575,7 +575,14 @@ Cash dividends break the scale invariance that American options normally have in
 
 ## 10. Price Table Grid Estimation
 
-The 4D grid density directly controls IV accuracy. Too coarse and the B-spline interpolation introduces significant error; too fine and pre-computation takes days. The library provides both automatic estimation and iterative refinement.
+The 4D grid density directly controls IV accuracy. Too coarse and the B-spline interpolation introduces significant error; too fine and pre-computation takes days.
+
+The library offers two grid specification modes:
+
+- **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). This gives full control over placement and density but requires domain expertise to balance accuracy against build cost.
+- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement (described below), validated against fresh PDE solves. This removes the need for manual tuning at the cost of additional PDE solves during construction.
+
+Both modes share the same maturity grid (supplied via the path configuration) and produce the same `PriceTableSurface<4>` — the difference is only in how the per-axis point counts are chosen.
 
 ### Curvature-Based Budget Allocation
 
