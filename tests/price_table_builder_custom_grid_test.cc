@@ -16,7 +16,7 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -63,11 +63,11 @@ TEST(PriceTableBuilderCustomGridTest, CustomGridWithNormalizedCase) {
     std::cout << "\n=== Testing custom_grid (claimed to fail) ===" << std::endl;
 
     // Create custom grid/time domain as plan specified
-    const auto& cg_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    const auto& cg_grid = std::get<PDEGridConfig>(config.pde_grid);
     GridSpec<double> user_grid = cg_grid.grid_spec;
     auto time_domain = TimeDomain::from_n_steps(0.0, axes.grids[1].back(), cg_grid.n_time);
     std::optional<PDEGridSpec> custom_grid =
-        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
+        PDEGridConfig{user_grid, time_domain.n_steps(), {}};
 
     // Create a BatchAmericanOptionSolver to test with custom_grid
     BatchAmericanOptionSolver solver;
@@ -120,7 +120,7 @@ TEST(PriceTableBuilderCustomGridTest, VerifyNormalizedBatchConditions) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100}
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 101).value(), 100}
     };
 
     PriceTableBuilder<4> builder(config);
@@ -284,7 +284,7 @@ TEST(PriceTableBuilderCustomGridTest, ExplicitGridFallbackCoversWideMoneyness) {
     // Use a coarse explicit grid to trigger the fallback path.
     // Uniform(-1.0, 1.0, 21): dx = 2.0/20 = 0.1 > MAX_DX (0.05) → fallback
     auto coarse_grid = GridSpec<double>::uniform(-1.0, 1.0, 21).value();
-    ExplicitPDEGrid explicit_pde{coarse_grid, 200};
+    PDEGridConfig explicit_pde{coarse_grid, 200};
 
     // Wide moneyness + low vol/short maturity (same scenario as AutoGridCoversWideMoneyness)
     std::vector<double> moneyness = {0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0};

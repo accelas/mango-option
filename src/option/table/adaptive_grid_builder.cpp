@@ -148,7 +148,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         auto builder_result = PriceTableBuilder<4>::from_vectors(
             moneyness_grid, maturity_grid, vol_grid, rate_grid,
             chain.spot,  // K_ref = spot as reference strike
-            ExplicitPDEGrid{grid_spec, n_time}, type, chain.dividend_yield,
+            PDEGridConfig{grid_spec, n_time}, type, chain.dividend_yield,
             params_.max_failure_rate);
 
         if (!builder_result.has_value()) {
@@ -237,7 +237,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
                 // Grid meets constraints: pass exact grid_spec + TimeDomain
                 const double max_maturity = maturity_grid.back();
                 TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+                PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
                 fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
             } else {
                 // Grid violates constraints: use GridAccuracyParams with proper bounds

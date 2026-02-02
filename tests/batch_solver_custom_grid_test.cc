@@ -24,7 +24,7 @@ TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
         auto time_domain = mango::TimeDomain::from_n_steps(0.0, 1.0, 200);
 
         std::optional<mango::PDEGridSpec> custom_grid =
-        mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+        mango::PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
         auto result = solver.solve_batch(batch, true, nullptr, custom_grid);
 

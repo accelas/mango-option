@@ -141,10 +141,10 @@ std::pmr::synchronized_pool_resource pool;
 std::pmr::vector<double> buffer(mango::PDEWorkspace::required_size(n), &pool);
 auto workspace = mango::PDEWorkspace::from_buffer(buffer, n).value();
 
-// Pass custom grid to solver via ExplicitPDEGrid
+// Pass custom grid to solver via PDEGridConfig
 auto solver = mango::AmericanOptionSolver::create(
     params, workspace,
-    mango::ExplicitPDEGrid{.grid_spec = grid_spec, .n_time = n_time}
+    mango::PDEGridConfig{.grid_spec = grid_spec, .n_time = n_time}
 ).value();
 
 auto result = solver.solve();
@@ -322,7 +322,7 @@ auto result = solver.solve(query);
 auto grid_spec = mango::GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.5).value();
 
 mango::IVSolverFDMConfig config{
-    .grid = mango::ExplicitPDEGrid{
+    .grid = mango::PDEGridConfig{
         .grid_spec = grid_spec,
         .n_time = 2000
     }

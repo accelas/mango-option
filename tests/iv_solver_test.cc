@@ -155,9 +155,9 @@ TEST_F(IVSolverTest, ATMCallIVCalculation) {
     EXPECT_LT(result->implied_vol, 0.35);
 }
 
-// Test 12: ExplicitPDEGrid with minimal spatial points
+// Test 12: PDEGridConfig with minimal spatial points
 TEST_F(IVSolverTest, ExplicitGridMinimalPoints) {
-    config.grid = ExplicitPDEGrid{
+    config.grid = PDEGridConfig{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 11, 2.0).value(), 50};
     IVSolverFDM solver(config);
     auto result = solver.solve(query);
@@ -167,9 +167,9 @@ TEST_F(IVSolverTest, ExplicitGridMinimalPoints) {
     EXPECT_LT(result->implied_vol, 0.5);
 }
 
-// Test 13: ExplicitPDEGrid with few time steps
+// Test 13: PDEGridConfig with few time steps
 TEST_F(IVSolverTest, ExplicitGridFewTimeSteps) {
-    config.grid = ExplicitPDEGrid{
+    config.grid = PDEGridConfig{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0).value(), 10};
     IVSolverFDM solver(config);
     auto result = solver.solve(query);
@@ -186,9 +186,9 @@ TEST_F(IVSolverTest, GridSpecRejectsInvalidBounds) {
     ASSERT_FALSE(bad_grid.has_value());
 }
 
-// Test 15: ExplicitPDEGrid with 201 points
+// Test 15: PDEGridConfig with 201 points
 TEST_F(IVSolverTest, ExplicitGrid201Points) {
-    config.grid = ExplicitPDEGrid{
+    config.grid = PDEGridConfig{
         GridSpec<double>::sinh_spaced(-3.0, 3.0, 201, 2.0).value(), 1000};
     IVSolverFDM solver(config);
     auto result = solver.solve(query);

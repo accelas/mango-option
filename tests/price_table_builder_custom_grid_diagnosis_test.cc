@@ -15,7 +15,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     PriceTableConfig config{
         .option_type = OptionType::PUT,
         .K_ref = 100.0,
-        .pde_grid = ExplicitPDEGrid{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
+        .pde_grid = PDEGridConfig{GridSpec<double>::uniform(-3.0, 3.0, 21).value(), 100},
         .dividends = {.dividend_yield = 0.02}
     };
 
@@ -51,7 +51,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     std::cout << "  dividend_yield: " << params.dividend_yield << std::endl;
 
     // Check grid estimator
-    const auto& diag_grid = std::get<ExplicitPDEGrid>(config.pde_grid);
+    const auto& diag_grid = std::get<PDEGridConfig>(config.pde_grid);
     std::cout << "\nGrid estimator from config:" << std::endl;
     std::cout << "  x_min: " << diag_grid.grid_spec.x_min() << std::endl;
     std::cout << "  x_max: " << diag_grid.grid_spec.x_max() << std::endl;
@@ -106,7 +106,7 @@ TEST(PriceTableBuilderCustomGridDiagnosisTest, ReproduceFailure) {
     // Try solving with custom_grid
     std::cout << "\n=== Test 2: WITH custom_grid ===" << std::endl;
     std::optional<PDEGridSpec> custom_grid =
-        ExplicitPDEGrid{user_grid, time_domain.n_steps(), {}};
+        PDEGridConfig{user_grid, time_domain.n_steps(), {}};
     BatchAmericanOptionSolver solver2;
     solver2.set_grid_accuracy(accuracy);
     solver2.set_snapshot_times(axes.grids[1]);

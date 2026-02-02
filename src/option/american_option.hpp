@@ -181,7 +181,7 @@ public:
      *
      * @param params Option pricing parameters
      * @param workspace PDEWorkspace with pre-allocated buffers
-     * @param grid Optional grid specification (GridAccuracyParams or ExplicitPDEGrid).
+     * @param grid Optional grid specification (GridAccuracyParams or PDEGridConfig).
      *             When nullopt, auto-estimates from option parameters.
      * @param snapshot_times Optional times to record solution snapshots
      * @return AmericanOptionSolver on success, ValidationError on failure
@@ -299,7 +299,7 @@ inline std::expected<AmericanOptionResult, SolverError> solve_american_option_au
     // Buffer stays alive during solve(), result contains Grid with solution
     auto solver_result = AmericanOptionSolver::create(
         params, workspace_result.value(),
-        ExplicitPDEGrid{.grid_spec = grid_spec, .n_time = time_domain.n_steps(),
+        PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps(),
                         .mandatory_times = std::move(mandatory_tau)});
     if (!solver_result) {
         return std::unexpected(SolverError{

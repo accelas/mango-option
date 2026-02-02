@@ -591,11 +591,11 @@ BatchAmericanOptionResult BatchAmericanOptionSolver::solve_regular_batch(
 
             // Create solver using PDEWorkspace API with explicit grid config
             // This ensures workspace size matches the grid that will be used
-            // Convert resolved pair to ExplicitPDEGrid for new constructor API
+            // Convert resolved pair to PDEGridConfig for new constructor API
             std::optional<PDEGridSpec> solver_grid_spec;
             if (solver_grid_config.has_value()) {
                 auto& [gs, td] = *solver_grid_config;
-                solver_grid_spec = ExplicitPDEGrid{gs, td.n_steps(), {}};
+                solver_grid_spec = PDEGridConfig{gs, td.n_steps(), {}};
             }
             auto solver_result = AmericanOptionSolver::create(params[i], *workspace_ptr, solver_grid_spec);
             if (!solver_result) {

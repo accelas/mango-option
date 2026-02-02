@@ -60,7 +60,7 @@ void BatchSolverNeverCrashes(
 
     // Create custom grid config
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, maturity, 500);
-    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec_result.value(), time_domain.n_steps(), {}};
+    PDEGridSpec custom_grid = PDEGridConfig{grid_spec_result.value(), time_domain.n_steps(), {}};
 
     // This should never crash
     BatchAmericanOptionSolver solver;
@@ -195,7 +195,7 @@ void GridSizeConsistency(size_t n_points, size_t batch_size, bool use_shared_gri
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec_result.value(), time_domain.n_steps(), {}};
+    PDEGridSpec custom_grid = PDEGridConfig{grid_spec_result.value(), time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, use_shared_grid, nullptr, custom_grid);

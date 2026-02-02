@@ -3,7 +3,7 @@
 
 namespace mango {
 
-GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile) {
+GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile) {
     GridAccuracyParams params;
     switch (profile) {
         case GridAccuracyProfile::Low:

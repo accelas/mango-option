@@ -350,7 +350,7 @@ PYBIND11_MODULE(mango_option, m) {
 
             mango::GridAccuracyParams accuracy;
             if (accuracy_profile.has_value()) {
-                accuracy = mango::grid_accuracy_profile(accuracy_profile.value());
+                accuracy = mango::make_grid_accuracy(accuracy_profile.value());
             }
 
             // Estimate grid automatically (sinh-spaced, clustered near strike)
@@ -368,7 +368,7 @@ PYBIND11_MODULE(mango_option, m) {
 
             auto solver_result = mango::AmericanOptionSolver::create(
                 params, workspace_result.value(),
-                mango::ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}});
+                mango::PDEGridConfig{grid_spec, time_domain.n_steps(), {}});
             if (!solver_result) {
                 throw py::value_error(
                     "Failed to create solver (validation error code " +
@@ -431,7 +431,7 @@ PYBIND11_MODULE(mango_option, m) {
         .def(py::init<>())
         .def("set_grid_accuracy",
             [](mango::BatchAmericanOptionSolver& self, mango::GridAccuracyProfile profile) {
-                self.set_grid_accuracy(mango::grid_accuracy_profile(profile));
+                self.set_grid_accuracy(mango::make_grid_accuracy(profile));
                 return &self;
             },
             py::arg("profile"),

@@ -109,7 +109,7 @@ TEST(ProductionConfig, PriceTableBuilder_SmallGrid_51Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec, 500},
+        PDEGridConfig{grid_spec, 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -145,7 +145,7 @@ TEST(ProductionConfig, PriceTableBuilder_VerySmallGrid_31Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 300},
+        PDEGridConfig{grid_spec_result.value(), 300},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -170,7 +170,7 @@ TEST(ProductionConfig, PriceTableBuilder_LargeGrid_201Points) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 1000},
+        PDEGridConfig{grid_spec_result.value(), 1000},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -194,7 +194,7 @@ TEST(ProductionConfig, PriceTableBuilder_FullMarketGrid) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 500},
+        PDEGridConfig{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -232,7 +232,7 @@ TEST_P(BatchSolverGridSizeTest, SharedGrid_ExplicitSize) {
 
     // Create custom grid config
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, /*use_shared_grid=*/true, nullptr, custom_grid);
@@ -263,7 +263,7 @@ TEST_P(BatchSolverGridSizeTest, PerOptionGrid_ExplicitSize) {
     }
 
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, 1.0, 500);
-    PDEGridSpec custom_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
     BatchAmericanOptionSolver solver;
     auto results = solver.solve_batch(params, /*use_shared_grid=*/false, nullptr, custom_grid);
@@ -463,7 +463,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_BuildPriceTable) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 500},
+        PDEGridConfig{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate
@@ -498,7 +498,7 @@ TEST(BenchmarkAsTest, MarketIVE2E_IVSolverCreation) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec_result.value(), 500},
+        PDEGridConfig{grid_spec_result.value(), 500},
         OptionType::PUT,
         grid.dividend,
         0.0);    // max_failure_rate

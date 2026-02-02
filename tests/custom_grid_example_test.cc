@@ -65,7 +65,7 @@ TEST_F(CustomGridTest, UniformGrid) {
 
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{uniform_spec.value(), time.n_steps(), {}}).value();
+        mango::PDEGridConfig{uniform_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -84,7 +84,7 @@ TEST_F(CustomGridTest, SinhSpacedGrid) {
 
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{sinh_spec.value(), time.n_steps(), {}}).value();
+        mango::PDEGridConfig{sinh_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -108,7 +108,7 @@ TEST_F(CustomGridTest, MultiSinhGrid) {
 
     mango::TimeDomain time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{multi_sinh_spec.value(), time.n_steps(), {}}).value();
+        mango::PDEGridConfig{multi_sinh_spec.value(), time.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -164,7 +164,7 @@ TEST_F(CustomGridTest, HighAccuracyParams) {
 
     // Pass the estimated grid config to the solver
     auto solver = mango::AmericanOptionSolver::create(params, workspace,
-        mango::ExplicitPDEGrid{grid, time_domain.n_steps(), {}}).value();
+        mango::PDEGridConfig{grid, time_domain.n_steps(), {}}).value();
     auto result = solver.solve();
 
     ASSERT_TRUE(result.has_value());
@@ -192,7 +192,7 @@ TEST_F(CustomGridTest, AllGridTypesProduceSimilarPrices) {
     auto sinh_ws = mango::PDEWorkspace::from_buffer(sinh_buf, n_sinh).value();
     mango::TimeDomain sinh_time = mango::TimeDomain::from_n_steps(0.0, params.maturity, 1000);
     auto sinh_solver = mango::AmericanOptionSolver::create(params, sinh_ws,
-        mango::ExplicitPDEGrid{sinh_spec.value(), sinh_time.n_steps(), {}}).value();
+        mango::PDEGridConfig{sinh_spec.value(), sinh_time.n_steps(), {}}).value();
     auto sinh_result = sinh_solver.solve();
     ASSERT_TRUE(sinh_result.has_value());
     double sinh_price = sinh_result->value();

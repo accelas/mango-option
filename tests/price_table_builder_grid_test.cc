@@ -18,7 +18,7 @@ TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
     mango::PriceTableConfig config;
     config.option_type = mango::OptionType::PUT;
     config.K_ref = 100.0;
-    config.pde_grid = mango::ExplicitPDEGrid{mango::GridSpec<double>::uniform(-0.5, 0.5, 51).value(), 100};
+    config.pde_grid = mango::PDEGridConfig{mango::GridSpec<double>::uniform(-0.5, 0.5, 51).value(), 100};
 
     mango::PriceTableBuilder<4> builder(config);
     auto result = builder.build(axes);
@@ -41,7 +41,7 @@ TEST(PriceTableBuilderGridTest, RejectsInsufficientGridBounds) {
     mango::PriceTableConfig config;
     config.option_type = mango::OptionType::PUT;
     config.K_ref = 100.0;
-    config.pde_grid = mango::ExplicitPDEGrid{mango::GridSpec<double>::uniform(-0.1, 0.1, 51).value(), 100};
+    config.pde_grid = mango::PDEGridConfig{mango::GridSpec<double>::uniform(-0.1, 0.1, 51).value(), 100};
 
     mango::PriceTableBuilder<4> builder(config);
     auto result = builder.build(axes);

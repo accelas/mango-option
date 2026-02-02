@@ -34,7 +34,7 @@ static std::pair<GridSpec<double>, TimeDomain> resolve_grid(
         [&](const GridAccuracyParams& acc) {
             return estimate_grid_for_option(params, acc);
         },
-        [&](const ExplicitPDEGrid& eg) {
+        [&](const PDEGridConfig& eg) {
             auto td = eg.mandatory_times.empty()
                 ? TimeDomain::from_n_steps(0.0, params.maturity, eg.n_time)
                 : TimeDomain::with_mandatory_points(0.0, params.maturity,

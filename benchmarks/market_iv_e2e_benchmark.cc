@@ -25,7 +25,7 @@
  *     {0.15, 0.20, 0.25, 0.30, 0.40},          // volatility
  *     {0.02, 0.03, 0.04, 0.05},                // rate
  *     100.0,                                    // K_ref
- *     ExplicitPDEGrid{grid_spec, 1000},
+ *     PDEGridConfig{grid_spec, 1000},
  *     OptionType::PUT,
  *     dividend).value();
  *
@@ -189,7 +189,7 @@ static void BM_API_BuildPriceTable(benchmark::State& state) {
             grid.volatilities,
             grid.rates,
             grid.K_ref,
-            ExplicitPDEGrid{grid_spec, 500},
+            PDEGridConfig{grid_spec, 500},
             OptionType::PUT,
             grid.dividend);
 
@@ -242,7 +242,7 @@ static void BM_API_ComputeIVSurface(benchmark::State& state) {
         grid.volatilities,
         grid.rates,
         grid.K_ref,
-        ExplicitPDEGrid{grid_spec, 500},
+        PDEGridConfig{grid_spec, 500},
         OptionType::PUT,
         grid.dividend);
 
@@ -356,7 +356,7 @@ static void BM_API_EndToEnd(benchmark::State& state) {
             grid.volatilities,
             grid.rates,
             grid.K_ref,
-            ExplicitPDEGrid{grid_spec, 500},
+            PDEGridConfig{grid_spec, 500},
             OptionType::PUT,
             grid.dividend);
 

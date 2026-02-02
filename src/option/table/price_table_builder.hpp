@@ -105,7 +105,7 @@ public:
     /// @param volatility Volatility values (must be > 0)
     /// @param rate Risk-free rate values (may be negative)
     /// @param K_ref Reference strike price (must be > 0)
-    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
+    /// @param pde_grid PDE grid: PDEGridConfig{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
     /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
@@ -133,7 +133,7 @@ public:
     /// @param maturities Time to expiration values in years (must be > 0)
     /// @param volatilities Volatility values (must be > 0)
     /// @param rates Risk-free rate values (may be negative)
-    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
+    /// @param pde_grid PDE grid: PDEGridConfig{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param dividend_yield Continuous dividend yield (default 0.0)
     /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
@@ -157,7 +157,7 @@ public:
     /// Uses grid.dividend_yield.
     ///
     /// @param chain Option grid data
-    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
+    /// @param pde_grid PDE grid: PDEGridConfig{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param max_failure_rate Maximum tolerable failure rate (default 0.0)
     /// @return Pair of (builder, axes) or error
@@ -175,7 +175,7 @@ public:
     /// the specified IV error tolerance.
     ///
     /// @param chain Option grid (provides domain bounds from strikes, maturities, vols, rates)
-    /// @param pde_grid PDE grid: ExplicitPDEGrid{grid_spec, n_time} or GridAccuracyParams
+    /// @param pde_grid PDE grid: PDEGridConfig{grid_spec, n_time} or GridAccuracyParams
     /// @param type Option type (PUT or CALL)
     /// @param accuracy Grid accuracy parameters (controls target error and point allocation)
     /// @return Pair of (builder, axes) or error

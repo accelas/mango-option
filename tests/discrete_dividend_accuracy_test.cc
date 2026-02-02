@@ -76,7 +76,7 @@ double solve_mango(const PricingParams& params,
         PDEWorkspace::required_size(n), std::pmr::get_default_resource());
     auto ws = PDEWorkspace::from_buffer(buffer, n).value();
     auto solver = AmericanOptionSolver::create(params, ws,
-                                ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}}).value();
+                                PDEGridConfig{grid_spec, time_domain.n_steps(), {}}).value();
     auto result = solver.solve();
     return result->value();
 }
@@ -93,7 +93,7 @@ TEST(DiscreteDividendAccuracyTest, PutSingleDividendVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.5, .amount = 3.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.20, 0.05, {{0.5, 3.0}}, false);
 
@@ -109,7 +109,7 @@ TEST(DiscreteDividendAccuracyTest, CallSingleDividendVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::CALL}, 0.25,
                          {{.calendar_time = 0.3, .amount = 4.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.25, 0.05, {{0.3, 4.0}}, true);
 
@@ -124,7 +124,7 @@ TEST(DiscreteDividendAccuracyTest, MultipleDividendsVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 95.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.25, .amount = 2.0}, {.calendar_time = 0.75, .amount = 2.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         95.0, 100.0, 1.0, 0.20, 0.05, {{0.25, 2.0}, {0.75, 2.0}}, false);
 
@@ -139,7 +139,7 @@ TEST(DiscreteDividendAccuracyTest, LargeDividendVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.30,
                          {{.calendar_time = 0.5, .amount = 15.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.30, 0.05, {{0.5, 15.0}}, false);
 
@@ -155,7 +155,7 @@ TEST(DiscreteDividendAccuracyTest, DividendNearExpiryVsQuantLib) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.9, .amount = 2.0}});
 
-    double mango_price = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
+    double mango_price = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
     double ql_price = price_american_discrete_div_quantlib(
         100.0, 100.0, 1.0, 0.20, 0.05, {{0.9, 2.0}}, false);
 
@@ -173,9 +173,9 @@ TEST(DiscreteDividendAccuracyTest, GridConvergence) {
     PricingParams params(OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0, .rate = 0.05, .option_type = OptionType::PUT}, 0.20,
                          {{.calendar_time = 0.5, .amount = 3.0}});
 
-    double p_low  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Low));
-    double p_med  = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::Medium));
-    double p_high = solve_mango(params, grid_accuracy_profile(GridAccuracyProfile::High));
+    double p_low  = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Low));
+    double p_med  = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::Medium));
+    double p_high = solve_mango(params, make_grid_accuracy(GridAccuracyProfile::High));
 
     // Successive differences should shrink
     double diff_1 = std::abs(p_med - p_low);

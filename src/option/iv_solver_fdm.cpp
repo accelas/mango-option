@@ -73,7 +73,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
             auto [auto_grid, auto_td] = estimate_grid_for_option(option_params, grid_variant);
             grid_spec = auto_grid;
             time_domain = auto_td;
-        } else if constexpr (std::is_same_v<T, ExplicitPDEGrid>) {
+        } else if constexpr (std::is_same_v<T, PDEGridConfig>) {
             grid_spec = grid_variant.grid_spec;
             if (grid_variant.mandatory_times.empty()) {
                 time_domain = TimeDomain::from_n_steps(0.0, query.maturity, grid_variant.n_time);
@@ -110,7 +110,7 @@ double IVSolverFDM::objective_function(const IVQuery& query, double volatility) 
 
     // Create solver and solve — always pass grid config to ensure the solver
     // uses the same grid we computed (matching the workspace size)
-    auto explicit_grid = ExplicitPDEGrid{grid_spec, time_domain.n_steps(), {}};
+    auto explicit_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
 
     auto solver_result = AmericanOptionSolver::create(
         option_params, pde_workspace_result.value(), PDEGridSpec{explicit_grid});

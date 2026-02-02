@@ -23,10 +23,10 @@ TEST(PriceTableGridEstimatorTest, DefaultParamsAre4D) {
 }
 
 TEST(PriceTableGridEstimatorTest, ProfileOrdering) {
-    auto low = grid_accuracy_profile(PriceTableGridProfile::Low);
-    auto medium = grid_accuracy_profile(PriceTableGridProfile::Medium);
-    auto high = grid_accuracy_profile(PriceTableGridProfile::High);
-    auto ultra = grid_accuracy_profile(PriceTableGridProfile::Ultra);
+    auto low = make_price_table_grid_accuracy(PriceTableGridProfile::Low);
+    auto medium = make_price_table_grid_accuracy(PriceTableGridProfile::Medium);
+    auto high = make_price_table_grid_accuracy(PriceTableGridProfile::High);
+    auto ultra = make_price_table_grid_accuracy(PriceTableGridProfile::Ultra);
 
     EXPECT_GT(low.target_iv_error, medium.target_iv_error);
     EXPECT_GT(medium.target_iv_error, high.target_iv_error);
@@ -38,10 +38,10 @@ TEST(PriceTableGridEstimatorTest, ProfileOrdering) {
 }
 
 TEST(PriceTableGridEstimatorTest, PdeProfileOrdering) {
-    auto low = grid_accuracy_profile(GridAccuracyProfile::Low);
-    auto medium = grid_accuracy_profile(GridAccuracyProfile::Medium);
-    auto high = grid_accuracy_profile(GridAccuracyProfile::High);
-    auto ultra = grid_accuracy_profile(GridAccuracyProfile::Ultra);
+    auto low = make_grid_accuracy(GridAccuracyProfile::Low);
+    auto medium = make_grid_accuracy(GridAccuracyProfile::Medium);
+    auto high = make_grid_accuracy(GridAccuracyProfile::High);
+    auto ultra = make_grid_accuracy(GridAccuracyProfile::Ultra);
 
     EXPECT_GT(low.tol, medium.tol);
     EXPECT_GT(medium.tol, high.tol);
