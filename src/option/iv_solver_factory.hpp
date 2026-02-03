@@ -99,7 +99,7 @@ private:
 ///
 /// If path holds StandardIVPath, uses the AmericanPriceSurface path.
 /// If path holds SegmentedIVPath, uses the SegmentedMultiKRefSurface path.
-/// If grid holds AdaptiveGrid (StandardIVPath only), uses AdaptiveGridBuilder
+/// If grid holds AdaptiveGrid, uses AdaptiveGridBuilder
 /// to automatically refine grid density until the target IV error is met.
 ///
 /// @param config Solver configuration
