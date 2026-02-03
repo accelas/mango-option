@@ -62,6 +62,7 @@
 #define MODULE_VALIDATION       6
 #define MODULE_PRICE_TABLE      7
 #define MODULE_BATCH_SOLVER     8
+#define MODULE_GRID_PROBE       9
 
 /**
  * Validation stage identifiers for adaptive refinement tracing
@@ -488,5 +489,42 @@ enum class NormalizedIneligibilityReason {
 #define MANGO_TRACE_NORMALIZED_INELIGIBLE(reason_code, param_value) \
     DTRACE_PROBE3(MANGO_PROVIDER, normalized_ineligible, \
                   MODULE_BATCH_SOLVER, reason_code, param_value)
+
+/**
+ * ============================================================================
+ * Module-Specific Probes: Grid Probe (Richardson-style grid calibration)
+ * ============================================================================
+ */
+
+/**
+ * Fired when grid probe calibration begins
+ * @param initial_Nx: Initial grid points
+ * @param target_error: Target price error
+ * @param max_iterations: Maximum probe iterations
+ */
+#define MANGO_TRACE_GRID_PROBE_START(initial_Nx, target_error, max_iterations) \
+    MANGO_TRACE_ALGO_START(MODULE_GRID_PROBE, initial_Nx, target_error, max_iterations)
+
+/**
+ * Fired after each probe iteration
+ * @param iteration: Current iteration (1-based)
+ * @param Nx: Grid points used this iteration
+ * @param price_diff: |P(Nx) - P(2Nx)|
+ * @param converged: 1 if converged, 0 if not
+ */
+#define MANGO_TRACE_GRID_PROBE_ITERATION(iteration, Nx, price_diff, converged) \
+    DTRACE_PROBE5(MANGO_PROVIDER, grid_probe_iteration, \
+                  MODULE_GRID_PROBE, iteration, Nx, price_diff, converged)
+
+/**
+ * Fired when grid probe calibration completes
+ * @param final_Nx: Final grid points
+ * @param estimated_error: Final estimated error
+ * @param iterations: Total probe iterations
+ * @param converged: 1 if converged, 0 if hit max iterations
+ */
+#define MANGO_TRACE_GRID_PROBE_COMPLETE(final_Nx, estimated_error, iterations, converged) \
+    DTRACE_PROBE5(MANGO_PROVIDER, grid_probe_complete, \
+                  MODULE_GRID_PROBE, final_Nx, estimated_error, iterations, converged)
 
 #endif // IVCALC_TRACE_H

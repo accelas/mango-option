@@ -161,7 +161,9 @@ TEST(RealMarketDataTest, IVSanityCheck) {
     // Verify IV calculation produces consistent prices
     auto query = make_iv_query(bdata::ATM_PUT);
 
-    IVSolverConfig config;
+    // Use heuristic path (target_price_error = 0) to ensure IV solver and
+    // verification use the same grid estimation method
+    IVSolverConfig config{.target_price_error = 0.0};
     IVSolver iv_solver(config);
     auto iv_result = iv_solver.solve(query);
     ASSERT_TRUE(iv_result.has_value());
