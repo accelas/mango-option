@@ -1035,6 +1035,73 @@ AdaptiveGridBuilder::build_segmented(
         return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
 
+    // 8. Final multi-K_ref validation at arbitrary strikes
+    auto final_samples = latin_hypercube_4d(
+        params_.validation_samples, params_.lhs_seed + 999);
+
+    std::array<std::pair<double, double>, 4> final_bounds = {{
+        {expanded_min_m, max_m},
+        {min_tau, max_tau},
+        {min_vol, max_vol},
+        {min_rate, max_rate},
+    }};
+    auto scaled = scale_lhs_samples(final_samples, final_bounds);
+
+    double final_max_error = 0.0;
+    size_t valid = 0;
+
+    for (const auto& sample : scaled) {
+        double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
+        double strike = config.spot / m;
+
+        double interp = surface->price(config.spot, strike, tau, sigma, rate);
+
+        PricingParams params;
+        params.spot = config.spot;
+        params.strike = strike;
+        params.maturity = tau;
+        params.rate = rate;
+        params.dividend_yield = config.dividend_yield;
+        params.option_type = config.option_type;
+        params.volatility = sigma;
+        params.discrete_dividends = config.discrete_dividends;
+
+        auto fd = solve_american_option(params);
+        if (!fd.has_value()) continue;
+
+        auto err = compute_error_metric(
+            interp, fd->value(), config.spot, strike, tau,
+            sigma, rate, config.dividend_yield);
+        if (!err.has_value()) continue;
+
+        final_max_error = std::max(final_max_error, *err);
+        valid++;
+    }
+
+    if (valid > 0 && final_max_error > params_.target_iv_error) {
+        // Bump grids by one refinement step and rebuild (one retry)
+        size_t bumped_m = std::min(max_m_size + 2, params_.max_points_per_dim);
+        size_t bumped_v = std::min(max_v_size + 1, params_.max_points_per_dim);
+        size_t bumped_r = std::min(max_r_size + 1, params_.max_points_per_dim);
+        int bumped_tau = std::min(max_tau_pts + 2,
+            static_cast<int>(params_.max_points_per_dim));
+
+        auto retry_m = linspace(expanded_min_m, max_m, bumped_m);
+        auto retry_v = linspace(min_vol, max_vol, bumped_v);
+        auto retry_r = linspace(min_rate, max_rate, bumped_r);
+
+        SegmentedMultiKRefBuilder::Config retry_config = mkref_config;
+        retry_config.moneyness_grid = retry_m;
+        retry_config.vol_grid = retry_v;
+        retry_config.rate_grid = retry_r;
+        retry_config.tau_points_per_segment = bumped_tau;
+
+        auto retry_surface = SegmentedMultiKRefBuilder::build(retry_config);
+        if (retry_surface.has_value()) {
+            return std::move(*retry_surface);
+        }
+    }
+
     return std::move(*surface);
 }
 
