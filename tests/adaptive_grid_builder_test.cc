@@ -3,6 +3,7 @@
 #include "src/option/table/adaptive_grid_builder.hpp"
 #include "src/option/american_option_batch.hpp"
 #include <algorithm>
+#include "src/option/table/segmented_multi_kref_surface.hpp"
 #include <iostream>
 
 namespace mango {
@@ -331,6 +332,66 @@ TEST(AdaptiveGridBuilderTest, RegressionCacheClearedBetweenBuilds) {
     size_t solves2 = result2->iterations[0].pde_solves_table;
 
     EXPECT_EQ(solves1, solves2) << "Second build should recompute all slices for new chain";
+}
+
+
+TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;  // 50 bps — relaxed for test speed
+    params.max_iter = 2;
+    params.validation_samples = 16;
+
+    AdaptiveGridBuilder builder(params);
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    std::vector<double> m_domain = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
+    std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
+    ASSERT_TRUE(result.has_value())
+        << "build_segmented failed";
+
+    // Should be able to query prices at various strikes
+    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_GT(price, 0.0);
+    EXPECT_TRUE(std::isfinite(price));
+
+    // And at off-K_ref strikes
+    double price2 = result->price(100.0, 90.0, 0.5, 0.20, 0.05);
+    EXPECT_GT(price2, 0.0);
+    EXPECT_TRUE(std::isfinite(price2));
+}
+
+TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+
+    AdaptiveGridBuilder builder(params);
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.25, .amount = 1.50}},
+        .maturity = 0.5,
+        .kref_config = {.K_refs = {95.0, 105.0}},  // < 3 K_refs — probe all
+    };
+
+    std::vector<double> m_domain = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
+    ASSERT_TRUE(result.has_value());
 }
 
 }  // namespace

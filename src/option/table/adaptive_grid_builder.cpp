@@ -4,6 +4,9 @@
 #include "src/math/latin_hypercube.hpp"
 #include "src/option/american_option_batch.hpp"
 #include "src/option/table/price_table_surface.hpp"
+#include "src/option/table/segmented_price_table_builder.hpp"
+#include "src/option/table/segmented_multi_kref_builder.hpp"
+#include "src/option/table/segmented_multi_kref_surface.hpp"
 #include "src/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
@@ -811,6 +814,228 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
     }
 
     return merged;
+}
+
+
+std::expected<SegmentedMultiKRefSurface, PriceTableError>
+AdaptiveGridBuilder::build_segmented(
+    const SegmentedAdaptiveConfig& config,
+    const std::vector<double>& moneyness_domain,
+    const std::vector<double>& vol_domain,
+    const std::vector<double>& rate_domain)
+{
+    // 1. Determine full K_ref list
+    std::vector<double> K_refs = config.kref_config.K_refs;
+    if (K_refs.empty()) {
+        // Auto-generate (same logic as SegmentedMultiKRefBuilder)
+        const int count = config.kref_config.K_ref_count;
+        const double span = config.kref_config.K_ref_span;
+        if (count < 1 || span <= 0.0) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+        const double log_lo = std::log(1.0 - span);
+        const double log_hi = std::log(1.0 + span);
+        K_refs.reserve(static_cast<size_t>(count));
+        if (count == 1) {
+            K_refs.push_back(config.spot);
+        } else {
+            for (int i = 0; i < count; ++i) {
+                double t = static_cast<double>(i) / static_cast<double>(count - 1);
+                K_refs.push_back(config.spot * std::exp(log_lo + t * (log_hi - log_lo)));
+            }
+        }
+    }
+    std::sort(K_refs.begin(), K_refs.end());
+
+    // 2. Select probe K_refs (ATM, lowest, highest; all if <= 3)
+    std::vector<double> probe_krefs;
+    if (K_refs.size() <= 3) {
+        probe_krefs = K_refs;
+    } else {
+        probe_krefs.push_back(K_refs.front());   // lowest
+        probe_krefs.push_back(K_refs.back());    // highest
+        // ATM: closest to spot
+        auto atm_it = std::min_element(K_refs.begin(), K_refs.end(),
+            [&](double a, double b) {
+                return std::abs(a - config.spot) < std::abs(b - config.spot);
+            });
+        if (*atm_it != K_refs.front() && *atm_it != K_refs.back()) {
+            probe_krefs.push_back(*atm_it);
+        }
+    }
+
+    // 3. Pre-expand moneyness domain using worst-case K_ref
+    // Filter dividends same way as SegmentedPriceTableBuilder: strictly inside (0,T), positive
+    double total_div = 0.0;
+    for (const auto& div : config.discrete_dividends) {
+        if (div.calendar_time > 0.0 && div.calendar_time < config.maturity && div.amount > 0.0) {
+            total_div += div.amount;
+        }
+    }
+    double K_ref_min = K_refs.front();
+    double expansion = (K_ref_min > 0.0) ? total_div / K_ref_min : 0.0;
+
+    double min_m = moneyness_domain.front();
+    double max_m = moneyness_domain.back();
+    double expanded_min_m = std::max(min_m - expansion, 0.01);
+
+    double min_vol = vol_domain.front();
+    double max_vol = vol_domain.back();
+    double min_rate = rate_domain.front();
+    double max_rate = rate_domain.back();
+
+    // Expand bounds when min == max (same logic as build())
+    constexpr double kMinPositive = 1e-6;
+    auto expand_bounds_positive = [kMinPositive](double& lo, double& hi, double min_spread) {
+        if (hi - lo < min_spread) {
+            double mid = (lo + hi) / 2.0;
+            lo = mid - min_spread / 2.0;
+            hi = mid + min_spread / 2.0;
+        }
+        if (lo < kMinPositive) {
+            double shift = kMinPositive - lo;
+            lo = kMinPositive;
+            hi += shift;
+        }
+    };
+    auto expand_bounds = [](double& lo, double& hi, double min_spread) {
+        if (hi - lo < min_spread) {
+            double mid = (lo + hi) / 2.0;
+            lo = mid - min_spread / 2.0;
+            hi = mid + min_spread / 2.0;
+        }
+    };
+
+    expand_bounds_positive(expanded_min_m, max_m, 0.10);
+    expand_bounds_positive(min_vol, max_vol, 0.10);
+    expand_bounds(min_rate, max_rate, 0.04);
+
+    // Tau bounds: from small epsilon to maturity
+    double min_tau = std::min(0.01, config.maturity * 0.5);
+    double max_tau = config.maturity;
+    expand_bounds_positive(min_tau, max_tau, 0.1);
+
+    // 4. Run probes - each probes at strike = K_ref
+    std::vector<GridSizes> probe_results;
+    for (double K_ref : probe_krefs) {
+        // BuildFn: wraps SegmentedPriceTableBuilder for this K_ref
+        BuildFn build_fn = [&config, K_ref](
+            const std::vector<double>& m_grid,
+            const std::vector<double>& /*tau_grid*/,
+            const std::vector<double>& v_grid,
+            const std::vector<double>& r_grid)
+            -> std::expected<SurfaceHandle, PriceTableError>
+        {
+            SegmentedPriceTableBuilder::Config seg_cfg{
+                .K_ref = K_ref,
+                .option_type = config.option_type,
+                .dividends = {.dividend_yield = config.dividend_yield,
+                              .discrete_dividends = config.discrete_dividends},
+                .moneyness_grid = m_grid,
+                .maturity = config.maturity,
+                .vol_grid = v_grid,
+                .rate_grid = r_grid,
+                .skip_moneyness_expansion = true,
+            };
+            auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
+            if (!surface.has_value()) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+            }
+            auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
+            double spot = config.spot;
+            return SurfaceHandle{
+                .price = [shared, spot](double /*spot_arg*/, double strike,
+                                        double tau, double sigma, double rate) -> double {
+                    return shared->price(spot, strike, tau, sigma, rate);
+                },
+                .pde_solves = 0
+            };
+        };
+
+        // ValidateFn: solve_american_option with discrete dividends
+        ValidateFn validate_fn = [&config](
+            double spot, double strike, double tau,
+            double sigma, double rate)
+            -> std::expected<double, SolverError>
+        {
+            PricingParams params;
+            params.spot = spot;
+            params.strike = strike;
+            params.maturity = tau;
+            params.rate = rate;
+            params.dividend_yield = config.dividend_yield;
+            params.option_type = config.option_type;
+            params.volatility = sigma;
+            params.discrete_dividends = config.discrete_dividends;
+            auto fd = solve_american_option(params);
+            if (!fd.has_value()) return std::unexpected(fd.error());
+            return fd->value();
+        };
+
+        auto compute_error_fn = [this](double interp, double ref,
+                                        double spot, double strike, double tau,
+                                        double sigma, double rate,
+                                        double div_yield) -> std::optional<double> {
+            return compute_error_metric(interp, ref, spot, strike, tau, sigma, rate, div_yield);
+        };
+
+        RefinementContext ctx{
+            .spot = config.spot,
+            .dividend_yield = config.dividend_yield,
+            .option_type = config.option_type,
+            .min_moneyness = expanded_min_m,
+            .max_moneyness = max_m,
+            .min_tau = min_tau,
+            .max_tau = max_tau,
+            .min_vol = min_vol,
+            .max_vol = max_vol,
+            .min_rate = min_rate,
+            .max_rate = max_rate,
+        };
+
+        auto sizes = run_refinement(params_, build_fn, validate_fn, ctx, compute_error_fn);
+        if (!sizes.has_value()) {
+            return std::unexpected(sizes.error());
+        }
+        probe_results.push_back(std::move(*sizes));
+    }
+
+    // 5. Per-axis max
+    size_t max_m_size = 0, max_v_size = 0, max_r_size = 0;
+    int max_tau_pts = 0;
+    for (const auto& pr : probe_results) {
+        max_m_size = std::max(max_m_size, pr.moneyness.size());
+        max_v_size = std::max(max_v_size, pr.vol.size());
+        max_r_size = std::max(max_r_size, pr.rate.size());
+        max_tau_pts = std::max(max_tau_pts, pr.tau_points);
+    }
+
+    // 6. Generate uniform grids with max sizes
+    auto final_m = linspace(expanded_min_m, max_m, max_m_size);
+    auto final_v = linspace(min_vol, max_vol, max_v_size);
+    auto final_r = linspace(min_rate, max_rate, max_r_size);
+
+    // 7. Build full SegmentedMultiKRefSurface
+    SegmentedMultiKRefBuilder::Config mkref_config{
+        .spot = config.spot,
+        .option_type = config.option_type,
+        .dividends = {.dividend_yield = config.dividend_yield,
+                      .discrete_dividends = config.discrete_dividends},
+        .moneyness_grid = final_m,
+        .maturity = config.maturity,
+        .vol_grid = final_v,
+        .rate_grid = final_r,
+        .kref_config = config.kref_config,
+        .tau_points_per_segment = max_tau_pts,
+        .skip_moneyness_expansion = true,
+    };
+
+    auto surface = SegmentedMultiKRefBuilder::build(mkref_config);
+    if (!surface.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    return std::move(*surface);
 }
 
 }  // namespace mango

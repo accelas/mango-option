@@ -5,6 +5,8 @@
 #include "src/option/table/price_table_builder.hpp"
 #include "src/option/table/slice_cache.hpp"
 #include "src/option/table/error_attribution.hpp"
+#include "src/option/table/segmented_multi_kref_builder.hpp"
+#include "src/option/table/segmented_multi_kref_surface.hpp"
 #include "src/option/option_grid.hpp"
 #include "src/pde/core/grid.hpp"
 #include "src/support/error_types.hpp"
@@ -12,6 +14,16 @@
 #include <optional>
 
 namespace mango {
+
+/// Configuration for segmented adaptive grid building
+struct SegmentedAdaptiveConfig {
+    double spot;
+    OptionType option_type;
+    double dividend_yield;
+    std::vector<Dividend> discrete_dividends;
+    double maturity;
+    MultiKRefConfig kref_config;
+};
 
 /// Adaptive grid builder for price tables
 ///
@@ -47,6 +59,15 @@ public:
           GridSpec<double> grid_spec,
           size_t n_time,
           OptionType type = OptionType::PUT);
+
+    /// Build segmented multi-K_ref surface with adaptive grid refinement.
+    /// Probes 2-3 representative K_refs, takes per-axis max grid sizes,
+    /// then builds all segments with a uniform grid.
+    [[nodiscard]] std::expected<SegmentedMultiKRefSurface, PriceTableError>
+    build_segmented(const SegmentedAdaptiveConfig& config,
+                    const std::vector<double>& moneyness_domain,
+                    const std::vector<double>& vol_domain,
+                    const std::vector<double>& rate_domain);
 
 private:
     AdaptiveGridParams params_;
