@@ -571,6 +571,24 @@ $$S_\text{adj} = S - \sum_{\{k : t_\text{query} < t_k \leq t_\text{boundary}\}} 
 
 Cash dividends break the scale invariance that American options normally have in strike (the EEP decomposition assumes $P \propto K$, which fails when $D/K$ varies with $K$). The builder constructs surfaces at several reference strikes and interpolates across them with Catmull-Rom splines in $\ln(K_\text{ref})$, producing a `SegmentedMultiKRefSurface`.
 
+### Adaptive Grid Refinement for Segmented Surfaces
+
+The adaptive grid builder (section 10) extends to segmented surfaces via a probe-and-max strategy. Rather than building the full multi-K_ref surface at each refinement iteration, the builder:
+
+1. **Selects 2–3 probe K_ref values** from the full list: the lowest, highest, and the one closest to ATM (deduplicated if ATM coincides with an endpoint).
+
+2. **Runs independent refinement loops** on each probe, building single-K_ref `SegmentedPriceSurface` instances. Each probe validates at strike = K_ref (the only strike that single-K_ref raw segments can price exactly).
+
+3. **Takes the per-axis maximum** grid sizes across probes — the worst-case K_ref determines each axis.
+
+4. **Builds the full `SegmentedMultiKRefSurface`** once, using uniform grids at the maximum sizes with `skip_moneyness_expansion = true` (the domain was pre-expanded in step 1).
+
+5. **Final validation** at arbitrary strikes against fresh PDE reference prices. If the error exceeds the target, all grids are bumped by one refinement step and the surface is rebuilt (one retry).
+
+The moneyness domain is pre-expanded before probing using the worst-case (smallest) K_ref: $m_\text{min}' = \max(m_\text{min} - \sum D_k / K_\text{ref,min},\; 0.01)$. This ensures all K_refs share the same expanded domain.
+
+The tau axis is refined via the `tau_points_per_segment` scalar (minimum 4 for B-spline), which the refinement loop increments when tau is the worst dimension.
+
 ---
 
 ## 10. Price Table Grid Estimation
@@ -580,7 +598,7 @@ The 4D grid density directly controls IV accuracy. Too coarse and the B-spline i
 The library offers two grid specification modes:
 
 - **Manual grid.** The user supplies explicit grid vectors for moneyness, volatility, and rate (each requiring $\geq 4$ points for the cubic B-spline). Predefined accuracy profiles translate a qualitative accuracy level into concrete grid sizes derived from the curvature-based formula below.
-- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This removes the need for manual tuning at the cost of additional PDE solves during construction.
+- **Adaptive grid.** The user specifies a target IV error $\varepsilon_\text{target}$ and domain bounds. The builder automatically determines grid density via iterative refinement, validated against fresh PDE solves. This works for both the standard path (continuous dividends) and the segmented path (discrete dividends; see section 9 for the probe-and-max strategy). This removes the need for manual tuning at the cost of additional PDE solves during construction.
 
 Both modes share the same maturity grid (supplied via the path configuration) and produce the same `PriceTableSurface<4>` — the difference is only in how the per-axis point counts are chosen.
 

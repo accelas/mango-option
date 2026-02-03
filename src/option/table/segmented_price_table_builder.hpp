@@ -26,6 +26,8 @@ public:
         std::vector<double> rate_grid;
         /// Minimum tau points per segment (actual count may be higher)
         int tau_points_per_segment = 5;
+        /// If true, skip internal moneyness expansion (caller pre-expanded).
+        bool skip_moneyness_expansion = false;
     };
 
     /// Build a SegmentedPriceSurface from the given configuration.
