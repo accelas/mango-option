@@ -228,8 +228,9 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
     // The high-accuracy solver should produce a meaningfully different IV,
     // demonstrating that grid_accuracy actually flows through.
 
-    // Default accuracy
+    // Default accuracy (disable probe-based calibration to use config_.grid)
     IVSolverConfig default_config = config;
+    default_config.target_price_error = 0.0;  // Use heuristic grid from config_.grid
     IVSolver solver_default(default_config);
     auto result_default = solver_default.solve(query);
     ASSERT_TRUE(result_default.has_value())
@@ -238,6 +239,7 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
 
     // Finer grid: tol=5e-3 (vs default 1e-2), min 150 points (vs default 100)
     IVSolverConfig finer_config = config;
+    finer_config.target_price_error = 0.0;  // Use heuristic grid from config_.grid
     auto finer_accuracy = GridAccuracyParams{};
     finer_accuracy.tol = 5e-3;
     finer_accuracy.min_spatial_points = 150;
@@ -262,4 +264,82 @@ TEST_F(IVSolverTest, GridAccuracyReducesError) {
     EXPECT_LT(result_default->implied_vol, 0.35);
     EXPECT_GT(result_finer->implied_vol, 0.15);
     EXPECT_LT(result_finer->implied_vol, 0.35);
+}
+
+// ===========================================================================
+// Probe-based grid calibration tests
+// ===========================================================================
+
+TEST(IVSolverProbeTest, UsesProbeBasedGridWhenTargetPriceErrorSet) {
+    mango::OptionSpec spec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = mango::OptionType::PUT};
+
+    mango::IVSolverConfig config{
+        .target_price_error = 0.01  // Enable probe-based calibration
+    };
+
+    mango::IVSolver solver(config);
+    mango::IVQuery query(spec, 5.50);
+
+    auto result = solver.solve(query);
+    ASSERT_TRUE(result.has_value())
+        << "Probe-based solve failed with error code: "
+        << static_cast<int>(result.error().code);
+    // IV should be reasonable (between 10% and 30% for this price)
+    EXPECT_GT(result->implied_vol, 0.10);
+    EXPECT_LT(result->implied_vol, 0.30);
+}
+
+TEST(IVSolverProbeTest, DifferentOptionsGetDifferentGrids) {
+    // Verify cache is per-solve(), not per-solver-instance
+    mango::IVSolverConfig config{.target_price_error = 0.01};
+    mango::IVSolver solver(config);
+
+    // Option 1: short maturity
+    mango::OptionSpec spec1{
+        .spot = 100.0, .strike = 100.0, .maturity = 0.1,
+        .rate = 0.05, .dividend_yield = 0.0,
+        .option_type = mango::OptionType::PUT};
+    mango::IVQuery query1(spec1, 2.0);
+
+    // Option 2: long maturity (needs different grid)
+    mango::OptionSpec spec2{
+        .spot = 100.0, .strike = 100.0, .maturity = 2.0,
+        .rate = 0.05, .dividend_yield = 0.0,
+        .option_type = mango::OptionType::PUT};
+    mango::IVQuery query2(spec2, 12.0);
+
+    auto result1 = solver.solve(query1);
+    auto result2 = solver.solve(query2);
+
+    // Both should succeed (if cache was shared incorrectly, one might fail)
+    ASSERT_TRUE(result1.has_value())
+        << "Short maturity solve failed";
+    ASSERT_TRUE(result2.has_value())
+        << "Long maturity solve failed";
+
+    // IVs should be different (different maturities, different prices)
+    EXPECT_NE(result1->implied_vol, result2->implied_vol);
+}
+
+TEST(IVSolverProbeTest, FallsBackToHeuristicWhenProbeDisabled) {
+    mango::OptionSpec spec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.0,
+        .option_type = mango::OptionType::PUT};
+
+    // target_price_error = 0 disables probe-based calibration
+    mango::IVSolverConfig config{.target_price_error = 0.0};
+    mango::IVSolver solver(config);
+    mango::IVQuery query(spec, 5.50);
+
+    auto result = solver.solve(query);
+    ASSERT_TRUE(result.has_value())
+        << "Heuristic fallback solve failed with error code: "
+        << static_cast<int>(result.error().code);
+    // IV should be reasonable (between 10% and 30%)
+    EXPECT_GT(result->implied_vol, 0.10);
+    EXPECT_LT(result->implied_vol, 0.30);
 }

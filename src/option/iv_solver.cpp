@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "src/option/iv_solver.hpp"
+#include "src/option/grid_probe.hpp"
 #include "src/math/root_finding.hpp"
 #include "src/option/american_option.hpp"
 #include "src/pde/core/pde_workspace.hpp"
@@ -52,7 +53,8 @@ double IVSolver::estimate_lower_bound() const {
     return 0.01;  // 1%
 }
 
-double IVSolver::objective_function(const IVQuery& query, double volatility) const {
+double IVSolver::objective_function(const IVQuery& query, double volatility,
+                                     const CachedGrid& cached_grid) const {
     // Create American option parameters
     PricingParams option_params;
     option_params.strike = query.strike;
@@ -63,27 +65,40 @@ double IVSolver::objective_function(const IVQuery& query, double volatility) con
     option_params.dividend_yield = query.dividend_yield;
     option_params.option_type = query.option_type;
 
-    // Resolve grid from config
+    // Resolve grid: use cached grid if available, otherwise fall back to config_.grid
     GridSpec<double> grid_spec = GridSpec<double>::uniform(0.0, 1.0, 10).value();  // Will be replaced
     TimeDomain time_domain = TimeDomain::from_n_steps(0.0, query.maturity, 100);
 
-    std::visit([&](const auto& grid_variant) {
-        using T = std::decay_t<decltype(grid_variant)>;
-        if constexpr (std::is_same_v<T, GridAccuracyParams>) {
-            auto [auto_grid, auto_td] = estimate_pde_grid(option_params, grid_variant);
-            grid_spec = auto_grid;
-            time_domain = auto_td;
-        } else if constexpr (std::is_same_v<T, PDEGridConfig>) {
-            grid_spec = grid_variant.grid_spec;
-            if (grid_variant.mandatory_times.empty()) {
-                time_domain = TimeDomain::from_n_steps(0.0, query.maturity, grid_variant.n_time);
-            } else {
-                time_domain = TimeDomain::with_mandatory_points(0.0, query.maturity,
-                    query.maturity / static_cast<double>(grid_variant.n_time),
-                    grid_variant.mandatory_times);
+    if (cached_grid.has_value()) {
+        // Use probe-calibrated grid (from σ_high calibration)
+        grid_spec = cached_grid->first;
+        time_domain = cached_grid->second;
+    } else if (config_.target_price_error > 0.0) {
+        // Probe was attempted but didn't converge -> use default heuristic
+        // (config_.grid is ignored when target_price_error > 0)
+        auto [auto_grid, auto_td] = estimate_pde_grid(option_params, GridAccuracyParams{});
+        grid_spec = auto_grid;
+        time_domain = auto_td;
+    } else {
+        // target_price_error == 0 -> use config_.grid (existing behavior)
+        std::visit([&](const auto& grid_variant) {
+            using T = std::decay_t<decltype(grid_variant)>;
+            if constexpr (std::is_same_v<T, GridAccuracyParams>) {
+                auto [auto_grid, auto_td] = estimate_pde_grid(option_params, grid_variant);
+                grid_spec = auto_grid;
+                time_domain = auto_td;
+            } else if constexpr (std::is_same_v<T, PDEGridConfig>) {
+                grid_spec = grid_variant.grid_spec;
+                if (grid_variant.mandatory_times.empty()) {
+                    time_domain = TimeDomain::from_n_steps(0.0, query.maturity, grid_variant.n_time);
+                } else {
+                    time_domain = TimeDomain::with_mandatory_points(0.0, query.maturity,
+                        query.maturity / static_cast<double>(grid_variant.n_time),
+                        grid_variant.mandatory_times);
+                }
             }
-        }
-    }, config_.grid);
+        }, config_.grid);
+    }
 
     // Single grow-only buffer per thread — avoids unordered_map overhead.
     // Grid size may vary across Brent iterations (volatility changes grid estimation)
@@ -151,7 +166,7 @@ IVSolver::validate_query(const IVQuery& query) const {
 }
 
 std::expected<IVSuccess, IVError>
-IVSolver::solve_brent(const IVQuery& query) const {
+IVSolver::solve_brent(const IVQuery& query, const CachedGrid& cached_grid) const {
     // Adaptive bounds logic
     double intrinsic = (query.option_type == OptionType::CALL)
         ? std::max(0.0, query.spot - query.strike)
@@ -171,9 +186,9 @@ IVSolver::solve_brent(const IVQuery& query) const {
 
     double vol_lower = 0.01;
 
-    // Objective function
-    auto objective = [this, &query](double vol) -> double {
-        return this->objective_function(query, vol);
+    // Objective function (captures cached_grid for probe-based path)
+    auto objective = [this, &query, &cached_grid](double vol) -> double {
+        return this->objective_function(query, vol, cached_grid);
     };
 
     // Run Brent
@@ -220,9 +235,34 @@ IVSolver::solve_brent(const IVQuery& query) const {
 }
 
 std::expected<IVSuccess, IVError> IVSolver::solve(const IVQuery& query) const {
-    // C++23 monadic validation pipeline: validate → solve
-    return validate_query(query)
-        .and_then([this, &query](auto) { return solve_brent(query); });
+    // Validate first - don't waste time probing invalid queries
+    auto validation = validate_query(query);
+    if (!validation.has_value()) {
+        return std::unexpected(validation.error());
+    }
+
+    // Local cache for this solve() call only (NOT a member variable)
+    // This ensures different options get their own calibrated grids
+    CachedGrid cached_grid;
+
+    // If target_price_error > 0, use probe-based calibration
+    if (config_.target_price_error > 0.0) {
+        // Calibrate at sigma_high (worst case for grid requirements)
+        // Use 3.0 which is the maximum adaptive upper bound from solve_brent()
+        constexpr double sigma_high = 3.0;
+        PricingParams probe_params(query, sigma_high);
+
+        auto probe_result = probe_grid_adequacy(probe_params, config_.target_price_error);
+        if (probe_result.has_value() && probe_result->converged) {
+            cached_grid = {probe_result->grid, probe_result->time_domain};
+        }
+        // If probe fails or doesn't converge, cached_grid remains nullopt
+        // -> objective_function() falls back to default heuristic (GridAccuracyParams{})
+        // Note: config_.grid is IGNORED when target_price_error > 0
+    }
+
+    // Run Brent solver with cached grid (validation already done above)
+    return solve_brent(query, cached_grid);
 }
 
 BatchIVResult IVSolver::solve_batch(const std::vector<IVQuery>& queries) const {

@@ -184,11 +184,16 @@ private:
     /// @return Lower bound (typically 0.01 or 1%)
     double estimate_lower_bound() const;
 
+    /// Cached grid for probe-based calibration
+    using CachedGrid = std::optional<std::pair<GridSpec<double>, TimeDomain>>;
+
     /// Objective function for root-finding: f(σ) = V(σ) - V_market
     /// @param query Option specification and market price
     /// @param volatility Candidate volatility
+    /// @param cached_grid Optional cached grid from probe-based calibration
     /// @return Difference between theoretical and market price
-    double objective_function(const IVQuery& query, double volatility) const;
+    double objective_function(const IVQuery& query, double volatility,
+                              const CachedGrid& cached_grid) const;
 
     /// Validate query using centralized validation
     /// Uses validate_iv_query() from option_spec.cpp for consistency
@@ -196,8 +201,11 @@ private:
     std::expected<std::monostate, IVError> validate_query(const IVQuery& query) const;
 
     /// Run Brent solver to find implied volatility
+    /// @param query Option specification and market price
+    /// @param cached_grid Optional cached grid from probe-based calibration
     /// @return IVSuccess with implied volatility or IVError on failure
-    std::expected<IVSuccess, IVError> solve_brent(const IVQuery& query) const;
+    std::expected<IVSuccess, IVError> solve_brent(const IVQuery& query,
+                                                   const CachedGrid& cached_grid) const;
 };
 
 } // namespace mango
