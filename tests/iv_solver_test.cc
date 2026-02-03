@@ -365,3 +365,71 @@ TEST(IVSolverProbeTest, FallsBackToHeuristicWhenProbeDoesntConverge) {
     EXPECT_GT(result->implied_vol, 0.10);
     EXPECT_LT(result->implied_vol, 0.50);
 }
+
+// ===========================================================================
+// Probe path consistency tests
+// ===========================================================================
+
+// Verify probe-based IV is stable for multiple queries with same parameters
+TEST(IVSolverProbeTest, ProbePathStability) {
+    mango::OptionSpec spec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = mango::OptionType::PUT};
+
+    // Enable probe-based calibration
+    mango::IVSolverConfig config{.root_config = {}, .target_price_error = 0.01};
+    mango::IVSolver solver(config);
+
+    mango::IVQuery query(spec, 6.50);
+
+    // Solve twice with the same query - should get same result
+    auto result1 = solver.solve(query);
+    auto result2 = solver.solve(query);
+
+    ASSERT_TRUE(result1.has_value())
+        << "First solve failed with error code: "
+        << static_cast<int>(result1.error().code);
+    ASSERT_TRUE(result2.has_value())
+        << "Second solve failed with error code: "
+        << static_cast<int>(result2.error().code);
+
+    // Both should produce the same IV (deterministic within floating-point tolerance)
+    EXPECT_NEAR(result1->implied_vol, result2->implied_vol, 1e-8)
+        << "Probe-based IV should be deterministic";
+
+    // IV should be reasonable (between 10% and 40%)
+    EXPECT_GT(result1->implied_vol, 0.10);
+    EXPECT_LT(result1->implied_vol, 0.40);
+}
+
+// Verify probe-based path produces similar IV to heuristic path
+TEST(IVSolverProbeTest, ProbePathSimilarToHeuristic) {
+    mango::OptionSpec spec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = mango::OptionType::PUT};
+
+    mango::IVQuery query(spec, 6.50);
+
+    // Probe-based solver
+    mango::IVSolverConfig probe_config{.root_config = {}, .target_price_error = 0.01};
+    mango::IVSolver probe_solver(probe_config);
+    auto probe_result = probe_solver.solve(query);
+
+    // Heuristic-based solver
+    mango::IVSolverConfig heuristic_config{.root_config = {}, .target_price_error = 0.0};
+    mango::IVSolver heuristic_solver(heuristic_config);
+    auto heuristic_result = heuristic_solver.solve(query);
+
+    ASSERT_TRUE(probe_result.has_value());
+    ASSERT_TRUE(heuristic_result.has_value());
+
+    // Both methods should produce similar IVs (within 2% absolute)
+    // Note: Different grid estimation methods can produce slightly different IVs
+    // due to discretization effects
+    double iv_diff = std::abs(probe_result->implied_vol - heuristic_result->implied_vol);
+    EXPECT_LT(iv_diff, 0.02)
+        << "Probe IV=" << probe_result->implied_vol
+        << " Heuristic IV=" << heuristic_result->implied_vol;
+}

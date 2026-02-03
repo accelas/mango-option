@@ -123,9 +123,18 @@ double IVSolver::objective_function(const IVQuery& query, double volatility,
         return std::numeric_limits<double>::quiet_NaN();
     }
 
+    // Collect mandatory tau values for discrete dividends
+    std::vector<double> mandatory_tau;
+    for (const auto& div : option_params.discrete_dividends) {
+        double tau = option_params.maturity - div.calendar_time;
+        if (tau > 0.0 && tau < option_params.maturity) {
+            mandatory_tau.push_back(tau);
+        }
+    }
+
     // Create solver and solve — always pass grid config to ensure the solver
     // uses the same grid we computed (matching the workspace size)
-    auto explicit_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
+    auto explicit_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), std::move(mandatory_tau)};
 
     auto solver_result = AmericanOptionSolver::create(
         option_params, pde_workspace_result.value(), PDEGridSpec{explicit_grid});
