@@ -201,8 +201,9 @@ Flow:
    `skip_moneyness_expansion = true`
 8. Final validation: LHS samples at arbitrary strikes against fresh
    FD references. If error exceeds target, bump grids by one step
-   and rebuild (one retry). Return surface regardless (with
-   `target_met` reflecting final validation result).
+   and rebuild (one retry). Return best surface regardless — the
+   return type is just `SegmentedMultiKRefSurface` with no
+   diagnostics (factory discards them).
 
 ### 7. Factory integration
 
