@@ -37,6 +37,8 @@ IVSolverFDMConfig config{
 - If `target_price_error == 0`, fall back to existing `grid` behavior (heuristic or explicit)
 - Users who need manual control can set `target_price_error = 0` and pass explicit `PDEGridConfig` via `grid`
 
+**Fallback on probe failure:** If probe doesn't converge (returns `converged=false`), IVSolver uses **default heuristic** (`GridAccuracyParams{}`) regardless of what `grid` field contains. This is because `grid` is explicitly ignored when `target_price_error > 0`. Users who want explicit grid control must set `target_price_error = 0`.
+
 **Units:** `target_price_error` is in absolute price units (same as option price). For a $100 stock, `0.01` means $0.01 accuracy.
 
 ### Probe Algorithm
@@ -64,10 +66,12 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         auto [grid2, td2] = make_grid(params, 2 * Nx);
         double P2 = solve_pde(params, grid2, td2);
 
-        // Compute delta consistently: finite difference at spot using finer grid
-        // Both deltas computed on grid2 to avoid interpolation noise
-        double delta1 = interpolate_and_diff(solution1, grid2, spot);
-        double delta2 = compute_delta(solution2, grid2, spot);
+        // Compute delta consistently at the SAME physical point (spot)
+        // Use cubic spline interpolation of each solution, then finite diff
+        // This avoids grid-dependent artifacts in delta comparison
+        double h = 0.01 * spot;  // 1% bump for finite difference
+        double delta1 = (interpolate(solution1, spot + h) - interpolate(solution1, spot - h)) / (2 * h);
+        double delta2 = (interpolate(solution2, spot + h) - interpolate(solution2, spot - h)) / (2 * h);
 
         // Composite acceptance criterion using max of both prices
         double price_ref = std::max({std::abs(P1), std::abs(P2), 0.10});
@@ -87,10 +91,11 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 ```
 
 **Key details:**
-- Delta computed consistently on finer grid to avoid interpolation artifacts
+- Delta computed consistently via cubic spline interpolation at the same physical point (spot)
 - Error criterion uses `max(|P1|, |P2|, floor)` for consistent relative scale
 - Returns `converged` flag so caller can decide fallback behavior
-- When enforcing Nt floor, also verify CFL stability: `dt <= c_t * dx_min`
+- Nt floor (min 50 steps) ensures temporal resolution for short maturities
+- Note: TR-BDF2 is L-stable (unconditionally stable for diffusion), so no CFL constraint needed for stability; Nt floor is purely for accuracy
 
 ### IVSolver Integration
 
@@ -124,12 +129,12 @@ Calibrate at σ_high because higher volatility requires wider domain and finer g
 
 | Case | Problem | Solution |
 |------|---------|----------|
-| Short maturity (T < 0.05) | Too few time steps | Nt floor (min 50) + verify CFL: `dt <= c_t * dx_min` |
-| Coincidental agreement | P(Nx) ≈ P(2Nx) by chance | Check delta convergence on same grid |
+| Short maturity (T < 0.05) | Too few time steps | Nt floor (min 50) for temporal accuracy |
+| Coincidental agreement | P(Nx) ≈ P(2Nx) by chance | Check delta convergence at same physical point |
 | Order reduction | TR-BDF2 degrades near free boundary | Use finer grid (2Nx) as result |
 | Discrete dividends | Discontinuities | Inherit dividend-aware domain widening |
 | Boundary placement | Domain too narrow | Verify n_sigma covers moneyness |
-| Probe failure | Max iterations reached | Return `converged=false`, IVSolver falls back to heuristic |
+| Probe failure | Max iterations reached | Return `converged=false`, IVSolver uses default heuristic |
 | Price converges, delta doesn't | Grid adequate for price but not greeks | Require both to converge |
 
 ### Performance
@@ -148,9 +153,9 @@ Net result: ~20% faster AND empirically verified accuracy.
 - `IVSolverFDMConfig.target_price_error` field (double, default 0.01)
 - `probe_grid_adequacy()` function with `converged` flag
 - IVSolver grid caching per `solve()` call at σ_high
-- Edge case handling (Nt floor with CFL check, consistent delta computation)
+- Edge case handling (Nt floor for accuracy, consistent delta via interpolation)
 - USDT probes for calibration tracing
-- Fallback to heuristic when probe doesn't converge
+- Fallback to default heuristic when probe doesn't converge
 
 **Out of scope (future work):**
 - Single-option `solve_american_option()` — heuristic adequate

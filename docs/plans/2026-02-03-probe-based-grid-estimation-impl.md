@@ -169,7 +169,8 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
     constexpr double delta_tol = 0.01;
     constexpr double price_floor = 0.10;
     constexpr size_t min_time_steps = 50;
-    constexpr double c_t = 0.75;  // CFL safety factor
+    // Note: TR-BDF2 is L-stable (unconditionally stable for diffusion)
+    // No CFL constraint needed; Nt floor is purely for accuracy
 
     GridSpec<double> best_grid;
     TimeDomain best_td;
@@ -182,15 +183,10 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         acc1.max_spatial_points = Nx;
         auto [grid1, td1] = estimate_pde_grid(params, acc1);
 
-        // Enforce Nt floor for short maturities, respecting CFL
-        double dx_min1 = grid1.min_spacing();
-        double dt_max1 = c_t * dx_min1;
-        size_t nt1 = std::max(td1.n_steps(), min_time_steps);
-        double dt1 = params.maturity / static_cast<double>(nt1);
-        if (dt1 > dt_max1) {
-            nt1 = static_cast<size_t>(std::ceil(params.maturity / dt_max1));
+        // Enforce Nt floor for short maturities (accuracy, not stability)
+        if (td1.n_steps() < min_time_steps) {
+            td1 = TimeDomain::from_n_steps(0.0, params.maturity, min_time_steps);
         }
-        td1 = TimeDomain::from_n_steps(0.0, params.maturity, nt1);
 
         // Solve at Nx
         auto result1 = solve_american_option(params, PDEGridConfig{
@@ -206,15 +202,10 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         acc2.max_spatial_points = 2 * Nx;
         auto [grid2, td2] = estimate_pde_grid(params, acc2);
 
-        // Enforce Nt floor with CFL for finer grid
-        double dx_min2 = grid2.min_spacing();
-        double dt_max2 = c_t * dx_min2;
-        size_t nt2 = std::max(td2.n_steps(), min_time_steps);
-        double dt2 = params.maturity / static_cast<double>(nt2);
-        if (dt2 > dt_max2) {
-            nt2 = static_cast<size_t>(std::ceil(params.maturity / dt_max2));
+        // Enforce Nt floor for finer grid
+        if (td2.n_steps() < min_time_steps) {
+            td2 = TimeDomain::from_n_steps(0.0, params.maturity, min_time_steps);
         }
-        td2 = TimeDomain::from_n_steps(0.0, params.maturity, nt2);
 
         // Solve at 2Nx
         auto result2 = solve_american_option(params, PDEGridConfig{
@@ -224,12 +215,11 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         }
         double P2 = result2->value_at(params.spot);
 
-        // Compute delta consistently using finer grid (grid2)
-        // Interpolate solution1 onto grid2 points, then finite diff at spot
-        double delta1 = result1->delta();  // From coarse grid
-        double delta2 = result2->delta();  // From fine grid
-        // Note: Both use same spot, so comparison is meaningful
-        // For higher precision, could interpolate sol1 onto grid2 and recompute
+        // Compute delta consistently at same physical point via interpolation
+        // Use cubic spline interpolation + finite difference at spot
+        double h = 0.01 * params.spot;  // 1% bump
+        double delta1 = (result1->value_at(params.spot + h) - result1->value_at(params.spot - h)) / (2.0 * h);
+        double delta2 = (result2->value_at(params.spot + h) - result2->value_at(params.spot - h)) / (2.0 * h);
 
         // Composite acceptance criterion using max of both prices
         double price_diff = std::abs(P1 - P2);
@@ -319,7 +309,7 @@ git commit -m "Add probe_grid_adequacy() for Richardson-style grid calibration"
 **Step 1: Write tests for edge cases**
 
 ```cpp
-TEST(GridProbeTest, ShortMaturityEnforcesNtFloorWithCFL) {
+TEST(GridProbeTest, ShortMaturityEnforcesNtFloor) {
     mango::PricingParams params(
         mango::OptionSpec{
             .spot = 100.0, .strike = 100.0, .maturity = 0.02,  // 1 week
@@ -328,12 +318,8 @@ TEST(GridProbeTest, ShortMaturityEnforcesNtFloorWithCFL) {
 
     auto result = mango::probe_grid_adequacy(params, 0.01);
     ASSERT_TRUE(result.has_value());
-    EXPECT_GE(result->time_domain.n_steps(), 50);  // Nt floor
-
-    // Verify CFL is respected: dt <= c_t * dx_min
-    double dt = params.maturity / result->time_domain.n_steps();
-    double dx_min = result->grid.min_spacing();
-    EXPECT_LE(dt, 0.75 * dx_min + 1e-10);  // c_t = 0.75
+    EXPECT_GE(result->time_domain.n_steps(), 50);  // Nt floor for accuracy
+    // Note: No CFL check needed - TR-BDF2 is L-stable (unconditionally stable)
 }
 
 TEST(GridProbeTest, DeepITMConverges) {
@@ -515,7 +501,9 @@ std::expected<IVSuccess, IVError> IVSolver::solve(const IVQuery& query) const {
         if (probe_result.has_value() && probe_result->converged) {
             probe_grid = {probe_result->grid, probe_result->time_domain};
         }
-        // If probe fails or doesn't converge, fall back to heuristic
+        // If probe fails or doesn't converge, probe_grid remains nullopt
+        // -> falls back to default heuristic (GridAccuracyParams{})
+        // Note: config_.grid is IGNORED when target_price_error > 0
     }
 
     // Pass probe_grid to objective function (or nullptr for heuristic path)
@@ -530,8 +518,14 @@ std::expected<IVSuccess, IVError> IVSolver::solve(const IVQuery& query) const {
 if (probe_grid.has_value()) {
     grid_spec = probe_grid->first;
     time_domain = probe_grid->second;
+} else if (config_.target_price_error > 0.0) {
+    // Probe was attempted but didn't converge -> use default heuristic
+    // (config_.grid is ignored when target_price_error > 0)
+    auto [auto_grid, auto_td] = estimate_pde_grid(option_params, GridAccuracyParams{});
+    grid_spec = auto_grid;
+    time_domain = auto_td;
 } else {
-    // Existing heuristic path
+    // target_price_error == 0 -> use config_.grid (existing behavior)
     std::visit([&](const auto& grid_variant) { ... }, config_.grid);
 }
 ```
