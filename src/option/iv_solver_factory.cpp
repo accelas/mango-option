@@ -130,37 +130,62 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 
 static std::expected<AnyIVSolver, ValidationError>
 build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path) {
-    // Segmented path requires ManualGrid
-    const auto* manual = std::get_if<ManualGrid>(&config.grid);
-    if (!manual) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
+    return std::visit([&](const auto& grid) -> std::expected<AnyIVSolver, ValidationError> {
+        using G = std::decay_t<decltype(grid)>;
 
-    SegmentedMultiKRefBuilder::Config seg_config{
-        .spot = config.spot,
-        .option_type = config.option_type,
-        .dividends = {.dividend_yield = config.dividend_yield, .discrete_dividends = path.discrete_dividends},
-        .moneyness_grid = manual->moneyness,
-        .maturity = path.maturity,
-        .vol_grid = manual->vol,
-        .rate_grid = manual->rate,
-        .kref_config = path.kref_config,
-    };
+        if constexpr (std::is_same_v<G, AdaptiveGrid>) {
+            // Adaptive grid for segmented path
+            AdaptiveGridBuilder builder(grid.params);
+            SegmentedAdaptiveConfig seg_config{
+                .spot = config.spot,
+                .option_type = config.option_type,
+                .dividend_yield = config.dividend_yield,
+                .discrete_dividends = path.discrete_dividends,
+                .maturity = path.maturity,
+                .kref_config = path.kref_config,
+            };
+            auto surface = builder.build_segmented(
+                seg_config, grid.moneyness, grid.vol, grid.rate);
+            if (!surface.has_value()) {
+                return std::unexpected(ValidationError{
+                    ValidationErrorCode::InvalidGridSize, 0.0});
+            }
 
-    auto surface = SegmentedMultiKRefBuilder::build(seg_config);
-    if (!surface.has_value()) {
-        return std::unexpected(surface.error());
-    }
+            auto solver = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
+                std::move(*surface), config.solver_config);
+            if (!solver.has_value()) {
+                return std::unexpected(ValidationError{
+                    ValidationErrorCode::InvalidGridSize, 0.0});
+            }
+            return AnyIVSolver(std::move(*solver));
+        }
 
-    auto solver = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
-        std::move(*surface), config.solver_config);
-    if (!solver.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
+        // Manual grid: existing path (unchanged)
+        SegmentedMultiKRefBuilder::Config seg_config{
+            .spot = config.spot,
+            .option_type = config.option_type,
+            .dividends = {.dividend_yield = config.dividend_yield, .discrete_dividends = path.discrete_dividends},
+            .moneyness_grid = grid.moneyness,
+            .maturity = path.maturity,
+            .vol_grid = grid.vol,
+            .rate_grid = grid.rate,
+            .kref_config = path.kref_config,
+        };
 
-    return AnyIVSolver(std::move(*solver));
+        auto surface = SegmentedMultiKRefBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
+        }
+
+        auto solver = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
+            std::move(*surface), config.solver_config);
+        if (!solver.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        return AnyIVSolver(std::move(*solver));
+    }, config.grid);
 }
 
 // ---------------------------------------------------------------------------

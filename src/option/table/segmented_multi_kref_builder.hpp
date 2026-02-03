@@ -27,6 +27,8 @@ public:
         std::vector<double> vol_grid;
         std::vector<double> rate_grid;
         MultiKRefConfig kref_config;
+        int tau_points_per_segment = 5;
+        bool skip_moneyness_expansion = false;
     };
 
     static std::expected<SegmentedMultiKRefSurface, ValidationError> build(const Config& config);

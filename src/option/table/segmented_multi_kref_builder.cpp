@@ -51,6 +51,8 @@ SegmentedMultiKRefBuilder::build(const Config& config) {
             .maturity = config.maturity,
             .vol_grid = config.vol_grid,
             .rate_grid = config.rate_grid,
+            .tau_points_per_segment = config.tau_points_per_segment,
+            .skip_moneyness_expansion = config.skip_moneyness_expansion,
         };
 
         auto surface = SegmentedPriceTableBuilder::build(seg_config);

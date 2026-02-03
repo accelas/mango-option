@@ -169,6 +169,48 @@ TEST(IVSolverFactorySegmented, DiscreteDividends) {
         EXPECT_LT(result->implied_vol, 3.0);
     }
 }
+TEST(IVSolverFactorySegmented, AdaptiveGridDiscreteDividends) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;  // 50 bps for test speed
+    params.max_iter = 2;
+    params.validation_samples = 16;
+
+    IVSolverFactoryConfig config{
+        .option_type = OptionType::PUT,
+        .spot = 100.0,
+        .dividend_yield = 0.02,
+        .grid = AdaptiveGrid{.params = params},
+        .path = SegmentedIVPath{
+            .maturity = 1.0,
+            .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+            .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+        },
+    };
+
+    auto solver = make_interpolated_iv_solver(config);
+    ASSERT_TRUE(solver.has_value())
+        << "Factory should succeed with AdaptiveGrid + SegmentedIVPath";
+
+    // Solve IV for a known option
+    OptionSpec spec{
+        .spot = 100.0, .strike = 100.0, .maturity = 0.5,
+        .rate = 0.05, .dividend_yield = 0.02,
+        .option_type = OptionType::PUT
+    };
+
+    PricingParams pricing_params(spec, 0.20);
+    pricing_params.discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}};
+    auto ref = solve_american_option(pricing_params);
+    ASSERT_TRUE(ref.has_value());
+
+    IVQuery query(spec, ref->value());
+    auto result = solver->solve(query);
+    if (result.has_value()) {
+        EXPECT_GT(result->implied_vol, 0.0);
+        EXPECT_LT(result->implied_vol, 3.0);
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // Side-by-side accuracy comparison

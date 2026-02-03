@@ -590,7 +590,29 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 `AdaptiveGrid` includes sensible domain-bound defaults (moneyness 0.7–1.3, vol 0.05–0.50, rate 0.01–0.10). The builder iteratively refines grid density, validating via Latin Hypercube sampling against fresh PDE solves, until the target is met.
 
-> **Note:** `AdaptiveGrid` currently supports `StandardIVPath` only. For `SegmentedIVPath`, use `ManualGrid`. See [#320](https://github.com/accelas/mango-option/issues/320) for planned adaptive support on the segmented path.
+### Segmented Path with Adaptive Grid
+
+Adaptive grid also works with discrete dividends. The builder probes 2–3 representative K_ref values using segmented PDE surfaces, takes per-axis maximum grid sizes across probes, then builds all segments with a uniform grid:
+
+```cpp
+mango::IVSolverFactoryConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .dividend_yield = 0.01,
+    .grid = mango::AdaptiveGrid{
+        .params = {.target_iv_error = 0.001},
+    },
+    .path = mango::SegmentedIVPath{
+        .maturity = 1.0,
+        .discrete_dividends = {
+            mango::Dividend{.calendar_time = 0.25, .amount = 1.50},
+            mango::Dividend{.calendar_time = 0.50, .amount = 1.50}},
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    },
+};
+
+auto solver = mango::make_interpolated_iv_solver(config);
+```
 
 ### Querying the Solver
 
