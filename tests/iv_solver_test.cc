@@ -343,3 +343,24 @@ TEST(IVSolverProbeTest, FallsBackToHeuristicWhenProbeDisabled) {
     EXPECT_GT(result->implied_vol, 0.10);
     EXPECT_LT(result->implied_vol, 0.30);
 }
+
+TEST(IVSolverProbeTest, FallsBackToHeuristicWhenProbeDoesntConverge) {
+    mango::OptionSpec spec{
+        .spot = 100.0, .strike = 100.0, .maturity = 1.0,
+        .rate = 0.05, .dividend_yield = 0.0,
+        .option_type = mango::OptionType::PUT};
+
+    // Very tight tolerance that probe may not achieve in 3 iterations
+    mango::IVSolverConfig config{.target_price_error = 1e-10};
+    mango::IVSolver solver(config);
+    mango::IVQuery query(spec, 5.50);
+
+    // Should still succeed (falls back to heuristic when probe doesn't converge)
+    auto result = solver.solve(query);
+    ASSERT_TRUE(result.has_value())
+        << "Fallback solve failed with error code: "
+        << static_cast<int>(result.error().code);
+    // IV should still be reasonable
+    EXPECT_GT(result->implied_vol, 0.10);
+    EXPECT_LT(result->implied_vol, 0.50);
+}
