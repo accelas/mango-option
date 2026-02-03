@@ -237,6 +237,18 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
+**Pattern 5: Probe-Based FDM IV Solver (Simple API)**
+```cpp
+#include "src/option/iv_solver.hpp"
+
+// Just specify target accuracy - no grid parameters needed
+mango::IVSolverConfig config{.target_price_error = 0.01};  // $0.01 accuracy
+mango::IVSolver solver(config);
+
+mango::IVQuery query(spec, market_price);
+auto result = solver.solve(query);
+```
+
 **See [docs/API_GUIDE.md](docs/API_GUIDE.md) for complete patterns**
 
 ## Git Workflow
