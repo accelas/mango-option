@@ -85,6 +85,11 @@ and produces correct reference prices. No new solver needed.
 The segmented `ValidateFn` populates `PricingParams.discrete_dividends`
 from the config. The existing `compute_error_metric()` works unchanged.
 
+**Spot/strike mapping:** Validation must use `strike = config.spot / m`
+with the original `config.spot`, not the probe K_ref. The probe K_ref
+only determines which segmented surface to build — the validation
+samples actual pricing queries at the original spot.
+
 ### 3. Tau axis as `tau_points_per_segment`
 
 `SegmentedPriceTableBuilder` generates its tau grid internally from the
@@ -95,6 +100,9 @@ Solution: the refinement loop treats the tau axis as the
 `tau_points_per_segment` scalar. When the worst dimension is tau, the
 loop increments this scalar (e.g., 5 → 7 → 9). The `BuildFn` receives
 `tau_points` and passes it through to `SegmentedPriceTableBuilder::Config`.
+
+Cap `tau_points_per_segment` at `params.max_points_per_dim` to prevent
+excessive points in very short segments.
 
 For the standard path, `tau_points` maps to the maturity grid size as
 before (adding midpoints in problematic bins). The callback abstraction
@@ -107,10 +115,14 @@ hides this difference.
 different expanded grids, breaking the uniform-grid guarantee.
 
 Solution: **pre-expand the moneyness domain** before probing, using the
-worst-case (smallest) K_ref:
+worst-case (smallest) K_ref. Filter dividends the same way
+`SegmentedPriceTableBuilder` does: only those strictly inside `(0, T)`
+with positive amount.
 
 ```
-total_div = sum of all discrete dividend amounts
+filtered_divs = [d for d in discrete_dividends
+                 if 0 < d.calendar_time < maturity and d.amount > 0]
+total_div = sum of filtered_divs amounts
 K_ref_min = smallest K_ref in the full list
 expansion = total_div / K_ref_min
 expanded_m_min = max(domain_m_min - expansion, 0.01)
