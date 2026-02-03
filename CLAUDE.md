@@ -217,6 +217,26 @@ auto solver = mango::make_interpolated_iv_solver(config);
 auto result = solver->solve(query);
 ```
 
+**Pattern 4: Discrete Dividend IV with Adaptive Grid**
+```cpp
+#include "src/option/iv_solver_factory.hpp"
+
+mango::IVSolverFactoryConfig config{
+    .option_type = mango::OptionType::PUT,
+    .spot = 100.0,
+    .dividend_yield = 0.01,
+    .grid = mango::AdaptiveGrid{
+        .params = {.target_iv_error = 0.001},
+    },
+    .path = mango::SegmentedIVPath{
+        .maturity = 1.0,
+        .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    },
+};
+auto solver = mango::make_interpolated_iv_solver(config);
+```
+
 **See [docs/API_GUIDE.md](docs/API_GUIDE.md) for complete patterns**
 
 ## Git Workflow
