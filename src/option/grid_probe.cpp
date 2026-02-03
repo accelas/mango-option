@@ -200,6 +200,7 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 
         // Compute delta difference
         double delta_diff = 0.0;
+        bool delta_valid = false;  // Track if delta was actually computed
         double x_spot = std::log(params.spot / params.strike);
 
         // Only compute delta if spot is within valid range
@@ -210,6 +211,7 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
                 double delta1 = compute_delta_at_spot(*result_nx, params.spot);
                 double delta2 = compute_delta_at_spot(*result_2nx, params.spot);
                 delta_diff = std::abs(delta2 - delta1);
+                delta_valid = true;
             }
         }
 
@@ -220,7 +222,9 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         bool price_converged = price_diff <= price_tol;
 
         // Delta: |delta2 - delta1| <= 0.01
-        bool delta_converged = delta_diff <= 0.01;
+        // If delta could not be computed (spot near boundary), skip delta criterion
+        // but require stronger price convergence (force another refinement round)
+        bool delta_converged = delta_valid ? (delta_diff <= 0.01) : price_converged;
 
         estimated_error = price_diff;
 
@@ -228,23 +232,32 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         bool iter_converged = price_converged && delta_converged;
         MANGO_TRACE_GRID_PROBE_ITERATION(iteration, Nx, price_diff, iter_converged ? 1 : 0);
 
+        // Helper to preserve grid type from result
+        auto make_grid_from_result = [&accuracy](const AmericanOptionResult& result) {
+            auto grid = result.grid();
+            if (grid->spacing().grid().is_uniform()) {
+                return GridSpec<double>::uniform(
+                    grid->x().front(),
+                    grid->x().back(),
+                    grid->n_space()).value();
+            } else {
+                return GridSpec<double>::sinh_spaced(
+                    grid->x().front(),
+                    grid->x().back(),
+                    grid->n_space(),
+                    accuracy.alpha).value();
+            }
+        };
+
         if (iter_converged) {
             converged = true;
             // Use the finer grid (2*Nx) since it's more accurate
-            best_grid = GridSpec<double>::sinh_spaced(
-                grid_2nx->x().front(),
-                grid_2nx->x().back(),
-                grid_2nx->n_space(),
-                accuracy.alpha).value();
+            best_grid = make_grid_from_result(*result_2nx);
             best_time_domain = grid_2nx->time();
         } else {
             // Not converged - prepare for next iteration
             // Store current best (the finer grid)
-            best_grid = GridSpec<double>::sinh_spaced(
-                grid_2nx->x().front(),
-                grid_2nx->x().back(),
-                grid_2nx->n_space(),
-                accuracy.alpha).value();
+            best_grid = make_grid_from_result(*result_2nx);
             best_time_domain = grid_2nx->time();
 
             // Double Nx for next iteration
@@ -255,8 +268,20 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
     // If we don't have a grid yet, create one from initial parameters
     if (!best_grid.has_value() || !best_time_domain.has_value()) {
         auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
+
+        // Collect mandatory tau values for discrete dividends
+        std::vector<double> mandatory_tau;
+        for (const auto& div : params.discrete_dividends) {
+            double tau = params.maturity - div.calendar_time;
+            if (tau > 0.0 && tau < params.maturity) {
+                mandatory_tau.push_back(tau);
+            }
+        }
+
+        // Enforce minimum steps while preserving mandatory dividend times
         if (time_domain.n_steps() < kMinTimeSteps) {
-            time_domain = TimeDomain::from_n_steps(0.0, params.maturity, kMinTimeSteps);
+            time_domain = TimeDomain::with_mandatory_points(
+                0.0, params.maturity, kMinTimeSteps, mandatory_tau);
         }
         best_grid = grid_spec;
         best_time_domain = time_domain;

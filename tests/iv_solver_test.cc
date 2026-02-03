@@ -203,13 +203,13 @@ TEST_F(IVSolverTest, ExplicitGrid201Points) {
 // ===========================================================================
 
 TEST(IVSolverConfigTest, TargetPriceErrorConfig) {
-    mango::IVSolverConfig config{.target_price_error = 0.005};
+    mango::IVSolverConfig config{.root_config = {}, .target_price_error = 0.005};
     EXPECT_EQ(config.target_price_error, 0.005);
 
     mango::IVSolverConfig default_config{};
     EXPECT_EQ(default_config.target_price_error, 0.01);
 
-    mango::IVSolverConfig heuristic_config{.target_price_error = 0.0};
+    mango::IVSolverConfig heuristic_config{.root_config = {}, .target_price_error = 0.0};
     EXPECT_EQ(heuristic_config.target_price_error, 0.0);
 }
 
@@ -277,6 +277,7 @@ TEST(IVSolverProbeTest, UsesProbeBasedGridWhenTargetPriceErrorSet) {
         .option_type = mango::OptionType::PUT};
 
     mango::IVSolverConfig config{
+        .root_config = {},
         .target_price_error = 0.01  // Enable probe-based calibration
     };
 
@@ -294,7 +295,7 @@ TEST(IVSolverProbeTest, UsesProbeBasedGridWhenTargetPriceErrorSet) {
 
 TEST(IVSolverProbeTest, DifferentOptionsGetDifferentGrids) {
     // Verify cache is per-solve(), not per-solver-instance
-    mango::IVSolverConfig config{.target_price_error = 0.01};
+    mango::IVSolverConfig config{.root_config = {}, .target_price_error = 0.01};
     mango::IVSolver solver(config);
 
     // Option 1: short maturity
@@ -331,7 +332,7 @@ TEST(IVSolverProbeTest, FallsBackToHeuristicWhenProbeDisabled) {
         .option_type = mango::OptionType::PUT};
 
     // target_price_error = 0 disables probe-based calibration
-    mango::IVSolverConfig config{.target_price_error = 0.0};
+    mango::IVSolverConfig config{.root_config = {}, .target_price_error = 0.0};
     mango::IVSolver solver(config);
     mango::IVQuery query(spec, 5.50);
 
@@ -351,7 +352,7 @@ TEST(IVSolverProbeTest, FallsBackToHeuristicWhenProbeDoesntConverge) {
         .option_type = mango::OptionType::PUT};
 
     // Very tight tolerance that probe may not achieve in 3 iterations
-    mango::IVSolverConfig config{.target_price_error = 1e-10};
+    mango::IVSolverConfig config{.root_config = {}, .target_price_error = 1e-10};
     mango::IVSolver solver(config);
     mango::IVQuery query(spec, 5.50);
 

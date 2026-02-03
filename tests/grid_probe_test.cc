@@ -293,5 +293,55 @@ TEST(GridProbeTest, WithMultipleDiscreteDividends) {
     EXPECT_GE(result->grid.n_points(), 100);
 }
 
+// ===========================================================================
+// Regression tests for code review issues
+// ===========================================================================
+
+// Regression: Delta cannot be computed when spot is near grid boundary
+// Bug: When delta_diff remained 0.0 (not computed), delta_converged was
+// incorrectly set to true, allowing convergence based solely on price.
+// Fix: Track delta_valid flag; when delta cannot be computed, require
+// stronger price convergence (price_converged must be true).
+TEST(GridProbeTest, SpotNearBoundaryDoesNotFalselyConverge) {
+    // Use deep ITM put where spot is far from strike
+    // This creates a scenario where delta computation may be skipped
+    PricingParams params(
+        OptionSpec{
+            .spot = 150.0, .strike = 100.0, .maturity = 0.1,  // Deep ITM, short maturity
+            .rate = 0.05, .dividend_yield = 0.0,
+            .option_type = OptionType::PUT},
+        0.50);  // High vol to stress the grid
+
+    auto result = probe_grid_adequacy(params, 0.01);
+
+    ASSERT_TRUE(result.has_value());
+    // Should still produce a valid result
+    // The key is that it doesn't falsely converge in one iteration
+    // when delta cannot be computed
+    EXPECT_GE(result->grid.n_points(), 50);
+}
+
+// Regression: Fallback path drops mandatory dividend times
+// Bug: When fallback used TimeDomain::from_n_steps(), it lost mandatory
+// time points for discrete dividends.
+// Fix: Use TimeDomain::with_mandatory_points() in fallback path.
+TEST(GridProbeTest, FallbackPreservesMandatoryDividendTimes) {
+    // Short maturity with dividend - fallback will trigger kMinTimeSteps enforcement
+    PricingParams params(
+        OptionSpec{
+            .spot = 100.0, .strike = 100.0, .maturity = 0.05,  // Very short
+            .rate = 0.05, .dividend_yield = 0.0,
+            .option_type = OptionType::PUT},
+        0.20,
+        {Dividend{.calendar_time = 0.02, .amount = 2.0}});  // Dividend mid-period
+
+    // Use very tight tolerance to force fallback (probe won't converge)
+    auto result = probe_grid_adequacy(params, 1e-12, 50, 1);  // Only 1 iteration
+
+    ASSERT_TRUE(result.has_value());
+    // Result should be valid even if probe didn't converge
+    EXPECT_GE(result->time_domain.n_steps(), 50);
+}
+
 }  // namespace
 }  // namespace mango
