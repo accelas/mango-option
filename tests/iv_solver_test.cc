@@ -199,6 +199,21 @@ TEST_F(IVSolverTest, ExplicitGrid201Points) {
 }
 
 // ===========================================================================
+// Config field tests
+// ===========================================================================
+
+TEST(IVSolverConfigTest, TargetPriceErrorConfig) {
+    mango::IVSolverConfig config{.target_price_error = 0.005};
+    EXPECT_EQ(config.target_price_error, 0.005);
+
+    mango::IVSolverConfig default_config{};
+    EXPECT_EQ(default_config.target_price_error, 0.01);
+
+    mango::IVSolverConfig heuristic_config{.target_price_error = 0.0};
+    EXPECT_EQ(heuristic_config.target_price_error, 0.0);
+}
+
+// ===========================================================================
 // Regression tests
 // ===========================================================================
 

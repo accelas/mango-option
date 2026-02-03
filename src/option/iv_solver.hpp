@@ -65,6 +65,12 @@ struct IVSolverConfig {
 
     /// PDE grid specification: auto-estimate (default) or explicit
     PDEGridSpec grid = GridAccuracyParams{};
+
+    /// Target price error for probe-based grid calibration (absolute units).
+    /// If > 0, uses Richardson-style probes; `grid` field is ignored.
+    /// If == 0, falls back to `grid` field (heuristic or explicit).
+    /// Default: 0.01 ($0.01 accuracy)
+    double target_price_error = 0.01;
 };
 
 /// FDM-based Implied Volatility Solver for American Options
