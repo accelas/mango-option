@@ -404,22 +404,3 @@ cc_binary(
     tags = ["benchmark", "manual"],
 )
 
-cc_binary(
-    name = "iv_solver_probe_benchmark",
-    srcs = ["iv_solver_probe_benchmark.cc"],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-march=native",
-        "-ftree-vectorize",
-        "-fopenmp",
-    ],
-    linkopts = ["-fopenmp"],
-    linkstatic = True,
-    deps = [
-        "//src/option:iv_solver",
-        "@google_benchmark//:benchmark_main",
-    ],
-    tags = ["benchmark", "manual"],
-)

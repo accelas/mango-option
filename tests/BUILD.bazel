@@ -1547,17 +1547,3 @@ py_test(
     deps = [requirement("numpy")],
 )
 
-cc_test(
-    name = "grid_probe_test",
-    size = "medium",
-    srcs = ["grid_probe_test.cc"],
-    deps = [
-        "//src/option:grid_probe",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-    ],
-)
