@@ -206,7 +206,6 @@ cc_library(
     deps = [
         ":option_spec",
         ":iv_result",
-        ":grid_probe",
         "//src/math:root_finding",
         ":american_option",
         "//src/pde/core:pde_workspace",
@@ -261,23 +260,3 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-cc_library(
-    name = "grid_probe",
-    srcs = ["grid_probe.cpp"],
-    hdrs = ["grid_probe.hpp"],
-    deps = [
-        ":american_option",
-        ":grid_spec_types",
-        "//src/pde/core:time_domain",
-        "//src/pde/core:pde_workspace",
-        "//src/support:error_types",
-        "//src/support:ivcalc_trace_hdr",
-    ],
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-O3",
-        "-DHAVE_SYSTEMTAP_SDT",
-    ],
-    visibility = ["//visibility:public"],
-)

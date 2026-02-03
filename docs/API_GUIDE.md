@@ -226,28 +226,6 @@ if (result.has_value()) {
 }
 ```
 
-### Probe-Based Grid Calibration (Recommended)
-
-For users who want accuracy guarantees without understanding grid parameters:
-
-```cpp
-mango::IVSolverConfig config{
-    .target_price_error = 0.01  // $0.01 absolute price accuracy
-};
-
-mango::IVSolver solver(config);
-auto result = solver.solve(query);
-```
-
-The solver automatically calibrates the PDE grid using Richardson-style probe solves at σ_high (the upper bound of the volatility search range), ensuring the requested accuracy is achieved.
-
-**API Rules:**
-- `target_price_error > 0`: Uses probe-based calibration; `grid` field is ignored
-- `target_price_error == 0`: Falls back to `grid` field (heuristic or explicit)
-- Default: `0.01` ($0.01 accuracy)
-
-**Performance Note:** Probe calibration adds 4-6 PDE solves upfront (~50-100ms), but this cost is amortized across all Brent iterations within a single IV solve. For IV solves requiring multiple iterations, total time is typically comparable to or faster than per-iteration heuristic re-estimation.
-
 ### Custom Grid for IV (Advanced)
 
 **Control PDE accuracy via GridAccuracyParams (recommended):**
