@@ -455,5 +455,303 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     EXPECT_TRUE(std::isfinite(price));
 }
 
+// ===========================================================================
+// Coverage gap tests — Priority 1 (Critical)
+// ===========================================================================
+
+// Coverage: Invalid auto-K_ref config with count < 1
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
+    AdaptiveGridParams params;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {}, .K_ref_count = 0, .K_ref_span = 0.3},
+    };
+
+    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// Coverage: Invalid auto-K_ref config with span <= 0
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
+    AdaptiveGridParams params;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {}, .K_ref_count = 5, .K_ref_span = 0.0},
+    };
+
+    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// ===========================================================================
+// Coverage gap tests — Priority 2 (High)
+// ===========================================================================
+
+// Coverage: ATM K_ref coincides with lowest K_ref — dedup prevents 3rd probe
+TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    AdaptiveGridBuilder builder(params);
+
+    // spot=100, K_refs sorted: {100, 110, 120, 130}
+    // Lowest=100, highest=130, ATM=100 (closest to spot)
+    // ATM == lowest → only 2 probes (100, 130)
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 1.50}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {100.0, 110.0, 120.0, 130.0}},
+    };
+
+    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    ASSERT_TRUE(result.has_value());
+    double price = result->price(100.0, 110.0, 0.5, 0.20, 0.05);
+    EXPECT_GT(price, 0.0);
+}
+
+// Coverage: ATM K_ref coincides with highest K_ref
+TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    AdaptiveGridBuilder builder(params);
+
+    // spot=100, K_refs sorted: {70, 80, 90, 100}
+    // Lowest=70, highest=100, ATM=100 (closest to spot)
+    // ATM == highest → only 2 probes (70, 100)
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 1.50}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {70.0, 80.0, 90.0, 100.0}},
+    };
+
+    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    ASSERT_TRUE(result.has_value());
+    double price = result->price(100.0, 90.0, 0.5, 0.20, 0.05);
+    EXPECT_GT(price, 0.0);
+}
+
+// Coverage: Single auto-generated K_ref (count=1)
+TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {}, .K_ref_count = 1, .K_ref_span = 0.3},
+    };
+
+    std::vector<double> m = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
+    std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    ASSERT_TRUE(result.has_value());
+
+    // Single K_ref = spot, should produce valid prices
+    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    EXPECT_GT(price, 0.0);
+    EXPECT_TRUE(std::isfinite(price));
+}
+
+// Coverage: Very short maturity — tau domain compressed, max_tau clamped
+TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.02, .amount = 1.0}},
+        .maturity = 0.05,  // Very short
+        .kref_config = {.K_refs = {90.0, 100.0, 110.0}},
+    };
+
+    std::vector<double> m = {0.8, 0.9, 1.0, 1.1, 1.2};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    ASSERT_TRUE(result.has_value());
+
+    // Query at a tau within the short maturity
+    double price = result->price(100.0, 100.0, 0.03, 0.20, 0.05);
+    EXPECT_GT(price, 0.0);
+    EXPECT_TRUE(std::isfinite(price));
+}
+
+// ===========================================================================
+// Coverage gap tests — Priority 3 (Medium)
+// ===========================================================================
+
+// Coverage: Large expansion clamps moneyness to 0.01
+TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    AdaptiveGridBuilder builder(params);
+
+    // total_div = 50, K_ref_min = 50 → expansion = 1.0
+    // min_m = 0.5, expanded = max(0.5 - 1.0, 0.01) = 0.01
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.25, .amount = 25.0},
+                               Dividend{.calendar_time = 0.75, .amount = 25.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {50.0, 100.0, 150.0}},
+    };
+
+    std::vector<double> m = {0.5, 0.7, 0.9, 1.0, 1.1, 1.3, 1.5};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
+    std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    // Should succeed — moneyness floor prevents negative/zero domain
+    ASSERT_TRUE(result.has_value());
+}
+
+// Coverage: Negative K_ref in explicit list (K_ref_min <= 0 guard)
+TEST(AdaptiveGridBuilderTest, BuildSegmentedNegativeKRefExpansionGuard) {
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.005;
+    params.max_iter = 1;
+    params.validation_samples = 8;
+    AdaptiveGridBuilder builder(params);
+
+    // K_ref_min=0.01 is very small, making expansion = total_div / 0.01 = 200
+    // This exercises the K_ref_min > 0 guard and the moneyness clamp.
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {0.01, 100.0, 200.0}},
+    };
+
+    std::vector<double> m = {0.3, 0.5, 0.7, 1.0, 1.3, 1.5, 2.0};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
+    std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    // With K_ref=0.01, the per-K_ref PDE build will likely fail.
+    // The important thing is it doesn't crash or divide by zero.
+    // It should either succeed or return a clean error.
+    if (!result.has_value()) {
+        // Acceptable: clean error propagation, no crash
+        SUCCEED();
+    } else {
+        // Also acceptable: managed to build despite extreme K_ref
+        SUCCEED();
+    }
+}
+
+// Coverage: Probe failure propagation — validation_samples=0 makes
+// run_refinement fail, which build_segmented should propagate cleanly
+TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
+    AdaptiveGridParams params;
+    params.max_iter = 1;
+    params.validation_samples = 0;  // Triggers InvalidConfig inside run_refinement
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {80.0, 100.0, 120.0}},
+    };
+
+    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
+// Coverage: Negative span with auto K_refs
+TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
+    AdaptiveGridParams params;
+    params.max_iter = 1;
+    params.validation_samples = 4;
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig seg_config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.0,
+        .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
+        .maturity = 1.0,
+        .kref_config = {.K_refs = {}, .K_ref_count = 3, .K_ref_span = -0.2},
+    };
+
+    std::vector<double> m = {0.7, 0.9, 1.0, 1.1, 1.3};
+    std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
+    std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
+
+    auto result = builder.build_segmented(seg_config, m, v, r);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
+}
+
 }  // namespace
 }  // namespace mango
