@@ -52,7 +52,7 @@ bazel test //...    # run all tests
 ### C++
 
 ```cpp
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 
 mango::PricingParams params(
     mango::OptionSpec{

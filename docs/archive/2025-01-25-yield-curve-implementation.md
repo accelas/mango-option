@@ -20,7 +20,7 @@
 Create `tests/yield_curve_test.cc`:
 
 ```cpp
-#include "src/math/yield_curve.hpp"
+#include "mango/math/yield_curve.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -418,8 +418,8 @@ git commit -m "test: add YieldCurve interpolation and extrapolation tests"
 Create `tests/rate_spec_test.cc`:
 
 ```cpp
-#include "src/option/option_spec.hpp"
-#include "src/math/yield_curve.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/math/yield_curve.hpp"
 #include <gtest/gtest.h>
 
 TEST(RateSpecTest, DefaultIsDouble) {
@@ -482,7 +482,7 @@ Modify `src/option/option_spec.hpp`:
 Add includes at top:
 ```cpp
 #include <variant>
-#include "src/math/yield_curve.hpp"
+#include "mango/math/yield_curve.hpp"
 ```
 
 Add before `OptionSpec` struct:
@@ -566,8 +566,8 @@ git commit -m "feat: add RateSpec variant for constant rate or yield curve"
 Create `tests/black_scholes_pde_rate_fn_test.cc`:
 
 ```cpp
-#include "src/pde/operators/black_scholes_pde.hpp"
-#include "src/math/yield_curve.hpp"
+#include "mango/pde/operators/black_scholes_pde.hpp"
+#include "mango/math/yield_curve.hpp"
 #include <gtest/gtest.h>
 
 TEST(BlackScholesPDERateFnTest, ConstantRateFnViaLambda) {

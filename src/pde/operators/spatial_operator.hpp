@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/pde/core/grid.hpp"
-#include "centered_difference_facade.hpp"
-#include "src/math/tridiagonal_matrix_view.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/math/tridiagonal_matrix_view.hpp"
 #include <span>
 #include <memory>
 #include <concepts>

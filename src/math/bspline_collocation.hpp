@@ -23,11 +23,11 @@
 
 #pragma once
 
-#include "src/math/banded_matrix_solver.hpp"
-#include "src/math/bspline_basis.hpp"
-#include "src/math/bspline_collocation_workspace.hpp"
-#include "src/support/error_types.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/math/banded_matrix_solver.hpp"
+#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/support/parallel.hpp"
 #include <experimental/mdspan>
 #include <expected>
 #include <span>

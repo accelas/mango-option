@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/iv_solver_factory.hpp"
-#include "src/option/table/adaptive_grid_builder.hpp"
-#include "src/option/table/price_table_builder.hpp"
+#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/price_table_builder.hpp"
 #include <type_traits>
 
 namespace mango {

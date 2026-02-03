@@ -14,9 +14,9 @@
 #include <format>
 #include <limits>
 #include <experimental/mdspan>
-#include "src/support/aligned_allocator.hpp"
-#include "src/support/error_types.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/support/aligned_allocator.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/pde/core/time_domain.hpp"
 
 namespace mango {
 

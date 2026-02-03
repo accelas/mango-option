@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/american_option_result.hpp"
+#include "mango/option/american_option_result.hpp"
 #include <map>
 #include <optional>
 #include <vector>

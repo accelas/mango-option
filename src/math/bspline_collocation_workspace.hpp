@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "src/math/lapack_banded_layout.hpp"
-#include "src/support/lifetime.hpp"
+#include "mango/math/lapack_banded_layout.hpp"
+#include "mango/support/lifetime.hpp"
 #include <experimental/mdspan>
 #include <span>
 #include <expected>

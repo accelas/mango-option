@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/operators/centered_difference_facade.hpp"
-#include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/pde/core/trbdf2_config.hpp"
-#include "src/math/thomas_solver.hpp"
-#include "src/math/tridiagonal_matrix_view.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/core/boundary_conditions.hpp"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/pde/core/trbdf2_config.hpp"
+#include "mango/math/thomas_solver.hpp"
+#include "mango/math/tridiagonal_matrix_view.hpp"
 #include <expected>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 #include <memory>
 #include <span>
 #include <vector>

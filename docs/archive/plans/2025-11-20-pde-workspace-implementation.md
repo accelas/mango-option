@@ -45,9 +45,9 @@ Create `src/pde/core/grid_with_solution.hpp`:
 #ifndef MANGO_GRID_WITH_SOLUTION_HPP
 #define MANGO_GRID_WITH_SOLUTION_HPP
 
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/bspline/bspline_utils.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/bspline/bspline_utils.hpp"
 #include <expected>
 #include <memory>
 #include <vector>
@@ -166,9 +166,9 @@ Related: #209"
 Create `tests/grid_with_solution_test.cc`:
 
 ```cpp
-#include "src/pde/core/grid_with_solution.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/pde/core/grid_with_solution.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -491,7 +491,7 @@ Related: #209"
 Create `tests/pde_workspace_spans_test.cc`:
 
 ```cpp
-#include "src/pde/core/pde_workspace_spans.hpp"
+#include "mango/pde/core/pde_workspace_spans.hpp"
 #include <gtest/gtest.h>
 #include <memory_resource>
 #include <vector>
@@ -632,8 +632,8 @@ This completes Commit 1. The new infrastructure is added with zero impact on exi
 At top of `src/pde/core/pde_solver.hpp`, add:
 
 ```cpp
-#include "src/pde/core/grid_with_solution.hpp"
-#include "src/pde/core/pde_workspace_spans.hpp"
+#include "mango/pde/core/grid_with_solution.hpp"
+#include "mango/pde/core/pde_workspace_spans.hpp"
 ```
 
 **Step 2: Replace member variables (lines ~245-266)**

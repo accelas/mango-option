@@ -12,12 +12,16 @@ cc_library(
     name = "laplacian_pde",
     hdrs = ["laplacian_pde.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/pde/operators",
+    include_prefix = "mango/pde/operators",
 )
 
 cc_library(
     name = "black_scholes_pde",
     hdrs = ["black_scholes_pde.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/pde/operators",
+    include_prefix = "mango/pde/operators",
 )
 
 cc_library(
@@ -29,6 +33,8 @@ cc_library(
         "//src/math:tridiagonal_matrix_view",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/pde/operators",
+    include_prefix = "mango/pde/operators",
 )
 
 cc_library(
@@ -39,6 +45,8 @@ cc_library(
         "//src/pde/core:grid",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/pde/operators",
+    include_prefix = "mango/pde/operators",
 )
 
 cc_library(
@@ -53,6 +61,8 @@ cc_library(
         "-fopenmp-simd",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/pde/operators",
+    include_prefix = "mango/pde/operators",
 )
 
 cc_library(
@@ -63,4 +73,6 @@ cc_library(
         "//src/pde/core:grid",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/pde/operators",
+    include_prefix = "mango/pde/operators",
 )

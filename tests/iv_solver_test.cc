@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 #include <cmath>
 
 using namespace mango;

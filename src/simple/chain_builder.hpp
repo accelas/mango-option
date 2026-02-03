@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include "src/simple/option_chain.hpp"
-#include "src/simple/converter.hpp"
+#include "mango/simple/option_chain.hpp"
+#include "mango/simple/converter.hpp"
 #include <map>
 
 namespace mango::simple {

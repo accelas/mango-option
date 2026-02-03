@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/math/root_finding.hpp"
+#include "mango/math/root_finding.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

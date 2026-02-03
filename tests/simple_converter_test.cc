@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/simple/converter.hpp"
-#include "src/simple/sources/yfinance.hpp"
-#include "src/simple/sources/databento.hpp"
-#include "src/simple/sources/ibkr.hpp"
+#include "mango/simple/converter.hpp"
+#include "mango/simple/sources/yfinance.hpp"
+#include "mango/simple/sources/databento.hpp"
+#include "mango/simple/sources/ibkr.hpp"
 
 using namespace mango::simple;
 

@@ -9,8 +9,8 @@
 
 #pragma once
 
-#include "src/option/option_spec.hpp"
-#include "src/option/option_concepts.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/option_concepts.hpp"
 #include <expected>
 
 namespace mango {

@@ -11,8 +11,8 @@
  */
 
 #include <benchmark/benchmark.h>
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
 #include <vector>
 #include <random>
 #include <cmath>

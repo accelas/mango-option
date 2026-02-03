@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include "src/simple/option_chain.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/option/iv_solver.hpp"
+#include "mango/simple/option_chain.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 #include <expected>
 #include <memory>
 #include <ranges>

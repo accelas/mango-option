@@ -613,7 +613,7 @@ struct OptionChain {
 **Location:** `src/option/price_table_builder.hpp`
 
 ```cpp
-#include "src/option/option_chain.hpp"  // NEW: Include shared OptionChain type
+#include "mango/option/option_chain.hpp"  // NEW: Include shared OptionChain type
 
 template <size_t N>
 class PriceTableBuilder {
@@ -782,12 +782,12 @@ double price = surface->eval(m, tau, sigma, r);  // Note: -> not .
 1. **Update includes** (src/option/iv_solver_interpolated.cpp, iv_solver_interpolated.hpp):
    ```cpp
    // BEFORE:
-   #include "src/option/price_table_4d_builder.hpp"
+   #include "mango/option/price_table_4d_builder.hpp"
 
    // AFTER:
-   #include "src/option/price_table_builder.hpp"
-   #include "src/option/price_table_axes.hpp"
-   #include "src/option/price_table_surface.hpp"
+   #include "mango/option/price_table_builder.hpp"
+   #include "mango/option/price_table_axes.hpp"
+   #include "mango/option/price_table_surface.hpp"
    ```
 
 2. **Update surface storage** (if storing PriceTableSurface):

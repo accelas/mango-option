@@ -87,7 +87,7 @@ git commit -m "docs: analyze current banded matrix implementation"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "mango/interpolation/bspline_fitter_4d.hpp"
 #include <vector>
 #include <cmath>
 
@@ -666,7 +666,7 @@ git commit -m "feat: integrate banded solver into BSplineCollocation1D"
 
 ```cpp
 #include <benchmark/benchmark.h>
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "mango/interpolation/bspline_fitter_4d.hpp"
 #include <vector>
 
 namespace mango {

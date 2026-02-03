@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/simple/vol_surface.hpp"
+#include "mango/simple/vol_surface.hpp"
 #include <cmath>
 
 namespace mango::simple {

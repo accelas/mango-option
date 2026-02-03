@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/support/aligned_allocator.hpp"
-#include "src/math/safe_math.hpp"
+#include "mango/support/aligned_allocator.hpp"
+#include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <memory>
 #include <expected>

@@ -13,8 +13,8 @@
  * Requires: libquantlib-dev (apt-get install libquantlib-dev)
  */
 
-#include "src/option/american_option.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <memory_resource>
 #include <stdexcept>

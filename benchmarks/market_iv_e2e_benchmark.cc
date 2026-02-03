@@ -48,11 +48,11 @@
  * ```
  */
 
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/math/bspline_nd_separable.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
 #include <vector>

@@ -4,7 +4,7 @@
  * @brief Tests for AmericanOptionResult wrapper class
  */
 
-#include "src/option/american_option_result.hpp"
+#include "mango/option/american_option_result.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

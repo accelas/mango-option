@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/iv_solver.hpp"
-#include "src/math/root_finding.hpp"
-#include "src/option/american_option.hpp"
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/support/parallel.hpp"
-#include "src/support/ivcalc_trace.h"
+#include "mango/option/iv_solver.hpp"
+#include "mango/math/root_finding.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/support/parallel.hpp"
+#include "mango/support/ivcalc_trace.h"
 #include <cmath>
 #include <algorithm>
 #include <memory>

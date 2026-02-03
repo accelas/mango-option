@@ -22,7 +22,7 @@
 Create `tests/root_finding_test.cc`:
 
 ```cpp
-#include "src/cpp/root_finding.hpp"
+#include "mango/cpp/root_finding.hpp"
 #include <gtest/gtest.h>
 
 TEST(RootFindingConfigTest, DefaultValues) {
@@ -183,9 +183,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `tests/newton_workspace_test.cc`:
 
 ```cpp
-#include "src/cpp/newton_workspace.hpp"
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/grid.hpp"
+#include "mango/cpp/newton_workspace.hpp"
+#include "mango/cpp/workspace.hpp"
+#include "mango/cpp/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -435,12 +435,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `tests/newton_solver_test.cc`:
 
 ```cpp
-#include "src/cpp/newton_solver.hpp"
-#include "src/cpp/root_finding.hpp"
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/boundary_conditions.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/grid.hpp"
+#include "mango/cpp/newton_solver.hpp"
+#include "mango/cpp/root_finding.hpp"
+#include "mango/cpp/workspace.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
+#include "mango/cpp/spatial_operators.hpp"
+#include "mango/cpp/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
@@ -1323,7 +1323,7 @@ The library provides a unified configuration and result interface for all root-f
 ### Configuration
 
 ```cpp
-#include "src/cpp/root_finding.hpp"
+#include "mango/cpp/root_finding.hpp"
 
 mango::RootFindingConfig config{
     .max_iter = 100,
@@ -1370,12 +1370,12 @@ Safe borrowing: u_stage and rhs are unused during Newton iteration.
 Create `examples/example_newton_solver.cc`:
 
 ```cpp
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/boundary_conditions.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/root_finding.hpp"
-#include "src/cpp/grid.hpp"
-#include "src/cpp/time_domain.hpp"
+#include "mango/cpp/pde_solver.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
+#include "mango/cpp/spatial_operators.hpp"
+#include "mango/cpp/root_finding.hpp"
+#include "mango/cpp/grid.hpp"
+#include "mango/cpp/time_domain.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>

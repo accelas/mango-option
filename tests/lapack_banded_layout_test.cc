@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/math/lapack_banded_layout.hpp"
+#include "mango/math/lapack_banded_layout.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

@@ -19,7 +19,7 @@ This plan implements the ThreadWorkspaceBuffer design from `docs/plans/2025-11-2
 **Test (RED):**
 ```cpp
 // tests/parallel_critical_test.cc
-#include "src/support/parallel.hpp"
+#include "mango/support/parallel.hpp"
 #include <gtest/gtest.h>
 #include <atomic>
 #include <vector>
@@ -64,7 +64,7 @@ Add to `src/support/parallel.hpp` after line 43:
 **Test (RED):**
 ```cpp
 // tests/lifetime_test.cc
-#include "src/support/lifetime.hpp"
+#include "mango/support/lifetime.hpp"
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <type_traits>
@@ -160,7 +160,7 @@ constexpr size_t align_up(size_t offset, size_t alignment) noexcept {
 **Test (RED):**
 ```cpp
 // tests/thread_workspace_test.cc
-#include "src/support/thread_workspace.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cstdint>
 
@@ -276,7 +276,7 @@ cc_test(
 **Test (RED):**
 ```cpp
 // tests/interpolation_error_test.cc (add to existing or create)
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 #include <gtest/gtest.h>
 #include <sstream>
 
@@ -410,8 +410,8 @@ inline PriceTableError convert_to_price_table_error(const InterpolationError& er
 **Test (RED):**
 ```cpp
 // tests/bspline_collocation_workspace_test.cc
-#include "src/math/bspline_collocation_workspace.hpp"
-#include "src/support/thread_workspace.hpp"
+#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cstdint>
 
@@ -514,9 +514,9 @@ Create `src/math/bspline_collocation_workspace.hpp` with the exact implementatio
 **Test (RED):**
 ```cpp
 // tests/bspline_fit_with_workspace_test.cc
-#include "src/math/bspline_collocation.hpp"
-#include "src/math/bspline_collocation_workspace.hpp"
-#include "src/support/thread_workspace.hpp"
+#include "mango/math/bspline_collocation.hpp"
+#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -736,8 +736,8 @@ Add tests to `tests/BUILD.bazel`.
 **Test:**
 ```cpp
 // Verify 4D tensor fitting produces identical results with and without workspace
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/support/thread_workspace.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;
@@ -790,8 +790,8 @@ Follow the exact pattern from design document lines 563-676.
 **Test (RED):**
 ```cpp
 // tests/american_pde_workspace_test.cc
-#include "src/pde/core/american_pde_workspace.hpp"
-#include "src/support/thread_workspace.hpp"
+#include "mango/pde/core/american_pde_workspace.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;
@@ -878,7 +878,7 @@ cc_library(
 **Test (RED):**
 ```cpp
 // tests/american_option_batch_workspace_test.cc
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option_batch.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;

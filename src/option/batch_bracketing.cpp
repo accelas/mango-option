@@ -10,7 +10,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 
-#include "src/option/batch_bracketing.hpp"
+#include "mango/option/batch_bracketing.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>

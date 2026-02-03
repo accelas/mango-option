@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/adaptive_grid_builder.hpp"
-#include "src/math/black_scholes_analytics.hpp"
-#include "src/math/latin_hypercube.hpp"
-#include "src/option/american_option_batch.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/segmented_price_table_builder.hpp"
-#include "src/option/table/segmented_multi_kref_builder.hpp"
-#include "src/option/table/segmented_multi_kref_surface.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/math/black_scholes_analytics.hpp"
+#include "mango/math/latin_hypercube.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <chrono>

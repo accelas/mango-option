@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/european_option.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/european_option.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>

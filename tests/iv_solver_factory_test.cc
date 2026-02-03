@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_factory.hpp"
-#include "src/option/american_option.hpp"
+#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/american_option.hpp"
 #include <chrono>
 #include <cmath>
 #include <iostream>

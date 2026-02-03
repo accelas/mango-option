@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
 
 #include <algorithm>
 #include <cmath>

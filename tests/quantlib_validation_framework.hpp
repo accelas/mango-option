@@ -17,9 +17,9 @@
 
 #pragma once
 
-#include "src/option/american_option.hpp"
-#include "src/option/iv_solver.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/iv_solver.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include <gtest/gtest.h>
 #include <ql/quantlib.hpp>
 #include <vector>

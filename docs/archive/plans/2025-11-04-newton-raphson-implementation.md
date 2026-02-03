@@ -25,7 +25,7 @@
 Create `tests/tridiagonal_solver_test.cc`:
 
 ```cpp
-#include "src/cpp/tridiagonal_solver.hpp"
+#include "mango/cpp/tridiagonal_solver.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

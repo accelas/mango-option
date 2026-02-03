@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/grid_spec_types.hpp"  // PDEGridSpec, PDEGridConfig, GridAccuracyParams
-#include "src/option/option_spec.hpp"      // OptionType
-#include "src/option/table/price_table_metadata.hpp"  // For SurfaceContent
+#include "mango/option/grid_spec_types.hpp"  // PDEGridSpec, PDEGridConfig, GridAccuracyParams
+#include "mango/option/option_spec.hpp"      // OptionType
+#include "mango/option/table/price_table_metadata.hpp"  // For SurfaceContent
 #include <utility>
 #include <optional>
 #include <string>

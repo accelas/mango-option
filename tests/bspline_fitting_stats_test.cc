@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // tests/bspline_fitting_stats_test.cc
 #include <gtest/gtest.h>
-#include "src/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
 
 TEST(BSplineFittingStatsTest, DefaultConstruction) {
     mango::BSplineFittingStats<double, 4> stats;

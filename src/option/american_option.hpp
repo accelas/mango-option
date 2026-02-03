@@ -7,17 +7,17 @@
 #ifndef MANGO_AMERICAN_OPTION_HPP
 #define MANGO_AMERICAN_OPTION_HPP
 
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/operators/black_scholes_pde.hpp"
-#include "src/pde/operators/centered_difference_facade.hpp"
-#include "src/option/option_concepts.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/operators/black_scholes_pde.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/option/option_concepts.hpp"
 #include <expected>
-#include "src/support/error_types.hpp"
-#include "src/support/parallel.hpp"
-#include "src/option/american_option_result.hpp"
-#include "src/option/option_spec.hpp"  // For OptionType enum
-#include "src/option/grid_spec_types.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/support/parallel.hpp"
+#include "mango/option/american_option_result.hpp"
+#include "mango/option/option_spec.hpp"  // For OptionType enum
+#include "mango/option/grid_spec_types.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include <vector>
 #include <memory>
 #include <memory_resource>

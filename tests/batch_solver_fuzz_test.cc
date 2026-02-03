@@ -18,8 +18,8 @@
 
 #include "fuzztest/fuzztest.h"
 #include "gtest/gtest.h"
-#include "src/option/american_option_batch.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <cmath>
 
 using namespace mango;

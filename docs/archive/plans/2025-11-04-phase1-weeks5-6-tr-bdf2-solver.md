@@ -47,7 +47,7 @@ This plan implements TR-BDF2 with cache-blocking for performance on large grids 
 Create `tests/time_domain_test.cc`:
 
 ```cpp
-#include "src/cpp/time_domain.hpp"
+#include "mango/cpp/time_domain.hpp"
 #include <gtest/gtest.h>
 
 TEST(TimeDomainTest, BasicConfiguration) {
@@ -197,7 +197,7 @@ Tests: 2 passing"
 Create `tests/trbdf2_config_test.cc`:
 
 ```cpp
-#include "src/cpp/trbdf2_config.hpp"
+#include "mango/cpp/trbdf2_config.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -347,7 +347,7 @@ Tests: 2 passing"
 Create `tests/fixed_point_solver_test.cc`:
 
 ```cpp
-#include "src/cpp/fixed_point_solver.hpp"
+#include "mango/cpp/fixed_point_solver.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -595,9 +595,9 @@ Tests: 3 passing"
 Create `tests/pde_solver_test.cc`:
 
 ```cpp
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/boundary_conditions.hpp"
+#include "mango/cpp/pde_solver.hpp"
+#include "mango/cpp/spatial_operators.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
@@ -1031,9 +1031,9 @@ Tests: 2 passing"
 Create `tests/integration_trbdf2_accuracy_test.cc`:
 
 ```cpp
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/boundary_conditions.hpp"
+#include "mango/cpp/pde_solver.hpp"
+#include "mango/cpp/spatial_operators.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>

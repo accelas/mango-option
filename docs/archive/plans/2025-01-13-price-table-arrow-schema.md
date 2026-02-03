@@ -349,8 +349,8 @@ Total: ~2.4 MB per table
 ### Save (Overnight Batch)
 
 ```cpp
-#include "src/option/price_table_4d_builder.hpp"
-#include "src/option/price_table_arrow.hpp"
+#include "mango/option/price_table_4d_builder.hpp"
+#include "mango/option/price_table_arrow.hpp"
 
 // Build price table (expensive: ~3 minutes)
 auto builder = PriceTable4DBuilder::create(grid);
@@ -366,8 +366,8 @@ if (!save_result) {
 ### Load (Pre-Market)
 
 ```cpp
-#include "src/option/price_table_arrow.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
+#include "mango/option/price_table_arrow.hpp"
+#include "mango/option/iv_solver_interpolated.hpp"
 
 // Load table from disk (<1ms, zero-copy mmap)
 auto surface_result = load_price_table("SPY_put_20250113.arrow");

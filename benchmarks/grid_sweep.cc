@@ -5,12 +5,12 @@
 //
 // Sweeps PriceTableGridAccuracyParams.target_iv_error from coarse to fine,
 // measuring interpolated IV accuracy against FDM ground truth.
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/price_table_grid_estimator.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/iv_solver.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_grid_estimator.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/iv_solver.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include <cstdio>
 #include <chrono>
 #include <cmath>

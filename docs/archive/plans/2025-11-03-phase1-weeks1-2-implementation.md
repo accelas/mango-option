@@ -175,7 +175,7 @@ Part of Phase 1 Week 1: Grid system foundation"
 Create `tests/grid_test.cc`:
 
 ```cpp
-#include "src/cpp/grid.hpp"
+#include "mango/cpp/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(GridSpecTest, UniformGridGeneration) {
@@ -552,7 +552,7 @@ cc_library(
 Create `tests/boundary_conditions_test.cc`:
 
 ```cpp
-#include "src/cpp/boundary_conditions.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 
 TEST(BoundaryConditionTest, DirichletTagExists) {
@@ -1198,7 +1198,7 @@ cc_library(
 Create `tests/cache_config_test.cc`:
 
 ```cpp
-#include "src/cpp/cache_config.hpp"
+#include "mango/cpp/cache_config.hpp"
 #include <gtest/gtest.h>
 
 TEST(CacheBlockConfigTest, SmallGridSingleBlock) {

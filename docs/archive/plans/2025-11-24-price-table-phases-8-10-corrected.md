@@ -330,7 +330,7 @@ Expected: FAIL (extract_tensor doesn't exist yet)
 Add to `src/option/price_table_builder.hpp`:
 
 ```cpp
-#include "src/math/cubic_spline_solver.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 
 private:
     std::expected<PriceTensor<N>, std::string> extract_tensor(

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/grid_spec_types.hpp"
+#include "mango/option/grid_spec_types.hpp"
 
 namespace mango {
 

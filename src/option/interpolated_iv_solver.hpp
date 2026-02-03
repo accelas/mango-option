@@ -49,13 +49,13 @@
 
 #pragma once
 
-#include "src/option/option_spec.hpp"
-#include "src/option/iv_result.hpp"
-#include "src/option/table/price_surface_concept.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/support/error_types.hpp"
-#include "src/support/parallel.hpp"
-#include "src/math/root_finding.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/iv_result.hpp"
+#include "mango/option/table/price_surface_concept.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/support/parallel.hpp"
+#include "mango/math/root_finding.hpp"
 #include <expected>
 #include <cmath>
 #include <algorithm>

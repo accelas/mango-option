@@ -76,7 +76,7 @@ mango-option/
 ### Pricing American Options
 
 ```cpp
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 
 // Define option parameters
 mango::PricingParams params(
@@ -113,7 +113,7 @@ All tests use GoogleTest:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 
 TEST(AmericanOptionTest, ATMPut) {
     mango::PricingParams params{...};
@@ -166,7 +166,7 @@ TEST(RateSpecTest, TimeConversionForUpslopingCurve) {
 
 **Pattern 1: American IV Calculation**
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 
 mango::IVQuery query(spec, 10.45);
 mango::IVSolver solver(config);
@@ -175,9 +175,9 @@ auto result = solver.solve(query);
 
 **Pattern 2: Price Table Pre-computation and Interpolated IV**
 ```cpp
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 
 // Build price table (always uses EEP for ~5x better interpolation accuracy)
 auto [builder, axes] = mango::PriceTableBuilder<4>::from_vectors(
@@ -197,7 +197,7 @@ auto iv_result = iv_solver.solve(iv_query);
 
 **Pattern 3: Discrete Dividend IV Calculation**
 ```cpp
-#include "src/option/iv_solver_factory.hpp"
+#include "mango/option/iv_solver_factory.hpp"
 
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
@@ -219,7 +219,7 @@ auto result = solver->solve(query);
 
 **Pattern 4: Discrete Dividend IV with Adaptive Grid**
 ```cpp
-#include "src/option/iv_solver_factory.hpp"
+#include "mango/option/iv_solver_factory.hpp"
 
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
@@ -239,7 +239,7 @@ auto solver = mango::make_interpolated_iv_solver(config);
 
 **Pattern 5: Probe-Based FDM IV Solver (Simple API)**
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 
 // Just specify target accuracy - no grid parameters needed
 mango::IVSolverConfig config{.target_price_error = 0.01};  // $0.01 accuracy

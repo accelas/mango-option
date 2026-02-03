@@ -10,7 +10,7 @@
  * - Grid spacing properties (concentration near cluster centers)
  */
 
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <limits>
 

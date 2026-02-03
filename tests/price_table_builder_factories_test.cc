@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/option_grid.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/option_grid.hpp"
 
 TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
     std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};

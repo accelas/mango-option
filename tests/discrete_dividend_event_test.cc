@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/discrete_dividend_event.hpp"
-#include "src/math/cubic_spline_solver.hpp"
+#include "mango/option/discrete_dividend_event.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <vector>
 #include <cmath>
 

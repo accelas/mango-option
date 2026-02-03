@@ -749,7 +749,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `examples/example_multi_sinh_grid.cc`:
 
 ```cpp
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <iostream>
 #include <format>
 
@@ -874,7 +874,7 @@ For batch solvers that mix instruments with different normalized strikes, multi-
 **Usage:**
 
 ```cpp
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 
 // Define concentration regions
 std::vector<mango::MultiSinhCluster<double>> clusters = {

@@ -21,8 +21,8 @@
 Create `tests/workspace_test.cc`:
 
 ```cpp
-#include "src/cpp/workspace.hpp"
-#include "src/cpp/grid.hpp"
+#include "mango/cpp/workspace.hpp"
+#include "mango/cpp/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(WorkspaceStorageTest, SmallGridSingleBlock) {
@@ -374,8 +374,8 @@ Tests: 5 passing"
 Create `tests/spatial_operators_test.cc`:
 
 ```cpp
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/grid.hpp"
+#include "mango/cpp/spatial_operators.hpp"
+#include "mango/cpp/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

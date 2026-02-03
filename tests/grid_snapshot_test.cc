@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/support/error_types.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/simple/timestamp.hpp"
+#include "mango/simple/timestamp.hpp"
 #include <chrono>
 
 using namespace mango::simple;

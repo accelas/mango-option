@@ -21,7 +21,7 @@
 Create `tests/grid_spacing_data_test.cc`:
 
 ```cpp
-#include "src/pde/core/grid_spacing_data.hpp"
+#include "mango/pde/core/grid_spacing_data.hpp"
 #include <gtest/gtest.h>
 
 TEST(UniformSpacingTest, ConstructionAndAccessors) {
@@ -545,7 +545,7 @@ private:
 Add to top of `src/pde/core/grid.hpp` after other includes:
 
 ```cpp
-#include "src/pde/core/grid_spacing_data.hpp"
+#include "mango/pde/core/grid_spacing_data.hpp"
 ```
 
 **Step 6: Update grid library BUILD dependency**

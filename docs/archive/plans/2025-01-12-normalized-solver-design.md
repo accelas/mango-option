@@ -542,7 +542,7 @@ All existing code continues to work unchanged:
 ### Direct Normalized Solving
 
 ```cpp
-#include "src/option/normalized_chain_solver.hpp"
+#include "mango/option/normalized_chain_solver.hpp"
 
 std::vector<double> maturities = {0.25, 0.5, 1.0};
 

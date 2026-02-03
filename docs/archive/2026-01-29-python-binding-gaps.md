@@ -58,7 +58,7 @@ git commit -m "Add batch solver dep to Python bindings BUILD"
 At the top of `mango_bindings.cpp`, after the existing includes, add:
 
 ```cpp
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option_batch.hpp"
 ```
 
 **Step 2: Bind GridAccuracyParams struct**

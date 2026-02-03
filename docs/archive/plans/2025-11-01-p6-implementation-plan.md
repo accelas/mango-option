@@ -336,8 +336,8 @@ int american_option_solve_on_grid_with_greeks(
 ```python
 cc_library(
     name = "american_option_unified",
-    srcs = ["src/american_option_unified.c"],
-    hdrs = ["src/american_option_unified.h"],
+    srcs = ["mango/american_option_unified.c"],
+    hdrs = ["mango/american_option_unified.h"],
     deps = [
         ":pde_solver",
     ],

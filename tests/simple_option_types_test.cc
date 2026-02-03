@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/simple/option_types.hpp"
+#include "mango/simple/option_types.hpp"
 
 using namespace mango::simple;
 

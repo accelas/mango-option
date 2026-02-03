@@ -24,7 +24,7 @@ Create `tests/simple_price_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/price.hpp"
+#include "mango/simple/price.hpp"
 
 TEST(SimplePriceTest, ConstructFromDouble) {
     mango::simple::Price p{100.50};
@@ -208,7 +208,7 @@ Create `tests/simple_timestamp_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/timestamp.hpp"
+#include "mango/simple/timestamp.hpp"
 #include <chrono>
 
 using namespace mango::simple;
@@ -350,7 +350,7 @@ double compute_tau(const Timestamp& valuation, const Timestamp& expiry);
 Create `src/simple/timestamp.cpp`:
 
 ```cpp
-#include "src/simple/timestamp.hpp"
+#include "mango/simple/timestamp.hpp"
 #include <charconv>
 #include <ctime>
 #include <iomanip>
@@ -526,7 +526,7 @@ Create `tests/simple_option_types_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/option_types.hpp"
+#include "mango/simple/option_types.hpp"
 
 using namespace mango::simple;
 
@@ -607,8 +607,8 @@ Create `src/simple/option_types.hpp`:
 
 #pragma once
 
-#include "src/simple/price.hpp"
-#include "src/simple/timestamp.hpp"
+#include "mango/simple/price.hpp"
+#include "mango/simple/timestamp.hpp"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -750,7 +750,7 @@ Create `tests/simple_option_chain_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/option_chain.hpp"
+#include "mango/simple/option_chain.hpp"
 
 using namespace mango::simple;
 
@@ -824,9 +824,9 @@ Create `src/simple/option_chain.hpp`:
 
 #pragma once
 
-#include "src/simple/option_types.hpp"
-#include "src/math/yield_curve.hpp"
-#include "src/option/option_spec.hpp"  // For RateSpec
+#include "mango/simple/option_types.hpp"
+#include "mango/math/yield_curve.hpp"
+#include "mango/option/option_spec.hpp"  // For RateSpec
 #include <optional>
 #include <string>
 #include <vector>
@@ -962,10 +962,10 @@ Create `tests/simple_converter_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/converter.hpp"
-#include "src/simple/sources/yfinance.hpp"
-#include "src/simple/sources/databento.hpp"
-#include "src/simple/sources/ibkr.hpp"
+#include "mango/simple/converter.hpp"
+#include "mango/simple/sources/yfinance.hpp"
+#include "mango/simple/sources/databento.hpp"
+#include "mango/simple/sources/ibkr.hpp"
 
 using namespace mango::simple;
 
@@ -1042,10 +1042,10 @@ Create `src/simple/converter.hpp`:
 
 #pragma once
 
-#include "src/simple/price.hpp"
-#include "src/simple/timestamp.hpp"
-#include "src/simple/option_types.hpp"
-#include "src/option/option_spec.hpp"
+#include "mango/simple/price.hpp"
+#include "mango/simple/timestamp.hpp"
+#include "mango/simple/option_types.hpp"
+#include "mango/option/option_spec.hpp"
 #include <concepts>
 #include <stdexcept>
 
@@ -1090,7 +1090,7 @@ Create `src/simple/sources/yfinance.hpp`:
 
 #pragma once
 
-#include "src/simple/converter.hpp"
+#include "mango/simple/converter.hpp"
 
 namespace mango::simple {
 
@@ -1154,7 +1154,7 @@ Create `src/simple/sources/databento.hpp`:
 
 #pragma once
 
-#include "src/simple/converter.hpp"
+#include "mango/simple/converter.hpp"
 
 namespace mango::simple {
 
@@ -1211,7 +1211,7 @@ Create `src/simple/sources/ibkr.hpp`:
 
 #pragma once
 
-#include "src/simple/converter.hpp"
+#include "mango/simple/converter.hpp"
 
 namespace mango::simple {
 
@@ -1360,9 +1360,9 @@ Create `tests/simple_chain_builder_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/chain_builder.hpp"
-#include "src/simple/sources/yfinance.hpp"
-#include "src/simple/sources/databento.hpp"
+#include "mango/simple/chain_builder.hpp"
+#include "mango/simple/sources/yfinance.hpp"
+#include "mango/simple/sources/databento.hpp"
 
 using namespace mango::simple;
 
@@ -1433,8 +1433,8 @@ Create `src/simple/chain_builder.hpp`:
 
 #pragma once
 
-#include "src/simple/option_chain.hpp"
-#include "src/simple/converter.hpp"
+#include "mango/simple/option_chain.hpp"
+#include "mango/simple/converter.hpp"
 #include <map>
 
 namespace mango::simple {
@@ -1580,9 +1580,9 @@ Create `tests/simple_vol_surface_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/simple/vol_surface.hpp"
-#include "src/simple/chain_builder.hpp"
-#include "src/simple/sources/yfinance.hpp"
+#include "mango/simple/vol_surface.hpp"
+#include "mango/simple/chain_builder.hpp"
+#include "mango/simple/sources/yfinance.hpp"
 
 using namespace mango::simple;
 
@@ -1650,9 +1650,9 @@ Create `src/simple/vol_surface.hpp`:
 
 #pragma once
 
-#include "src/simple/option_chain.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "mango/simple/option_chain.hpp"
+#include "mango/option/iv_solver_interpolated.hpp"
+#include "mango/option/iv_solver_fdm.hpp"
 #include <expected>
 #include <memory>
 #include <vector>
@@ -1739,7 +1739,7 @@ std::expected<VolatilitySurface, ComputeError> compute_vol_surface(
 Create `src/simple/vol_surface.cpp`:
 
 ```cpp
-#include "src/simple/vol_surface.hpp"
+#include "mango/simple/vol_surface.hpp"
 #include <cmath>
 
 namespace mango::simple {
@@ -1975,16 +1975,16 @@ Create `src/simple/simple.hpp`:
 
 #pragma once
 
-#include "src/simple/price.hpp"
-#include "src/simple/timestamp.hpp"
-#include "src/simple/option_types.hpp"
-#include "src/simple/option_chain.hpp"
-#include "src/simple/converter.hpp"
-#include "src/simple/chain_builder.hpp"
-#include "src/simple/vol_surface.hpp"
-#include "src/simple/sources/yfinance.hpp"
-#include "src/simple/sources/databento.hpp"
-#include "src/simple/sources/ibkr.hpp"
+#include "mango/simple/price.hpp"
+#include "mango/simple/timestamp.hpp"
+#include "mango/simple/option_types.hpp"
+#include "mango/simple/option_chain.hpp"
+#include "mango/simple/converter.hpp"
+#include "mango/simple/chain_builder.hpp"
+#include "mango/simple/vol_surface.hpp"
+#include "mango/simple/sources/yfinance.hpp"
+#include "mango/simple/sources/databento.hpp"
+#include "mango/simple/sources/ibkr.hpp"
 ```
 
 **Step 7: Add test target**
@@ -2033,7 +2033,7 @@ Create `examples/simple_yfinance_example.cpp`:
  * @brief End-to-end example: yfinance data → volatility smile
  */
 
-#include "src/simple/simple.hpp"
+#include "mango/simple/simple.hpp"
 #include <iostream>
 #include <iomanip>
 
@@ -2177,7 +2177,7 @@ Create `examples/simple_databento_example.cpp`:
  * @brief End-to-end example: Databento fixed-point data → volatility smile
  */
 
-#include "src/simple/simple.hpp"
+#include "mango/simple/simple.hpp"
 #include <iostream>
 #include <iomanip>
 

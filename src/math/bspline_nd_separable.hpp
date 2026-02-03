@@ -27,11 +27,11 @@
 
 #pragma once
 
-#include "src/math/bspline_collocation.hpp"
-#include "src/math/bspline_collocation_workspace.hpp"
-#include "src/support/parallel.hpp"
-#include "src/support/thread_workspace.hpp"
-#include "src/math/safe_math.hpp"
+#include "mango/math/bspline_collocation.hpp"
+#include "mango/math/bspline_collocation_workspace.hpp"
+#include "mango/support/parallel.hpp"
+#include "mango/support/thread_workspace.hpp"
+#include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <expected>
 #include <span>

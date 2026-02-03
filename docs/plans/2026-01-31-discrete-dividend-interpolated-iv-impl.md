@@ -27,8 +27,8 @@ Modify `AmericanPriceSurface` to handle `SurfaceContent::RawPrice` and expose bo
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/table/price_table_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_surface.hpp"
 
 using namespace mango;
 
@@ -166,8 +166,8 @@ Define the concept that `AmericanPriceSurface` satisfies. This is a header-only 
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/price_surface_concept.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_surface_concept.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 
 using namespace mango;
 
@@ -253,7 +253,7 @@ Add optional IC override so the solver can accept a custom initial condition ins
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 
 using namespace mango;
 
@@ -366,8 +366,8 @@ Three additive changes to the existing builder.
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 
 using namespace mango;
 
@@ -505,7 +505,7 @@ Test segment selection, spot adjustment, and the worked example from the design 
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/segmented_price_surface.hpp"
+#include "mango/option/table/segmented_price_surface.hpp"
 
 using namespace mango;
 
@@ -569,7 +569,7 @@ Create `src/option/table/segmented_price_surface.hpp`:
 
 #include <vector>
 #include <utility>
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 
 namespace mango {
 
@@ -654,7 +654,7 @@ Orchestrates backward-chained construction for a single K_ref.
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
 
 using namespace mango;
 
@@ -761,8 +761,8 @@ Wraps multiple `SegmentedPriceSurface` instances with strike interpolation. Sati
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/segmented_multi_kref_surface.hpp"
-#include "src/option/table/price_surface_concept.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/price_surface_concept.hpp"
 
 using namespace mango;
 
@@ -837,7 +837,7 @@ Top-level builder that chooses K_ref values and assembles the multi-K_ref surfac
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
 
 using namespace mango;
 
@@ -913,9 +913,9 @@ Template the solver and replace concrete `AmericanPriceSurface` references with 
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/table/segmented_multi_kref_surface.hpp"
-#include "src/option/table/price_surface_concept.hpp"
+#include "mango/option/iv_solver_interpolated.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/price_surface_concept.hpp"
 
 using namespace mango;
 
@@ -998,7 +998,7 @@ Single factory function that hides the two paths.
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_factory.hpp"
+#include "mango/option/iv_solver_factory.hpp"
 
 using namespace mango;
 
@@ -1085,8 +1085,8 @@ Full integration test exercising the complete pipeline: factory → segmented bu
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_factory.hpp"
-#include "src/option/iv_solver_fdm.hpp"
+#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/iv_solver_fdm.hpp"
 
 using namespace mango;
 

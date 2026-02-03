@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/iv_result.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/iv_result.hpp"
+#include "mango/support/error_types.hpp"
 #include <expected>
 #include <vector>
 

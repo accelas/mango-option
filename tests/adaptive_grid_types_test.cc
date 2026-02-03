@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 
 namespace mango {
 namespace {

@@ -18,7 +18,7 @@ Move `GridAccuracyParams` and `GridAccuracyProfile` from `american_option.hpp`, 
 
 **Files:**
 - Create: `src/option/grid_spec_types.hpp`
-- Modify: `src/option/american_option.hpp` — remove `GridAccuracyParams` and `GridAccuracyProfile` definitions, add `#include "src/option/grid_spec_types.hpp"`
+- Modify: `src/option/american_option.hpp` — remove `GridAccuracyParams` and `GridAccuracyProfile` definitions, add `#include "mango/option/grid_spec_types.hpp"`
 - Modify: `src/option/table/price_table_config.hpp` — remove `ExplicitPDEGrid` and `PDEGridSpec`, add include, replace heavy `american_option.hpp` include with `option_spec.hpp`
 - Modify: `BUILD.bazel` — add new header to appropriate `cc_library` target
 - Modify: any file that includes `american_option.hpp` solely for `GridAccuracyParams` — switch to lighter include
@@ -28,8 +28,8 @@ Move `GridAccuracyParams` and `GridAccuracyProfile` from `american_option.hpp`, 
 ```cpp
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <variant>
 
 namespace mango {
@@ -65,8 +65,8 @@ GridAccuracyParams grid_accuracy_profile(GridAccuracyProfile profile);
 
 **`price_table_config.hpp` after:**
 ```cpp
-#include "src/option/grid_spec_types.hpp"  // PDEGridSpec, ExplicitPDEGrid, GridAccuracyParams
-#include "src/option/option_spec.hpp"      // OptionType (was: american_option.hpp — too heavy)
+#include "mango/option/grid_spec_types.hpp"  // PDEGridSpec, ExplicitPDEGrid, GridAccuracyParams
+#include "mango/option/option_spec.hpp"      // OptionType (was: american_option.hpp — too heavy)
 ```
 
 This fixes the heavy transitive include: `price_table_config.hpp` no longer pulls in the PDE solver chain.
@@ -269,7 +269,7 @@ private:
 ```cpp
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "src/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_builder.hpp"
 
 namespace mango::testing {
 

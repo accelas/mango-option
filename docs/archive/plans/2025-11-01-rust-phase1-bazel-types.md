@@ -124,7 +124,7 @@ license.workspace = true
 
 [lib]
 name = "mango_types"
-path = "src/lib.rs"
+path = "mango/lib.rs"
 
 [dependencies]
 # No dependencies yet - pure types
@@ -181,7 +181,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "types",
-    srcs = ["src/lib.rs"],
+    srcs = ["mango/lib.rs"],
     edition = "2021",
     visibility = ["//visibility:public"],
 )

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/table/price_table_axes.hpp"
-#include "src/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/price_table_surface.hpp"
 #include <array>
 #include <memory>
 #include <vector>

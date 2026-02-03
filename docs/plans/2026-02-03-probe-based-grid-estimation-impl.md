@@ -82,7 +82,7 @@ git commit -m "Add target_price_error field to IVSolverFDMConfig"
 ```cpp
 // tests/grid_probe_test.cc
 #include <gtest/gtest.h>
-#include "src/option/grid_probe.hpp"
+#include "mango/option/grid_probe.hpp"
 
 TEST(GridProbeTest, ConvergesForTypicalOption) {
     mango::PricingParams params(
@@ -115,10 +115,10 @@ Expected: FAIL with "No such file or directory" or "probe_grid_adequacy not foun
 #pragma once
 
 #include <expected>
-#include "src/pde/core/grid_spec.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/option/american_option.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/pde/core/grid_spec.hpp"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/support/error_types.hpp"
 
 namespace mango {
 
@@ -148,8 +148,8 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 ```cpp
 // src/option/grid_probe.cpp
 // SPDX-License-Identifier: MIT
-#include "src/option/grid_probe.hpp"
-#include "src/option/american_option.hpp"
+#include "mango/option/grid_probe.hpp"
+#include "mango/option/american_option.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -558,7 +558,7 @@ if (probe_grid.has_value()) {
 **Step 5: Add include for grid_probe.hpp**
 
 ```cpp
-#include "src/option/grid_probe.hpp"
+#include "mango/option/grid_probe.hpp"
 ```
 
 **Step 6: Update BUILD.bazel to add grid_probe dependency**
@@ -635,7 +635,7 @@ git commit -m "Add test for IVSolver fallback when probe doesn't converge"
 
 ```cpp
 // At top of file
-#include "src/support/usdt_probes.hpp"
+#include "mango/support/usdt_probes.hpp"
 
 // In probe_grid_adequacy():
 
@@ -678,7 +678,7 @@ git commit -m "Add USDT probes for grid calibration tracing"
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <benchmark/benchmark.h>
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 
 static void BM_IVSolver_Heuristic(benchmark::State& state) {
     mango::OptionSpec spec{
@@ -809,7 +809,7 @@ Add Pattern 5 to "Common Development Patterns" section:
 ```markdown
 **Pattern 5: Probe-Based IV Solver**
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 
 // Simple: just specify target accuracy
 mango::IVSolverFDMConfig config{.target_price_error = 0.01};

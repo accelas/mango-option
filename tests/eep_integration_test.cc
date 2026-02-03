@@ -2,11 +2,11 @@
 /// @file eep_integration_test.cc
 /// @brief End-to-end integration tests for EEP decomposition feature
 
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/table/price_table_metadata.hpp"
-#include "src/option/american_option.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
 #include <memory_resource>
 #include <cmath>

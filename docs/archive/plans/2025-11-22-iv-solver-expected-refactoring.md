@@ -24,7 +24,7 @@ Create test file `tests/iv_error_types_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 
 using namespace mango;
 
@@ -141,7 +141,7 @@ Create test file `tests/iv_result_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/iv_result.hpp"
+#include "mango/option/iv_result.hpp"
 
 using namespace mango;
 
@@ -331,8 +331,8 @@ std::expected<IVSuccess, IVError> solve_impl(const IVQuery& query);
 Add includes at top:
 
 ```cpp
-#include "src/option/iv_result.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/iv_result.hpp"
+#include "mango/support/error_types.hpp"
 #include <expected>
 ```
 
@@ -604,7 +604,7 @@ In `src/option/iv_result.hpp`, add after IVSuccess:
 ```cpp
 #include <vector>
 #include <expected>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 
 /// Batch IV solver result
 struct BatchIVResult {
@@ -960,7 +960,7 @@ In `CLAUDE.md`, find the "Implied Volatility Solver" section and update:
 ### Basic Usage
 
 ```cpp
-#include "src/option/iv_solver_fdm.hpp"
+#include "mango/option/iv_solver_fdm.hpp"
 
 // Setup option parameters
 OptionSpec spec{
@@ -1085,8 +1085,8 @@ Create `tests/iv_solver_integration_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/iv_solver_fdm.hpp"
-#include "src/option/american_option.hpp"
+#include "mango/option/iv_solver_fdm.hpp"
+#include "mango/option/american_option.hpp"
 
 using namespace mango;
 
@@ -1249,7 +1249,7 @@ bazel build //... 2>&1 | grep -i deprecated
 
 # 4. Example usage compiles
 cat > /tmp/test_iv_api.cc <<'EOF'
-#include "src/option/iv_solver_fdm.hpp"
+#include "mango/option/iv_solver_fdm.hpp"
 int main() {
     mango::OptionSpec spec{100, 100, 1, 0.05, 0.02, mango::OptionType::PUT};
     mango::IVQuery q{spec, 10.0};

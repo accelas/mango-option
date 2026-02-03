@@ -420,8 +420,8 @@ Expected: FAIL — `build_segmented` and `SegmentedAdaptiveConfig` don't exist.
 In `src/option/table/adaptive_grid_builder.hpp`, add includes and types:
 
 ```cpp
-#include "src/option/table/segmented_multi_kref_builder.hpp"
-#include "src/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
 
 // Before AdaptiveGridBuilder class:
 struct AdaptiveGrid;  // forward-declared; defined in iv_solver_factory.hpp

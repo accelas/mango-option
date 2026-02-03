@@ -8,8 +8,8 @@
  * instantiations for common surface types to improve compile times.
  */
 
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 
 namespace mango {
 

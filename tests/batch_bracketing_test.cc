@@ -5,7 +5,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "src/option/batch_bracketing.hpp"
+#include "mango/option/batch_bracketing.hpp"
 #include <limits>
 
 namespace mango {

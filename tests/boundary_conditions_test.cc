@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/pde/core/boundary_conditions.hpp"
+#include "mango/pde/core/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 
 TEST(BoundaryConditionTest, BoundarySideEnum) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
 #include <cmath>
 #include <memory_resource>
 #include <ql/quantlib.hpp>

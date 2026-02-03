@@ -32,9 +32,9 @@ The implementation is divided into 3 phases with bite-sized tasks. Each task inc
 #ifndef MANGO_NORMALIZED_CHAIN_SOLVER_HPP
 #define MANGO_NORMALIZED_CHAIN_SOLVER_HPP
 
-#include "src/option/american_option.hpp"
-#include "src/option/american_solver_workspace.hpp"
-#include "src/support/expected.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_solver_workspace.hpp"
+#include "mango/support/expected.hpp"
 #include <span>
 #include <memory>
 #include <vector>
@@ -251,7 +251,7 @@ to solve once and interpolate for all strikes.
  * @brief Implementation of normalized chain solver
  */
 
-#include "src/option/normalized_chain_solver.hpp"
+#include "mango/option/normalized_chain_solver.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -540,7 +540,7 @@ accuracy and Newton convergence for production use cases.
 **Add to existing file:**
 
 ```cpp
-#include "src/option/price_table_snapshot_collector.hpp"
+#include "mango/option/price_table_snapshot_collector.hpp"
 #include <cmath>
 
 expected<void, SolverError> NormalizedChainSolver::solve(
@@ -679,7 +679,7 @@ One solve yields prices for all (S,K) via V = K·u interpolation.
  * @brief Unit tests for normalized chain solver
  */
 
-#include "src/option/normalized_chain_solver.hpp"
+#include "mango/option/normalized_chain_solver.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -1364,7 +1364,7 @@ private:
 **Add to source:**
 
 ```cpp
-#include "src/option/normalized_chain_solver.hpp"
+#include "mango/option/normalized_chain_solver.hpp"
 
 bool PriceTable4DBuilder::should_use_normalized_solver(
     double x_min,
@@ -1776,7 +1776,7 @@ that normalized solver cannot handle.
  * @brief Integration tests for PriceTable4DBuilder with routing
  */
 
-#include "src/option/price_table_4d_builder.hpp"
+#include "mango/option/price_table_4d_builder.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -1961,8 +1961,8 @@ bazel run //benchmarks:price_table_benchmark
 Create `examples/example_normalized_solver.cc`:
 
 ```cpp
-#include "src/option/normalized_chain_solver.hpp"
-#include "src/option/price_table_4d_builder.hpp"
+#include "mango/option/normalized_chain_solver.hpp"
+#include "mango/option/price_table_4d_builder.hpp"
 #include <iostream>
 #include <vector>
 

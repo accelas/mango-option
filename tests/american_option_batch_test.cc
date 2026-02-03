@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option_batch.hpp"
 
 using namespace mango;
 

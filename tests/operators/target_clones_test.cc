@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/pde/operators/centered_difference_scalar.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/operators/centered_difference_scalar.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <vector>
 #include <cmath>
 #include <dlfcn.h>

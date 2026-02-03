@@ -10,7 +10,7 @@
  * - Data preservation through pipeline
  */
 
-#include "src/simple/simple.hpp"
+#include "mango/simple/simple.hpp"
 #include <gtest/gtest.h>
 #include <ranges>
 

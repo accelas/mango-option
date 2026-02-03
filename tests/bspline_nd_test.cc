@@ -4,9 +4,9 @@
  * @brief Tests for N-dimensional B-spline interpolation
  */
 
-#include "src/math/bspline_nd.hpp"
-#include "src/math/bspline_basis.hpp"
-#include "src/math/bspline_nd_separable.hpp"
+#include "mango/math/bspline_nd.hpp"
+#include "mango/math/bspline_basis.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <array>

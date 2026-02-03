@@ -571,7 +571,7 @@ ThomasWorkspace construction and resize.
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 
 using namespace mango;
 
@@ -749,7 +749,7 @@ are used at every API boundary but had zero test coverage.
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/option_spec.hpp"
+#include "mango/option/option_spec.hpp"
 #include <cmath>
 
 using namespace mango;

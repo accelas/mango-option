@@ -12,10 +12,10 @@
  * Run with: bazel run -c opt //benchmarks:iv_interpolation_profile -- --benchmark_filter="Vega"
  */
 
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/price_table_axes.hpp"
-#include "src/option/table/price_table_metadata.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/price_table_metadata.hpp"
 #include <benchmark/benchmark.h>
 #include <memory>
 #include <vector>

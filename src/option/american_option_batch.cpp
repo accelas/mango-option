@@ -4,10 +4,10 @@
  * @brief Implementation of batch and normalized chain solvers
  */
 
-#include "src/option/american_option_batch.hpp"
-#include "src/support/ivcalc_trace.h"
-#include "src/support/thread_workspace.hpp"
-#include "src/pde/core/american_pde_workspace.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/support/ivcalc_trace.h"
+#include "mango/support/thread_workspace.hpp"
+#include "mango/pde/core/american_pde_workspace.hpp"
 #include <cmath>
 #include <algorithm>
 #include <ranges>

@@ -25,7 +25,7 @@ Practical examples and common usage patterns for the mango-option library.
 ### Minimal American Option Example
 
 ```cpp
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 #include <iostream>
 
 int main() {
@@ -53,7 +53,7 @@ int main() {
 ### Minimal IV Calculation Example
 
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 #include <iostream>
 
 int main() {
@@ -94,7 +94,7 @@ int main() {
 **Recommended for most use cases:**
 
 ```cpp
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 
 // Define option
 mango::PricingParams params(
@@ -177,7 +177,7 @@ if (result.has_value()) {
 **Uses Brent's method with nested PDE pricing:**
 
 ```cpp
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 
 // Option specification
 mango::OptionSpec spec{
@@ -268,8 +268,8 @@ auto result = solver.solve(query);
 **Pre-compute American option prices across parameter space:**
 
 ```cpp
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 
 // Define 4D parameter grids
 std::vector<double> moneyness_grid = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};  // m = S/K
@@ -413,7 +413,7 @@ surface = mo.build_price_table_surface_from_grid(
 ### Using Price Surface with InterpolatedIVSolver
 
 ```cpp
-#include "src/option/interpolated_iv_solver.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 
 // Create IV solver from AmericanPriceSurface
 auto iv_solver = mango::InterpolatedIVSolver::create(std::move(aps)).value();
@@ -451,7 +451,7 @@ A cash dividend at time t creates a discontinuity: at the ex-dividend instant, t
 Pass discrete dividends to `PricingParams`:
 
 ```cpp
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 
 mango::PricingParams params(
     mango::OptionSpec{
@@ -520,7 +520,7 @@ The result is a `SegmentedPriceSurface` — an ordered list of segments that tog
 The `make_interpolated_iv_solver` factory handles all the segmented construction:
 
 ```cpp
-#include "src/option/iv_solver_factory.hpp"
+#include "mango/option/iv_solver_factory.hpp"
 
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
@@ -647,7 +647,7 @@ if (result.has_value()) {
 **Parallel batch solver with automatic optimization:**
 
 ```cpp
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option_batch.hpp"
 
 // Build batch of options
 std::vector<mango::PricingParams> batch;
@@ -807,10 +807,10 @@ Use FDM batch when you need exact PDE accuracy or have few queries. Use the pric
 **Solve simple diffusion PDE:**
 
 ```cpp
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/operators/laplacian_pde.hpp"
-#include "src/pde/operators/operator_factory.hpp"
-#include "src/pde/core/boundary_conditions.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/operators/laplacian_pde.hpp"
+#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/core/boundary_conditions.hpp"
 
 // Define derived solver class using CRTP
 class HeatSolver : public mango::PDESolver<HeatSolver> {
@@ -972,8 +972,8 @@ if (!validation_result.has_value()) {
 **Zero-allocation parallel workloads with 64-byte alignment:**
 
 ```cpp
-#include "src/support/thread_workspace.hpp"
-#include "src/math/bspline_collocation_workspace.hpp"
+#include "mango/support/thread_workspace.hpp"
+#include "mango/math/bspline_collocation_workspace.hpp"
 
 // Example: Parallel B-spline fitting with zero allocations per iteration
 const size_t n_axis = 100;
@@ -1001,7 +1001,7 @@ MANGO_PRAGMA_PARALLEL
 **For PDE solving in parallel:**
 
 ```cpp
-#include "src/pde/core/american_pde_workspace.hpp"
+#include "mango/pde/core/american_pde_workspace.hpp"
 
 MANGO_PRAGMA_PARALLEL
 {

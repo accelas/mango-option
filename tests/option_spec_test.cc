@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/option_spec.hpp"
+#include "mango/option/option_spec.hpp"
 #include <cmath>
 
 using namespace mango;
