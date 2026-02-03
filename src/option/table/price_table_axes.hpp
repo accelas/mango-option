@@ -6,8 +6,8 @@
 #include <string>
 #include <expected>
 #include <algorithm>
-#include "src/support/error_types.hpp"
-#include "src/math/safe_math.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/math/safe_math.hpp"
 
 namespace mango {
 

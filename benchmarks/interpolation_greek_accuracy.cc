@@ -13,10 +13,10 @@
  *   bazel run //benchmarks:interpolation_greek_accuracy
  */
 
-#include "src/option/american_option.hpp"
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>

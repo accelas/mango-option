@@ -15,8 +15,8 @@
  * Tolerance: 1% relative error (protects against 14.5% regression like #204)
  */
 
-#include "src/option/american_option.hpp"
-#include "src/option/iv_solver.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/iv_solver.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <memory_resource>

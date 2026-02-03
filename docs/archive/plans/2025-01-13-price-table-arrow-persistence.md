@@ -24,7 +24,7 @@
 Create `tests/price_table_workspace_test.cc`:
 
 ```cpp
-#include "src/option/price_table_workspace.hpp"
+#include "mango/option/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -95,8 +95,8 @@ Create `src/option/price_table_workspace.hpp`:
 ```cpp
 #pragma once
 
-#include "src/support/expected.hpp"
-#include "src/interpolation/bspline_utils.hpp"
+#include "mango/support/expected.hpp"
+#include "mango/interpolation/bspline_utils.hpp"
 #include <vector>
 #include <span>
 #include <string>
@@ -222,7 +222,7 @@ private:
 Create `src/option/price_table_workspace.cpp`:
 
 ```cpp
-#include "src/option/price_table_workspace.hpp"
+#include "mango/option/price_table_workspace.hpp"
 #include <algorithm>
 #include <numeric>
 #include <cstring>
@@ -450,7 +450,7 @@ git commit -m "feat: add PriceTableWorkspace with aligned arena
 Add to `tests/bspline_4d_test.cc`:
 
 ```cpp
-#include "src/option/price_table_workspace.hpp"
+#include "mango/option/price_table_workspace.hpp"
 
 TEST(BSpline4D, ConstructsFromWorkspace) {
     std::vector<double> m = {0.8, 0.9, 1.0, 1.1};
@@ -587,7 +587,7 @@ public:
 Add include at top of file:
 
 ```cpp
-#include "src/option/price_table_workspace.hpp"
+#include "mango/option/price_table_workspace.hpp"
 ```
 
 **Step 4: Update BSpline4D dependencies in BUILD.bazel**

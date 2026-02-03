@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/error_attribution.hpp"
+#include "mango/option/table/error_attribution.hpp"
 
 namespace mango {
 namespace {

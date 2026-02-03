@@ -14,8 +14,8 @@
  * Requires: libquantlib0-dev
  */
 
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
 #include <benchmark/benchmark.h>
 #include <iostream>
 #include <iomanip>

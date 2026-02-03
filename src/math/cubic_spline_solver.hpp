@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "src/math/thomas_solver.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/math/thomas_solver.hpp"
+#include "mango/support/parallel.hpp"
 #include <span>
 #include <vector>
 #include <optional>

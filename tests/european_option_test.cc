@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/european_option.hpp"
-#include "src/option/option_concepts.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/option/option_concepts.hpp"
 #include <cmath>
 
 namespace {

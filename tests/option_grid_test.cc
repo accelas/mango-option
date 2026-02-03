@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/option_grid.hpp"
+#include "mango/option/option_grid.hpp"
 
 TEST(OptionGridTest, DefaultConstruction) {
     mango::OptionGrid chain;

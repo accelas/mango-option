@@ -3,10 +3,10 @@
 
 #include <vector>
 #include <expected>
-#include "src/option/table/segmented_multi_kref_surface.hpp"
-#include "src/option/table/segmented_price_table_builder.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/support/error_types.hpp"
 
 namespace mango {
 

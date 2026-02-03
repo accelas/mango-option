@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // tests/lifetime_test.cc
-#include "src/support/lifetime.hpp"
+#include "mango/support/lifetime.hpp"
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <type_traits>

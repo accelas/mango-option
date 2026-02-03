@@ -401,7 +401,7 @@ Create `tests/discrete_dividend_event_test.cc`:
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/discrete_dividend_event.hpp"
+#include "mango/option/discrete_dividend_event.hpp"
 #include <vector>
 #include <cmath>
 
@@ -520,8 +520,8 @@ Create `src/option/discrete_dividend_event.hpp`:
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/pde/core/pde_solver.hpp"
-#include "src/math/cubic_spline_solver.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <cmath>
 #include <span>
 #include <vector>
@@ -749,7 +749,7 @@ In `src/option/american_option.cpp`, add dividend event registration after creat
 
 Add include at top:
 ```cpp
-#include "src/option/discrete_dividend_event.hpp"
+#include "mango/option/discrete_dividend_event.hpp"
 ```
 
 In `solve()`, replace the solver creation block (lines 109-119) with:
@@ -886,8 +886,8 @@ lower bound). Also compare put-call parity bounds.
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
 
 using namespace mango;
 

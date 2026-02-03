@@ -82,8 +82,8 @@ Create `tests/brent_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/cpp/brent.hpp"
-#include "src/cpp/root_finding.hpp"
+#include "mango/cpp/brent.hpp"
+#include "mango/cpp/root_finding.hpp"
 #include <cmath>
 #include <limits>
 
@@ -141,8 +141,8 @@ Create `src/cpp/brent.hpp`:
 ```cpp
 #pragma once
 
-#include "src/cpp/root_finding.hpp"
-#include "src/mango_trace.h"
+#include "mango/cpp/root_finding.hpp"
+#include "mango/mango_trace.h"
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -497,8 +497,8 @@ Create `tests/iv_solver_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/cpp/iv_solver.hpp"
-#include "src/cpp/american_option.hpp"
+#include "mango/cpp/iv_solver.hpp"
+#include "mango/cpp/american_option.hpp"
 #include <vector>
 
 namespace mango {
@@ -585,10 +585,10 @@ Create `src/cpp/iv_solver.hpp`:
 ```cpp
 #pragma once
 
-#include "src/cpp/brent.hpp"
-#include "src/cpp/american_option.hpp"
-#include "src/cpp/root_finding.hpp"
-#include "src/mango_trace.h"
+#include "mango/cpp/brent.hpp"
+#include "mango/cpp/american_option.hpp"
+#include "mango/cpp/root_finding.hpp"
+#include "mango/mango_trace.h"
 #include <span>
 #include <vector>
 #include <optional>
@@ -1655,8 +1655,8 @@ git commit -m "docs(iv): add IV calculation workflow to CLAUDE.md"
 Create `examples/example_iv_calculation.cc`:
 
 ```cpp
-#include "src/cpp/iv_solver.hpp"
-#include "src/cpp/american_option.hpp"
+#include "mango/cpp/iv_solver.hpp"
+#include "mango/cpp/american_option.hpp"
 #include <iostream>
 #include <iomanip>
 

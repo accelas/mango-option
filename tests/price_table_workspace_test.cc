@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/price_table_workspace.hpp"
+#include "mango/option/table/price_table_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <fstream>

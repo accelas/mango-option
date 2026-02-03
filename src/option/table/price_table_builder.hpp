@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/option/table/price_table_config.hpp"
-#include "src/option/table/price_table_axes.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/price_tensor.hpp"
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
-#include "src/option/option_grid.hpp"
-#include "src/option/table/price_table_grid_estimator.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/table/price_table_config.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_tensor.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/option/option_grid.hpp"
+#include "mango/option/table/price_table_grid_estimator.hpp"
+#include "mango/support/error_types.hpp"
 #include <expected>
 #include <functional>
 #include <memory>

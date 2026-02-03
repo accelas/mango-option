@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/slice_cache.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/option/option_spec.hpp"
+#include "mango/option/table/slice_cache.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/option/option_spec.hpp"
 
 namespace mango {
 namespace {

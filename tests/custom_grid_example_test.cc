@@ -11,8 +11,8 @@
  * - Grid accuracy tradeoffs
  */
 
-#include "src/option/american_option.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <memory_resource>
 #include <optional>

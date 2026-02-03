@@ -7,8 +7,8 @@
 #pragma once
 
 #include <expected>
-#include "src/support/error_types.hpp"
-#include "src/math/yield_curve.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/math/yield_curve.hpp"
 #include <string>
 #include <vector>
 #include <utility>

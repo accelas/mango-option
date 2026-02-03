@@ -498,8 +498,8 @@ This design:
 ### Example 1: Basic Usage (No Snapshots)
 
 ```cpp
-#include "src/option/american_option.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 
 // Define params
 AmericanOptionParams params{

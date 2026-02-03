@@ -6,8 +6,8 @@
 // Verifies that N-dimensional tensor fitting produces identical results
 // with workspace-based zero-allocation fitting.
 
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/support/thread_workspace.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 

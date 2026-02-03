@@ -899,8 +899,8 @@ File: `benchmarks/gamma_accuracy.cc`
 #include <string>
 
 extern "C" {
-#include "src/price_table.h"
-#include "src/american_option.h"
+#include "mango/price_table.h"
+#include "mango/american_option.h"
 }
 
 // Compute gamma using finite differences

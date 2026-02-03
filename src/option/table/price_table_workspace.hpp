@@ -2,8 +2,8 @@
 #pragma once
 
 #include <expected>
-#include "src/support/error_types.hpp"
-#include "src/math/bspline_basis.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/math/bspline_basis.hpp"
 #include <experimental/mdspan>
 #include <vector>
 #include <span>

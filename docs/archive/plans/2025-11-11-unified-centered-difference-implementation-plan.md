@@ -552,9 +552,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `tests/centered_difference_facade_test.cc`:
 
 ```cpp
-#include "src/pde/operators/centered_difference_facade.hpp"
-#include "src/pde/operators/grid_spacing.hpp"
-#include "src/grid.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/operators/grid_spacing.hpp"
+#include "mango/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
@@ -754,10 +754,10 @@ Modify `tests/centered_difference_simd_test.cc`:
 Change includes:
 ```cpp
 // Old:
-#include "src/pde/operators/centered_difference_simd.hpp"
+#include "mango/pde/operators/centered_difference_simd.hpp"
 
 // New:
-#include "src/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
 ```
 
 Change test instantiations:

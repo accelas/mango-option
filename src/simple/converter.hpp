@@ -6,10 +6,10 @@
 
 #pragma once
 
-#include "src/simple/price.hpp"
-#include "src/simple/timestamp.hpp"
-#include "src/simple/option_types.hpp"
-#include "src/option/option_spec.hpp"
+#include "mango/simple/price.hpp"
+#include "mango/simple/timestamp.hpp"
+#include "mango/simple/option_types.hpp"
+#include "mango/option/option_spec.hpp"
 #include <concepts>
 #include <stdexcept>
 

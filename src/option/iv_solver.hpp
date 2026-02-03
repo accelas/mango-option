@@ -31,13 +31,13 @@
 
 #pragma once
 
-#include "src/option/option_spec.hpp"
-#include "src/option/iv_result.hpp"
-#include "src/option/american_option.hpp"
-#include "src/option/grid_spec_types.hpp"
-#include "src/math/root_finding.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/iv_result.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/grid_spec_types.hpp"
+#include "mango/math/root_finding.hpp"
 #include <expected>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 #include <span>
 #include <optional>
 #include <unordered_map>

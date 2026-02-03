@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

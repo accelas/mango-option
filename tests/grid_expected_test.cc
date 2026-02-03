@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <expected>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango;

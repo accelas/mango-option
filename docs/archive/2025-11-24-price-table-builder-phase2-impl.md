@@ -75,7 +75,7 @@ git commit -m "build: add OpenMP flags to price_table_builder target"
 
 ```cpp
 // At top of src/option/price_table_builder.cpp, add:
-#include "src/support/parallel.hpp"
+#include "mango/support/parallel.hpp"
 #include <mutex>
 #include <tuple>
 #include <map>

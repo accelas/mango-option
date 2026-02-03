@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/support/parallel.hpp"
+#include "mango/support/parallel.hpp"
 #include <gtest/gtest.h>
 #include <atomic>
 #include <vector>

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // tests/american_pde_workspace_test.cc
 
-#include "src/pde/core/american_pde_workspace.hpp"
-#include "src/support/thread_workspace.hpp"
+#include "mango/pde/core/american_pde_workspace.hpp"
+#include "mango/support/thread_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

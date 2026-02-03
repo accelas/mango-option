@@ -11,10 +11,10 @@
 #ifndef MANGO_BATCH_BRACKETING_HPP
 #define MANGO_BATCH_BRACKETING_HPP
 
-#include "src/option/option_spec.hpp"
-#include "src/option/american_option.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <vector>
 #include <span>
 #include <expected>

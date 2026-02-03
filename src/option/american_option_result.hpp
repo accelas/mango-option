@@ -11,10 +11,10 @@
 
 #pragma once
 
-#include "src/pde/core/grid.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/option/option_concepts.hpp"
-#include "src/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/option_concepts.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
 #include <memory>
 #include <optional>
 #include <span>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/simple/price.hpp"
+#include "mango/simple/price.hpp"
 
 TEST(SimplePriceTest, ConstructFromDouble) {
     mango::simple::Price p{100.50};

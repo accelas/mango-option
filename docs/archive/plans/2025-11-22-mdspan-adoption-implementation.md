@@ -162,7 +162,7 @@ Added basic integration tests to verify functionality."
 
 Create `tests/lapack_banded_layout_test.cc`:
 ```cpp
-#include "src/math/lapack_banded_layout.hpp"
+#include "mango/math/lapack_banded_layout.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -376,7 +376,7 @@ Includes comprehensive tests verifying:
 
 Create `tests/banded_matrix_mdspan_test.cc`:
 ```cpp
-#include "src/math/banded_matrix_solver.hpp"
+#include "mango/math/banded_matrix_solver.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -448,7 +448,7 @@ Expected: FAIL (BandedMatrix doesn't have mdspan interface yet)
 Modify `src/math/banded_matrix_solver.hpp` (replace old BandedMatrix class):
 ```cpp
 // Add includes at top of file
-#include "src/math/lapack_banded_layout.hpp"
+#include "mango/math/lapack_banded_layout.hpp"
 #include <experimental/mdspan>
 
 // Replace BandedMatrix class (around line 30-100)
@@ -766,7 +766,7 @@ Performance improvement measured via benchmark test."
 
 Create `tests/bspline_nd_mdspan_test.cc`:
 ```cpp
-#include "src/math/bspline_nd.hpp"
+#include "mango/math/bspline_nd.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -1100,7 +1100,7 @@ All existing B-spline tests pass with identical results."
 
 Create `tests/grid_spacing_mdspan_test.cc`:
 ```cpp
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -1291,9 +1291,9 @@ Benefits:
 
 Create `tests/mdspan_integration_e2e_test.cc`:
 ```cpp
-#include "src/math/banded_matrix_solver.hpp"
-#include "src/math/bspline_nd.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/math/banded_matrix_solver.hpp"
+#include "mango/math/bspline_nd.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {

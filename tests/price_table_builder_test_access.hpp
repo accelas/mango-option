@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "src/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_builder.hpp"
 
 namespace mango::testing {
 

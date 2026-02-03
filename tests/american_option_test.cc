@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
 
 #include <gtest/gtest.h>
 #include <cmath>

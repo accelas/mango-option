@@ -8,20 +8,20 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <sstream>
-#include "src/option/option_spec.hpp"
-#include "src/option/iv_solver.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/option/american_option.hpp"
-#include "src/option/option_grid.hpp"
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_workspace.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/table/price_table_metadata.hpp"
-#include "src/option/table/price_table_axes.hpp"
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/math/yield_curve.hpp"
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/iv_solver.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/option_grid.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_workspace.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/math/yield_curve.hpp"
+#include "mango/option/american_option_batch.hpp"
 
 namespace py = pybind11;
 

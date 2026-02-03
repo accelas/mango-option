@@ -6,7 +6,7 @@
 #include <string>
 #include <format>
 #include <algorithm>
-#include "src/math/tridiagonal_matrix_view.hpp"
+#include "mango/math/tridiagonal_matrix_view.hpp"
 
 namespace mango {
 

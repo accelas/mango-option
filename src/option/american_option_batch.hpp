@@ -9,11 +9,11 @@
 #ifndef MANGO_AMERICAN_OPTION_BATCH_HPP
 #define MANGO_AMERICAN_OPTION_BATCH_HPP
 
-#include "src/option/american_option.hpp"
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/support/error_types.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/support/parallel.hpp"
 #include <vector>
 #include <expected>
 #include <span>

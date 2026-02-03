@@ -4,7 +4,7 @@
  * @brief Comprehensive tests for CubicSpline2D template class
  */
 
-#include "src/math/cubic_spline_solver.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

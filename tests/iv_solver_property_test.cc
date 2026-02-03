@@ -5,7 +5,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "src/option/iv_solver.hpp"
+#include "mango/option/iv_solver.hpp"
 #include <cmath>
 #include <vector>
 

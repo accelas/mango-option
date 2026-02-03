@@ -275,7 +275,7 @@ concept PriceSurface = requires(const S& s, double spot, double strike,
 };
 ```
 
-This requires adding `#include "src/option/option_spec.hpp"` to the concept header (for `OptionType`).
+This requires adding `#include "mango/option/option_spec.hpp"` to the concept header (for `OptionType`).
 
 **Step 3: Add accessors to AmericanPriceSurface**
 

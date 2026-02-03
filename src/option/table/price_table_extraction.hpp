@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include "src/option/american_option_batch.hpp"
-#include "src/option/table/price_table_grid.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/option/table/price_table_grid.hpp"
 
 namespace mango {
 

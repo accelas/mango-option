@@ -3,9 +3,9 @@
 
 #include <vector>
 #include <expected>
-#include "src/option/table/segmented_price_surface.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/table/segmented_price_surface.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/support/error_types.hpp"
 
 namespace mango {
 

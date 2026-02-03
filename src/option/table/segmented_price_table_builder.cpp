@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/segmented_price_table_builder.hpp"
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/american_option.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/american_option.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>

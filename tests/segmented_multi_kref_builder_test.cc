@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/segmented_multi_kref_builder.hpp"
-#include "src/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
 
 using namespace mango;
 

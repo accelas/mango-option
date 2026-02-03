@@ -74,7 +74,7 @@ The IV solver for American options has been successfully implemented using C++20
 ### Basic Example
 
 ```cpp
-#include "src/cpp/iv_solver.hpp"
+#include "mango/cpp/iv_solver.hpp"
 
 // Setup parameters
 mango::IVParams params{

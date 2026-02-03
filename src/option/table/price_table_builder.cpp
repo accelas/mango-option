@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/european_option.hpp"
-#include "src/option/table/recursion_helpers.hpp"
-#include "src/math/cubic_spline_solver.hpp"
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/support/ivcalc_trace.h"
-#include "src/pde/core/time_domain.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/option/table/recursion_helpers.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/support/ivcalc_trace.h"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/support/parallel.hpp"
 #include <cmath>
 #include <limits>
 #include <algorithm>

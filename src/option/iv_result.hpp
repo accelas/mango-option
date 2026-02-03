@@ -11,7 +11,7 @@
 #include <vector>
 #include <expected>
 #include <cmath>
-#include "src/support/error_types.hpp"
+#include "mango/support/error_types.hpp"
 
 namespace mango {
 

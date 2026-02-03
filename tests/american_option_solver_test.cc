@@ -4,9 +4,9 @@
  * @brief Tests for AmericanOptionSolver structure and API
  */
 
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <mutex>

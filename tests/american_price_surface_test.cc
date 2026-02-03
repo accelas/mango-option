@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/price_table_axes.hpp"
-#include "src/option/table/price_table_metadata.hpp"
-#include "src/option/european_option.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/european_option.hpp"
 #include <cmath>
 
 namespace mango {

@@ -32,7 +32,7 @@
 Create `tests/snapshot_test.cc`:
 
 ```cpp
-#include "src/cpp/snapshot.hpp"
+#include "mango/cpp/snapshot.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -344,7 +344,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Add to `tests/pde_solver_test.cc`:
 
 ```cpp
-#include "src/cpp/snapshot.hpp"
+#include "mango/cpp/snapshot.hpp"
 
 // Mock collector for testing
 class MockCollector : public mango::SnapshotCollector {
@@ -619,7 +619,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `tests/snapshot_interpolator_test.cc`:
 
 ```cpp
-#include "src/cpp/snapshot_interpolator.hpp"
+#include "mango/cpp/snapshot_interpolator.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
@@ -679,7 +679,7 @@ Create `src/cpp/snapshot_interpolator.hpp`:
 ```cpp
 #pragma once
 
-#include "src/cubic_spline.h"
+#include "mango/cubic_spline.h"
 #include <span>
 #include <memory>
 #include <vector>
@@ -811,8 +811,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 Create `tests/price_table_snapshot_collector_test.cc`:
 
 ```cpp
-#include "src/cpp/price_table_snapshot_collector.hpp"
-#include "src/cpp/snapshot.hpp"
+#include "mango/cpp/price_table_snapshot_collector.hpp"
+#include "mango/cpp/snapshot.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

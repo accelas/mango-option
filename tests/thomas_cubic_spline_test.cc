@@ -4,8 +4,8 @@
  * @brief Test modern C++20 Thomas solver and cubic spline
  */
 
-#include "src/math/thomas_solver.hpp"
-#include "src/math/cubic_spline_solver.hpp"
+#include "mango/math/thomas_solver.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

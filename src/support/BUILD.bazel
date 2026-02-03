@@ -12,18 +12,24 @@ cc_library(
     name = "aligned_allocator",
     hdrs = ["aligned_allocator.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )
 
 cc_library(
     name = "parallel",
     hdrs = ["parallel.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )
 
 cc_library(
     name = "lifetime",
     hdrs = ["lifetime.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )
 
 cc_library(
@@ -31,12 +37,16 @@ cc_library(
     hdrs = ["thread_workspace.hpp"],
     deps = [":parallel"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )
 
 cc_library(
     name = "error_types",
     hdrs = ["error_types.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )
 
 
@@ -45,10 +55,14 @@ cc_library(
     srcs = ["crc64.cpp"],
     hdrs = ["crc64.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )
 
 cc_library(
     name = "ivcalc_trace_hdr",
     hdrs = ["ivcalc_trace.h"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/support",
+    include_prefix = "mango/support",
 )

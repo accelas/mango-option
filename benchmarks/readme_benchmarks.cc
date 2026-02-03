@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_batch.hpp"
-#include "src/math/bspline_nd_separable.hpp"
-#include "src/option/iv_solver.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/math/bspline_nd_separable.hpp"
+#include "mango/option/iv_solver.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <cmath>

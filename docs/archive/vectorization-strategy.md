@@ -323,7 +323,7 @@ Measured on centered difference stencil (second derivative, 100-point grid):
 
 **Step 1: Include the header**
 ```cpp
-#include "src/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
 ```
 
 **Step 2: Create operator from grid spacing**
@@ -493,7 +493,7 @@ objdump -d ./bazel-bin/examples/example_newton_solver | grep -A 30 "avx512"
 Use the CPU diagnostics API to check which ISA is available:
 
 ```cpp
-#include "src/support/cpu/cpu_diagnostics.hpp"
+#include "mango/support/cpu/cpu_diagnostics.hpp"
 
 int main() {
     auto features = mango::cpu::detect_cpu_features();

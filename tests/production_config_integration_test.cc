@@ -15,11 +15,11 @@
  */
 
 #include <gtest/gtest.h>
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/american_option_batch.hpp"
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 
 using namespace mango;
 

@@ -38,8 +38,8 @@
 Create `tests/bspline_vega_triple_test.cc`:
 
 ```cpp
-#include "src/interpolation/bspline_4d.hpp"
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "mango/interpolation/bspline_4d.hpp"
+#include "mango/interpolation/bspline_fitter_4d.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

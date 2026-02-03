@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/price_tensor.hpp"
+#include "mango/option/table/price_tensor.hpp"
 
 namespace mango {
 namespace {

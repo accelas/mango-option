@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/pde/core/grid.hpp"
-#include "centered_difference_scalar.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/operators/centered_difference_scalar.hpp"
 #include <span>
 #include <concepts>
 

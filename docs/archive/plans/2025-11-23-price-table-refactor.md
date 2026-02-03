@@ -21,7 +21,7 @@
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/support/memory/aligned_arena.hpp"
+#include "mango/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace memory {
@@ -127,7 +127,7 @@ private:
 - Create: `src/support/memory/aligned_arena.cpp`
 
 ```cpp
-#include "src/support/memory/aligned_arena.hpp"
+#include "mango/support/memory/aligned_arena.hpp"
 #include <cstring>
 
 namespace mango {
@@ -235,7 +235,7 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/price_table_axes.hpp"
+#include "mango/option/price_table_axes.hpp"
 
 namespace mango {
 namespace {
@@ -424,8 +424,8 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/price_tensor.hpp"
-#include "src/support/memory/aligned_arena.hpp"
+#include "mango/option/price_tensor.hpp"
+#include "mango/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace {
@@ -502,7 +502,7 @@ Expected: FAIL with "No such file: src/option/price_tensor.hpp"
 ```cpp
 #pragma once
 
-#include "src/support/memory/aligned_arena.hpp"
+#include "mango/support/memory/aligned_arena.hpp"
 #include <experimental/mdspan>
 #include <memory>
 #include <expected>
@@ -631,7 +631,7 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/price_table_metadata.hpp"
+#include "mango/option/price_table_metadata.hpp"
 
 namespace mango {
 namespace {
@@ -726,8 +726,8 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/price_table_surface.hpp"
-#include "src/support/memory/aligned_arena.hpp"
+#include "mango/option/price_table_surface.hpp"
+#include "mango/support/memory/aligned_arena.hpp"
 
 namespace mango {
 namespace {
@@ -806,10 +806,10 @@ Expected: FAIL
 ```cpp
 #pragma once
 
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_tensor.hpp"
-#include "src/option/price_table_metadata.hpp"
-#include "src/math/bspline_nd.hpp"
+#include "mango/option/price_table_axes.hpp"
+#include "mango/option/price_table_tensor.hpp"
+#include "mango/option/price_table_metadata.hpp"
+#include "mango/math/bspline_nd.hpp"
 #include <memory>
 #include <expected>
 #include <string>
@@ -871,8 +871,8 @@ private:
 - Create: `src/option/price_table_surface.cpp`
 
 ```cpp
-#include "src/option/price_table_surface.hpp"
-#include "src/math/bspline_nd.hpp"
+#include "mango/option/price_table_surface.hpp"
+#include "mango/math/bspline_nd.hpp"
 
 namespace mango {
 
@@ -1023,7 +1023,7 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/price_table_config.hpp"
+#include "mango/option/price_table_config.hpp"
 
 namespace mango {
 namespace {
@@ -1060,8 +1060,8 @@ TEST(PriceTableConfigTest, WithDiscreteDividends) {
 ```cpp
 #pragma once
 
-#include "src/option/american_option.hpp"  // For OptionType
-#include "src/pde/core/grid_spec.hpp"
+#include "mango/option/american_option.hpp"  // For OptionType
+#include "mango/pde/core/grid_spec.hpp"
 #include <vector>
 #include <utility>
 #include <optional>
@@ -1103,7 +1103,7 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "mango/option/price_table_builder.hpp"
 
 namespace mango {
 namespace {
@@ -1144,10 +1144,10 @@ TEST(PriceTableBuilderTest, BuildEmpty4DSurface) {
 ```cpp
 #pragma once
 
-#include "src/option/price_table_config.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_surface.hpp"
-#include "src/option/american_option.hpp"
+#include "mango/option/price_table_config.hpp"
+#include "mango/option/price_table_axes.hpp"
+#include "mango/option/price_table_surface.hpp"
+#include "mango/option/american_option.hpp"
 #include <expected>
 #include <string>
 
@@ -1185,7 +1185,7 @@ private:
 - Create: `src/option/price_table_builder.cpp`
 
 ```cpp
-#include "src/option/price_table_builder.hpp"
+#include "mango/option/price_table_builder.hpp"
 
 namespace mango {
 
@@ -1237,7 +1237,7 @@ Part of price table refactor (#XXX)"
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/recursion_helpers.hpp"
+#include "mango/option/recursion_helpers.hpp"
 #include <vector>
 
 namespace mango {
@@ -1288,7 +1288,7 @@ TEST(RecursionHelpersTest, ForEachAxisIndex4D) {
 ```cpp
 #pragma once
 
-#include "src/option/price_table_axes.hpp"
+#include "mango/option/price_table_axes.hpp"
 #include <array>
 #include <functional>
 

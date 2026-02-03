@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/pde/core/grid.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/support/parallel.hpp"
 #include <span>
 #include <cmath>
 #include <cassert>

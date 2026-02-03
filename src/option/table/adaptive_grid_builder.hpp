@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/table/adaptive_grid_types.hpp"
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/slice_cache.hpp"
-#include "src/option/table/error_attribution.hpp"
-#include "src/option/table/segmented_multi_kref_builder.hpp"
-#include "src/option/table/segmented_multi_kref_surface.hpp"
-#include "src/option/option_grid.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/slice_cache.hpp"
+#include "mango/option/table/error_attribution.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/option_grid.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/support/error_types.hpp"
 #include <expected>
 #include <optional>
 

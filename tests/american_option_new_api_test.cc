@@ -4,10 +4,10 @@
  * @brief Tests for new AmericanOptionSolver API with PDEWorkspace
  */
 
-#include "src/option/american_option.hpp"
-#include "src/option/american_option_result.hpp"
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_option_result.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <memory_resource>
 

@@ -4,9 +4,9 @@
  * @brief Implementation of price table extraction utility
  */
 
-#include "src/option/table/price_table_extraction.hpp"
-#include "src/math/cubic_spline_solver.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/option/table/price_table_extraction.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
+#include "mango/support/parallel.hpp"
 #include <experimental/mdspan>
 #include <cassert>
 #include <cmath>

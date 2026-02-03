@@ -2,8 +2,8 @@
 // src/pde/core/american_pde_workspace.hpp
 #pragma once
 
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/support/lifetime.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/support/lifetime.hpp"
 #include <span>
 #include <expected>
 #include <string>

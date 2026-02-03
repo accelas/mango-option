@@ -27,9 +27,9 @@
 Create `tests/grid_with_solution_test.cc`:
 
 ```cpp
-#include "src/pde/core/grid_with_solution.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/pde/core/grid_with_solution.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -148,8 +148,8 @@ Create `src/pde/core/grid_with_solution.hpp`:
 #ifndef MANGO_GRID_WITH_SOLUTION_HPP
 #define MANGO_GRID_WITH_SOLUTION_HPP
 
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <expected>
 #include <memory>
 #include <vector>
@@ -343,7 +343,7 @@ Expected: FAIL with "clamped_knots_cubic was not declared in this scope"
 Modify `src/pde/core/grid_with_solution.hpp`:
 
 ```cpp
-#include "src/bspline/bspline_utils.hpp"  // Add this line
+#include "mango/bspline/bspline_utils.hpp"  // Add this line
 ```
 
 Update `src/pde/core/BUILD.bazel`:
@@ -395,7 +395,7 @@ Related: #209"
 Create `tests/pde_workspace_spans_test.cc`:
 
 ```cpp
-#include "src/pde/core/pde_workspace_spans.hpp"
+#include "mango/pde/core/pde_workspace_spans.hpp"
 #include <gtest/gtest.h>
 #include <memory_resource>
 #include <vector>
@@ -1219,7 +1219,7 @@ Related: #209"
 Create `tests/obstacle_policies_test.cc`:
 
 ```cpp
-#include "src/pde/core/obstacle_policies.hpp"
+#include "mango/pde/core/obstacle_policies.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 

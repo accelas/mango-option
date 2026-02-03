@@ -16,13 +16,13 @@
 #include <vector>
 #include <variant>
 #include <expected>
-#include "src/option/interpolated_iv_solver.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/table/segmented_multi_kref_surface.hpp"
-#include "src/option/table/segmented_multi_kref_builder.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/option/table/adaptive_grid_types.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/support/error_types.hpp"
 
 namespace mango {
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "src/pde/operators/centered_difference_facade.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

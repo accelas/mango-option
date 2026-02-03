@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <variant>
 #include <vector>
 

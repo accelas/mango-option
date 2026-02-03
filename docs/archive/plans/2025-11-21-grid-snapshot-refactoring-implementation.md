@@ -24,9 +24,9 @@
 Create `tests/grid_snapshot_test.cc`:
 
 ```cpp
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/grid_spec.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/grid_spec.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -425,10 +425,10 @@ git commit -m "feat(grid): add snapshot recording API
 Create `tests/pde_solver_snapshot_test.cc`:
 
 ```cpp
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/operators/laplacian_pde.hpp"
-#include "src/pde/operators/operator_factory.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/operators/laplacian_pde.hpp"
+#include "mango/pde/operators/operator_factory.hpp"
 #include <gtest/gtest.h>
 
 // Simple diffusion solver for testing
@@ -633,8 +633,8 @@ git commit -m "test(pde): verify snapshot recording during time steps
 Create `tests/american_option_result_test.cc`:
 
 ```cpp
-#include "src/option/american_option_result.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/option/american_option_result.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 
 TEST(AmericanOptionResultTest, ValueAtSpot) {
@@ -686,9 +686,9 @@ Create `src/option/american_option_result.hpp`:
 ```cpp
 #pragma once
 
-#include "src/pde/core/grid.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
 #include <memory>
 #include <optional>
 
@@ -758,7 +758,7 @@ private:
 Create `src/option/american_option_result.cpp`:
 
 ```cpp
-#include "src/option/american_option_result.hpp"
+#include "mango/option/american_option_result.hpp"
 
 namespace mango {
 
@@ -1051,8 +1051,8 @@ git commit -m "feat(option): add PDEWorkspace-based constructor
 Create `tests/american_option_new_api_test.cc`:
 
 ```cpp
-#include "src/option/american_option.hpp"
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include <gtest/gtest.h>
 
 TEST(AmericanOptionNewAPITest, SolveWithPDEWorkspace) {

@@ -361,7 +361,7 @@ Create test file:
 
 ```bash
 cat > /tmp/test_workspace.cc << 'EOF'
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "mango/interpolation/bspline_fitter_4d.hpp"
 #include <iostream>
 
 int main() {
@@ -763,7 +763,7 @@ Create new test file:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/interpolation/bspline_fitter_4d.hpp"
+#include "mango/interpolation/bspline_fitter_4d.hpp"
 #include <cmath>
 #include <vector>
 

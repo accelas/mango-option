@@ -4,7 +4,7 @@
  * @brief Implementation of AmericanOptionResult wrapper class
  */
 
-#include "american_option_result.hpp"
+#include "mango/option/american_option_result.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>

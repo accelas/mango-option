@@ -126,9 +126,9 @@ This will be used by delta/gamma calculations in next commits."
 Open `src/option/american_option.hpp` and add after line 9 (after black_scholes_pde include):
 
 ```cpp
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/operators/black_scholes_pde.hpp"
-#include "src/pde/operators/centered_difference_facade.hpp"  // NEW
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/operators/black_scholes_pde.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"  // NEW
 #include <expected>
 ```
 
@@ -422,7 +422,7 @@ Create `tests/greeks_performance_test.cc`:
  * have acceptable performance overhead vs manual calculation.
  */
 
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 

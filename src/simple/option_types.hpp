@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include "src/option/option_spec.hpp"  // For mango::OptionType
-#include "src/simple/price.hpp"
-#include "src/simple/timestamp.hpp"
+#include "mango/option/option_spec.hpp"  // For mango::OptionType
+#include "mango/simple/price.hpp"
+#include "mango/simple/timestamp.hpp"
 #include <cstdint>
 #include <optional>
 #include <ranges>

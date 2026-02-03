@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <vector>
-#include "src/option/option_spec.hpp"
+#include "mango/option/option_spec.hpp"
 
 namespace mango {
 

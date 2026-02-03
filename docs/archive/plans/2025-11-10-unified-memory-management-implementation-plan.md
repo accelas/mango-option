@@ -27,7 +27,7 @@
 Create `tests/memory/unified_memory_resource_test.cc`:
 
 ```cpp
-#include "src/pde/memory/unified_memory_resource.hpp"
+#include "mango/pde/memory/unified_memory_resource.hpp"
 #include <gtest/gtest.h>
 
 TEST(UnifiedMemoryResourceTest, BasicAllocation) {
@@ -208,7 +208,7 @@ Part of unified memory management refactor (Phase 1/5)."
 Create `tests/memory/workspace_base_test.cc`:
 
 ```cpp
-#include "src/pde/memory/workspace_base.hpp"
+#include "mango/pde/memory/workspace_base.hpp"
 #include <gtest/gtest.h>
 
 TEST(WorkspaceBaseTest, TileMetadataGeneration) {
@@ -407,8 +407,8 @@ Part of unified memory management refactor (Phase 1/5)."
 Create `tests/memory/pde_workspace_test.cc`:
 
 ```cpp
-#include "src/pde/memory/pde_workspace.hpp"
-#include "src/grid.hpp"
+#include "mango/pde/memory/pde_workspace.hpp"
+#include "mango/grid.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 
@@ -744,7 +744,7 @@ Part of unified memory management refactor (Phase 2/5)."
 Create `tests/cpu/feature_detection_test.cc`:
 
 ```cpp
-#include "src/support/cpu/feature_detection.hpp"
+#include "mango/support/cpu/feature_detection.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -1004,9 +1004,9 @@ Part of unified memory management refactor (Phase 3/5)."
 Create `tests/operators/centered_difference_simd_test.cc`:
 
 ```cpp
-#include "src/pde/operators/centered_difference_simd.hpp"
-#include "src/pde/operators/grid_spacing.hpp"
-#include "src/grid.hpp"
+#include "mango/pde/operators/centered_difference_simd.hpp"
+#include "mango/pde/operators/grid_spacing.hpp"
+#include "mango/grid.hpp"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
@@ -1475,8 +1475,8 @@ PDESolver(/* existing params */)
 Create `tests/pde_solver_simd_benchmark.cc`:
 
 ```cpp
-#include "src/pde_solver.hpp"
-#include "src/support/cpu/feature_detection.hpp"
+#include "mango/pde_solver.hpp"
+#include "mango/support/cpu/feature_detection.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>
@@ -1583,14 +1583,14 @@ Old workspace classes are deprecated in favor of new PMR-based implementations.
 
 **Before:**
 \`\`\`cpp
-#include "src/workspace.hpp"
+#include "mango/workspace.hpp"
 WorkspaceStorage workspace(n, grid);
 auto u = workspace.u_current();
 \`\`\`
 
 **After:**
 \`\`\`cpp
-#include "src/pde/memory/pde_workspace.hpp"
+#include "mango/pde/memory/pde_workspace.hpp"
 PDEWorkspace workspace(n, grid);
 auto u = workspace.u_current();  // Same API!
 \`\`\`

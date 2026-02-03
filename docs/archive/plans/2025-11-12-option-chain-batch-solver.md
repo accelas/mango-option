@@ -62,9 +62,9 @@ Create `src/option/option_chain_solver.hpp`:
 
 #pragma once
 
-#include "src/option/american_option.hpp"
-#include "src/option/slice_solver_workspace.hpp"
-#include "src/support/expected.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/slice_solver_workspace.hpp"
+#include "mango/support/expected.hpp"
 #include <vector>
 #include <span>
 
@@ -182,7 +182,7 @@ git commit -m "feat(option): add option chain configuration struct"
 Create `tests/option_chain_solver_test.cc`:
 
 ```cpp
-#include "src/option/option_chain_solver.hpp"
+#include "mango/option/option_chain_solver.hpp"
 #include <gtest/gtest.h>
 
 namespace mango {
@@ -327,9 +327,9 @@ public:
 Create `src/option/option_chain_solver.cpp`:
 
 ```cpp
-#include "src/option/option_chain_solver.hpp"
-#include "src/option/american_option.hpp"
-#include "src/option/slice_solver_workspace.hpp"
+#include "mango/option/option_chain_solver.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/slice_solver_workspace.hpp"
 
 namespace mango {
 
@@ -757,8 +757,8 @@ git commit -m "test(option): add parallel chain solver tests"
 Create `benchmarks/option_chain_benchmark.cc`:
 
 ```cpp
-#include "src/option/option_chain_solver.hpp"
-#include "src/option/american_option.hpp"
+#include "mango/option/option_chain_solver.hpp"
+#include "mango/option/american_option.hpp"
 #include <benchmark/benchmark.h>
 #include <vector>
 
@@ -956,7 +956,7 @@ Example: SPY Dec-19-2025 Puts with strikes [400, 420, 440, 460, ...]
 ### Basic Usage
 
 ```cpp
-#include "src/option/option_chain_solver.hpp"
+#include "mango/option/option_chain_solver.hpp"
 
 // Define chain: 5 put strikes, shared parameters
 mango::AmericanOptionChain chain{

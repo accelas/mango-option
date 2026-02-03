@@ -1058,9 +1058,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **File:** `tests/cache_blocking_benchmark.cc`
 
 ```cpp
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/spatial_operators.hpp"
-#include "src/cpp/boundary_conditions.hpp"
+#include "mango/cpp/pde_solver.hpp"
+#include "mango/cpp/spatial_operators.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <iostream>

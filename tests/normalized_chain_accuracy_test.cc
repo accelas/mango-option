@@ -16,7 +16,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option_batch.hpp"
 #include "tests/quantlib_validation_framework.hpp"
 
 using namespace mango;

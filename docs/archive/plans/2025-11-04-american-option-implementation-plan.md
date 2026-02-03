@@ -35,7 +35,7 @@ Add to `tests/workspace_test.cc` (create if needed):
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/cpp/workspace.hpp"
+#include "mango/cpp/workspace.hpp"
 
 namespace mango {
 namespace {
@@ -145,9 +145,9 @@ Create `tests/temporal_event_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/boundary_conditions.hpp"
-#include "src/cpp/spatial_operators.hpp"
+#include "mango/cpp/pde_solver.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
+#include "mango/cpp/spatial_operators.hpp"
 #include <cmath>
 
 namespace mango {
@@ -367,8 +367,8 @@ Create `tests/obstacle_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/cpp/pde_solver.hpp"
-#include "src/cpp/boundary_conditions.hpp"
+#include "mango/cpp/pde_solver.hpp"
+#include "mango/cpp/boundary_conditions.hpp"
 #include <algorithm>
 
 namespace mango {
@@ -568,7 +568,7 @@ Create `tests/american_option_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/cpp/american_option.hpp"
+#include "mango/cpp/american_option.hpp"
 #include <cmath>
 
 namespace mango {

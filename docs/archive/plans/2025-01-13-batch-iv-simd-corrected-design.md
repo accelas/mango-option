@@ -330,7 +330,7 @@ SIMD Newton Loop (batches of W=8)
 ```cpp
 #pragma once
 
-#include "src/pde/memory/workspace_base.hpp"
+#include "mango/pde/memory/workspace_base.hpp"
 #include <span>
 #include <string>
 
@@ -639,7 +639,7 @@ TEST(BatchIVWorkspaceTest, ConcurrentDistinctWorkspaces) {
 
 3. **Reset Contract**: Document that callers **must** call `reset()` before each `solve_batch()` to clear stale convergence flags and failure reasons. Without this, previous batch state bleeds into new queries.
 
-4. **Include Style**: Follow existing codebase pattern with relative includes (e.g., `#include "workspace_base.hpp"` not `#include "src/pde/memory/workspace_base.hpp"`).
+4. **Include Style**: Follow existing codebase pattern with relative includes (e.g., `#include "workspace_base.hpp"` not `#include "mango/pde/memory/workspace_base.hpp"`).
 
 5. **Build Dependencies**: Ensure Bazel target links OpenMP before adding `#pragma omp` tests, otherwise tests will compile but not parallelize.
 

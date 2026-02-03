@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/option/table/segmented_price_surface.hpp"
+#include "mango/option/table/segmented_price_surface.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>

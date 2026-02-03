@@ -12,15 +12,15 @@
 
 #pragma once
 
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/core/time_domain.hpp"
-#include "src/pde/core/pde_workspace.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/operators/operator_factory.hpp"
-#include "src/pde/operators/black_scholes_pde.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/core/boundary_conditions.hpp"
+#include "mango/pde/core/time_domain.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/operators/black_scholes_pde.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/support/error_types.hpp"
 #include <cassert>
 #include <expected>
 #include <variant>

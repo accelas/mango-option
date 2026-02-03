@@ -15,7 +15,7 @@
 #include <optional>
 #include <string_view>
 #include <limits>
-#include "src/math/tridiagonal_matrix_view.hpp"
+#include "mango/math/tridiagonal_matrix_view.hpp"
 
 namespace mango {
 

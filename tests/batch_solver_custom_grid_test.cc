@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/american_option_batch.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 
 TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
     // Test without custom grid first (baseline)

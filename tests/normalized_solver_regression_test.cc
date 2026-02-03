@@ -8,7 +8,7 @@
  * - Issue #2: SetupCallback disables normalized path
  */
 
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/american_option_batch.hpp"
 #include <gtest/gtest.h>
 #include <mutex>
 #include <vector>

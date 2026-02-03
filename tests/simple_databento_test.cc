@@ -9,7 +9,7 @@
  * - Correct conversion of nanosecond timestamps
  */
 
-#include "src/simple/simple.hpp"
+#include "mango/simple/simple.hpp"
 #include <gtest/gtest.h>
 
 using namespace mango::simple;

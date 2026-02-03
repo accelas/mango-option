@@ -27,9 +27,9 @@
 
 #pragma once
 
-#include "src/math/bspline_basis.hpp"
-#include "src/support/error_types.hpp"
-#include "src/math/safe_math.hpp"
+#include "mango/math/bspline_basis.hpp"
+#include "mango/support/error_types.hpp"
+#include "mango/math/safe_math.hpp"
 #include <experimental/mdspan>
 #include <array>
 #include <vector>

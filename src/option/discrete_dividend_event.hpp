@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/pde/core/pde_solver.hpp"
-#include "src/math/cubic_spline_solver.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <cmath>
 #include <span>
 

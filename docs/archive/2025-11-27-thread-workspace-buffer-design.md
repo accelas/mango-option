@@ -409,7 +409,7 @@ The existing `PDEWorkspace` takes `std::span<double>`, requiring callers to mana
 
 #pragma once
 
-#include "src/pde/core/pde_workspace.hpp"
+#include "mango/pde/core/pde_workspace.hpp"
 #include <span>
 #include <expected>
 #include <string>

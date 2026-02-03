@@ -24,7 +24,7 @@ Create `tests/pde_workspace_pmr_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/pde/core/pde_workspace_pmr.hpp"
+#include "mango/pde/core/pde_workspace_pmr.hpp"
 #include <memory_resource>
 
 namespace mango {
@@ -85,7 +85,7 @@ Create `src/pde/core/pde_workspace_pmr.hpp`:
 ```cpp
 #pragma once
 
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <memory_resource>
 #include <span>
 #include <expected>
@@ -360,7 +360,7 @@ Create `tests/grid_spacing_view_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/pde/core/grid_spacing.hpp"
+#include "mango/pde/core/grid_spacing.hpp"
 #include <vector>
 
 namespace mango {
@@ -824,9 +824,9 @@ In `src/option/american_solver_workspace.hpp`:
 ```cpp
 #pragma once
 
-#include "src/pde/core/pde_workspace_pmr.hpp"
-#include "src/pde/core/grid_spacing.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/pde_workspace_pmr.hpp"
+#include "mango/pde/core/grid_spacing.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <memory>
 #include <expected>
 #include <string>
@@ -870,7 +870,7 @@ private:
 In `src/option/american_solver_workspace.cpp`:
 
 ```cpp
-#include "src/option/american_solver_workspace.hpp"
+#include "mango/option/american_solver_workspace.hpp"
 
 namespace mango {
 
@@ -1150,13 +1150,13 @@ git commit -m "Update American option test fixture for PMR
 **Step 1: Update example to use PMR workspace**
 
 ```cpp
-#include "src/pde/core/pde_solver.hpp"
-#include "src/pde/core/pde_workspace_pmr.hpp"
-#include "src/pde/core/boundary_conditions.hpp"
-#include "src/pde/operators/laplacian_pde.hpp"
-#include "src/pde/operators/operator_factory.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/pde/core/pde_solver.hpp"
+#include "mango/pde/core/pde_workspace_pmr.hpp"
+#include "mango/pde/core/boundary_conditions.hpp"
+#include "mango/pde/operators/laplacian_pde.hpp"
+#include "mango/pde/operators/operator_factory.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <iostream>
 #include <memory_resource>
 #include <cmath>

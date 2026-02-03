@@ -19,8 +19,8 @@ Move `GridAccuracyParams`, `GridAccuracyProfile`, `grid_accuracy_profile()` from
 **Files:**
 - Create: `src/option/grid_spec_types.hpp`
 - Create: `src/option/grid_spec_types.cpp` (for `grid_accuracy_profile()` definition)
-- Modify: `src/option/american_option.hpp:39-101` — remove `GridAccuracyParams`, `GridAccuracyProfile`, `grid_accuracy_profile()`; add `#include "src/option/grid_spec_types.hpp"`
-- Modify: `src/option/table/price_table_config.hpp:4-22` — remove `ExplicitPDEGrid` and `PDEGridSpec`; replace `#include "src/option/american_option.hpp"` with `#include "src/option/grid_spec_types.hpp"` and `#include "src/option/option_spec.hpp"`
+- Modify: `src/option/american_option.hpp:39-101` — remove `GridAccuracyParams`, `GridAccuracyProfile`, `grid_accuracy_profile()`; add `#include "mango/option/grid_spec_types.hpp"`
+- Modify: `src/option/table/price_table_config.hpp:4-22` — remove `ExplicitPDEGrid` and `PDEGridSpec`; replace `#include "mango/option/american_option.hpp"` with `#include "mango/option/grid_spec_types.hpp"` and `#include "mango/option/option_spec.hpp"`
 - Modify: `src/option/BUILD.bazel` — add `grid_spec_types` cc_library target; update deps for `american_option` and others
 - Modify: `src/option/table/BUILD.bazel:58-66` — update `price_table_config` deps: replace `/src/option:american_option` with `/src/option:grid_spec_types` and `/src/option:option_spec`
 
@@ -31,7 +31,7 @@ Write `src/option/grid_spec_types.hpp`:
 ```cpp
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <variant>
 #include <vector>
 
@@ -87,7 +87,7 @@ Update `src/option/table/BUILD.bazel` `price_table_config` target:
 
 **Step 3: Update `american_option.hpp`**
 
-- Add `#include "src/option/grid_spec_types.hpp"` to includes
+- Add `#include "mango/option/grid_spec_types.hpp"` to includes
 - Remove lines 39-101 (`GridAccuracyParams` struct, `GridAccuracyProfile` enum, `grid_accuracy_profile()` function) — they now live in the new header
 - Keep `estimate_grid_for_option()` and `compute_global_grid_for_batch()` here (they depend on `PricingParams` which is in `option_spec.hpp`)
 
@@ -95,12 +95,12 @@ Update `src/option/table/BUILD.bazel` `price_table_config` target:
 
 Replace:
 ```cpp
-#include "src/option/american_option.hpp"
+#include "mango/option/american_option.hpp"
 ```
 With:
 ```cpp
-#include "src/option/grid_spec_types.hpp"
-#include "src/option/option_spec.hpp"
+#include "mango/option/grid_spec_types.hpp"
+#include "mango/option/option_spec.hpp"
 ```
 
 Remove the `ExplicitPDEGrid` struct (lines 15-19) and `PDEGridSpec` alias (line 22) — now in `grid_spec_types.hpp`.
@@ -151,7 +151,7 @@ struct IVSolverFDMConfig {
 };
 ```
 
-Add `#include "src/option/grid_spec_types.hpp"` if not already included transitively.
+Add `#include "mango/option/grid_spec_types.hpp"` if not already included transitively.
 
 **Step 2: Update `iv_solver_fdm.cpp`**
 
@@ -458,7 +458,7 @@ Write `tests/price_table_builder_test_access.hpp`:
 ```cpp
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "src/option/table/price_table_builder.hpp"
+#include "mango/option/table/price_table_builder.hpp"
 
 namespace mango::testing {
 
@@ -575,7 +575,7 @@ Update all deps referencing `:option_chain` → `:option_grid`.
 **Step 3: Update includes and references**
 
 In `src/option/table/price_table_builder.hpp:11`:
-- `#include "src/option/option_chain.hpp"` → `#include "src/option/option_grid.hpp"`
+- `#include "mango/option/option_chain.hpp"` → `#include "mango/option/option_grid.hpp"`
 - Rename factory methods: `from_chain` → `from_grid`, `from_chain_auto` → `from_grid_auto`, `from_chain_auto_profile` → `from_grid_auto_profile`
 - Rename parameter types: `const OptionChain&` → `const OptionGrid&`
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/adaptive_grid_builder.hpp"
-#include "src/option/american_option_batch.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/american_option_batch.hpp"
 #include <algorithm>
-#include "src/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
 #include <iostream>
 
 namespace mango {

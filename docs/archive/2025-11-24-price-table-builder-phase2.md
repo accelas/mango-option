@@ -65,7 +65,7 @@ This codebase uses abstraction macros from `src/support/parallel.hpp` for portab
 // src/option/price_table_builder.cpp
 
 // Add includes (NOT <omp.h> directly)
-#include "src/support/parallel.hpp"
+#include "mango/support/parallel.hpp"
 #include <mutex>           // std::mutex, std::lock_guard
 #include <tuple>           // std::tuple
 #include <map>             // std::map

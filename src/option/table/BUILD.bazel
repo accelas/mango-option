@@ -15,6 +15,8 @@ cc_library(
         "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -25,6 +27,8 @@ cc_library(
         "//src/math:safe_math",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -36,6 +40,8 @@ cc_library(
         "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -45,6 +51,8 @@ cc_library(
         "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -58,6 +66,8 @@ cc_library(
         "//src/math:bspline_basis",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -69,6 +79,8 @@ cc_library(
         "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -102,6 +114,8 @@ cc_library(
         "//src/support:parallel",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -111,6 +125,8 @@ cc_library(
         ":price_table_axes",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -125,18 +141,24 @@ cc_library(
         "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
     name = "price_table_grid",
     hdrs = ["price_table_grid.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
     name = "price_table_grid_estimator",
     hdrs = ["price_table_grid_estimator.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -151,12 +173,16 @@ cc_library(
         "@mdspan//:mdspan",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
     name = "error_attribution",
     hdrs = ["error_attribution.hpp"],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -166,6 +192,8 @@ cc_library(
         "//src/option:american_option_result",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -180,6 +208,8 @@ cc_library(
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -193,6 +223,8 @@ cc_library(
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -207,6 +239,8 @@ cc_library(
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -219,6 +253,8 @@ cc_library(
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -232,6 +268,8 @@ cc_library(
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -242,6 +280,8 @@ cc_library(
         ":price_table_surface",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )
 
 cc_library(
@@ -271,4 +311,6 @@ cc_library(
         "//src/support:error_types",
     ],
     visibility = ["//visibility:public"],
+    strip_include_prefix = "/src/option/table",
+    include_prefix = "mango/option/table",
 )

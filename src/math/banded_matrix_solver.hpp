@@ -15,8 +15,8 @@
 
 #pragma once
 
-#include "src/math/lapack_banded_layout.hpp"
-#include "src/support/parallel.hpp"
+#include "mango/math/lapack_banded_layout.hpp"
+#include "mango/support/parallel.hpp"
 #include <experimental/mdspan>
 #include <span>
 #include <vector>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/price_table_config.hpp"
+#include "mango/option/table/price_table_config.hpp"
 
 namespace mango {
 namespace {

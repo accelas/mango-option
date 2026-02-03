@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/price_table_metadata.hpp"
-#include "src/option/option_spec.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/option_spec.hpp"
+#include "mango/support/error_types.hpp"
 #include <memory>
 #include <expected>
 

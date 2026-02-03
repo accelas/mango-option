@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "src/math/thomas_solver.hpp"
+#include "mango/math/thomas_solver.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>

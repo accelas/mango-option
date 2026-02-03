@@ -26,7 +26,7 @@ Extract `OptionChain` from specialized builder before any other changes (Step 5 
 ```cpp
 // tests/option_chain_test.cc
 #include <gtest/gtest.h>
-#include "src/option/option_chain.hpp"
+#include "mango/option/option_chain.hpp"
 
 TEST(OptionChainTest, DefaultConstruction) {
     mango::OptionChain chain;
@@ -126,7 +126,7 @@ Expected: PASS
 
 ```cpp
 // In src/option/price_table_4d_builder.hpp, replace inline OptionChain with:
-#include "src/option/option_chain.hpp"
+#include "mango/option/option_chain.hpp"
 
 // Remove the struct OptionChain { ... } definition (lines ~87-95)
 ```
@@ -165,7 +165,7 @@ Add diagnostic struct for B-spline fitting results (Step 2 in design, part 1).
 ```cpp
 // tests/bspline_fitting_stats_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "mango/option/price_table_builder.hpp"
 
 TEST(BSplineFittingStatsTest, DefaultConstruction) {
     mango::BSplineFittingStats stats;
@@ -267,7 +267,7 @@ Add the result struct with surface pointer and diagnostics (Step 2 in design, pa
 ```cpp
 // tests/price_table_result_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
+#include "mango/option/price_table_builder.hpp"
 
 TEST(PriceTableResultTest, DefaultConstruction) {
     mango::PriceTableResult<4> result;
@@ -491,9 +491,9 @@ Change build() to return PriceTableResult<N> with full instrumentation (Step 2 i
 ```cpp
 // tests/price_table_builder_result_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_config.hpp"
+#include "mango/option/price_table_builder.hpp"
+#include "mango/option/price_table_axes.hpp"
+#include "mango/option/price_table_config.hpp"
 
 TEST(PriceTableBuilderResultTest, BuildReturnsDiagnostics) {
     // Create minimal valid axes (4 points per axis for B-spline)
@@ -635,9 +635,9 @@ Add custom_grid parameter to public solve_batch() methods.
 ```cpp
 // tests/batch_solver_custom_grid_test.cc
 #include <gtest/gtest.h>
-#include "src/option/american_option_batch.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/option/american_option_batch.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 
 TEST(BatchSolverCustomGridTest, AcceptsCustomGrid) {
     std::vector<mango::AmericanOptionParams> batch;
@@ -852,9 +852,9 @@ Fix the grid configuration bug by passing complete GridSpec to solver.
 ```cpp
 // tests/price_table_builder_grid_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_config.hpp"
+#include "mango/option/price_table_builder.hpp"
+#include "mango/option/price_table_axes.hpp"
+#include "mango/option/price_table_config.hpp"
 
 TEST(PriceTableBuilderGridTest, RespectsUserGridBounds) {
     // Create axes with specific moneyness range
@@ -996,9 +996,9 @@ Add comprehensive input validation from specialized builder.
 ```cpp
 // tests/price_table_builder_validation_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_config.hpp"
+#include "mango/option/price_table_builder.hpp"
+#include "mango/option/price_table_axes.hpp"
+#include "mango/option/price_table_config.hpp"
 
 class PriceTableValidationTest : public ::testing::Test {
 protected:
@@ -1197,8 +1197,8 @@ Add from_vectors, from_strikes, from_chain factory methods.
 ```cpp
 // tests/price_table_builder_factories_test.cc
 #include <gtest/gtest.h>
-#include "src/option/price_table_builder.hpp"
-#include "src/option/option_chain.hpp"
+#include "mango/option/price_table_builder.hpp"
+#include "mango/option/option_chain.hpp"
 
 TEST(PriceTableFactoriesTest, FromVectorsCreatesBuilderAndAxes) {
     std::vector<double> moneyness = {0.8, 0.9, 1.0, 1.1};
@@ -1281,7 +1281,7 @@ Expected: FAIL (factories not defined)
 ```cpp
 // In src/option/price_table_builder.hpp, add to PriceTableBuilder class:
 
-#include "src/option/option_chain.hpp"
+#include "mango/option/option_chain.hpp"
 
 template <size_t N>
 class PriceTableBuilder {
@@ -1516,12 +1516,12 @@ Migrate the most critical consumer before deletion.
 // In src/option/iv_solver_interpolated.hpp and .cpp, change:
 
 // BEFORE:
-#include "src/option/price_table_4d_builder.hpp"
+#include "mango/option/price_table_4d_builder.hpp"
 
 // AFTER:
-#include "src/option/price_table_builder.hpp"
-#include "src/option/price_table_axes.hpp"
-#include "src/option/price_table_surface.hpp"
+#include "mango/option/price_table_builder.hpp"
+#include "mango/option/price_table_axes.hpp"
+#include "mango/option/price_table_surface.hpp"
 ```
 
 **Step 10.2: Update surface storage type**

@@ -30,7 +30,7 @@ Create `src/option/option_concepts.hpp`:
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "src/option/option_spec.hpp"
+#include "mango/option/option_spec.hpp"
 #include <concepts>
 
 namespace mango {
@@ -87,8 +87,8 @@ Create `tests/option_concepts_test.cc`:
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/option_concepts.hpp"
-#include "src/option/american_option_result.hpp"
+#include "mango/option/option_concepts.hpp"
+#include "mango/option/american_option_result.hpp"
 
 namespace mango {
 namespace {
@@ -159,8 +159,8 @@ Create `tests/european_option_test.cc`:
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/european_option.hpp"
-#include "src/option/option_concepts.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/option/option_concepts.hpp"
 #include <cmath>
 
 namespace mango {
@@ -532,7 +532,7 @@ meta.content = config_.store_eep
 
 **Step 3: Add include and BUILD dep**
 
-Add `#include "src/option/european_option.hpp"` to `price_table_builder.cpp`.
+Add `#include "mango/option/european_option.hpp"` to `price_table_builder.cpp`.
 
 Add `"//src/option:european_option"` to deps in `src/option/table/BUILD.bazel:73-89`.
 
@@ -571,11 +571,11 @@ Create `tests/american_price_surface_test.cc`:
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/table/price_table_surface.hpp"
-#include "src/option/table/price_table_axes.hpp"
-#include "src/option/table/price_table_metadata.hpp"
-#include "src/option/european_option.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/european_option.hpp"
 #include <cmath>
 
 namespace mango {
@@ -974,10 +974,10 @@ Create `tests/eep_integration_test.cc`. This test builds a price table in both r
 ```cpp
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/american_price_surface.hpp"
-#include "src/option/iv_solver_interpolated.hpp"
-#include "src/option/european_option.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/iv_solver_interpolated.hpp"
+#include "mango/option/european_option.hpp"
 
 namespace mango {
 namespace {

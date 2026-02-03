@@ -4,12 +4,12 @@
  * @brief American option pricing solver implementation
  */
 
-#include "src/option/american_option.hpp"
-#include "src/option/american_pde_solver.hpp"
-#include "src/option/discrete_dividend_event.hpp"
-#include "src/math/cubic_spline_solver.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/pde/core/time_domain.hpp"
+#include "mango/option/american_option.hpp"
+#include "mango/option/american_pde_solver.hpp"
+#include "mango/option/discrete_dividend_event.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>

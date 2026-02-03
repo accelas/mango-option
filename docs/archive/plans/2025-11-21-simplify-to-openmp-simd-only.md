@@ -22,8 +22,8 @@ Create: `tests/pde_operators/target_clones_test.cc`
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/pde/operators/centered_difference_scalar.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/operators/centered_difference_scalar.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <vector>
 #include <cmath>
 #include <dlfcn.h>
@@ -368,7 +368,7 @@ Remove all SimdBackend-related code:
 
 ```cpp
 // DELETE THIS INCLUDE:
-// #include "src/pde/operators/centered_difference_simd_backend.hpp"
+// #include "mango/pde/operators/centered_difference_simd_backend.hpp"
 
 // DELETE ALL BM_Simd_* functions (lines 133-187)
 // DELETE ALL BENCHMARK(BM_Simd_*) registrations (lines 200-203)
@@ -469,8 +469,8 @@ Create: `tests/pde_operators/centered_difference_facade_test.cc`
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/pde/operators/centered_difference_facade.hpp"
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/core/grid.hpp"
 #include <vector>
 #include <cmath>
 
@@ -544,7 +544,7 @@ Replace entire file with simplified version:
 ```cpp
 #pragma once
 
-#include "src/pde/core/grid.hpp"
+#include "mango/pde/core/grid.hpp"
 #include "centered_difference_scalar.hpp"
 #include <span>
 #include <concepts>
@@ -780,7 +780,7 @@ inline std::string describe_cpu_features() {
 Create: `tests/cpu/cpu_diagnostics_test.cc`
 
 ```cpp
-#include "src/support/cpu/cpu_diagnostics.hpp"
+#include "mango/support/cpu/cpu_diagnostics.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -884,10 +884,10 @@ For each file, replace:
 
 ```cpp
 // OLD:
-#include "src/support/cpu/feature_detection.hpp"
+#include "mango/support/cpu/feature_detection.hpp"
 
 // NEW:
-#include "src/support/cpu/cpu_diagnostics.hpp"
+#include "mango/support/cpu/cpu_diagnostics.hpp"
 ```
 
 **Step 7: Run all tests**
@@ -949,7 +949,7 @@ Benchmark results (see `docs/experiments/openmp-simd-alternative.md`) showed:
 ### Single-ISA Code (Portable)
 
 ```cpp
-#include "src/support/parallel.hpp"
+#include "mango/support/parallel.hpp"
 
 [[gnu::target_clones("default", "avx2", "avx512f")]]
 void compute_stencil(const double* u, double* result, size_t n) {
@@ -1018,7 +1018,7 @@ For typical workloads (1000+ iterations):
 For logging/debugging, use `src/support/cpu/cpu_diagnostics.hpp`:
 
 ```cpp
-#include "src/support/cpu/cpu_diagnostics.hpp"
+#include "mango/support/cpu/cpu_diagnostics.hpp"
 
 void log_cpu_info() {
     auto features = mango::cpu::detect_cpu_features();

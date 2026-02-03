@@ -23,7 +23,7 @@ In `tests/black_scholes_analytics_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/math/black_scholes_analytics.hpp"
+#include "mango/math/black_scholes_analytics.hpp"
 #include <cmath>
 
 namespace mango {
@@ -174,7 +174,7 @@ In `tests/latin_hypercube_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/math/latin_hypercube.hpp"
+#include "mango/math/latin_hypercube.hpp"
 #include <algorithm>
 #include <set>
 
@@ -373,7 +373,7 @@ In `tests/error_attribution_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/table/error_attribution.hpp"
+#include "mango/option/table/error_attribution.hpp"
 
 namespace mango {
 namespace {
@@ -602,7 +602,7 @@ In `tests/slice_cache_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/table/slice_cache.hpp"
+#include "mango/option/table/slice_cache.hpp"
 
 namespace mango {
 namespace {
@@ -706,7 +706,7 @@ In `src/option/table/slice_cache.hpp`:
 ```cpp
 #pragma once
 
-#include "src/option/american_option_result.hpp"
+#include "mango/option/american_option_result.hpp"
 #include <map>
 #include <optional>
 #include <vector>
@@ -873,7 +873,7 @@ In `tests/adaptive_grid_types_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 
 namespace mango {
 namespace {
@@ -923,8 +923,8 @@ In `src/option/table/adaptive_grid_types.hpp`:
 ```cpp
 #pragma once
 
-#include "src/option/table/price_table_axes.hpp"
-#include "src/option/table/price_table_surface.hpp"
+#include "mango/option/table/price_table_axes.hpp"
+#include "mango/option/table/price_table_surface.hpp"
 #include <array>
 #include <memory>
 #include <vector>
@@ -1058,7 +1058,7 @@ In `tests/adaptive_grid_builder_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
 
 namespace mango {
 namespace {
@@ -1096,13 +1096,13 @@ In `src/option/table/adaptive_grid_builder.hpp`:
 ```cpp
 #pragma once
 
-#include "src/option/table/adaptive_grid_types.hpp"
-#include "src/option/table/price_table_builder.hpp"
-#include "src/option/table/slice_cache.hpp"
-#include "src/option/table/error_attribution.hpp"
-#include "src/option/option_chain.hpp"
-#include "src/pde/core/grid.hpp"
-#include "src/support/error_types.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
+#include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/slice_cache.hpp"
+#include "mango/option/table/error_attribution.hpp"
+#include "mango/option/option_chain.hpp"
+#include "mango/pde/core/grid.hpp"
+#include "mango/support/error_types.hpp"
 #include <expected>
 
 namespace mango {
@@ -1165,10 +1165,10 @@ private:
 In `src/option/table/adaptive_grid_builder.cpp`:
 
 ```cpp
-#include "src/option/table/adaptive_grid_builder.hpp"
-#include "src/math/black_scholes_analytics.hpp"
-#include "src/math/latin_hypercube.hpp"
-#include "src/option/table/price_table_grid_estimator.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/math/black_scholes_analytics.hpp"
+#include "mango/math/latin_hypercube.hpp"
+#include "mango/option/table/price_table_grid_estimator.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -1435,7 +1435,7 @@ In `tests/adaptive_grid_builder_integration_test.cc`:
 
 ```cpp
 #include <gtest/gtest.h>
-#include "src/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/adaptive_grid_builder.hpp"
 #include <chrono>
 
 namespace mango {
