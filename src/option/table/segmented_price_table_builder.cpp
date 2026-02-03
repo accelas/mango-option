@@ -129,29 +129,31 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 3: Expand moneyness grid downward
     // =====================================================================
-    double total_div = 0.0;
-    for (const auto& div : dividends) {
-        total_div += div.amount;
-    }
-    double m_min_expanded = config.moneyness_grid.front() - total_div / K_ref;
-    if (m_min_expanded < 0.01) m_min_expanded = 0.01;
-
     std::vector<double> expanded_m_grid = config.moneyness_grid;
-    if (m_min_expanded < expanded_m_grid.front()) {
-        // Insert extra points at the low end
-        double step = (expanded_m_grid.front() - m_min_expanded) / 3.0;
-        for (int i = 2; i >= 0; --i) {
-            double val = m_min_expanded + step * static_cast<double>(i);
-            if (val > 0.0 && val < expanded_m_grid.front()) {
-                expanded_m_grid.insert(expanded_m_grid.begin(), val);
+    if (!config.skip_moneyness_expansion) {
+        double total_div = 0.0;
+        for (const auto& div : dividends) {
+            total_div += div.amount;
+        }
+        double m_min_expanded = config.moneyness_grid.front() - total_div / K_ref;
+        if (m_min_expanded < 0.01) m_min_expanded = 0.01;
+
+        if (m_min_expanded < expanded_m_grid.front()) {
+            // Insert extra points at the low end
+            double step = (expanded_m_grid.front() - m_min_expanded) / 3.0;
+            for (int i = 2; i >= 0; --i) {
+                double val = m_min_expanded + step * static_cast<double>(i);
+                if (val > 0.0 && val < expanded_m_grid.front()) {
+                    expanded_m_grid.insert(expanded_m_grid.begin(), val);
+                }
             }
         }
+        // Sort and deduplicate
+        std::sort(expanded_m_grid.begin(), expanded_m_grid.end());
+        expanded_m_grid.erase(
+            std::unique(expanded_m_grid.begin(), expanded_m_grid.end()),
+            expanded_m_grid.end());
     }
-    // Sort and deduplicate
-    std::sort(expanded_m_grid.begin(), expanded_m_grid.end());
-    expanded_m_grid.erase(
-        std::unique(expanded_m_grid.begin(), expanded_m_grid.end()),
-        expanded_m_grid.end());
 
     // Ensure at least 4 moneyness points
     if (expanded_m_grid.size() < 4) {
