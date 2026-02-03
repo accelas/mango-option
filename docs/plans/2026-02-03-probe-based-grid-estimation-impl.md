@@ -220,23 +220,33 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         // which is sufficient since we're comparing relative convergence
         double h = std::max(0.01 * params.spot, 0.01);  // 1% bump with floor
 
-        // Ensure spot ± h is within grid domain (grid domain is in log-moneyness)
-        double x_spot = std::log(params.spot / params.strike);
-        double x_lo = grid2.x_min();
-        double x_hi = grid2.x_max();
-        double spot_lo = params.strike * std::exp(x_lo);
-        double spot_hi = params.strike * std::exp(x_hi);
-        double s_minus = std::max(params.spot - h, spot_lo * 1.01);
-        double s_plus = std::min(params.spot + h, spot_hi * 0.99);
-        h = (s_plus - s_minus) / 2.0;  // Recompute h after clamping
-        double s_center = (s_plus + s_minus) / 2.0;
+        // Use INTERSECTION of both grid domains to avoid extrapolation on either
+        double x_lo1 = grid1.x_min(), x_hi1 = grid1.x_max();
+        double x_lo2 = grid2.x_min(), x_hi2 = grid2.x_max();
+        double x_lo = std::max(x_lo1, x_lo2);  // Intersection
+        double x_hi = std::min(x_hi1, x_hi2);
+        double spot_lo = params.strike * std::exp(x_lo) * 1.01;  // 1% margin
+        double spot_hi = params.strike * std::exp(x_hi) * 0.99;
 
-        double delta1 = (result1->value_at(s_plus) - result1->value_at(s_minus)) / (2.0 * h);
-        double delta2 = (result2->value_at(s_plus) - result2->value_at(s_minus)) / (2.0 * h);
+        // Clamp h symmetrically around spot (keep center at spot)
+        double h_max = std::min(params.spot - spot_lo, spot_hi - params.spot);
+        h = std::min(h, h_max);
+
+        // Guard against zero or tiny h (domain too tight)
+        constexpr double h_min = 1e-6;
+        double delta_diff = 0.0;
+        if (h < h_min) {
+            // Domain too tight for reliable delta comparison - skip delta check
+            // Only use price convergence for this iteration
+            delta_diff = 0.0;  // Effectively skip delta criterion
+        } else {
+            double delta1 = (result1->value_at(params.spot + h) - result1->value_at(params.spot - h)) / (2.0 * h);
+            double delta2 = (result2->value_at(params.spot + h) - result2->value_at(params.spot - h)) / (2.0 * h);
+            delta_diff = std::abs(delta1 - delta2);
+        }
 
         // Composite acceptance criterion using max of both prices
         double price_diff = std::abs(P1 - P2);
-        double delta_diff = std::abs(delta1 - delta2);
         double price_ref = std::max({std::abs(P1), std::abs(P2), price_floor});
         double price_tol = std::max(target_error, 0.001 * price_ref);
 

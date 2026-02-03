@@ -68,11 +68,20 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 
         // Compute delta consistently at the SAME physical point (spot)
         // Uses value_at() which does linear interpolation in log-moneyness space
-        // This is sufficient since we're comparing relative convergence
         double h = max(0.01 * spot, 0.01);  // 1% bump with floor
-        // Clamp to grid domain to avoid extrapolation
-        double delta1 = (value_at(solution1, spot + h) - value_at(solution1, spot - h)) / (2 * h);
-        double delta2 = (value_at(solution2, spot + h) - value_at(solution2, spot - h)) / (2 * h);
+
+        // Use INTERSECTION of both grid domains to avoid extrapolation
+        // Clamp h symmetrically around spot (keep center at spot)
+        double h_max = min(spot - domain_lo, domain_hi - spot);
+        h = min(h, h_max);
+
+        // Guard: if h too small, skip delta check (use price only)
+        if (h < 1e-6) { delta_diff = 0; }
+        else {
+            double delta1 = (value_at(sol1, spot + h) - value_at(sol1, spot - h)) / (2 * h);
+            double delta2 = (value_at(sol2, spot + h) - value_at(sol2, spot - h)) / (2 * h);
+            delta_diff = |delta1 - delta2|;
+        }
 
         // Composite acceptance criterion using max of both prices
         double price_ref = std::max({std::abs(P1), std::abs(P2), 0.10});
@@ -92,7 +101,8 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 ```
 
 **Key details:**
-- Delta computed via finite difference at the same physical point, with minimum bump (1% or $0.01 floor) and domain clamping
+- Delta computed via finite difference at spot, clamped symmetrically to intersection of both grid domains
+- If h becomes too small (< 1e-6) after clamping, skip delta check and use price convergence only
 - Error criterion uses `max(|P1|, |P2|, floor)` for consistent relative scale
 - Returns `converged` flag so caller can decide fallback behavior
 - Nt floor (min 50 steps) ensures temporal resolution for short maturities
