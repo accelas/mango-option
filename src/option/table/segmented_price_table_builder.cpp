@@ -148,12 +148,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 }
             }
         }
-        // Sort and deduplicate
-        std::sort(expanded_m_grid.begin(), expanded_m_grid.end());
-        expanded_m_grid.erase(
-            std::unique(expanded_m_grid.begin(), expanded_m_grid.end()),
-            expanded_m_grid.end());
     }
+    // Always sort and deduplicate (even when expansion is skipped,
+    // the caller might pass unsorted or duplicate points)
+    std::sort(expanded_m_grid.begin(), expanded_m_grid.end());
+    expanded_m_grid.erase(
+        std::unique(expanded_m_grid.begin(), expanded_m_grid.end()),
+        expanded_m_grid.end());
 
     // Ensure at least 4 moneyness points
     if (expanded_m_grid.size() < 4) {

@@ -911,9 +911,12 @@ AdaptiveGridBuilder::build_segmented(
     expand_bounds(min_rate, max_rate, 0.04);
 
     // Tau bounds: from small epsilon to maturity
+    // Only expand min_tau downward; keep max_tau at maturity to avoid
+    // validation samples beyond the surface's domain.
     double min_tau = std::min(0.01, config.maturity * 0.5);
     double max_tau = config.maturity;
     expand_bounds_positive(min_tau, max_tau, 0.1);
+    max_tau = std::min(max_tau, config.maturity);
 
     // 4. Run probes - each probes at strike = K_ref
     std::vector<GridSizes> probe_results;
@@ -921,11 +924,12 @@ AdaptiveGridBuilder::build_segmented(
         // BuildFn: wraps SegmentedPriceTableBuilder for this K_ref
         BuildFn build_fn = [&config, K_ref](
             const std::vector<double>& m_grid,
-            const std::vector<double>& /*tau_grid*/,
+            const std::vector<double>& tau_grid,
             const std::vector<double>& v_grid,
             const std::vector<double>& r_grid)
             -> std::expected<SurfaceHandle, PriceTableError>
         {
+            int tau_pts = static_cast<int>(tau_grid.size());
             SegmentedPriceTableBuilder::Config seg_cfg{
                 .K_ref = K_ref,
                 .option_type = config.option_type,
@@ -935,6 +939,7 @@ AdaptiveGridBuilder::build_segmented(
                 .maturity = config.maturity,
                 .vol_grid = v_grid,
                 .rate_grid = r_grid,
+                .tau_points_per_segment = tau_pts,
                 .skip_moneyness_expansion = true,
             };
             auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
