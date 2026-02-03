@@ -76,19 +76,42 @@ SliceCache stays inside the `BuildFn` closure.
 `SegmentedPriceTableBuilder::build()`, `ValidateFn` calls
 `solve_american_option()` with `discrete_dividends` populated.
 
-### 2. Validation with discrete dividends
+### 2. Validation strategy (hybrid)
 
-`solve_american_option(PricingParams)` already handles discrete dividends:
-it expands the spatial domain, adds mandatory tau points at dividend dates,
-and produces correct reference prices. No new solver needed.
+**Reference solver:** `solve_american_option(PricingParams)` already
+handles discrete dividends: it expands the spatial domain, adds mandatory
+tau points at dividend dates, and produces correct reference prices.
+No new solver needed. The segmented `ValidateFn` populates
+`PricingParams.discrete_dividends` from the config.
 
-The segmented `ValidateFn` populates `PricingParams.discrete_dividends`
-from the config. The existing `compute_error_metric()` works unchanged.
+**Strike/K_ref constraint:** A single-K_ref `SegmentedPriceSurface`
+forces `strike = K_ref` in raw (non-EEP) segments. Per-K_ref probes
+cannot validate at arbitrary strikes. All strike dependence in raw
+segments comes from interpolation across K_refs in the multi-K_ref
+surface, not from the individual surface.
 
-**Spot/strike mapping:** Validation must use `strike = config.spot / m`
-with the original `config.spot`, not the probe K_ref. The probe K_ref
-only determines which segmented surface to build — the validation
-samples actual pricing queries at the original spot.
+**Two-phase validation (Option C):**
+
+1. **Per-K_ref probes (fast):** Each probe validates at
+   `strike = K_ref` (moneyness = `spot / K_ref`). This tests surface
+   accuracy at the K_ref's own strike and captures per-surface curvature
+   requirements. Used for grid sizing.
+
+2. **Final multi-K_ref validation:** After grid sizes are determined,
+   build the full `SegmentedMultiKRefSurface` with all K_refs using the
+   uniform grid. Run one validation pass with LHS samples at arbitrary
+   strikes (`strike = config.spot / m`). Compare against fresh FD
+   reference prices.
+
+   If the final validation **passes**: return the surface.
+
+   If it **fails**: the error may be from K_ref spacing (interpolation
+   between K_refs) rather than per-surface grid density. Log a
+   diagnostic indicating whether max error correlates with mid-bracket
+   strikes. Then bump all grids by one refinement step and rebuild.
+   If still failing after one retry, return the best surface with
+   `target_met = false` (same behavior as standard path when target
+   isn't achieved).
 
 ### 3. Tau axis as `tau_points_per_segment`
 
@@ -167,14 +190,19 @@ build_segmented(const SegmentedAdaptiveConfig& config,
 
 Flow:
 1. Determine full K_ref list from `kref_config`
-2. Select probe K_refs (ATM, lowest, highest)
+2. Select probe K_refs (ATM, lowest, highest; all if < 3)
 3. Pre-expand moneyness domain using worst-case K_ref
 4. For each probe, run `run_refinement()` with segmented callbacks
+   validating at `strike = K_ref` (per-K_ref accuracy)
 5. Take per-axis max grid sizes across probes
 6. Generate uniform grids (linspace over expanded domain) with max sizes
-7. Build all K_ref segments via `SegmentedMultiKRefBuilder::build()`
-   with the uniform grid and `skip_moneyness_expansion = true`
-8. Return `SegmentedMultiKRefSurface`
+7. Build full `SegmentedMultiKRefSurface` via
+   `SegmentedMultiKRefBuilder::build()` with uniform grid and
+   `skip_moneyness_expansion = true`
+8. Final validation: LHS samples at arbitrary strikes against fresh
+   FD references. If error exceeds target, bump grids by one step
+   and rebuild (one retry). Return surface regardless (with
+   `target_met` reflecting final validation result).
 
 ### 7. Factory integration
 
@@ -187,13 +215,14 @@ if (const auto* adaptive = std::get_if<AdaptiveGrid>(&config.grid)) {
         SegmentedAdaptiveConfig{...}, *adaptive);
     if (!surface)
         return std::unexpected(ValidationError{
-            ValidationError::InvalidGridSize, surface.error().message});
+            ValidationErrorCode::InvalidGridSize, 0.0});
     // wrap in InterpolatedIVSolver<SegmentedMultiKRefSurface>
 }
 ```
 
-`ManualGrid` path unchanged. Error mapping: `PriceTableError.message`
-converts to `ValidationError` with `InvalidGridSize` code.
+`ManualGrid` path unchanged. Error mapping follows existing factory
+pattern: any `PriceTableError` maps to
+`ValidationError{InvalidGridSize, 0.0}` (same as standard adaptive path).
 
 ### 8. SliceCache
 
