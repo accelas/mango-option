@@ -215,11 +215,24 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         }
         double P2 = result2->value_at(params.spot);
 
-        // Compute delta consistently at same physical point via interpolation
-        // Use cubic spline interpolation + finite difference at spot
-        double h = 0.01 * params.spot;  // 1% bump
-        double delta1 = (result1->value_at(params.spot + h) - result1->value_at(params.spot - h)) / (2.0 * h);
-        double delta2 = (result2->value_at(params.spot + h) - result2->value_at(params.spot - h)) / (2.0 * h);
+        // Compute delta consistently at same physical point via finite difference
+        // Note: value_at() uses linear interpolation in log-moneyness space,
+        // which is sufficient since we're comparing relative convergence
+        double h = std::max(0.01 * params.spot, 0.01);  // 1% bump with floor
+
+        // Ensure spot ± h is within grid domain (grid domain is in log-moneyness)
+        double x_spot = std::log(params.spot / params.strike);
+        double x_lo = grid2.x_min();
+        double x_hi = grid2.x_max();
+        double spot_lo = params.strike * std::exp(x_lo);
+        double spot_hi = params.strike * std::exp(x_hi);
+        double s_minus = std::max(params.spot - h, spot_lo * 1.01);
+        double s_plus = std::min(params.spot + h, spot_hi * 0.99);
+        h = (s_plus - s_minus) / 2.0;  // Recompute h after clamping
+        double s_center = (s_plus + s_minus) / 2.0;
+
+        double delta1 = (result1->value_at(s_plus) - result1->value_at(s_minus)) / (2.0 * h);
+        double delta2 = (result2->value_at(s_plus) - result2->value_at(s_minus)) / (2.0 * h);
 
         // Composite acceptance criterion using max of both prices
         double price_diff = std::abs(P1 - P2);

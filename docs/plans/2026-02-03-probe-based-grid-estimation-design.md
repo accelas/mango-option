@@ -67,11 +67,12 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         double P2 = solve_pde(params, grid2, td2);
 
         // Compute delta consistently at the SAME physical point (spot)
-        // Use cubic spline interpolation of each solution, then finite diff
-        // This avoids grid-dependent artifacts in delta comparison
-        double h = 0.01 * spot;  // 1% bump for finite difference
-        double delta1 = (interpolate(solution1, spot + h) - interpolate(solution1, spot - h)) / (2 * h);
-        double delta2 = (interpolate(solution2, spot + h) - interpolate(solution2, spot - h)) / (2 * h);
+        // Uses value_at() which does linear interpolation in log-moneyness space
+        // This is sufficient since we're comparing relative convergence
+        double h = max(0.01 * spot, 0.01);  // 1% bump with floor
+        // Clamp to grid domain to avoid extrapolation
+        double delta1 = (value_at(solution1, spot + h) - value_at(solution1, spot - h)) / (2 * h);
+        double delta2 = (value_at(solution2, spot + h) - value_at(solution2, spot - h)) / (2 * h);
 
         // Composite acceptance criterion using max of both prices
         double price_ref = std::max({std::abs(P1), std::abs(P2), 0.10});
@@ -91,11 +92,11 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 ```
 
 **Key details:**
-- Delta computed consistently via cubic spline interpolation at the same physical point (spot)
+- Delta computed via finite difference at the same physical point, with minimum bump (1% or $0.01 floor) and domain clamping
 - Error criterion uses `max(|P1|, |P2|, floor)` for consistent relative scale
 - Returns `converged` flag so caller can decide fallback behavior
 - Nt floor (min 50 steps) ensures temporal resolution for short maturities
-- Note: TR-BDF2 is L-stable (unconditionally stable for diffusion), so no CFL constraint needed for stability; Nt floor is purely for accuracy
+- Note: TR-BDF2 is L-stable (unconditionally stable for diffusion), so no CFL constraint needed; Nt floor is purely for accuracy
 
 ### IVSolver Integration
 
