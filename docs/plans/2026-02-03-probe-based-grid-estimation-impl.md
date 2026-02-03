@@ -229,7 +229,9 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         double spot_hi = params.strike * std::exp(x_hi) * 0.99;
 
         // Clamp h symmetrically around spot (keep center at spot)
+        // Guard against invalid intersection (spot_lo >= spot_hi after margins)
         double h_max = std::min(params.spot - spot_lo, spot_hi - params.spot);
+        h_max = std::max(0.0, h_max);  // Clamp to non-negative
         h = std::min(h, h_max);
 
         // Guard against zero or tiny h (domain too tight)

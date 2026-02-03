@@ -70,9 +70,9 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
         // Uses value_at() which does linear interpolation in log-moneyness space
         double h = max(0.01 * spot, 0.01);  // 1% bump with floor
 
-        // Use INTERSECTION of both grid domains to avoid extrapolation
+        // Use INTERSECTION of both grid domains (with 1% margin) to avoid extrapolation
         // Clamp h symmetrically around spot (keep center at spot)
-        double h_max = min(spot - domain_lo, domain_hi - spot);
+        double h_max = max(0, min(spot - domain_lo, domain_hi - spot));
         h = min(h, h_max);
 
         // Guard: if h too small, skip delta check (use price only)
@@ -101,8 +101,8 @@ std::expected<ProbeResult, ValidationError> probe_grid_adequacy(
 ```
 
 **Key details:**
-- Delta computed via finite difference at spot, clamped symmetrically to intersection of both grid domains
-- If h becomes too small (< 1e-6) after clamping, skip delta check and use price convergence only
+- Delta computed via finite difference at spot, clamped symmetrically to intersection of both grid domains (with 1% margin to avoid boundary effects)
+- If h becomes too small (< 1e-6) after clamping, or if intersection is invalid, skip delta check and use price convergence only
 - Error criterion uses `max(|P1|, |P2|, floor)` for consistent relative scale
 - Returns `converged` flag so caller can decide fallback behavior
 - Nt floor (min 50 steps) ensures temporal resolution for short maturities
