@@ -15,6 +15,7 @@
 #include "mango/option/option_spec.hpp"
 #include "mango/option/option_concepts.hpp"
 #include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <memory>
 #include <optional>
 #include <span>
@@ -75,7 +76,7 @@ public:
     /**
      * @brief Get option value at arbitrary spot price
      *
-     * Uses linear interpolation in log-moneyness space: x = ln(S/K).
+     * Uses cubic spline interpolation in log-moneyness space: x = ln(S/K).
      * Converts normalized price V/K to actual price: V = (V/K) * K.
      *
      * @param spot_price Spot price to evaluate at
@@ -86,10 +87,8 @@ public:
     /**
      * @brief Compute delta: ∂V/∂S
      *
-     * Uses first derivative operator in log-moneyness space.
-     * Delta = (∂V/∂x) / S where x = ln(S/K).
-     *
-     * Lazy initialization: Creates CenteredDifference operator on first call.
+     * Uses cubic spline derivative in log-moneyness space.
+     * Delta = (∂V_norm/∂x) * (K/S) where x = ln(S/K).
      *
      * @return Delta at current spot price
      */
@@ -98,10 +97,9 @@ public:
     /**
      * @brief Compute gamma: ∂²V/∂S²
      *
-     * Uses second derivative operator in log-moneyness space.
-     * Gamma ≈ (∂²V/∂x²) / S²
-     *
-     * Lazy initialization: Creates CenteredDifference operator on first call.
+     * Uses stencil-based second derivative with linear interpolation
+     * to the exact spot point.
+     * Gamma = (K/S²) * [∂²V_norm/∂x² - ∂V_norm/∂x]
      *
      * @return Gamma at current spot price
      */
@@ -135,49 +133,27 @@ public:
     std::shared_ptr<Grid<double>> grid() const { return grid_; }
 
 private:
-    /**
-     * @brief Find grid index for log-moneyness x = ln(S/K)
-     *
-     * Returns the left index for linear interpolation.
-     *
-     * @param x Log-moneyness
-     * @return Pair of (left_index, right_index) for interpolation
-     */
-    std::pair<size_t, size_t> find_grid_index(double x) const;
+    /// Build cubic spline from solution on first use
+    void ensure_spline() const;
 
-    /**
-     * @brief Linear interpolation between two grid points (uses current solution)
-     *
-     * @param x Log-moneyness to evaluate at
-     * @param i_left Left grid index
-     * @param i_right Right grid index
-     * @return Interpolated value
-     */
-    double interpolate(double x, size_t i_left, size_t i_right) const;
+    /// Build cubic spline on an arbitrary solution array
+    void build_spline(CubicSpline<double>& spline,
+                      std::span<const double> solution) const;
 
-    /**
-     * @brief Linear interpolation between two grid points with explicit solution
-     *
-     * @param x Log-moneyness to evaluate at
-     * @param i_left Left grid index
-     * @param i_right Right grid index
-     * @param solution Solution array to interpolate from
-     * @return Interpolated value
-     */
-    double interpolate(double x, size_t i_left, size_t i_right,
-                       std::span<const double> solution) const;
-
-    /**
-     * @brief Lazy initialize CenteredDifference operator
-     *
-     * Creates operator on first call to delta() or gamma().
-     */
+    /// Lazy initialize CenteredDifference operator (for gamma stencil)
     void ensure_operator() const;
+
+    /// Find grid index for linear interpolation of stencil output
+    std::pair<size_t, size_t> find_grid_index(double x) const;
 
     std::shared_ptr<Grid<double>> grid_;
     PricingParams params_;
 
-    // Lazy-initialized operator for Greeks
+    // Lazy-initialized cubic spline for value/delta interpolation
+    mutable CubicSpline<double> spline_;
+    mutable bool spline_built_ = false;
+
+    // Lazy-initialized operator for gamma stencil
     mutable std::unique_ptr<operators::CenteredDifference<double>> operator_;
 };
 
