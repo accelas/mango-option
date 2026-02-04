@@ -171,14 +171,17 @@ public:
                 const T d2_coeff_i = -a * (1.0 / dx_left + 1.0 / dx_right) / dx_avg;
                 const T d2_coeff_ip1 = a / (dx_right * dx_avg);
 
-                // First derivative: (u[i+1] - u[i-1]) / (dx_left + dx_right)
+                // First derivative: weighted forward/backward (matches CenteredDifference::apply)
+                //   du/dx = w_l·(u[i]-u[i-1])/dx_l + w_r·(u[i+1]-u[i])/dx_r
+                // where w_l = dx_r/(dx_l+dx_r), w_r = dx_l/(dx_l+dx_r)
                 const T d1_denom = dx_left + dx_right;
-                const T d1_coeff_im1 = -b / d1_denom;
-                const T d1_coeff_ip1 = b / d1_denom;
+                const T d1_coeff_im1 = -b * dx_right / (dx_left * d1_denom);
+                const T d1_coeff_i   =  b * (dx_right - dx_left) / (dx_left * dx_right);
+                const T d1_coeff_ip1 =  b * dx_left / (dx_right * d1_denom);
 
                 // Jacobian of L(u): ∂L_i/∂u
                 const T jac_lower_i = d2_coeff_im1 + d1_coeff_im1;
-                const T jac_diag_i = d2_coeff_i + c;
+                const T jac_diag_i = d2_coeff_i + d1_coeff_i + c;
                 const T jac_upper_i = d2_coeff_ip1 + d1_coeff_ip1;
 
                 // F(u) = u - rhs - coeff_dt·L(u), so ∂F/∂u = I - coeff_dt·∂L/∂u
