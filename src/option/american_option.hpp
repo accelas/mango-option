@@ -56,15 +56,6 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
     // Ensure odd number of points (for centered stencils)
     if (Nx % 2 == 0) Nx++;
 
-    // Temporal resolution (coupled to smallest spatial spacing)
-    // For sinh grid with clustering α, dx_min ≈ dx_avg · exp(-α)
-    double dx_avg = (x_max - x_min) / static_cast<double>(Nx);
-    double dx_min = dx_avg * std::exp(-accuracy.alpha);  // Sinh clustering factor
-
-    double dt = accuracy.c_t * dx_min;
-    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
-    Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound for stability
-
     // Widen grid for dividend shift: spline evaluates at x'=ln(exp(x)-D/K)
     // Only consider dividends strictly within (0, T) — same filter as mandatory tau
     double max_d_over_k = 0.0;
@@ -82,6 +73,21 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
 
     // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
     auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
+
+    // Temporal resolution: compute actual dx_min from generated grid.
+    // The old formula dx_min = dx_avg·exp(-α) was an approximation that became
+    // wildly pessimistic at high α (e.g., α≈4 gave ~7x more time steps than needed).
+    // TR-BDF2 is L-stable so CFL is for accuracy, not stability.
+    auto grid_buf = grid_spec.value().generate();
+    auto pts = grid_buf.view().span();
+    double dx_min = pts[1] - pts[0];
+    for (size_t i = 2; i < pts.size(); ++i) {
+        dx_min = std::min(dx_min, pts[i] - pts[i - 1]);
+    }
+
+    double dt = accuracy.c_t * dx_min;
+    size_t Nt = static_cast<size_t>(std::ceil(params.maturity / dt));
+    Nt = std::min(Nt, accuracy.max_time_steps);  // Upper bound
 
     // Convert discrete dividend calendar times to time-to-expiry (tau)
     std::vector<double> mandatory_tau;

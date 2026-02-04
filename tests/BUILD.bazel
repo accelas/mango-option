@@ -781,6 +781,19 @@ cc_test(
 )
 
 cc_test(
+    name = "spatial_operator_jacobian_test",
+    srcs = ["spatial_operator_jacobian_test.cc"],
+    deps = [
+        "//src/pde/operators:spatial_operator",
+        "//src/pde/operators:black_scholes_pde",
+        "//src/pde/operators:operator_factory",
+        "//src/pde/core:grid",
+        "//src/pde/core:pde_workspace",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "target_clones_test",
     srcs = ["operators/target_clones_test.cc"],
     deps = [
