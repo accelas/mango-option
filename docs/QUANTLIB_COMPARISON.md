@@ -42,32 +42,45 @@ grids (8x) the gap widens to 2.8x as mango's higher convergence order dominates.
 The 6-case average eliminates the single-case error cancellation that previously
 made QuantLib appear artificially better at 2x.
 
-## IV Strike Sweep: Mango vs QuantLib (after #338, #339)
+## IV Strike Sweep: Mango vs QuantLib (after #341)
 
 IV accuracy across strikes K=80..120 for American puts.
-Known true σ=0.20 → QuantLib high-res reference price (2001×20000) → recover IV.
-Both solvers use 101 spatial points; Brent root-finding with tol=1e-6.
+Multi-scenario averaging: 4 scenarios (σ ∈ {0.15, 0.30} × T ∈ {1.0, 2.0}) × 9 strikes.
+Reference prices from QuantLib high-res (2001×20000). Both solvers use auto-estimated
+grids; Brent root-finding with tol=1e-6.
 
-### Mango vs QuantLib: IV Error (basis points from true vol)
+S=100, r=0.05, q=0.02. Moneyness buckets: OTM (K=80..90), ATM (K=95..105), ITM (K=110..120).
 
-| Strike | S/K  | Mango (bps) | QuantLib (bps) | Mango Time | QL Time | Winner |
-|--------|------|-------------|----------------|------------|---------|--------|
-| 80     | 1.25 | 0.54        | 0.42           | 115ms      | 176ms   | QL accuracy, Mango speed |
-| 85     | 1.18 | 0.63        | 0.48           | 110ms      | 176ms   | QL accuracy, Mango speed |
-| 90     | 1.11 | 0.44        | 0.50           | 90ms       | 131ms   | **Mango wins both** |
-| 95     | 1.05 | 0.81        | 0.76           | 18ms       | 6ms     | Comparable |
-| 100    | 1.00 | 1.63        | 1.31           | 8ms        | 2.5ms   | QL wins both |
-| 105    | 0.95 | 1.33        | 1.19           | 32ms       | 5ms     | QL wins both |
-| 110    | 0.91 | 1.13        | 0.73           | 100ms      | 159ms   | QL accuracy, Mango speed |
-| 115    | 0.87 | 0.89        | 0.87           | 138ms      | 174ms   | Tied accuracy, Mango speed |
-| 120    | 0.83 | 1.11        | 1.36           | 127ms      | 188ms   | **Mango wins both** |
+### Vanilla IV (4-scenario RMS, basis points)
+
+| Metric | Mango (bps) | QuantLib (bps) | Notes |
+|--------|-------------|----------------|-------|
+| Overall RMS | 1.05 | 0.99 | Comparable |
+| OTM RMS | 0.45 | 0.43 | Comparable |
+| ATM RMS | 1.46 | 1.31 | QuantLib slightly better |
+| ITM RMS | 0.97 | 1.02 | Comparable |
+| Mango Time | 3.8s | — | 36 IV solves |
+| QL Time | — | 5.3s | 36 IV solves |
+| Failures | 1 | 1 | Same degenerate deep OTM case |
+
+### Dividend IV (quarterly $0.50, 4-scenario RMS, basis points)
+
+| Metric | Mango (bps) | QuantLib (bps) | Notes |
+|--------|-------------|----------------|-------|
+| Overall RMS | **0.95** | 1.36 | **Mango 1.4x better** |
+| OTM RMS | **0.73** | 1.62 | **Mango 2.2x better** |
+| ATM RMS | 1.05 | 1.01 | Comparable |
+| ITM RMS | 1.05 | 1.38 | Mango better |
+| Mango Time | 4.0s | — | 36 IV solves |
+| QL Time | — | 4.9s | 36 IV solves |
+| Failures | 0 | 0 | — |
 
 **Key findings:**
-- **Both are sub-2 bps** across all strikes — excellent accuracy
-- QuantLib slightly more accurate near ATM (K=95..110) by ~0.1-0.4 bps
-- **Mango matches or beats QuantLib at deep OTM/ITM** (K=80..90, K=115..120)
-- Mango faster at off-ATM strikes (QuantLib gets the same time-step count from mango's CFL estimate, but TR-BDF2 has higher per-step cost at ATM where grids are small)
-- Maximum IV error difference between the two: **< 0.5 bps at any strike**
+- **Both sub-1.5 bps** across all buckets in vanilla — excellent accuracy
+- Vanilla: comparable overall (mango 1.05 vs QuantLib 0.99 bps)
+- **Dividend: mango 1.4x better** overall (0.95 vs 1.36 bps), with OTM 2.2x better
+- Mango faster (3.8-4.0s vs 4.9-5.3s for 36 IV solves)
+- 4-scenario averaging eliminates per-case error cancellation artifacts
 
 ```bash
 bazel run //benchmarks:iv_strike_sweep
@@ -177,6 +190,19 @@ Empirical order from log-log slope (RMS relative error vs grid scale):
 | Dividend | ~1.3 | ~0.9 |
 
 ## Changelog
+
+### 2026-02-04: Multi-scenario IV benchmark (#341)
+
+**Changes:**
+- IV strike sweep now uses 4 scenarios (σ ∈ {0.15, 0.30} × T ∈ {1.0, 2.0}) × 9 strikes
+- Added dividend IV benchmarks (quarterly $0.50) with manual Brent over FDM
+- Per-bucket RMS reporting: OTM, ATM, ITM, overall
+- Graceful degenerate-case handling (NaN for failed/ill-conditioned solves)
+
+**Impact:**
+- Vanilla IV: mango comparable to QuantLib (~1.0 bps both)
+- Dividend IV: **mango 1.4x better** (0.95 vs 1.36 bps overall)
+- OTM dividend: **mango 2.2x better** (0.73 vs 1.62 bps)
 
 ### 2026-02-04: Multi-case benchmarks (#327)
 
