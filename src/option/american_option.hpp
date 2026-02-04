@@ -71,8 +71,16 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
         x_min -= 1.0;  // conservative extension
     }
 
-    // Create sinh-spaced GridSpec for better resolution near strike (x=0 in log-moneyness)
-    auto grid_spec = GridSpec<double>::sinh_spaced(x_min, x_max, Nx, accuracy.alpha);
+    // Build cluster list for multi-sinh grid.
+    // Strike cluster at x=0 (payoff kink) is the dominant coarse-grid error source.
+    // Spot cluster at x0 (query point) is secondary for value_at()/delta().
+    // When S≈K, auto-merge combines them. Skip strike cluster if outside domain.
+    std::vector<MultiSinhCluster<double>> clusters;
+    clusters.push_back({.center_x = x0, .alpha = accuracy.alpha, .weight = 0.5});
+    if (0.0 >= x_min && 0.0 <= x_max) {
+        clusters.push_back({.center_x = 0.0, .alpha = accuracy.alpha, .weight = 1.0});
+    }
+    auto grid_spec = GridSpec<double>::multi_sinh_spaced(x_min, x_max, Nx, std::move(clusters));
 
     // Temporal resolution: compute actual dx_min from generated grid.
     // The old formula dx_min = dx_avg·exp(-α) was an approximation that became
@@ -145,8 +153,11 @@ inline std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
         max_maturity = std::max(max_maturity, p.maturity);
     }
 
-    // Create sinh-spaced grid with same concentration parameter
-    auto grid_spec = GridSpec<double>::sinh_spaced(global_x_min, global_x_max, global_Nx, accuracy.alpha);
+    // Create multi-sinh grid with strike cluster at x=0
+    // Batch uses shared strike, so x=0 is the common payoff kink
+    auto grid_spec = GridSpec<double>::multi_sinh_spaced(global_x_min, global_x_max, global_Nx, {
+        {.center_x = 0.0, .alpha = accuracy.alpha, .weight = 1.0},
+    });
 
     // Collect union of all dividend tau values across the batch
     std::vector<double> all_mandatory_tau;
