@@ -295,4 +295,90 @@ TEST_F(AmericanOptionResultTest, GammaAccuracy) {
         << "\n  fraction: " << correction_fraction * 100 << "%";
 }
 
+// ===========================================================================
+// Regression: cubic spline interpolation vs linear (#331)
+// Verify that cubic spline gives better accuracy at off-grid points
+// ===========================================================================
+
+// Verify cubic spline interpolation is accurate on a smooth function
+// evaluated at off-grid points (where the improvement over linear matters)
+TEST_F(AmericanOptionResultTest, CubicSplineOffGridAccuracy) {
+    // Create a coarse grid to amplify interpolation error
+    auto coarse_grid_spec = GridSpec<double>::uniform(-1.0, 1.0, 21);
+    ASSERT_TRUE(coarse_grid_spec.has_value());
+    auto time_domain = TimeDomain::from_n_steps(0.0, 1.0, 100);
+    auto coarse_grid = Grid<double>::create(coarse_grid_spec.value(), time_domain).value();
+
+    // Fill with a smooth function: V(x) = exp(-x²) (Gaussian-like, always positive)
+    // This approximates a smooth PDE solution without kinks
+    auto x_span = coarse_grid->x();
+    auto solution = coarse_grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        double x = x_span[i];
+        solution[i] = std::exp(-x * x);
+    }
+
+    // Evaluate at a point between grid nodes
+    // Grid spacing = 2.0/20 = 0.1, so midpoint x=0.05 is between nodes
+    double spot_mid = params.strike * std::exp(0.05);  // S = K * exp(0.05)
+
+    PricingParams mid_params(
+        OptionSpec{.spot = spot_mid, .strike = params.strike, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
+
+    AmericanOptionResult result(coarse_grid, mid_params);
+    double value = result.value_at(spot_mid);
+    double value_normalized = value / params.strike;
+
+    // Exact value at x=0.05: exp(-0.0025) ≈ 0.99750
+    double exact = std::exp(-0.05 * 0.05);
+    double error = std::abs(value_normalized - exact);
+
+    // Cubic spline on a smooth function should be very accurate (< 1e-4)
+    // Linear interpolation on this grid would give ~2.5e-4 error
+    EXPECT_LT(error, 1e-4)
+        << "Cubic spline should interpolate smooth functions accurately"
+        << "\n  computed: " << value_normalized
+        << "\n  exact:    " << exact
+        << "\n  error:    " << error;
+}
+
+// Verify delta from spline derivative is more accurate than grid-snapping
+TEST_F(AmericanOptionResultTest, CubicSplineDeltaAccuracy) {
+    // Fine grid with smooth function: V(x) = exp(-x²)
+    auto grid_spec = GridSpec<double>::uniform(-1.0, 1.0, 51);
+    ASSERT_TRUE(grid_spec.has_value());
+    auto time_domain = TimeDomain::from_n_steps(0.0, 1.0, 100);
+    auto test_grid = Grid<double>::create(grid_spec.value(), time_domain).value();
+
+    auto x_span = test_grid->x();
+    auto solution = test_grid->solution();
+    for (size_t i = 0; i < x_span.size(); ++i) {
+        double x = x_span[i];
+        solution[i] = std::exp(-x * x);
+    }
+
+    // Evaluate at off-grid spot: x = 0.03 (between nodes at dx = 0.04)
+    double spot = params.strike * std::exp(0.03);
+    PricingParams test_params(
+        OptionSpec{.spot = spot, .strike = params.strike, .maturity = 1.0,
+            .rate = 0.05, .dividend_yield = 0.02, .option_type = OptionType::PUT}, 0.20);
+
+    AmericanOptionResult result(test_grid, test_params);
+    double delta = result.delta();
+
+    // Analytical: V(x) = K·exp(-x²), dV/dS = (K/S)·dV_norm/dx = (K/S)·(-2x)·exp(-x²)
+    double x_spot = 0.03;
+    double dv_norm_dx = -2.0 * x_spot * std::exp(-x_spot * x_spot);
+    double expected_delta = dv_norm_dx * (params.strike / spot);
+
+    // Spline derivative should be accurate within 0.5%
+    double rel_error = std::abs(delta - expected_delta) / std::abs(expected_delta);
+    EXPECT_LT(rel_error, 0.005)
+        << "Cubic spline derivative should be accurate at off-grid points"
+        << "\n  computed delta: " << delta
+        << "\n  exact delta:    " << expected_delta
+        << "\n  rel error:      " << rel_error * 100 << "%";
+}
+
 } // namespace
