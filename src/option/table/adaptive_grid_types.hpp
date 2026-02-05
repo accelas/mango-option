@@ -3,6 +3,7 @@
 
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/per_maturity_price_surface.hpp"
 #include <array>
 #include <memory>
 #include <vector>
@@ -29,6 +30,11 @@ struct AdaptiveGridParams {
     /// Moneyness requires higher density than other dimensions due to
     /// exercise boundary curvature and PDE → B-spline sampling loss.
     size_t min_moneyness_points = 60;
+
+    /// Use per-maturity 3D surfaces instead of global 4D B-spline (default: true)
+    /// Per-maturity approach avoids global smoothing over the exercise boundary,
+    /// significantly improving accuracy for American options.
+    bool use_per_maturity = true;
 
     /// Number of validation FD solves per iteration (default: 64)
     size_t validation_samples = 64;
@@ -62,11 +68,22 @@ struct IterationStats {
 
 /// Final result with full diagnostics
 struct AdaptiveResult {
-    /// The built price table surface (always populated, even if target not met)
+    /// The built price table surface (4D mode, nullptr if using per-maturity)
     std::shared_ptr<const PriceTableSurface<4>> surface = nullptr;
+
+    /// Per-maturity surface (per-maturity mode, nullptr if using 4D)
+    std::shared_ptr<const PerMaturityPriceSurface> per_maturity_surface = nullptr;
 
     /// Final axes used for the surface
     PriceTableAxes<4> axes;
+
+    /// Query price from whichever surface is populated
+    [[nodiscard]] double value(const std::array<double, 4>& coords) const {
+        if (per_maturity_surface) {
+            return per_maturity_surface->value(coords);
+        }
+        return surface ? surface->value(coords) : 0.0;
+    }
 
     /// Per-iteration history for diagnostics
     std::vector<IterationStats> iterations;
