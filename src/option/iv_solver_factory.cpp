@@ -112,6 +112,10 @@ AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver)
     : solver_(std::move(solver))
 {}
 
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<StrikeSurfaceWrapper<>> solver)
+    : solver_(std::move(solver))
+{}
+
 std::expected<IVSuccess, IVError> AnyIVSolver::solve(const IVQuery& query) const {
     return std::visit([&](const auto& solver) {
         return solver.solve(query);
@@ -222,8 +226,13 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 
 static std::expected<AnyIVSolver, ValidationError>
 build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path) {
+    MultiKRefConfig kref_config = path.kref_config;
     return std::visit([&](const auto& grid) -> std::expected<AnyIVSolver, ValidationError> {
         using G = std::decay_t<decltype(grid)>;
+        const bool use_per_strike = !path.strike_grid.empty();
+        if (use_per_strike) {
+            kref_config.K_refs = path.strike_grid;
+        }
 
         if constexpr (std::is_same_v<G, AdaptiveGrid>) {
             // Adaptive grid for segmented path
@@ -234,8 +243,44 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                 .dividend_yield = config.dividend_yield,
                 .discrete_dividends = path.discrete_dividends,
                 .maturity = path.maturity,
-                .kref_config = path.kref_config,
+                .kref_config = kref_config,
             };
+            if (use_per_strike) {
+                auto surface = builder.build_segmented_strike(
+                    seg_config, path.strike_grid,
+                    grid.moneyness, grid.vol, grid.rate);
+                if (!surface.has_value()) {
+                    return std::unexpected(ValidationError{
+                        ValidationErrorCode::InvalidGridSize, 0.0});
+                }
+
+                auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
+                auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
+                auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
+
+                StrikeSurfaceWrapper<>::Bounds bounds{
+                    .m_min = *minmax_m.first,
+                    .m_max = *minmax_m.second,
+                    .tau_min = 0.0,
+                    .tau_max = path.maturity,
+                    .sigma_min = *minmax_v.first,
+                    .sigma_max = *minmax_v.second,
+                    .rate_min = *minmax_r.first,
+                    .rate_max = *minmax_r.second,
+                };
+
+                auto wrapper = StrikeSurfaceWrapper<>(
+                    std::move(*surface), bounds, config.option_type, config.dividend_yield);
+
+                auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
+                    std::move(wrapper), config.solver_config);
+                if (!solver.has_value()) {
+                    return std::unexpected(ValidationError{
+                        ValidationErrorCode::InvalidGridSize, 0.0});
+                }
+                return AnyIVSolver(std::move(*solver));
+            }
+
             auto surface = builder.build_segmented(
                 seg_config, grid.moneyness, grid.vol, grid.rate);
             if (!surface.has_value()) {
@@ -243,7 +288,6 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                     ValidationErrorCode::InvalidGridSize, 0.0});
             }
 
-            // Compute bounds from domain
             auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
             auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
             auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
@@ -277,16 +321,83 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             .discrete_dividends = path.discrete_dividends
         };
 
+        if (use_per_strike) {
+            std::vector<StrikeEntry> entries;
+            entries.reserve(kref_config.K_refs.size());
+            for (double strike : kref_config.K_refs) {
+                SegmentedPriceTableBuilder::Config seg_config{
+                    .K_ref = strike,
+                    .option_type = config.option_type,
+                    .dividends = dividends,
+                    .moneyness_grid = grid.moneyness,
+                    .maturity = path.maturity,
+                    .vol_grid = grid.vol,
+                    .rate_grid = grid.rate,
+                    .tau_points_per_segment = 5,
+                    .skip_moneyness_expansion = false,
+                };
+
+                auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
+                if (!old_surface.has_value()) {
+                    return std::unexpected(ValidationError{
+                        ValidationErrorCode::InvalidGridSize, 0.0});
+                }
+
+                auto new_surface = convert_to_spliced(*old_surface);
+                if (!new_surface.has_value()) {
+                    return std::unexpected(ValidationError{
+                        ValidationErrorCode::InvalidGridSize, 0.0});
+                }
+
+                entries.push_back(StrikeEntry{
+                    .strike = strike,
+                    .surface = std::move(*new_surface),
+                });
+            }
+
+            auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
+            if (!surface.has_value()) {
+                return std::unexpected(ValidationError{
+                    ValidationErrorCode::InvalidGridSize, 0.0});
+            }
+
+            auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
+            auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
+            auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
+
+            StrikeSurfaceWrapper<>::Bounds bounds{
+                .m_min = *minmax_m.first,
+                .m_max = *minmax_m.second,
+                .tau_min = 0.0,
+                .tau_max = path.maturity,
+                .sigma_min = *minmax_v.first,
+                .sigma_max = *minmax_v.second,
+                .rate_min = *minmax_r.first,
+                .rate_max = *minmax_r.second,
+            };
+
+            auto wrapper = StrikeSurfaceWrapper<>(
+                std::move(*surface), bounds, config.option_type, config.dividend_yield);
+
+            auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
+                std::move(wrapper), config.solver_config);
+            if (!solver.has_value()) {
+                return std::unexpected(ValidationError{
+                    ValidationErrorCode::InvalidGridSize, 0.0});
+            }
+
+            return AnyIVSolver(std::move(*solver));
+        }
+
         auto surface = build_multi_kref_manual(
             config.spot, config.option_type, dividends,
             grid.moneyness, path.maturity, grid.vol, grid.rate,
-            path.kref_config);
+            kref_config);
         if (!surface.has_value()) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
 
-        // Compute bounds from domain
         auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
         auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
         auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());

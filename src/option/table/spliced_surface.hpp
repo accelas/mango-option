@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -312,6 +313,70 @@ private:
     std::vector<double> k_refs_;
 };
 
+/// Split strategy for strike grid selection (exact/nearest/linear).
+class StrikeBracket {
+public:
+    explicit StrikeBracket(std::vector<double> strikes, bool use_nearest = true)
+        : strikes_(std::move(strikes))
+        , use_nearest_(use_nearest)
+    {}
+
+    [[nodiscard]] double key(const PriceQuery& q) const noexcept { return q.strike; }
+    [[nodiscard]] size_t num_slices() const noexcept { return strikes_.size(); }
+
+    [[nodiscard]] Bracket bracket(double strike) const noexcept {
+        Bracket br;
+        const size_t n = strikes_.size();
+        if (n == 0) {
+            return br;
+        }
+
+        auto it = std::lower_bound(strikes_.begin(), strikes_.end(), strike);
+        if (it != strikes_.end() && *it == strike) {
+            size_t idx = static_cast<size_t>(it - strikes_.begin());
+            br.items[0] = SliceWeight{idx, 1.0};
+            br.size = 1;
+            return br;
+        }
+
+        if (it == strikes_.begin()) {
+            br.items[0] = SliceWeight{0, 1.0};
+            br.size = 1;
+            return br;
+        }
+        if (it == strikes_.end()) {
+            br.items[0] = SliceWeight{n - 1, 1.0};
+            br.size = 1;
+            return br;
+        }
+
+        size_t hi = static_cast<size_t>(it - strikes_.begin());
+        size_t lo = hi - 1;
+
+        if (use_nearest_) {
+            size_t idx = (std::abs(strikes_[hi] - strike) < std::abs(strike - strikes_[lo]))
+                ? hi : lo;
+            br.items[0] = SliceWeight{idx, 1.0};
+            br.size = 1;
+            return br;
+        }
+
+        double k_lo = strikes_[lo];
+        double k_hi = strikes_[hi];
+        double t = (strike - k_lo) / (k_hi - k_lo);
+        br.items[0] = SliceWeight{lo, 1.0 - t};
+        br.items[1] = SliceWeight{hi, t};
+        br.size = 2;
+        return br;
+    }
+
+    [[nodiscard]] const std::vector<double>& strikes() const noexcept { return strikes_; }
+
+private:
+    std::vector<double> strikes_;
+    bool use_nearest_ = true;
+};
+
 struct WeightedSum {
     [[nodiscard]] double combine(std::span<const Sample> samples,
                                  const PriceQuery&) const noexcept {
@@ -401,6 +466,20 @@ struct KRefTransform {
 
     [[nodiscard]] double denormalize(double combined, const PriceQuery& q) const noexcept {
         return combined * q.strike;
+    }
+};
+
+struct StrikeTransform {
+    std::vector<double> strikes;
+
+    [[nodiscard]] PriceQuery to_local(size_t i, const PriceQuery& q) const noexcept {
+        PriceQuery out = q;
+        out.strike = strikes[i];
+        return out;
+    }
+
+    [[nodiscard]] double normalize_value(size_t, const PriceQuery&, double raw) const noexcept {
+        return raw;
     }
 };
 
@@ -509,6 +588,14 @@ using MultiKRefSurface = SplicedSurface<
     KRefTransform,
     WeightedSum>;
 
+/// Per-strike surface: select exact/nearest/linear strike slice.
+template<SplicedInner Inner = SegmentedSurface<>>
+using StrikeSurface = SplicedSurface<
+    Inner,
+    StrikeBracket,
+    StrikeTransform,
+    WeightedSum>;
+
 // ===========================================================================
 // PriceSurface-compatible wrapper for MultiKRefSurface
 // ===========================================================================
@@ -558,6 +645,55 @@ public:
 
 private:
     MultiKRefSurface<Inner> surface_;
+    Bounds bounds_;
+    OptionType option_type_;
+    double dividend_yield_;
+};
+
+/// Wrapper that adapts StrikeSurface<> to satisfy the PriceSurface concept.
+template<SplicedInner Inner = SegmentedSurface<>>
+class StrikeSurfaceWrapper {
+public:
+    struct Bounds {
+        double m_min, m_max;
+        double tau_min, tau_max;
+        double sigma_min, sigma_max;
+        double rate_min, rate_max;
+    };
+
+    StrikeSurfaceWrapper(StrikeSurface<Inner> surface,
+                         Bounds bounds,
+                         OptionType option_type,
+                         double dividend_yield)
+        : surface_(std::move(surface))
+        , bounds_(bounds)
+        , option_type_(option_type)
+        , dividend_yield_(dividend_yield)
+    {}
+
+    [[nodiscard]] double price(double spot, double strike,
+                               double tau, double sigma, double rate) const {
+        return surface_.price(PriceQuery{spot, strike, tau, sigma, rate});
+    }
+
+    [[nodiscard]] double vega(double spot, double strike,
+                              double tau, double sigma, double rate) const {
+        return surface_.vega(PriceQuery{spot, strike, tau, sigma, rate});
+    }
+
+    [[nodiscard]] double m_min() const noexcept { return bounds_.m_min; }
+    [[nodiscard]] double m_max() const noexcept { return bounds_.m_max; }
+    [[nodiscard]] double tau_min() const noexcept { return bounds_.tau_min; }
+    [[nodiscard]] double tau_max() const noexcept { return bounds_.tau_max; }
+    [[nodiscard]] double sigma_min() const noexcept { return bounds_.sigma_min; }
+    [[nodiscard]] double sigma_max() const noexcept { return bounds_.sigma_max; }
+    [[nodiscard]] double rate_min() const noexcept { return bounds_.rate_min; }
+    [[nodiscard]] double rate_max() const noexcept { return bounds_.rate_max; }
+    [[nodiscard]] OptionType option_type() const noexcept { return option_type_; }
+    [[nodiscard]] double dividend_yield() const noexcept { return dividend_yield_; }
+
+private:
+    StrikeSurface<Inner> surface_;
     Bounds bounds_;
     OptionType option_type_;
     double dividend_yield_;

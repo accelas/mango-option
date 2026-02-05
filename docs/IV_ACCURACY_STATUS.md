@@ -2,7 +2,9 @@
 
 ## Summary
 
-This document tracks the current state of interpolated IV accuracy in the adaptive grid builder, including changes made, known issues, and failure cases.
+- Vanilla short-maturity extreme strikes remain ill-conditioned in IV space (vega → 0). Errors are large and should be treated as “IV not meaningful” rather than solver failure.
+- Discrete-dividend accuracy improves materially when using per-strike segmented surfaces (enabled via `SegmentedIVPath::strike_grid`).
+- Short-maturity dividend cases that include a cash dividend before expiry still fail at most strikes.
 
 ## Changes Made
 
@@ -27,7 +29,7 @@ auto compute_error_fn = [this, &validate_fn](...) -> double {
 };
 ```
 
-**Rationale:** American option vega differs from European vega due to early exercise. Using FD American vega provides a more accurate error metric.
+**Rationale:** American option vega differs from European vega due to early exercise. Using FD American vega provides a more accurate error metric for the non-dividend path.
 
 ### 2. Initial Tau Grid Seeding (Implemented)
 
@@ -53,6 +55,18 @@ double compute_error_metric(double price_error, double vega) const;
 
 **Rationale:** Never skip validation samples. All samples contribute to the error metric with vega floor clamping for low-vega regions.
 
+### 4. Per-Strike Segmented Surfaces for Discrete Dividends (Implemented)
+
+**Files:**
+- `src/option/table/spliced_surface.hpp`
+- `src/option/table/spliced_surface_builder.hpp/.cpp`
+- `src/option/iv_solver_factory.hpp/.cpp`
+- `src/option/table/adaptive_grid_builder.hpp/.cpp`
+
+**Change:** Added a `StrikeSurface` abstraction and `StrikeSurfaceWrapper`, plus a `SegmentedIVPath::strike_grid` that builds one segmented surface per strike instead of interpolating across multiple K_ref slices.
+
+**Rationale:** Discrete dividends break K_ref homogeneity; K_ref interpolation compounds errors. Per-strike segmented surfaces remove that interpolation axis and reduce dividend IV errors when the strike grid matches the queried strikes.
+
 ## What Works
 
 ### Long-Maturity Vanilla Options (T ≥ 1 year)
@@ -63,6 +77,10 @@ double compute_error_metric(double price_error, double vega) const;
 | T=2y | 0.7 - 7.3 bps | 0.1 - 1.0 bps |
 
 These meet the target of ≤5 bps for most strike/vol combinations.
+
+### Dividend Cases (Mid/Long Maturities, Per-Strike)
+
+With per-strike segmented surfaces (explicit strike grid), most maturities beyond ~60d are within tens of bps, with RMS ~47–56 bps overall.
 
 ### Timing Performance
 
@@ -90,26 +108,40 @@ B-spline interpolation is 77-1300x faster than FDM depending on moneyness.
 - Exercise boundary effects dominate
 - B-spline extrapolation breaks down
 
-**Status:** Unsolved. May require per-maturity surfaces or strike-dependent refinement.
+**Status:** Unsolved. Requires either per-maturity surfaces or an IV validity guard.
 
-### 2. Dividend Cases - Elevated Errors Throughout
+**Mathematical interpretation / approach:**
+- As τ→0 and moneyness is extreme, option price → intrinsic and vega → 0, so the map
+  price → IV is ill-conditioned (tiny price error ⇒ huge IV error).
+- In this regime, IV is effectively undefined; accuracy should be judged in price space
+  or via bounds, not point IV.
+- Pragmatic, mathematically consistent options:
+  1) Time-value/vega threshold: if `time_value` or `|vega|` is below a floor,
+     return “IV not meaningful” or a bounded default.
+  2) Switch to price-error metric when `|vega| < vega_floor` to avoid amplification.
+  3) Use small-time asymptotics for IV (e.g., Roper-Rutkowski-type expansions) to
+     stabilize inversion near expiry.
+  4) Per-maturity (or dense near-expiry) surfaces to avoid global smoothing over
+     the exercise boundary.
+
+### 2. Dividend Cases - Improved but Still Short-Term Failures
 
 | σ | RMS Error | Success Rate |
 |---|-----------|--------------|
-| 15% | 91.8 bps | 44/72 (61%) |
-| 30% | 66.1 bps | 48/72 (67%) |
+| 15% | 47.1 bps | 43/72 (60%) |
+| 30% | 55.9 bps | 48/72 (67%) |
 
 **Specific failures:**
 - T=7d, 14d: All strikes fail (discrete dividend before expiry)
-- T=30d: Only ATM solves, with 115-331 bps error
-- T=2y, K=80, σ=30%: 231 bps error
+- T=30d: Only ATM/near-ATM solves reliably
+- Long maturities still show elevated errors for deep ITM (K=80) in σ=30% cases
 
-**Root Cause:** Segmented surface approach with discrete dividends has:
-- K_ref interpolation errors compound
-- Short segments before first dividend poorly resolved
-- BS vega used instead of FD American vega (acceptable tradeoff for speed)
+**Root Cause:**
+- Discrete dividend boundaries + short τ near expiry create low-vega regions.
+- K_ref interpolation errors were a major contributor; per-strike surfaces remove that axis
+  when an explicit strike grid is supplied.
 
-**Status:** Partially addressed. Per-maturity surfaces planned but not implemented.
+**Status:** Improved with per-strike surfaces; remaining failures are concentrated near dividend dates and very short maturities.
 
 ### 3. Test Isolation Issue
 
@@ -148,33 +180,43 @@ The `Builds/Adaptive` test fails when run after both `IVSolverFactorySegmented` 
 
 Legend: `*` >10bps, `**` >50bps, `***` >200bps, `---` solve failed
 
-### Dividends (Quarterly $0.50)
+### Dividends (Quarterly $0.50) with Per-Strike Surfaces
 
 ```
 === σ=15%, quarterly $0.50 div ===
   T=  7d     ---     ---     ---     ---     ---     ---     ---     ---     ---
   T= 14d     ---     ---     ---     ---     ---     ---     ---     ---     ---
-  T= 30d     ---     ---     ---     ---   332***    ---     ---     ---     ---
-  T= 60d     ---   113**    60**    35*    132**   124**    78**   142**     ---
+  T= 30d     ---     ---     ---     ---     4.7      ---     ---     ---     ---
+  T= 60d     ---    48.9*     5.6      2.0      4.0      5.7     20.1*   135.5**    ---
+  T= 90d    98.6**    5.4      4.4      2.7      3.6      5.2      6.6     55.6**  222.6***
+  T=180d    11.8*     4.6      0.3      4.2      4.9      6.9      3.9     67.0**    ---
+  T=  1y    17.1*     3.7      2.2      2.9      2.2      4.0      2.6     37.5*    38.3*
+  T=  2y    42.2*    14.5*     2.0      2.6      3.9      6.9      6.9     17.9*    33.2*
 
 === σ=30%, quarterly $0.50 div ===
-  T=  2y   232*** 166**   118**    84**    61**    42*     26*     14*      5.9
+  T=  7d     ---     ---     ---     ---     ---     ---     ---     ---     ---
+  T= 14d     ---     ---     ---     ---     ---     ---     ---     ---     ---
+  T= 30d     ---     ---     ---     1.0      2.1      6.6      ---     ---     ---
+  T= 60d     9.6      0.5      1.8      1.4      2.0      4.1      6.4     14.6*    39.3*
+  T= 90d    25.2*     3.3      0.9      0.9      1.0      1.7      1.1      1.6     11.6*
+  T=180d    77.4**   30.2*    11.8*     4.8      2.7      2.4      4.6      5.0      4.9
+  T=  1y   153.5**   89.0**   51.3**   28.2*    13.8*     4.4      3.2      8.5     14.7*
+  T=  2y   228.6*** 163.7**  116.4**   82.2**   57.0**   37.7*    23.2*    12.8*     4.9
 ```
 
 ## Recommendations
 
-1. **Short-maturity accuracy:** Implement per-maturity 3D surfaces (flag exists but not implemented)
-2. **Dividend accuracy:** Use FD American vega for segmented path validation (currently uses BS vega for speed)
-3. **Test isolation:** Continue investigating; may be OpenMP thread pool state or memory allocator behavior
-4. **Strike coverage:** Add strike-dependent refinement to increase density near exercise boundary
+1. **Short-maturity accuracy:** Add an IV validity guard (time-value/vega floor) and/or switch to price-error metrics in the low-vega regime.
+2. **Dividend accuracy:** Use per-strike segmented surfaces when discrete dividends are present and a strike grid is available.
+3. **Near-dividend refinement:** Add strike- and time-local refinement around dividend boundaries (especially for the first segment).
+4. **Per-maturity surfaces:** Evaluate per-maturity 3D surfaces for short expiries to avoid global smoothing over the early exercise boundary.
+5. **Test isolation:** Continue investigating; may be OpenMP thread pool state or memory allocator behavior.
 
 ## Metrics Summary
 
-| Metric | Vanilla | Dividends |
-|--------|---------|-----------|
-| Overall RMS (σ=15%) | 735 bps | 92 bps |
-| Overall RMS (σ=30%) | 470 bps | 66 bps |
-| Success rate (σ=15%) | 78% | 61% |
+| Metric | Vanilla | Dividends (per-strike) |
+|--------|---------|------------------------|
+| Overall RMS (σ=15%) | 735 bps | 47.1 bps |
+| Overall RMS (σ=30%) | 470 bps | 55.9 bps |
+| Success rate (σ=15%) | 78% | 60% |
 | Success rate (σ=30%) | 94% | 67% |
-| T≥1y max error | 7.3 bps | 232 bps |
-| Interpolation speed | 102 μs | ~102 μs |
