@@ -31,10 +31,11 @@ struct AdaptiveGridParams {
     /// exercise boundary curvature and PDE → B-spline sampling loss.
     size_t min_moneyness_points = 60;
 
-    /// Use per-maturity 3D surfaces instead of global 4D B-spline (default: true)
+    /// Use per-maturity 3D surfaces instead of global 4D B-spline (default: false)
     /// Per-maturity approach avoids global smoothing over the exercise boundary,
     /// significantly improving accuracy for American options.
-    bool use_per_maturity = true;
+    /// NOTE: Not yet implemented - flag reserved for future use.
+    bool use_per_maturity = false;
 
     /// Number of validation FD solves per iteration (default: 64)
     size_t validation_samples = 64;

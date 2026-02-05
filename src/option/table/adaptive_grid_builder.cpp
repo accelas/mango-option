@@ -737,14 +737,22 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
 
         // Compute American vega via central finite difference
         double eps = std::max(1e-4, 0.01 * sigma);
-        auto fd_up = validate_fn(spot, strike, tau, sigma + eps, rate);
-        auto fd_dn = validate_fn(spot, strike, tau, sigma - eps, rate);
+
+        // Ensure sigma - eps stays positive (minimum 1e-4)
+        double sigma_dn = std::max(1e-4, sigma - eps);
+        double sigma_up = sigma + eps;
+
+        // Adjust eps if we had to clamp sigma_dn
+        double effective_eps = (sigma_up - sigma_dn) / 2.0;
+
+        auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
+        auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
 
         double vega;
-        if (fd_up.has_value() && fd_dn.has_value()) {
-            vega = (fd_up.value() - fd_dn.value()) / (2.0 * eps);
+        if (fd_up.has_value() && fd_dn.has_value() && effective_eps > 1e-6) {
+            vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
         } else {
-            // FD bump failed — clamp to floor inside compute_error_metric
+            // FD bump failed or eps too small — clamp to floor inside compute_error_metric
             vega = 0.0;
         }
         return compute_error_metric(price_error, vega);
@@ -794,7 +802,9 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
     result.total_pde_solves = 0;
-    for (const auto& it : result.iterations) {
+    for (auto& it : result.iterations) {
+        // Standard path uses FD American vega: 1 base solve + 2 vega bump solves = 3x
+        it.pde_solves_validation *= 3;
         result.total_pde_solves += it.pde_solves_table + it.pde_solves_validation;
     }
 

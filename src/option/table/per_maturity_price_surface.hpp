@@ -12,7 +12,7 @@ namespace mango {
 /// Per-maturity price surface with τ interpolation
 ///
 /// Stores separate 3D B-spline surfaces (m × σ × r) for each maturity point,
-/// then interpolates across τ using cubic splines. This avoids global 4D
+/// then interpolates across τ using linear interpolation. This avoids global 4D
 /// smoothing that causes bias near the American exercise boundary.
 ///
 /// Thread-safe after construction.

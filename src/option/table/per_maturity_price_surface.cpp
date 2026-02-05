@@ -3,6 +3,7 @@
 #include "mango/option/table/per_maturity_price_surface.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace mango {
 
@@ -140,7 +141,7 @@ double PerMaturityPriceSurface::partial(
     } else if (axis == 3) {
         axis_3d = 2;  // rate
     } else {
-        return 0.0;  // invalid axis
+        return std::numeric_limits<double>::quiet_NaN();  // invalid axis
     }
 
     if (lo == hi) {
