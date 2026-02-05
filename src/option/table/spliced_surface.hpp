@@ -4,12 +4,16 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <span>
 #include <utility>
 #include <vector>
 
+#include "mango/math/black_scholes_analytics.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
+#include "mango/option/table/price_table_surface.hpp"
 
 namespace mango {
 
@@ -385,5 +389,59 @@ struct KRefTransform {
         return combined * q.strike;
     }
 };
+
+/// Adapter wrapping PriceTableSurface<3> for SplicedSurface.
+/// Maps PriceQuery {spot, strike, tau, sigma, rate} to 3D coords {m, sigma, rate}.
+class PriceTableSurface3DAdapter {
+public:
+    PriceTableSurface3DAdapter(
+        std::shared_ptr<const PriceTableSurface<3>> surface,
+        double K_ref)
+        : surface_(std::move(surface)), K_ref_(K_ref) {}
+
+    [[nodiscard]] double price(const PriceQuery& q) const {
+        double m = q.spot / q.strike;
+        return surface_->value({m, q.sigma, q.rate});
+    }
+
+    [[nodiscard]] double vega(const PriceQuery& q) const {
+        double m = q.spot / q.strike;
+        double eps = std::max(1e-4, 0.01 * q.sigma);
+        double sigma_dn = std::max(1e-4, q.sigma - eps);
+        double v_up = surface_->value({m, q.sigma + eps, q.rate});
+        double v_dn = surface_->value({m, sigma_dn, q.rate});
+        return (v_up - v_dn) / (q.sigma + eps - sigma_dn);
+    }
+
+    [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
+
+private:
+    std::shared_ptr<const PriceTableSurface<3>> surface_;
+    double K_ref_;
+};
+
+static_assert(PriceSurface<PriceTableSurface3DAdapter>);
+
+/// Adapter wrapping AmericanPriceSurface for SplicedSurface.
+class AmericanPriceSurfaceAdapter {
+public:
+    explicit AmericanPriceSurfaceAdapter(AmericanPriceSurface surface)
+        : surface_(std::move(surface)) {}
+
+    [[nodiscard]] double price(const PriceQuery& q) const {
+        return surface_.price(q.spot, q.strike, q.tau, q.sigma, q.rate);
+    }
+
+    [[nodiscard]] double vega(const PriceQuery& q) const {
+        return surface_.vega(q.spot, q.strike, q.tau, q.sigma, q.rate);
+    }
+
+    [[nodiscard]] const AmericanPriceSurface& surface() const { return surface_; }
+
+private:
+    AmericanPriceSurface surface_;
+};
+
+static_assert(PriceSurface<AmericanPriceSurfaceAdapter>);
 
 }  // namespace mango

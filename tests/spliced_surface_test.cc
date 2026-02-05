@@ -42,6 +42,20 @@ TEST(SplicedSurfaceTest, ConceptsCompile) {
 }
 
 // ===========================================================================
+// Surface adapter concept checks
+// ===========================================================================
+
+TEST(SurfaceAdapterTest, PriceTableSurface3DAdapterSatisfiesConcept) {
+    static_assert(PriceSurface<PriceTableSurface3DAdapter>);
+    SUCCEED();
+}
+
+TEST(SurfaceAdapterTest, AmericanPriceSurfaceAdapterSatisfiesConcept) {
+    static_assert(PriceSurface<AmericanPriceSurfaceAdapter>);
+    SUCCEED();
+}
+
+// ===========================================================================
 // SegmentLookup tests
 // ===========================================================================
 

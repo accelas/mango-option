@@ -289,7 +289,10 @@ cc_library(
     name = "spliced_surface",
     hdrs = ["spliced_surface.hpp"],
     deps = [
+        ":american_price_surface",
         ":price_table_metadata",
+        ":price_table_surface",
+        "//src/math:black_scholes_analytics",
         "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
