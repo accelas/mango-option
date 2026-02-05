@@ -99,7 +99,60 @@ struct AdaptiveGridParams {
 
 ## Next Steps
 
-1. Run benchmark with increased moneyness density (40 points minimum)
-2. If errors improve significantly, confirms sampling loss as root cause
+1. ✅ Run benchmark with increased moneyness density (40→60 points)
+2. ✅ Confirms sampling loss as root cause for dividend path
 3. Consider adding boundary clamping for additional improvement
 4. Consider monotone spline for boundary/kink behavior
+
+---
+
+## Codex Analysis #4: Why Vanilla 4D Doesn't Improve
+
+### Root Cause
+
+The vanilla 4D path **doesn't solve PDEs at each moneyness point**. It:
+1. Solves only for `(σ, r)` batches with `spot=strike=K_ref`
+2. Resamples the PDE spatial grid onto moneyness grid via cubic spline
+3. Fits a global 4D B-spline across all axes
+
+More moneyness points just **densify interpolation of the same PDE curve**, not new information.
+
+### Why Segmented Works But Vanilla Doesn't
+
+| Aspect | Vanilla 4D | Segmented |
+|--------|-----------|-----------|
+| Fitting | Global tensor-product B-spline across (m,τ,σ,r) | Per-maturity surfaces + Catmull-Rom K_ref interpolation |
+| Smoothness | Forces C2-like smoothness everywhere | Local and piecewise, preserves kinks |
+| Exercise boundary | Smoothed over (causes bias) | Isolated to each maturity slice |
+
+The American early-exercise surface is **not globally smooth** (kinked boundary). The 4D fit "smooths over" the boundary, creating persistent bias.
+
+### Why Moneyness Density Hurts Vanilla
+
+Adding more m points can actually **increase ringing/conditioning** in the 4D B-spline fit rather than reduce error. The global smoother is being fed more data on a function that isn't globally smooth.
+
+### Error Sources in Vanilla (~750-1400 bps)
+
+1. **Non-smooth exercise boundary + global spline smoothing** - 4D fit forces smoothness where surface has kinks
+2. **Two layers of smoothing** - CubicSpline resampling + 4D B-spline fitting
+3. **Boundary overshoot** - Unconstrained natural spline can overshoot at edges
+4. **FD vega noise** - Vanilla uses FD vega (noisy when vega small)
+
+### Targeted Fixes (Impact Order)
+
+1. **Per-maturity 3D surfaces + τ interpolation** (highest impact)
+   - Match segmented design: build `(m, σ, r)` per maturity, interpolate in τ
+   - Avoids global cross-axis smoothing
+
+2. **Monotone/clamped spline for extraction** (medium impact)
+   - Replace natural cubic with PCHIP or clamped cubic
+   - Reduces overshoot at ITM/OTM boundaries
+   - Only fixes extraction stage, not 4D smoothing
+
+3. **Increase PDE spatial resolution** (medium impact)
+   - If PDE x grid is coarse, m densification won't help
+   - Tighten `GridAccuracyParams` for vanilla build
+
+4. **Piecewise B-splines in moneyness** (medium impact)
+   - Split ITM/ATM/OTM to localize kinks
+   - Avoids smoothing across exercise boundary
