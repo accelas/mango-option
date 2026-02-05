@@ -5,8 +5,8 @@
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/segmented_price_surface.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
@@ -425,6 +425,80 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
     }
 
     return result;
+}
+
+/// Convert a SegmentedPriceSurface to the new SegmentedSurface<> type
+std::expected<SegmentedSurface<>, PriceTableError> convert_to_spliced(
+    SegmentedPriceSurface& old_surface)
+{
+    // Extract segments and convert to SegmentConfig
+    std::vector<SegmentConfig> seg_configs;
+    for (auto& seg : old_surface.segments()) {
+        seg_configs.push_back(SegmentConfig{
+            .surface = std::move(seg.surface),
+            .tau_start = seg.tau_start,
+            .tau_end = seg.tau_end,
+        });
+    }
+
+    // Build SegmentedConfig
+    SegmentedConfig config{
+        .segments = std::move(seg_configs),
+        .dividends = old_surface.dividends(),
+        .K_ref = old_surface.K_ref(),
+        .T = old_surface.T(),
+    };
+
+    return build_segmented_surface(std::move(config));
+}
+
+/// Build a MultiKRefSurface<> using the new spliced surface builders
+std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_with_new_builders(
+    double spot,
+    OptionType option_type,
+    const DividendSpec& dividends,
+    const std::vector<double>& moneyness_grid,
+    double maturity,
+    const std::vector<double>& vol_grid,
+    const std::vector<double>& rate_grid,
+    const std::vector<double>& K_refs,
+    int tau_points_per_segment)
+{
+    std::vector<MultiKRefEntry> entries;
+    entries.reserve(K_refs.size());
+
+    for (double K_ref : K_refs) {
+        // Build SegmentedPriceSurface for this K_ref using old builder
+        SegmentedPriceTableBuilder::Config seg_config{
+            .K_ref = K_ref,
+            .option_type = option_type,
+            .dividends = dividends,
+            .moneyness_grid = moneyness_grid,
+            .maturity = maturity,
+            .vol_grid = vol_grid,
+            .rate_grid = rate_grid,
+            .tau_points_per_segment = tau_points_per_segment,
+            .skip_moneyness_expansion = true,
+        };
+
+        auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!old_surface.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+
+        // Convert to new SegmentedSurface<>
+        auto new_surface = convert_to_spliced(*old_surface);
+        if (!new_surface.has_value()) {
+            return std::unexpected(new_surface.error());
+        }
+
+        entries.push_back(MultiKRefEntry{
+            .K_ref = K_ref,
+            .surface = std::move(*new_surface),
+        });
+    }
+
+    return build_multi_kref_surface(std::move(entries));
 }
 
 }  // anonymous namespace
@@ -900,7 +974,7 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
 }
 
 
-std::expected<SegmentedMultiKRefSurface, PriceTableError>
+std::expected<MultiKRefSurface<>, PriceTableError>
 AdaptiveGridBuilder::build_segmented(
     const SegmentedAdaptiveConfig& config,
     const std::vector<double>& moneyness_domain,
@@ -1113,24 +1187,18 @@ AdaptiveGridBuilder::build_segmented(
     auto final_v = linspace(min_vol, max_vol, max_v_size);
     auto final_r = linspace(min_rate, max_rate, max_r_size);
 
-    // 7. Build full SegmentedMultiKRefSurface
-    SegmentedMultiKRefBuilder::Config mkref_config{
-        .spot = config.spot,
-        .option_type = config.option_type,
-        .dividends = {.dividend_yield = config.dividend_yield,
-                      .discrete_dividends = config.discrete_dividends},
-        .moneyness_grid = final_m,
-        .maturity = config.maturity,
-        .vol_grid = final_v,
-        .rate_grid = final_r,
-        .kref_config = config.kref_config,
-        .tau_points_per_segment = max_tau_pts,
-        .skip_moneyness_expansion = true,
+    // 7. Build full MultiKRefSurface<> using new builders
+    DividendSpec dividends{
+        .dividend_yield = config.dividend_yield,
+        .discrete_dividends = config.discrete_dividends,
     };
 
-    auto surface = SegmentedMultiKRefBuilder::build(mkref_config);
+    auto surface = build_multi_kref_with_new_builders(
+        config.spot, config.option_type, dividends,
+        final_m, config.maturity, final_v, final_r,
+        K_refs, max_tau_pts);
     if (!surface.has_value()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        return std::unexpected(surface.error());
     }
 
     // 8. Final multi-K_ref validation at arbitrary strikes
@@ -1152,7 +1220,15 @@ AdaptiveGridBuilder::build_segmented(
         double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
         double strike = config.spot / m;
 
-        double interp = surface->price(config.spot, strike, tau, sigma, rate);
+        // Use PriceQuery for the new surface type
+        PriceQuery query{
+            .spot = config.spot,
+            .strike = strike,
+            .tau = tau,
+            .sigma = sigma,
+            .rate = rate,
+        };
+        double interp = surface->price(query);
 
         PricingParams params;
         params.spot = config.spot;
@@ -1187,13 +1263,10 @@ AdaptiveGridBuilder::build_segmented(
         auto retry_v = linspace(min_vol, max_vol, bumped_v);
         auto retry_r = linspace(min_rate, max_rate, bumped_r);
 
-        SegmentedMultiKRefBuilder::Config retry_config = mkref_config;
-        retry_config.moneyness_grid = retry_m;
-        retry_config.vol_grid = retry_v;
-        retry_config.rate_grid = retry_r;
-        retry_config.tau_points_per_segment = bumped_tau;
-
-        auto retry_surface = SegmentedMultiKRefBuilder::build(retry_config);
+        auto retry_surface = build_multi_kref_with_new_builders(
+            config.spot, config.option_type, dividends,
+            retry_m, config.maturity, retry_v, retry_r,
+            K_refs, bumped_tau);
         if (retry_surface.has_value()) {
             return std::move(*retry_surface);
         }

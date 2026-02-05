@@ -40,8 +40,14 @@ public:
     [[nodiscard]] double rate_min() const noexcept;
     [[nodiscard]] double rate_max() const noexcept;
     [[nodiscard]] double K_ref() const noexcept { return K_ref_; }
+    [[nodiscard]] double T() const noexcept { return T_; }
     [[nodiscard]] OptionType option_type() const noexcept;
     [[nodiscard]] double dividend_yield() const noexcept;
+
+    /// Access segments for migration to new spliced surface types
+    [[nodiscard]] std::vector<Segment>& segments() noexcept { return segments_; }
+    [[nodiscard]] const std::vector<Segment>& segments() const noexcept { return segments_; }
+    [[nodiscard]] const std::vector<Dividend>& dividends() const noexcept { return dividends_; }
 
 private:
     SegmentedPriceSurface() = default;

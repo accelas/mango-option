@@ -6,7 +6,9 @@
 #include "mango/option/table/slice_cache.hpp"
 #include "mango/option/table/error_attribution.hpp"
 #include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"
@@ -62,7 +64,7 @@ public:
     /// Build segmented multi-K_ref surface with adaptive grid refinement.
     /// Probes 2-3 representative K_refs, takes per-axis max grid sizes,
     /// then builds all segments with a uniform grid.
-    [[nodiscard]] std::expected<SegmentedMultiKRefSurface, PriceTableError>
+    [[nodiscard]] std::expected<MultiKRefSurface<>, PriceTableError>
     build_segmented(const SegmentedAdaptiveConfig& config,
                     const std::vector<double>& moneyness_domain,
                     const std::vector<double>& vol_domain,
