@@ -184,18 +184,6 @@ cc_test(
 )
 
 cc_test(
-    name = "per_maturity_price_surface_test",
-    size = "small",
-    srcs = ["per_maturity_price_surface_test.cc"],
-    deps = [
-        "//src/option/table:per_maturity_price_surface",
-        "//src/option/table:price_table_surface",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "spliced_surface_test",
     size = "small",
     srcs = ["spliced_surface_test.cc"],
@@ -1171,8 +1159,6 @@ cc_test(
         "//src/option/table:price_table_axes",
         "//src/option/table:price_table_metadata",
         "//src/option/table:american_price_surface",
-        "//src/option/table:segmented_multi_kref_builder",
-        "//src/option/table:segmented_multi_kref_surface",
         "@googletest//:gtest_main",
     ],
 )
@@ -1460,28 +1446,6 @@ cc_test(
     srcs = ["segmented_price_table_builder_test.cc"],
     deps = [
         "//src/option/table:segmented_price_table_builder",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "segmented_multi_kref_surface_test",
-    size = "medium",
-    srcs = ["segmented_multi_kref_surface_test.cc"],
-    deps = [
-        "//src/option/table:segmented_multi_kref_surface",
-        "//src/option/table:segmented_price_table_builder",
-        "//src/option/table:price_surface_concept",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "segmented_multi_kref_builder_test",
-    size = "medium",
-    srcs = ["segmented_multi_kref_builder_test.cc"],
-    deps = [
-        "//src/option/table:segmented_multi_kref_builder",
         "@googletest//:gtest_main",
     ],
 )

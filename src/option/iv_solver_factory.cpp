@@ -2,10 +2,103 @@
 #include "mango/option/iv_solver_factory.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/price_table_builder.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
 #include <algorithm>
+#include <cmath>
 #include <type_traits>
 
 namespace mango {
+
+namespace {
+
+/// Convert a SegmentedPriceSurface to the new SegmentedSurface<> type
+std::expected<SegmentedSurface<>, PriceTableError> convert_to_spliced(
+    SegmentedPriceSurface& old_surface)
+{
+    // Extract segments and convert to SegmentConfig
+    std::vector<SegmentConfig> seg_configs;
+    for (auto& seg : old_surface.segments()) {
+        seg_configs.push_back(SegmentConfig{
+            .surface = std::move(seg.surface),
+            .tau_start = seg.tau_start,
+            .tau_end = seg.tau_end,
+        });
+    }
+
+    // Build SegmentedConfig
+    SegmentedConfig config{
+        .segments = std::move(seg_configs),
+        .dividends = old_surface.dividends(),
+        .K_ref = old_surface.K_ref(),
+        .T = old_surface.T(),
+    };
+
+    return build_segmented_surface(std::move(config));
+}
+
+/// Build a MultiKRefSurface<> for manual grid path
+std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
+    double spot,
+    OptionType option_type,
+    const DividendSpec& dividends,
+    const std::vector<double>& moneyness_grid,
+    double maturity,
+    const std::vector<double>& vol_grid,
+    const std::vector<double>& rate_grid,
+    const MultiKRefConfig& kref_config)
+{
+    // Generate K_refs if not provided
+    std::vector<double> K_refs = kref_config.K_refs;
+    if (K_refs.empty()) {
+        // Auto-generate K_refs around spot
+        K_refs.reserve(static_cast<size_t>(kref_config.K_ref_count));
+        double log_low = std::log(spot) - kref_config.K_ref_span;
+        double log_high = std::log(spot) + kref_config.K_ref_span;
+        for (int i = 0; i < kref_config.K_ref_count; ++i) {
+            double t = static_cast<double>(i) / (kref_config.K_ref_count - 1);
+            K_refs.push_back(std::exp(log_low + t * (log_high - log_low)));
+        }
+    }
+
+    std::vector<MultiKRefEntry> entries;
+    entries.reserve(K_refs.size());
+
+    for (double K_ref : K_refs) {
+        // Build SegmentedPriceSurface for this K_ref
+        SegmentedPriceTableBuilder::Config seg_config{
+            .K_ref = K_ref,
+            .option_type = option_type,
+            .dividends = dividends,
+            .moneyness_grid = moneyness_grid,
+            .maturity = maturity,
+            .vol_grid = vol_grid,
+            .rate_grid = rate_grid,
+            .tau_points_per_segment = 5,
+            .skip_moneyness_expansion = false,
+        };
+
+        auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!old_surface.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+
+        // Convert to new SegmentedSurface<>
+        auto new_surface = convert_to_spliced(*old_surface);
+        if (!new_surface.has_value()) {
+            return std::unexpected(new_surface.error());
+        }
+
+        entries.push_back(MultiKRefEntry{
+            .K_ref = K_ref,
+            .surface = std::move(*new_surface),
+        });
+    }
+
+    return build_multi_kref_surface(std::move(entries));
+}
+
+}  // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // AnyIVSolver: type-erased wrapper
@@ -16,10 +109,6 @@ AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver)
 {}
 
 AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver)
-    : solver_(std::move(solver))
-{}
-
-AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<SegmentedMultiKRefSurface> solver)
     : solver_(std::move(solver))
 {}
 
@@ -184,25 +273,42 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             return AnyIVSolver(std::move(*solver));
         }
 
-        // Manual grid: existing path (unchanged for now, uses old SegmentedMultiKRefSurface)
-        SegmentedMultiKRefBuilder::Config seg_config{
-            .spot = config.spot,
-            .option_type = config.option_type,
-            .dividends = {.dividend_yield = config.dividend_yield, .discrete_dividends = path.discrete_dividends},
-            .moneyness_grid = grid.moneyness,
-            .maturity = path.maturity,
-            .vol_grid = grid.vol,
-            .rate_grid = grid.rate,
-            .kref_config = path.kref_config,
+        // Manual grid: build MultiKRefSurface using new spliced surface types
+        DividendSpec dividends{
+            .dividend_yield = config.dividend_yield,
+            .discrete_dividends = path.discrete_dividends
         };
 
-        auto surface = SegmentedMultiKRefBuilder::build(seg_config);
+        auto surface = build_multi_kref_manual(
+            config.spot, config.option_type, dividends,
+            grid.moneyness, path.maturity, grid.vol, grid.rate,
+            path.kref_config);
         if (!surface.has_value()) {
-            return std::unexpected(surface.error());
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
         }
 
-        auto solver = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
-            std::move(*surface), config.solver_config);
+        // Compute bounds from domain
+        auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
+        auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
+        auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
+
+        MultiKRefSurfaceWrapper<>::Bounds bounds{
+            .m_min = *minmax_m.first,
+            .m_max = *minmax_m.second,
+            .tau_min = 0.0,
+            .tau_max = path.maturity,
+            .sigma_min = *minmax_v.first,
+            .sigma_max = *minmax_v.second,
+            .rate_min = *minmax_r.first,
+            .rate_max = *minmax_r.second,
+        };
+
+        auto wrapper = MultiKRefSurfaceWrapper<>(
+            std::move(*surface), bounds, config.option_type, config.dividend_yield);
+
+        auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+            std::move(wrapper), config.solver_config);
         if (!solver.has_value()) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});

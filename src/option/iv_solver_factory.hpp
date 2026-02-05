@@ -18,8 +18,6 @@
 #include <expected>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/american_price_surface.hpp"
-#include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
 #include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
@@ -85,17 +83,13 @@ public:
     /// Constructor from standard solver
     explicit AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver);
 
-    /// Constructor from segmented solver (new spliced surface)
+    /// Constructor from segmented solver (spliced surface)
     explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver);
-
-    /// Constructor from segmented solver (legacy surface, for ManualGrid path)
-    explicit AnyIVSolver(InterpolatedIVSolver<SegmentedMultiKRefSurface> solver);
 
 private:
     using SolverVariant = std::variant<
         InterpolatedIVSolver<AmericanPriceSurface>,
-        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>,
-        InterpolatedIVSolver<SegmentedMultiKRefSurface>
+        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>
     >;
     SolverVariant solver_;
 };
@@ -103,7 +97,7 @@ private:
 /// Factory function: build price surface and IV solver from config
 ///
 /// If path holds StandardIVPath, uses the AmericanPriceSurface path.
-/// If path holds SegmentedIVPath, uses the SegmentedMultiKRefSurface path.
+/// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
 /// If grid holds AdaptiveGrid, uses AdaptiveGridBuilder
 /// to automatically refine grid density until the target IV error is met.
 ///

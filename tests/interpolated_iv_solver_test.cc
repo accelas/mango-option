@@ -11,8 +11,6 @@
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_metadata.hpp"
 #include "mango/option/table/american_price_surface.hpp"
-#include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
 
 namespace mango {
 namespace {
@@ -245,56 +243,6 @@ TEST_F(InterpolatedIVSolverTest, SolveWithAmericanPriceSurface) {
     if (result.has_value()) {
         EXPECT_GT(result->implied_vol, 0.0);
         EXPECT_LT(result->implied_vol, 5.0);
-    }
-}
-
-// ===========================================================================
-// Template instantiation tests with different surface types
-// ===========================================================================
-
-TEST_F(InterpolatedIVSolverTest, WorksWithSegmentedMultiKRefSurface) {
-    // Build a SegmentedMultiKRefSurface via SegmentedMultiKRefBuilder
-    SegmentedMultiKRefBuilder::Config config{
-        .spot = 100.0,
-        .option_type = OptionType::PUT,
-        .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},  // One discrete dividend at t=0.5
-        .moneyness_grid = {0.8, 0.9, 1.0, 1.1, 1.2},
-        .maturity = 1.0,
-        .vol_grid = {0.10, 0.20, 0.30, 0.40},
-        .rate_grid = {0.02, 0.04, 0.06, 0.08},
-        .kref_config = {
-            .K_refs = {100.0},  // Single K_ref for simplicity
-            .K_ref_count = 1,
-        },
-    };
-
-    auto surface_result = SegmentedMultiKRefBuilder::build(config);
-    ASSERT_TRUE(surface_result.has_value())
-        << "SegmentedMultiKRefBuilder::build failed";
-
-    // Create InterpolatedIVSolver<SegmentedMultiKRefSurface>
-    auto solver_result = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
-        std::move(*surface_result));
-    ASSERT_TRUE(solver_result.has_value())
-        << "InterpolatedIVSolver<SegmentedMultiKRefSurface>::create failed";
-
-    auto& solver = solver_result.value();
-
-    // Solve an IV query
-    IVQuery query(
-        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 0.8, .rate = 0.05, .option_type = OptionType::PUT}, 8.0);
-
-    auto result = solver.solve(query);
-    // With synthetic data from segmented builder, accept success or graceful failure
-    if (result.has_value()) {
-        EXPECT_GT(result->implied_vol, 0.0);
-        EXPECT_LT(result->implied_vol, 5.0);
-    } else {
-        // Graceful failure is acceptable - check it's a convergence issue
-        EXPECT_TRUE(result.error().code == IVErrorCode::MaxIterationsExceeded ||
-                    result.error().code == IVErrorCode::BracketingFailed ||
-                    result.error().code == IVErrorCode::NumericalInstability ||
-                    result.error().code == IVErrorCode::InvalidGridConfig);
     }
 }
 
