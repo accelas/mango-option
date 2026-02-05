@@ -444,4 +444,24 @@ private:
 
 static_assert(PriceSurface<AmericanPriceSurfaceAdapter>);
 
+/// Transform for per-maturity EEP surfaces.
+/// Reconstructs American price: P_Am = EEP + P_Eu.
+struct MaturityTransform {
+    OptionType option_type = OptionType::PUT;
+    double dividend_yield = 0.0;
+
+    [[nodiscard]] PriceQuery to_local(size_t, const PriceQuery& q) const noexcept {
+        return q;  // No coordinate transformation needed
+    }
+
+    [[nodiscard]] double normalize_value(size_t, const PriceQuery& q, double eep) const noexcept {
+        // Reconstruct American price from EEP
+        double p_eu = bs_price(q.spot, q.strike, q.tau, q.sigma, q.rate,
+                               dividend_yield, option_type);
+        return eep + p_eu;
+    }
+};
+
+static_assert(SliceTransform<MaturityTransform>);
+
 }  // namespace mango
