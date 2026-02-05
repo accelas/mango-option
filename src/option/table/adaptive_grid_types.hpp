@@ -5,6 +5,7 @@
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/per_maturity_price_surface.hpp"
 #include <array>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <cstddef>
@@ -79,11 +80,13 @@ struct AdaptiveResult {
     PriceTableAxes<4> axes;
 
     /// Query price from whichever surface is populated
+    /// Returns NaN if no surface is available (build failure or not yet built)
     [[nodiscard]] double value(const std::array<double, 4>& coords) const {
         if (per_maturity_surface) {
             return per_maturity_surface->value(coords);
         }
-        return surface ? surface->value(coords) : 0.0;
+        return surface ? surface->value(coords)
+                       : std::numeric_limits<double>::quiet_NaN();
     }
 
     /// Per-iteration history for diagnostics

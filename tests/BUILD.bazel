@@ -184,6 +184,18 @@ cc_test(
 )
 
 cc_test(
+    name = "per_maturity_price_surface_test",
+    size = "small",
+    srcs = ["per_maturity_price_surface_test.cc"],
+    deps = [
+        "//src/option/table:per_maturity_price_surface",
+        "//src/option/table:price_table_surface",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_config_test",
     size = "small",
     srcs = ["price_table_config_test.cc"],

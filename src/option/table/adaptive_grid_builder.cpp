@@ -68,7 +68,11 @@ struct GridSizes {
 };
 
 /// Helper to create evenly spaced grid
+/// Requires n >= 2 to avoid divide-by-zero; returns {lo, hi} if n < 2
 std::vector<double> linspace(double lo, double hi, size_t n) {
+    if (n < 2) {
+        return {lo, hi};  // Minimum valid grid
+    }
     std::vector<double> v(n);
     for (size_t i = 0; i < n; ++i) {
         v[i] = lo + (hi - lo) * i / (n - 1);
@@ -141,6 +145,13 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
 {
     // Validation requires at least one sample per iteration
     if (params.validation_samples == 0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig
+        });
+    }
+
+    // B-spline requires minimum 4 control points per dimension
+    if (params.min_moneyness_points < 4) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig
         });
