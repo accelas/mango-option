@@ -462,6 +462,31 @@ cc_binary(
 )
 
 cc_binary(
+    name = "debug_vanilla_iv",
+    srcs = ["debug_vanilla_iv.cc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:european_option",
+        "//src/option:iv_solver_factory",
+        "//src/option/table:adaptive_grid_builder",
+        "//src/option/table:american_price_surface",
+        "//src/option/table:price_table_builder",
+        "//src/math:cubic_spline_solver",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
     name = "bspline_move_semantics_demo",
     srcs = ["bspline_move_semantics_demo.cc"],
     copts = [
