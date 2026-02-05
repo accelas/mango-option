@@ -4,7 +4,7 @@
  * @brief Factory function that hides the two IV solver paths
  *
  * Provides make_interpolated_iv_solver() which builds the appropriate price surface
- * (AmericanPriceSurface for continuous dividends, SegmentedMultiKRefSurface
+ * (AmericanPriceSurface for continuous dividends, MultiKRefSurface<>
  * for discrete dividends) and wraps it in a type-erased AnyIVSolver.
  *
  * Grid density is controlled via IVGridSpec: ManualGrid for explicit grid
@@ -18,8 +18,9 @@
 #include <expected>
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/american_price_surface.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
 #include "mango/option/table/segmented_multi_kref_builder.hpp"
+#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
@@ -84,12 +85,16 @@ public:
     /// Constructor from standard solver
     explicit AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver);
 
-    /// Constructor from segmented solver
+    /// Constructor from segmented solver (new spliced surface)
+    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver);
+
+    /// Constructor from segmented solver (legacy surface, for ManualGrid path)
     explicit AnyIVSolver(InterpolatedIVSolver<SegmentedMultiKRefSurface> solver);
 
 private:
     using SolverVariant = std::variant<
         InterpolatedIVSolver<AmericanPriceSurface>,
+        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>,
         InterpolatedIVSolver<SegmentedMultiKRefSurface>
     >;
     SolverVariant solver_;

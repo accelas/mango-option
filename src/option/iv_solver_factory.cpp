@@ -2,6 +2,7 @@
 #include "mango/option/iv_solver_factory.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/table/price_table_builder.hpp"
+#include <algorithm>
 #include <type_traits>
 
 namespace mango {
@@ -11,6 +12,10 @@ namespace mango {
 // ---------------------------------------------------------------------------
 
 AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver)
+    : solver_(std::move(solver))
+{}
+
+AnyIVSolver::AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver)
     : solver_(std::move(solver))
 {}
 
@@ -151,8 +156,27 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                     ValidationErrorCode::InvalidGridSize, 0.0});
             }
 
-            auto solver = InterpolatedIVSolver<SegmentedMultiKRefSurface>::create(
-                std::move(*surface), config.solver_config);
+            // Compute bounds from domain
+            auto minmax_m = std::minmax_element(grid.moneyness.begin(), grid.moneyness.end());
+            auto minmax_v = std::minmax_element(grid.vol.begin(), grid.vol.end());
+            auto minmax_r = std::minmax_element(grid.rate.begin(), grid.rate.end());
+
+            MultiKRefSurfaceWrapper<>::Bounds bounds{
+                .m_min = *minmax_m.first,
+                .m_max = *minmax_m.second,
+                .tau_min = 0.0,
+                .tau_max = path.maturity,
+                .sigma_min = *minmax_v.first,
+                .sigma_max = *minmax_v.second,
+                .rate_min = *minmax_r.first,
+                .rate_max = *minmax_r.second,
+            };
+
+            auto wrapper = MultiKRefSurfaceWrapper<>(
+                std::move(*surface), bounds, config.option_type, config.dividend_yield);
+
+            auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+                std::move(wrapper), config.solver_config);
             if (!solver.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidGridSize, 0.0});
@@ -160,7 +184,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             return AnyIVSolver(std::move(*solver));
         }
 
-        // Manual grid: existing path (unchanged)
+        // Manual grid: existing path (unchanged for now, uses old SegmentedMultiKRefSurface)
         SegmentedMultiKRefBuilder::Config seg_config{
             .spot = config.spot,
             .option_type = config.option_type,

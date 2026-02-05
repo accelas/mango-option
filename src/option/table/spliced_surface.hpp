@@ -495,4 +495,58 @@ using MultiKRefSurface = SplicedSurface<
     KRefTransform,
     WeightedSum>;
 
+// ===========================================================================
+// PriceSurface-compatible wrapper for MultiKRefSurface
+// ===========================================================================
+
+/// Wrapper that adapts MultiKRefSurface<> to satisfy the PriceSurface concept.
+/// Adds 5-parameter price/vega methods and bounds accessors.
+template<SplicedInner Inner = SegmentedSurface<>>
+class MultiKRefSurfaceWrapper {
+public:
+    struct Bounds {
+        double m_min, m_max;
+        double tau_min, tau_max;
+        double sigma_min, sigma_max;
+        double rate_min, rate_max;
+    };
+
+    MultiKRefSurfaceWrapper(MultiKRefSurface<Inner> surface,
+                            Bounds bounds,
+                            OptionType option_type,
+                            double dividend_yield)
+        : surface_(std::move(surface))
+        , bounds_(bounds)
+        , option_type_(option_type)
+        , dividend_yield_(dividend_yield)
+    {}
+
+    [[nodiscard]] double price(double spot, double strike,
+                               double tau, double sigma, double rate) const {
+        return surface_.price(PriceQuery{spot, strike, tau, sigma, rate});
+    }
+
+    [[nodiscard]] double vega(double spot, double strike,
+                              double tau, double sigma, double rate) const {
+        return surface_.vega(PriceQuery{spot, strike, tau, sigma, rate});
+    }
+
+    [[nodiscard]] double m_min() const noexcept { return bounds_.m_min; }
+    [[nodiscard]] double m_max() const noexcept { return bounds_.m_max; }
+    [[nodiscard]] double tau_min() const noexcept { return bounds_.tau_min; }
+    [[nodiscard]] double tau_max() const noexcept { return bounds_.tau_max; }
+    [[nodiscard]] double sigma_min() const noexcept { return bounds_.sigma_min; }
+    [[nodiscard]] double sigma_max() const noexcept { return bounds_.sigma_max; }
+    [[nodiscard]] double rate_min() const noexcept { return bounds_.rate_min; }
+    [[nodiscard]] double rate_max() const noexcept { return bounds_.rate_max; }
+    [[nodiscard]] OptionType option_type() const noexcept { return option_type_; }
+    [[nodiscard]] double dividend_yield() const noexcept { return dividend_yield_; }
+
+private:
+    MultiKRefSurface<Inner> surface_;
+    Bounds bounds_;
+    OptionType option_type_;
+    double dividend_yield_;
+};
+
 }  // namespace mango
