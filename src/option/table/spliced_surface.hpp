@@ -45,7 +45,7 @@ struct Sample {
 };
 
 template <typename S>
-concept PriceSurface =
+concept SplicedInner =
     requires(const S& s, const PriceQuery& q) {
         { s.price(q) } -> std::same_as<double>;
         { s.vega(q) } -> std::same_as<double>;
@@ -96,7 +96,7 @@ template <typename S>
 
 }  // namespace detail
 
-template <PriceSurface Inner,
+template <SplicedInner Inner,
           SplitStrategy Split,
           SliceTransform Xform,
           CombineStrategy Combiner>
@@ -420,7 +420,7 @@ private:
     double K_ref_;
 };
 
-static_assert(PriceSurface<PriceTableSurface3DAdapter>);
+static_assert(SplicedInner<PriceTableSurface3DAdapter>);
 
 /// Adapter wrapping AmericanPriceSurface for SplicedSurface.
 class AmericanPriceSurfaceAdapter {
@@ -442,7 +442,7 @@ private:
     AmericanPriceSurface surface_;
 };
 
-static_assert(PriceSurface<AmericanPriceSurfaceAdapter>);
+static_assert(SplicedInner<AmericanPriceSurfaceAdapter>);
 
 /// Transform for per-maturity EEP surfaces.
 /// Reconstructs American price: P_Am = EEP + P_Eu.
@@ -479,7 +479,7 @@ using PerMaturitySurface = SplicedSurface<
 /// Segmented surface: dividend segment lookup with spot adjustment.
 /// Replaces SegmentedPriceSurface.
 /// Inner can be AmericanPriceSurfaceAdapter or PerMaturitySurface.
-template<PriceSurface Inner = AmericanPriceSurfaceAdapter>
+template<SplicedInner Inner = AmericanPriceSurfaceAdapter>
 using SegmentedSurface = SplicedSurface<
     Inner,
     SegmentLookup,
@@ -488,7 +488,7 @@ using SegmentedSurface = SplicedSurface<
 
 /// Multi-K_ref surface: strike bracket interpolation.
 /// Replaces SegmentedMultiKRefSurface.
-template<PriceSurface Inner = SegmentedSurface<>>
+template<SplicedInner Inner = SegmentedSurface<>>
 using MultiKRefSurface = SplicedSurface<
     Inner,
     KRefBracket,

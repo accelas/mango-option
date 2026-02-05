@@ -3,7 +3,7 @@
 
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/per_maturity_price_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
 #include <array>
 #include <limits>
 #include <memory>
@@ -74,16 +74,25 @@ struct AdaptiveResult {
     std::shared_ptr<const PriceTableSurface<4>> surface = nullptr;
 
     /// Per-maturity surface (per-maturity mode, nullptr if using 4D)
-    std::shared_ptr<const PerMaturityPriceSurface> per_maturity_surface = nullptr;
+    std::shared_ptr<const PerMaturitySurface> per_maturity_surface = nullptr;
 
     /// Final axes used for the surface
     PriceTableAxes<4> axes;
 
     /// Query price from whichever surface is populated
     /// Returns NaN if no surface is available (build failure or not yet built)
+    /// coords: [moneyness, tau, sigma, rate]
     [[nodiscard]] double value(const std::array<double, 4>& coords) const {
         if (per_maturity_surface) {
-            return per_maturity_surface->value(coords);
+            // Convert 4D coords to PriceQuery (spot=moneyness, strike=1.0)
+            PriceQuery q{
+                .spot = coords[0],    // moneyness = spot/strike, with strike=1
+                .strike = 1.0,
+                .tau = coords[1],
+                .sigma = coords[2],
+                .rate = coords[3]
+            };
+            return per_maturity_surface->price(q);
         }
         return surface ? surface->value(coords)
                        : std::numeric_limits<double>::quiet_NaN();

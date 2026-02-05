@@ -27,7 +27,7 @@ struct MockSurface {
     }
 };
 
-static_assert(PriceSurface<MockSurface>, "MockSurface must satisfy PriceSurface");
+static_assert(SplicedInner<MockSurface>, "MockSurface must satisfy SplicedInner");
 
 // ===========================================================================
 // Concept verification tests
@@ -108,12 +108,12 @@ TEST(MaturityTransformTest, WorksWithCallOptions) {
 // ===========================================================================
 
 TEST(SurfaceAdapterTest, PriceTableSurface3DAdapterSatisfiesConcept) {
-    static_assert(PriceSurface<PriceTableSurface3DAdapter>);
+    static_assert(SplicedInner<PriceTableSurface3DAdapter>);
     SUCCEED();
 }
 
 TEST(SurfaceAdapterTest, AmericanPriceSurfaceAdapterSatisfiesConcept) {
-    static_assert(PriceSurface<AmericanPriceSurfaceAdapter>);
+    static_assert(SplicedInner<AmericanPriceSurfaceAdapter>);
     SUCCEED();
 }
 
@@ -423,7 +423,7 @@ TEST(KRefTransformTest, DenormalizeIsCalled) {
         }
         double vega(const PriceQuery&) const { return 0.01; }
     };
-    static_assert(PriceSurface<NormalizedMockSurface>);
+    static_assert(SplicedInner<NormalizedMockSurface>);
 
     std::vector<NormalizedMockSurface> slices = {{.k_ref = 100.0}};
     LinearBracket split({0.5});  // Single point
