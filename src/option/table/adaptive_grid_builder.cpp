@@ -1046,6 +1046,11 @@ AdaptiveGridBuilder::build_segmented(
     double K_ref_min = K_refs.front();
     double expansion = (K_ref_min > 0.0) ? total_div / K_ref_min : 0.0;
 
+    // Guard against empty domain vectors (UB to access .front()/.back())
+    if (moneyness_domain.empty() || vol_domain.empty() || rate_domain.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
     double min_m = moneyness_domain.front();
     double max_m = moneyness_domain.back();
     double expanded_min_m = std::max(min_m - expansion, 0.01);

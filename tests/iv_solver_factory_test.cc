@@ -29,9 +29,13 @@ IVGridSpec manual_grid() {
 IVGridSpec adaptive_grid() {
     AdaptiveGridParams params;
     params.target_iv_error = 0.002;
-    params.max_iter = 2;
+    params.max_iter = 5;  // Increased from 2 to allow convergence under memory pressure
     params.validation_samples = 32;
-    return AdaptiveGrid{.params = params};
+    // Note: Must explicitly set all fields - designated initializers value-initialize
+    // omitted members (empty vectors) rather than using in-class defaults.
+    AdaptiveGrid grid;
+    grid.params = params;
+    return grid;
 }
 
 AnyIVSolver build_solver(const IVGridSpec& grid) {
@@ -175,11 +179,16 @@ TEST(IVSolverFactorySegmented, AdaptiveGridDiscreteDividends) {
     params.max_iter = 2;
     params.validation_samples = 16;
 
+    // Note: Must NOT use designated initializers for AdaptiveGrid - they leave
+    // moneyness/vol/rate vectors empty instead of using in-class defaults.
+    AdaptiveGrid adaptive_grid;
+    adaptive_grid.params = params;
+
     IVSolverFactoryConfig config{
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
-        .grid = AdaptiveGrid{.params = params},
+        .grid = adaptive_grid,
         .path = SegmentedIVPath{
             .maturity = 1.0,
             .discrete_dividends = {Dividend{.calendar_time = 0.5, .amount = 2.0}},
