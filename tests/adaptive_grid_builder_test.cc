@@ -549,6 +549,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
     AdaptiveGridBuilder builder(params);
 
     // spot=100, K_refs sorted: {70, 80, 90, 100}
@@ -579,6 +580,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
     AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
@@ -643,6 +645,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
     AdaptiveGridBuilder builder(params);
 
     // total_div = 50, K_ref_min = 50 → expansion = 1.0
