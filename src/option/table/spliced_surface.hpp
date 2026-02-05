@@ -250,6 +250,56 @@ private:
     std::vector<double> grid_;
 };
 
+/// Split strategy for K_ref bracket interpolation.
+/// Finds two K_refs bracketing the query strike and computes linear weights.
+class KRefBracket {
+public:
+    explicit KRefBracket(std::vector<double> k_refs)
+        : k_refs_(std::move(k_refs))
+    {}
+
+    [[nodiscard]] double key(const PriceQuery& q) const noexcept { return q.strike; }
+    [[nodiscard]] size_t num_slices() const noexcept { return k_refs_.size(); }
+
+    [[nodiscard]] Bracket bracket(double strike) const noexcept {
+        Bracket br;
+        const size_t n = k_refs_.size();
+        if (n == 0) {
+            return br;
+        }
+        if (n == 1 || strike <= k_refs_.front()) {
+            br.items[0] = SliceWeight{0, 1.0};
+            br.size = 1;
+            return br;
+        }
+        if (strike >= k_refs_.back()) {
+            br.items[0] = SliceWeight{n - 1, 1.0};
+            br.size = 1;
+            return br;
+        }
+
+        size_t hi = 1;
+        while (hi < n && k_refs_[hi] < strike) {
+            ++hi;
+        }
+        size_t lo = hi - 1;
+
+        double k_lo = k_refs_[lo];
+        double k_hi = k_refs_[hi];
+        double t = (strike - k_lo) / (k_hi - k_lo);
+
+        br.items[0] = SliceWeight{lo, 1.0 - t};
+        br.items[1] = SliceWeight{hi, t};
+        br.size = 2;
+        return br;
+    }
+
+    [[nodiscard]] const std::vector<double>& k_refs() const noexcept { return k_refs_; }
+
+private:
+    std::vector<double> k_refs_;
+};
+
 struct WeightedSum {
     [[nodiscard]] double combine(std::span<const Sample> samples,
                                  const PriceQuery&) const noexcept {

@@ -135,6 +135,98 @@ TEST(LinearBracketTest, AtGridPoint) {
 }
 
 // ===========================================================================
+// KRefBracket tests
+// ===========================================================================
+
+TEST(KRefBracketTest, HandlesEmptyKRefs) {
+    KRefBracket bracket({});  // Empty K_refs
+
+    auto br = bracket.bracket(100.0);
+    EXPECT_EQ(br.size, 0);  // Should return empty bracket, not crash
+}
+
+TEST(KRefBracketTest, HandlesSingleKRef) {
+    KRefBracket bracket({100.0});  // Single K_ref
+
+    auto br = bracket.bracket(80.0);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+
+    br = bracket.bracket(100.0);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+
+    br = bracket.bracket(120.0);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+}
+
+TEST(KRefBracketTest, InterpolatesMidpoint) {
+    KRefBracket bracket({80.0, 100.0, 120.0});
+
+    auto br = bracket.bracket(90.0);  // Midpoint between 80 and 100
+    EXPECT_EQ(br.size, 2);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_EQ(br.items[1].index, 1);
+    EXPECT_NEAR(br.items[0].weight, 0.5, 1e-10);
+    EXPECT_NEAR(br.items[1].weight, 0.5, 1e-10);
+
+    // Verify weights sum to 1.0
+    double total = br.items[0].weight + br.items[1].weight;
+    EXPECT_NEAR(total, 1.0, 1e-10);
+}
+
+TEST(KRefBracketTest, InterpolatesQuarter) {
+    KRefBracket bracket({80.0, 120.0});
+
+    auto br = bracket.bracket(90.0);  // 25% of the way from 80 to 120
+    EXPECT_EQ(br.size, 2);
+    EXPECT_NEAR(br.items[0].weight, 0.75, 1e-10);
+    EXPECT_NEAR(br.items[1].weight, 0.25, 1e-10);
+
+    // Verify weights sum to 1.0
+    double total = br.items[0].weight + br.items[1].weight;
+    EXPECT_NEAR(total, 1.0, 1e-10);
+}
+
+TEST(KRefBracketTest, ClampsBelow) {
+    KRefBracket bracket({80.0, 100.0, 120.0});
+
+    auto br = bracket.bracket(50.0);  // Below first K_ref
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+}
+
+TEST(KRefBracketTest, ClampsAbove) {
+    KRefBracket bracket({80.0, 100.0, 120.0});
+
+    auto br = bracket.bracket(150.0);  // Above last K_ref
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 2);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+}
+
+TEST(KRefBracketTest, AtGridPoint) {
+    KRefBracket bracket({80.0, 100.0, 120.0});
+
+    // At exact grid point K=100
+    auto br = bracket.bracket(100.0);
+    EXPECT_EQ(br.size, 2);
+    // Weight should be 0 for lower, 1 for upper
+    double total = br.items[0].weight + br.items[1].weight;
+    EXPECT_NEAR(total, 1.0, 1e-10);
+}
+
+TEST(KRefBracketTest, ConceptCheck) {
+    static_assert(SplitStrategy<KRefBracket>);
+    SUCCEED();
+}
+
+// ===========================================================================
 // SplicedSurface integration tests
 // ===========================================================================
 
