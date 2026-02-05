@@ -505,9 +505,18 @@ PriceTableBuilder<N>::fit_coeffs(
     static_assert(N == 4, "PriceTableBuilder only supports N=4");
 
     // Extract grids for BSplineNDSeparable
+    // IMPORTANT: Transform axis 0 from moneyness to log-moneyness to match
+    // PriceTableSurface::build() which also uses log-moneyness internally.
+    // The B-spline coefficients must be fitted in the same coordinate system
+    // that the surface will use for evaluation.
     std::array<std::vector<double>, N> grids;
     for (size_t i = 0; i < N; ++i) {
         grids[i] = axes.grids[i];
+    }
+    if constexpr (N >= 1) {
+        for (double& m : grids[0]) {
+            m = std::log(m);  // moneyness → log-moneyness
+        }
     }
 
     // Create fitter

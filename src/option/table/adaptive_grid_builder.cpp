@@ -765,6 +765,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         metadata.m_min = m_grid.front();
         metadata.m_max = m_grid.back();
         metadata.dividends.discrete_dividends = {};
+        metadata.content = SurfaceContent::EarlyExercisePremium;
 
         // Build surface
         auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);
