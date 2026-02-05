@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: MIT
+#include <gtest/gtest.h>
+#include <cmath>
+#include "mango/option/table/spliced_surface.hpp"
+
+namespace mango {
+namespace {
+
+// Simple mock surface for testing
+struct MockSurface {
+    double offset = 0.0;
+
+    double price(const PriceQuery& q) const {
+        return q.spot / q.strike + q.tau + q.sigma + q.rate + offset;
+    }
+
+    double price(double spot, double strike, double tau, double sigma, double rate) const {
+        return spot / strike + tau + sigma + rate + offset;
+    }
+
+    double vega(const PriceQuery& q) const {
+        return q.tau * 100.0 + offset;  // Simple vega for testing
+    }
+
+    double vega(double, double, double tau, double, double) const {
+        return tau * 100.0 + offset;
+    }
+};
+
+static_assert(PriceSurface<MockSurface>, "MockSurface must satisfy PriceSurface");
+
+// ===========================================================================
+// Concept verification tests
+// ===========================================================================
+
+TEST(SplicedSurfaceTest, ConceptsCompile) {
+    static_assert(SplitStrategy<SegmentLookup>);
+    static_assert(SplitStrategy<LinearBracket>);
+    static_assert(SliceTransform<IdentityTransform>);
+    static_assert(CombineStrategy<WeightedSum>);
+    SUCCEED();
+}
+
+// ===========================================================================
+// SegmentLookup tests
+// ===========================================================================
+
+TEST(SegmentLookupTest, FindsCorrectSegment) {
+    SegmentLookup lookup({0.0, 0.5, 1.0}, {0.5, 1.0, 2.0});
+
+    // Query in first segment
+    auto br = lookup.bracket(0.25);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+
+    // Query in second segment
+    br = lookup.bracket(0.75);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 1);
+
+    // Query in third segment
+    br = lookup.bracket(1.5);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 2);
+}
+
+TEST(SegmentLookupTest, ClampsToFirstSegment) {
+    SegmentLookup lookup({0.5, 1.0}, {1.0, 2.0});
+
+    auto br = lookup.bracket(0.1);  // Below first segment
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+}
+
+TEST(SegmentLookupTest, ClampsToLastSegment) {
+    SegmentLookup lookup({0.5, 1.0}, {1.0, 2.0});
+
+    auto br = lookup.bracket(5.0);  // Above last segment
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 1);
+}
+
+// ===========================================================================
+// LinearBracket tests
+// ===========================================================================
+
+TEST(LinearBracketTest, InterpolatesMidpoint) {
+    LinearBracket bracket({0.0, 1.0, 2.0});
+
+    auto br = bracket.bracket(0.5);
+    EXPECT_EQ(br.size, 2);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_EQ(br.items[1].index, 1);
+    EXPECT_NEAR(br.items[0].weight, 0.5, 1e-10);
+    EXPECT_NEAR(br.items[1].weight, 0.5, 1e-10);
+}
+
+TEST(LinearBracketTest, InterpolatesQuarter) {
+    LinearBracket bracket({0.0, 1.0});
+
+    auto br = bracket.bracket(0.25);
+    EXPECT_EQ(br.size, 2);
+    EXPECT_NEAR(br.items[0].weight, 0.75, 1e-10);
+    EXPECT_NEAR(br.items[1].weight, 0.25, 1e-10);
+}
+
+TEST(LinearBracketTest, ClampsBelow) {
+    LinearBracket bracket({1.0, 2.0, 3.0});
+
+    auto br = bracket.bracket(0.5);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 0);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+}
+
+TEST(LinearBracketTest, ClampsAbove) {
+    LinearBracket bracket({1.0, 2.0, 3.0});
+
+    auto br = bracket.bracket(5.0);
+    EXPECT_EQ(br.size, 1);
+    EXPECT_EQ(br.items[0].index, 2);
+    EXPECT_DOUBLE_EQ(br.items[0].weight, 1.0);
+}
+
+TEST(LinearBracketTest, AtGridPoint) {
+    LinearBracket bracket({0.0, 1.0, 2.0});
+
+    // At exact grid point tau=1.0
+    auto br = bracket.bracket(1.0);
+    EXPECT_EQ(br.size, 2);
+    // Weight should be 0 for lower, 1 for upper (or could return single sample)
+    double total = br.items[0].weight + br.items[1].weight;
+    EXPECT_NEAR(total, 1.0, 1e-10);
+}
+
+// ===========================================================================
+// SplicedSurface integration tests
+// ===========================================================================
+
+TEST(SplicedSurfaceTest, SegmentLookupWithMockSurface) {
+    std::vector<MockSurface> slices = {{.offset = 0.0}, {.offset = 1.0}};
+    SegmentLookup split({0.0, 0.5}, {0.5, 1.0});
+    IdentityTransform xform;
+    WeightedSum combine;
+
+    SplicedSurface<MockSurface, SegmentLookup, IdentityTransform, WeightedSum>
+        surface(std::move(slices), std::move(split), xform, combine);
+
+    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.25, .sigma = 0.2, .rate = 0.05};
+    double p1 = surface.price(q);
+
+    // Should use first slice (offset=0)
+    // Expected: 100/100 + 0.25 + 0.2 + 0.05 + 0 = 1.5
+    EXPECT_NEAR(p1, 1.5, 1e-10);
+
+    q.tau = 0.75;
+    double p2 = surface.price(q);
+    // Should use second slice (offset=1)
+    // Expected: 100/100 + 0.75 + 0.2 + 0.05 + 1 = 3.0
+    EXPECT_NEAR(p2, 3.0, 1e-10);
+}
+
+TEST(SplicedSurfaceTest, LinearInterpolationWithMockSurface) {
+    std::vector<MockSurface> slices = {{.offset = 0.0}, {.offset = 2.0}};
+    LinearBracket split({0.0, 1.0});
+    IdentityTransform xform;
+    WeightedSum combine;
+
+    SplicedSurface<MockSurface, LinearBracket, IdentityTransform, WeightedSum>
+        surface(std::move(slices), std::move(split), xform, combine);
+
+    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.2, .rate = 0.05};
+
+    // At tau=0.5, weights are (0.5, 0.5)
+    // Slice 0: 1 + 0.5 + 0.2 + 0.05 + 0 = 1.75
+    // Slice 1: 1 + 0.5 + 0.2 + 0.05 + 2 = 3.75
+    // Interpolated: 0.5 * 1.75 + 0.5 * 3.75 = 2.75
+    double p = surface.price(q);
+    EXPECT_NEAR(p, 2.75, 1e-10);
+}
+
+TEST(SplicedSurfaceTest, VegaWorks) {
+    std::vector<MockSurface> slices = {{.offset = 0.0}, {.offset = 10.0}};
+    LinearBracket split({0.0, 1.0});
+    IdentityTransform xform;
+    WeightedSum combine;
+
+    SplicedSurface<MockSurface, LinearBracket, IdentityTransform, WeightedSum>
+        surface(std::move(slices), std::move(split), xform, combine);
+
+    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.2, .rate = 0.05};
+
+    // Vega at tau=0.5:
+    // Slice 0: 0.5 * 100 + 0 = 50
+    // Slice 1: 0.5 * 100 + 10 = 60
+    // Interpolated: 0.5 * 50 + 0.5 * 60 = 55
+    double v = surface.vega(q);
+    EXPECT_NEAR(v, 55.0, 1e-10);
+}
+
+// ===========================================================================
+// Composition test (nested SplicedSurface)
+// ===========================================================================
+
+TEST(SplicedSurfaceTest, CompositionWorks) {
+    // Inner level: linear interpolation over tau
+    using InnerSurface = SplicedSurface<MockSurface, LinearBracket, IdentityTransform, WeightedSum>;
+
+    // Create two inner surfaces with different offsets
+    std::vector<MockSurface> inner1_slices = {{.offset = 0.0}, {.offset = 1.0}};
+    std::vector<MockSurface> inner2_slices = {{.offset = 10.0}, {.offset = 11.0}};
+
+    InnerSurface inner1(std::move(inner1_slices), LinearBracket({0.0, 1.0}),
+                        IdentityTransform{}, WeightedSum{});
+    InnerSurface inner2(std::move(inner2_slices), LinearBracket({0.0, 1.0}),
+                        IdentityTransform{}, WeightedSum{});
+
+    // Outer level: segment lookup (like dividend segments)
+    std::vector<InnerSurface> outer_slices;
+    outer_slices.push_back(std::move(inner1));
+    outer_slices.push_back(std::move(inner2));
+
+    using OuterSurface = SplicedSurface<InnerSurface, SegmentLookup, IdentityTransform, WeightedSum>;
+
+    OuterSurface outer(std::move(outer_slices),
+                       SegmentLookup({0.0, 0.5}, {0.5, 1.0}),
+                       IdentityTransform{}, WeightedSum{});
+
+    // Query in first segment (uses inner1)
+    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.25, .sigma = 0.2, .rate = 0.05};
+    double p1 = outer.price(q);
+
+    // Query in second segment (uses inner2)
+    q.tau = 0.75;
+    double p2 = outer.price(q);
+
+    // Second segment should have +10 offset from inner2
+    EXPECT_GT(p2, p1 + 9.0);  // At least 10 more due to offset difference
+}
+
+} // namespace
+} // namespace mango

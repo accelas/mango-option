@@ -196,6 +196,17 @@ cc_test(
 )
 
 cc_test(
+    name = "spliced_surface_test",
+    size = "small",
+    srcs = ["spliced_surface_test.cc"],
+    deps = [
+        "//src/option/table:spliced_surface",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "price_table_config_test",
     size = "small",
     srcs = ["price_table_config_test.cc"],
