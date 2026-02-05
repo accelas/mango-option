@@ -25,6 +25,11 @@ struct AdaptiveGridParams {
     /// Maximum points per dimension ceiling (default: 160, High profile)
     size_t max_points_per_dim = 160;
 
+    /// Minimum moneyness grid points (default: 20)
+    /// Moneyness requires higher density than other dimensions due to
+    /// exercise boundary curvature and PDE → B-spline sampling loss.
+    size_t min_moneyness_points = 20;
+
     /// Number of validation FD solves per iteration (default: 64)
     size_t validation_samples = 64;
 

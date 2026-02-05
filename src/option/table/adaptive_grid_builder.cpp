@@ -76,17 +76,68 @@ std::vector<double> linspace(double lo, double hi, size_t n) {
     return v;
 }
 
+/// Seed a grid from user-provided knots, or fall back to linspace.
+/// Ensures domain endpoints are included and minimum 4 points for B-spline.
+std::vector<double> seed_grid(const std::vector<double>& user_knots,
+                               double lo, double hi, size_t fallback_n = 5) {
+    std::vector<double> grid;
+
+    if (!user_knots.empty()) {
+        // Filter knots to domain bounds
+        for (double v : user_knots) {
+            if (v >= lo && v <= hi) {
+                grid.push_back(v);
+            }
+        }
+        // Ensure domain endpoints are included
+        if (grid.empty() || grid.front() > lo + 1e-12) {
+            grid.insert(grid.begin(), lo);
+        }
+        if (grid.back() < hi - 1e-12) {
+            grid.push_back(hi);
+        }
+        std::sort(grid.begin(), grid.end());
+        grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
+
+        // Need minimum 4 points for cubic B-spline
+        while (grid.size() < 4) {
+            // Insert midpoint in largest gap
+            double max_gap = 0.0;
+            size_t max_idx = 0;
+            for (size_t i = 0; i + 1 < grid.size(); ++i) {
+                double gap = grid[i + 1] - grid[i];
+                if (gap > max_gap) { max_gap = gap; max_idx = i; }
+            }
+            grid.push_back((grid[max_idx] + grid[max_idx + 1]) / 2.0);
+            std::sort(grid.begin(), grid.end());
+        }
+    } else {
+        grid = linspace(lo, hi, fallback_n);
+    }
+
+    return grid;
+}
+
 // ============================================================================
 // run_refinement: the extracted iterative refinement loop
 // ============================================================================
+
+/// Initial grids for seeding the refinement loop (optional for each dimension)
+struct InitialGrids {
+    std::vector<double> moneyness;
+    std::vector<double> tau;
+    std::vector<double> vol;
+    std::vector<double> rate;
+};
 
 static std::expected<GridSizes, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
     ValidateFn validate_fn,
     const RefinementContext& ctx,
-    const std::function<std::optional<double>(double, double, double, double,
-                                              double, double, double, double)>& compute_error)
+    const std::function<double(double, double, double, double,
+                               double, double, double, double)>& compute_error,
+    const InitialGrids& initial_grids = {})
 {
     // Validation requires at least one sample per iteration
     if (params.validation_samples == 0) {
@@ -104,11 +155,28 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
     const double min_rate = ctx.min_rate;
     const double max_rate = ctx.max_rate;
 
-    // Start with ~5-7 points per dimension (minimum 4 for B-splines)
-    std::vector<double> moneyness_grid = linspace(min_moneyness, max_moneyness, 5);
-    std::vector<double> maturity_grid = linspace(min_tau, max_tau, 5);
-    std::vector<double> vol_grid = linspace(min_vol, max_vol, 5);
-    std::vector<double> rate_grid = linspace(min_rate, max_rate, 4);  // Need at least 4
+    // Seed grids from user-provided knots (or linspace fallback)
+    // This ensures user-specified knots (e.g., benchmark vols) are always grid points
+    auto moneyness_grid = seed_grid(initial_grids.moneyness, min_moneyness, max_moneyness,
+                                    params.min_moneyness_points);
+    auto maturity_grid = seed_grid(initial_grids.tau, min_tau, max_tau, 5);
+    auto vol_grid = seed_grid(initial_grids.vol, min_vol, max_vol, 5);
+    auto rate_grid = seed_grid(initial_grids.rate, min_rate, max_rate, 4);
+
+    // Ensure moneyness grid meets minimum density requirement
+    // Moneyness needs higher density due to exercise boundary curvature
+    while (moneyness_grid.size() < params.min_moneyness_points) {
+        // Insert midpoints in largest gaps until we reach minimum
+        double max_gap = 0.0;
+        size_t max_idx = 0;
+        for (size_t i = 0; i + 1 < moneyness_grid.size(); ++i) {
+            double gap = moneyness_grid[i + 1] - moneyness_grid[i];
+            if (gap > max_gap) { max_gap = gap; max_idx = i; }
+        }
+        moneyness_grid.push_back(
+            (moneyness_grid[max_idx] + moneyness_grid[max_idx + 1]) / 2.0);
+        std::sort(moneyness_grid.begin(), moneyness_grid.end());
+    }
 
     GridSizes result;
     result.iterations.reserve(params.max_iter);
@@ -216,17 +284,10 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
             stats.pde_solves_validation++;
 
             double ref_price = fd_result.value();
-            auto iv_error_opt = compute_error(
+            double iv_error = compute_error(
                 interp_price, ref_price,
                 ctx.spot, strike, tau, sigma, rate,
                 ctx.dividend_yield);
-
-            // Skip low-vega samples where error metric is undefined
-            if (!iv_error_opt.has_value()) {
-                continue;
-            }
-
-            double iv_error = iv_error_opt.value();
             max_error = std::max(max_error, iv_error);
             sum_error += iv_error;
             valid_samples++;
@@ -665,14 +726,28 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         return fd_result->value();
     };
 
-    // compute_error: wraps compute_error_metric
-    auto compute_error_fn = [this](double interp_price, double ref_price,
-                                    double spot, double strike, double tau,
-                                    double sigma, double rate,
-                                    double dividend_yield) -> std::optional<double> {
-        return compute_error_metric(interp_price, ref_price,
-                                    spot, strike, tau, sigma, rate,
-                                    dividend_yield);
+    // compute_error: FD American vega for standard path
+    auto compute_error_fn = [this, &validate_fn](
+        double interp_price, double ref_price,
+        double spot, double strike, double tau,
+        double sigma, double rate,
+        double /*dividend_yield*/) -> double
+    {
+        double price_error = std::abs(interp_price - ref_price);
+
+        // Compute American vega via central finite difference
+        double eps = std::max(1e-4, 0.01 * sigma);
+        auto fd_up = validate_fn(spot, strike, tau, sigma + eps, rate);
+        auto fd_dn = validate_fn(spot, strike, tau, sigma - eps, rate);
+
+        double vega;
+        if (fd_up.has_value() && fd_dn.has_value()) {
+            vega = (fd_up.value() - fd_dn.value()) / (2.0 * eps);
+        } else {
+            // FD bump failed — clamp to floor inside compute_error_metric
+            vega = 0.0;
+        }
+        return compute_error_metric(price_error, vega);
     };
 
     RefinementContext ctx{
@@ -693,7 +768,18 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     // 3. Run refinement and assemble result
     // ========================================================================
 
-    auto grid_result = run_refinement(params_, build_fn, validate_fn, ctx, compute_error_fn);
+    // Build initial grids from chain data (ensures user-specified knots are grid points)
+    InitialGrids initial_grids;
+    initial_grids.moneyness.reserve(chain.strikes.size());
+    for (double strike : chain.strikes) {
+        initial_grids.moneyness.push_back(chain.spot / strike);
+    }
+    initial_grids.tau = chain.maturities;
+    initial_grids.vol = chain.implied_vols;
+    initial_grids.rate = chain.rates;
+
+    auto grid_result = run_refinement(params_, build_fn, validate_fn, ctx,
+                                      compute_error_fn, initial_grids);
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
@@ -715,43 +801,19 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     return result;
 }
 
-std::optional<double> AdaptiveGridBuilder::compute_error_metric(
-    double interpolated_price, double reference_price,
-    double spot, double strike, double tau, double sigma, double rate,
-    double dividend_yield) const
+double AdaptiveGridBuilder::compute_error_metric(
+    double price_error, double vega) const
 {
-    double price_error = std::abs(interpolated_price - reference_price);
+    double vega_clamped = std::max(std::abs(vega), params_.vega_floor);
+    double iv_error = price_error / vega_clamped;
 
-    // Use European Black-Scholes vega as an approximation for American vega.
-    //
-    // Limitation: For deep ITM American puts, true American vega is smaller
-    // than European vega because part of the option value is intrinsic (not
-    // sensitive to vol). Using European vega here underestimates the IV error,
-    // which may cause under-refinement in those regions.
-    //
-    // This is acceptable because:
-    // 1. For ATM/OTM options (most common), the vegas are nearly identical
-    // 2. Deep ITM puts have small vega anyway, so the vega_floor kicks in
-    // 3. Computing true American vega would require 2 extra PDE solves per
-    //    validation point, which is expensive
-    //
-    // Future: Could use Barone-Adesi-Whaley or finite-difference vega if
-    // higher accuracy is needed for deep ITM regions.
-    double vega = bs_vega(spot, strike, tau, sigma, rate, dividend_yield);
-
-    if (vega >= params_.vega_floor) {
-        // ΔIV ≈ ΔP / vega (first-order Taylor approximation)
-        return price_error / vega;
-    } else {
-        // Vega too small (deep ITM/OTM or very short τ): IV is ill-defined.
-        // If price error is within tolerance, skip this sample entirely.
-        // Otherwise, use vega_floor to get a bounded error estimate.
-        double price_tol = params_.target_iv_error * params_.vega_floor;
-        if (price_error <= price_tol) {
-            return std::nullopt;  // Price is accurate enough - skip this sample
-        }
-        return price_error / params_.vega_floor;
+    // Cap when price is already within tolerance.
+    // Prevents FD noise from driving runaway refinement.
+    double price_tol = params_.target_iv_error * params_.vega_floor;
+    if (price_error <= price_tol) {
+        iv_error = std::min(iv_error, params_.target_iv_error);
     }
+    return iv_error;
 }
 
 BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
@@ -980,8 +1042,10 @@ AdaptiveGridBuilder::build_segmented(
         auto compute_error_fn = [this](double interp, double ref,
                                         double spot, double strike, double tau,
                                         double sigma, double rate,
-                                        double div_yield) -> std::optional<double> {
-            return compute_error_metric(interp, ref, spot, strike, tau, sigma, rate, div_yield);
+                                        double div_yield) -> double {
+            double price_error = std::abs(interp - ref);
+            double vega = bs_vega(spot, strike, tau, sigma, rate, div_yield);
+            return compute_error_metric(price_error, vega);
         };
 
         RefinementContext ctx{
@@ -998,7 +1062,15 @@ AdaptiveGridBuilder::build_segmented(
             .max_rate = max_rate,
         };
 
-        auto sizes = run_refinement(params_, build_fn, validate_fn, ctx, compute_error_fn);
+        // Seed grids from user-provided domain knots
+        InitialGrids initial_grids;
+        initial_grids.moneyness = moneyness_domain;
+        initial_grids.vol = vol_domain;
+        initial_grids.rate = rate_domain;
+        // tau: segmented path has single maturity, no seeding needed
+
+        auto sizes = run_refinement(params_, build_fn, validate_fn, ctx,
+                                    compute_error_fn, initial_grids);
         if (!sizes.has_value()) {
             return std::unexpected(sizes.error());
         }
@@ -1074,12 +1146,11 @@ AdaptiveGridBuilder::build_segmented(
         auto fd = solve_american_option(params);
         if (!fd.has_value()) continue;
 
-        auto err = compute_error_metric(
-            interp, fd->value(), config.spot, strike, tau,
-            sigma, rate, config.dividend_yield);
-        if (!err.has_value()) continue;
+        double price_error = std::abs(interp - fd->value());
+        double vega = bs_vega(config.spot, strike, tau, sigma, rate, config.dividend_yield);
+        double err = compute_error_metric(price_error, vega);
 
-        final_max_error = std::max(final_max_error, *err);
+        final_max_error = std::max(final_max_error, err);
         valid++;
     }
 

@@ -11,7 +11,6 @@
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
-#include <optional>
 
 namespace mango {
 
@@ -73,11 +72,10 @@ private:
     AdaptiveGridParams params_;
     SliceCache cache_;
 
-    /// Compute hybrid IV/price error metric with vega floor
-    /// Returns nullopt for low-vega regions where price error is within tolerance
-    std::optional<double> compute_error_metric(double interpolated_price, double reference_price,
-                                               double spot, double strike, double tau,
-                                               double sigma, double rate, double dividend_yield) const;
+    /// Compute IV error metric from price error and vega.
+    /// Caller provides vega (FD American or BS European depending on path).
+    /// Never returns nullopt — always counts the sample.
+    double compute_error_metric(double price_error, double vega) const;
 
     /// Build BatchAmericanOptionResult by merging cached and fresh results
     /// @param all_params All (σ,r) parameter combos in full batch order

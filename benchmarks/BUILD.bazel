@@ -441,6 +441,27 @@ cc_binary(
 )
 
 cc_binary(
+    name = "interp_iv_safety",
+    srcs = ["interp_iv_safety.cc"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-fopenmp",
+    ],
+    linkopts = ["-fopenmp"],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option:american_option_batch",
+        "//src/option:iv_solver",
+        "//src/option:iv_solver_factory",
+    ],
+    tags = ["manual"],
+)
+
+cc_binary(
     name = "bspline_move_semantics_demo",
     srcs = ["bspline_move_semantics_demo.cc"],
     copts = [
