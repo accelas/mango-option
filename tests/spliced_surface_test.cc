@@ -465,5 +465,106 @@ TEST(LinearBracketTest, HandlesEmptyGrid) {
     EXPECT_EQ(br.size, 0);  // Should return empty bracket, not crash
 }
 
+// ===========================================================================
+// Unified type alias tests
+// ===========================================================================
+
+// Verify PerMaturitySurface type alias compiles
+TEST(UnifiedTypeAliasTest, PerMaturitySurfaceCompiles) {
+    // Static assert that the type alias resolves correctly
+    static_assert(std::is_same_v<
+        PerMaturitySurface,
+        SplicedSurface<PriceTableSurface3DAdapter, LinearBracket, MaturityTransform, WeightedSum>>);
+    SUCCEED();
+}
+
+// Verify SegmentedSurface type alias compiles with default template parameter
+TEST(UnifiedTypeAliasTest, SegmentedSurfaceDefaultCompiles) {
+    // Default Inner = AmericanPriceSurfaceAdapter
+    static_assert(std::is_same_v<
+        SegmentedSurface<>,
+        SplicedSurface<AmericanPriceSurfaceAdapter, SegmentLookup, SegmentedTransform, WeightedSum>>);
+    SUCCEED();
+}
+
+// Verify SegmentedSurface type alias compiles with explicit MockSurface
+TEST(UnifiedTypeAliasTest, SegmentedSurfaceWithMockCompiles) {
+    static_assert(std::is_same_v<
+        SegmentedSurface<MockSurface>,
+        SplicedSurface<MockSurface, SegmentLookup, SegmentedTransform, WeightedSum>>);
+    SUCCEED();
+}
+
+// Verify MultiKRefSurface type alias compiles with default template parameter
+TEST(UnifiedTypeAliasTest, MultiKRefSurfaceDefaultCompiles) {
+    // Default Inner = SegmentedSurface<> = SegmentedSurface<AmericanPriceSurfaceAdapter>
+    static_assert(std::is_same_v<
+        MultiKRefSurface<>,
+        SplicedSurface<SegmentedSurface<>, KRefBracket, KRefTransform, WeightedSum>>);
+    SUCCEED();
+}
+
+// Verify MultiKRefSurface type alias compiles with explicit MockSurface
+TEST(UnifiedTypeAliasTest, MultiKRefSurfaceWithMockCompiles) {
+    static_assert(std::is_same_v<
+        MultiKRefSurface<MockSurface>,
+        SplicedSurface<MockSurface, KRefBracket, KRefTransform, WeightedSum>>);
+    SUCCEED();
+}
+
+// Verify nested composition: MultiKRefSurface<SegmentedSurface<PerMaturitySurface>>
+TEST(UnifiedTypeAliasTest, FullyNestedCompositionCompiles) {
+    // This represents the full composition for discrete dividends with per-maturity surfaces
+    using NestedType = MultiKRefSurface<SegmentedSurface<PerMaturitySurface>>;
+
+    // Verify it expands to the expected type
+    static_assert(std::is_same_v<
+        NestedType,
+        SplicedSurface<
+            SplicedSurface<
+                SplicedSurface<PriceTableSurface3DAdapter, LinearBracket, MaturityTransform, WeightedSum>,
+                SegmentLookup,
+                SegmentedTransform,
+                WeightedSum>,
+            KRefBracket,
+            KRefTransform,
+            WeightedSum>>);
+    SUCCEED();
+}
+
+// Integration test: SegmentedSurface with MockSurface can be instantiated
+TEST(UnifiedTypeAliasTest, SegmentedSurfaceInstantiates) {
+    std::vector<MockSurface> slices = {{.offset = 0.0}, {.offset = 1.0}};
+    SegmentLookup split({0.0, 0.5}, {0.5, 1.0});
+    SegmentedTransform xform{
+        .tau_start = {0.0, 0.5},
+        .tau_min = {0.0, 0.0},
+        .tau_max = {0.5, 0.5},
+        .content = {SurfaceContent::EarlyExercisePremium, SurfaceContent::EarlyExercisePremium},
+        .dividends = {},
+        .K_ref = 100.0,
+        .T = 1.0
+    };
+    WeightedSum combine;
+
+    SegmentedSurface<MockSurface> surface(
+        std::move(slices), std::move(split), std::move(xform), combine);
+
+    EXPECT_EQ(surface.num_slices(), 2);
+}
+
+// Integration test: MultiKRefSurface with MockSurface can be instantiated
+TEST(UnifiedTypeAliasTest, MultiKRefSurfaceInstantiates) {
+    std::vector<MockSurface> slices = {{.offset = 0.0}, {.offset = 1.0}};
+    KRefBracket split({80.0, 100.0});
+    KRefTransform xform{.k_refs = {80.0, 100.0}};
+    WeightedSum combine;
+
+    MultiKRefSurface<MockSurface> surface(
+        std::move(slices), std::move(split), std::move(xform), combine);
+
+    EXPECT_EQ(surface.num_slices(), 2);
+}
+
 } // namespace
 } // namespace mango

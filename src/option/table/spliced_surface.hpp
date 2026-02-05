@@ -464,4 +464,35 @@ struct MaturityTransform {
 
 static_assert(SliceTransform<MaturityTransform>);
 
+// ===========================================================================
+// Unified surface type aliases
+// ===========================================================================
+
+/// Per-maturity surface: linear τ interpolation over 3D EEP surfaces.
+/// Replaces PerMaturityPriceSurface.
+using PerMaturitySurface = SplicedSurface<
+    PriceTableSurface3DAdapter,
+    LinearBracket,
+    MaturityTransform,
+    WeightedSum>;
+
+/// Segmented surface: dividend segment lookup with spot adjustment.
+/// Replaces SegmentedPriceSurface.
+/// Inner can be AmericanPriceSurfaceAdapter or PerMaturitySurface.
+template<PriceSurface Inner = AmericanPriceSurfaceAdapter>
+using SegmentedSurface = SplicedSurface<
+    Inner,
+    SegmentLookup,
+    SegmentedTransform,
+    WeightedSum>;
+
+/// Multi-K_ref surface: strike bracket interpolation.
+/// Replaces SegmentedMultiKRefSurface.
+template<PriceSurface Inner = SegmentedSurface<>>
+using MultiKRefSurface = SplicedSurface<
+    Inner,
+    KRefBracket,
+    KRefTransform,
+    WeightedSum>;
+
 }  // namespace mango
