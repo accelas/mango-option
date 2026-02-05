@@ -514,8 +514,7 @@ AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridParams params)
 
 std::expected<AdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build(const OptionGrid& chain,
-                           GridSpec<double> grid_spec,
-                           size_t n_time,
+                           PDEGridSpec pde_grid,
                            OptionType type)
 {
     // ========================================================================
@@ -607,7 +606,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         auto builder_result = PriceTableBuilder<4>::from_vectors(
             m_grid, tau_grid, v_grid, r_grid,
             chain.spot,
-            PDEGridConfig{grid_spec, n_time}, type, chain.dividend_yield,
+            pde_grid, type, chain.dividend_yield,
             params_.max_failure_rate);
 
         if (!builder_result.has_value()) {
@@ -649,67 +648,77 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         // Solve missing pairs
         BatchAmericanOptionResult fresh_results;
         if (!missing_params.empty()) {
-            constexpr double MAX_WIDTH = 5.8;
-            constexpr double MAX_DX = 0.05;
-
-            const double grid_width = grid_spec.x_max() - grid_spec.x_min();
-
-            double max_dx;
-            if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
-                max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
-            } else {
-                auto grid_buffer = grid_spec.generate();
-                auto spacings = grid_buffer.span() | std::views::pairwise
-                                                   | std::views::transform([](auto pair) {
-                                                         auto [a, b] = pair;
-                                                         return b - a;
-                                                     });
-                max_dx = std::ranges::max(spacings);
-            }
-
-            auto sigma_sqrt_tau = [](const PricingParams& p) {
-                return p.volatility * std::sqrt(p.maturity);
-            };
-            const double max_sigma_sqrt_tau = std::ranges::max(
-                all_params | std::views::transform(sigma_sqrt_tau));
-            const double min_required_width = 6.0 * max_sigma_sqrt_tau;
-
-            const bool grid_meets_constraints =
-                (grid_width <= MAX_WIDTH) &&
-                (max_dx <= MAX_DX) &&
-                (grid_width >= min_required_width);
-
             BatchAmericanOptionSolver batch_solver;
             batch_solver.set_snapshot_times(std::span{tau_grid});
 
-            if (grid_meets_constraints) {
-                const double max_maturity = tau_grid.back();
-                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
-                fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
-            } else {
-                GridAccuracyParams accuracy;
-                const size_t n_points = grid_spec.n_points();
-                const size_t clamped = std::clamp(n_points, size_t{100}, size_t{1200});
-                accuracy.min_spatial_points = clamped;
-                accuracy.max_spatial_points = clamped;
-                accuracy.max_time_steps = n_time;
+            // Handle PDEGridSpec variant: either explicit config or auto-estimated
+            if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
+                const auto& grid_spec = explicit_grid->grid_spec;
+                const size_t n_time = explicit_grid->n_time;
 
-                if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
-                    accuracy.alpha = grid_spec.concentration();
+                constexpr double MAX_WIDTH = 5.8;
+                constexpr double MAX_DX = 0.05;
+
+                const double grid_width = grid_spec.x_max() - grid_spec.x_min();
+
+                double max_dx;
+                if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
+                    max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
+                } else {
+                    auto grid_buffer = grid_spec.generate();
+                    auto spacings = grid_buffer.span() | std::views::pairwise
+                                                       | std::views::transform([](auto pair) {
+                                                             auto [a, b] = pair;
+                                                             return b - a;
+                                                         });
+                    max_dx = std::ranges::max(spacings);
                 }
 
-                const double x_min = grid_spec.x_min();
-                const double x_max = grid_spec.x_max();
-                const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
-                constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+                auto sigma_sqrt_tau = [](const PricingParams& p) {
+                    return p.volatility * std::sqrt(p.maturity);
+                };
+                const double max_sigma_sqrt_tau = std::ranges::max(
+                    all_params | std::views::transform(sigma_sqrt_tau));
+                const double min_required_width = 6.0 * max_sigma_sqrt_tau;
 
-                if (max_sigma_sqrt_tau >= 1e-10) {
-                    double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-                    accuracy.n_sigma = std::max(5.0, required_n_sigma);
+                const bool grid_meets_constraints =
+                    (grid_width <= MAX_WIDTH) &&
+                    (max_dx <= MAX_DX) &&
+                    (grid_width >= min_required_width);
+
+                if (grid_meets_constraints) {
+                    const double max_maturity = tau_grid.back();
+                    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
+                    PDEGridSpec custom_grid{PDEGridConfig{grid_spec, time_domain.n_steps(), std::vector<double>{}}};
+                    fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
+                } else {
+                    GridAccuracyParams accuracy;
+                    const size_t n_points = grid_spec.n_points();
+                    const size_t clamped = std::clamp(n_points, size_t{100}, size_t{1200});
+                    accuracy.min_spatial_points = clamped;
+                    accuracy.max_spatial_points = clamped;
+                    accuracy.max_time_steps = n_time;
+
+                    if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
+                        accuracy.alpha = grid_spec.concentration();
+                    }
+
+                    const double x_min = grid_spec.x_min();
+                    const double x_max = grid_spec.x_max();
+                    const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
+                    constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+
+                    if (max_sigma_sqrt_tau >= 1e-10) {
+                        double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+                        accuracy.n_sigma = std::max(5.0, required_n_sigma);
+                    }
+
+                    batch_solver.set_grid_accuracy(accuracy);
+                    fresh_results = batch_solver.solve_batch(missing_params, true);
                 }
-
-                batch_solver.set_grid_accuracy(accuracy);
+            } else if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
+                // Auto-estimated grid: use accuracy params directly
+                batch_solver.set_grid_accuracy(*accuracy_grid);
                 fresh_results = batch_solver.solve_batch(missing_params, true);
             }
 
@@ -1278,6 +1287,16 @@ AdaptiveGridBuilder::build_segmented(
     }
 
     return std::move(*surface);
+}
+
+// Backward-compatible overload: delegates to PDEGridSpec version
+std::expected<AdaptiveResult, PriceTableError>
+AdaptiveGridBuilder::build(const OptionGrid& chain,
+                           GridSpec<double> grid_spec,
+                           size_t n_time,
+                           OptionType type)
+{
+    return build(chain, PDEGridConfig{grid_spec, n_time, {}}, type);
 }
 
 }  // namespace mango

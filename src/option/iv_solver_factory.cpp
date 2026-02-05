@@ -167,14 +167,12 @@ build_standard_adaptive(const IVSolverFactoryConfig& config,
     chain.implied_vols = grid.vol;
     chain.rates = grid.rate;
 
-    auto grid_spec = GridSpec<double>::sinh_spaced(-3.0, 3.0, 101, 2.0);
-    if (!grid_spec.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
+    // Use auto-estimated grid with High profile for better accuracy
+    // (Fixed 101×500 grid was too coarse, causing ~600 bps IV errors)
+    GridAccuracyParams accuracy = make_grid_accuracy(GridAccuracyProfile::High);
 
     AdaptiveGridBuilder builder(grid.params);
-    auto result = builder.build(chain, *grid_spec, 500, config.option_type);
+    auto result = builder.build(chain, accuracy, config.option_type);
 
     if (!result.has_value()) {
         return std::unexpected(ValidationError{

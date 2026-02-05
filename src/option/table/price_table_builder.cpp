@@ -472,14 +472,15 @@ PriceTableBuilder<N>::extract_tensor(
 
                             double eep_raw = american_price - eu.value();
 
-                            // Softplus floor: smooth non-negativity without creating kinks
+                            // Debiased softplus floor: smooth non-negativity with zero bias at eep_raw=0
                             constexpr double kSharpness = 100.0;
                             if (kSharpness * eep_raw > 500.0) {
                                 // Overflow protection: softplus ≈ x for large x
                                 tensor.view[i, j, σ_idx, r_idx] = eep_raw;
                             } else {
-                                tensor.view[i, j, σ_idx, r_idx] =
-                                    std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
+                                double softplus = std::log1p(std::exp(kSharpness * eep_raw)) / kSharpness;
+                                double bias = std::log(2.0) / kSharpness;  // softplus(0) ≈ 0.00693
+                                tensor.view[i, j, σ_idx, r_idx] = std::max(0.0, softplus - bias);
                             }
                         }
                     }
