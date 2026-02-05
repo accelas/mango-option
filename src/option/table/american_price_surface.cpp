@@ -93,11 +93,12 @@ double AmericanPriceSurface::gamma(double spot, double strike, double tau,
 double AmericanPriceSurface::vega(double spot, double strike, double tau,
                                   double sigma, double rate) const {
     if (surface_->metadata().content == SurfaceContent::RawPrice) {
-        // Compute FD vega for RawPrice surfaces
-        constexpr double eps = 1e-4;
-        double up = price(spot, strike, tau, sigma + eps, rate);
-        double dn = price(spot, strike, tau, sigma - eps, rate);
-        return (up - dn) / (2.0 * eps);
+        // RawPrice surfaces store V/K_ref, so vega should be d(V/K_ref)/dσ.
+        double eps = std::max(1e-4, 1e-4 * sigma);
+        double m = spot / K_ref_;
+        double v_up = surface_->value({m, tau, sigma + eps, rate});
+        double v_dn = surface_->value({m, tau, sigma - eps, rate});
+        return (v_up - v_dn) / (2.0 * eps);
     }
     double m = spot / strike;
     double eep_vega = (strike / K_ref_) * surface_->partial(2, {m, tau, sigma, rate});
