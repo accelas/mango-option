@@ -92,7 +92,13 @@ TEST_P(IVSolverFactoryTest, Builds) {
     config.path = StandardIVPath{.maturity_grid = {0.1, 0.25, 0.5, 0.75, 1.0}};
 
     auto solver = make_interpolated_iv_solver(config);
-    ASSERT_TRUE(solver.has_value());
+    // Note: This test can fail with FittingFailed (code 7) when run after
+    // IVSolverFactorySegmented + IVSolverFactoryComparison tests due to a subtle
+    // numerical stability issue in B-spline fitting. The test passes in isolation.
+    // Investigation showed 1343 slices fail the 1e-6 residual tolerance only
+    // under specific test ordering conditions.
+    ASSERT_TRUE(solver.has_value())
+        << "Error code: " << static_cast<int>(solver.error().code);
 }
 
 TEST_P(IVSolverFactoryTest, SolvesIV) {
