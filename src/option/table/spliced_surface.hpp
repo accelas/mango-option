@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <span>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -118,7 +118,12 @@ public:
             double norm = xform_.normalize_value(sw.index, q, raw);
             samples[i] = Sample{norm, sw.weight};
         }
-        return comb_.combine({samples.data(), br.size}, q);
+        double combined = comb_.combine({samples.data(), br.size}, q);
+        // Call denormalize if the transform supports it (e.g., KRefTransform).
+        if constexpr (requires { xform_.denormalize(combined, q); }) {
+            return xform_.denormalize(combined, q);
+        }
+        return combined;
     }
 
     [[nodiscard]] double vega(const PriceQuery& q) const {
@@ -132,7 +137,12 @@ public:
             double norm = xform_.normalize_value(sw.index, q, raw);
             samples[i] = Sample{norm, sw.weight};
         }
-        return comb_.combine({samples.data(), br.size}, q);
+        double combined = comb_.combine({samples.data(), br.size}, q);
+        // Call denormalize if the transform supports it (e.g., KRefTransform).
+        if constexpr (requires { xform_.denormalize(combined, q); }) {
+            return xform_.denormalize(combined, q);
+        }
+        return combined;
     }
 
     [[nodiscard]] size_t num_slices() const noexcept { return slices_.size(); }
@@ -155,7 +165,12 @@ public:
     [[nodiscard]] size_t num_slices() const noexcept { return tau_start_.size(); }
 
     [[nodiscard]] Bracket bracket(double tau) const noexcept {
+        Bracket br;
         const size_t n = tau_start_.size();
+        if (n == 0) {
+            return br;  // Empty: return bracket with size=0
+        }
+
         size_t idx = 0;
 
         for (size_t i = n; i > 0; --i) {
@@ -179,7 +194,6 @@ public:
             idx = n - 1;
         }
 
-        Bracket br;
         br.items[0] = SliceWeight{idx, 1.0};
         br.size = 1;
         return br;

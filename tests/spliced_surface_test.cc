@@ -239,5 +239,63 @@ TEST(SplicedSurfaceTest, CompositionWorks) {
     EXPECT_GT(p2, p1 + 9.0);  // At least 10 more due to offset difference
 }
 
+// ===========================================================================
+// Regression tests for Codex review critical issues
+// ===========================================================================
+
+// Regression: KRefTransform::denormalize() must be called after combining
+// Bug: denormalize() existed but was never invoked by SplicedSurface
+TEST(KRefTransformTest, DenormalizeIsCalled) {
+    // Mock surface returns normalized price (price / K_ref)
+    struct NormalizedMockSurface {
+        double k_ref = 100.0;
+        double price(const PriceQuery& q) const {
+            // Return price as if already normalized by K_ref
+            return q.spot / k_ref;  // e.g., spot=100 -> 1.0
+        }
+        double vega(const PriceQuery&) const { return 0.01; }
+    };
+    static_assert(PriceSurface<NormalizedMockSurface>);
+
+    std::vector<NormalizedMockSurface> slices = {{.k_ref = 100.0}};
+    LinearBracket split({0.5});  // Single point
+    KRefTransform xform{.k_refs = {100.0}};
+    WeightedSum combine;
+
+    SplicedSurface<NormalizedMockSurface, LinearBracket, KRefTransform, WeightedSum>
+        surface(std::move(slices), std::move(split), xform, combine);
+
+    // Query with spot=100, strike=120
+    PriceQuery q{.spot = 100.0, .strike = 120.0, .tau = 0.5, .sigma = 0.2, .rate = 0.05};
+    double p = surface.price(q);
+
+    // Without denormalize: would return (100/100) / 100 = 0.01
+    // With denormalize: (100/100) / 100 * strike = 0.01 * 120 = 1.2
+    //
+    // Actually the flow is:
+    // 1. slice.price(q) = 100/100 = 1.0 (normalized mock returns spot/k_ref)
+    // 2. normalize_value: 1.0 / k_refs[0] = 1.0 / 100 = 0.01
+    // 3. combine: 0.01
+    // 4. denormalize: 0.01 * strike = 0.01 * 120 = 1.2
+    EXPECT_NEAR(p, 1.2, 1e-10);
+}
+
+// Regression: SegmentLookup::bracket() must handle empty slices
+// Bug: Called tau_start_.front() without checking if vector is empty
+TEST(SegmentLookupTest, HandlesEmptySlices) {
+    SegmentLookup lookup({}, {});  // Empty vectors
+
+    auto br = lookup.bracket(0.5);
+    EXPECT_EQ(br.size, 0);  // Should return empty bracket, not crash
+}
+
+// Regression: LinearBracket::bracket() must handle empty grid
+TEST(LinearBracketTest, HandlesEmptyGrid) {
+    LinearBracket bracket({});  // Empty grid
+
+    auto br = bracket.bracket(0.5);
+    EXPECT_EQ(br.size, 0);  // Should return empty bracket, not crash
+}
+
 } // namespace
 } // namespace mango
