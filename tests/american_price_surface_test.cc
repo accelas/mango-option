@@ -233,13 +233,15 @@ TEST(AmericanPriceSurfaceTest, RawPricePriceReturnsInterpolatedValue) {
     EXPECT_DOUBLE_EQ(price, direct);
 }
 
-TEST(AmericanPriceSurfaceTest, RawPriceVegaReturnsNaN) {
+TEST(AmericanPriceSurfaceTest, RawPriceVegaReturnsFiniteFDValue) {
+    // RawPrice surfaces now compute FD vega (previously returned NaN)
     auto surface = make_test_surface(SurfaceContent::RawPrice, 5.0);
     auto aps = AmericanPriceSurface::create(surface, OptionType::PUT);
     ASSERT_TRUE(aps.has_value());
 
     double vega = aps->vega(100.0, 100.0, 1.0, 0.20, 0.05);
-    EXPECT_TRUE(std::isnan(vega));
+    EXPECT_FALSE(std::isnan(vega));
+    EXPECT_TRUE(std::isfinite(vega));
 }
 
 // ===========================================================================

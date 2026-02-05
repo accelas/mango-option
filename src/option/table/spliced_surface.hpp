@@ -387,7 +387,13 @@ private:
 struct KRefTransform {
     std::vector<double> k_refs;
 
-    [[nodiscard]] PriceQuery to_local(size_t, const PriceQuery& q) const noexcept { return q; }
+    [[nodiscard]] PriceQuery to_local(size_t i, const PriceQuery& q) const noexcept {
+        // Keep spot in real dollars (discrete dividends break homogeneity).
+        // Only move strike to the slice's K_ref.
+        PriceQuery out = q;
+        out.strike = k_refs[i];
+        return out;
+    }
 
     [[nodiscard]] double normalize_value(size_t i, const PriceQuery&, double raw) const noexcept {
         return raw / k_refs[i];

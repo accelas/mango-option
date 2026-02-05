@@ -3,6 +3,7 @@
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/segmented_price_surface.hpp"
@@ -777,14 +778,17 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
 
         size_t pde_solves = missing_params.size();
 
-        // Return a handle that queries the surface
+        // Return a handle that queries the surface (reconstruct full American price)
         auto surface_ptr = surface.value();
-        double spot = chain.spot;
+        auto aps = AmericanPriceSurface::create(surface_ptr, type);
+        if (!aps.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+
         return SurfaceHandle{
-            .price = [surface_ptr, spot](double /*query_spot*/, double strike, double tau,
-                                         double sigma, double rate) -> double {
-                double m = spot / strike;
-                return surface_ptr->value({m, tau, sigma, rate});
+            .price = [aps = std::move(*aps)](double query_spot, double strike, double tau,
+                                             double sigma, double rate) -> double {
+                return aps.price(query_spot, strike, tau, sigma, rate);
             },
             .pde_solves = pde_solves
         };
