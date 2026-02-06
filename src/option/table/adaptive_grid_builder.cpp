@@ -88,7 +88,8 @@ SegmentedPriceTableBuilder::Config make_seg_config(
     const std::vector<double>& m_grid,
     const std::vector<double>& v_grid,
     const std::vector<double>& r_grid,
-    int tau_pts)
+    int tau_pts,
+    double tau_target_dt = 0.0)
 {
     return {
         .K_ref = 0.0,
@@ -99,7 +100,32 @@ SegmentedPriceTableBuilder::Config make_seg_config(
         .maturity = config.maturity,
         .tau_points_per_segment = tau_pts,
         .skip_moneyness_expansion = true,
+        .tau_target_dt = tau_target_dt,
     };
+}
+
+/// Compute the shortest segment width (in τ) from a dividend schedule.
+double shortest_segment_width(const std::vector<Dividend>& divs, double maturity) {
+    std::vector<double> boundaries;
+    boundaries.push_back(0.0);
+    std::vector<double> div_times;
+    for (const auto& d : divs) {
+        if (d.calendar_time > 0.0 && d.calendar_time < maturity && d.amount > 0.0) {
+            div_times.push_back(d.calendar_time);
+        }
+    }
+    std::sort(div_times.begin(), div_times.end());
+    for (auto it = div_times.rbegin(); it != div_times.rend(); ++it) {
+        boundaries.push_back(maturity - *it);
+    }
+    boundaries.push_back(maturity);
+
+    double min_width = maturity;
+    for (size_t i = 0; i + 1 < boundaries.size(); ++i) {
+        double w = boundaries[i + 1] - boundaries[i];
+        if (w > 0.0) min_width = std::min(min_width, w);
+    }
+    return min_width;
 }
 
 /// Sum discrete dividends strictly inside (0, maturity) with positive amount.
@@ -713,7 +739,15 @@ probe_and_build(
     auto final_r = linspace(min_rate, max_rate, gsz.rate);
     int max_tau_pts = gsz.tau_points;
 
-    auto seg_template = make_seg_config(config, final_m, final_v, final_r, max_tau_pts);
+    // Compute tau_target_dt from shortest segment width
+    double min_seg_width = shortest_segment_width(
+        config.discrete_dividends, config.maturity);
+    double tau_target_dt = (max_tau_pts > 1)
+        ? min_seg_width / static_cast<double>(max_tau_pts - 1)
+        : 0.0;
+
+    auto seg_template = make_seg_config(config, final_m, final_v, final_r,
+                                        max_tau_pts, tau_target_dt);
 
     auto seg_surfaces = build_segmented_surfaces(seg_template, ref_values);
     if (!seg_surfaces.has_value()) {
