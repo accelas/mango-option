@@ -140,8 +140,34 @@ cc_binary(
 )
 
 cc_binary(
-    name = "iv_strike_sweep",
-    srcs = ["iv_strike_sweep.cc"],
+    name = "iv_fdm_sweep",
+    srcs = ["iv_fdm_sweep.cc", "iv_benchmark_common.hpp", "iv_benchmark_ql.hpp"],
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-O3",
+        "-march=native",
+        "-ftree-vectorize",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkopts = [
+        "-lQuantLib",
+        "-fopenmp",
+        "-flto",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/option:american_option",
+        "//src/option:iv_solver",
+        "@google_benchmark//:benchmark",
+    ],
+    tags = ["benchmark", "manual"],
+)
+
+cc_binary(
+    name = "iv_interpolation_sweep",
+    srcs = ["iv_interpolation_sweep.cc", "iv_benchmark_common.hpp", "iv_benchmark_ql.hpp"],
     copts = [
         "-Wall",
         "-Wextra",
@@ -161,9 +187,14 @@ cc_binary(
         "//src/option:american_option",
         "//src/option:iv_solver",
         "//src/option:interpolated_iv_solver",
+        "//src/option:iv_solver_factory",
+        "//src/option:option_grid",
+        "//src/option/table:adaptive_grid_builder",
         "//src/option/table:price_table_builder",
         "//src/option/table:price_table_surface",
         "//src/option/table:american_price_surface",
+        "//src/option/table:segmented_price_table_builder",
+        "//src/option/table:spliced_surface_builder",
         "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
@@ -442,7 +473,7 @@ cc_binary(
 
 cc_binary(
     name = "interp_iv_safety",
-    srcs = ["interp_iv_safety.cc"],
+    srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp"],
     copts = [
         "-Wall",
         "-Wextra",

@@ -1183,7 +1183,7 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
 }
 
 
-std::expected<MultiKRefSurface<>, PriceTableError>
+std::expected<SegmentedAdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build_segmented(
     const SegmentedAdaptiveConfig& config,
     const ManualGrid& domain)
@@ -1298,15 +1298,23 @@ AdaptiveGridBuilder::build_segmented(
             }
             auto retry_surface = build_multi_kref_surface(std::move(retry_entries));
             if (retry_surface.has_value()) {
-                return std::move(*retry_surface);
+                return SegmentedAdaptiveResult{
+                    .surface = std::move(*retry_surface),
+                    .grid = {.moneyness = retry_m, .vol = retry_v, .rate = retry_r},
+                    .tau_points_per_segment = bumped_tau,
+                };
             }
         }
     }
 
-    return std::move(*surface);
+    return SegmentedAdaptiveResult{
+        .surface = std::move(*surface),
+        .grid = build.seg_template.grid,
+        .tau_points_per_segment = build.seg_template.tau_points_per_segment,
+    };
 }
 
-std::expected<StrikeSurface<>, PriceTableError>
+std::expected<StrikeAdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build_segmented_strike(
     const SegmentedAdaptiveConfig& config,
     const std::vector<double>& strike_grid,
@@ -1328,7 +1336,15 @@ AdaptiveGridBuilder::build_segmented_strike(
     for (size_t i = 0; i < strikes.size(); ++i) {
         entries.push_back({.strike = strikes[i], .surface = std::move(result->surfaces[i])});
     }
-    return build_strike_surface(std::move(entries), /*use_nearest=*/true);
+    auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
+    if (!surface.has_value()) {
+        return std::unexpected(surface.error());
+    }
+    return StrikeAdaptiveResult{
+        .surface = std::move(*surface),
+        .grid = result->seg_template.grid,
+        .tau_points_per_segment = result->seg_template.tau_points_per_segment,
+    };
 }
 
 // Backward-compatible overload: delegates to PDEGridSpec version
