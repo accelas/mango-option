@@ -35,14 +35,7 @@ struct SegmentedIVPath {
     double maturity = 1.0;
     std::vector<Dividend> discrete_dividends;
     MultiKRefConfig kref_config;  ///< defaults to auto
-};
-
-/// Manual grid specification: explicit grid points for each axis.
-/// Requires >= 4 points per axis (B-spline minimum).
-struct ManualGrid {
-    std::vector<double> moneyness;
-    std::vector<double> vol;
-    std::vector<double> rate;
+    std::vector<double> strike_grid;  ///< optional explicit strikes for per-strike surfaces
 };
 
 /// Adaptive grid specification: automatic grid density tuning.
@@ -85,11 +78,14 @@ public:
 
     /// Constructor from segmented solver (spliced surface)
     explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver);
+    /// Constructor from per-strike solver (spliced surface)
+    explicit AnyIVSolver(InterpolatedIVSolver<StrikeSurfaceWrapper<>> solver);
 
 private:
     using SolverVariant = std::variant<
         InterpolatedIVSolver<AmericanPriceSurface>,
-        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>
+        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>,
+        InterpolatedIVSolver<StrikeSurfaceWrapper<>>
     >;
     SolverVariant solver_;
 };

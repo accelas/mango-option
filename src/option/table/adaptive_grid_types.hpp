@@ -13,6 +13,14 @@
 
 namespace mango {
 
+/// Manual grid specification: explicit grid points for each axis.
+/// Requires >= 4 points per axis (B-spline minimum).
+struct ManualGrid {
+    std::vector<double> moneyness;
+    std::vector<double> vol;
+    std::vector<double> rate;
+};
+
 /// Configuration for adaptive grid refinement
 ///
 /// Defaults match the High accuracy profile (2 bps target).
