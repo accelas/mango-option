@@ -20,14 +20,26 @@ struct ChainedICContext {
     bool prev_is_eep;      ///< Whether previous segment uses EEP decomposition
 };
 
-/// Generate a τ grid for a segment [tau_start, tau_end] with at least
-/// `min_points` points (including endpoints).  The first segment (closest
-/// to expiry) uses a small ε instead of exactly 0 to avoid PDE degeneracy.
+/// Generate a τ grid for a segment [tau_start, tau_end].
+/// When tau_target_dt > 0, scales points proportionally to segment width.
+/// Otherwise falls back to constant min_points.
+/// The first segment (closest to expiry) uses a small ε instead of exactly 0
+/// to avoid PDE degeneracy.
 std::vector<double> make_segment_tau_grid(
-    double tau_start, double tau_end, int min_points, bool is_last_segment)
+    double tau_start, double tau_end, int min_points, bool is_last_segment,
+    double tau_target_dt = 0.0, int tau_points_min = 4, int tau_points_max = 30)
 {
-    // Ensure at least 4 points (B-spline minimum)
-    int n = std::max(min_points, 4);
+    double seg_width = tau_end - tau_start;
+
+    int n;
+    if (tau_target_dt > 0.0) {
+        // Width-proportional: wider segments get more points
+        n = static_cast<int>(std::ceil(seg_width / tau_target_dt)) + 1;
+        n = std::clamp(n, tau_points_min, tau_points_max);
+    } else {
+        // Legacy constant mode
+        n = std::max(min_points, 4);
+    }
 
     std::vector<double> grid;
     grid.reserve(static_cast<size_t>(n));
@@ -178,7 +190,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         // Local τ grid for this segment
         auto local_tau = make_segment_tau_grid(
-            0.0, seg_width, config.tau_points_per_segment, is_last_segment);
+            0.0, seg_width, config.tau_points_per_segment, is_last_segment,
+            config.tau_target_dt, config.tau_points_min, config.tau_points_max);
 
         // Determine surface content mode
         SurfaceContent content = is_last_segment
