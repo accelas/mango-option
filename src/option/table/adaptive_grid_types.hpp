@@ -3,6 +3,7 @@
 
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
 #include <array>
 #include <limits>
 #include <memory>
@@ -99,6 +100,20 @@ struct AdaptiveResult {
 
     /// Total PDE solves across all iterations (table + validation)
     size_t total_pde_solves = 0;
+};
+
+/// Result from adaptive segmented grid building (multi-K_ref path)
+struct SegmentedAdaptiveResult {
+    MultiKRefSurface<> surface;
+    ManualGrid grid;  ///< The grid sizes adaptive chose
+    int tau_points_per_segment;
+};
+
+/// Result from adaptive segmented grid building (per-strike path)
+struct StrikeAdaptiveResult {
+    StrikeSurface<> surface;
+    ManualGrid grid;  ///< The grid sizes adaptive chose
+    int tau_points_per_segment;
 };
 
 }  // namespace mango

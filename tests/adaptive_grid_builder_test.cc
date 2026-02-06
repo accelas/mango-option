@@ -361,13 +361,13 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
 
     // Should be able to query prices at various strikes
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 
     // And at off-K_ref strikes
     PriceQuery query2{.spot = 100.0, .strike = 90.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price2 = result->price(query2);
+    double price2 = result->surface.price(query2);
     EXPECT_GT(price2, 0.0);
     EXPECT_TRUE(std::isfinite(price2));
 }
@@ -423,7 +423,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     ASSERT_TRUE(result.has_value());
 
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -454,7 +454,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     ASSERT_TRUE(result.has_value());
 
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -544,7 +544,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
     PriceQuery query{.spot = 100.0, .strike = 110.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
 }
 
@@ -576,7 +576,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
     PriceQuery query{.spot = 100.0, .strike = 90.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
 }
 
@@ -607,7 +607,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
 
     // Single K_ref = spot, should produce valid prices
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -638,7 +638,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
 
     // Query at a tau within the short maturity
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.03, .sigma = 0.20, .rate = 0.05};
-    double price = result->price(query);
+    double price = result->surface.price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
