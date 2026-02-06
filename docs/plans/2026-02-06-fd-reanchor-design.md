@@ -58,11 +58,13 @@ struct BoundarySnapshot {
 };
 ```
 
-**Spline caching:** The IC callback is invoked per spatial node in the
-PDE grid. Building a cubic spline per call is wasteful. Instead, cache
-one `CubicSpline` per `(vol_idx, rate_idx)` pair inside the callback
-(or pre-build all N_σ × N_r splines when constructing the snapshot).
-With typical grids of 6×6 = 36 pairs, this is negligible memory.
+**Spline construction:** The IC callback receives the full spatial span
+at once (`std::span<const double> x, std::span<double> u`), so the
+spline is built once per `(vol_idx, rate_idx)` invocation — not per
+node. Pre-build one `CubicSpline` at the start of each callback
+invocation and evaluate it across all `x` nodes in the span. With
+typical grids of 6×6 = 36 `(σ, r)` pairs, this means 36 spline builds
+per segment boundary — negligible cost.
 
 ## Integration Point
 
@@ -77,6 +79,8 @@ segment 0 to use the same manual path as chained segments:
 
 This is a code-path change, not a behavioral change — the same PDE
 solve, extraction, repair, and fitting steps happen in both paths.
+Note: `builder.build(axes)` enforces `max_failure_rate` before repair.
+The manual path must replicate this check to preserve parity.
 
 ### All segments (unified flow)
 
@@ -132,16 +136,18 @@ Use `axes.grids[0]` for moneyness, `axes.grids[2]` for vol indices,
 
 Use the existing natural cubic spline (`CubicSpline` in
 `src/math/cubic_spline_solver.hpp`) for 1D interpolation along the
-moneyness dimension.
+**log-moneyness** dimension (`log(m)`). The B-spline surfaces and PDE
+solver both operate in log-moneyness internally; the snapshot spline
+must use the same coordinate to avoid interpolation drift.
 
-Rationale:
+Rationale for natural cubic (vs PCHIP):
 - PCHIP was previously implemented in this codebase and removed;
   natural cubic was the deliberate choice (PR #338).
 - Dividend shifts are small (0.3–1.3 grid cells at typical densities).
 
-Clamp `m_adj` to `[m_min, m_max]` before spline evaluation (flat
-extrapolation at both ends). Deep ITM prices are dominated by intrinsic
-value; deep OTM prices approach zero smoothly.
+Clamp `log(m_adj)` to `[log(m_min), log(m_max)]` before spline
+evaluation (flat extrapolation at both ends). Deep ITM prices are
+dominated by intrinsic value; deep OTM prices approach zero smoothly.
 
 **Grid density guard:** The builder enforces >= 4 moneyness points, but
 cubic spline quality degrades on very coarse grids. The adaptive grid
