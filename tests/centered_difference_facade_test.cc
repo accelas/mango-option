@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/operators/centered_difference.hpp"
 #include "mango/pde/core/grid.hpp"
 #include <gtest/gtest.h>
 #include <vector>
@@ -44,7 +44,7 @@ TEST(CenteredDifferenceFacadeTest, DirectBackendCall) {
     auto grid = GridView<double>(x);
     auto spacing = GridSpacing<double>(grid);
 
-    // Direct ScalarBackend usage (no Mode enum)
+    // Direct CenteredDifference usage (no Mode enum)
     CenteredDifference<double> stencil(spacing);
 
     std::vector<double> u(11);

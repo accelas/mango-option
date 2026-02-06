@@ -358,7 +358,7 @@ cc_binary(
     linkstatic = True,
     deps = [
         "//src/pde/core:grid",
-        "//src/pde/operators:centered_difference_scalar",
+        "//src/pde/operators:centered_difference",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],
