@@ -49,21 +49,35 @@ void expand_bounds(double& lo, double& hi, double min_spread) {
     }
 }
 
-/// Select up to 3 probes from a sorted vector: front, back, and nearest to
-/// reference_value. Returns all items if size <= 3.
+/// Select probes from a sorted vector.
+/// - N <= 15: return all items (probing is cheap vs accuracy cost of missing strikes)
+/// - N > 15: percentile sampling {min, p25, nearest-to-ref, p75, max}
 std::vector<double> select_probes(const std::vector<double>& items,
                                   double reference_value) {
-    if (items.size() <= 3) return items;
+    if (items.size() <= 15) return items;
+
     std::vector<double> probes;
-    probes.push_back(items.front());
-    probes.push_back(items.back());
+    const size_t n = items.size();
+    probes.push_back(items.front());                    // min
+    probes.push_back(items[n / 4]);                     // p25
+    probes.push_back(items[3 * n / 4]);                 // p75
+    probes.push_back(items.back());                     // max
+
+    // ATM: closest to reference_value (if not already included)
     auto atm_it = std::min_element(items.begin(), items.end(),
         [&](double a, double b) {
             return std::abs(a - reference_value) < std::abs(b - reference_value);
         });
-    if (*atm_it != items.front() && *atm_it != items.back()) {
+    bool already_included = false;
+    for (double p : probes) {
+        if (std::abs(p - *atm_it) < 1e-12) { already_included = true; break; }
+    }
+    if (!already_included) {
         probes.push_back(*atm_it);
     }
+
+    std::sort(probes.begin(), probes.end());
+    probes.erase(std::unique(probes.begin(), probes.end()), probes.end());
     return probes;
 }
 

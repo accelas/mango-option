@@ -764,5 +764,39 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
 
+// ===========================================================================
+// select_probes coverage tests
+// ===========================================================================
+
+TEST(AdaptiveGridBuilderTest, SelectProbesSmallN) {
+    // N <= 15 should probe all strikes. With 9 strikes (< 15), all should
+    // be probed, producing a valid surface.
+    std::vector<double> strikes = {80, 85, 90, 95, 100, 105, 110, 115, 120};
+
+    AdaptiveGridParams params;
+    params.target_iv_error = 0.001;  // 10 bps (loose, for speed)
+    params.max_iter = 2;
+    params.validation_samples = 16;
+    AdaptiveGridBuilder builder(params);
+
+    SegmentedAdaptiveConfig config{
+        .spot = 100.0,
+        .option_type = OptionType::PUT,
+        .dividend_yield = 0.02,
+        .discrete_dividends = {{.calendar_time = 0.25, .amount = 0.50}},
+        .maturity = 0.5,
+        .kref_config = {},
+    };
+
+    ManualGrid domain{
+        .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
+        .vol = {0.15, 0.20, 0.30},
+        .rate = {0.03, 0.05},
+    };
+
+    auto result = builder.build_segmented_strike(config, strikes, domain);
+    ASSERT_TRUE(result.has_value()) << "build_segmented_strike should succeed with 9 strikes";
+}
+
 }  // namespace
 }  // namespace mango
