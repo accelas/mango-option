@@ -140,8 +140,8 @@ cc_binary(
 )
 
 cc_binary(
-    name = "iv_strike_sweep",
-    srcs = ["iv_strike_sweep.cc"],
+    name = "iv_fdm_sweep",
+    srcs = ["iv_fdm_sweep.cc"],
     copts = [
         "-Wall",
         "-Wextra",
@@ -160,11 +160,6 @@ cc_binary(
     deps = [
         "//src/option:american_option",
         "//src/option:iv_solver",
-        "//src/option:interpolated_iv_solver",
-        "//src/option/table:price_table_builder",
-        "//src/option/table:price_table_surface",
-        "//src/option/table:american_price_surface",
-        "//src/math:bspline_nd_separable",
         "@google_benchmark//:benchmark",
     ],
     tags = ["benchmark", "manual"],

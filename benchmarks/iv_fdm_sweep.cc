@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @file iv_strike_sweep.cc
+ * @file iv_fdm_sweep.cc
  * @brief IV accuracy across strikes: mango vs QuantLib
  *
  * Recovery test: price American puts at known σ across strikes,
@@ -12,22 +12,17 @@
  *
  * Reference prices from QuantLib high-res (2001×20000).
  *
- * Run with: bazel run //benchmarks:iv_strike_sweep
+ * Run with: bazel run //benchmarks:iv_fdm_sweep
  */
 
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
-#include "mango/option/interpolated_iv_solver.hpp"
-#include "mango/option/table/price_table_builder.hpp"
-#include "mango/option/table/price_table_surface.hpp"
-#include "mango/option/table/american_price_surface.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
 #include <benchmark/benchmark.h>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <format>
-#include <map>
 #include <memory>
 #include <memory_resource>
 #include <numeric>
@@ -695,123 +690,6 @@ BENCHMARK(BM_QuantLib_IV_Scaled)
         benchmark::CreateDenseRange(0, static_cast<int>(kScales.size()) - 1, 1),
     })
     ->Unit(benchmark::kMillisecond);
-
-// ============================================================================
-// Grid-scaled IV: interpolated (B-spline price table)
-// ============================================================================
-
-// Cached interpolated IV solvers keyed by scale (build is expensive)
-struct InterpSolverEntry {
-    std::unique_ptr<DefaultInterpolatedIVSolver> solver;
-    double build_time_ms = 0.0;
-    size_t n_pde_solves = 0;
-};
-
-static const InterpSolverEntry& get_interp_solver(int scale) {
-    static std::map<int, InterpSolverEntry> cache;
-    auto it = cache.find(scale);
-    if (it != cache.end()) return it->second;
-
-    auto t0 = std::chrono::steady_clock::now();
-
-    // Scale FDM resolution via GridAccuracyParams (auto-sizes domain per option)
-    size_t base_points = 101;
-    GridAccuracyParams accuracy;
-    accuracy.min_spatial_points = base_points * static_cast<size_t>(scale);
-    accuracy.max_spatial_points = accuracy.min_spatial_points + 100;
-
-    // Interpolation axes: dense enough that interpolation error < FDM error
-    auto setup = PriceTableBuilder<4>::from_vectors(
-        {0.70, 0.75, 0.78, 0.80, 0.82, 0.85, 0.88, 0.90, 0.93, 0.95, 0.97, 1.00,
-         1.03, 1.05, 1.10, 1.15, 1.20, 1.25, 1.30},
-        {0.25, 0.5, 0.75, 1.0, 1.5},              // maturity
-        {0.08, 0.12, 0.16, 0.20, 0.25, 0.30},     // volatility
-        {0.02, 0.03, 0.05, 0.07},                  // rate
-        100.0,                                     // K_ref
-        accuracy,
-        OptionType::PUT,
-        kDivYield);
-
-    if (!setup) {
-        std::fprintf(stderr, "PriceTableBuilder::from_vectors failed (scale=%d)\n", scale);
-        std::abort();
-    }
-    auto [builder, axes] = std::move(setup.value());
-    auto result = builder.build(axes);
-    if (!result) {
-        std::fprintf(stderr, "PriceTableBuilder::build failed (scale=%d, code=%d, axis=%zu, count=%zu)\n",
-            scale, static_cast<int>(result.error().code),
-            result.error().axis_index, result.error().count);
-        std::abort();
-    }
-
-    auto aps = AmericanPriceSurface::create(
-        result.value().surface, OptionType::PUT);
-    if (!aps) {
-        std::fprintf(stderr, "AmericanPriceSurface::create failed (scale=%d)\n", scale);
-        std::abort();
-    }
-    auto solver = DefaultInterpolatedIVSolver::create(std::move(aps.value()));
-    if (!solver) {
-        std::fprintf(stderr, "InterpolatedIVSolver::create failed (scale=%d)\n", scale);
-        std::abort();
-    }
-
-    auto t1 = std::chrono::steady_clock::now();
-    double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-    auto [pos, _] = cache.emplace(scale, InterpSolverEntry{
-        std::make_unique<DefaultInterpolatedIVSolver>(std::move(solver.value())),
-        build_ms,
-        result.value().n_pde_solves,
-    });
-    return pos->second;
-}
-
-static void BM_Interp_IV_Scaled(benchmark::State& state) {
-    double K = kScaledStrikes[static_cast<size_t>(state.range(0))];
-    int scale = kScales[static_cast<size_t>(state.range(1))];
-    int ref_idx = scaled_strike_to_idx(K);
-    double ref_price = get_scaled_reference_prices()[ref_idx];
-
-    OptionSpec spec{
-        .spot = kSpot, .strike = K, .maturity = kScaledMaturity,
-        .rate = kRate, .dividend_yield = kDivYield,
-        .option_type = OptionType::PUT
-    };
-    IVQuery query(spec, ref_price);
-
-    const auto& entry = get_interp_solver(scale);
-
-    std::expected<IVSuccess, IVError> last_result;
-    for (auto _ : state) {
-        last_result = entry.solver->solve(query);
-        if (!last_result) {
-            state.SkipWithError("Interp IV solve failed");
-            return;
-        }
-        benchmark::DoNotOptimize(last_result);
-    }
-
-    double iv = last_result->implied_vol;
-    double iv_err_bps = std::abs(iv - kScaledVol) * 10000.0;
-
-    state.SetLabel(std::format("K={:.0f} {}x interp", K, scale));
-    state.counters["strike"] = K;
-    state.counters["scale"] = scale;
-    state.counters["iv"] = iv;
-    state.counters["iv_err_bps"] = iv_err_bps;
-    state.counters["iters"] = static_cast<double>(last_result->iterations);
-    state.counters["build_ms"] = entry.build_time_ms;
-    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
-}
-
-BENCHMARK(BM_Interp_IV_Scaled)
-    ->ArgsProduct({
-        benchmark::CreateDenseRange(0, static_cast<int>(kScaledStrikes.size()) - 1, 1),
-        benchmark::CreateDenseRange(0, static_cast<int>(kScales.size()) - 1, 1),
-    })
-    ->Unit(benchmark::kMicrosecond);
 
 // ============================================================================
 // Info
