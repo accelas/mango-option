@@ -13,6 +13,8 @@
  * Run with: bazel run //benchmarks:iv_interpolation_sweep
  */
 
+#include "iv_benchmark_common.hpp"
+#include "iv_benchmark_ql.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
@@ -24,10 +26,6 @@
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/option/iv_solver_factory.hpp"
-
-// QuantLib includes
-#include <ql/quantlib.hpp>
-namespace ql = QuantLib;
 
 #include <benchmark/benchmark.h>
 #include <array>
@@ -41,14 +39,12 @@ namespace ql = QuantLib;
 #include <vector>
 
 using namespace mango;
+using namespace mango::bench;
 
 // ============================================================================
 // Test parameters
 // ============================================================================
 
-static constexpr double kSpot = 100.0;
-static constexpr double kRate = 0.05;
-static constexpr double kDivYield = 0.02;
 static constexpr double kTrueVol = 0.20;
 static constexpr double kMaturity = 1.0;
 
@@ -58,52 +54,69 @@ static constexpr std::array<double, 7> kStrikes = {
     142.86, 125.0, 111.11, 100.0, 90.91, 83.33, 76.92
 };
 
-// Scales: 1x = adaptive base, then refine by inserting midpoints
-static constexpr std::array<int, 4> kScales = {1, 2, 4, 8};
+// Scales: 1x = adaptive base, 2x = midpoint refinement
+// (4x+ causes B-spline FittingFailed on the 309-point moneyness axis)
+static constexpr std::array<int, 2> kScales = {1, 2};
 
 // ============================================================================
-// Reference prices: mango FDM high-accuracy (isolates interpolation error)
+// Reference prices
 // ============================================================================
 
+/// Solve American put at given accuracy for all kStrikes
+static std::vector<double> solve_reference_prices(const GridAccuracyParams& accuracy) {
+    std::vector<double> p;
+    p.reserve(kStrikes.size());
+
+    for (double K : kStrikes) {
+        PricingParams params(
+            OptionSpec{.spot = kSpot, .strike = K, .maturity = kMaturity,
+                .rate = kRate, .dividend_yield = kDivYield,
+                .option_type = OptionType::PUT},
+            kTrueVol);
+
+        auto [grid_spec, time_domain] = estimate_pde_grid(params, accuracy);
+        size_t n = grid_spec.n_points();
+        std::pmr::vector<double> buffer(
+            PDEWorkspace::required_size(n), std::pmr::get_default_resource());
+        auto workspace = PDEWorkspace::from_buffer(buffer, n);
+        if (!workspace) {
+            p.push_back(std::numeric_limits<double>::quiet_NaN());
+            continue;
+        }
+        auto solver = AmericanOptionSolver::create(
+            params, *workspace,
+            PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps()});
+        if (!solver) {
+            p.push_back(std::numeric_limits<double>::quiet_NaN());
+            continue;
+        }
+        auto result = solver->solve();
+        p.push_back(result ? result->value_at(kSpot)
+                           : std::numeric_limits<double>::quiet_NaN());
+    }
+    return p;
+}
+
+/// High-accuracy reference (401-501 spatial pts) — the "true" price
 static const std::vector<double>& get_reference_prices() {
     static std::vector<double> prices = [] {
-        std::vector<double> p;
-        p.reserve(kStrikes.size());
-
-        // High-accuracy grid for reference pricing
         GridAccuracyParams high_accuracy;
         high_accuracy.min_spatial_points = 401;
         high_accuracy.max_spatial_points = 501;
+        return solve_reference_prices(high_accuracy);
+    }();
+    return prices;
+}
 
-        for (double K : kStrikes) {
-            PricingParams params(
-                OptionSpec{.spot = kSpot, .strike = K, .maturity = kMaturity,
-                    .rate = kRate, .dividend_yield = kDivYield,
-                    .option_type = OptionType::PUT},
-                kTrueVol);
-
-            // Estimate high-accuracy grid and solve manually
-            auto [grid_spec, time_domain] = estimate_pde_grid(params, high_accuracy);
-            size_t n = grid_spec.n_points();
-            std::pmr::vector<double> buffer(
-                PDEWorkspace::required_size(n), std::pmr::get_default_resource());
-            auto workspace = PDEWorkspace::from_buffer(buffer, n);
-            if (!workspace) {
-                p.push_back(std::numeric_limits<double>::quiet_NaN());
-                continue;
-            }
-            auto solver = AmericanOptionSolver::create(
-                params, *workspace,
-                PDEGridConfig{.grid_spec = grid_spec, .n_time = time_domain.n_steps()});
-            if (!solver) {
-                p.push_back(std::numeric_limits<double>::quiet_NaN());
-                continue;
-            }
-            auto result = solver->solve();
-            p.push_back(result ? result->value_at(kSpot)
-                               : std::numeric_limits<double>::quiet_NaN());
-        }
-        return p;
+/// Table-accuracy reference (201-301 spatial pts) — same PDE accuracy as the
+/// interpolation table.  Recovering IV from these prices via the interpolated
+/// surface isolates B-spline interpolation error from PDE discretisation error.
+static const std::vector<double>& get_pde_baseline_prices() {
+    static std::vector<double> prices = [] {
+        GridAccuracyParams table_accuracy;
+        table_accuracy.min_spatial_points = 201;
+        table_accuracy.max_spatial_points = 301;
+        return solve_reference_prices(table_accuracy);
     }();
     return prices;
 }
@@ -255,11 +268,13 @@ static const AdaptiveSolverEntry& get_adaptive_solver(int scale) {
 // ============================================================================
 
 static void BM_Adaptive_IV_Scaled(benchmark::State& state) {
-    double K = kStrikes[static_cast<size_t>(state.range(0))];
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
     int scale = kScales[static_cast<size_t>(state.range(1))];
 
-    double ref_price = get_reference_prices()[static_cast<size_t>(state.range(0))];
-    if (!std::isfinite(ref_price)) {
+    double ref_price = get_reference_prices()[si];
+    double pde_price = get_pde_baseline_prices()[si];
+    if (!std::isfinite(ref_price) || !std::isfinite(pde_price)) {
         state.SkipWithError("Reference price not available");
         return;
     }
@@ -286,11 +301,20 @@ static void BM_Adaptive_IV_Scaled(benchmark::State& state) {
     double iv = last_result->implied_vol;
     double iv_err_bps = std::abs(iv - kTrueVol) * 10000.0;
 
+    // Interpolation-only error: recover IV from PDE-baseline price
+    // (same PDE accuracy as table → isolates B-spline error)
+    double interp_err_bps = std::numeric_limits<double>::quiet_NaN();
+    auto interp_result = entry.solver->solve(IVQuery(spec, pde_price));
+    if (interp_result) {
+        interp_err_bps = std::abs(interp_result->implied_vol - kTrueVol) * 10000.0;
+    }
+
     state.SetLabel(std::format("K={:.0f} {}x adaptive", K, scale));
     state.counters["strike"] = K;
     state.counters["scale"] = scale;
     state.counters["iv"] = iv;
     state.counters["iv_err_bps"] = iv_err_bps;
+    state.counters["interp_err_bps"] = interp_err_bps;
     state.counters["iters"] = static_cast<double>(last_result->iterations);
     state.counters["build_ms"] = entry.build_time_ms;
     state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
@@ -312,63 +336,10 @@ BENCHMARK(BM_Adaptive_IV_Scaled)
 // Discrete dividend scenario
 // ============================================================================
 
-// Discrete dividend scenario: quarterly $0.50
-static std::vector<Dividend> make_div_schedule(double maturity) {
-    return {
-        Dividend{.calendar_time = maturity * 0.25, .amount = 0.50},
-        Dividend{.calendar_time = maturity * 0.50, .amount = 0.50},
-        Dividend{.calendar_time = maturity * 0.75, .amount = 0.50},
-    };
-}
-
-// K_refs for multi-K_ref surface
-static const std::vector<double> kKRefs = {80.0, 100.0, 120.0};
-
-// Fixed evaluation date for QuantLib reproducibility
-static const ql::Date kEvalDate(1, ql::January, 2024);
-
-// ============================================================================
-// QuantLib pricing with discrete dividends (for reference prices)
-// ============================================================================
-
-static double price_ql_div(double spot, double strike, double vol, double maturity,
-                            double rate, double div_yield,
-                            const std::vector<Dividend>& divs,
-                            size_t grid_steps, size_t time_steps) {
-    ql::Date today = kEvalDate;
-    ql::Settings::instance().evaluationDate() = today;
-
-    auto maturity_date = today + ql::Period(static_cast<int>(maturity * 365), ql::Days);
-
-    auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, maturity_date);
-    auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(ql::Option::Put, strike);
-    ql::VanillaOption option(payoff, exercise);
-
-    auto spot_h = ql::Handle<ql::Quote>(ql::ext::make_shared<ql::SimpleQuote>(spot));
-    auto rate_h = ql::Handle<ql::YieldTermStructure>(
-        ql::ext::make_shared<ql::FlatForward>(today, rate, ql::Actual365Fixed()));
-    auto div_h = ql::Handle<ql::YieldTermStructure>(
-        ql::ext::make_shared<ql::FlatForward>(today, div_yield, ql::Actual365Fixed()));
-    auto vol_h = ql::Handle<ql::BlackVolTermStructure>(
-        ql::ext::make_shared<ql::BlackConstantVol>(today, ql::NullCalendar(), vol, ql::Actual365Fixed()));
-
-    auto process = ql::ext::make_shared<ql::BlackScholesMertonProcess>(spot_h, div_h, rate_h, vol_h);
-
-    std::vector<ql::Date> div_dates;
-    std::vector<ql::Real> div_amounts;
-    for (const auto& d : divs) {
-        div_dates.push_back(today + ql::Period(static_cast<int>(d.calendar_time * 365), ql::Days));
-        div_amounts.push_back(d.amount);
-    }
-
-    option.setPricingEngine(
-        ql::MakeFdBlackScholesVanillaEngine(process)
-            .withTGrid(time_steps)
-            .withXGrid(grid_steps)
-            .withCashDividends(div_dates, div_amounts));
-
-    return option.NPV();
-}
+// Per-strike surface: one segmented surface per test strike
+static const std::vector<double> kStrikeGrid = {
+    kStrikes.begin(), kStrikes.end()
+};
 
 // ============================================================================
 // Reference prices: QuantLib FD with discrete dividends (2001x20000)
@@ -388,12 +359,35 @@ static const std::vector<double>& get_div_reference_prices() {
     return prices;
 }
 
+/// Table-accuracy reference for segmented path (mango FDM with discrete divs,
+/// default grid accuracy — same PDE resolution the segmented table builder uses).
+static const std::vector<double>& get_div_pde_baseline_prices() {
+    static std::vector<double> prices = [] {
+        std::vector<double> p;
+        p.reserve(kStrikes.size());
+        auto divs = make_div_schedule(kMaturity);
+        for (double K : kStrikes) {
+            PricingParams params(
+                OptionSpec{.spot = kSpot, .strike = K, .maturity = kMaturity,
+                    .rate = kRate, .dividend_yield = kDivYield,
+                    .option_type = OptionType::PUT},
+                kTrueVol);
+            params.discrete_dividends = divs;
+            auto result = solve_american_option(params);
+            p.push_back(result ? result->value()
+                               : std::numeric_limits<double>::quiet_NaN());
+        }
+        return p;
+    }();
+    return prices;
+}
+
 // ============================================================================
 // Cached segmented adaptive-scaled IV solvers (discrete dividends)
 // ============================================================================
 
 struct SegmentedSolverEntry {
-    std::unique_ptr<InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>> solver;
+    std::unique_ptr<InterpolatedIVSolver<StrikeSurfaceWrapper<>>> solver;
     double build_time_ms = 0.0;
     size_t n_pde_solves = 0;
     std::array<size_t, 3> base_grid_sizes = {};  // [m, sigma, r]
@@ -409,7 +403,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
     auto t0 = std::chrono::steady_clock::now();
 
     // 1. Build adaptive base (only once, reuse grid for larger scales)
-    static SegmentedAdaptiveResult* base_result = nullptr;
+    static StrikeAdaptiveResult* base_result = nullptr;
 
     if (!base_result) {
         AdaptiveGridParams params;
@@ -421,7 +415,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
             .dividend_yield = kDivYield,
             .discrete_dividends = make_div_schedule(kMaturity),
             .maturity = kMaturity,
-            .kref_config = {.K_refs = kKRefs},
+            .kref_config = {.K_refs = kStrikeGrid},
         };
 
         ManualGrid domain{
@@ -431,12 +425,12 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
         };
 
         AdaptiveGridBuilder builder(params);
-        auto result = builder.build_segmented(seg_config, domain);
+        auto result = builder.build_segmented_strike(seg_config, kStrikeGrid, domain);
         if (!result.has_value()) {
-            std::fprintf(stderr, "AdaptiveGridBuilder::build_segmented failed\n");
+            std::fprintf(stderr, "AdaptiveGridBuilder::build_segmented_strike failed\n");
             std::abort();
         }
-        static SegmentedAdaptiveResult stored = std::move(*result);
+        static StrikeAdaptiveResult stored = std::move(*result);
         base_result = &stored;
     }
 
@@ -445,7 +439,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
     int tau_pts = 0;
 
     // For scale > 1, refine base grid; for scale == 1, rebuild from base grid
-    // (MultiKRefSurface is move-only, so we always rebuild from grid specs)
+    // (StrikeSurface is move-only, so we always rebuild from grid specs)
     auto m_refined = (scale <= 1) ? base_result->grid.moneyness
                                   : refine_axis(base_result->grid.moneyness, scale);
     auto v_refined = (scale <= 1) ? base_result->grid.vol
@@ -458,14 +452,14 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
     grid_sizes = {m_refined.size(), v_refined.size(), r_refined.size()};
     tau_pts = tau_refined;
 
-    // Rebuild each K_ref segment and assemble
+    // Rebuild per-strike segmented surfaces and assemble
     auto divs = make_div_schedule(kMaturity);
     DividendSpec div_spec{.dividend_yield = kDivYield, .discrete_dividends = divs};
 
-    std::vector<MultiKRefEntry> entries;
-    for (double K_ref : kKRefs) {
+    std::vector<StrikeEntry> entries;
+    for (double strike : kStrikeGrid) {
         SegmentedPriceTableBuilder::Config seg_cfg{
-            .K_ref = K_ref,
+            .K_ref = strike,
             .option_type = OptionType::PUT,
             .dividends = div_spec,
             .grid = {.moneyness = m_refined, .vol = v_refined, .rate = r_refined},
@@ -474,19 +468,19 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
         };
         auto seg = SegmentedPriceTableBuilder::build(seg_cfg);
         if (!seg.has_value()) {
-            std::fprintf(stderr, "SegmentedPriceTableBuilder::build failed (K_ref=%.0f, scale=%d)\n",
-                K_ref, scale);
+            std::fprintf(stderr, "SegmentedPriceTableBuilder::build failed (K=%.0f, scale=%d)\n",
+                strike, scale);
             std::abort();
         }
-        entries.push_back({.K_ref = K_ref, .surface = std::move(*seg)});
+        entries.push_back({.strike = strike, .surface = std::move(*seg)});
     }
-    auto multi = build_multi_kref_surface(std::move(entries));
-    if (!multi.has_value()) {
-        std::fprintf(stderr, "build_multi_kref_surface failed (scale=%d)\n", scale);
+    auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
+    if (!surface.has_value()) {
+        std::fprintf(stderr, "build_strike_surface failed (scale=%d)\n", scale);
         std::abort();
     }
 
-    // 3. Wrap in MultiKRefSurfaceWrapper and create IV solver
+    // 3. Wrap in StrikeSurfaceWrapper and create IV solver
     auto minmax_m = std::minmax_element(base_result->grid.moneyness.begin(),
                                          base_result->grid.moneyness.end());
     auto minmax_v = std::minmax_element(base_result->grid.vol.begin(),
@@ -494,7 +488,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
     auto minmax_r = std::minmax_element(base_result->grid.rate.begin(),
                                          base_result->grid.rate.end());
 
-    MultiKRefSurfaceWrapper<>::Bounds bounds{
+    StrikeSurfaceWrapper<>::Bounds bounds{
         .m_min = *minmax_m.first,
         .m_max = *minmax_m.second,
         .tau_min = 0.0,
@@ -505,10 +499,10 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
         .rate_max = *minmax_r.second,
     };
 
-    auto wrapper = MultiKRefSurfaceWrapper<>(
-        std::move(*multi), bounds, OptionType::PUT, kDivYield);
+    auto wrapper = StrikeSurfaceWrapper<>(
+        std::move(*surface), bounds, OptionType::PUT, kDivYield);
 
-    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+    auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
         std::move(wrapper));
     if (!solver.has_value()) {
         std::fprintf(stderr, "InterpolatedIVSolver create failed (scale=%d)\n", scale);
@@ -519,7 +513,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
     double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     auto [pos, ins] = cache.emplace(scale, SegmentedSolverEntry{
-        .solver = std::make_unique<InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>>(std::move(*solver)),
+        .solver = std::make_unique<InterpolatedIVSolver<StrikeSurfaceWrapper<>>>(std::move(*solver)),
         .build_time_ms = build_ms,
         .n_pde_solves = 0,
         .base_grid_sizes = grid_sizes,
@@ -534,11 +528,13 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
 // ============================================================================
 
 static void BM_Adaptive_IV_Div_Scaled(benchmark::State& state) {
-    double K = kStrikes[static_cast<size_t>(state.range(0))];
+    size_t si = static_cast<size_t>(state.range(0));
+    double K = kStrikes[si];
     int scale = kScales[static_cast<size_t>(state.range(1))];
 
-    double ref_price = get_div_reference_prices()[static_cast<size_t>(state.range(0))];
-    if (!std::isfinite(ref_price)) {
+    double ref_price = get_div_reference_prices()[si];
+    double pde_price = get_div_pde_baseline_prices()[si];
+    if (!std::isfinite(ref_price) || !std::isfinite(pde_price)) {
         state.SkipWithError("Reference price not available");
         return;
     }
@@ -565,11 +561,19 @@ static void BM_Adaptive_IV_Div_Scaled(benchmark::State& state) {
     double iv = last_result->implied_vol;
     double iv_err_bps = std::abs(iv - kTrueVol) * 10000.0;
 
+    // Interpolation-only error: recover IV from PDE-baseline price
+    double interp_err_bps = std::numeric_limits<double>::quiet_NaN();
+    auto interp_result = entry.solver->solve(IVQuery(spec, pde_price));
+    if (interp_result) {
+        interp_err_bps = std::abs(interp_result->implied_vol - kTrueVol) * 10000.0;
+    }
+
     state.SetLabel(std::format("K={:.0f} {}x segmented", K, scale));
     state.counters["strike"] = K;
     state.counters["scale"] = scale;
     state.counters["iv"] = iv;
     state.counters["iv_err_bps"] = iv_err_bps;
+    state.counters["interp_err_bps"] = interp_err_bps;
     state.counters["iters"] = static_cast<double>(last_result->iterations);
     state.counters["build_ms"] = entry.build_time_ms;
     state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);

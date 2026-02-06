@@ -15,6 +15,8 @@
  * Run with: bazel run //benchmarks:iv_fdm_sweep
  */
 
+#include "iv_benchmark_common.hpp"
+#include "iv_benchmark_ql.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/iv_solver.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
@@ -28,26 +30,16 @@
 #include <numeric>
 #include <vector>
 
-// QuantLib includes
-#include <ql/quantlib.hpp>
-
 using namespace mango;
-namespace ql = QuantLib;
+using namespace mango::bench;
 
 // ============================================================================
 // Test parameters
 // ============================================================================
 
-static constexpr double kSpot = 100.0;
-static constexpr double kRate = 0.05;
-static constexpr double kDivYield = 0.02;
-
 static constexpr std::array<double, 9> kStrikes = {
     80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0
 };
-
-// Fixed evaluation date for reproducible results
-static const ql::Date kEvalDate(1, ql::January, 2024);
 
 // For scaled benchmarks (single fixed scenario)
 static constexpr double kScaledVol = 0.20;
@@ -72,15 +64,6 @@ static constexpr std::array<IVScenario, kNScenarios> kVanillaScenarios = {{
     {0.30, 1.0, "hi/med"},
     {0.30, 2.0, "hi/long"},
 }};
-
-// Dividend: quarterly $0.50 scaled to maturity
-static std::vector<Dividend> make_div_schedule(double maturity) {
-    return {
-        Dividend{.calendar_time = maturity * 0.25, .amount = 0.50},
-        Dividend{.calendar_time = maturity * 0.50, .amount = 0.50},
-        Dividend{.calendar_time = maturity * 0.75, .amount = 0.50},
-    };
-}
 
 // ============================================================================
 // Moneyness bucket RMS computation
@@ -133,79 +116,6 @@ static void report_iv_metrics(benchmark::State& state,
 }
 
 // ============================================================================
-// QuantLib pricing helper (parameterized by strike and vol)
-// ============================================================================
-
-static double price_ql(double strike, double vol, double maturity,
-                       size_t grid_steps, size_t time_steps) {
-    ql::Date today = kEvalDate;
-    ql::Settings::instance().evaluationDate() = today;
-
-    auto maturity_date = today + ql::Period(static_cast<int>(maturity * 365), ql::Days);
-
-    auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, maturity_date);
-    auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(ql::Option::Put, strike);
-    ql::VanillaOption option(payoff, exercise);
-
-    auto spot_h = ql::Handle<ql::Quote>(ql::ext::make_shared<ql::SimpleQuote>(kSpot));
-    auto rate_h = ql::Handle<ql::YieldTermStructure>(
-        ql::ext::make_shared<ql::FlatForward>(today, kRate, ql::Actual365Fixed()));
-    auto div_h = ql::Handle<ql::YieldTermStructure>(
-        ql::ext::make_shared<ql::FlatForward>(today, kDivYield, ql::Actual365Fixed()));
-    auto vol_h = ql::Handle<ql::BlackVolTermStructure>(
-        ql::ext::make_shared<ql::BlackConstantVol>(today, ql::NullCalendar(), vol, ql::Actual365Fixed()));
-
-    auto process = ql::ext::make_shared<ql::BlackScholesMertonProcess>(spot_h, div_h, rate_h, vol_h);
-
-    option.setPricingEngine(
-        ql::ext::make_shared<ql::FdBlackScholesVanillaEngine>(process, time_steps, grid_steps));
-
-    return option.NPV();
-}
-
-// ============================================================================
-// QuantLib pricing with discrete dividends
-// ============================================================================
-
-static double price_ql_div(double strike, double vol, double maturity,
-                            const std::vector<Dividend>& divs,
-                            size_t grid_steps, size_t time_steps) {
-    ql::Date today = kEvalDate;
-    ql::Settings::instance().evaluationDate() = today;
-
-    auto maturity_date = today + ql::Period(static_cast<int>(maturity * 365), ql::Days);
-
-    auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, maturity_date);
-    auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(ql::Option::Put, strike);
-    ql::VanillaOption option(payoff, exercise);
-
-    auto spot_h = ql::Handle<ql::Quote>(ql::ext::make_shared<ql::SimpleQuote>(kSpot));
-    auto rate_h = ql::Handle<ql::YieldTermStructure>(
-        ql::ext::make_shared<ql::FlatForward>(today, kRate, ql::Actual365Fixed()));
-    auto div_h = ql::Handle<ql::YieldTermStructure>(
-        ql::ext::make_shared<ql::FlatForward>(today, kDivYield, ql::Actual365Fixed()));
-    auto vol_h = ql::Handle<ql::BlackVolTermStructure>(
-        ql::ext::make_shared<ql::BlackConstantVol>(today, ql::NullCalendar(), vol, ql::Actual365Fixed()));
-
-    auto process = ql::ext::make_shared<ql::BlackScholesMertonProcess>(spot_h, div_h, rate_h, vol_h);
-
-    std::vector<ql::Date> div_dates;
-    std::vector<ql::Real> div_amounts;
-    for (const auto& d : divs) {
-        div_dates.push_back(today + ql::Period(static_cast<int>(d.calendar_time * 365), ql::Days));
-        div_amounts.push_back(d.amount);
-    }
-
-    option.setPricingEngine(
-        ql::MakeFdBlackScholesVanillaEngine(process)
-            .withTGrid(time_steps)
-            .withXGrid(grid_steps)
-            .withCashDividends(div_dates, div_amounts));
-
-    return option.NPV();
-}
-
-// ============================================================================
 // Reference prices (QuantLib 2001×20000, computed once per scenario)
 // ============================================================================
 
@@ -219,8 +129,8 @@ static const std::array<ScenarioData, kNScenarios>& get_vanilla_scenario_data() 
         for (size_t s = 0; s < kNScenarios; ++s) {
             for (size_t k = 0; k < kNStrikes; ++k) {
                 d[s].ref_prices[k] = price_ql(
-                    kStrikes[k], kVanillaScenarios[s].true_vol,
-                    kVanillaScenarios[s].maturity, 2001, 20000);
+                    kSpot, kStrikes[k], kVanillaScenarios[s].true_vol,
+                    kVanillaScenarios[s].maturity, kRate, kDivYield, 2001, 20000);
             }
         }
         return d;
@@ -235,8 +145,8 @@ static const std::array<ScenarioData, kNScenarios>& get_div_scenario_data() {
             auto divs = make_div_schedule(kVanillaScenarios[s].maturity);
             for (size_t k = 0; k < kNStrikes; ++k) {
                 d[s].ref_prices[k] = price_ql_div(
-                    kStrikes[k], kVanillaScenarios[s].true_vol,
-                    kVanillaScenarios[s].maturity, divs, 2001, 20000);
+                    kSpot, kStrikes[k], kVanillaScenarios[s].true_vol,
+                    kVanillaScenarios[s].maturity, kRate, kDivYield, divs, 2001, 20000);
             }
         }
         return d;
@@ -250,7 +160,8 @@ static const std::vector<double>& get_scaled_reference_prices() {
         std::vector<double> p;
         p.reserve(kStrikes.size());
         for (double K : kStrikes) {
-            p.push_back(price_ql(K, kScaledVol, kScaledMaturity, 2001, 20000));
+            p.push_back(price_ql(kSpot, K, kScaledVol, kScaledMaturity,
+                                  kRate, kDivYield, 2001, 20000));
         }
         return p;
     }();
@@ -288,81 +199,20 @@ static BaseGrid get_mango_base_grid_div(double strike, double maturity, double v
 }
 
 // ============================================================================
-// Generic Brent solver for IV recovery
+// Convenience IV solver wrappers
 // ============================================================================
 
-template <typename PriceFn>
-static double brent_solve_iv(PriceFn&& price_fn, double target_price) {
-    double a = 0.01, b = 3.0;
-    double fa = price_fn(a) - target_price;
-    double fb = price_fn(b) - target_price;
-
-    if (!std::isfinite(fa) || !std::isfinite(fb) || fa * fb > 0) return -1.0;
-
-    if (std::abs(fa) < std::abs(fb)) {
-        std::swap(a, b);
-        std::swap(fa, fb);
-    }
-
-    double c = a, fc = fa;
-    bool mflag = true;
-    double d = 0.0;
-    constexpr double tol = 1e-6;
-    constexpr size_t max_iter = 100;
-
-    for (size_t iter = 0; iter < max_iter; ++iter) {
-        if (std::abs(fb) < tol || std::abs(b - a) < tol) {
-            return b;
-        }
-
-        double s;
-        if (fa != fc && fb != fc) {
-            s = a * fb * fc / ((fa - fb) * (fa - fc))
-              + b * fa * fc / ((fb - fa) * (fb - fc))
-              + c * fa * fb / ((fc - fa) * (fc - fb));
-        } else {
-            s = b - fb * (b - a) / (fb - fa);
-        }
-
-        double bisect = (3.0 * a + b) / 4.0;
-        bool cond1 = !((s > bisect && s < b) || (s < bisect && s > b));
-        bool cond2 = mflag && std::abs(s - b) >= std::abs(b - c) / 2.0;
-        bool cond3 = !mflag && std::abs(s - b) >= std::abs(c - d) / 2.0;
-        bool cond4 = mflag && std::abs(b - c) < tol;
-        bool cond5 = !mflag && std::abs(c - d) < tol;
-
-        if (cond1 || cond2 || cond3 || cond4 || cond5) {
-            s = (a + b) / 2.0;
-            mflag = true;
-        } else {
-            mflag = false;
-        }
-
-        double fs = price_fn(s) - target_price;
-        if (!std::isfinite(fs)) return -1.0;
-
-        d = c; c = b; fc = fb;
-        if (fa * fs < 0.0) { b = s; fb = fs; }
-        else { a = s; fa = fs; }
-        if (std::abs(fa) < std::abs(fb)) {
-            std::swap(a, b); std::swap(fa, fb);
-        }
-    }
-    return b;
-}
-
-// Convenience wrappers
 static double ql_solve_iv(double strike, double maturity, double target_price,
                            size_t nx, size_t nt) {
     return brent_solve_iv(
-        [&](double vol) { return price_ql(strike, vol, maturity, nx, nt); },
+        [&](double vol) { return price_ql(kSpot, strike, vol, maturity, kRate, kDivYield, nx, nt); },
         target_price);
 }
 
 static double ql_solve_iv_div(double strike, double maturity, double target_price,
                                const std::vector<Dividend>& divs, size_t nx, size_t nt) {
     return brent_solve_iv(
-        [&](double vol) { return price_ql_div(strike, vol, maturity, divs, nx, nt); },
+        [&](double vol) { return price_ql_div(kSpot, strike, vol, maturity, kRate, kDivYield, divs, nx, nt); },
         target_price);
 }
 
@@ -450,8 +300,8 @@ static void BM_QuantLib_IV(benchmark::State& state) {
                 auto& base = grids[s * kNStrikes + k];
                 double iv = ql_solve_iv(
                     kStrikes[k], sc.maturity, scenario_data[s].ref_prices[k], base.nx, base.nt);
-                cached_ivs[s * kNStrikes + k] = (iv > 0) ? iv
-                    : std::numeric_limits<double>::quiet_NaN();
+                cached_ivs[s * kNStrikes + k] = std::isfinite(iv)
+                    ? iv : std::numeric_limits<double>::quiet_NaN();
             }
         }
         benchmark::DoNotOptimize(cached_ivs);
@@ -489,8 +339,8 @@ static void BM_Mango_IV_Div(benchmark::State& state) {
             for (size_t k = 0; k < kNStrikes; ++k) {
                 double iv = mango_solve_iv_div(
                     kStrikes[k], sc.maturity, scenario_data[s].ref_prices[k], divs);
-                cached_ivs[s * kNStrikes + k] = (iv > 0) ? iv
-                    : std::numeric_limits<double>::quiet_NaN();
+                cached_ivs[s * kNStrikes + k] = std::isfinite(iv)
+                    ? iv : std::numeric_limits<double>::quiet_NaN();
             }
         }
         benchmark::DoNotOptimize(cached_ivs);
@@ -537,8 +387,8 @@ static void BM_QuantLib_IV_Div(benchmark::State& state) {
                 double iv = ql_solve_iv_div(
                     kStrikes[k], sc.maturity, scenario_data[s].ref_prices[k],
                     divs, base.nx, base.nt);
-                cached_ivs[s * kNStrikes + k] = (iv > 0) ? iv
-                    : std::numeric_limits<double>::quiet_NaN();
+                cached_ivs[s * kNStrikes + k] = std::isfinite(iv)
+                    ? iv : std::numeric_limits<double>::quiet_NaN();
             }
         }
         benchmark::DoNotOptimize(cached_ivs);
@@ -673,7 +523,7 @@ static void BM_QuantLib_IV_Scaled(benchmark::State& state) {
         benchmark::DoNotOptimize(iv);
     }
 
-    double iv_err_bps = (iv > 0) ? std::abs(iv - kScaledVol) * 10000.0 : -1.0;
+    double iv_err_bps = std::isfinite(iv) ? std::abs(iv - kScaledVol) * 10000.0 : -1.0;
 
     state.SetLabel(std::format("K={:.0f} {}x QL", K, scale));
     state.counters["strike"] = K;

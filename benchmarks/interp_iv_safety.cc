@@ -15,6 +15,7 @@
  * Run with: bazel run //benchmarks:interp_iv_safety
  */
 
+#include "iv_benchmark_common.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/iv_solver.hpp"
@@ -27,14 +28,11 @@
 #include <vector>
 
 using namespace mango;
+using namespace mango::bench;
 
 // ============================================================================
 // Test parameters
 // ============================================================================
-
-static constexpr double kSpot = 100.0;
-static constexpr double kRate = 0.05;
-static constexpr double kDivYield = 0.02;
 
 static constexpr std::array<double, 9> kStrikes = {
     80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0};
@@ -51,18 +49,6 @@ static constexpr size_t kNV = kVols.size();
 
 static const std::array<const char*, kNT> kMatLabels = {
     "  7d", " 14d", " 30d", " 60d", " 90d", "180d", "  1y", "  2y"};
-
-// ============================================================================
-// Dividend schedule
-// ============================================================================
-
-static std::vector<Dividend> make_div_schedule(double maturity) {
-    return {
-        {maturity / 4.0, 0.50},
-        {maturity / 2.0, 0.50},
-        {3.0 * maturity / 4.0, 0.50},
-    };
-}
 
 // ============================================================================
 // Step 1: Generate reference prices via batch chain solver
@@ -199,83 +185,23 @@ static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
 static double solve_fdm_iv_div(double strike, double maturity,
                                 double market_price,
                                 const std::vector<Dividend>& divs) {
-    auto price_fn = [&](double vol) -> double {
-        PricingParams p;
-        p.spot = kSpot;
-        p.strike = strike;
-        p.maturity = maturity;
-        p.rate = kRate;
-        p.dividend_yield = kDivYield;
-        p.option_type = OptionType::PUT;
-        p.volatility = vol;
-        p.discrete_dividends = divs;
+    return brent_solve_iv(
+        [&](double vol) -> double {
+            PricingParams p;
+            p.spot = kSpot;
+            p.strike = strike;
+            p.maturity = maturity;
+            p.rate = kRate;
+            p.dividend_yield = kDivYield;
+            p.option_type = OptionType::PUT;
+            p.volatility = vol;
+            p.discrete_dividends = divs;
 
-        auto result = solve_american_option(p);
-        if (!result.has_value()) return std::nan("");
-        return result->value();
-    };
-
-    // Brent's method: find vol where price_fn(vol) = market_price
-    double a = 0.01, b = 3.0;
-    double fa = price_fn(a) - market_price;
-    double fb = price_fn(b) - market_price;
-
-    if (std::isnan(fa) || std::isnan(fb)) return std::nan("");
-    if (fa * fb > 0) return std::nan("");
-
-    double c = a, fc = fa;
-    bool mflag = true;
-    double d = 0.0;
-
-    for (int i = 0; i < 100; ++i) {
-        if (std::abs(fb) < 1e-10) return b;
-        if (std::abs(b - a) < 1e-10) return b;
-
-        double s;
-        if (fa != fc && fb != fc) {
-            s = a * fb * fc / ((fa - fb) * (fa - fc))
-              + b * fa * fc / ((fb - fa) * (fb - fc))
-              + c * fa * fb / ((fc - fa) * (fc - fb));
-        } else {
-            s = b - fb * (b - a) / (fb - fa);
-        }
-
-        double mid = (3 * a + b) / 4;
-        bool cond1 = !((mid < s && s < b) || (b < s && s < mid));
-        bool cond2 = mflag && std::abs(s - b) >= std::abs(b - c) / 2;
-        bool cond3 = !mflag && std::abs(s - b) >= std::abs(c - d) / 2;
-        bool cond4 = mflag && std::abs(b - c) < 1e-10;
-        bool cond5 = !mflag && std::abs(c - d) < 1e-10;
-
-        if (cond1 || cond2 || cond3 || cond4 || cond5) {
-            s = (a + b) / 2;
-            mflag = true;
-        } else {
-            mflag = false;
-        }
-
-        double fs = price_fn(s) - market_price;
-        if (std::isnan(fs)) return std::nan("");
-
-        d = c;
-        c = b;
-        fc = fb;
-
-        if (fa * fs < 0) {
-            b = s;
-            fb = fs;
-        } else {
-            a = s;
-            fa = fs;
-        }
-
-        if (std::abs(fa) < std::abs(fb)) {
-            std::swap(a, b);
-            std::swap(fa, fb);
-        }
-    }
-
-    return b;
+            auto result = solve_american_option(p);
+            if (!result.has_value()) return std::nan("");
+            return result->value();
+        },
+        market_price);
 }
 
 // ============================================================================

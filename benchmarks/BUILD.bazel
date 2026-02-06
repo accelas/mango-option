@@ -141,7 +141,7 @@ cc_binary(
 
 cc_binary(
     name = "iv_fdm_sweep",
-    srcs = ["iv_fdm_sweep.cc"],
+    srcs = ["iv_fdm_sweep.cc", "iv_benchmark_common.hpp", "iv_benchmark_ql.hpp"],
     copts = [
         "-Wall",
         "-Wextra",
@@ -167,7 +167,7 @@ cc_binary(
 
 cc_binary(
     name = "iv_interpolation_sweep",
-    srcs = ["iv_interpolation_sweep.cc"],
+    srcs = ["iv_interpolation_sweep.cc", "iv_benchmark_common.hpp", "iv_benchmark_ql.hpp"],
     copts = [
         "-Wall",
         "-Wextra",
@@ -473,7 +473,7 @@ cc_binary(
 
 cc_binary(
     name = "interp_iv_safety",
-    srcs = ["interp_iv_safety.cc"],
+    srcs = ["interp_iv_safety.cc", "iv_benchmark_common.hpp"],
     copts = [
         "-Wall",
         "-Wextra",
