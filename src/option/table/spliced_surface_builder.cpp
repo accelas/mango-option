@@ -6,60 +6,6 @@
 namespace mango {
 
 // ===========================================================================
-// Per-maturity surface builder
-// ===========================================================================
-
-std::expected<PerMaturitySurface, PriceTableError>
-build_per_maturity_surface(PerMaturityConfig config) {
-    // Validate: non-empty
-    if (config.surfaces.empty()) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig, 0, 0});
-    }
-
-    // Validate: surfaces.size() == tau_grid.size()
-    if (config.surfaces.size() != config.tau_grid.size()) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::InvalidConfig, 0, config.surfaces.size()});
-    }
-
-    // Validate: tau_grid sorted
-    if (!std::is_sorted(config.tau_grid.begin(), config.tau_grid.end())) {
-        return std::unexpected(PriceTableError{
-            PriceTableErrorCode::GridNotSorted, 0, config.tau_grid.size()});
-    }
-
-    // Validate: all surfaces non-null
-    for (size_t i = 0; i < config.surfaces.size(); ++i) {
-        if (!config.surfaces[i]) {
-            return std::unexpected(PriceTableError{
-                PriceTableErrorCode::InvalidConfig, i, 0});
-        }
-    }
-
-    // Build PriceTableSurface3DAdapter slices
-    std::vector<PriceTableSurface3DAdapter> slices;
-    slices.reserve(config.surfaces.size());
-    for (const auto& surface : config.surfaces) {
-        slices.emplace_back(surface, config.K_ref);
-    }
-
-    // Construct LinearBracket, MaturityTransform, WeightedSum
-    LinearBracket bracket(config.tau_grid);
-    MaturityTransform xform{
-        .option_type = config.option_type,
-        .dividend_yield = config.dividend_yield
-    };
-    WeightedSum combiner;
-
-    return PerMaturitySurface(
-        std::move(slices),
-        std::move(bracket),
-        std::move(xform),
-        std::move(combiner));
-}
-
-// ===========================================================================
 // Segmented surface builder
 // ===========================================================================
 

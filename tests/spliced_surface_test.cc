@@ -37,80 +37,13 @@ TEST(SplicedSurfaceTest, ConceptsCompile) {
     static_assert(SplitStrategy<SegmentLookup>);
     static_assert(SplitStrategy<LinearBracket>);
     static_assert(SliceTransform<IdentityTransform>);
-    static_assert(SliceTransform<MaturityTransform>);
     static_assert(CombineStrategy<WeightedSum>);
     SUCCEED();
 }
 
 // ===========================================================================
-// MaturityTransform tests
-// ===========================================================================
-
-TEST(MaturityTransformTest, SatisfiesSliceTransformConcept) {
-    static_assert(SliceTransform<MaturityTransform>);
-    SUCCEED();
-}
-
-TEST(MaturityTransformTest, ToLocalReturnsQueryUnchanged) {
-    MaturityTransform xform{.option_type = OptionType::PUT, .dividend_yield = 0.02};
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.2, .rate = 0.05};
-
-    PriceQuery local = xform.to_local(0, q);
-    EXPECT_DOUBLE_EQ(local.spot, q.spot);
-    EXPECT_DOUBLE_EQ(local.strike, q.strike);
-    EXPECT_DOUBLE_EQ(local.tau, q.tau);
-    EXPECT_DOUBLE_EQ(local.sigma, q.sigma);
-    EXPECT_DOUBLE_EQ(local.rate, q.rate);
-}
-
-TEST(MaturityTransformTest, NormalizeValueAddsEuropeanPrice) {
-    MaturityTransform xform{.option_type = OptionType::PUT, .dividend_yield = 0.0};
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.2, .rate = 0.05};
-
-    // Compute expected European put price using bs_price
-    double p_eu = bs_price(q.spot, q.strike, q.tau, q.sigma, q.rate, 0.0, OptionType::PUT);
-
-    // With EEP = 0, the American price should equal the European price
-    double american = xform.normalize_value(0, q, 0.0);
-    EXPECT_DOUBLE_EQ(american, p_eu);
-
-    // With non-zero EEP, the American price = EEP + P_Eu
-    double eep = 1.5;
-    american = xform.normalize_value(0, q, eep);
-    EXPECT_DOUBLE_EQ(american, eep + p_eu);
-}
-
-TEST(MaturityTransformTest, WorksWithDividendYield) {
-    MaturityTransform xform{.option_type = OptionType::PUT, .dividend_yield = 0.02};
-    PriceQuery q{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.2, .rate = 0.05};
-
-    // European price with dividend yield
-    double p_eu = bs_price(q.spot, q.strike, q.tau, q.sigma, q.rate, 0.02, OptionType::PUT);
-
-    double eep = 2.0;
-    double american = xform.normalize_value(0, q, eep);
-    EXPECT_DOUBLE_EQ(american, eep + p_eu);
-}
-
-TEST(MaturityTransformTest, WorksWithCallOptions) {
-    MaturityTransform xform{.option_type = OptionType::CALL, .dividend_yield = 0.03};
-    PriceQuery q{.spot = 100.0, .strike = 95.0, .tau = 0.25, .sigma = 0.25, .rate = 0.04};
-
-    double p_eu = bs_price(q.spot, q.strike, q.tau, q.sigma, q.rate, 0.03, OptionType::CALL);
-
-    double eep = 0.5;
-    double american = xform.normalize_value(0, q, eep);
-    EXPECT_DOUBLE_EQ(american, eep + p_eu);
-}
-
-// ===========================================================================
 // Surface adapter concept checks
 // ===========================================================================
-
-TEST(SurfaceAdapterTest, PriceTableSurface3DAdapterSatisfiesConcept) {
-    static_assert(SplicedInner<PriceTableSurface3DAdapter>);
-    SUCCEED();
-}
 
 TEST(SurfaceAdapterTest, AmericanPriceSurfaceAdapterSatisfiesConcept) {
     static_assert(SplicedInner<AmericanPriceSurfaceAdapter>);
@@ -469,15 +402,6 @@ TEST(LinearBracketTest, HandlesEmptyGrid) {
 // Unified type alias tests
 // ===========================================================================
 
-// Verify PerMaturitySurface type alias compiles
-TEST(UnifiedTypeAliasTest, PerMaturitySurfaceCompiles) {
-    // Static assert that the type alias resolves correctly
-    static_assert(std::is_same_v<
-        PerMaturitySurface,
-        SplicedSurface<PriceTableSurface3DAdapter, LinearBracket, MaturityTransform, WeightedSum>>);
-    SUCCEED();
-}
-
 // Verify SegmentedSurface type alias compiles with default template parameter
 TEST(UnifiedTypeAliasTest, SegmentedSurfaceDefaultCompiles) {
     // Default Inner = AmericanPriceSurfaceAdapter
@@ -509,26 +433,6 @@ TEST(UnifiedTypeAliasTest, MultiKRefSurfaceWithMockCompiles) {
     static_assert(std::is_same_v<
         MultiKRefSurface<MockSurface>,
         SplicedSurface<MockSurface, KRefBracket, KRefTransform, WeightedSum>>);
-    SUCCEED();
-}
-
-// Verify nested composition: MultiKRefSurface<SegmentedSurface<PerMaturitySurface>>
-TEST(UnifiedTypeAliasTest, FullyNestedCompositionCompiles) {
-    // This represents the full composition for discrete dividends with per-maturity surfaces
-    using NestedType = MultiKRefSurface<SegmentedSurface<PerMaturitySurface>>;
-
-    // Verify it expands to the expected type
-    static_assert(std::is_same_v<
-        NestedType,
-        SplicedSurface<
-            SplicedSurface<
-                SplicedSurface<PriceTableSurface3DAdapter, LinearBracket, MaturityTransform, WeightedSum>,
-                SegmentLookup,
-                SegmentedTransform,
-                WeightedSum>,
-            KRefBracket,
-            KRefTransform,
-            WeightedSum>>);
     SUCCEED();
 }
 
