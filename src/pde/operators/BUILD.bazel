@@ -28,7 +28,7 @@ cc_library(
     name = "spatial_operator",
     hdrs = ["spatial_operator.hpp"],
     deps = [
-        ":centered_difference_facade",
+        ":centered_difference",
         "//src/pde/core:grid",
         "//src/math:tridiagonal_matrix_view",
     ],
@@ -50,8 +50,8 @@ cc_library(
 )
 
 cc_library(
-    name = "centered_difference_scalar",
-    hdrs = ["centered_difference_scalar.hpp"],
+    name = "centered_difference",
+    hdrs = ["centered_difference.hpp"],
     deps = [
         "//src/pde/core:grid",
         "//src/support:parallel",
@@ -59,18 +59,6 @@ cc_library(
     copts = [
         "-march=x86-64",
         "-fopenmp-simd",
-    ],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/pde/operators",
-    include_prefix = "mango/pde/operators",
-)
-
-cc_library(
-    name = "centered_difference_facade",
-    hdrs = ["centered_difference_facade.hpp"],
-    deps = [
-        ":centered_difference_scalar",
-        "//src/pde/core:grid",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/pde/operators",

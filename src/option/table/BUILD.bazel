@@ -146,32 +146,8 @@ cc_library(
 )
 
 cc_library(
-    name = "price_table_grid",
-    hdrs = ["price_table_grid.hpp"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
     name = "price_table_grid_estimator",
     hdrs = ["price_table_grid_estimator.hpp"],
-    visibility = ["//visibility:public"],
-    strip_include_prefix = "/src/option/table",
-    include_prefix = "mango/option/table",
-)
-
-cc_library(
-    name = "price_table_extraction",
-    srcs = ["price_table_extraction.cpp"],
-    hdrs = ["price_table_extraction.hpp"],
-    deps = [
-        ":price_table_grid",
-        "//src/option:american_option_batch",
-        "//src/math:cubic_spline_solver",
-        "//src/support:parallel",
-        "@mdspan//:mdspan",
-    ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",
     include_prefix = "mango/option/table",

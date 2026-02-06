@@ -99,7 +99,7 @@ cc_library(
     deps = [
         ":grid",
         ":pde_workspace",
-        "//src/pde/operators:centered_difference_facade",
+        "//src/pde/operators:centered_difference",
         ":boundary_conditions",
         ":time_domain",
         ":trbdf2_config",

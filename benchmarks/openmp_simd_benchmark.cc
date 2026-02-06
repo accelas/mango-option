@@ -15,7 +15,7 @@
  */
 
 #include <benchmark/benchmark.h>
-#include "mango/pde/operators/centered_difference_scalar.hpp"
+#include "mango/pde/operators/centered_difference.hpp"
 #include "mango/pde/core/grid.hpp"
 #include <vector>
 #include <cmath>
@@ -71,13 +71,13 @@ auto setup_nonuniform_grid(size_t n) {
 }
 
 // ============================================================================
-// ScalarBackend Benchmarks (OpenMP SIMD)
+// CenteredDifference Benchmarks (OpenMP SIMD)
 // ============================================================================
 
 static void BM_Scalar_UniformGrid_2ndDeriv(benchmark::State& state) {
     const size_t n = state.range(0);
     auto [spacing, u, result] = setup_uniform_grid<double>(n);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     for (auto _ : state) {
         backend.compute_second_derivative_uniform(u, result, 1, n - 1);
@@ -91,7 +91,7 @@ static void BM_Scalar_UniformGrid_2ndDeriv(benchmark::State& state) {
 static void BM_Scalar_NonUniformGrid_2ndDeriv(benchmark::State& state) {
     const size_t n = state.range(0);
     auto [spacing, u, result] = setup_nonuniform_grid<double>(n);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     for (auto _ : state) {
         backend.compute_second_derivative_non_uniform(u, result, 1, n - 1);
@@ -105,7 +105,7 @@ static void BM_Scalar_NonUniformGrid_2ndDeriv(benchmark::State& state) {
 static void BM_Scalar_UniformGrid_1stDeriv(benchmark::State& state) {
     const size_t n = state.range(0);
     auto [spacing, u, result] = setup_uniform_grid<double>(n);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     for (auto _ : state) {
         backend.compute_first_derivative_uniform(u, result, 1, n - 1);
@@ -119,7 +119,7 @@ static void BM_Scalar_UniformGrid_1stDeriv(benchmark::State& state) {
 static void BM_Scalar_NonUniformGrid_1stDeriv(benchmark::State& state) {
     const size_t n = state.range(0);
     auto [spacing, u, result] = setup_nonuniform_grid<double>(n);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     for (auto _ : state) {
         backend.compute_first_derivative_non_uniform(u, result, 1, n - 1);

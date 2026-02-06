@@ -93,7 +93,7 @@ struct BatchAmericanOptionResult {
 ///     if (result.has_value()) {
 ///         auto grid = result.value().grid();
 ///         // grid->num_snapshots() == 3
-///         // Use extract_batch_results_to_4d() for interpolation table
+///         // Use snapshots for interpolation table construction
 ///     }
 /// }
 /// ```

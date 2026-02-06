@@ -9,7 +9,6 @@
 
 #include "mango/pde/core/pde_solver.hpp"
 #include "mango/pde/operators/black_scholes_pde.hpp"
-#include "mango/pde/operators/centered_difference_facade.hpp"
 #include "mango/option/option_concepts.hpp"
 #include <expected>
 #include "mango/support/error_types.hpp"
