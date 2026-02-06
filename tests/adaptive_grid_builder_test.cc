@@ -355,7 +355,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
     std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
+    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value())
         << "build_segmented failed";
 
@@ -392,7 +392,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSmallKRefList) {
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
+    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 }
 
@@ -419,7 +419,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     std::vector<double> v_domain = {0.05, 0.10, 0.20, 0.30, 0.50};
     std::vector<double> r_domain = {0.01, 0.03, 0.05, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
+    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
@@ -450,7 +450,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     std::vector<double> v_domain = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r_domain = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
+    auto result = builder.build_segmented(seg_config, {m_domain, v_domain, r_domain});
     ASSERT_TRUE(result.has_value());
 
     PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
@@ -483,7 +483,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsInvalidKRefCount) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -508,7 +508,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsZeroSpan) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -541,7 +541,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
     PriceQuery query{.spot = 100.0, .strike = 110.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
     double price = result->price(query);
@@ -573,7 +573,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
     PriceQuery query{.spot = 100.0, .strike = 90.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
     double price = result->price(query);
@@ -602,7 +602,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     std::vector<double> v = {0.10, 0.15, 0.20, 0.30};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
 
     // Single K_ref = spot, should produce valid prices
@@ -633,7 +633,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.03, 0.05, 0.07};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     ASSERT_TRUE(result.has_value());
 
     // Query at a tau within the short maturity
@@ -672,7 +672,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     // Should succeed — moneyness floor prevents negative/zero domain
     ASSERT_TRUE(result.has_value());
 }
@@ -700,7 +700,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNegativeKRefExpansionGuard) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.50};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     // With K_ref=0.01, the per-K_ref PDE build will likely fail.
     // The important thing is it doesn't crash or divide by zero.
     // It should either succeed or return a clean error.
@@ -734,7 +734,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedProbeFailurePropagation) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
@@ -759,7 +759,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedRejectsNegativeSpan) {
     std::vector<double> v = {0.10, 0.20, 0.30, 0.40};
     std::vector<double> r = {0.02, 0.05, 0.07, 0.10};
 
-    auto result = builder.build_segmented(seg_config, m, v, r);
+    auto result = builder.build_segmented(seg_config, {m, v, r});
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, PriceTableErrorCode::InvalidConfig);
 }
