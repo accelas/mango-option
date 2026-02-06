@@ -197,12 +197,12 @@ auto iv_result = iv_solver.solve(iv_query);
 
 **Pattern 3: Discrete Dividend IV Calculation**
 ```cpp
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
-    .grid = mango::ManualGrid{
+    .grid = mango::IVGrid{
         .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
         .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
@@ -219,15 +219,13 @@ auto result = solver->solve(query);
 
 **Pattern 4: Discrete Dividend IV with Adaptive Grid**
 ```cpp
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
-    .grid = mango::AdaptiveGrid{
-        .params = {.target_iv_error = 0.001},
-    },
+    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
         .discrete_dividends = {mango::Dividend{.calendar_time = 0.25, .amount = 1.50}},

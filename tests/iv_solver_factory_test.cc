@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
 #include <cmath>
 #include <iostream>

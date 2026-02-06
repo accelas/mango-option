@@ -19,7 +19,7 @@
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/option/iv_solver.hpp"
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/option_spec.hpp"
 #include <array>
 #include <cmath>

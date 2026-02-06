@@ -3,48 +3,18 @@
  * @file interpolated_iv_solver.hpp
  * @brief Implied volatility solver using B-spline price interpolation
  *
- * Solves for implied volatility using Newton's method with interpolated
- * option prices from pre-computed 4D B-spline surface. Achieves ~30us
- * IV calculation vs ~19ms with FDM (5,400x speedup).
+ * Provides:
+ * - InterpolatedIVSolver<Surface>: Newton-Raphson IV solver on any PriceSurface
+ * - AnyIVSolver: type-erased wrapper for convenient use
+ * - make_interpolated_iv_solver(): factory that builds the price surface and solver
  *
- * Usage:
- *   // After building price table
- *   auto surface_result = PriceTableSurface::create(...);
- *   auto solver = DefaultInterpolatedIVSolver::create(surface_result.value());
+ * Two construction paths:
+ * 1. Direct: build your own PriceSurface, then InterpolatedIVSolver::create()
+ * 2. Factory: fill IVSolverFactoryConfig, call make_interpolated_iv_solver()
  *
- *   // Solve for IV
- *   OptionSpec spec{
- *       .spot = 100.0,
- *       .strike = 100.0,
- *       .maturity = 1.0,
- *       .rate = 0.05,
- *       .dividend_yield = 0.02,
- *       .option_type = OptionType::PUT
- *   };
- *   IVQuery query{.option = spec, .market_price = 10.45};
- *
- *   auto result = solver->solve(query);
- *   if (result.has_value()) {
- *       std::cout << "IV: " << result->implied_vol << "\n";
- *   } else {
- *       std::cerr << "Error: " <<  "Error code: " << static_cast<int>(result.error().code) << "\n";
- *   }
- *
- * Algorithm:
- * - Newton-Raphson iteration: s_{n+1} = s_n - f(s_n)/f'(s_n)
- * - f(s) = Price(m, tau, s, r) - Market_Price
- * - f'(s) = Vega(m, tau, s, r) ~ [Price(s+e) - Price(s-e)] / (2e)
- * - Adaptive bounds based on intrinsic value analysis
- * - Typical convergence: 3-5 iterations
- *
- * Performance:
- * - B-spline eval: ~500ns per price query
- * - Vega computation: ~1us (2 B-spline evals + FD)
- * - Newton iterations: 3-5 typical
- * - Total IV solve: ~10-30us
- *
- * Template parameter:
- * - Surface must satisfy the PriceSurface concept (price, vega, bounds)
+ * Grid density is controlled via IVGrid.  When `adaptive` is set, the grid
+ * values serve as domain bounds for automatic refinement; otherwise they are
+ * exact interpolation knots.
  */
 
 #pragma once
@@ -53,6 +23,8 @@
 #include "mango/option/iv_result.hpp"
 #include "mango/option/table/price_surface_concept.hpp"
 #include "mango/option/table/american_price_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/adaptive_grid_types.hpp"
 #include "mango/support/error_types.hpp"
 #include "mango/support/parallel.hpp"
 #include "mango/math/root_finding.hpp"
@@ -60,6 +32,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <variant>
 #include <optional>
 
 namespace mango {
@@ -172,6 +145,71 @@ private:
 
 /// Type alias for backward compatibility: InterpolatedIVSolver with AmericanPriceSurface
 using DefaultInterpolatedIVSolver = InterpolatedIVSolver<AmericanPriceSurface>;
+
+// =====================================================================
+// Factory: config types, type-erased solver, and factory function
+// =====================================================================
+
+/// Standard path: continuous dividends only, maturity grid for interpolation
+struct StandardIVPath {
+    std::vector<double> maturity_grid;
+};
+
+/// Segmented path: discrete dividends with multi-K_ref surface
+struct SegmentedIVPath {
+    double maturity = 1.0;
+    std::vector<Dividend> discrete_dividends;
+    MultiKRefConfig kref_config;  ///< defaults to auto
+    std::vector<double> strike_grid;  ///< optional explicit strikes for per-strike surfaces
+};
+
+/// Configuration for the IV solver factory
+struct IVSolverFactoryConfig {
+    OptionType option_type = OptionType::PUT;
+    double spot = 100.0;
+    double dividend_yield = 0.0;
+    IVGrid grid;                                    ///< Grid points (exact or domain bounds)
+    std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
+    InterpolatedIVSolverConfig solver_config;       ///< Newton config
+    std::variant<StandardIVPath, SegmentedIVPath> path;
+};
+
+/// Type-erased IV solver wrapping either path
+class AnyIVSolver {
+public:
+    /// Solve for implied volatility (single query)
+    std::expected<IVSuccess, IVError> solve(const IVQuery& query) const;
+
+    /// Solve for implied volatility (batch with OpenMP)
+    BatchIVResult solve_batch(const std::vector<IVQuery>& queries) const;
+
+    /// Constructor from standard solver
+    explicit AnyIVSolver(InterpolatedIVSolver<AmericanPriceSurface> solver);
+
+    /// Constructor from segmented solver (spliced surface)
+    explicit AnyIVSolver(InterpolatedIVSolver<MultiKRefSurfaceWrapper<>> solver);
+    /// Constructor from per-strike solver (spliced surface)
+    explicit AnyIVSolver(InterpolatedIVSolver<StrikeSurfaceWrapper<>> solver);
+
+private:
+    using SolverVariant = std::variant<
+        InterpolatedIVSolver<AmericanPriceSurface>,
+        InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>,
+        InterpolatedIVSolver<StrikeSurfaceWrapper<>>
+    >;
+    SolverVariant solver_;
+};
+
+/// Factory function: build price surface and IV solver from config
+///
+/// If path holds StandardIVPath, uses the AmericanPriceSurface path.
+/// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
+/// If adaptive is set, uses AdaptiveGridBuilder
+/// to automatically refine grid density until the target IV error is met.
+///
+/// @param config Solver configuration
+/// @return Type-erased AnyIVSolver or ValidationError
+std::expected<AnyIVSolver, ValidationError> make_interpolated_iv_solver(const IVSolverFactoryConfig& config);
 
 // =====================================================================
 // Template implementation (must be in header for template instantiation)
