@@ -8,6 +8,7 @@
  * the base grid, then uniform midpoint insertion scales resolution.
  *
  * Standard path: continuous dividends (AdaptiveGridBuilder::build)
+ * Segmented path: discrete dividends (AdaptiveGridBuilder::build_segmented)
  *
  * Run with: bazel run //benchmarks:iv_interpolation_sweep
  */
@@ -20,6 +21,14 @@
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/option_grid.hpp"
+#include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
+#include "mango/option/iv_solver_factory.hpp"
+
+// QuantLib includes
+#include <ql/quantlib.hpp>
+namespace ql = QuantLib;
+
 #include <benchmark/benchmark.h>
 #include <array>
 #include <chrono>
@@ -293,6 +302,284 @@ static void BM_Adaptive_IV_Scaled(benchmark::State& state) {
 }
 
 BENCHMARK(BM_Adaptive_IV_Scaled)
+    ->ArgsProduct({
+        benchmark::CreateDenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1),
+        benchmark::CreateDenseRange(0, static_cast<int>(kScales.size()) - 1, 1),
+    })
+    ->Unit(benchmark::kMicrosecond);
+
+// ============================================================================
+// Discrete dividend scenario
+// ============================================================================
+
+// Discrete dividend scenario: quarterly $0.50
+static std::vector<Dividend> make_div_schedule(double maturity) {
+    return {
+        Dividend{.calendar_time = maturity * 0.25, .amount = 0.50},
+        Dividend{.calendar_time = maturity * 0.50, .amount = 0.50},
+        Dividend{.calendar_time = maturity * 0.75, .amount = 0.50},
+    };
+}
+
+// K_refs for multi-K_ref surface
+static const std::vector<double> kKRefs = {80.0, 100.0, 120.0};
+
+// Fixed evaluation date for QuantLib reproducibility
+static const ql::Date kEvalDate(1, ql::January, 2024);
+
+// ============================================================================
+// QuantLib pricing with discrete dividends (for reference prices)
+// ============================================================================
+
+static double price_ql_div(double spot, double strike, double vol, double maturity,
+                            double rate, double div_yield,
+                            const std::vector<Dividend>& divs,
+                            size_t grid_steps, size_t time_steps) {
+    ql::Date today = kEvalDate;
+    ql::Settings::instance().evaluationDate() = today;
+
+    auto maturity_date = today + ql::Period(static_cast<int>(maturity * 365), ql::Days);
+
+    auto exercise = ql::ext::make_shared<ql::AmericanExercise>(today, maturity_date);
+    auto payoff = ql::ext::make_shared<ql::PlainVanillaPayoff>(ql::Option::Put, strike);
+    ql::VanillaOption option(payoff, exercise);
+
+    auto spot_h = ql::Handle<ql::Quote>(ql::ext::make_shared<ql::SimpleQuote>(spot));
+    auto rate_h = ql::Handle<ql::YieldTermStructure>(
+        ql::ext::make_shared<ql::FlatForward>(today, rate, ql::Actual365Fixed()));
+    auto div_h = ql::Handle<ql::YieldTermStructure>(
+        ql::ext::make_shared<ql::FlatForward>(today, div_yield, ql::Actual365Fixed()));
+    auto vol_h = ql::Handle<ql::BlackVolTermStructure>(
+        ql::ext::make_shared<ql::BlackConstantVol>(today, ql::NullCalendar(), vol, ql::Actual365Fixed()));
+
+    auto process = ql::ext::make_shared<ql::BlackScholesMertonProcess>(spot_h, div_h, rate_h, vol_h);
+
+    std::vector<ql::Date> div_dates;
+    std::vector<ql::Real> div_amounts;
+    for (const auto& d : divs) {
+        div_dates.push_back(today + ql::Period(static_cast<int>(d.calendar_time * 365), ql::Days));
+        div_amounts.push_back(d.amount);
+    }
+
+    option.setPricingEngine(
+        ql::MakeFdBlackScholesVanillaEngine(process)
+            .withTGrid(time_steps)
+            .withXGrid(grid_steps)
+            .withCashDividends(div_dates, div_amounts));
+
+    return option.NPV();
+}
+
+// ============================================================================
+// Reference prices: QuantLib FD with discrete dividends (2001x20000)
+// ============================================================================
+
+static const std::vector<double>& get_div_reference_prices() {
+    static std::vector<double> prices = [] {
+        std::vector<double> p;
+        p.reserve(kStrikes.size());
+        auto divs = make_div_schedule(kMaturity);
+        for (double K : kStrikes) {
+            p.push_back(price_ql_div(kSpot, K, kTrueVol, kMaturity,
+                                      kRate, kDivYield, divs, 2001, 20000));
+        }
+        return p;
+    }();
+    return prices;
+}
+
+// ============================================================================
+// Cached segmented adaptive-scaled IV solvers (discrete dividends)
+// ============================================================================
+
+struct SegmentedSolverEntry {
+    std::unique_ptr<InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>> solver;
+    double build_time_ms = 0.0;
+    size_t n_pde_solves = 0;
+    std::array<size_t, 3> base_grid_sizes = {};  // [m, sigma, r]
+    int base_tau_points = 0;
+    bool target_met = false;
+};
+
+static const SegmentedSolverEntry& get_segmented_solver(int scale) {
+    static std::map<int, SegmentedSolverEntry> cache;
+    auto it = cache.find(scale);
+    if (it != cache.end()) return it->second;
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    // 1. Build adaptive base (only once, reuse grid for larger scales)
+    static SegmentedAdaptiveResult* base_result = nullptr;
+
+    if (!base_result) {
+        AdaptiveGridParams params;
+        params.target_iv_error = 2e-5;  // 2 bps
+
+        SegmentedAdaptiveConfig seg_config{
+            .spot = kSpot,
+            .option_type = OptionType::PUT,
+            .dividend_yield = kDivYield,
+            .discrete_dividends = make_div_schedule(kMaturity),
+            .maturity = kMaturity,
+            .kref_config = {.K_refs = kKRefs},
+        };
+
+        ManualGrid domain{
+            .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
+            .vol = {0.05, 0.10, 0.20, 0.30, 0.50},
+            .rate = {0.01, 0.03, 0.05, 0.10},
+        };
+
+        AdaptiveGridBuilder builder(params);
+        auto result = builder.build_segmented(seg_config, domain);
+        if (!result.has_value()) {
+            std::fprintf(stderr, "AdaptiveGridBuilder::build_segmented failed\n");
+            std::abort();
+        }
+        static SegmentedAdaptiveResult stored = std::move(*result);
+        base_result = &stored;
+    }
+
+    // 2. Build solver for this scale
+    std::array<size_t, 3> grid_sizes = {};
+    int tau_pts = 0;
+
+    // For scale > 1, refine base grid; for scale == 1, rebuild from base grid
+    // (MultiKRefSurface is move-only, so we always rebuild from grid specs)
+    auto m_refined = (scale <= 1) ? base_result->grid.moneyness
+                                  : refine_axis(base_result->grid.moneyness, scale);
+    auto v_refined = (scale <= 1) ? base_result->grid.vol
+                                  : refine_axis(base_result->grid.vol, scale);
+    auto r_refined = (scale <= 1) ? base_result->grid.rate
+                                  : refine_axis(base_result->grid.rate, scale);
+    int tau_refined = (scale <= 1) ? base_result->tau_points_per_segment
+                                   : base_result->tau_points_per_segment * scale;
+
+    grid_sizes = {m_refined.size(), v_refined.size(), r_refined.size()};
+    tau_pts = tau_refined;
+
+    // Rebuild each K_ref segment and assemble
+    auto divs = make_div_schedule(kMaturity);
+    DividendSpec div_spec{.dividend_yield = kDivYield, .discrete_dividends = divs};
+
+    std::vector<MultiKRefEntry> entries;
+    for (double K_ref : kKRefs) {
+        SegmentedPriceTableBuilder::Config seg_cfg{
+            .K_ref = K_ref,
+            .option_type = OptionType::PUT,
+            .dividends = div_spec,
+            .grid = {.moneyness = m_refined, .vol = v_refined, .rate = r_refined},
+            .maturity = kMaturity,
+            .tau_points_per_segment = tau_refined,
+        };
+        auto seg = SegmentedPriceTableBuilder::build(seg_cfg);
+        if (!seg.has_value()) {
+            std::fprintf(stderr, "SegmentedPriceTableBuilder::build failed (K_ref=%.0f, scale=%d)\n",
+                K_ref, scale);
+            std::abort();
+        }
+        entries.push_back({.K_ref = K_ref, .surface = std::move(*seg)});
+    }
+    auto multi = build_multi_kref_surface(std::move(entries));
+    if (!multi.has_value()) {
+        std::fprintf(stderr, "build_multi_kref_surface failed (scale=%d)\n", scale);
+        std::abort();
+    }
+
+    // 3. Wrap in MultiKRefSurfaceWrapper and create IV solver
+    auto minmax_m = std::minmax_element(base_result->grid.moneyness.begin(),
+                                         base_result->grid.moneyness.end());
+    auto minmax_v = std::minmax_element(base_result->grid.vol.begin(),
+                                         base_result->grid.vol.end());
+    auto minmax_r = std::minmax_element(base_result->grid.rate.begin(),
+                                         base_result->grid.rate.end());
+
+    MultiKRefSurfaceWrapper<>::Bounds bounds{
+        .m_min = *minmax_m.first,
+        .m_max = *minmax_m.second,
+        .tau_min = 0.0,
+        .tau_max = kMaturity,
+        .sigma_min = *minmax_v.first,
+        .sigma_max = *minmax_v.second,
+        .rate_min = *minmax_r.first,
+        .rate_max = *minmax_r.second,
+    };
+
+    auto wrapper = MultiKRefSurfaceWrapper<>(
+        std::move(*multi), bounds, OptionType::PUT, kDivYield);
+
+    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+        std::move(wrapper));
+    if (!solver.has_value()) {
+        std::fprintf(stderr, "InterpolatedIVSolver create failed (scale=%d)\n", scale);
+        std::abort();
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    auto [pos, ins] = cache.emplace(scale, SegmentedSolverEntry{
+        .solver = std::make_unique<InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>>(std::move(*solver)),
+        .build_time_ms = build_ms,
+        .n_pde_solves = 0,
+        .base_grid_sizes = grid_sizes,
+        .base_tau_points = tau_pts,
+        .target_met = true,
+    });
+    return pos->second;
+}
+
+// ============================================================================
+// BM_Adaptive_IV_Div_Scaled: segmented (discrete dividends)
+// ============================================================================
+
+static void BM_Adaptive_IV_Div_Scaled(benchmark::State& state) {
+    double K = kStrikes[static_cast<size_t>(state.range(0))];
+    int scale = kScales[static_cast<size_t>(state.range(1))];
+
+    double ref_price = get_div_reference_prices()[static_cast<size_t>(state.range(0))];
+    if (!std::isfinite(ref_price)) {
+        state.SkipWithError("Reference price not available");
+        return;
+    }
+
+    OptionSpec spec{
+        .spot = kSpot, .strike = K, .maturity = kMaturity,
+        .rate = kRate, .dividend_yield = kDivYield,
+        .option_type = OptionType::PUT
+    };
+    IVQuery query(spec, ref_price);
+
+    const auto& entry = get_segmented_solver(scale);
+
+    std::expected<IVSuccess, IVError> last_result;
+    for (auto _ : state) {
+        last_result = entry.solver->solve(query);
+        if (!last_result) {
+            state.SkipWithError("Segmented interp IV solve failed");
+            return;
+        }
+        benchmark::DoNotOptimize(last_result);
+    }
+
+    double iv = last_result->implied_vol;
+    double iv_err_bps = std::abs(iv - kTrueVol) * 10000.0;
+
+    state.SetLabel(std::format("K={:.0f} {}x segmented", K, scale));
+    state.counters["strike"] = K;
+    state.counters["scale"] = scale;
+    state.counters["iv"] = iv;
+    state.counters["iv_err_bps"] = iv_err_bps;
+    state.counters["iters"] = static_cast<double>(last_result->iterations);
+    state.counters["build_ms"] = entry.build_time_ms;
+    state.counters["n_pde_solves"] = static_cast<double>(entry.n_pde_solves);
+    state.counters["base_grid_m"] = static_cast<double>(entry.base_grid_sizes[0]);
+    state.counters["base_grid_sig"] = static_cast<double>(entry.base_grid_sizes[1]);
+    state.counters["base_grid_r"] = static_cast<double>(entry.base_grid_sizes[2]);
+    state.counters["base_tau_pts"] = static_cast<double>(entry.base_tau_points);
+}
+
+BENCHMARK(BM_Adaptive_IV_Div_Scaled)
     ->ArgsProduct({
         benchmark::CreateDenseRange(0, static_cast<int>(kStrikes.size()) - 1, 1),
         benchmark::CreateDenseRange(0, static_cast<int>(kScales.size()) - 1, 1),
