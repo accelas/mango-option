@@ -1502,10 +1502,17 @@ AdaptiveGridBuilder::build_segmented_strike(
     double best_p95 = p95_err;
 
     for (int retry = 0; retry < kMaxRetries && !target_met; ++retry) {
-        size_t bumped_m = std::min(build.gsz.moneyness + 2, params_.max_points_per_dim);
-        size_t bumped_v = std::min(build.gsz.vol + 1, params_.max_points_per_dim);
-        size_t bumped_r = std::min(build.gsz.rate + 1, params_.max_points_per_dim);
-        int bumped_tau = std::min(build.gsz.tau_points + 2,
+        // Scale bump size based on error ratio — bigger errors need bigger bumps
+        double error_ratio = best_max / kMaxAcceptable;
+        double bump_factor = std::min(std::max(error_ratio, 1.5), 4.0);
+        size_t m_bump = static_cast<size_t>(std::ceil(2.0 * bump_factor));
+        size_t vr_bump = static_cast<size_t>(std::ceil(1.0 * bump_factor));
+        int tau_bump = static_cast<int>(std::ceil(2.0 * bump_factor));
+
+        size_t bumped_m = std::min(build.gsz.moneyness + m_bump, params_.max_points_per_dim);
+        size_t bumped_v = std::min(build.gsz.vol + vr_bump, params_.max_points_per_dim);
+        size_t bumped_r = std::min(build.gsz.rate + vr_bump, params_.max_points_per_dim);
+        int bumped_tau = std::min(build.gsz.tau_points + tau_bump,
             static_cast<int>(params_.max_points_per_dim));
 
         // Recompute tau_target_dt with bumped tau
