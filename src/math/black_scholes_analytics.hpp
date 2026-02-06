@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <algorithm>
 #include <cmath>
+
+#include "mango/option/option_spec.hpp"
 
 namespace mango {
 
@@ -43,6 +46,49 @@ inline double bs_vega(double spot, double strike, double tau, double sigma, doub
     }
     double d1 = bs_d1(spot, strike, tau, sigma, rate, dividend_yield);
     return spot * std::exp(-dividend_yield * tau) * std::sqrt(tau) * norm_pdf(d1);
+}
+
+/// Black-Scholes option price
+///
+/// @param spot Current underlying price
+/// @param strike Strike price
+/// @param tau Time to expiry in years
+/// @param sigma Volatility
+/// @param rate Risk-free rate
+/// @param dividend_yield Continuous dividend yield
+/// @param option_type PUT or CALL
+/// @return European option price
+inline double bs_price(double spot, double strike, double tau, double sigma, double rate,
+                       double dividend_yield, OptionType option_type) {
+    // Edge cases: zero maturity or zero vol -> intrinsic value
+    if (tau <= 0.0 || sigma <= 0.0) {
+        if (tau <= 0.0) {
+            if (option_type == OptionType::PUT) {
+                return std::max(strike - spot, 0.0);
+            } else {
+                return std::max(spot - strike, 0.0);
+            }
+        }
+        // Zero vol, positive maturity: discounted intrinsic
+        double S_fwd = spot * std::exp(-dividend_yield * tau);
+        double K_disc = strike * std::exp(-rate * tau);
+        if (option_type == OptionType::PUT) {
+            return std::max(K_disc - S_fwd, 0.0);
+        } else {
+            return std::max(S_fwd - K_disc, 0.0);
+        }
+    }
+
+    double d1 = bs_d1(spot, strike, tau, sigma, rate, dividend_yield);
+    double d2 = d1 - sigma * std::sqrt(tau);
+    double exp_qt = std::exp(-dividend_yield * tau);
+    double exp_rt = std::exp(-rate * tau);
+
+    if (option_type == OptionType::PUT) {
+        return strike * exp_rt * norm_cdf(-d2) - spot * exp_qt * norm_cdf(-d1);
+    } else {
+        return spot * exp_qt * norm_cdf(d1) - strike * exp_rt * norm_cdf(d2);
+    }
 }
 
 }  // namespace mango

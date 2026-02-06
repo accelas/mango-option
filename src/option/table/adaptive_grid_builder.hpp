@@ -5,8 +5,8 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/slice_cache.hpp"
 #include "mango/option/table/error_attribution.hpp"
-#include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"
@@ -59,14 +59,33 @@ public:
           size_t n_time,
           OptionType type = OptionType::PUT);
 
+    /// Build price table with adaptive grid refinement (auto-estimated grid)
+    ///
+    /// @param chain Option grid providing domain bounds
+    /// @param pde_grid PDE grid specification (PDEGridConfig or GridAccuracyParams)
+    /// @param type Option type (default: PUT)
+    /// @return AdaptiveResult with surface and diagnostics, or error
+    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
+    build(const OptionGrid& chain,
+          PDEGridSpec pde_grid,
+          OptionType type = OptionType::PUT);
+
     /// Build segmented multi-K_ref surface with adaptive grid refinement.
     /// Probes 2-3 representative K_refs, takes per-axis max grid sizes,
     /// then builds all segments with a uniform grid.
-    [[nodiscard]] std::expected<SegmentedMultiKRefSurface, PriceTableError>
+    [[nodiscard]] std::expected<MultiKRefSurface<>, PriceTableError>
     build_segmented(const SegmentedAdaptiveConfig& config,
                     const std::vector<double>& moneyness_domain,
                     const std::vector<double>& vol_domain,
                     const std::vector<double>& rate_domain);
+
+    /// Build segmented surface using per-strike surfaces (no K_ref interpolation).
+    [[nodiscard]] std::expected<StrikeSurface<>, PriceTableError>
+    build_segmented_strike(const SegmentedAdaptiveConfig& config,
+                           const std::vector<double>& strike_grid,
+                           const std::vector<double>& moneyness_domain,
+                           const std::vector<double>& vol_domain,
+                           const std::vector<double>& rate_domain);
 
 private:
     AdaptiveGridParams params_;

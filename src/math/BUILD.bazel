@@ -11,6 +11,7 @@ filegroup(
 cc_library(
     name = "black_scholes_analytics",
     hdrs = ["black_scholes_analytics.hpp"],
+    deps = ["//src/option:option_spec"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/math",
     include_prefix = "mango/math",
