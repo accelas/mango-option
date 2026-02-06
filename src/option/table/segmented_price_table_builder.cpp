@@ -6,6 +6,7 @@
 #include "mango/option/european_option.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <numeric>
 
@@ -143,8 +144,9 @@ BoundarySnapshot extract_boundary_snapshot(
                     auto eu = EuropeanOptionSolver(
                         OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau_end,
                             .rate = rate, .dividend_yield = dividend_yield,
-                            .option_type = option_type}, sigma).solve().value();
-                    snap.values[offset + i] = (tensor_val + eu.value()) / K_ref;
+                            .option_type = option_type}, sigma).solve();
+                    double eu_price = eu.has_value() ? eu->value() : 0.0;
+                    snap.values[offset + i] = (tensor_val + eu_price) / K_ref;
                 } else {
                     // RawPrice: tensor already stores V/K_ref
                     snap.values[offset + i] = tensor_val;
@@ -303,6 +305,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // Dividend amount at this boundary.
             double boundary_div = dividends[dividends.size() - seg_idx].amount;
 
+            assert(prev_snapshot.has_value() && "snapshot must exist for chained segments");
             ChainedICContext ic_ctx{
                 .snapshot = &(*prev_snapshot),
                 .K_ref = K_ref,
@@ -356,11 +359,16 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto batch_result = batch_solver.solve_batch(
             batch_params, true, setup_callback);
 
-        // 5. Failure rate check (matches builder.build() behavior)
-        const double failure_rate = static_cast<double>(batch_result.failed_count) /
-                                    static_cast<double>(batch_result.results.size());
-        if (failure_rate > 0.5) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+        // 5. Failure rate check
+        // Segment 0: strict (0.0), matching builder.build() default.
+        // Chained segments: lenient (0.5), matching old behavior (no check).
+        if (!batch_result.results.empty()) {
+            const double max_rate = is_last_segment ? 0.0 : 0.5;
+            const double failure_rate = static_cast<double>(batch_result.failed_count) /
+                                        static_cast<double>(batch_result.results.size());
+            if (failure_rate > max_rate) {
+                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+            }
         }
 
         // 6. Extract tensor
