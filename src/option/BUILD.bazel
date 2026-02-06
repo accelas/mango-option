@@ -14,6 +14,8 @@ cc_library(
     hdrs = ["grid_spec_types.hpp"],
     deps = [
         "//src/pde/core:grid",
+        "//src/pde/core:time_domain",
+        ":option_spec",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option",

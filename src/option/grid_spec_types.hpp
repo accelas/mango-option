@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "mango/pde/core/grid.hpp"
+#include "mango/option/option_spec.hpp"
 #include <cmath>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -59,5 +61,15 @@ struct PDEGridConfig {
 using PDEGridSpec = std::variant<PDEGridConfig, GridAccuracyParams>;
 
 GridAccuracyParams make_grid_accuracy(GridAccuracyProfile profile);
+
+/// Estimate grid specification from option parameters.
+std::pair<GridSpec<double>, TimeDomain> estimate_pde_grid(
+    const PricingParams& params,
+    const GridAccuracyParams& accuracy = GridAccuracyParams{});
+
+/// Compute global grid for batch processing.
+std::pair<GridSpec<double>, TimeDomain> estimate_batch_pde_grid(
+    std::span<const PricingParams> params,
+    const GridAccuracyParams& accuracy = GridAccuracyParams{});
 
 }  // namespace mango

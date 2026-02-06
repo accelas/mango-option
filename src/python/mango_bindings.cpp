@@ -12,6 +12,7 @@
 #include "mango/option/iv_solver.hpp"
 #include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/price_table_workspace.hpp"
