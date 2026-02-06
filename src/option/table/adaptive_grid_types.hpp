@@ -112,8 +112,11 @@ struct SegmentedAdaptiveResult {
 /// Result from adaptive segmented grid building (per-strike path)
 struct StrikeAdaptiveResult {
     StrikeSurface<> surface;
-    ManualGrid grid;  ///< The grid sizes adaptive chose
+    ManualGrid grid;            ///< The grid sizes adaptive chose
     int tau_points_per_segment;
+    double max_iv_error = 0.0;  ///< Worst IV error across all validation points
+    double p95_iv_error = 0.0;  ///< 95th percentile IV error
+    bool target_met = false;    ///< Whether acceptance thresholds were satisfied
 };
 
 }  // namespace mango

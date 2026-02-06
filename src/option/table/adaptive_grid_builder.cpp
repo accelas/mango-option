@@ -1388,10 +1388,154 @@ AdaptiveGridBuilder::build_segmented_strike(
     if (!surface.has_value()) {
         return std::unexpected(surface.error());
     }
+
+    auto& build = *result;
+    auto final_m = linspace(build.expanded_min_m, build.max_m, build.gsz.moneyness);
+    auto final_v = linspace(build.min_vol, build.max_vol, build.gsz.vol);
+    auto final_r = linspace(build.min_rate, build.max_rate, build.gsz.rate);
+
+    // === Validation pass with FD American vega ===
+    constexpr double kMaxAcceptable = 20e-4;   // 20 bps
+    constexpr double kP95Acceptable = 5e-4;    // 5 bps
+    constexpr double kVegaBumpH = 0.005;       // 50 bps sigma bump
+    constexpr int kMaxRetries = 2;
+
+    auto validate_surface = [&](const StrikeSurface<>& surf)
+        -> std::pair<double, double>  // {max_error, p95_error}
+    {
+        auto lhs = latin_hypercube<3>(params_.validation_samples, params_.lhs_seed + 777);
+        std::array<std::pair<double, double>, 3> bounds = {{
+            {build.min_tau, build.max_tau},
+            {build.min_vol, build.max_vol},
+            {build.min_rate, build.max_rate},
+        }};
+        auto samples = scale_lhs_samples(lhs, bounds);
+
+        std::vector<double> errors;
+        errors.reserve(samples.size() * strikes.size());
+
+        for (const auto& s : samples) {
+            double tau = s[0], sigma = s[1], rate = s[2];
+
+            for (double K : strikes) {
+                // Interpolated price
+                double interp = surf.price(PriceQuery{
+                    config.spot, K, tau, sigma, rate});
+
+                // Reference FD price
+                PricingParams p;
+                p.spot = config.spot;
+                p.strike = K;
+                p.maturity = tau;
+                p.rate = rate;
+                p.dividend_yield = config.dividend_yield;
+                p.option_type = config.option_type;
+                p.volatility = sigma;
+                p.discrete_dividends = config.discrete_dividends;
+                auto fd = solve_american_option(p);
+                if (!fd.has_value()) continue;
+
+                double price_error = std::abs(interp - fd->value());
+
+                // FD American vega via central difference
+                double sigma_lo = std::max(sigma - kVegaBumpH, 0.01);
+                double sigma_hi = sigma + kVegaBumpH;
+                p.volatility = sigma_lo;
+                auto fd_lo = solve_american_option(p);
+                p.volatility = sigma_hi;
+                auto fd_hi = solve_american_option(p);
+
+                double am_vega = 0.0;
+                if (fd_lo.has_value() && fd_hi.has_value()) {
+                    am_vega = (fd_hi->value() - fd_lo->value()) /
+                              (sigma_hi - sigma_lo);
+                }
+                double vega_clamped = std::max(std::abs(am_vega), params_.vega_floor);
+                double iv_err = price_error / vega_clamped;
+
+                // Cap when price is already tiny
+                double price_tol = kMaxAcceptable * params_.vega_floor;
+                if (price_error <= price_tol) {
+                    iv_err = std::min(iv_err, kMaxAcceptable);
+                }
+
+                errors.push_back(iv_err);
+            }
+        }
+
+        if (errors.empty()) return {0.0, 0.0};
+
+        std::sort(errors.begin(), errors.end());
+        double max_err = errors.back();
+        size_t p95_idx = std::min(
+            static_cast<size_t>(errors.size() * 0.95),
+            errors.size() - 1);
+        double p95_err = errors[p95_idx];
+        return {max_err, p95_err};
+    };
+
+    auto [max_err, p95_err] = validate_surface(*surface);
+    bool target_met = (max_err <= kMaxAcceptable && p95_err <= kP95Acceptable);
+
+    // Retry loop: bump grids and rebuild if thresholds breached
+    auto best_surface = std::move(*surface);
+    double best_max = max_err;
+    double best_p95 = p95_err;
+
+    for (int retry = 0; retry < kMaxRetries && !target_met; ++retry) {
+        size_t bumped_m = std::min(build.gsz.moneyness + 2, params_.max_points_per_dim);
+        size_t bumped_v = std::min(build.gsz.vol + 1, params_.max_points_per_dim);
+        size_t bumped_r = std::min(build.gsz.rate + 1, params_.max_points_per_dim);
+        int bumped_tau = std::min(build.gsz.tau_points + 2,
+            static_cast<int>(params_.max_points_per_dim));
+
+        // Recompute tau_target_dt with bumped tau
+        double min_seg_width = shortest_segment_width(
+            config.discrete_dividends, config.maturity);
+        double retry_dt = (bumped_tau > 1)
+            ? min_seg_width / static_cast<double>(bumped_tau - 1)
+            : 0.0;
+
+        auto retry_m = linspace(build.expanded_min_m, build.max_m, bumped_m);
+        auto retry_v = linspace(build.min_vol, build.max_vol, bumped_v);
+        auto retry_r = linspace(build.min_rate, build.max_rate, bumped_r);
+
+        auto retry_cfg = make_seg_config(config, retry_m, retry_v, retry_r,
+                                         bumped_tau, retry_dt);
+        auto retry_segs = build_segmented_surfaces(retry_cfg, strikes);
+        if (!retry_segs.has_value()) continue;
+
+        std::vector<StrikeEntry> retry_entries;
+        for (size_t i = 0; i < strikes.size(); ++i) {
+            retry_entries.push_back({.strike = strikes[i],
+                                     .surface = std::move((*retry_segs)[i])});
+        }
+        auto retry_surf = build_strike_surface(std::move(retry_entries), true);
+        if (!retry_surf.has_value()) continue;
+
+        auto [rm, rp] = validate_surface(*retry_surf);
+        if (rm < best_max) {
+            best_surface = std::move(*retry_surf);
+            best_max = rm;
+            best_p95 = rp;
+            final_m = retry_m;
+            final_v = retry_v;
+            final_r = retry_r;
+            build.gsz.moneyness = bumped_m;
+            build.gsz.vol = bumped_v;
+            build.gsz.rate = bumped_r;
+            build.gsz.tau_points = bumped_tau;
+        }
+        target_met = (best_max <= kMaxAcceptable && best_p95 <= kP95Acceptable);
+    }
+
     return StrikeAdaptiveResult{
-        .surface = std::move(*surface),
-        .grid = result->seg_template.grid,
-        .tau_points_per_segment = result->seg_template.tau_points_per_segment,
+        .surface = std::move(best_surface),
+        .grid = {.moneyness = final_m, .vol = final_v, .rate = final_r},
+        .tau_points_per_segment = build.gsz.tau_points,
+        .max_iv_error = best_max,
+        .p95_iv_error = best_p95,
+        .target_met = target_met,
     };
 }
 
