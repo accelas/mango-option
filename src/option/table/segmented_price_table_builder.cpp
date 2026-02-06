@@ -20,14 +20,26 @@ struct ChainedICContext {
     bool prev_is_eep;      ///< Whether previous segment uses EEP decomposition
 };
 
-/// Generate a τ grid for a segment [tau_start, tau_end] with at least
-/// `min_points` points (including endpoints).  The first segment (closest
-/// to expiry) uses a small ε instead of exactly 0 to avoid PDE degeneracy.
+/// Generate a τ grid for a segment [tau_start, tau_end].
+/// When tau_target_dt > 0, scales points proportionally to segment width.
+/// Otherwise falls back to constant min_points.
+/// The first segment (closest to expiry) uses a small ε instead of exactly 0
+/// to avoid PDE degeneracy.
 std::vector<double> make_segment_tau_grid(
-    double tau_start, double tau_end, int min_points, bool is_last_segment)
+    double tau_start, double tau_end, int min_points, bool is_last_segment,
+    double tau_target_dt = 0.0, int tau_points_min = 4, int tau_points_max = 30)
 {
-    // Ensure at least 4 points (B-spline minimum)
-    int n = std::max(min_points, 4);
+    double seg_width = tau_end - tau_start;
+
+    int n;
+    if (tau_target_dt > 0.0) {
+        // Width-proportional: wider segments get more points
+        n = static_cast<int>(std::ceil(seg_width / tau_target_dt)) + 1;
+        n = std::clamp(n, tau_points_min, tau_points_max);
+    } else {
+        // Legacy constant mode
+        n = std::max(min_points, 4);
+    }
 
     std::vector<double> grid;
     grid.reserve(static_cast<size_t>(n));
@@ -165,8 +177,6 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     segment_configs.reserve(n_segments);
 
     // The "previous" surface, used to generate chained ICs for earlier segments.
-    // After building segment 0, this holds segment 0's surface; after segment 1,
-    // segment 1's surface; etc.
     AmericanPriceSurface* prev_surface_ptr = nullptr;
 
     for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
@@ -178,7 +188,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         // Local τ grid for this segment
         auto local_tau = make_segment_tau_grid(
-            0.0, seg_width, config.tau_points_per_segment, is_last_segment);
+            0.0, seg_width, config.tau_points_per_segment, is_last_segment,
+            config.tau_target_dt, config.tau_points_min, config.tau_points_max);
 
         // Determine surface content mode
         SurfaceContent content = is_last_segment
@@ -198,6 +209,22 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto& [builder, axes] = *setup;
         builder.set_surface_content(content);
 
+        // ------ Manual build path (used for all segments) ------
+
+        // 1. Create batch params
+        auto batch_params = builder.make_batch(axes);
+
+        // 2. Estimate PDE grid (same as builder.build() would)
+        auto [est_grid, est_td] = builder.estimate_pde_grid(batch_params, axes);
+        PDEGridSpec custom_grid = PDEGridConfig{est_grid, est_td.n_steps(), {}};
+
+        // 3. Create batch solver with snapshot times
+        BatchAmericanOptionSolver batch_solver;
+        batch_solver.set_snapshot_times(axes.grids[1]);
+
+        // 4. Build setup callback (chained segments only)
+        BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
+
         if (!is_last_segment) {
             // Chained segment: τ=0 is the boundary, needs custom IC
             builder.set_allow_tau_zero(true);
@@ -209,22 +236,10 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // τ at the boundary of the previous segment (in its local coords)
             double prev_seg_tau_local_end = boundaries[seg_idx] - boundaries[seg_idx - 1];
 
-            // Capture prev_surface by pointer (it's in the segments vector)
-            AmericanPriceSurface* prev = prev_surface_ptr;
-
             // Dividend amount at this boundary.
             double boundary_div = dividends[dividends.size() - seg_idx].amount;
 
-            // ------ Manual build for chained segment ------
-
-            // Create batch params from the builder
-            auto batch_params = builder.make_batch(axes);
-
-            // Create batch solver with per-index setup
-            BatchAmericanOptionSolver batch_solver;
-            batch_solver.set_snapshot_times(axes.grids[1]);
-
-            // Build setup callback that sets per-solve IC
+            AmericanPriceSurface* prev = prev_surface_ptr;
             ChainedICContext ic_ctx{
                 .prev = prev,
                 .K_ref = K_ref,
@@ -234,13 +249,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                                 SurfaceContent::EarlyExercisePremium),
             };
 
-            auto setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
+            setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
                 size_t index, AmericanOptionSolver& solver)
             {
                 double sigma = vol_grid[index / Nr];
                 double rate = rate_grid[index % Nr];
 
-                // IC maps log-moneyness x → normalized price u = V/K.
+                // IC maps log-moneyness x → normalized price u = V/K_ref.
                 // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
                 solver.set_initial_condition(
                     [ic_ctx, sigma, rate](
@@ -257,77 +272,69 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                         }
                     });
             };
+        }
 
-            // Estimate grid using the builder's internal approach
-            auto batch_result = batch_solver.solve_batch(
-                batch_params, true, setup_callback);
+        // 5. Solve batch with estimated grid
+        auto batch_result = batch_solver.solve_batch(
+            batch_params, true, setup_callback, custom_grid);
 
-            // Extract tensor
-            auto extraction = builder.extract_tensor(batch_result, axes);
-            if (!extraction.has_value()) {
+        // 6. Failure rate check
+        // Segment 0: strict (0.0), matching builder.build() default.
+        // Chained segments: lenient (0.5), matching old behavior (no check).
+        if (!batch_result.results.empty()) {
+            const double max_rate = is_last_segment ? 0.0 : 0.5;
+            const double failure_rate = static_cast<double>(batch_result.failed_count) /
+                                        static_cast<double>(batch_result.results.size());
+            if (failure_rate > max_rate) {
                 return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
             }
-
-            // Repair failures
-            auto repair = builder.repair_failed_slices(
-                extraction->tensor, extraction->failed_pde,
-                extraction->failed_spline, axes);
-            if (!repair.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
-            }
-
-            // Fit B-spline coefficients
-            auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
-            if (!fit_result.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
-            }
-            auto coeffs = std::move(fit_result->coefficients);
-
-            // Build PriceTableSurface manually
-            PriceTableMetadata metadata{
-                .K_ref = K_ref,
-                .dividends = {.dividend_yield = config.dividends.dividend_yield},
-                .content = content,
-            };
-
-            auto surface = PriceTableSurface<4>::build(
-                axes, std::move(coeffs), metadata);
-            if (!surface.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            auto aps = AmericanPriceSurface::create(*surface, config.option_type);
-            if (!aps.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            segment_configs.push_back(SegmentConfig{
-                .surface = std::move(*aps),
-                .tau_start = tau_start,
-                .tau_end = tau_end,
-            });
-            prev_surface_ptr = &segment_configs.back().surface;
-
-        } else {
-            // Last segment (closest to expiry): standard build with EEP
-            auto result = builder.build(axes);
-            if (!result.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            auto aps = AmericanPriceSurface::create(
-                result->surface, config.option_type);
-            if (!aps.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            segment_configs.push_back(SegmentConfig{
-                .surface = std::move(*aps),
-                .tau_start = tau_start,
-                .tau_end = tau_end,
-            });
-            prev_surface_ptr = &segment_configs.back().surface;
         }
+
+        // 7. Extract tensor
+        auto extraction = builder.extract_tensor(batch_result, axes);
+        if (!extraction.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+        }
+
+        // 8. Repair failures
+        auto repair = builder.repair_failed_slices(
+            extraction->tensor, extraction->failed_pde,
+            extraction->failed_spline, axes);
+        if (!repair.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
+        }
+
+        // 9. Fit B-spline coefficients
+        auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
+        if (!fit_result.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+        }
+        auto coeffs = std::move(fit_result->coefficients);
+
+        // 10. Build PriceTableSurface and AmericanPriceSurface
+        PriceTableMetadata metadata{
+            .K_ref = K_ref,
+            .dividends = {.dividend_yield = config.dividends.dividend_yield},
+            .content = content,
+        };
+
+        auto surface = PriceTableSurface<4>::build(
+            axes, std::move(coeffs), metadata);
+        if (!surface.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+        }
+
+        auto aps = AmericanPriceSurface::create(*surface, config.option_type);
+        if (!aps.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+        }
+
+        segment_configs.push_back(SegmentConfig{
+            .surface = std::move(*aps),
+            .tau_start = tau_start,
+            .tau_end = tau_end,
+        });
+        prev_surface_ptr = &segment_configs.back().surface;
     }
 
     // =====================================================================
