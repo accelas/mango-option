@@ -121,7 +121,7 @@ TEST(SegmentedPriceTableBuilderTest, InvalidMaturityFails) {
 }
 
 // ===========================================================================
-// Regression tests for FD re-anchoring (boundary snapshot IC chaining)
+// Regression tests for unified manual build path
 // ===========================================================================
 
 // Regression: Manual build path for segment 0 must produce the same result
@@ -158,11 +158,11 @@ TEST(SegmentedPriceTableBuilderTest, ManualPathMatchesBuildPath) {
     EXPECT_TRUE(std::isfinite(price2));
 }
 
-// Regression: Re-anchored chaining with boundary snapshots must produce
-// finite, positive prices across all segments with multiple dividends.
-// Bug: Old approach sampled previous segment's B-spline surface for IC,
-// which introduced interpolation artifacts that compound across segments.
-TEST(SegmentedPriceTableBuilderTest, ReanchoredChainingReducesError) {
+// Regression: Unified manual build path must produce finite, positive prices
+// across all segments with multiple dividends.
+// Bug: Manual path for all segments (including segment 0) could diverge from
+// the old mixed path (builder.build() for segment 0, manual for chained).
+TEST(SegmentedPriceTableBuilderTest, UnifiedManualPathMultiDividend) {
     // 3 dividends = 4 segments (quarterly $0.50 dividends)
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
