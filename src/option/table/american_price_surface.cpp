@@ -121,10 +121,6 @@ double AmericanPriceSurface::theta(double spot, double strike, double tau,
     return -eep_dtau + eu.theta();
 }
 
-const PriceTableSurface<4>& AmericanPriceSurface::eep_surface() const {
-    return *surface_;
-}
-
 const PriceTableMetadata& AmericanPriceSurface::metadata() const {
     return surface_->metadata();
 }
