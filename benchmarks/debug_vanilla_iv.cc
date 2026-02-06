@@ -5,7 +5,7 @@
 
 #include "mango/option/american_option.hpp"
 #include "mango/option/european_option.hpp"
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/table/adaptive_grid_builder.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include "mango/math/cubic_spline_solver.hpp"

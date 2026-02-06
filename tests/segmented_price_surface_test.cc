@@ -20,7 +20,7 @@ TEST(SegmentedSurfaceTest, FindsCorrectSegment) {
             .dividend_yield = 0.0,
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -55,7 +55,7 @@ TEST(SegmentedSurfaceTest, BoundaryTauGoesToCorrectSegment) {
             .dividend_yield = 0.0,
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -85,7 +85,7 @@ TEST(SegmentedSurfaceTest, VegaIsPositive) {
             .dividend_yield = 0.0,
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -115,7 +115,7 @@ TEST(SegmentedSurfaceTest, BoundsSpanFullMaturityRange) {
             .dividend_yield = 0.0,
             .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -152,7 +152,7 @@ TEST(SegmentedSurfaceTest, MultipleDividendsCreateMultipleSegments) {
                 {.calendar_time = 0.75, .amount = 1.5},
             }
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -186,7 +186,7 @@ TEST(SegmentedSurfaceTest, NoDividendsProducesSingleSegment) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividends = {.dividend_yield = 0.02},  // No discrete dividends
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -217,7 +217,7 @@ TEST(SegmentedSurfaceTest, DividendAtExpiryIsIgnored) {
             .dividend_yield = 0.0,
             .discrete_dividends = {{.calendar_time = 1.0, .amount = 5.0}}
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},
@@ -238,7 +238,7 @@ TEST(SegmentedSurfaceTest, DividendAtTimeZeroIsIgnored) {
             .dividend_yield = 0.0,
             .discrete_dividends = {{.calendar_time = 0.0, .amount = 3.0}}
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.04, 0.05},

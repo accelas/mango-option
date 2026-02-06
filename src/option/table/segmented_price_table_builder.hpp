@@ -24,7 +24,7 @@ public:
         DividendSpec dividends;  ///< Continuous yield + discrete schedule
 
         /// Grid specification: moneyness, vol, and rate grids
-        ManualGrid grid;
+        IVGrid grid;
 
         double maturity;  // T in years
 

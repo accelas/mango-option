@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 #include "mango/option/american_option.hpp"
 #include "mango/option/american_option_batch.hpp"
 
@@ -20,7 +20,7 @@ protected:
         IVSolverFactoryConfig config{
             .option_type = OptionType::PUT,
             .spot = 100.0,
-            .grid = ManualGrid{
+            .grid = IVGrid{
                 .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
                 .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
                 .rate = {0.02, 0.03, 0.05, 0.07},
@@ -210,7 +210,7 @@ TEST(DiscreteDividendIVRegressionTest, NoDividendMatchesExisting) {
         .option_type = OptionType::PUT,
         .spot = 100.0,
         .dividend_yield = 0.02,
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
             .rate = {0.02, 0.03, 0.05, 0.07},

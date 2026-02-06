@@ -25,7 +25,6 @@
 #include "mango/option/option_grid.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
-#include "mango/option/iv_solver_factory.hpp"
 
 #include <benchmark/benchmark.h>
 #include <array>
@@ -418,7 +417,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
             .kref_config = {.K_refs = kStrikeGrid},
         };
 
-        ManualGrid domain{
+        IVGrid domain{
             .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
             .vol = {0.05, 0.10, 0.20, 0.30, 0.50},
             .rate = {0.01, 0.03, 0.05, 0.10},

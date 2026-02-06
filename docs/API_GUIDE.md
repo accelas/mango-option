@@ -520,13 +520,13 @@ The result is a `SegmentedPriceSurface` — an ordered list of segments that tog
 The `make_interpolated_iv_solver` factory handles all the segmented construction:
 
 ```cpp
-#include "mango/option/iv_solver_factory.hpp"
+#include "mango/option/interpolated_iv_solver.hpp"
 
 mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
-    .grid = mango::ManualGrid{
+    .grid = mango::IVGrid{
         .moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3},
         .vol = {0.10, 0.15, 0.20, 0.25, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
@@ -546,7 +546,7 @@ auto solver = mango::make_interpolated_iv_solver(config);
 The factory dispatches on two orthogonal variants:
 
 - **`path`**: `StandardIVPath` (continuous dividends) or `SegmentedIVPath` (discrete dividends)
-- **`grid`**: `ManualGrid` (explicit grid points) or `AdaptiveGrid` (automatic density tuning to target IV accuracy)
+- **`grid`**: `IVGrid` grid points (exact knots or domain bounds), with optional `adaptive` for automatic density tuning to target IV accuracy
 
 ### Standard Path with Manual Grid
 
@@ -555,7 +555,7 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.02,
-    .grid = mango::ManualGrid{
+    .grid = mango::IVGrid{
         .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
         .vol = {0.10, 0.15, 0.20, 0.30, 0.40},
         .rate = {0.02, 0.03, 0.05, 0.07},
@@ -577,9 +577,7 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.02,
-    .grid = mango::AdaptiveGrid{
-        .params = {.target_iv_error = 0.001},
-    },
+    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
     .path = mango::StandardIVPath{
         .maturity_grid = {0.1, 0.25, 0.5, 1.0},
     },
@@ -588,7 +586,7 @@ mango::IVSolverFactoryConfig config{
 auto solver = mango::make_interpolated_iv_solver(config);
 ```
 
-`AdaptiveGrid` includes sensible domain-bound defaults (moneyness 0.7–1.3, vol 0.05–0.50, rate 0.01–0.10). The builder iteratively refines grid density, validating via Latin Hypercube sampling against fresh PDE solves, until the target is met.
+`IVGrid` includes sensible domain-bound defaults (moneyness 0.7–1.3, vol 0.05–0.50, rate 0.01–0.10). When `adaptive` is set, the builder iteratively refines grid density, validating via Latin Hypercube sampling against fresh PDE solves, until the target is met.
 
 ### Segmented Path with Adaptive Grid
 
@@ -599,9 +597,7 @@ mango::IVSolverFactoryConfig config{
     .option_type = mango::OptionType::PUT,
     .spot = 100.0,
     .dividend_yield = 0.01,
-    .grid = mango::AdaptiveGrid{
-        .params = {.target_iv_error = 0.001},
-    },
+    .adaptive = mango::AdaptiveGridParams{.target_iv_error = 0.001},
     .path = mango::SegmentedIVPath{
         .maturity = 1.0,
         .discrete_dividends = {

@@ -1479,7 +1479,7 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option:iv_solver_factory",
+        "//src/option:interpolated_iv_solver",
         "//src/option:american_option",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
@@ -1493,7 +1493,7 @@ cc_test(
     copts = ["-fopenmp"],
     linkopts = ["-fopenmp"],
     deps = [
-        "//src/option:iv_solver_factory",
+        "//src/option:interpolated_iv_solver",
         "//src/option:american_option",
         "//src/option:american_option_batch",
         "@googletest//:gtest_main",
