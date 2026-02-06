@@ -3,10 +3,10 @@
 #include "mango/math/black_scholes_analytics.hpp"
 #include "mango/math/latin_hypercube.hpp"
 #include "mango/option/american_option_batch.hpp"
+#include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
 #include <cmath>
@@ -68,7 +68,11 @@ struct GridSizes {
 };
 
 /// Helper to create evenly spaced grid
+/// Requires n >= 2 to avoid divide-by-zero; returns {lo, hi} if n < 2
 std::vector<double> linspace(double lo, double hi, size_t n) {
+    if (n < 2) {
+        return {lo, hi};  // Minimum valid grid
+    }
     std::vector<double> v(n);
     for (size_t i = 0; i < n; ++i) {
         v[i] = lo + (hi - lo) * i / (n - 1);
@@ -76,20 +80,78 @@ std::vector<double> linspace(double lo, double hi, size_t n) {
     return v;
 }
 
+/// Seed a grid from user-provided knots, or fall back to linspace.
+/// Ensures domain endpoints are included and minimum 4 points for B-spline.
+std::vector<double> seed_grid(const std::vector<double>& user_knots,
+                               double lo, double hi, size_t fallback_n = 5) {
+    std::vector<double> grid;
+
+    if (!user_knots.empty()) {
+        // Filter knots to domain bounds
+        for (double v : user_knots) {
+            if (v >= lo && v <= hi) {
+                grid.push_back(v);
+            }
+        }
+        // Ensure domain endpoints are included
+        if (grid.empty() || grid.front() > lo + 1e-12) {
+            grid.insert(grid.begin(), lo);
+        }
+        if (grid.back() < hi - 1e-12) {
+            grid.push_back(hi);
+        }
+        std::sort(grid.begin(), grid.end());
+        grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
+
+        // Need minimum 4 points for cubic B-spline
+        while (grid.size() < 4) {
+            // Insert midpoint in largest gap
+            double max_gap = 0.0;
+            size_t max_idx = 0;
+            for (size_t i = 0; i + 1 < grid.size(); ++i) {
+                double gap = grid[i + 1] - grid[i];
+                if (gap > max_gap) { max_gap = gap; max_idx = i; }
+            }
+            grid.push_back((grid[max_idx] + grid[max_idx + 1]) / 2.0);
+            std::sort(grid.begin(), grid.end());
+        }
+    } else {
+        grid = linspace(lo, hi, fallback_n);
+    }
+
+    return grid;
+}
+
 // ============================================================================
 // run_refinement: the extracted iterative refinement loop
 // ============================================================================
+
+/// Initial grids for seeding the refinement loop (optional for each dimension)
+struct InitialGrids {
+    std::vector<double> moneyness;
+    std::vector<double> tau;
+    std::vector<double> vol;
+    std::vector<double> rate;
+};
 
 static std::expected<GridSizes, PriceTableError> run_refinement(
     const AdaptiveGridParams& params,
     BuildFn build_fn,
     ValidateFn validate_fn,
     const RefinementContext& ctx,
-    const std::function<std::optional<double>(double, double, double, double,
-                                              double, double, double, double)>& compute_error)
+    const std::function<double(double, double, double, double,
+                               double, double, double, double)>& compute_error,
+    const InitialGrids& initial_grids = {})
 {
     // Validation requires at least one sample per iteration
     if (params.validation_samples == 0) {
+        return std::unexpected(PriceTableError{
+            PriceTableErrorCode::InvalidConfig
+        });
+    }
+
+    // B-spline requires minimum 4 control points per dimension
+    if (params.min_moneyness_points < 4) {
         return std::unexpected(PriceTableError{
             PriceTableErrorCode::InvalidConfig
         });
@@ -104,11 +166,28 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
     const double min_rate = ctx.min_rate;
     const double max_rate = ctx.max_rate;
 
-    // Start with ~5-7 points per dimension (minimum 4 for B-splines)
-    std::vector<double> moneyness_grid = linspace(min_moneyness, max_moneyness, 5);
-    std::vector<double> maturity_grid = linspace(min_tau, max_tau, 5);
-    std::vector<double> vol_grid = linspace(min_vol, max_vol, 5);
-    std::vector<double> rate_grid = linspace(min_rate, max_rate, 4);  // Need at least 4
+    // Seed grids from user-provided knots (or linspace fallback)
+    // This ensures user-specified knots (e.g., benchmark vols) are always grid points
+    auto moneyness_grid = seed_grid(initial_grids.moneyness, min_moneyness, max_moneyness,
+                                    params.min_moneyness_points);
+    auto maturity_grid = seed_grid(initial_grids.tau, min_tau, max_tau, 5);
+    auto vol_grid = seed_grid(initial_grids.vol, min_vol, max_vol, 5);
+    auto rate_grid = seed_grid(initial_grids.rate, min_rate, max_rate, 4);
+
+    // Ensure moneyness grid meets minimum density requirement
+    // Moneyness needs higher density due to exercise boundary curvature
+    while (moneyness_grid.size() < params.min_moneyness_points) {
+        // Insert midpoints in largest gaps until we reach minimum
+        double max_gap = 0.0;
+        size_t max_idx = 0;
+        for (size_t i = 0; i + 1 < moneyness_grid.size(); ++i) {
+            double gap = moneyness_grid[i + 1] - moneyness_grid[i];
+            if (gap > max_gap) { max_gap = gap; max_idx = i; }
+        }
+        moneyness_grid.push_back(
+            (moneyness_grid[max_idx] + moneyness_grid[max_idx + 1]) / 2.0);
+        std::sort(moneyness_grid.begin(), moneyness_grid.end());
+    }
 
     GridSizes result;
     result.iterations.reserve(params.max_iter);
@@ -216,17 +295,10 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
             stats.pde_solves_validation++;
 
             double ref_price = fd_result.value();
-            auto iv_error_opt = compute_error(
+            double iv_error = compute_error(
                 interp_price, ref_price,
                 ctx.spot, strike, tau, sigma, rate,
                 ctx.dividend_yield);
-
-            // Skip low-vega samples where error metric is undefined
-            if (!iv_error_opt.has_value()) {
-                continue;
-            }
-
-            double iv_error = iv_error_opt.value();
             max_error = std::max(max_error, iv_error);
             sum_error += iv_error;
             valid_samples++;
@@ -355,6 +427,95 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
     return result;
 }
 
+/// Build a MultiKRefSurface<> using the new spliced surface builders
+std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_with_new_builders(
+    double spot,
+    OptionType option_type,
+    const DividendSpec& dividends,
+    const std::vector<double>& moneyness_grid,
+    double maturity,
+    const std::vector<double>& vol_grid,
+    const std::vector<double>& rate_grid,
+    const std::vector<double>& K_refs,
+    int tau_points_per_segment)
+{
+    std::vector<MultiKRefEntry> entries;
+    entries.reserve(K_refs.size());
+
+    for (double K_ref : K_refs) {
+        // Build SegmentedSurface for this K_ref
+        SegmentedPriceTableBuilder::Config seg_config{
+            .K_ref = K_ref,
+            .option_type = option_type,
+            .dividends = dividends,
+            .grid = ManualGrid{
+                .moneyness = moneyness_grid,
+                .vol = vol_grid,
+                .rate = rate_grid,
+            },
+            .maturity = maturity,
+            .tau_points_per_segment = tau_points_per_segment,
+            .skip_moneyness_expansion = true,
+        };
+
+        auto surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
+        }
+
+        entries.push_back(MultiKRefEntry{
+            .K_ref = K_ref,
+            .surface = std::move(*surface),
+        });
+    }
+
+    return build_multi_kref_surface(std::move(entries));
+}
+
+/// Build a StrikeSurface<> using the new spliced surface builders
+std::expected<StrikeSurface<>, PriceTableError> build_strike_with_new_builders(
+    double spot,
+    OptionType option_type,
+    const DividendSpec& dividends,
+    const std::vector<double>& moneyness_grid,
+    double maturity,
+    const std::vector<double>& vol_grid,
+    const std::vector<double>& rate_grid,
+    const std::vector<double>& strikes,
+    int tau_points_per_segment)
+{
+    std::vector<StrikeEntry> entries;
+    entries.reserve(strikes.size());
+
+    for (double strike : strikes) {
+        SegmentedPriceTableBuilder::Config seg_config{
+            .K_ref = strike,
+            .option_type = option_type,
+            .dividends = dividends,
+            .grid = ManualGrid{
+                .moneyness = moneyness_grid,
+                .vol = vol_grid,
+                .rate = rate_grid,
+            },
+            .maturity = maturity,
+            .tau_points_per_segment = tau_points_per_segment,
+            .skip_moneyness_expansion = true,
+        };
+
+        auto surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
+        }
+
+        entries.push_back(StrikeEntry{
+            .strike = strike,
+            .surface = std::move(*surface),
+        });
+    }
+
+    return build_strike_surface(std::move(entries), /*use_nearest=*/true);
+}
+
 }  // anonymous namespace
 
 // ============================================================================
@@ -367,8 +528,7 @@ AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridParams params)
 
 std::expected<AdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build(const OptionGrid& chain,
-                           GridSpec<double> grid_spec,
-                           size_t n_time,
+                           PDEGridSpec pde_grid,
                            OptionType type)
 {
     // ========================================================================
@@ -460,7 +620,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         auto builder_result = PriceTableBuilder<4>::from_vectors(
             m_grid, tau_grid, v_grid, r_grid,
             chain.spot,
-            PDEGridConfig{grid_spec, n_time}, type, chain.dividend_yield,
+            pde_grid, type, chain.dividend_yield,
             params_.max_failure_rate);
 
         if (!builder_result.has_value()) {
@@ -502,67 +662,77 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         // Solve missing pairs
         BatchAmericanOptionResult fresh_results;
         if (!missing_params.empty()) {
-            constexpr double MAX_WIDTH = 5.8;
-            constexpr double MAX_DX = 0.05;
-
-            const double grid_width = grid_spec.x_max() - grid_spec.x_min();
-
-            double max_dx;
-            if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
-                max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
-            } else {
-                auto grid_buffer = grid_spec.generate();
-                auto spacings = grid_buffer.span() | std::views::pairwise
-                                                   | std::views::transform([](auto pair) {
-                                                         auto [a, b] = pair;
-                                                         return b - a;
-                                                     });
-                max_dx = std::ranges::max(spacings);
-            }
-
-            auto sigma_sqrt_tau = [](const PricingParams& p) {
-                return p.volatility * std::sqrt(p.maturity);
-            };
-            const double max_sigma_sqrt_tau = std::ranges::max(
-                all_params | std::views::transform(sigma_sqrt_tau));
-            const double min_required_width = 6.0 * max_sigma_sqrt_tau;
-
-            const bool grid_meets_constraints =
-                (grid_width <= MAX_WIDTH) &&
-                (max_dx <= MAX_DX) &&
-                (grid_width >= min_required_width);
-
             BatchAmericanOptionSolver batch_solver;
             batch_solver.set_snapshot_times(std::span{tau_grid});
 
-            if (grid_meets_constraints) {
-                const double max_maturity = tau_grid.back();
-                TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                PDEGridSpec custom_grid = PDEGridConfig{grid_spec, time_domain.n_steps(), {}};
-                fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
-            } else {
-                GridAccuracyParams accuracy;
-                const size_t n_points = grid_spec.n_points();
-                const size_t clamped = std::clamp(n_points, size_t{100}, size_t{1200});
-                accuracy.min_spatial_points = clamped;
-                accuracy.max_spatial_points = clamped;
-                accuracy.max_time_steps = n_time;
+            // Handle PDEGridSpec variant: either explicit config or auto-estimated
+            if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
+                const auto& grid_spec = explicit_grid->grid_spec;
+                const size_t n_time = explicit_grid->n_time;
 
-                if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
-                    accuracy.alpha = grid_spec.concentration();
+                constexpr double MAX_WIDTH = 5.8;
+                constexpr double MAX_DX = 0.05;
+
+                const double grid_width = grid_spec.x_max() - grid_spec.x_min();
+
+                double max_dx;
+                if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
+                    max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
+                } else {
+                    auto grid_buffer = grid_spec.generate();
+                    auto spacings = grid_buffer.span() | std::views::pairwise
+                                                       | std::views::transform([](auto pair) {
+                                                             auto [a, b] = pair;
+                                                             return b - a;
+                                                         });
+                    max_dx = std::ranges::max(spacings);
                 }
 
-                const double x_min = grid_spec.x_min();
-                const double x_max = grid_spec.x_max();
-                const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
-                constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+                auto sigma_sqrt_tau = [](const PricingParams& p) {
+                    return p.volatility * std::sqrt(p.maturity);
+                };
+                const double max_sigma_sqrt_tau = std::ranges::max(
+                    all_params | std::views::transform(sigma_sqrt_tau));
+                const double min_required_width = 6.0 * max_sigma_sqrt_tau;
 
-                if (max_sigma_sqrt_tau >= 1e-10) {
-                    double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-                    accuracy.n_sigma = std::max(5.0, required_n_sigma);
+                const bool grid_meets_constraints =
+                    (grid_width <= MAX_WIDTH) &&
+                    (max_dx <= MAX_DX) &&
+                    (grid_width >= min_required_width);
+
+                if (grid_meets_constraints) {
+                    const double max_maturity = tau_grid.back();
+                    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
+                    PDEGridSpec custom_grid{PDEGridConfig{grid_spec, time_domain.n_steps(), std::vector<double>{}}};
+                    fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
+                } else {
+                    GridAccuracyParams accuracy;
+                    const size_t n_points = grid_spec.n_points();
+                    const size_t clamped = std::clamp(n_points, size_t{100}, size_t{1200});
+                    accuracy.min_spatial_points = clamped;
+                    accuracy.max_spatial_points = clamped;
+                    accuracy.max_time_steps = n_time;
+
+                    if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
+                        accuracy.alpha = grid_spec.concentration();
+                    }
+
+                    const double x_min = grid_spec.x_min();
+                    const double x_max = grid_spec.x_max();
+                    const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
+                    constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+
+                    if (max_sigma_sqrt_tau >= 1e-10) {
+                        double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+                        accuracy.n_sigma = std::max(5.0, required_n_sigma);
+                    }
+
+                    batch_solver.set_grid_accuracy(accuracy);
+                    fresh_results = batch_solver.solve_batch(missing_params, true);
                 }
-
-                batch_solver.set_grid_accuracy(accuracy);
+            } else if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
+                // Auto-estimated grid: use accuracy params directly
+                batch_solver.set_grid_accuracy(*accuracy_grid);
                 fresh_results = batch_solver.solve_batch(missing_params, true);
             }
 
@@ -618,6 +788,7 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         metadata.m_min = m_grid.front();
         metadata.m_max = m_grid.back();
         metadata.dividends.discrete_dividends = {};
+        metadata.content = SurfaceContent::EarlyExercisePremium;
 
         // Build surface
         auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);
@@ -631,14 +802,17 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
 
         size_t pde_solves = missing_params.size();
 
-        // Return a handle that queries the surface
+        // Return a handle that queries the surface (reconstruct full American price)
         auto surface_ptr = surface.value();
-        double spot = chain.spot;
+        auto aps = AmericanPriceSurface::create(surface_ptr, type);
+        if (!aps.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        }
+
         return SurfaceHandle{
-            .price = [surface_ptr, spot](double /*query_spot*/, double strike, double tau,
-                                         double sigma, double rate) -> double {
-                double m = spot / strike;
-                return surface_ptr->value({m, tau, sigma, rate});
+            .price = [aps = std::move(*aps)](double query_spot, double strike, double tau,
+                                             double sigma, double rate) -> double {
+                return aps.price(query_spot, strike, tau, sigma, rate);
             },
             .pde_solves = pde_solves
         };
@@ -665,14 +839,36 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         return fd_result->value();
     };
 
-    // compute_error: wraps compute_error_metric
-    auto compute_error_fn = [this](double interp_price, double ref_price,
-                                    double spot, double strike, double tau,
-                                    double sigma, double rate,
-                                    double dividend_yield) -> std::optional<double> {
-        return compute_error_metric(interp_price, ref_price,
-                                    spot, strike, tau, sigma, rate,
-                                    dividend_yield);
+    // compute_error: FD American vega for standard path
+    auto compute_error_fn = [this, &validate_fn](
+        double interp_price, double ref_price,
+        double spot, double strike, double tau,
+        double sigma, double rate,
+        double /*dividend_yield*/) -> double
+    {
+        double price_error = std::abs(interp_price - ref_price);
+
+        // Compute American vega via central finite difference
+        double eps = std::max(1e-4, 0.01 * sigma);
+
+        // Ensure sigma - eps stays positive (minimum 1e-4)
+        double sigma_dn = std::max(1e-4, sigma - eps);
+        double sigma_up = sigma + eps;
+
+        // Adjust eps if we had to clamp sigma_dn
+        double effective_eps = (sigma_up - sigma_dn) / 2.0;
+
+        auto fd_up = validate_fn(spot, strike, tau, sigma_up, rate);
+        auto fd_dn = validate_fn(spot, strike, tau, sigma_dn, rate);
+
+        double vega;
+        if (fd_up.has_value() && fd_dn.has_value() && effective_eps > 1e-6) {
+            vega = (fd_up.value() - fd_dn.value()) / (2.0 * effective_eps);
+        } else {
+            // FD bump failed or eps too small — clamp to floor inside compute_error_metric
+            vega = 0.0;
+        }
+        return compute_error_metric(price_error, vega);
     };
 
     RefinementContext ctx{
@@ -693,7 +889,18 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     // 3. Run refinement and assemble result
     // ========================================================================
 
-    auto grid_result = run_refinement(params_, build_fn, validate_fn, ctx, compute_error_fn);
+    // Build initial grids from chain data (ensures user-specified knots are grid points)
+    InitialGrids initial_grids;
+    initial_grids.moneyness.reserve(chain.strikes.size());
+    for (double strike : chain.strikes) {
+        initial_grids.moneyness.push_back(chain.spot / strike);
+    }
+    initial_grids.tau = chain.maturities;
+    initial_grids.vol = chain.implied_vols;
+    initial_grids.rate = chain.rates;
+
+    auto grid_result = run_refinement(params_, build_fn, validate_fn, ctx,
+                                      compute_error_fn, initial_grids);
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
@@ -708,50 +915,28 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     result.achieved_avg_error = grids.achieved_avg_error;
     result.target_met = grids.target_met;
     result.total_pde_solves = 0;
-    for (const auto& it : result.iterations) {
+    for (auto& it : result.iterations) {
+        // Standard path uses FD American vega: 1 base solve + 2 vega bump solves = 3x
+        it.pde_solves_validation *= 3;
         result.total_pde_solves += it.pde_solves_table + it.pde_solves_validation;
     }
 
     return result;
 }
 
-std::optional<double> AdaptiveGridBuilder::compute_error_metric(
-    double interpolated_price, double reference_price,
-    double spot, double strike, double tau, double sigma, double rate,
-    double dividend_yield) const
+double AdaptiveGridBuilder::compute_error_metric(
+    double price_error, double vega) const
 {
-    double price_error = std::abs(interpolated_price - reference_price);
+    double vega_clamped = std::max(std::abs(vega), params_.vega_floor);
+    double iv_error = price_error / vega_clamped;
 
-    // Use European Black-Scholes vega as an approximation for American vega.
-    //
-    // Limitation: For deep ITM American puts, true American vega is smaller
-    // than European vega because part of the option value is intrinsic (not
-    // sensitive to vol). Using European vega here underestimates the IV error,
-    // which may cause under-refinement in those regions.
-    //
-    // This is acceptable because:
-    // 1. For ATM/OTM options (most common), the vegas are nearly identical
-    // 2. Deep ITM puts have small vega anyway, so the vega_floor kicks in
-    // 3. Computing true American vega would require 2 extra PDE solves per
-    //    validation point, which is expensive
-    //
-    // Future: Could use Barone-Adesi-Whaley or finite-difference vega if
-    // higher accuracy is needed for deep ITM regions.
-    double vega = bs_vega(spot, strike, tau, sigma, rate, dividend_yield);
-
-    if (vega >= params_.vega_floor) {
-        // ΔIV ≈ ΔP / vega (first-order Taylor approximation)
-        return price_error / vega;
-    } else {
-        // Vega too small (deep ITM/OTM or very short τ): IV is ill-defined.
-        // If price error is within tolerance, skip this sample entirely.
-        // Otherwise, use vega_floor to get a bounded error estimate.
-        double price_tol = params_.target_iv_error * params_.vega_floor;
-        if (price_error <= price_tol) {
-            return std::nullopt;  // Price is accurate enough - skip this sample
-        }
-        return price_error / params_.vega_floor;
+    // Cap when price is already within tolerance.
+    // Prevents FD noise from driving runaway refinement.
+    double price_tol = params_.target_iv_error * params_.vega_floor;
+    if (price_error <= price_tol) {
+        iv_error = std::min(iv_error, params_.target_iv_error);
     }
+    return iv_error;
 }
 
 BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
@@ -817,7 +1002,7 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
 }
 
 
-std::expected<SegmentedMultiKRefSurface, PriceTableError>
+std::expected<MultiKRefSurface<>, PriceTableError>
 AdaptiveGridBuilder::build_segmented(
     const SegmentedAdaptiveConfig& config,
     const std::vector<double>& moneyness_domain,
@@ -874,6 +1059,11 @@ AdaptiveGridBuilder::build_segmented(
     }
     double K_ref_min = K_refs.front();
     double expansion = (K_ref_min > 0.0) ? total_div / K_ref_min : 0.0;
+
+    // Guard against empty domain vectors (UB to access .front()/.back())
+    if (moneyness_domain.empty() || vol_domain.empty() || rate_domain.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
 
     double min_m = moneyness_domain.front();
     double max_m = moneyness_domain.back();
@@ -935,23 +1125,25 @@ AdaptiveGridBuilder::build_segmented(
                 .option_type = config.option_type,
                 .dividends = {.dividend_yield = config.dividend_yield,
                               .discrete_dividends = config.discrete_dividends},
-                .moneyness_grid = m_grid,
+                .grid = ManualGrid{
+                    .moneyness = m_grid,
+                    .vol = v_grid,
+                    .rate = r_grid,
+                },
                 .maturity = config.maturity,
-                .vol_grid = v_grid,
-                .rate_grid = r_grid,
                 .tau_points_per_segment = tau_pts,
                 .skip_moneyness_expansion = true,
             };
             auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
             if (!surface.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+                return std::unexpected(surface.error());
             }
-            auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
+            auto shared = std::make_shared<SegmentedSurface<>>(std::move(*surface));
             double spot = config.spot;
             return SurfaceHandle{
                 .price = [shared, spot](double /*spot_arg*/, double strike,
                                         double tau, double sigma, double rate) -> double {
-                    return shared->price(spot, strike, tau, sigma, rate);
+                    return shared->price(PriceQuery{spot, strike, tau, sigma, rate});
                 },
                 .pde_solves = 0
             };
@@ -980,8 +1172,10 @@ AdaptiveGridBuilder::build_segmented(
         auto compute_error_fn = [this](double interp, double ref,
                                         double spot, double strike, double tau,
                                         double sigma, double rate,
-                                        double div_yield) -> std::optional<double> {
-            return compute_error_metric(interp, ref, spot, strike, tau, sigma, rate, div_yield);
+                                        double div_yield) -> double {
+            double price_error = std::abs(interp - ref);
+            double vega = bs_vega(spot, strike, tau, sigma, rate, div_yield);
+            return compute_error_metric(price_error, vega);
         };
 
         RefinementContext ctx{
@@ -998,7 +1192,15 @@ AdaptiveGridBuilder::build_segmented(
             .max_rate = max_rate,
         };
 
-        auto sizes = run_refinement(params_, build_fn, validate_fn, ctx, compute_error_fn);
+        // Seed grids from user-provided domain knots
+        InitialGrids initial_grids;
+        initial_grids.moneyness = moneyness_domain;
+        initial_grids.vol = vol_domain;
+        initial_grids.rate = rate_domain;
+        // tau: segmented path has single maturity, no seeding needed
+
+        auto sizes = run_refinement(params_, build_fn, validate_fn, ctx,
+                                    compute_error_fn, initial_grids);
         if (!sizes.has_value()) {
             return std::unexpected(sizes.error());
         }
@@ -1020,24 +1222,18 @@ AdaptiveGridBuilder::build_segmented(
     auto final_v = linspace(min_vol, max_vol, max_v_size);
     auto final_r = linspace(min_rate, max_rate, max_r_size);
 
-    // 7. Build full SegmentedMultiKRefSurface
-    SegmentedMultiKRefBuilder::Config mkref_config{
-        .spot = config.spot,
-        .option_type = config.option_type,
-        .dividends = {.dividend_yield = config.dividend_yield,
-                      .discrete_dividends = config.discrete_dividends},
-        .moneyness_grid = final_m,
-        .maturity = config.maturity,
-        .vol_grid = final_v,
-        .rate_grid = final_r,
-        .kref_config = config.kref_config,
-        .tau_points_per_segment = max_tau_pts,
-        .skip_moneyness_expansion = true,
+    // 7. Build full MultiKRefSurface<> using new builders
+    DividendSpec dividends{
+        .dividend_yield = config.dividend_yield,
+        .discrete_dividends = config.discrete_dividends,
     };
 
-    auto surface = SegmentedMultiKRefBuilder::build(mkref_config);
+    auto surface = build_multi_kref_with_new_builders(
+        config.spot, config.option_type, dividends,
+        final_m, config.maturity, final_v, final_r,
+        K_refs, max_tau_pts);
     if (!surface.has_value()) {
-        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+        return std::unexpected(surface.error());
     }
 
     // 8. Final multi-K_ref validation at arbitrary strikes
@@ -1059,7 +1255,15 @@ AdaptiveGridBuilder::build_segmented(
         double m = sample[0], tau = sample[1], sigma = sample[2], rate = sample[3];
         double strike = config.spot / m;
 
-        double interp = surface->price(config.spot, strike, tau, sigma, rate);
+        // Use PriceQuery for the new surface type
+        PriceQuery query{
+            .spot = config.spot,
+            .strike = strike,
+            .tau = tau,
+            .sigma = sigma,
+            .rate = rate,
+        };
+        double interp = surface->price(query);
 
         PricingParams params;
         params.spot = config.spot;
@@ -1074,12 +1278,11 @@ AdaptiveGridBuilder::build_segmented(
         auto fd = solve_american_option(params);
         if (!fd.has_value()) continue;
 
-        auto err = compute_error_metric(
-            interp, fd->value(), config.spot, strike, tau,
-            sigma, rate, config.dividend_yield);
-        if (!err.has_value()) continue;
+        double price_error = std::abs(interp - fd->value());
+        double vega = bs_vega(config.spot, strike, tau, sigma, rate, config.dividend_yield);
+        double err = compute_error_metric(price_error, vega);
 
-        final_max_error = std::max(final_max_error, *err);
+        final_max_error = std::max(final_max_error, err);
         valid++;
     }
 
@@ -1095,19 +1298,234 @@ AdaptiveGridBuilder::build_segmented(
         auto retry_v = linspace(min_vol, max_vol, bumped_v);
         auto retry_r = linspace(min_rate, max_rate, bumped_r);
 
-        SegmentedMultiKRefBuilder::Config retry_config = mkref_config;
-        retry_config.moneyness_grid = retry_m;
-        retry_config.vol_grid = retry_v;
-        retry_config.rate_grid = retry_r;
-        retry_config.tau_points_per_segment = bumped_tau;
-
-        auto retry_surface = SegmentedMultiKRefBuilder::build(retry_config);
+        auto retry_surface = build_multi_kref_with_new_builders(
+            config.spot, config.option_type, dividends,
+            retry_m, config.maturity, retry_v, retry_r,
+            K_refs, bumped_tau);
         if (retry_surface.has_value()) {
             return std::move(*retry_surface);
         }
     }
 
     return std::move(*surface);
+}
+
+std::expected<StrikeSurface<>, PriceTableError>
+AdaptiveGridBuilder::build_segmented_strike(
+    const SegmentedAdaptiveConfig& config,
+    const std::vector<double>& strike_grid,
+    const std::vector<double>& moneyness_domain,
+    const std::vector<double>& vol_domain,
+    const std::vector<double>& rate_domain)
+{
+    std::vector<double> strikes = strike_grid;
+    if (strikes.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+    std::sort(strikes.begin(), strikes.end());
+    strikes.erase(std::unique(strikes.begin(), strikes.end()), strikes.end());
+
+    // Select probe strikes (ATM, lowest, highest; all if <= 3)
+    std::vector<double> probe_strikes;
+    if (strikes.size() <= 3) {
+        probe_strikes = strikes;
+    } else {
+        probe_strikes.push_back(strikes.front());
+        probe_strikes.push_back(strikes.back());
+        auto atm_it = std::min_element(strikes.begin(), strikes.end(),
+            [&](double a, double b) {
+                return std::abs(a - config.spot) < std::abs(b - config.spot);
+            });
+        if (*atm_it != strikes.front() && *atm_it != strikes.back()) {
+            probe_strikes.push_back(*atm_it);
+        }
+    }
+
+    // Pre-expand moneyness domain using worst-case strike (min strike)
+    double total_div = 0.0;
+    for (const auto& div : config.discrete_dividends) {
+        if (div.calendar_time > 0.0 && div.calendar_time < config.maturity && div.amount > 0.0) {
+            total_div += div.amount;
+        }
+    }
+    double K_ref_min = strikes.front();
+    double expansion = (K_ref_min > 0.0) ? total_div / K_ref_min : 0.0;
+
+    if (moneyness_domain.empty() || vol_domain.empty() || rate_domain.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double min_m = moneyness_domain.front();
+    double max_m = moneyness_domain.back();
+    double expanded_min_m = std::max(min_m - expansion, 0.01);
+
+    double min_vol = vol_domain.front();
+    double max_vol = vol_domain.back();
+    double min_rate = rate_domain.front();
+    double max_rate = rate_domain.back();
+
+    constexpr double kMinPositive = 1e-6;
+    auto expand_bounds_positive = [kMinPositive](double& lo, double& hi, double min_spread) {
+        if (hi - lo < min_spread) {
+            double mid = (lo + hi) / 2.0;
+            lo = mid - min_spread / 2.0;
+            hi = mid + min_spread / 2.0;
+        }
+        if (lo < kMinPositive) {
+            double shift = kMinPositive - lo;
+            lo = kMinPositive;
+            hi += shift;
+        }
+    };
+    auto expand_bounds = [](double& lo, double& hi, double min_spread) {
+        if (hi - lo < min_spread) {
+            double mid = (lo + hi) / 2.0;
+            lo = mid - min_spread / 2.0;
+            hi = mid + min_spread / 2.0;
+        }
+    };
+
+    expand_bounds_positive(expanded_min_m, max_m, 0.10);
+    expand_bounds_positive(min_vol, max_vol, 0.10);
+    expand_bounds(min_rate, max_rate, 0.04);
+
+    double min_tau = std::min(0.01, config.maturity * 0.5);
+    double max_tau = config.maturity;
+    expand_bounds_positive(min_tau, max_tau, 0.1);
+    max_tau = std::min(max_tau, config.maturity);
+
+    // Run probes
+    std::vector<GridSizes> probe_results;
+    for (double strike : probe_strikes) {
+        BuildFn build_fn = [&config, strike](
+            const std::vector<double>& m_grid,
+            const std::vector<double>& tau_grid,
+            const std::vector<double>& v_grid,
+            const std::vector<double>& r_grid)
+            -> std::expected<SurfaceHandle, PriceTableError>
+        {
+            int tau_pts = static_cast<int>(tau_grid.size());
+            SegmentedPriceTableBuilder::Config seg_cfg{
+                .K_ref = strike,
+                .option_type = config.option_type,
+                .dividends = {.dividend_yield = config.dividend_yield,
+                              .discrete_dividends = config.discrete_dividends},
+                .grid = ManualGrid{
+                    .moneyness = m_grid,
+                    .vol = v_grid,
+                    .rate = r_grid,
+                },
+                .maturity = config.maturity,
+                .tau_points_per_segment = tau_pts,
+                .skip_moneyness_expansion = true,
+            };
+            auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
+            if (!surface.has_value()) {
+                return std::unexpected(surface.error());
+            }
+            auto shared = std::make_shared<SegmentedSurface<>>(std::move(*surface));
+            double spot = config.spot;
+            return SurfaceHandle{
+                .price = [shared, spot](double /*spot_arg*/, double strike_arg,
+                                        double tau, double sigma, double rate) -> double {
+                    return shared->price(PriceQuery{spot, strike_arg, tau, sigma, rate});
+                },
+                .pde_solves = 0
+            };
+        };
+
+        ValidateFn validate_fn = [&config](
+            double spot, double strike_arg, double tau,
+            double sigma, double rate)
+            -> std::expected<double, SolverError>
+        {
+            PricingParams params;
+            params.spot = spot;
+            params.strike = strike_arg;
+            params.maturity = tau;
+            params.rate = rate;
+            params.dividend_yield = config.dividend_yield;
+            params.option_type = config.option_type;
+            params.volatility = sigma;
+            params.discrete_dividends = config.discrete_dividends;
+            auto fd = solve_american_option(params);
+            if (!fd.has_value()) return std::unexpected(fd.error());
+            return fd->value();
+        };
+
+        auto compute_error_fn = [this](double interp, double ref,
+                                        double spot, double strike_arg, double tau,
+                                        double sigma, double rate,
+                                        double div_yield) -> double {
+            double price_error = std::abs(interp - ref);
+            double vega = bs_vega(spot, strike_arg, tau, sigma, rate, div_yield);
+            return compute_error_metric(price_error, vega);
+        };
+
+        RefinementContext ctx{
+            .spot = config.spot,
+            .dividend_yield = config.dividend_yield,
+            .option_type = config.option_type,
+            .min_moneyness = expanded_min_m,
+            .max_moneyness = max_m,
+            .min_tau = min_tau,
+            .max_tau = max_tau,
+            .min_vol = min_vol,
+            .max_vol = max_vol,
+            .min_rate = min_rate,
+            .max_rate = max_rate,
+        };
+
+        InitialGrids initial_grids;
+        initial_grids.moneyness = moneyness_domain;
+        initial_grids.vol = vol_domain;
+        initial_grids.rate = rate_domain;
+
+        auto sizes = run_refinement(params_, build_fn, validate_fn, ctx,
+                                    compute_error_fn, initial_grids);
+        if (!sizes.has_value()) {
+            return std::unexpected(sizes.error());
+        }
+        probe_results.push_back(std::move(*sizes));
+    }
+
+    size_t max_m_size = 0, max_v_size = 0, max_r_size = 0;
+    int max_tau_pts = 0;
+    for (const auto& pr : probe_results) {
+        max_m_size = std::max(max_m_size, pr.moneyness.size());
+        max_v_size = std::max(max_v_size, pr.vol.size());
+        max_r_size = std::max(max_r_size, pr.rate.size());
+        max_tau_pts = std::max(max_tau_pts, pr.tau_points);
+    }
+
+    auto final_m = linspace(expanded_min_m, max_m, max_m_size);
+    auto final_v = linspace(min_vol, max_vol, max_v_size);
+    auto final_r = linspace(min_rate, max_rate, max_r_size);
+
+    DividendSpec dividends{
+        .dividend_yield = config.dividend_yield,
+        .discrete_dividends = config.discrete_dividends,
+    };
+
+    auto surface = build_strike_with_new_builders(
+        config.spot, config.option_type, dividends,
+        final_m, config.maturity, final_v, final_r,
+        strikes, max_tau_pts);
+    if (!surface.has_value()) {
+        return std::unexpected(surface.error());
+    }
+
+    return std::move(*surface);
+}
+
+// Backward-compatible overload: delegates to PDEGridSpec version
+std::expected<AdaptiveResult, PriceTableError>
+AdaptiveGridBuilder::build(const OptionGrid& chain,
+                           GridSpec<double> grid_spec,
+                           size_t n_time,
+                           OptionType type)
+{
+    return build(chain, PDEGridConfig{grid_spec, n_time, {}}, type);
 }
 
 }  // namespace mango

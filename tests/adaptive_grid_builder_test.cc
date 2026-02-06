@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/adaptive_grid_builder.hpp"
+#include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/american_option_batch.hpp"
 #include <algorithm>
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
 #include <iostream>
 
 namespace mango {
@@ -360,12 +360,14 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedBasic) {
         << "build_segmented failed";
 
     // Should be able to query prices at various strikes
-    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 
     // And at off-K_ref strikes
-    double price2 = result->price(100.0, 90.0, 0.5, 0.20, 0.05);
+    PriceQuery query2{.spot = 100.0, .strike = 90.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price2 = result->price(query2);
     EXPECT_GT(price2, 0.0);
     EXPECT_TRUE(std::isfinite(price2));
 }
@@ -420,7 +422,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedLargeDividend) {
     auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
     ASSERT_TRUE(result.has_value());
 
-    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -450,7 +453,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedNoDividends) {
     auto result = builder.build_segmented(seg_config, m_domain, v_domain, r_domain);
     ASSERT_TRUE(result.has_value());
 
-    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -539,7 +543,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsLowest) {
 
     auto result = builder.build_segmented(seg_config, m, v, r);
     ASSERT_TRUE(result.has_value());
-    double price = result->price(100.0, 110.0, 0.5, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 110.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
 }
 
@@ -549,6 +554,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
     AdaptiveGridBuilder builder(params);
 
     // spot=100, K_refs sorted: {70, 80, 90, 100}
@@ -569,7 +575,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedATMEqualsHighest) {
 
     auto result = builder.build_segmented(seg_config, m, v, r);
     ASSERT_TRUE(result.has_value());
-    double price = result->price(100.0, 90.0, 0.5, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 90.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
 }
 
@@ -579,6 +586,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
     AdaptiveGridBuilder builder(params);
 
     SegmentedAdaptiveConfig seg_config{
@@ -598,7 +606,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedSingleAutoKRef) {
     ASSERT_TRUE(result.has_value());
 
     // Single K_ref = spot, should produce valid prices
-    double price = result->price(100.0, 100.0, 0.5, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.5, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -628,7 +637,8 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedVeryShortMaturity) {
     ASSERT_TRUE(result.has_value());
 
     // Query at a tau within the short maturity
-    double price = result->price(100.0, 100.0, 0.03, 0.20, 0.05);
+    PriceQuery query{.spot = 100.0, .strike = 100.0, .tau = 0.03, .sigma = 0.20, .rate = 0.05};
+    double price = result->price(query);
     EXPECT_GT(price, 0.0);
     EXPECT_TRUE(std::isfinite(price));
 }
@@ -643,6 +653,7 @@ TEST(AdaptiveGridBuilderTest, BuildSegmentedMoneynessClampedToFloor) {
     params.target_iv_error = 0.005;
     params.max_iter = 1;
     params.validation_samples = 8;
+    params.min_moneyness_points = 10;  // Use smaller grid for test speed
     AdaptiveGridBuilder builder(params);
 
     // total_div = 50, K_ref_min = 50 → expansion = 1.0

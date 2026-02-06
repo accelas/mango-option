@@ -3,13 +3,23 @@
 
 #include "mango/option/table/price_table_axes.hpp"
 #include "mango/option/table/price_table_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
 #include <array>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
 
 namespace mango {
+
+/// Manual grid specification: explicit grid points for each axis.
+/// Requires >= 4 points per axis (B-spline minimum).
+struct ManualGrid {
+    std::vector<double> moneyness;
+    std::vector<double> vol;
+    std::vector<double> rate;
+};
 
 /// Configuration for adaptive grid refinement
 ///
@@ -24,6 +34,17 @@ struct AdaptiveGridParams {
 
     /// Maximum points per dimension ceiling (default: 160, High profile)
     size_t max_points_per_dim = 160;
+
+    /// Minimum moneyness grid points (default: 60)
+    /// Moneyness requires higher density than other dimensions due to
+    /// exercise boundary curvature and PDE → B-spline sampling loss.
+    size_t min_moneyness_points = 60;
+
+    /// Use per-maturity 3D surfaces instead of global 4D B-spline (default: false)
+    /// Per-maturity approach avoids global smoothing over the exercise boundary,
+    /// significantly improving accuracy for American options.
+    /// NOTE: Not yet implemented - flag reserved for future use.
+    bool use_per_maturity = false;
 
     /// Number of validation FD solves per iteration (default: 64)
     size_t validation_samples = 64;
@@ -57,11 +78,33 @@ struct IterationStats {
 
 /// Final result with full diagnostics
 struct AdaptiveResult {
-    /// The built price table surface (always populated, even if target not met)
+    /// The built price table surface (4D mode, nullptr if using per-maturity)
     std::shared_ptr<const PriceTableSurface<4>> surface = nullptr;
+
+    /// Per-maturity surface (per-maturity mode, nullptr if using 4D)
+    std::shared_ptr<const PerMaturitySurface> per_maturity_surface = nullptr;
 
     /// Final axes used for the surface
     PriceTableAxes<4> axes;
+
+    /// Query price from whichever surface is populated
+    /// Returns NaN if no surface is available (build failure or not yet built)
+    /// coords: [moneyness, tau, sigma, rate]
+    [[nodiscard]] double value(const std::array<double, 4>& coords) const {
+        if (per_maturity_surface) {
+            // Convert 4D coords to PriceQuery (spot=moneyness, strike=1.0)
+            PriceQuery q{
+                .spot = coords[0],    // moneyness = spot/strike, with strike=1
+                .strike = 1.0,
+                .tau = coords[1],
+                .sigma = coords[2],
+                .rate = coords[3]
+            };
+            return per_maturity_surface->price(q);
+        }
+        return surface ? surface->value(coords)
+                       : std::numeric_limits<double>::quiet_NaN();
+    }
 
     /// Per-iteration history for diagnostics
     std::vector<IterationStats> iterations;

@@ -5,13 +5,12 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/slice_cache.hpp"
 #include "mango/option/table/error_attribution.hpp"
-#include "mango/option/table/segmented_multi_kref_builder.hpp"
-#include "mango/option/table/segmented_multi_kref_surface.hpp"
+#include "mango/option/table/spliced_surface.hpp"
+#include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/option/option_grid.hpp"
 #include "mango/pde/core/grid.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
-#include <optional>
 
 namespace mango {
 
@@ -60,24 +59,42 @@ public:
           size_t n_time,
           OptionType type = OptionType::PUT);
 
+    /// Build price table with adaptive grid refinement (auto-estimated grid)
+    ///
+    /// @param chain Option grid providing domain bounds
+    /// @param pde_grid PDE grid specification (PDEGridConfig or GridAccuracyParams)
+    /// @param type Option type (default: PUT)
+    /// @return AdaptiveResult with surface and diagnostics, or error
+    [[nodiscard]] std::expected<AdaptiveResult, PriceTableError>
+    build(const OptionGrid& chain,
+          PDEGridSpec pde_grid,
+          OptionType type = OptionType::PUT);
+
     /// Build segmented multi-K_ref surface with adaptive grid refinement.
     /// Probes 2-3 representative K_refs, takes per-axis max grid sizes,
     /// then builds all segments with a uniform grid.
-    [[nodiscard]] std::expected<SegmentedMultiKRefSurface, PriceTableError>
+    [[nodiscard]] std::expected<MultiKRefSurface<>, PriceTableError>
     build_segmented(const SegmentedAdaptiveConfig& config,
                     const std::vector<double>& moneyness_domain,
                     const std::vector<double>& vol_domain,
                     const std::vector<double>& rate_domain);
 
+    /// Build segmented surface using per-strike surfaces (no K_ref interpolation).
+    [[nodiscard]] std::expected<StrikeSurface<>, PriceTableError>
+    build_segmented_strike(const SegmentedAdaptiveConfig& config,
+                           const std::vector<double>& strike_grid,
+                           const std::vector<double>& moneyness_domain,
+                           const std::vector<double>& vol_domain,
+                           const std::vector<double>& rate_domain);
+
 private:
     AdaptiveGridParams params_;
     SliceCache cache_;
 
-    /// Compute hybrid IV/price error metric with vega floor
-    /// Returns nullopt for low-vega regions where price error is within tolerance
-    std::optional<double> compute_error_metric(double interpolated_price, double reference_price,
-                                               double spot, double strike, double tau,
-                                               double sigma, double rate, double dividend_yield) const;
+    /// Compute IV error metric from price error and vega.
+    /// Caller provides vega (FD American or BS European depending on path).
+    /// Never returns nullopt — always counts the sample.
+    double compute_error_metric(double price_error, double vega) const;
 
     /// Build BatchAmericanOptionResult by merging cached and fresh results
     /// @param all_params All (σ,r) parameter combos in full batch order

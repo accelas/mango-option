@@ -261,9 +261,10 @@ cc_library(
         "//src/option/table:adaptive_grid_builder",
         "//src/option/table:adaptive_grid_types",
         "//src/option/table:american_price_surface",
-        "//src/option/table:segmented_multi_kref_surface",
-        "//src/option/table:segmented_multi_kref_builder",
         "//src/option/table:price_table_builder",
+        "//src/option/table:segmented_price_table_builder",
+        "//src/option/table:spliced_surface",
+        "//src/option/table:spliced_surface_builder",
         "//src/support:error_types",
     ],
     copts = [
