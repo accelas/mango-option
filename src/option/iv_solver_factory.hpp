@@ -38,14 +38,6 @@ struct SegmentedIVPath {
     std::vector<double> strike_grid;  ///< optional explicit strikes for per-strike surfaces
 };
 
-/// Manual grid specification: explicit grid points for each axis.
-/// Requires >= 4 points per axis (B-spline minimum).
-struct ManualGrid {
-    std::vector<double> moneyness;
-    std::vector<double> vol;
-    std::vector<double> rate;
-};
-
 /// Adaptive grid specification: automatic grid density tuning.
 /// User provides domain bounds and a target IV accuracy; the builder
 /// iteratively refines until the target is met.

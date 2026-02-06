@@ -6,7 +6,6 @@
 #include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/table/price_table_surface.hpp"
 #include "mango/option/table/segmented_price_table_builder.hpp"
-#include "mango/option/table/segmented_price_surface.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include <algorithm>
@@ -428,31 +427,6 @@ static std::expected<GridSizes, PriceTableError> run_refinement(
     return result;
 }
 
-/// Convert a SegmentedPriceSurface to the new SegmentedSurface<> type
-std::expected<SegmentedSurface<>, PriceTableError> convert_to_spliced(
-    SegmentedPriceSurface& old_surface)
-{
-    // Extract segments and convert to SegmentConfig
-    std::vector<SegmentConfig> seg_configs;
-    for (auto& seg : old_surface.segments()) {
-        seg_configs.push_back(SegmentConfig{
-            .surface = std::move(seg.surface),
-            .tau_start = seg.tau_start,
-            .tau_end = seg.tau_end,
-        });
-    }
-
-    // Build SegmentedConfig
-    SegmentedConfig config{
-        .segments = std::move(seg_configs),
-        .dividends = old_surface.dividends(),
-        .K_ref = old_surface.K_ref(),
-        .T = old_surface.T(),
-    };
-
-    return build_segmented_surface(std::move(config));
-}
-
 /// Build a MultiKRefSurface<> using the new spliced surface builders
 std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_with_new_builders(
     double spot,
@@ -469,33 +443,29 @@ std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_with_new_bui
     entries.reserve(K_refs.size());
 
     for (double K_ref : K_refs) {
-        // Build SegmentedPriceSurface for this K_ref using old builder
+        // Build SegmentedSurface for this K_ref
         SegmentedPriceTableBuilder::Config seg_config{
             .K_ref = K_ref,
             .option_type = option_type,
             .dividends = dividends,
-            .moneyness_grid = moneyness_grid,
+            .grid = ManualGrid{
+                .moneyness = moneyness_grid,
+                .vol = vol_grid,
+                .rate = rate_grid,
+            },
             .maturity = maturity,
-            .vol_grid = vol_grid,
-            .rate_grid = rate_grid,
             .tau_points_per_segment = tau_points_per_segment,
             .skip_moneyness_expansion = true,
         };
 
-        auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
-        if (!old_surface.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-
-        // Convert to new SegmentedSurface<>
-        auto new_surface = convert_to_spliced(*old_surface);
-        if (!new_surface.has_value()) {
-            return std::unexpected(new_surface.error());
+        auto surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
         }
 
         entries.push_back(MultiKRefEntry{
             .K_ref = K_ref,
-            .surface = std::move(*new_surface),
+            .surface = std::move(*surface),
         });
     }
 
@@ -522,27 +492,24 @@ std::expected<StrikeSurface<>, PriceTableError> build_strike_with_new_builders(
             .K_ref = strike,
             .option_type = option_type,
             .dividends = dividends,
-            .moneyness_grid = moneyness_grid,
+            .grid = ManualGrid{
+                .moneyness = moneyness_grid,
+                .vol = vol_grid,
+                .rate = rate_grid,
+            },
             .maturity = maturity,
-            .vol_grid = vol_grid,
-            .rate_grid = rate_grid,
             .tau_points_per_segment = tau_points_per_segment,
             .skip_moneyness_expansion = true,
         };
 
-        auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
-        if (!old_surface.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-
-        auto new_surface = convert_to_spliced(*old_surface);
-        if (!new_surface.has_value()) {
-            return std::unexpected(new_surface.error());
+        auto surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
         }
 
         entries.push_back(StrikeEntry{
             .strike = strike,
-            .surface = std::move(*new_surface),
+            .surface = std::move(*surface),
         });
     }
 
@@ -1158,23 +1125,25 @@ AdaptiveGridBuilder::build_segmented(
                 .option_type = config.option_type,
                 .dividends = {.dividend_yield = config.dividend_yield,
                               .discrete_dividends = config.discrete_dividends},
-                .moneyness_grid = m_grid,
+                .grid = ManualGrid{
+                    .moneyness = m_grid,
+                    .vol = v_grid,
+                    .rate = r_grid,
+                },
                 .maturity = config.maturity,
-                .vol_grid = v_grid,
-                .rate_grid = r_grid,
                 .tau_points_per_segment = tau_pts,
                 .skip_moneyness_expansion = true,
             };
             auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
             if (!surface.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+                return std::unexpected(surface.error());
             }
-            auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
+            auto shared = std::make_shared<SegmentedSurface<>>(std::move(*surface));
             double spot = config.spot;
             return SurfaceHandle{
                 .price = [shared, spot](double /*spot_arg*/, double strike,
                                         double tau, double sigma, double rate) -> double {
-                    return shared->price(spot, strike, tau, sigma, rate);
+                    return shared->price(PriceQuery{spot, strike, tau, sigma, rate});
                 },
                 .pde_solves = 0
             };
@@ -1441,23 +1410,25 @@ AdaptiveGridBuilder::build_segmented_strike(
                 .option_type = config.option_type,
                 .dividends = {.dividend_yield = config.dividend_yield,
                               .discrete_dividends = config.discrete_dividends},
-                .moneyness_grid = m_grid,
+                .grid = ManualGrid{
+                    .moneyness = m_grid,
+                    .vol = v_grid,
+                    .rate = r_grid,
+                },
                 .maturity = config.maturity,
-                .vol_grid = v_grid,
-                .rate_grid = r_grid,
                 .tau_points_per_segment = tau_pts,
                 .skip_moneyness_expansion = true,
             };
             auto surface = SegmentedPriceTableBuilder::build(seg_cfg);
             if (!surface.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+                return std::unexpected(surface.error());
             }
-            auto shared = std::make_shared<SegmentedPriceSurface>(std::move(*surface));
+            auto shared = std::make_shared<SegmentedSurface<>>(std::move(*surface));
             double spot = config.spot;
             return SurfaceHandle{
                 .price = [shared, spot](double /*spot_arg*/, double strike_arg,
                                         double tau, double sigma, double rate) -> double {
-                    return shared->price(spot, strike_arg, tau, sigma, rate);
+                    return shared->price(PriceQuery{spot, strike_arg, tau, sigma, rate});
                 },
                 .pde_solves = 0
             };

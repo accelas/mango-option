@@ -1419,12 +1419,12 @@ cc_test(
 
 cc_test(
     name = "segmented_price_surface_test",
-    size = "small",
+    size = "medium",
+    timeout = "moderate",
     srcs = ["segmented_price_surface_test.cc"],
     deps = [
-        "//src/option/table:segmented_price_surface",
-        "//src/option/table:price_table_builder",
-        "//src/option/table:american_price_surface",
+        "//src/option/table:segmented_price_table_builder",
+        "//src/option/table:spliced_surface",
         "@googletest//:gtest_main",
     ],
 )
