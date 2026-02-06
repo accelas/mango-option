@@ -4,25 +4,9 @@
 #include "mango/option/table/spliced_surface.hpp"
 #include "mango/support/error_types.hpp"
 #include <expected>
-#include <memory>
 #include <vector>
 
 namespace mango {
-
-// ===========================================================================
-// Per-maturity surface builder
-// ===========================================================================
-
-struct PerMaturityConfig {
-    std::vector<std::shared_ptr<const PriceTableSurface<3>>> surfaces;
-    std::vector<double> tau_grid;
-    double K_ref;
-    OptionType option_type;
-    double dividend_yield;
-};
-
-[[nodiscard]] std::expected<PerMaturitySurface, PriceTableError>
-build_per_maturity_surface(PerMaturityConfig config);
 
 // ===========================================================================
 // Segmented surface builder
