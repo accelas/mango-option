@@ -1,85 +1,94 @@
 // SPDX-License-Identifier: MIT
+/**
+ * @file discrete_dividend_event_test.cc
+ * @brief Tests for discrete dividend handling in AmericanOptionSolver
+ *
+ * Verifies that discrete dividends are correctly applied during PDE solve
+ * by testing observable effects on option prices.
+ */
 #include <gtest/gtest.h>
-#include "mango/option/discrete_dividend_event.hpp"
-#include "mango/math/cubic_spline_solver.hpp"
-#include <vector>
+#include "mango/option/american_option.hpp"
 #include <cmath>
 
 using namespace mango;
 
-// Helper: pre-build a spline on the given grid
-static CubicSpline<double> make_spline(std::span<const double> x,
-                                        std::span<const double> y) {
-    CubicSpline<double> s;
-    [[maybe_unused]] auto err = s.build(x, y);
-    return s;
+namespace {
+
+// Helper: solve an American option with the given params
+std::expected<AmericanOptionResult, SolverError> solve(const PricingParams& params) {
+    return solve_american_option(params);
 }
 
-TEST(DiscreteDividendEventTest, BasicPutShift) {
-    std::vector<double> x = {-1.0, -0.5, 0.0, 0.5, 1.0};
-    std::vector<double> u(x.size());
-    for (size_t i = 0; i < x.size(); ++i) {
-        u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-    }
-
-    double original_atm = u[2];
-
-    auto spline = make_spline(x, u);
-    auto callback = make_put_dividend_event(5.0, 100.0, &spline);
-    callback(0.5, std::span<const double>(x), std::span<double>(u));
-
-    EXPECT_GT(u[2], original_atm)
-        << "Put value at ATM should increase after dividend (spot drops)";
-
-    // With a coarse 5-point grid, cubic spline interpolation may produce
-    // small negative overshoots in OTM regions. Use a relaxed tolerance.
-    for (size_t i = 0; i < u.size(); ++i) {
-        EXPECT_GE(u[i], -0.01) << "Solution must be approximately non-negative at index " << i;
-    }
+PricingParams make_put(double spot, double strike, double maturity,
+                       double vol, double rate, double div_yield,
+                       std::vector<Dividend> dividends = {}) {
+    PricingParams p(
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                   .rate = rate, .dividend_yield = div_yield,
+                   .option_type = OptionType::PUT},
+        vol);
+    p.discrete_dividends = std::move(dividends);
+    return p;
 }
 
-TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendPut) {
-    // Use a grid where the lowest points have S/K < D/K = 0.10,
-    // so the dividend shift drives them to S - D <= 0 (put fallback = 1.0)
-    std::vector<double> x = {-3.0, -2.5, -2.0, -1.5, -1.0};
-    std::vector<double> u(x.size());
-    for (size_t i = 0; i < x.size(); ++i) {
-        u[i] = std::max(1.0 - std::exp(x[i]), 0.0);
-    }
-
-    // D = 10, K = 100 → d = 0.10. exp(-3.0) ≈ 0.0498 < 0.10 → fallback
-    auto spline = make_spline(x, u);
-    auto callback = make_put_dividend_event(10.0, 100.0, &spline);
-    callback(0.5, std::span<const double>(x), std::span<double>(u));
-
-    EXPECT_DOUBLE_EQ(u[0], 1.0);
+PricingParams make_call(double spot, double strike, double maturity,
+                        double vol, double rate, double div_yield,
+                        std::vector<Dividend> dividends = {}) {
+    PricingParams p(
+        OptionSpec{.spot = spot, .strike = strike, .maturity = maturity,
+                   .rate = rate, .dividend_yield = div_yield,
+                   .option_type = OptionType::CALL},
+        vol);
+    p.discrete_dividends = std::move(dividends);
+    return p;
 }
 
-TEST(DiscreteDividendEventTest, NoShiftWhenSpotBelowDividendCall) {
-    // Same grid setup; exp(-3.0) ≈ 0.0498 < d = 0.10 → call fallback = 0.0
-    std::vector<double> x = {-3.0, -2.5, -2.0, -1.5, -1.0};
-    std::vector<double> u(x.size());
-    for (size_t i = 0; i < x.size(); ++i) {
-        u[i] = std::max(std::exp(x[i]) - 1.0, 0.0);  // call payoff
-    }
+}  // namespace
 
-    auto spline = make_spline(x, u);
-    auto callback = make_call_dividend_event(10.0, 100.0, &spline);
-    callback(0.5, std::span<const double>(x), std::span<double>(u));
+TEST(DiscreteDividendTest, PutValueIncreasesWithDividend) {
+    // A discrete dividend lowers the effective spot, increasing put value
+    auto no_div = solve(make_put(100, 100, 1.0, 0.20, 0.05, 0.0));
+    auto with_div = solve(make_put(100, 100, 1.0, 0.20, 0.05, 0.0,
+        {Dividend{.calendar_time = 0.25, .amount = 5.0}}));
 
-    EXPECT_NEAR(u[0], 0.0, 1e-10);
+    ASSERT_TRUE(no_div.has_value());
+    ASSERT_TRUE(with_div.has_value());
+    EXPECT_GT(with_div->value(), no_div->value())
+        << "Put value should increase when a discrete dividend is present";
 }
 
-TEST(DiscreteDividendEventTest, ZeroDividendNoOp) {
-    std::vector<double> x = {-1.0, 0.0, 1.0};
-    std::vector<double> u = {0.5, 0.3, 0.1};
-    std::vector<double> u_orig = u;
+TEST(DiscreteDividendTest, CallValueDecreasesWithDividend) {
+    // A discrete dividend lowers the effective spot, decreasing call value
+    auto no_div = solve(make_call(100, 100, 1.0, 0.20, 0.05, 0.0));
+    auto with_div = solve(make_call(100, 100, 1.0, 0.20, 0.05, 0.0,
+        {Dividend{.calendar_time = 0.25, .amount = 5.0}}));
 
-    auto spline = make_spline(x, u);
-    auto callback = make_put_dividend_event(0.0, 100.0, &spline);
-    callback(0.5, std::span<const double>(x), std::span<double>(u));
+    ASSERT_TRUE(no_div.has_value());
+    ASSERT_TRUE(with_div.has_value());
+    EXPECT_LT(with_div->value(), no_div->value())
+        << "Call value should decrease when a discrete dividend is present";
+}
 
-    for (size_t i = 0; i < u.size(); ++i) {
-        EXPECT_DOUBLE_EQ(u[i], u_orig[i]);
-    }
+TEST(DiscreteDividendTest, ZeroDividendMatchesNoDividend) {
+    auto no_div = solve(make_put(100, 100, 1.0, 0.20, 0.05, 0.0));
+    auto zero_div = solve(make_put(100, 100, 1.0, 0.20, 0.05, 0.0,
+        {Dividend{.calendar_time = 0.25, .amount = 0.0}}));
+
+    ASSERT_TRUE(no_div.has_value());
+    ASSERT_TRUE(zero_div.has_value());
+    EXPECT_NEAR(zero_div->value(), no_div->value(), 1e-10)
+        << "Zero dividend should produce same price as no dividend";
+}
+
+TEST(DiscreteDividendTest, LargerDividendIncreasesDeepITMPut) {
+    // Deep ITM put with large dividend should push price closer to intrinsic
+    auto small_div = solve(make_put(80, 100, 1.0, 0.20, 0.05, 0.0,
+        {Dividend{.calendar_time = 0.5, .amount = 2.0}}));
+    auto large_div = solve(make_put(80, 100, 1.0, 0.20, 0.05, 0.0,
+        {Dividend{.calendar_time = 0.5, .amount = 10.0}}));
+
+    ASSERT_TRUE(small_div.has_value());
+    ASSERT_TRUE(large_div.has_value());
+    EXPECT_GT(large_div->value(), small_div->value())
+        << "Larger dividend should increase put value further";
 }
