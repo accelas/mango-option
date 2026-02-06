@@ -75,7 +75,6 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-and-test:
-    name: Build and Test
     needs: docker-image
     runs-on: ubuntu-latest
     container:
