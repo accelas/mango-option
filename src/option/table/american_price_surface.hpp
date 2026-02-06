@@ -48,8 +48,6 @@ public:
 
     [[nodiscard]] OptionType option_type() const noexcept;
     [[nodiscard]] double dividend_yield() const noexcept;
-    /// Access underlying surface
-    const PriceTableSurface<4>& eep_surface() const;
     const PriceTableMetadata& metadata() const;
 
     /// Bounds accessors for PriceSurface concept
