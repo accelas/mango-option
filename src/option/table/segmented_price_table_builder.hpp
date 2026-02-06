@@ -33,6 +33,14 @@ public:
 
         /// If true, skip internal moneyness expansion (caller pre-expanded).
         bool skip_moneyness_expansion = false;
+
+        /// Target dt between tau grid points.
+        /// When > 0, each segment gets ceil(width / tau_target_dt) + 1 points
+        /// (clamped to [tau_points_min, tau_points_max]).
+        /// When == 0, falls back to constant tau_points_per_segment.
+        double tau_target_dt = 0.0;
+        int tau_points_min = 4;   ///< B-spline minimum
+        int tau_points_max = 30;  ///< Cap for very wide segments
     };
 
     /// Build a SegmentedSurface from the given configuration.
