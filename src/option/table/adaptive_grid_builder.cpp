@@ -737,6 +737,25 @@ probe_and_build(
     auto final_m = linspace(expanded_min_m, max_m, gsz.moneyness);
     auto final_v = linspace(min_vol, max_vol, gsz.vol);
     auto final_r = linspace(min_rate, max_rate, gsz.rate);
+
+    // 5b. Merge anchor moneyness knots: m=1.0 (ATM) and user-provided domain knots
+    {
+        std::vector<double> anchors = {1.0};
+        for (double m : domain.moneyness) {
+            if (m >= expanded_min_m && m <= max_m) anchors.push_back(m);
+        }
+        for (double a : anchors) {
+            if (a >= final_m.front() && a <= final_m.back()) {
+                bool found = false;
+                for (double g : final_m) {
+                    if (std::abs(g - a) < 1e-6) { found = true; break; }
+                }
+                if (!found) final_m.push_back(a);
+            }
+        }
+        std::sort(final_m.begin(), final_m.end());
+    }
+
     int max_tau_pts = gsz.tau_points;
 
     // Compute tau_target_dt from shortest segment width
