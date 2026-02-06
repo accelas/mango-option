@@ -75,17 +75,13 @@ public:
     /// then builds all segments with a uniform grid.
     [[nodiscard]] std::expected<MultiKRefSurface<>, PriceTableError>
     build_segmented(const SegmentedAdaptiveConfig& config,
-                    const std::vector<double>& moneyness_domain,
-                    const std::vector<double>& vol_domain,
-                    const std::vector<double>& rate_domain);
+                    const ManualGrid& domain);
 
     /// Build segmented surface using per-strike surfaces (no K_ref interpolation).
     [[nodiscard]] std::expected<StrikeSurface<>, PriceTableError>
     build_segmented_strike(const SegmentedAdaptiveConfig& config,
                            const std::vector<double>& strike_grid,
-                           const std::vector<double>& moneyness_domain,
-                           const std::vector<double>& vol_domain,
-                           const std::vector<double>& rate_domain);
+                           const ManualGrid& domain);
 
 private:
     AdaptiveGridParams params_;

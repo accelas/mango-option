@@ -213,7 +213,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             if (use_per_strike) {
                 auto surface = builder.build_segmented_strike(
                     seg_config, path.strike_grid,
-                    grid.moneyness, grid.vol, grid.rate);
+                    {grid.moneyness, grid.vol, grid.rate});
                 if (!surface.has_value()) {
                     return std::unexpected(ValidationError{
                         ValidationErrorCode::InvalidGridSize, 0.0});
@@ -247,7 +247,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             }
 
             auto surface = builder.build_segmented(
-                seg_config, grid.moneyness, grid.vol, grid.rate);
+                seg_config, {grid.moneyness, grid.vol, grid.rate});
             if (!surface.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidGridSize, 0.0});
