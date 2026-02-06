@@ -236,8 +236,6 @@ cc_library(
     deps = [
         ":american_price_surface",
         ":price_table_metadata",
-        ":price_table_surface",
-        "//src/math:black_scholes_analytics",
         "//src/option:option_spec",
     ],
     visibility = ["//visibility:public"],
@@ -262,7 +260,6 @@ cc_library(
     name = "adaptive_grid_types",
     hdrs = ["adaptive_grid_types.hpp"],
     deps = [
-        ":spliced_surface",
         ":price_table_axes",
         ":price_table_surface",
     ],
