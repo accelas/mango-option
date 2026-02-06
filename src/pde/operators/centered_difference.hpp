@@ -10,15 +10,15 @@
 namespace mango::operators {
 
 /**
- * ScalarBackend: Scalar implementation with compiler auto-vectorization
+ * CenteredDifference: Centered difference stencil with compiler auto-vectorization
  *
  * Uses #pragma omp simd hints for automatic vectorization.
  * For non-uniform grids, loads from precomputed GridSpacing arrays.
  */
 template<std::floating_point T = double>
-class ScalarBackend {
+class CenteredDifference {
 public:
-    explicit ScalarBackend(const GridSpacing<T>& spacing)
+    explicit CenteredDifference(const GridSpacing<T>& spacing)
         : spacing_(spacing)
     {}
 
@@ -96,15 +96,6 @@ public:
             du_dx[i] = term1 + term2;
         }
     }
-
-    // Note: Using manual if-else dispatch instead of std::visit for simplicity.
-    // std::visit provides no performance benefit here (compiler optimizes both equally).
-    // Future enhancement: Could use std::visit for pattern-matching clarity:
-    //
-    //   std::visit([&](const auto& spacing_data) {
-    //       if constexpr (std::is_same_v<...>) { /* uniform */ }
-    //       else { /* non-uniform */ }
-    //   }, spacing.spacing_);
 
     // Auto-dispatch second derivative
     void compute_second_derivative(

@@ -3,7 +3,6 @@
 
 #include "mango/pde/core/grid.hpp"
 #include "mango/pde/core/pde_workspace.hpp"
-#include "mango/pde/operators/centered_difference_facade.hpp"
 #include "mango/pde/core/boundary_conditions.hpp"
 #include "mango/pde/core/time_domain.hpp"
 #include "mango/pde/core/trbdf2_config.hpp"
