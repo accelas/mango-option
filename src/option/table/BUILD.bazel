@@ -238,6 +238,7 @@ cc_library(
     deps = [
         ":price_table_axes",
         ":price_table_surface",
+        ":spliced_surface",
     ],
     visibility = ["//visibility:public"],
     strip_include_prefix = "/src/option/table",

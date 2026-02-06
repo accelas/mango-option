@@ -211,10 +211,10 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                 .kref_config = kref_config,
             };
             if (use_per_strike) {
-                auto surface = builder.build_segmented_strike(
+                auto result = builder.build_segmented_strike(
                     seg_config, path.strike_grid,
                     {grid.moneyness, grid.vol, grid.rate});
-                if (!surface.has_value()) {
+                if (!result.has_value()) {
                     return std::unexpected(ValidationError{
                         ValidationErrorCode::InvalidGridSize, 0.0});
                 }
@@ -235,7 +235,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                 };
 
                 auto wrapper = StrikeSurfaceWrapper<>(
-                    std::move(*surface), bounds, config.option_type, config.dividend_yield);
+                    std::move(result->surface), bounds, config.option_type, config.dividend_yield);
 
                 auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
                     std::move(wrapper), config.solver_config);
@@ -246,9 +246,9 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                 return AnyIVSolver(std::move(*solver));
             }
 
-            auto surface = builder.build_segmented(
+            auto result = builder.build_segmented(
                 seg_config, {grid.moneyness, grid.vol, grid.rate});
-            if (!surface.has_value()) {
+            if (!result.has_value()) {
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidGridSize, 0.0});
             }
@@ -269,7 +269,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             };
 
             auto wrapper = MultiKRefSurfaceWrapper<>(
-                std::move(*surface), bounds, config.option_type, config.dividend_yield);
+                std::move(result->surface), bounds, config.option_type, config.dividend_yield);
 
             auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
                 std::move(wrapper), config.solver_config);
