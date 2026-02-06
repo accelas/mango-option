@@ -220,6 +220,103 @@ build_standard(const IVSolverFactoryConfig& config, const StandardIVPath& path) 
 }
 
 // ---------------------------------------------------------------------------
+// Factory: segmented path helpers
+// ---------------------------------------------------------------------------
+
+/// Wrap a StrikeSurface into AnyIVSolver
+static std::expected<AnyIVSolver, ValidationError>
+wrap_strike_surface(StrikeSurface<> surface,
+                    const GridBounds& b, double maturity,
+                    OptionType option_type, double dividend_yield,
+                    const InterpolatedIVSolverConfig& solver_config) {
+    StrikeSurfaceWrapper<>::Bounds bounds{
+        .m_min = b.m_min, .m_max = b.m_max,
+        .tau_min = 0.0, .tau_max = maturity,
+        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
+        .rate_min = b.rate_min, .rate_max = b.rate_max,
+    };
+
+    auto wrapper = StrikeSurfaceWrapper<>(
+        std::move(surface), bounds, option_type, dividend_yield);
+
+    auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
+        std::move(wrapper), solver_config);
+    if (!solver.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+    return AnyIVSolver(std::move(*solver));
+}
+
+/// Wrap a MultiKRefSurface into AnyIVSolver
+static std::expected<AnyIVSolver, ValidationError>
+wrap_multi_kref_surface(MultiKRefSurface<> surface,
+                        const GridBounds& b, double maturity,
+                        OptionType option_type, double dividend_yield,
+                        const InterpolatedIVSolverConfig& solver_config) {
+    MultiKRefSurfaceWrapper<>::Bounds bounds{
+        .m_min = b.m_min, .m_max = b.m_max,
+        .tau_min = 0.0, .tau_max = maturity,
+        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
+        .rate_min = b.rate_min, .rate_max = b.rate_max,
+    };
+
+    auto wrapper = MultiKRefSurfaceWrapper<>(
+        std::move(surface), bounds, option_type, dividend_yield);
+
+    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
+        std::move(wrapper), solver_config);
+    if (!solver.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+    return AnyIVSolver(std::move(*solver));
+}
+
+/// Build per-strike surface manually (no adaptive grid)
+static std::expected<StrikeSurface<>, ValidationError>
+build_manual_strike_surface(const IVSolverFactoryConfig& config,
+                            const SegmentedIVPath& path,
+                            const std::vector<double>& strikes) {
+    DividendSpec dividends{
+        .dividend_yield = config.dividend_yield,
+        .discrete_dividends = path.discrete_dividends
+    };
+
+    std::vector<StrikeEntry> entries;
+    entries.reserve(strikes.size());
+    for (double strike : strikes) {
+        SegmentedPriceTableBuilder::Config seg_config{
+            .K_ref = strike,
+            .option_type = config.option_type,
+            .dividends = dividends,
+            .grid = config.grid,
+            .maturity = path.maturity,
+            .tau_points_per_segment = 5,
+            .skip_moneyness_expansion = false,
+        };
+
+        auto surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(ValidationError{
+                ValidationErrorCode::InvalidGridSize, 0.0});
+        }
+
+        entries.push_back(StrikeEntry{
+            .strike = strike,
+            .surface = std::move(*surface),
+        });
+    }
+
+    auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
+    if (!surface.has_value()) {
+        return std::unexpected(ValidationError{
+            ValidationErrorCode::InvalidGridSize, 0.0});
+    }
+    return std::move(*surface);
+}
+
+// ---------------------------------------------------------------------------
 // Factory: segmented path (discrete dividends)
 // ---------------------------------------------------------------------------
 
@@ -232,8 +329,9 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         kref_config.K_refs = path.strike_grid;
     }
 
+    auto b = extract_bounds(grid);
+
     if (config.adaptive.has_value()) {
-        // Adaptive grid for segmented path
         AdaptiveGridBuilder builder(*config.adaptive);
         SegmentedAdaptiveConfig seg_config{
             .spot = config.spot,
@@ -244,8 +342,6 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             .kref_config = kref_config,
         };
 
-        auto b = extract_bounds(grid);
-
         if (use_per_strike) {
             auto result = builder.build_segmented_strike(
                 seg_config, path.strike_grid,
@@ -254,24 +350,9 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                 return std::unexpected(ValidationError{
                     ValidationErrorCode::InvalidGridSize, 0.0});
             }
-
-            StrikeSurfaceWrapper<>::Bounds bounds{
-                .m_min = b.m_min, .m_max = b.m_max,
-                .tau_min = 0.0, .tau_max = path.maturity,
-                .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-                .rate_min = b.rate_min, .rate_max = b.rate_max,
-            };
-
-            auto wrapper = StrikeSurfaceWrapper<>(
-                std::move(result->surface), bounds, config.option_type, config.dividend_yield);
-
-            auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
-                std::move(wrapper), config.solver_config);
-            if (!solver.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidGridSize, 0.0});
-            }
-            return AnyIVSolver(std::move(*solver));
+            return wrap_strike_surface(std::move(result->surface),
+                b, path.maturity, config.option_type,
+                config.dividend_yield, config.solver_config);
         }
 
         auto result = builder.build_segmented(
@@ -280,85 +361,26 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
         }
-
-        MultiKRefSurfaceWrapper<>::Bounds bounds{
-            .m_min = b.m_min, .m_max = b.m_max,
-            .tau_min = 0.0, .tau_max = path.maturity,
-            .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-            .rate_min = b.rate_min, .rate_max = b.rate_max,
-        };
-
-        auto wrapper = MultiKRefSurfaceWrapper<>(
-            std::move(result->surface), bounds, config.option_type, config.dividend_yield);
-
-        auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
-            std::move(wrapper), config.solver_config);
-        if (!solver.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidGridSize, 0.0});
-        }
-        return AnyIVSolver(std::move(*solver));
+        return wrap_multi_kref_surface(std::move(result->surface),
+            b, path.maturity, config.option_type,
+            config.dividend_yield, config.solver_config);
     }
 
     // Manual grid path
+    if (use_per_strike) {
+        auto surface = build_manual_strike_surface(config, path, kref_config.K_refs);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
+        }
+        return wrap_strike_surface(std::move(*surface),
+            b, path.maturity, config.option_type,
+            config.dividend_yield, config.solver_config);
+    }
+
     DividendSpec dividends{
         .dividend_yield = config.dividend_yield,
         .discrete_dividends = path.discrete_dividends
     };
-
-    auto b = extract_bounds(grid);
-
-    if (use_per_strike) {
-        std::vector<StrikeEntry> entries;
-        entries.reserve(kref_config.K_refs.size());
-        for (double strike : kref_config.K_refs) {
-            SegmentedPriceTableBuilder::Config seg_config{
-                .K_ref = strike,
-                .option_type = config.option_type,
-                .dividends = dividends,
-                .grid = grid,
-                .maturity = path.maturity,
-                .tau_points_per_segment = 5,
-                .skip_moneyness_expansion = false,
-            };
-
-            auto surface = SegmentedPriceTableBuilder::build(seg_config);
-            if (!surface.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidGridSize, 0.0});
-            }
-
-            entries.push_back(StrikeEntry{
-                .strike = strike,
-                .surface = std::move(*surface),
-            });
-        }
-
-        auto surface = build_strike_surface(std::move(entries), /*use_nearest=*/true);
-        if (!surface.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidGridSize, 0.0});
-        }
-
-        StrikeSurfaceWrapper<>::Bounds bounds{
-            .m_min = b.m_min, .m_max = b.m_max,
-            .tau_min = 0.0, .tau_max = path.maturity,
-            .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-            .rate_min = b.rate_min, .rate_max = b.rate_max,
-        };
-
-        auto wrapper = StrikeSurfaceWrapper<>(
-            std::move(*surface), bounds, config.option_type, config.dividend_yield);
-
-        auto solver = InterpolatedIVSolver<StrikeSurfaceWrapper<>>::create(
-            std::move(wrapper), config.solver_config);
-        if (!solver.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidGridSize, 0.0});
-        }
-
-        return AnyIVSolver(std::move(*solver));
-    }
 
     auto surface = build_multi_kref_manual(
         config.spot, config.option_type, dividends,
@@ -367,25 +389,9 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         return std::unexpected(ValidationError{
             ValidationErrorCode::InvalidGridSize, 0.0});
     }
-
-    MultiKRefSurfaceWrapper<>::Bounds bounds{
-        .m_min = b.m_min, .m_max = b.m_max,
-        .tau_min = 0.0, .tau_max = path.maturity,
-        .sigma_min = b.sigma_min, .sigma_max = b.sigma_max,
-        .rate_min = b.rate_min, .rate_max = b.rate_max,
-    };
-
-    auto wrapper = MultiKRefSurfaceWrapper<>(
-        std::move(*surface), bounds, config.option_type, config.dividend_yield);
-
-    auto solver = InterpolatedIVSolver<MultiKRefSurfaceWrapper<>>::create(
-        std::move(wrapper), config.solver_config);
-    if (!solver.has_value()) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidGridSize, 0.0});
-    }
-
-    return AnyIVSolver(std::move(*solver));
+    return wrap_multi_kref_surface(std::move(*surface),
+        b, path.maturity, config.option_type,
+        config.dividend_yield, config.solver_config);
 }
 
 // ---------------------------------------------------------------------------
