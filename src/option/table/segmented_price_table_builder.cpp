@@ -3,6 +3,8 @@
 #include "mango/option/table/price_table_builder.hpp"
 #include "mango/option/table/american_price_surface.hpp"
 #include "mango/option/american_option.hpp"
+#include "mango/option/european_option.hpp"
+#include "mango/math/cubic_spline_solver.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -11,13 +13,26 @@ namespace mango {
 
 namespace {
 
-/// Context for sampling a previous segment's surface as an initial condition.
+/// Stores the τ_max slice of a segment's repaired tensor for IC chaining.
+/// Layout: [Nσ × Nr × Nm], row-major. Values are V/K_ref uniformly.
+struct BoundarySnapshot {
+    std::vector<double> log_moneyness;  ///< log(m) grid, strictly increasing
+    std::vector<double> values;         ///< Flattened [Nσ × Nr × Nm], row-major
+    size_t n_vol;
+    size_t n_rate;
+
+    std::span<const double> slice(size_t vol_idx, size_t rate_idx) const {
+        size_t Nm = log_moneyness.size();
+        size_t offset = (vol_idx * n_rate + rate_idx) * Nm;
+        return {values.data() + offset, Nm};
+    }
+};
+
+/// Context for chained IC generation from boundary snapshot.
 struct ChainedICContext {
-    const AmericanPriceSurface* prev;
+    const BoundarySnapshot* snapshot;
     double K_ref;
-    double prev_tau_end;   ///< Previous segment's local τ at its far boundary
     double boundary_div;   ///< Discrete dividend amount at this boundary
-    bool prev_is_eep;      ///< Whether previous segment uses EEP decomposition
 };
 
 /// Generate a τ grid for a segment [tau_start, tau_end].
@@ -82,6 +97,62 @@ std::vector<Dividend> filter_dividends(
         }
     }
     return merged;
+}
+
+/// Extract the τ_max slice from a repaired tensor as a BoundarySnapshot.
+/// Converts EEP values to V/K_ref; RawPrice values are already V/K_ref.
+BoundarySnapshot extract_boundary_snapshot(
+    const PriceTensor<4>& tensor,
+    const PriceTableAxes<4>& axes,
+    SurfaceContent content,
+    double K_ref,
+    OptionType option_type,
+    double dividend_yield)
+{
+    const size_t Nm = axes.grids[0].size();
+    const size_t Nt = axes.grids[1].size();
+    const size_t Nv = axes.grids[2].size();
+    const size_t Nr = axes.grids[3].size();
+    const size_t tau_idx = Nt - 1;
+    const double tau_end = axes.grids[1][tau_idx];
+
+    BoundarySnapshot snap;
+    snap.n_vol = Nv;
+    snap.n_rate = Nr;
+
+    // Build log-moneyness grid
+    snap.log_moneyness.resize(Nm);
+    for (size_t i = 0; i < Nm; ++i) {
+        snap.log_moneyness[i] = std::log(axes.grids[0][i]);
+    }
+
+    // Extract values in [σ × r × m] layout
+    snap.values.resize(Nv * Nr * Nm);
+    for (size_t v = 0; v < Nv; ++v) {
+        double sigma = axes.grids[2][v];
+        for (size_t r = 0; r < Nr; ++r) {
+            double rate = axes.grids[3][r];
+            size_t offset = (v * Nr + r) * Nm;
+            for (size_t i = 0; i < Nm; ++i) {
+                double tensor_val = tensor.view[i, tau_idx, v, r];
+                if (content == SurfaceContent::EarlyExercisePremium) {
+                    // EEP tensor stores EEP in dollars.
+                    // V = EEP + European_price, then normalize to V/K_ref.
+                    double m = axes.grids[0][i];
+                    double spot = m * K_ref;
+                    auto eu = EuropeanOptionSolver(
+                        OptionSpec{.spot = spot, .strike = K_ref, .maturity = tau_end,
+                            .rate = rate, .dividend_yield = dividend_yield,
+                            .option_type = option_type}, sigma).solve().value();
+                    snap.values[offset + i] = (tensor_val + eu.value()) / K_ref;
+                } else {
+                    // RawPrice: tensor already stores V/K_ref
+                    snap.values[offset + i] = tensor_val;
+                }
+            }
+        }
+    }
+    return snap;
 }
 
 }  // namespace
@@ -176,10 +247,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     std::vector<SegmentConfig> segment_configs;
     segment_configs.reserve(n_segments);
 
-    // The "previous" surface, used to generate chained ICs for earlier segments.
-    // After building segment 0, this holds segment 0's surface; after segment 1,
-    // segment 1's surface; etc.
-    AmericanPriceSurface* prev_surface_ptr = nullptr;
+    // Boundary snapshot from previous segment for IC chaining.
+    std::optional<BoundarySnapshot> prev_snapshot;
 
     for (size_t seg_idx = 0; seg_idx < n_segments; ++seg_idx) {
         double tau_start = boundaries[seg_idx];
@@ -211,6 +280,18 @@ SegmentedPriceTableBuilder::build(const Config& config) {
         auto& [builder, axes] = *setup;
         builder.set_surface_content(content);
 
+        // ------ Manual build path (used for all segments) ------
+
+        // 1. Create batch params
+        auto batch_params = builder.make_batch(axes);
+
+        // 2. Create batch solver with snapshot times
+        BatchAmericanOptionSolver batch_solver;
+        batch_solver.set_snapshot_times(axes.grids[1]);
+
+        // 3. Build setup callback (chained segments only)
+        BatchAmericanOptionSolver::SetupCallback setup_callback = nullptr;
+
         if (!is_last_segment) {
             // Chained segment: τ=0 is the boundary, needs custom IC
             builder.set_allow_tau_zero(true);
@@ -219,128 +300,120 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             const auto& rate_grid = config.grid.rate;
             const size_t Nr = rate_grid.size();
 
-            // τ at the boundary of the previous segment (in its local coords)
-            double prev_seg_tau_local_end = boundaries[seg_idx] - boundaries[seg_idx - 1];
-
-            // Capture prev_surface by pointer (it's in the segments vector)
-            AmericanPriceSurface* prev = prev_surface_ptr;
-
             // Dividend amount at this boundary.
             double boundary_div = dividends[dividends.size() - seg_idx].amount;
 
-            // ------ Manual build for chained segment ------
-
-            // Create batch params from the builder
-            auto batch_params = builder.make_batch(axes);
-
-            // Create batch solver with per-index setup
-            BatchAmericanOptionSolver batch_solver;
-            batch_solver.set_snapshot_times(axes.grids[1]);
-
-            // Build setup callback that sets per-solve IC
             ChainedICContext ic_ctx{
-                .prev = prev,
+                .snapshot = &(*prev_snapshot),
                 .K_ref = K_ref,
-                .prev_tau_end = prev_seg_tau_local_end,
                 .boundary_div = boundary_div,
-                .prev_is_eep = (prev->metadata().content ==
-                                SurfaceContent::EarlyExercisePremium),
             };
 
-            auto setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
+            setup_callback = [ic_ctx, &vol_grid, &rate_grid, Nr](
                 size_t index, AmericanOptionSolver& solver)
             {
-                double sigma = vol_grid[index / Nr];
-                double rate = rate_grid[index % Nr];
+                size_t vol_idx = index / Nr;
+                size_t rate_idx = index % Nr;
 
-                // IC maps log-moneyness x → normalized price u = V/K.
+                // Get snapshot slice for this (σ, r) pair
+                auto snap_slice = ic_ctx.snapshot->slice(vol_idx, rate_idx);
+                const auto& log_m = ic_ctx.snapshot->log_moneyness;
+
+                // Build cubic spline from snapshot data
+                CubicSpline<double> spline;
+                auto err = spline.build(
+                    std::span<const double>(log_m),
+                    snap_slice);
+                // If spline build fails, fall back to zero IC (payoff)
+                if (err.has_value()) return;
+
+                double log_m_min = log_m.front();
+                double log_m_max = log_m.back();
+                double D = ic_ctx.boundary_div;
+                double Kref = ic_ctx.K_ref;
+
+                // IC maps log-moneyness x → normalized price u = V/K_ref.
                 // Jump condition at dividend date: V(t⁻, S) = V(t⁺, S - D).
                 solver.set_initial_condition(
-                    [ic_ctx, sigma, rate](
+                    [spline = std::move(spline), log_m_min, log_m_max, D, Kref](
                         std::span<const double> x, std::span<double> u)
                     {
                         for (size_t i = 0; i < x.size(); ++i) {
-                            double spot = ic_ctx.K_ref * std::exp(x[i]);
-                            double spot_adj = std::max(spot - ic_ctx.boundary_div, 1e-8);
-                            double raw = ic_ctx.prev->price(
-                                spot_adj, ic_ctx.K_ref, ic_ctx.prev_tau_end,
-                                sigma, rate);
-                            // EEP returns actual price V; RawPrice returns V/K_ref
-                            u[i] = ic_ctx.prev_is_eep ? raw / ic_ctx.K_ref : raw;
+                            double spot = Kref * std::exp(x[i]);
+                            double spot_adj = std::max(spot - D, 1e-8);
+                            double m_adj = spot_adj / Kref;
+                            double log_m_adj = std::log(m_adj);
+                            // Clamp to snapshot grid range
+                            log_m_adj = std::clamp(log_m_adj, log_m_min, log_m_max);
+                            // Snapshot stores V/K_ref uniformly
+                            u[i] = spline.eval(log_m_adj);
                         }
                     });
             };
-
-            // Estimate grid using the builder's internal approach
-            auto batch_result = batch_solver.solve_batch(
-                batch_params, true, setup_callback);
-
-            // Extract tensor
-            auto extraction = builder.extract_tensor(batch_result, axes);
-            if (!extraction.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
-            }
-
-            // Repair failures
-            auto repair = builder.repair_failed_slices(
-                extraction->tensor, extraction->failed_pde,
-                extraction->failed_spline, axes);
-            if (!repair.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
-            }
-
-            // Fit B-spline coefficients
-            auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
-            if (!fit_result.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
-            }
-            auto coeffs = std::move(fit_result->coefficients);
-
-            // Build PriceTableSurface manually
-            PriceTableMetadata metadata{
-                .K_ref = K_ref,
-                .dividends = {.dividend_yield = config.dividends.dividend_yield},
-                .content = content,
-            };
-
-            auto surface = PriceTableSurface<4>::build(
-                axes, std::move(coeffs), metadata);
-            if (!surface.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            auto aps = AmericanPriceSurface::create(*surface, config.option_type);
-            if (!aps.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            segment_configs.push_back(SegmentConfig{
-                .surface = std::move(*aps),
-                .tau_start = tau_start,
-                .tau_end = tau_end,
-            });
-            prev_surface_ptr = &segment_configs.back().surface;
-
-        } else {
-            // Last segment (closest to expiry): standard build with EEP
-            auto result = builder.build(axes);
-            if (!result.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            auto aps = AmericanPriceSurface::create(
-                result->surface, config.option_type);
-            if (!aps.has_value()) {
-                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
-            }
-
-            segment_configs.push_back(SegmentConfig{
-                .surface = std::move(*aps),
-                .tau_start = tau_start,
-                .tau_end = tau_end,
-            });
-            prev_surface_ptr = &segment_configs.back().surface;
         }
+
+        // 4. Solve batch
+        auto batch_result = batch_solver.solve_batch(
+            batch_params, true, setup_callback);
+
+        // 5. Failure rate check (matches builder.build() behavior)
+        const double failure_rate = static_cast<double>(batch_result.failed_count) /
+                                    static_cast<double>(batch_result.results.size());
+        if (failure_rate > 0.5) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+        }
+
+        // 6. Extract tensor
+        auto extraction = builder.extract_tensor(batch_result, axes);
+        if (!extraction.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
+        }
+
+        // 7. Repair failures
+        auto repair = builder.repair_failed_slices(
+            extraction->tensor, extraction->failed_pde,
+            extraction->failed_spline, axes);
+        if (!repair.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
+        }
+
+        // 8. Capture snapshot for next segment (if more segments follow)
+        if (seg_idx + 1 < n_segments) {
+            prev_snapshot = extract_boundary_snapshot(
+                extraction->tensor, axes, content, K_ref,
+                config.option_type, config.dividends.dividend_yield);
+        }
+
+        // 9. Fit B-spline coefficients
+        auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
+        if (!fit_result.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
+        }
+        auto coeffs = std::move(fit_result->coefficients);
+
+        // 10. Build PriceTableSurface and AmericanPriceSurface
+        PriceTableMetadata metadata{
+            .K_ref = K_ref,
+            .dividends = {.dividend_yield = config.dividends.dividend_yield},
+            .content = content,
+        };
+
+        auto surface = PriceTableSurface<4>::build(
+            axes, std::move(coeffs), metadata);
+        if (!surface.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+        }
+
+        auto aps = AmericanPriceSurface::create(*surface, config.option_type);
+        if (!aps.has_value()) {
+            return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
+        }
+
+        segment_configs.push_back(SegmentConfig{
+            .surface = std::move(*aps),
+            .tau_start = tau_start,
+            .tau_end = tau_end,
+        });
     }
 
     // =====================================================================
