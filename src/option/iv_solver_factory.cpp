@@ -12,40 +12,13 @@ namespace mango {
 
 namespace {
 
-/// Convert a SegmentedPriceSurface to the new SegmentedSurface<> type
-std::expected<SegmentedSurface<>, PriceTableError> convert_to_spliced(
-    SegmentedPriceSurface& old_surface)
-{
-    // Extract segments and convert to SegmentConfig
-    std::vector<SegmentConfig> seg_configs;
-    for (auto& seg : old_surface.segments()) {
-        seg_configs.push_back(SegmentConfig{
-            .surface = std::move(seg.surface),
-            .tau_start = seg.tau_start,
-            .tau_end = seg.tau_end,
-        });
-    }
-
-    // Build SegmentedConfig
-    SegmentedConfig config{
-        .segments = std::move(seg_configs),
-        .dividends = old_surface.dividends(),
-        .K_ref = old_surface.K_ref(),
-        .T = old_surface.T(),
-    };
-
-    return build_segmented_surface(std::move(config));
-}
-
 /// Build a MultiKRefSurface<> for manual grid path
 std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
     double spot,
     OptionType option_type,
     const DividendSpec& dividends,
-    const std::vector<double>& moneyness_grid,
+    const ManualGrid& grid,
     double maturity,
-    const std::vector<double>& vol_grid,
-    const std::vector<double>& rate_grid,
     const MultiKRefConfig& kref_config)
 {
     // Generate K_refs if not provided
@@ -65,33 +38,25 @@ std::expected<MultiKRefSurface<>, PriceTableError> build_multi_kref_manual(
     entries.reserve(K_refs.size());
 
     for (double K_ref : K_refs) {
-        // Build SegmentedPriceSurface for this K_ref
+        // Build SegmentedSurface for this K_ref
         SegmentedPriceTableBuilder::Config seg_config{
             .K_ref = K_ref,
             .option_type = option_type,
             .dividends = dividends,
-            .moneyness_grid = moneyness_grid,
+            .grid = grid,
             .maturity = maturity,
-            .vol_grid = vol_grid,
-            .rate_grid = rate_grid,
             .tau_points_per_segment = 5,
             .skip_moneyness_expansion = false,
         };
 
-        auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
-        if (!old_surface.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-
-        // Convert to new SegmentedSurface<>
-        auto new_surface = convert_to_spliced(*old_surface);
-        if (!new_surface.has_value()) {
-            return std::unexpected(new_surface.error());
+        auto surface = SegmentedPriceTableBuilder::build(seg_config);
+        if (!surface.has_value()) {
+            return std::unexpected(surface.error());
         }
 
         entries.push_back(MultiKRefEntry{
             .K_ref = K_ref,
-            .surface = std::move(*new_surface),
+            .surface = std::move(*surface),
         });
     }
 
@@ -313,10 +278,9 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                     ValidationErrorCode::InvalidGridSize, 0.0});
             }
             return AnyIVSolver(std::move(*solver));
-        }
-
-        // Manual grid: build MultiKRefSurface using new spliced surface types
-        DividendSpec dividends{
+        } else if constexpr (std::is_same_v<G, ManualGrid>) {
+            // Manual grid: build MultiKRefSurface using new spliced surface types
+            DividendSpec dividends{
             .dividend_yield = config.dividend_yield,
             .discrete_dividends = path.discrete_dividends
         };
@@ -329,29 +293,21 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
                     .K_ref = strike,
                     .option_type = config.option_type,
                     .dividends = dividends,
-                    .moneyness_grid = grid.moneyness,
+                    .grid = grid,
                     .maturity = path.maturity,
-                    .vol_grid = grid.vol,
-                    .rate_grid = grid.rate,
                     .tau_points_per_segment = 5,
                     .skip_moneyness_expansion = false,
                 };
 
-                auto old_surface = SegmentedPriceTableBuilder::build(seg_config);
-                if (!old_surface.has_value()) {
-                    return std::unexpected(ValidationError{
-                        ValidationErrorCode::InvalidGridSize, 0.0});
-                }
-
-                auto new_surface = convert_to_spliced(*old_surface);
-                if (!new_surface.has_value()) {
+                auto surface = SegmentedPriceTableBuilder::build(seg_config);
+                if (!surface.has_value()) {
                     return std::unexpected(ValidationError{
                         ValidationErrorCode::InvalidGridSize, 0.0});
                 }
 
                 entries.push_back(StrikeEntry{
                     .strike = strike,
-                    .surface = std::move(*new_surface),
+                    .surface = std::move(*surface),
                 });
             }
 
@@ -391,8 +347,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
 
         auto surface = build_multi_kref_manual(
             config.spot, config.option_type, dividends,
-            grid.moneyness, path.maturity, grid.vol, grid.rate,
-            kref_config);
+            grid, path.maturity, kref_config);
         if (!surface.has_value()) {
             return std::unexpected(ValidationError{
                 ValidationErrorCode::InvalidGridSize, 0.0});
@@ -424,6 +379,7 @@ build_segmented(const IVSolverFactoryConfig& config, const SegmentedIVPath& path
         }
 
         return AnyIVSolver(std::move(*solver));
+        }
     }, config.grid);
 }
 
