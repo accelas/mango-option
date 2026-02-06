@@ -567,7 +567,7 @@ probe_and_build(
     const AdaptiveGridParams& params,
     const SegmentedAdaptiveConfig& config,
     const std::vector<double>& ref_values,
-    const ManualGrid& domain)
+    const IVGrid& domain)
 {
     // 1. Select probe values (up to 3: front, back, nearest ATM)
     auto probes = select_probes(ref_values, config.spot);
@@ -1186,7 +1186,7 @@ BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
 std::expected<SegmentedAdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build_segmented(
     const SegmentedAdaptiveConfig& config,
-    const ManualGrid& domain)
+    const IVGrid& domain)
 {
     // 1. Determine full K_ref list
     std::vector<double> K_refs = config.kref_config.K_refs;
@@ -1318,7 +1318,7 @@ std::expected<StrikeAdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build_segmented_strike(
     const SegmentedAdaptiveConfig& config,
     const std::vector<double>& strike_grid,
-    const ManualGrid& domain)
+    const IVGrid& domain)
 {
     std::vector<double> strikes = strike_grid;
     if (strikes.empty()) {

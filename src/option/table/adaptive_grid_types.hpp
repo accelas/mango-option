@@ -13,12 +13,16 @@
 
 namespace mango {
 
-/// Manual grid specification: explicit grid points for each axis.
+/// Grid specification for IV solver: explicit grid points for each axis.
 /// Requires >= 4 points per axis (B-spline minimum).
-struct ManualGrid {
-    std::vector<double> moneyness;
-    std::vector<double> vol;
-    std::vector<double> rate;
+///
+/// Defaults cover typical equity option ranges.  When used with adaptive
+/// refinement the values serve as domain bounds; otherwise they are the
+/// exact interpolation knots.
+struct IVGrid {
+    std::vector<double> moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
+    std::vector<double> vol = {0.05, 0.10, 0.20, 0.30, 0.50};
+    std::vector<double> rate = {0.01, 0.03, 0.05, 0.10};
 };
 
 /// Configuration for adaptive grid refinement
@@ -105,14 +109,14 @@ struct AdaptiveResult {
 /// Result from adaptive segmented grid building (multi-K_ref path)
 struct SegmentedAdaptiveResult {
     MultiKRefSurface<> surface;
-    ManualGrid grid;  ///< The grid sizes adaptive chose
+    IVGrid grid;  ///< The grid sizes adaptive chose
     int tau_points_per_segment;
 };
 
 /// Result from adaptive segmented grid building (per-strike path)
 struct StrikeAdaptiveResult {
     StrikeSurface<> surface;
-    ManualGrid grid;  ///< The grid sizes adaptive chose
+    IVGrid grid;  ///< The grid sizes adaptive chose
     int tau_points_per_segment;
 };
 

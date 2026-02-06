@@ -8,7 +8,7 @@
  *
  * Workflow mirrors production use:
  *  1. Generate reference prices via BatchAmericanOptionSolver (chain mode)
- *  2. Build InterpolatedIVSolver via factory with AdaptiveGrid
+ *  2. Build InterpolatedIVSolver via factory with adaptive IVGrid
  *  3. Recover IV via interpolated solver and FDM IVSolver
  *  4. Error = |interp_iv − fdm_iv| in basis points
  *
@@ -113,7 +113,7 @@ static PriceGrid generate_prices(bool with_dividends) {
 // Step 2: Build interpolated IV solvers
 // ============================================================================
 
-// Vanilla: one solver covering all maturities via StandardIVPath + AdaptiveGrid
+// Vanilla: one solver covering all maturities via StandardIVPath + adaptive grid
 static AnyIVSolver build_vanilla_solver() {
     // Maturity grid for price table — deliberately offset from test maturities
     // so most test points require real interpolation
@@ -121,12 +121,12 @@ static AnyIVSolver build_vanilla_solver() {
         .option_type = OptionType::PUT,
         .spot = kSpot,
         .dividend_yield = kDivYield,
-        .grid = AdaptiveGrid{
-            .params = {.target_iv_error = 2e-5},  // 2 bps target
+        .grid = IVGrid{
             .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
             .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
             .rate = {0.01, 0.03, 0.05, 0.10},
         },
+        .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},  // 2 bps target
         .path = StandardIVPath{
             .maturity_grid = {0.01, 0.03, 0.06, 0.12, 0.20,
                               0.35, 0.60, 1.0, 1.5, 2.0, 2.5},
@@ -141,7 +141,7 @@ static AnyIVSolver build_vanilla_solver() {
     return std::move(*solver);
 }
 
-// Dividends: one solver per maturity via SegmentedIVPath + AdaptiveGrid
+// Dividends: one solver per maturity via SegmentedIVPath + adaptive grid
 static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
     std::vector<std::pair<size_t, AnyIVSolver>> solvers;
 
@@ -153,12 +153,12 @@ static std::vector<std::pair<size_t, AnyIVSolver>> build_div_solvers() {
             .option_type = OptionType::PUT,
             .spot = kSpot,
             .dividend_yield = kDivYield,
-            .grid = AdaptiveGrid{
-                .params = {.target_iv_error = 2e-5},
+            .grid = IVGrid{
                 .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
                 .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
                 .rate = {0.01, 0.03, 0.05, 0.10},
             },
+            .adaptive = AdaptiveGridParams{.target_iv_error = 2e-5},
             .path = SegmentedIVPath{
                 .maturity = mat,
                 .discrete_dividends = divs,
@@ -389,7 +389,7 @@ int main() {
     std::printf("===================================\n");
     std::printf("S=%.0f, r=%.2f, q=%.2f, PUT\n", kSpot, kRate, kDivYield);
     std::printf("Reference prices: BatchAmericanOptionSolver (chain mode)\n");
-    std::printf("Interpolated IV:  AdaptiveGrid + make_interpolated_iv_solver\n");
+    std::printf("Interpolated IV:  adaptive IVGrid + make_interpolated_iv_solver\n");
     std::printf("FDM reference IV: IVSolver (vanilla) / Brent solver (dividends)\n");
     std::printf("Error = |interp_iv - fdm_iv| in basis points\n\n");
 
@@ -409,7 +409,7 @@ int main() {
     auto div_prices = generate_prices(/*with_dividends=*/true);
 
     // Step 2: Build interpolated solvers
-    std::printf("--- Building vanilla interpolated solver (AdaptiveGrid)...\n");
+    std::printf("--- Building vanilla interpolated solver (adaptive)...\n");
     auto vanilla_solver = build_vanilla_solver();
 
     std::printf("--- Building dividend interpolated solvers (per-maturity)...\n");

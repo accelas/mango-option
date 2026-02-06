@@ -418,7 +418,7 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
             .kref_config = {.K_refs = kStrikeGrid},
         };
 
-        ManualGrid domain{
+        IVGrid domain{
             .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
             .vol = {0.05, 0.10, 0.20, 0.30, 0.50},
             .rate = {0.01, 0.03, 0.05, 0.10},

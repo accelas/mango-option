@@ -7,12 +7,14 @@
  * (AmericanPriceSurface for continuous dividends, MultiKRefSurface<>
  * for discrete dividends) and wraps it in a type-erased AnyIVSolver.
  *
- * Grid density is controlled via IVGridSpec: ManualGrid for explicit grid
- * points, or AdaptiveGrid for automatic refinement to a target IV accuracy.
+ * Grid density is controlled via IVGrid.  When `adaptive` is set, the grid
+ * values serve as domain bounds for automatic refinement; otherwise they are
+ * exact interpolation knots.
  */
 
 #pragma once
 
+#include <optional>
 #include <vector>
 #include <variant>
 #include <expected>
@@ -38,29 +40,14 @@ struct SegmentedIVPath {
     std::vector<double> strike_grid;  ///< optional explicit strikes for per-strike surfaces
 };
 
-/// Adaptive grid specification: automatic grid density tuning.
-/// User provides domain bounds and a target IV accuracy; the builder
-/// iteratively refines until the target is met.
-struct AdaptiveGrid {
-    AdaptiveGridParams params;
-
-    /// Domain bounds (min/max extracted automatically).
-    /// Defaults cover typical equity option ranges.
-    std::vector<double> moneyness = {0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3};
-    std::vector<double> vol = {0.05, 0.10, 0.20, 0.30, 0.50};
-    std::vector<double> rate = {0.01, 0.03, 0.05, 0.10};
-};
-
-/// Grid specification: manual or adaptive
-using IVGridSpec = std::variant<ManualGrid, AdaptiveGrid>;
-
 /// Configuration for the IV solver factory
 struct IVSolverFactoryConfig {
     OptionType option_type = OptionType::PUT;
     double spot = 100.0;
     double dividend_yield = 0.0;
-    IVGridSpec grid;                           ///< Grid points or adaptive spec
-    InterpolatedIVSolverConfig solver_config;  ///< Newton config
+    IVGrid grid;                                    ///< Grid points (exact or domain bounds)
+    std::optional<AdaptiveGridParams> adaptive;     ///< If set, refine grid adaptively
+    InterpolatedIVSolverConfig solver_config;       ///< Newton config
     std::variant<StandardIVPath, SegmentedIVPath> path;
 };
 
@@ -94,7 +81,7 @@ private:
 ///
 /// If path holds StandardIVPath, uses the AmericanPriceSurface path.
 /// If path holds SegmentedIVPath, uses the MultiKRefSurface path.
-/// If grid holds AdaptiveGrid, uses AdaptiveGridBuilder
+/// If adaptive is set, uses AdaptiveGridBuilder
 /// to automatically refine grid density until the target IV error is met.
 ///
 /// @param config Solver configuration

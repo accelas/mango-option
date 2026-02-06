@@ -10,7 +10,7 @@ TEST(SegmentedPriceTableBuilderTest, BuildWithOneDividend) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 2.0}}},
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -38,7 +38,7 @@ TEST(SegmentedPriceTableBuilderTest, BuildWithNoDividends) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividends = {.dividend_yield = 0.02},
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -59,7 +59,7 @@ TEST(SegmentedPriceTableBuilderTest, DividendAtExpiryIgnored) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividends = {.discrete_dividends = {{.calendar_time = 1.0, .amount = 5.0}}},  // at expiry — should be filtered out
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -76,7 +76,7 @@ TEST(SegmentedPriceTableBuilderTest, DividendAtTimeZeroIgnored) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividends = {.discrete_dividends = {{.calendar_time = 0.0, .amount = 3.0}}},  // at time 0 — should be filtered out
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -92,7 +92,7 @@ TEST(SegmentedPriceTableBuilderTest, InvalidKRefFails) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = -100.0,
         .option_type = OptionType::PUT,
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -108,7 +108,7 @@ TEST(SegmentedPriceTableBuilderTest, InvalidMaturityFails) {
     SegmentedPriceTableBuilder::Config config{
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -134,7 +134,7 @@ TEST(SegmentedPriceTableBuilderTest, ManualPathMatchesBuildPath) {
         .K_ref = 100.0,
         .option_type = OptionType::PUT,
         .dividends = {.dividend_yield = 0.0, .discrete_dividends = {{.calendar_time = 0.5, .amount = 1.50}}},
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.8, 0.9, 1.0, 1.1, 1.2},
             .vol = {0.15, 0.20, 0.30, 0.40},
             .rate = {0.03, 0.05, 0.07, 0.09},
@@ -175,7 +175,7 @@ TEST(SegmentedPriceTableBuilderTest, UnifiedManualPathMultiDividend) {
                 {.calendar_time = 0.75, .amount = 0.50},
             },
         },
-        .grid = ManualGrid{
+        .grid = IVGrid{
             .moneyness = {0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00,
                           1.05, 1.10, 1.15, 1.20, 1.25, 1.30},
             .vol = {0.10, 0.15, 0.20, 0.30, 0.40},

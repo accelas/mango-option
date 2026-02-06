@@ -74,13 +74,13 @@ public:
     /// then builds all segments with a uniform grid.
     [[nodiscard]] std::expected<SegmentedAdaptiveResult, PriceTableError>
     build_segmented(const SegmentedAdaptiveConfig& config,
-                    const ManualGrid& domain);
+                    const IVGrid& domain);
 
     /// Build segmented surface using per-strike surfaces (no K_ref interpolation).
     [[nodiscard]] std::expected<StrikeAdaptiveResult, PriceTableError>
     build_segmented_strike(const SegmentedAdaptiveConfig& config,
                            const std::vector<double>& strike_grid,
-                           const ManualGrid& domain);
+                           const IVGrid& domain);
 
 private:
     AdaptiveGridParams params_;
