@@ -74,30 +74,25 @@ std::vector<Dividend> filter_dividends(
 
 }  // namespace
 
-std::expected<SegmentedPriceSurface, ValidationError>
+std::expected<SegmentedSurface<>, PriceTableError>
 SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Validate inputs
     // =====================================================================
     if (config.K_ref <= 0.0) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidStrike, config.K_ref, 0});
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
     if (config.maturity <= 0.0) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidMaturity, config.maturity, 0});
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
     }
-    if (config.moneyness_grid.size() < 4) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidBounds, 0.0, 0});
+    if (config.grid.moneyness.size() < 4) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
     }
-    if (config.vol_grid.size() < 4) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidBounds, 0.0, 1});
+    if (config.grid.vol.size() < 4) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 2});
     }
-    if (config.rate_grid.size() < 4) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidBounds, 0.0, 2});
+    if (config.grid.rate.size() < 4) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 3});
     }
 
     const double T = config.maturity;
@@ -129,13 +124,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // Step 3: Expand moneyness grid downward
     // =====================================================================
-    std::vector<double> expanded_m_grid = config.moneyness_grid;
+    std::vector<double> expanded_m_grid = config.grid.moneyness;
     if (!config.skip_moneyness_expansion) {
         double total_div = 0.0;
         for (const auto& div : dividends) {
             total_div += div.amount;
         }
-        double m_min_expanded = config.moneyness_grid.front() - total_div / K_ref;
+        double m_min_expanded = config.grid.moneyness.front() - total_div / K_ref;
         if (m_min_expanded < 0.01) m_min_expanded = 0.01;
 
         if (m_min_expanded < expanded_m_grid.front()) {
@@ -158,8 +153,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
     // Ensure at least 4 moneyness points
     if (expanded_m_grid.size() < 4) {
-        return std::unexpected(ValidationError{
-            ValidationErrorCode::InvalidBounds, 0.0, 0});
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InsufficientGridPoints, 0});
     }
 
     // =====================================================================
@@ -167,8 +161,8 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // =====================================================================
     // We'll store AmericanPriceSurface for each segment, then assemble.
     // Index 0 = closest to expiry.
-    std::vector<SegmentedPriceSurface::Segment> segments;
-    segments.reserve(n_segments);
+    std::vector<SegmentConfig> segment_configs;
+    segment_configs.reserve(n_segments);
 
     // The "previous" surface, used to generate chained ICs for earlier segments.
     // After building segment 0, this holds segment 0's surface; after segment 1,
@@ -193,14 +187,12 @@ SegmentedPriceTableBuilder::build(const Config& config) {
 
         // Build PriceTableBuilder for this segment
         auto setup = PriceTableBuilder<4>::from_vectors(
-            expanded_m_grid, local_tau, config.vol_grid, config.rate_grid,
+            expanded_m_grid, local_tau, config.grid.vol, config.grid.rate,
             K_ref, GridAccuracyParams{}, config.option_type,
             config.dividends.dividend_yield);
 
         if (!setup.has_value()) {
-            return std::unexpected(ValidationError{
-                ValidationErrorCode::InvalidBounds,
-                static_cast<double>(seg_idx), 0});
+            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
         }
 
         auto& [builder, axes] = *setup;
@@ -210,118 +202,18 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // Chained segment: τ=0 is the boundary, needs custom IC
             builder.set_allow_tau_zero(true);
 
-            // The previous segment's surface provides the IC.
-            // We need per-(sigma, rate) ICs.  The SetupCallback receives
-            // the batch index and the solver; from the batch index we can
-            // recover sigma and rate indices (row-major over σ × r).
-            const auto& vol_grid = config.vol_grid;
-            const auto& rate_grid = config.rate_grid;
+            const auto& vol_grid = config.grid.vol;
+            const auto& rate_grid = config.grid.rate;
             const size_t Nr = rate_grid.size();
 
             // τ at the boundary of the previous segment (in its local coords)
-            // The previous segment covers [boundaries[seg_idx-1], boundaries[seg_idx]]
-            // so its local τ_end = boundaries[seg_idx] - boundaries[seg_idx-1].
             double prev_seg_tau_local_end = boundaries[seg_idx] - boundaries[seg_idx - 1];
 
             // Capture prev_surface by pointer (it's in the segments vector)
             AmericanPriceSurface* prev = prev_surface_ptr;
 
             // Dividend amount at this boundary.
-            // Boundary seg_idx was created from dividends[N - seg_idx].
             double boundary_div = dividends[dividends.size() - seg_idx].amount;
-
-            // Set a per-solve custom IC via the builder's SetupCallback.
-            // PriceTableBuilder itself doesn't have a SetupCallback setter,
-            // but it does have set_initial_condition() which sets a GLOBAL IC.
-            // Since the IC doesn't know sigma/rate, we use a different approach:
-            //
-            // We use the global custom IC that captures the previous surface.
-            // The IC function gets x values and must produce u values.
-            // For RawPrice surfaces, price(spot, K_ref, tau, sigma, rate)
-            // returns V/K_ref which IS the PDE normalized solution.
-            //
-            // Problem: the IC lambda doesn't know which sigma/rate it's being
-            // called with.  The PriceTableBuilder's solve_batch passes the
-            // custom_ic_ to ALL solves via a SetupCallback that doesn't
-            // differentiate between (sigma, rate) combinations.
-            //
-            // Looking at price_table_builder.cpp line 269-274:
-            //   if (custom_ic_) {
-            //       auto ic = *custom_ic_;
-            //       setup_cb = [ic](size_t, AmericanOptionSolver& s) {
-            //           s.set_initial_condition(ic);
-            //       };
-            //   }
-            // So the same IC is applied to all solves.  This won't work for
-            // per-(sigma, rate) ICs.
-            //
-            // Solution: we override this by setting a SetupCallback-aware IC.
-            // We'll build the batch manually and use solve_batch with a
-            // per-index SetupCallback that captures sigma/rate from the index.
-
-            // Actually, looking more closely, the SetupCallback IS per-index:
-            //   setup_cb = [ic](size_t /*index*/, AmericanOptionSolver& s) { ... };
-            // So we can use the index to determine sigma and rate.
-            //
-            // BUT: PriceTableBuilder::build() creates the SetupCallback
-            // internally and doesn't expose a way to set an external one.
-            // The custom_ic_ path creates a lambda that ignores the index.
-            //
-            // We have two options:
-            //   A) Modify PriceTableBuilder to accept a SetupCallback (breaks API).
-            //   B) Work around it by building manually.
-            //
-            // Let's use option B: we'll use the PriceTableBuilder's infrastructure
-            // but with a workaround.  Since the IC function is called once per solve,
-            // and the batch iterates over (sigma, rate) in a fixed order, we can use
-            // a stateful IC that advances through the grid.  But that's fragile.
-            //
-            // Better approach: use a single IC function that evaluates the previous
-            // surface.  For each x value, we compute the price for ALL possible
-            // (sigma, rate) pairs -- but the IC is called per-solve with specific
-            // (sigma, rate).  Wait, the IC doesn't receive sigma/rate at all.
-            //
-            // The cleanest workaround: use a thread-local or atomic counter to
-            // track which (sigma, rate) pair is being solved.  The batch ordering
-            // is deterministic: sigma_idx * Nr + rate_idx.  But with OpenMP
-            // parallelism, the ordering isn't sequential.
-            //
-            // Best approach: The previous segment's AmericanPriceSurface with EEP
-            // mode already stores the FULL American price for ANY (sigma, rate).
-            // The first segment's surface works correctly.  For the chained IC,
-            // we need to evaluate it.  But the IC function signature is
-            // f(x, u) with no sigma/rate info.
-            //
-            // Final decision: Build the chained segments using BatchAmericanOptionSolver
-            // directly with a per-index SetupCallback, instead of going through
-            // PriceTableBuilder.  This gives us full control.
-            //
-            // ACTUALLY: re-reading the task description again, the simplest
-            // approach that works is: set_initial_condition with a lambda that
-            // uses the previous surface at the max-local-tau.  But the IC
-            // doesn't know sigma or rate.
-            //
-            // COMPROMISE: For RawPrice chained segments, we can build a separate
-            // PriceTableBuilder for each (sigma, rate) pair.  That's O(Nsigma * Nr)
-            // builders, each with 1 batch entry... that's just as expensive as
-            // the batch approach.
-            //
-            // OK, I realize from re-reading the code more carefully that there IS
-            // a way.  The solve_batch in PriceTableBuilder creates a batch and
-            // passes a SetupCallback.  If custom_ic_ is set, it creates a callback
-            // that sets the same IC for all solves.  What if we DON'T set custom_ic_
-            // and instead manipulate the solve_batch process ourselves?
-            //
-            // Actually, the simplest clean approach: since PriceTableBuilder's
-            // build() method is monolithic, let's compose the pieces manually
-            // for chained segments.  We'll:
-            //   1. Create a PriceTableBuilder to get the config
-            //   2. Use make_batch_internal to get the batch params
-            //   3. Use a BatchAmericanOptionSolver with per-index setup callback
-            //   4. Use extract_tensor_internal, repair, fit_coeffs
-            //   5. Build the surface
-            //
-            // This requires the internal APIs that PriceTableBuilder exposes.
 
             // ------ Manual build for chained segment ------
 
@@ -373,9 +265,7 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             // Extract tensor
             auto extraction = builder.extract_tensor(batch_result, axes);
             if (!extraction.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 1});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::ExtractionFailed});
             }
 
             // Repair failures
@@ -383,17 +273,13 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 extraction->tensor, extraction->failed_pde,
                 extraction->failed_spline, axes);
             if (!repair.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 2});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::RepairFailed});
             }
 
             // Fit B-spline coefficients
             auto fit_result = builder.fit_coeffs(extraction->tensor, axes);
             if (!fit_result.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 3});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::FittingFailed});
             }
             auto coeffs = std::move(fit_result->coefficients);
 
@@ -407,61 +293,54 @@ SegmentedPriceTableBuilder::build(const Config& config) {
             auto surface = PriceTableSurface<4>::build(
                 axes, std::move(coeffs), metadata);
             if (!surface.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 4});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
             }
 
             auto aps = AmericanPriceSurface::create(*surface, config.option_type);
             if (!aps.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 5});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
             }
 
-            segments.push_back(SegmentedPriceSurface::Segment{
+            segment_configs.push_back(SegmentConfig{
                 .surface = std::move(*aps),
                 .tau_start = tau_start,
                 .tau_end = tau_end,
             });
-            prev_surface_ptr = &segments.back().surface;
+            prev_surface_ptr = &segment_configs.back().surface;
 
         } else {
             // Last segment (closest to expiry): standard build with EEP
             auto result = builder.build(axes);
             if (!result.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 0});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
             }
 
             auto aps = AmericanPriceSurface::create(
                 result->surface, config.option_type);
             if (!aps.has_value()) {
-                return std::unexpected(ValidationError{
-                    ValidationErrorCode::InvalidBounds,
-                    static_cast<double>(seg_idx), 1});
+                return std::unexpected(PriceTableError{PriceTableErrorCode::SurfaceBuildFailed});
             }
 
-            segments.push_back(SegmentedPriceSurface::Segment{
+            segment_configs.push_back(SegmentConfig{
                 .surface = std::move(*aps),
                 .tau_start = tau_start,
                 .tau_end = tau_end,
             });
-            prev_surface_ptr = &segments.back().surface;
+            prev_surface_ptr = &segment_configs.back().surface;
         }
     }
 
     // =====================================================================
-    // Step 5: Assemble SegmentedPriceSurface
+    // Step 5: Assemble SegmentedSurface
     // =====================================================================
-    SegmentedPriceSurface::Config sps_config;
-    sps_config.segments = std::move(segments);
-    sps_config.discrete_dividends = dividends;
-    sps_config.K_ref = K_ref;
-    sps_config.T = T;
+    SegmentedConfig seg_config{
+        .segments = std::move(segment_configs),
+        .dividends = dividends,
+        .K_ref = K_ref,
+        .T = T,
+    };
 
-    return SegmentedPriceSurface::create(std::move(sps_config));
+    return build_segmented_surface(std::move(seg_config));
 }
 
 }  // namespace mango
