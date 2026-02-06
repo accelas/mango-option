@@ -682,7 +682,7 @@ cc_test(
     srcs = ["american_option_gamma_oscillation_test.cc"],
     deps = [
         "//src/option:american_option",
-        "//src/pde/operators:centered_difference_facade",
+        "//src/pde/operators:centered_difference",
         "@googletest//:gtest_main",
     ],
 )
@@ -782,10 +782,10 @@ cc_test(
 )
 
 cc_test(
-    name = "centered_difference_facade_test",
+    name = "centered_difference_test",
     srcs = ["centered_difference_facade_test.cc"],
     deps = [
-        "//src/pde/operators:centered_difference_facade",
+        "//src/pde/operators:centered_difference",
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],
@@ -808,7 +808,7 @@ cc_test(
     name = "target_clones_test",
     srcs = ["operators/target_clones_test.cc"],
     deps = [
-        "//src/pde/operators:centered_difference_scalar",
+        "//src/pde/operators:centered_difference",
         "//src/pde/core:grid",
         "@googletest//:gtest_main",
     ],

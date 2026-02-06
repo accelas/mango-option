@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "mango/option/american_option.hpp"
-#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/operators/centered_difference.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 #include <array>

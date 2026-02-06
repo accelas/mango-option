@@ -18,4 +18,4 @@
 #   (expected, parallel, error_types)
 #
 # - Operators: //src/pde/operators:BUILD.bazel
-#   (grid_spacing, operator_factory, centered_difference_facade, black_scholes_pde, etc.)
+#   (grid_spacing, operator_factory, centered_difference, black_scholes_pde, etc.)

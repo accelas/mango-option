@@ -14,7 +14,7 @@
 #include "mango/pde/core/grid.hpp"
 #include "mango/option/option_spec.hpp"
 #include "mango/option/option_concepts.hpp"
-#include "mango/pde/operators/centered_difference_facade.hpp"
+#include "mango/pde/operators/centered_difference.hpp"
 #include "mango/math/cubic_spline_solver.hpp"
 #include <memory>
 #include <optional>

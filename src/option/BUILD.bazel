@@ -84,7 +84,7 @@ cc_library(
     hdrs = ["american_option_result.hpp"],
     deps = [
         "//src/pde/core:grid",
-        "//src/pde/operators:centered_difference_facade",
+        "//src/pde/operators:centered_difference",
         "//src/math:cubic_spline_solver",
         ":option_spec",
         ":option_concepts",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
-#include "mango/pde/operators/centered_difference_scalar.hpp"
+#include "mango/pde/operators/centered_difference.hpp"
 #include "mango/pde/core/grid.hpp"
 #include <vector>
 #include <cmath>
@@ -23,7 +23,7 @@ TEST(TargetClonesTest, MultipleISAVersionsGenerated) {
 
     GridView<double> grid_view(x);
     GridSpacing<double> spacing(grid_view);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     std::vector<double> u(n);
     std::vector<double> result(n);
@@ -50,7 +50,7 @@ TEST(TargetClonesTest, UniformGridOperations) {
 
     GridView<double> grid_view(x);
     GridSpacing<double> spacing(grid_view);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     std::vector<double> u(n);
     std::vector<double> d2u(n);
@@ -86,7 +86,7 @@ TEST(TargetClonesTest, NonUniformGridOperations) {
 
     GridView<double> grid_view(x);
     GridSpacing<double> spacing(grid_view);
-    ScalarBackend<double> backend(spacing);
+    CenteredDifference<double> backend(spacing);
 
     std::vector<double> u(n);
     std::vector<double> d2u(n);
