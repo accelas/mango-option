@@ -9,22 +9,24 @@
 
 namespace mango {
 
-/// Generate Latin Hypercube samples in 4D unit hypercube [0,1]^4
+/// Generate Latin Hypercube samples in N-dimensional unit hypercube [0,1]^N
 ///
 /// Latin Hypercube ensures each dimension has exactly one sample per
 /// stratum (bin), providing better space coverage than random sampling.
 ///
+/// @tparam N Number of dimensions
 /// @param n Number of samples
 /// @param seed Random seed for reproducibility
-/// @return Vector of n 4D points in [0,1]^4
-inline std::vector<std::array<double, 4>> latin_hypercube_4d(size_t n, uint64_t seed) {
+/// @return Vector of n N-dimensional points in [0,1]^N
+template <size_t N>
+inline std::vector<std::array<double, N>> latin_hypercube(size_t n, uint64_t seed) {
     std::mt19937_64 rng(seed);
     std::uniform_real_distribution<double> uniform(0.0, 1.0);
 
-    std::vector<std::array<double, 4>> samples(n);
+    std::vector<std::array<double, N>> samples(n);
 
     // For each dimension, create stratified samples and shuffle
-    for (size_t d = 0; d < 4; ++d) {
+    for (size_t d = 0; d < N; ++d) {
         // Create indices 0..n-1
         std::vector<size_t> indices(n);
         std::iota(indices.begin(), indices.end(), 0);
@@ -44,23 +46,30 @@ inline std::vector<std::array<double, 4>> latin_hypercube_4d(size_t n, uint64_t 
     return samples;
 }
 
-/// Scale Latin Hypercube samples from [0,1]^4 to custom bounds
+/// Scale Latin Hypercube samples from [0,1]^N to custom bounds
 ///
-/// @param samples Samples in [0,1]^4
+/// @tparam N Number of dimensions
+/// @param samples Samples in [0,1]^N
 /// @param bounds Array of {min, max} pairs for each dimension
 /// @return Scaled samples
-inline std::vector<std::array<double, 4>> scale_lhs_samples(
-    const std::vector<std::array<double, 4>>& samples,
-    const std::array<std::pair<double, double>, 4>& bounds)
+template <size_t N>
+inline std::vector<std::array<double, N>> scale_lhs_samples(
+    const std::vector<std::array<double, N>>& samples,
+    const std::array<std::pair<double, double>, N>& bounds)
 {
-    std::vector<std::array<double, 4>> scaled(samples.size());
+    std::vector<std::array<double, N>> scaled(samples.size());
     for (size_t i = 0; i < samples.size(); ++i) {
-        for (size_t d = 0; d < 4; ++d) {
+        for (size_t d = 0; d < N; ++d) {
             double range = bounds[d].second - bounds[d].first;
             scaled[i][d] = bounds[d].first + samples[i][d] * range;
         }
     }
     return scaled;
+}
+
+/// Backward-compatible 4D Latin Hypercube
+inline std::vector<std::array<double, 4>> latin_hypercube_4d(size_t n, uint64_t seed) {
+    return latin_hypercube<4>(n, seed);
 }
 
 }  // namespace mango

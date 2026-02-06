@@ -127,5 +127,61 @@ TEST(LatinHypercubeTest, ZeroRangeBounds) {
     }
 }
 
+// ===========================================================================
+// Template dimension tests
+// ===========================================================================
+
+TEST(LatinHypercubeTest, Template3D) {
+    auto samples = latin_hypercube<3>(50, 42);
+    EXPECT_EQ(samples.size(), 50);
+
+    for (const auto& s : samples) {
+        for (size_t d = 0; d < 3; ++d) {
+            EXPECT_GE(s[d], 0.0);
+            EXPECT_LE(s[d], 1.0);
+        }
+    }
+
+    // Verify stratification in each dimension
+    for (size_t d = 0; d < 3; ++d) {
+        std::set<size_t> bins;
+        for (const auto& s : samples) {
+            size_t bin = static_cast<size_t>(s[d] * 50);
+            bin = std::min(bin, size_t{49});
+            bins.insert(bin);
+        }
+        EXPECT_EQ(bins.size(), 50) << "Dimension " << d << " has repeated bins";
+    }
+}
+
+TEST(LatinHypercubeTest, Template2D) {
+    auto samples = latin_hypercube<2>(30, 77);
+    EXPECT_EQ(samples.size(), 30);
+
+    std::array<std::pair<double, double>, 2> bounds = {{
+        {10.0, 20.0}, {-1.0, 1.0}
+    }};
+    auto scaled = scale_lhs_samples(samples, bounds);
+    for (const auto& s : scaled) {
+        EXPECT_GE(s[0], 10.0);
+        EXPECT_LE(s[0], 20.0);
+        EXPECT_GE(s[1], -1.0);
+        EXPECT_LE(s[1], 1.0);
+    }
+}
+
+TEST(LatinHypercubeTest, BackwardCompatible4D) {
+    // latin_hypercube_4d should produce identical output to latin_hypercube<4>
+    auto old_samples = latin_hypercube_4d(32, 999);
+    auto new_samples = latin_hypercube<4>(32, 999);
+
+    ASSERT_EQ(old_samples.size(), new_samples.size());
+    for (size_t i = 0; i < old_samples.size(); ++i) {
+        for (size_t d = 0; d < 4; ++d) {
+            EXPECT_DOUBLE_EQ(old_samples[i][d], new_samples[i][d]);
+        }
+    }
+}
+
 }  // namespace
 }  // namespace mango
