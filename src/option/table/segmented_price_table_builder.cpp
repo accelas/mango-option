@@ -11,6 +11,10 @@ namespace mango {
 
 namespace {
 
+constexpr double kUpperMoneynessTailScale = 1.25;
+constexpr int kUpperMoneynessTailPoints = 3;
+constexpr double kTailEnableMaturityYears = 1.25;
+
 /// Context for sampling a previous segment's surface as an initial condition.
 struct ChainedICContext {
     const AmericanPriceSurface* prev;
@@ -84,6 +88,26 @@ std::vector<Dividend> filter_dividends(
     return merged;
 }
 
+/// Append sparse right-tail moneyness points beyond the current max.
+/// This adds boundary headroom for chained segments without reducing interior
+/// resolution (existing interior knots are preserved).
+void append_upper_tail_moneyness(std::vector<double>& grid, double maturity) {
+    if (maturity < kTailEnableMaturityYears) return;
+    if (grid.empty()) return;
+
+    const double max_m = grid.back();
+    if (max_m <= 0.0) return;
+
+    const double target_max = max_m * kUpperMoneynessTailScale;
+    if (target_max <= max_m) return;
+
+    const double step = (target_max - max_m) /
+                        static_cast<double>(kUpperMoneynessTailPoints);
+    for (int i = 1; i <= kUpperMoneynessTailPoints; ++i) {
+        grid.push_back(max_m + step * static_cast<double>(i));
+    }
+}
+
 }  // namespace
 
 std::expected<SegmentedSurface<>, PriceTableError>
@@ -155,6 +179,9 @@ SegmentedPriceTableBuilder::build(const Config& config) {
                 }
             }
         }
+
+        // Add sparse right-tail headroom to reduce chained-segment edge bias.
+        append_upper_tail_moneyness(expanded_m_grid, config.maturity);
     }
     // Always sort and deduplicate (even when expansion is skipped,
     // the caller might pass unsorted or duplicate points)

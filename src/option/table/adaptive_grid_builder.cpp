@@ -25,6 +25,9 @@ namespace {
 // ============================================================================
 
 constexpr double kMinPositive = 1e-6;
+constexpr double kSegmentUpperMoneynessTailScale = 1.25;
+constexpr int kSegmentUpperMoneynessTailPoints = 3;
+constexpr double kSegmentTailEnableMaturityYears = 1.25;
 
 /// Expand [lo, hi] to at least min_spread wide, keeping lo >= kMinPositive.
 void expand_bounds_positive(double& lo, double& hi, double min_spread) {
@@ -176,6 +179,33 @@ std::vector<double> linspace(double lo, double hi, size_t n) {
         v[i] = lo + (hi - lo) * i / (n - 1);
     }
     return v;
+}
+
+/// Append sparse upper-tail knots in log-moneyness space.
+/// Input grid is expected sorted ascending.
+void append_upper_tail_log_moneyness(std::vector<double>& log_m_grid,
+                                     double maturity) {
+    if (maturity < kSegmentTailEnableMaturityYears) return;
+    if (log_m_grid.empty()) return;
+
+    const double max_log_m = log_m_grid.back();
+    const double max_m = std::exp(max_log_m);
+    if (max_m <= 0.0) return;
+
+    const double target_max_m = max_m * kSegmentUpperMoneynessTailScale;
+    if (target_max_m <= max_m) return;
+
+    const double step = (target_max_m - max_m) /
+                        static_cast<double>(kSegmentUpperMoneynessTailPoints);
+    for (int i = 1; i <= kSegmentUpperMoneynessTailPoints; ++i) {
+        double m = max_m + step * static_cast<double>(i);
+        log_m_grid.push_back(std::log(m));
+    }
+
+    std::sort(log_m_grid.begin(), log_m_grid.end());
+    log_m_grid.erase(
+        std::unique(log_m_grid.begin(), log_m_grid.end()),
+        log_m_grid.end());
 }
 
 /// Seed a grid from user-provided knots, or fall back to linspace.
@@ -699,6 +729,7 @@ probe_and_build(
 
     // 5. Build final uniform grids and all surfaces
     auto final_m = linspace(expanded_min_m, max_m, gsz.moneyness);
+    append_upper_tail_log_moneyness(final_m, config.maturity);
     auto final_v = linspace(min_vol, max_vol, gsz.vol);
     auto final_r = linspace(min_rate, max_rate, gsz.rate);
     int max_tau_pts = gsz.tau_points;

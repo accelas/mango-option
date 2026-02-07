@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <gtest/gtest.h>
 #include "mango/option/table/segmented_price_table_builder.hpp"
+#include "mango/option/american_option.hpp"
 #include <cmath>
 
 using namespace mango;
@@ -197,4 +198,57 @@ TEST(SegmentedPriceTableBuilderTest, UnifiedManualPathMultiDividend) {
         EXPECT_GT(price, 0.0)
             << "ATM put price must be positive at tau=" << tau;
     }
+}
+
+// Regression: long-maturity multi-dividend chained surfaces can be biased high
+// at the upper moneyness edge if the right-side domain is too tight.
+TEST(SegmentedPriceTableBuilderTest, LongMaturityMultiDividendEdgeBiasControlled) {
+    SegmentedPriceTableBuilder::Config config{
+        .K_ref = 80.0,
+        .option_type = OptionType::PUT,
+        .dividends = {
+            .dividend_yield = 0.02,
+            .discrete_dividends = {
+                {.calendar_time = 0.5, .amount = 0.50},
+                {.calendar_time = 1.0, .amount = 0.50},
+                {.calendar_time = 1.5, .amount = 0.50},
+            },
+        },
+        .grid = IVGrid{
+            .moneyness = {0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30},
+            .vol = {0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50},
+            .rate = {0.01, 0.03, 0.05, 0.10},
+        },
+        .maturity = 2.0,
+    };
+
+    auto surface = SegmentedPriceTableBuilder::build(config);
+    ASSERT_TRUE(surface.has_value());
+
+    PricingParams p;
+    p.spot = 100.0;
+    p.strike = 80.0;
+    p.maturity = 2.0;
+    p.rate = 0.05;
+    p.dividend_yield = 0.02;
+    p.option_type = OptionType::PUT;
+    p.volatility = 0.30;
+    p.discrete_dividends = config.dividends.discrete_dividends;
+
+    auto fd = solve_american_option(p);
+    ASSERT_TRUE(fd.has_value());
+
+    PriceQuery q{
+        .spot = p.spot,
+        .strike = p.strike,
+        .tau = p.maturity,
+        .sigma = p.volatility,
+        .rate = std::get<double>(p.rate),
+    };
+    double interp_price = surface->price(q);
+    double fd_price = fd->value();
+    double abs_error = std::abs(interp_price - fd_price);
+
+    EXPECT_LT(abs_error, 0.25)
+        << "Interpolated chained-segment price drifted too far from FD reference";
 }
