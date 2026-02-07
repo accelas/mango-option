@@ -114,10 +114,10 @@ public:
         double dividend_yield = 0.0,
         double max_failure_rate = 0.0);
 
-    /// Factory from strikes (auto-computes moneyness)
+    /// Factory from strikes (auto-computes log-moneyness)
     ///
     /// Creates a PriceTableBuilder and axes from spot and strike prices.
-    /// Computes moneyness = spot/strike, sorts ascending.
+    /// Computes log-moneyness = ln(spot/strike), sorts ascending.
     /// Sorts and deduplicates all input vectors.
     ///
     /// @param spot Current underlying price (must be > 0)

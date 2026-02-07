@@ -172,6 +172,10 @@ SegmentedPriceTableBuilder::build(const Config& config) {
     // grid came from user-facing IVGrid, not from adaptive builder)
     if (!config.skip_moneyness_expansion) {
         for (auto& m : expanded_m_grid) {
+            if (m <= 0.0) {
+                return std::unexpected(PriceTableError{
+                    PriceTableErrorCode::InvalidConfig});
+            }
             m = std::log(m);
         }
     }
