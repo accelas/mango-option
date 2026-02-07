@@ -72,11 +72,15 @@ public:
     /// Build segmented multi-K_ref surface with adaptive grid refinement.
     /// Probes 2-3 representative K_refs, takes per-axis max grid sizes,
     /// then builds all segments with a uniform grid.
+    ///
+    /// `domain.moneyness` is interpreted as log-moneyness ln(S/K_ref).
     [[nodiscard]] std::expected<SegmentedAdaptiveResult, PriceTableError>
     build_segmented(const SegmentedAdaptiveConfig& config,
                     const IVGrid& domain);
 
     /// Build segmented surface using per-strike surfaces (no K_ref interpolation).
+    ///
+    /// `domain.moneyness` is interpreted as log-moneyness ln(S/K_ref).
     [[nodiscard]] std::expected<StrikeAdaptiveResult, PriceTableError>
     build_segmented_strike(const SegmentedAdaptiveConfig& config,
                            const std::vector<double>& strike_grid,
