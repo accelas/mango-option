@@ -375,6 +375,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
 
     // Initialize dividends after variant construction so that the captured
     // &dividend_spline_ pointer refers to the object's final location.
+    bool projection = projection_enabled_;
     auto solve_result = std::visit([&](auto& pde_solver) {
         pde_solver.init_dividends();
         if (custom_ic_) {
@@ -383,6 +384,7 @@ std::expected<AmericanOptionResult, SolverError> AmericanOptionSolver::solve() {
             pde_solver.initialize(std::remove_reference_t<decltype(pde_solver)>::payoff);
         }
         pde_solver.set_config(trbdf2_config_);
+        pde_solver.set_projection_enabled(projection);
         return pde_solver.solve();
     }, solver);
 

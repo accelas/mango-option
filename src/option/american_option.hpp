@@ -111,9 +111,16 @@ public:
     /// Set a custom initial condition (overrides the standard payoff)
     void set_initial_condition(InitialCondition ic) { custom_ic_ = std::move(ic); }
 
+    /// Disable obstacle projection for European PDE solve.
+    void set_projection_enabled(bool enabled) { projection_enabled_ = enabled; }
+    bool projection_enabled() const { return projection_enabled_; }
+
 private:
     /// Optional custom initial condition (replaces default payoff when set)
     std::optional<InitialCondition> custom_ic_;
+
+    /// Whether obstacle projection is enabled (true = American, false = European)
+    bool projection_enabled_ = true;
 };
 
 static_assert(OptionSolver<AmericanOptionSolver>);

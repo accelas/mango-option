@@ -360,5 +360,38 @@ TEST(AmericanOptionTest, SolveAutoFromPrimaryHeader) {
     EXPECT_NEAR(result->value_at(100.0), 6.35, 0.5);
 }
 
+// European PDE (projection disabled) should produce value <= American
+TEST(AmericanOptionTest, ProjectionDisabledProducesEuropeanValue) {
+    PricingParams params(
+        OptionSpec{.spot = 100.0, .strike = 100.0, .maturity = 1.0,
+                   .rate = 0.05, .dividend_yield = 0.02,
+                   .option_type = OptionType::PUT},
+        0.20);
+
+    // American solve (projection enabled, default)
+    auto am = solve_american_option(params);
+    ASSERT_TRUE(am.has_value());
+    double am_price = am->value_at(100.0);
+
+    // European solve (projection disabled)
+    auto [grid_spec, time_domain] = estimate_pde_grid(params);
+    size_t n = grid_spec.n_points();
+    std::pmr::vector<double> buffer(PDEWorkspace::required_size(n),
+                                     std::pmr::get_default_resource());
+    auto ws = PDEWorkspace::from_buffer(buffer, n).value();
+    auto solver = AmericanOptionSolver::create(params, ws).value();
+    solver.set_projection_enabled(false);
+    auto eu = solver.solve();
+    ASSERT_TRUE(eu.has_value());
+    double eu_price = eu->value_at(100.0);
+
+    // European <= American (early exercise adds value)
+    EXPECT_LE(eu_price, am_price + 1e-10);
+    // European should still be positive
+    EXPECT_GT(eu_price, 0.0);
+    // Difference (EEP) should be small but positive for ATM put
+    EXPECT_GT(am_price - eu_price, 0.0);
+}
+
 }  // namespace
 }  // namespace mango

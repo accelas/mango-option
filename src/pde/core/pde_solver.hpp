@@ -100,7 +100,7 @@ public:
         // Apply constraints at t=0 (boundary before obstacle, consistent with Newton iteration)
         double t = grid_->time().t_start();
         apply_boundary_conditions(u_current, t);
-        apply_obstacle(t, u_current);
+        if (projection_enabled_) apply_obstacle(t, u_current);
 
         // Copy initial condition to u_prev for first iteration
         auto u_prev = grid_->solution_prev();
@@ -196,6 +196,9 @@ public:
         return config_;
     }
 
+    /// Enable or disable obstacle projection (American vs European solve)
+    void set_projection_enabled(bool enabled) { projection_enabled_ = enabled; }
+
     /// Add temporal event to be executed at specific time
     ///
     /// Events are applied AFTER the TR-BDF2 step completes (not before).
@@ -230,6 +233,9 @@ private:
     // Temporal event system
     std::vector<TemporalEvent> events_;
     size_t next_event_idx_ = 0;
+
+    // Projection control (true = American, false = European)
+    bool projection_enabled_ = true;
 
     /// Process temporal events in time interval (t_old, t_new]
     ///
@@ -267,7 +273,7 @@ private:
             // values exceeding theoretical bounds (e.g., value > strike).
             // Apply boundary before obstacle (consistent with Newton iteration)
             apply_boundary_conditions(u_current, event.time);
-            apply_obstacle(event.time, u_current);
+            if (projection_enabled_) apply_obstacle(event.time, u_current);
 
             next_event_idx_++;
         }
@@ -579,6 +585,25 @@ private:
         }
         if constexpr (std::is_same_v<bc::boundary_tag_t<RightBCType>, bc::dirichlet_tag>) {
             rhs_with_bc[n_-1] = right_bc.value(t, grid_->x()[n_-1]);
+        }
+
+        // European mode: plain Thomas solve, no obstacle projection
+        if (!projection_enabled_) {
+            auto result = solve_thomas<double>(
+                workspace_.jacobian(),
+                rhs_with_bc,
+                u,
+                workspace_.tridiag_workspace()
+            );
+            if (!result.ok()) {
+                return std::unexpected(SolverError{
+                    .code = SolverErrorCode::LinearSolveFailure,
+                    .iterations = 1,
+                    .residual = std::numeric_limits<double>::infinity()
+                });
+            }
+            apply_boundary_conditions(u, t);
+            return {};
         }
 
         // Get obstacle constraint via CRTP
