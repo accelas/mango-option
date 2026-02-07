@@ -7,6 +7,7 @@
 #include "mango/option/table/spliced_surface.hpp"
 #include "mango/option/table/spliced_surface_builder.hpp"
 #include "mango/option/option_spec.hpp"
+#include "mango/option/grid_spec_types.hpp"
 #include "mango/support/error_types.hpp"
 
 namespace mango {
@@ -41,6 +42,10 @@ public:
         double tau_target_dt = 0.0;
         int tau_points_min = 4;   ///< B-spline minimum
         int tau_points_max = 30;  ///< Cap for very wide segments
+
+        /// PDE grid accuracy for each segment's PDE solve.
+        /// Default GridAccuracyParams{} gives ~100 spatial points.
+        GridAccuracyParams pde_accuracy = {};
     };
 
     /// Build a SegmentedSurface from the given configuration.

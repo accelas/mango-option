@@ -457,6 +457,10 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
 
     std::vector<StrikeEntry> entries;
     for (double strike : kStrikeGrid) {
+        GridAccuracyParams pde_accuracy;
+        if (scale > 1) {
+            pde_accuracy.min_spatial_points *= static_cast<size_t>(scale);
+        }
         SegmentedPriceTableBuilder::Config seg_cfg{
             .K_ref = strike,
             .option_type = OptionType::PUT,
@@ -464,6 +468,8 @@ static const SegmentedSolverEntry& get_segmented_solver(int scale) {
             .grid = {.moneyness = m_refined, .vol = v_refined, .rate = r_refined},
             .maturity = kMaturity,
             .tau_points_per_segment = tau_refined,
+            .skip_moneyness_expansion = true,
+            .pde_accuracy = pde_accuracy,
         };
         auto seg = SegmentedPriceTableBuilder::build(seg_cfg);
         if (!seg.has_value()) {

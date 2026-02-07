@@ -11,7 +11,6 @@
 #include <variant>
 #include <optional>
 #include <algorithm>
-#include <format>
 #include <limits>
 #include <experimental/mdspan>
 #include "mango/support/aligned_allocator.hpp"

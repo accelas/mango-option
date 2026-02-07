@@ -59,11 +59,9 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -90,11 +88,9 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -149,12 +145,10 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-lQuantLib",
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -175,12 +169,10 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-lQuantLib",
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -210,12 +202,10 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-lQuantLib",
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,  # Static link our library code
     deps = [
@@ -235,12 +225,10 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-lQuantLib",
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,  # Static link our library code
     deps = [
@@ -261,12 +249,10 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-lQuantLib",
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -286,11 +272,9 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -329,11 +313,9 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
@@ -356,11 +338,9 @@ cc_binary(
         "-march=native",
         "-ftree-vectorize",
         "-fopenmp",
-        "-flto",
     ],
     linkopts = [
         "-fopenmp",
-        "-flto",
     ],
     linkstatic = True,
     deps = [
