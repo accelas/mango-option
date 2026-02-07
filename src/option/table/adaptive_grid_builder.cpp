@@ -102,13 +102,6 @@ double total_discrete_dividends(const std::vector<Dividend>& dividends,
 // Types for the callback-based refinement loop
 // ============================================================================
 
-/// Type-erased surface for validation queries
-struct SurfaceHandle {
-    std::function<double(double spot, double strike, double tau,
-                         double sigma, double rate)> price;
-    size_t pde_solves = 0;  ///< Number of PDE solves used to build this surface
-};
-
 /// Builds a surface from current grids, returns handle for querying
 using BuildFn = std::function<std::expected<SurfaceHandle, PriceTableError>(
     const std::vector<double>& moneyness,
@@ -120,6 +113,56 @@ using BuildFn = std::function<std::expected<SurfaceHandle, PriceTableError>(
 using ValidateFn = std::function<std::expected<double, SolverError>(
     double spot, double strike, double tau,
     double sigma, double rate)>;
+
+/// Compute IV error from price error and vega, with floor and cap.
+double compute_iv_error(double price_error, double vega,
+                        double vega_floor, double target_iv_error) {
+    double vega_clamped = std::max(std::abs(vega), vega_floor);
+    double iv_error = price_error / vega_clamped;
+    double price_tol = target_iv_error * vega_floor;
+    if (price_error <= price_tol) {
+        iv_error = std::min(iv_error, target_iv_error);
+    }
+    return iv_error;
+}
+
+/// Error function using BS European vega (cheap, for segmented path).
+auto make_bs_vega_error_fn(const AdaptiveGridParams& params) {
+    double vega_floor = params.vega_floor;
+    double target = params.target_iv_error;
+    return [vega_floor, target](
+        double interp, double ref_price,
+        double spot, double strike, double tau,
+        double sigma, double rate, double div_yield) -> double
+    {
+        double price_error = std::abs(interp - ref_price);
+        double vega = bs_vega(spot, strike, tau, sigma, rate, div_yield);
+        return compute_iv_error(price_error, vega, vega_floor, target);
+    };
+}
+
+/// Create a ValidateFn that solves a single American option via FD.
+ValidateFn make_validate_fn(double dividend_yield,
+                            OptionType option_type,
+                            const std::vector<Dividend>& discrete_dividends = {}) {
+    return [dividend_yield, option_type, discrete_dividends](
+        double spot, double strike, double tau,
+        double sigma, double rate) -> std::expected<double, SolverError>
+    {
+        PricingParams p;
+        p.spot = spot;
+        p.strike = strike;
+        p.maturity = tau;
+        p.rate = rate;
+        p.dividend_yield = dividend_yield;
+        p.option_type = option_type;
+        p.volatility = sigma;
+        p.discrete_dividends = discrete_dividends;
+        auto fd = solve_american_option(p);
+        if (!fd.has_value()) return std::unexpected(fd.error());
+        return fd->value();
+    };
+}
 
 /// Domain bounds for the refinement loop
 struct RefinementContext {
@@ -638,41 +681,11 @@ probe_and_build(
             };
         };
 
-        ValidateFn validate_fn = [&config](
-            double spot, double strike, double tau,
-            double sigma, double rate)
-            -> std::expected<double, SolverError>
-        {
-            PricingParams p;
-            p.spot = spot;
-            p.strike = strike;
-            p.maturity = tau;
-            p.rate = rate;
-            p.dividend_yield = config.dividend_yield;
-            p.option_type = config.option_type;
-            p.volatility = sigma;
-            p.discrete_dividends = config.discrete_dividends;
-            auto fd = solve_american_option(p);
-            if (!fd.has_value()) return std::unexpected(fd.error());
-            return fd->value();
-        };
+        auto validate_fn = make_validate_fn(
+            config.dividend_yield, config.option_type,
+            config.discrete_dividends);
 
-        auto compute_error_fn = [&params](
-            double interp, double ref_price,
-            double spot, double strike, double tau,
-            double sigma, double rate,
-            double div_yield) -> double
-        {
-            double price_error = std::abs(interp - ref_price);
-            double vega = bs_vega(spot, strike, tau, sigma, rate, div_yield);
-            double vega_clamped = std::max(std::abs(vega), params.vega_floor);
-            double iv_error = price_error / vega_clamped;
-            double price_tol = params.target_iv_error * params.vega_floor;
-            if (price_error <= price_tol) {
-                iv_error = std::min(iv_error, params.target_iv_error);
-            }
-            return iv_error;
-        };
+        auto compute_error_fn = make_bs_vega_error_fn(params);
 
         RefinementContext ctx{
             .spot = config.spot,
@@ -732,6 +745,146 @@ probe_and_build(
     };
 }
 
+/// Extract domain bounds from OptionGrid, expand, and add headroom.
+std::expected<RefinementContext, PriceTableError>
+extract_chain_domain(const OptionGrid& chain) {
+    if (chain.strikes.empty() || chain.maturities.empty() ||
+        chain.implied_vols.empty() || chain.rates.empty()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    double min_m = std::numeric_limits<double>::max();
+    double max_m = std::numeric_limits<double>::lowest();
+    for (double strike : chain.strikes) {
+        double m = std::log(chain.spot / strike);
+        min_m = std::min(min_m, m);
+        max_m = std::max(max_m, m);
+    }
+
+    auto [min_tau, max_tau] = std::minmax_element(chain.maturities.begin(), chain.maturities.end());
+    auto [min_vol, max_vol] = std::minmax_element(chain.implied_vols.begin(), chain.implied_vols.end());
+    auto [min_rate, max_rate] = std::minmax_element(chain.rates.begin(), chain.rates.end());
+
+    expand_domain_bounds(min_m, max_m, 0.10);
+    double h = spline_support_headroom(max_m - min_m, chain.strikes.size());
+    min_m -= h;
+    max_m += h;
+
+    double lo_tau = *min_tau, hi_tau = *max_tau;
+    double lo_vol = *min_vol, hi_vol = *max_vol;
+    double lo_rate = *min_rate, hi_rate = *max_rate;
+
+    expand_domain_bounds(lo_tau, hi_tau, 0.5, kMinPositive);
+    expand_domain_bounds(lo_vol, hi_vol, 0.10, kMinPositive);
+    expand_domain_bounds(lo_rate, hi_rate, 0.04);
+
+    return RefinementContext{
+        .spot = chain.spot,
+        .dividend_yield = chain.dividend_yield,
+        .option_type = {},  // caller sets this
+        .min_moneyness = min_m, .max_moneyness = max_m,
+        .min_tau = lo_tau, .max_tau = hi_tau,
+        .min_vol = lo_vol, .max_vol = hi_vol,
+        .min_rate = lo_rate, .max_rate = hi_rate,
+    };
+}
+
+/// Build InitialGrids from OptionGrid (log-moneyness from strikes).
+InitialGrids extract_initial_grids(const OptionGrid& chain) {
+    InitialGrids grids;
+    grids.moneyness.reserve(chain.strikes.size());
+    for (double strike : chain.strikes) {
+        grids.moneyness.push_back(std::log(chain.spot / strike));
+    }
+    grids.tau = chain.maturities;
+    grids.vol = chain.implied_vols;
+    grids.rate = chain.rates;
+    return grids;
+}
+
+/// Solve missing PDE slices, dispatching on PDEGridSpec variant.
+BatchAmericanOptionResult solve_missing_slices(
+    BatchAmericanOptionSolver& batch_solver,
+    const std::vector<PricingParams>& missing_params,
+    const std::vector<PricingParams>& all_params,
+    const PDEGridSpec& pde_grid,
+    const std::vector<double>& tau_grid)
+{
+    if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
+        const auto& grid_spec = explicit_grid->grid_spec;
+        const size_t n_time = explicit_grid->n_time;
+
+        constexpr double MAX_WIDTH = 5.8;
+        constexpr double MAX_DX = 0.05;
+
+        const double grid_width = grid_spec.x_max() - grid_spec.x_min();
+
+        double max_dx;
+        if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
+            max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
+        } else {
+            auto grid_buffer = grid_spec.generate();
+            auto spacings = grid_buffer.span() | std::views::pairwise
+                                               | std::views::transform([](auto pair) {
+                                                     auto [a, b] = pair;
+                                                     return b - a;
+                                                 });
+            max_dx = std::ranges::max(spacings);
+        }
+
+        auto sigma_sqrt_tau = [](const PricingParams& p) {
+            return p.volatility * std::sqrt(p.maturity);
+        };
+        const double max_sigma_sqrt_tau = std::ranges::max(
+            all_params | std::views::transform(sigma_sqrt_tau));
+        const double min_required_width = 6.0 * max_sigma_sqrt_tau;
+
+        const bool grid_meets_constraints =
+            (grid_width <= MAX_WIDTH) &&
+            (max_dx <= MAX_DX) &&
+            (grid_width >= min_required_width);
+
+        if (grid_meets_constraints) {
+            const double max_maturity = tau_grid.back();
+            TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
+            PDEGridSpec custom_grid{PDEGridConfig{grid_spec, time_domain.n_steps(), std::vector<double>{}}};
+            return batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
+        }
+
+        GridAccuracyParams accuracy;
+        const size_t n_points = grid_spec.n_points();
+        const size_t clamped = std::clamp(n_points, size_t{100}, size_t{1200});
+        accuracy.min_spatial_points = clamped;
+        accuracy.max_spatial_points = clamped;
+        accuracy.max_time_steps = n_time;
+
+        if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
+            accuracy.alpha = grid_spec.concentration();
+        }
+
+        const double x_min = grid_spec.x_min();
+        const double x_max = grid_spec.x_max();
+        const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
+        constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
+
+        if (max_sigma_sqrt_tau >= 1e-10) {
+            double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
+            accuracy.n_sigma = std::max(5.0, required_n_sigma);
+        }
+
+        batch_solver.set_grid_accuracy(accuracy);
+        return batch_solver.solve_batch(missing_params, true);
+    }
+
+    if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
+        batch_solver.set_grid_accuracy(*accuracy_grid);
+        return batch_solver.solve_batch(missing_params, true);
+    }
+
+    // Should not reach here — PDEGridSpec is a variant with two alternatives
+    return {};
+}
+
 }  // anonymous namespace
 
 // ============================================================================
@@ -742,62 +895,164 @@ AdaptiveGridBuilder::AdaptiveGridBuilder(AdaptiveGridParams params)
     : params_(std::move(params))
 {}
 
+std::expected<SurfaceHandle, PriceTableError>
+AdaptiveGridBuilder::build_cached_surface(
+    const std::vector<double>& m_grid,
+    const std::vector<double>& tau_grid,
+    const std::vector<double>& v_grid,
+    const std::vector<double>& r_grid,
+    double K_ref,
+    double dividend_yield,
+    const PDEGridSpec& pde_grid,
+    OptionType type,
+    size_t& build_iteration,
+    std::shared_ptr<const PriceTableSurface<4>>& last_surface,
+    PriceTableAxes<4>& last_axes)
+{
+    auto builder_result = PriceTableBuilder<4>::from_vectors(
+        m_grid, tau_grid, v_grid, r_grid,
+        K_ref, pde_grid, type, dividend_yield,
+        params_.max_failure_rate);
+
+    if (!builder_result.has_value()) {
+        return std::unexpected(builder_result.error());
+    }
+
+    auto& [builder, axes] = builder_result.value();
+
+    // On first iteration, set the initial tau grid; subsequent iterations
+    // compare against it and clear cache only if tau actually changed.
+    if (build_iteration == 0) {
+        cache_.set_tau_grid(tau_grid);
+    } else {
+        cache_.invalidate_if_tau_changed(tau_grid);
+    }
+    build_iteration++;
+
+    // Generate all (σ,r) parameter combinations
+    auto all_params = builder.make_batch(axes);
+
+    // Extract (σ,r) pairs from all_params
+    std::vector<std::pair<double, double>> all_pairs;
+    all_pairs.reserve(all_params.size());
+    for (const auto& p : all_params) {
+        double rate = get_zero_rate(p.rate, p.maturity);
+        all_pairs.emplace_back(p.volatility, rate);
+    }
+
+    // Find which pairs are missing from cache
+    auto missing_indices = cache_.get_missing_indices(all_pairs);
+
+    // Build batch of params for missing pairs only
+    std::vector<PricingParams> missing_params;
+    missing_params.reserve(missing_indices.size());
+    for (size_t idx : missing_indices) {
+        missing_params.push_back(all_params[idx]);
+    }
+
+    // Solve missing pairs
+    BatchAmericanOptionResult fresh_results;
+    if (!missing_params.empty()) {
+        BatchAmericanOptionSolver batch_solver;
+        batch_solver.set_snapshot_times(std::span{tau_grid});
+
+        fresh_results = solve_missing_slices(
+            batch_solver, missing_params, all_params, pde_grid, tau_grid);
+
+        // Add fresh results to cache
+        for (size_t i = 0; i < fresh_results.results.size(); ++i) {
+            if (fresh_results.results[i].has_value()) {
+                double sigma = missing_params[i].volatility;
+                double rate = get_zero_rate(missing_params[i].rate, missing_params[i].maturity);
+                auto result_ptr = std::make_shared<AmericanOptionResult>(
+                    fresh_results.results[i].value().grid(),
+                    missing_params[i]);
+                cache_.add(sigma, rate, std::move(result_ptr));
+            }
+        }
+    } else {
+        fresh_results.failed_count = 0;
+    }
+
+    // Merge cached + fresh results into full batch
+    auto merged_results = merge_results(all_params, missing_indices, fresh_results);
+
+    // Extract tensor from merged results
+    auto tensor_result = builder.extract_tensor(merged_results, axes);
+    if (!tensor_result.has_value()) {
+        return std::unexpected(tensor_result.error());
+    }
+
+    auto& extraction = tensor_result.value();
+
+    // Repair failed slices if needed
+    if (!extraction.failed_pde.empty() || !extraction.failed_spline.empty()) {
+        auto repair_result = builder.repair_failed_slices(
+            extraction.tensor, extraction.failed_pde,
+            extraction.failed_spline, axes);
+        if (!repair_result.has_value()) {
+            return std::unexpected(repair_result.error());
+        }
+    }
+
+    // Fit coefficients
+    auto fit_result = builder.fit_coeffs(extraction.tensor, axes);
+    if (!fit_result.has_value()) {
+        return std::unexpected(fit_result.error());
+    }
+
+    // Build metadata
+    PriceTableMetadata metadata;
+    metadata.K_ref = K_ref;
+    metadata.dividends.dividend_yield = dividend_yield;
+    metadata.m_min = m_grid.front();
+    metadata.m_max = m_grid.back();
+    metadata.dividends.discrete_dividends = {};
+    metadata.content = SurfaceContent::EarlyExercisePremium;
+
+    // Build surface
+    auto surface = PriceTableSurface<4>::build(
+        axes, std::move(fit_result->coefficients), metadata);
+    if (!surface.has_value()) {
+        return std::unexpected(surface.error());
+    }
+
+    // Store for later extraction
+    last_surface = surface.value();
+    last_axes = axes;
+
+    size_t pde_solves = missing_params.size();
+
+    // Return a handle that queries the surface (reconstruct full American price)
+    auto surface_ptr = surface.value();
+    auto aps = AmericanPriceSurface::create(surface_ptr, type);
+    if (!aps.has_value()) {
+        return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
+    }
+
+    return SurfaceHandle{
+        .price = [aps = std::move(*aps)](double query_spot, double strike, double tau,
+                                         double sigma, double rate) -> double {
+            return aps.price(query_spot, strike, tau, sigma, rate);
+        },
+        .pde_solves = pde_solves
+    };
+}
+
 std::expected<AdaptiveResult, PriceTableError>
 AdaptiveGridBuilder::build(const OptionGrid& chain,
                            PDEGridSpec pde_grid,
                            OptionType type)
 {
-    // ========================================================================
-    // 1. SEED ESTIMATE - Extract grid bounds from chain
-    // ========================================================================
-
-    // Clear cache to prevent stale slices from previous builds leaking into this one
-    // (each build may have different spot/dividend parameters)
+    // Clear cache to prevent stale slices from previous builds leaking in
     cache_.clear();
 
-    if (chain.strikes.empty() || chain.maturities.empty()) {
-        return std::unexpected(PriceTableError(
-            PriceTableErrorCode::InvalidConfig
-        ));
+    auto domain = extract_chain_domain(chain);
+    if (!domain.has_value()) {
+        return std::unexpected(domain.error());
     }
-
-    // Bug fix: Check implied_vols and rates are non-empty before dereferencing
-    if (chain.implied_vols.empty() || chain.rates.empty()) {
-        return std::unexpected(PriceTableError(
-            PriceTableErrorCode::InvalidConfig
-        ));
-    }
-
-    double min_moneyness = std::numeric_limits<double>::max();
-    double max_moneyness = std::numeric_limits<double>::lowest();
-
-    for (double strike : chain.strikes) {
-        double m = std::log(chain.spot / strike);
-        min_moneyness = std::min(min_moneyness, m);
-        max_moneyness = std::max(max_moneyness, m);
-    }
-
-    double min_tau = *std::min_element(chain.maturities.begin(), chain.maturities.end());
-    double max_tau = *std::max_element(chain.maturities.begin(), chain.maturities.end());
-
-    double min_vol = *std::min_element(chain.implied_vols.begin(), chain.implied_vols.end());
-    double max_vol = *std::max_element(chain.implied_vols.begin(), chain.implied_vols.end());
-
-    double min_rate = *std::min_element(chain.rates.begin(), chain.rates.end());
-    double max_rate = *std::max_element(chain.rates.begin(), chain.rates.end());
-
-    expand_domain_bounds(min_moneyness, max_moneyness, 0.10);
-    double h = spline_support_headroom(max_moneyness - min_moneyness, chain.strikes.size());
-    min_moneyness -= h;
-    max_moneyness += h;
-
-    expand_domain_bounds(min_tau, max_tau, 0.5, kMinPositive);
-    expand_domain_bounds(min_vol, max_vol, 0.10, kMinPositive);
-    expand_domain_bounds(min_rate, max_rate, 0.04);
-
-    // ========================================================================
-    // 2. Create callbacks for run_refinement
-    // ========================================================================
+    auto ctx = std::move(*domain);
+    ctx.option_type = type;
 
     // Shared state for the last surface built (so we can extract it after refinement)
     std::shared_ptr<const PriceTableSurface<4>> last_surface;
@@ -806,234 +1061,17 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
     // Iteration counter for cache management (set_tau_grid vs invalidate_if_tau_changed)
     size_t build_iteration = 0;
 
-    // BuildFn: builds price table surface from grids, returns SurfaceHandle
     BuildFn build_fn = [&](const std::vector<double>& m_grid,
                            const std::vector<double>& tau_grid,
                            const std::vector<double>& v_grid,
-                           const std::vector<double>& r_grid)
-        -> std::expected<SurfaceHandle, PriceTableError>
-    {
-        auto builder_result = PriceTableBuilder<4>::from_vectors(
-            m_grid, tau_grid, v_grid, r_grid,
-            chain.spot,
-            pde_grid, type, chain.dividend_yield,
-            params_.max_failure_rate);
-
-        if (!builder_result.has_value()) {
-            return std::unexpected(builder_result.error());
-        }
-
-        auto& [builder, axes] = builder_result.value();
-
-        // On first iteration, set the initial tau grid; subsequent iterations
-        // compare against it and clear cache only if tau actually changed.
-        if (build_iteration == 0) {
-            cache_.set_tau_grid(tau_grid);
-        } else {
-            cache_.invalidate_if_tau_changed(tau_grid);
-        }
-        build_iteration++;
-
-        // Generate all (σ,r) parameter combinations
-        auto all_params = builder.make_batch(axes);
-
-        // Extract (σ,r) pairs from all_params
-        std::vector<std::pair<double, double>> all_pairs;
-        all_pairs.reserve(all_params.size());
-        for (const auto& p : all_params) {
-            double rate = get_zero_rate(p.rate, p.maturity);
-            all_pairs.emplace_back(p.volatility, rate);
-        }
-
-        // Find which pairs are missing from cache
-        auto missing_indices = cache_.get_missing_indices(all_pairs);
-
-        // Build batch of params for missing pairs only
-        std::vector<PricingParams> missing_params;
-        missing_params.reserve(missing_indices.size());
-        for (size_t idx : missing_indices) {
-            missing_params.push_back(all_params[idx]);
-        }
-
-        // Solve missing pairs
-        BatchAmericanOptionResult fresh_results;
-        if (!missing_params.empty()) {
-            BatchAmericanOptionSolver batch_solver;
-            batch_solver.set_snapshot_times(std::span{tau_grid});
-
-            // Handle PDEGridSpec variant: either explicit config or auto-estimated
-            if (const auto* explicit_grid = std::get_if<PDEGridConfig>(&pde_grid)) {
-                const auto& grid_spec = explicit_grid->grid_spec;
-                const size_t n_time = explicit_grid->n_time;
-
-                constexpr double MAX_WIDTH = 5.8;
-                constexpr double MAX_DX = 0.05;
-
-                const double grid_width = grid_spec.x_max() - grid_spec.x_min();
-
-                double max_dx;
-                if (grid_spec.type() == GridSpec<double>::Type::Uniform) {
-                    max_dx = grid_width / static_cast<double>(grid_spec.n_points() - 1);
-                } else {
-                    auto grid_buffer = grid_spec.generate();
-                    auto spacings = grid_buffer.span() | std::views::pairwise
-                                                       | std::views::transform([](auto pair) {
-                                                             auto [a, b] = pair;
-                                                             return b - a;
-                                                         });
-                    max_dx = std::ranges::max(spacings);
-                }
-
-                auto sigma_sqrt_tau = [](const PricingParams& p) {
-                    return p.volatility * std::sqrt(p.maturity);
-                };
-                const double max_sigma_sqrt_tau = std::ranges::max(
-                    all_params | std::views::transform(sigma_sqrt_tau));
-                const double min_required_width = 6.0 * max_sigma_sqrt_tau;
-
-                const bool grid_meets_constraints =
-                    (grid_width <= MAX_WIDTH) &&
-                    (max_dx <= MAX_DX) &&
-                    (grid_width >= min_required_width);
-
-                if (grid_meets_constraints) {
-                    const double max_maturity = tau_grid.back();
-                    TimeDomain time_domain = TimeDomain::from_n_steps(0.0, max_maturity, n_time);
-                    PDEGridSpec custom_grid{PDEGridConfig{grid_spec, time_domain.n_steps(), std::vector<double>{}}};
-                    fresh_results = batch_solver.solve_batch(missing_params, true, nullptr, custom_grid);
-                } else {
-                    GridAccuracyParams accuracy;
-                    const size_t n_points = grid_spec.n_points();
-                    const size_t clamped = std::clamp(n_points, size_t{100}, size_t{1200});
-                    accuracy.min_spatial_points = clamped;
-                    accuracy.max_spatial_points = clamped;
-                    accuracy.max_time_steps = n_time;
-
-                    if (grid_spec.type() == GridSpec<double>::Type::SinhSpaced) {
-                        accuracy.alpha = grid_spec.concentration();
-                    }
-
-                    const double x_min = grid_spec.x_min();
-                    const double x_max = grid_spec.x_max();
-                    const double max_abs_x = std::max(std::abs(x_min), std::abs(x_max));
-                    constexpr double DOMAIN_MARGIN_FACTOR = 1.1;
-
-                    if (max_sigma_sqrt_tau >= 1e-10) {
-                        double required_n_sigma = (max_abs_x / max_sigma_sqrt_tau) * DOMAIN_MARGIN_FACTOR;
-                        accuracy.n_sigma = std::max(5.0, required_n_sigma);
-                    }
-
-                    batch_solver.set_grid_accuracy(accuracy);
-                    fresh_results = batch_solver.solve_batch(missing_params, true);
-                }
-            } else if (const auto* accuracy_grid = std::get_if<GridAccuracyParams>(&pde_grid)) {
-                // Auto-estimated grid: use accuracy params directly
-                batch_solver.set_grid_accuracy(*accuracy_grid);
-                fresh_results = batch_solver.solve_batch(missing_params, true);
-            }
-
-            // Add fresh results to cache
-            for (size_t i = 0; i < fresh_results.results.size(); ++i) {
-                if (fresh_results.results[i].has_value()) {
-                    double sigma = missing_params[i].volatility;
-                    double rate = get_zero_rate(missing_params[i].rate, missing_params[i].maturity);
-                    auto result_ptr = std::make_shared<AmericanOptionResult>(
-                        fresh_results.results[i].value().grid(),
-                        missing_params[i]);
-                    cache_.add(sigma, rate, std::move(result_ptr));
-                }
-            }
-        } else {
-            fresh_results.failed_count = 0;
-        }
-
-        // Merge cached + fresh results into full batch
-        auto merged_results = merge_results(all_params, missing_indices, fresh_results);
-
-        // Extract tensor from merged results
-        auto tensor_result = builder.extract_tensor(merged_results, axes);
-        if (!tensor_result.has_value()) {
-            return std::unexpected(tensor_result.error());
-        }
-
-        auto& extraction = tensor_result.value();
-
-        // Repair failed slices if needed
-        RepairStats repair_stats{0, 0};
-        if (!extraction.failed_pde.empty() || !extraction.failed_spline.empty()) {
-            auto repair_result = builder.repair_failed_slices(
-                extraction.tensor, extraction.failed_pde,
-                extraction.failed_spline, axes);
-            if (!repair_result.has_value()) {
-                return std::unexpected(repair_result.error());
-            }
-            repair_stats = repair_result.value();
-        }
-
-        // Fit coefficients
-        auto fit_result = builder.fit_coeffs(extraction.tensor, axes);
-        if (!fit_result.has_value()) {
-            return std::unexpected(fit_result.error());
-        }
-        auto coeffs_result = std::move(fit_result->coefficients);
-
-        // Build metadata
-        PriceTableMetadata metadata;
-        metadata.K_ref = chain.spot;
-        metadata.dividends.dividend_yield = chain.dividend_yield;
-        metadata.m_min = m_grid.front();
-        metadata.m_max = m_grid.back();
-        metadata.dividends.discrete_dividends = {};
-        metadata.content = SurfaceContent::EarlyExercisePremium;
-
-        // Build surface
-        auto surface = PriceTableSurface<4>::build(axes, coeffs_result, metadata);
-        if (!surface.has_value()) {
-            return std::unexpected(surface.error());
-        }
-
-        // Store for later extraction
-        last_surface = surface.value();
-        last_axes = axes;
-
-        size_t pde_solves = missing_params.size();
-
-        // Return a handle that queries the surface (reconstruct full American price)
-        auto surface_ptr = surface.value();
-        auto aps = AmericanPriceSurface::create(surface_ptr, type);
-        if (!aps.has_value()) {
-            return std::unexpected(PriceTableError{PriceTableErrorCode::InvalidConfig});
-        }
-
-        return SurfaceHandle{
-            .price = [aps = std::move(*aps)](double query_spot, double strike, double tau,
-                                             double sigma, double rate) -> double {
-                return aps.price(query_spot, strike, tau, sigma, rate);
-            },
-            .pde_solves = pde_solves
-        };
+                           const std::vector<double>& r_grid) {
+        return build_cached_surface(m_grid, tau_grid, v_grid, r_grid,
+                                    chain.spot, chain.dividend_yield,
+                                    pde_grid, type,
+                                    build_iteration, last_surface, last_axes);
     };
 
-    // ValidateFn: fresh FD solve for a single validation point
-    ValidateFn validate_fn = [&](double spot, double strike, double tau,
-                                  double sigma, double rate)
-        -> std::expected<double, SolverError>
-    {
-        PricingParams params;
-        params.spot = spot;
-        params.strike = strike;
-        params.maturity = tau;
-        params.rate = rate;
-        params.dividend_yield = chain.dividend_yield;
-        params.option_type = type;
-        params.volatility = sigma;
-
-        auto fd_result = solve_american_option(params);
-        if (!fd_result.has_value()) {
-            return std::unexpected(fd_result.error());
-        }
-        return fd_result->value();
-    };
+    auto validate_fn = make_validate_fn(chain.dividend_yield, type);
 
     // compute_error: FD American vega for standard path
     auto compute_error_fn = [this, &validate_fn](
@@ -1067,36 +1105,9 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
         return compute_error_metric(price_error, vega);
     };
 
-    RefinementContext ctx{
-        .spot = chain.spot,
-        .dividend_yield = chain.dividend_yield,
-        .option_type = type,
-        .min_moneyness = min_moneyness,
-        .max_moneyness = max_moneyness,
-        .min_tau = min_tau,
-        .max_tau = max_tau,
-        .min_vol = min_vol,
-        .max_vol = max_vol,
-        .min_rate = min_rate,
-        .max_rate = max_rate
-    };
-
-    // ========================================================================
-    // 3. Run refinement and assemble result
-    // ========================================================================
-
-    // Build initial grids from chain data (ensures user-specified knots are grid points)
-    InitialGrids initial_grids;
-    initial_grids.moneyness.reserve(chain.strikes.size());
-    for (double strike : chain.strikes) {
-        initial_grids.moneyness.push_back(std::log(chain.spot / strike));
-    }
-    initial_grids.tau = chain.maturities;
-    initial_grids.vol = chain.implied_vols;
-    initial_grids.rate = chain.rates;
-
     auto grid_result = run_refinement(params_, build_fn, validate_fn, ctx,
-                                      compute_error_fn, initial_grids);
+                                      compute_error_fn,
+                                      extract_initial_grids(chain));
     if (!grid_result.has_value()) {
         return std::unexpected(grid_result.error());
     }
@@ -1123,16 +1134,8 @@ AdaptiveGridBuilder::build(const OptionGrid& chain,
 double AdaptiveGridBuilder::compute_error_metric(
     double price_error, double vega) const
 {
-    double vega_clamped = std::max(std::abs(vega), params_.vega_floor);
-    double iv_error = price_error / vega_clamped;
-
-    // Cap when price is already within tolerance.
-    // Prevents FD noise from driving runaway refinement.
-    double price_tol = params_.target_iv_error * params_.vega_floor;
-    if (price_error <= price_tol) {
-        iv_error = std::min(iv_error, params_.target_iv_error);
-    }
-    return iv_error;
+    return compute_iv_error(price_error, vega,
+                            params_.vega_floor, params_.target_iv_error);
 }
 
 BatchAmericanOptionResult AdaptiveGridBuilder::merge_results(
