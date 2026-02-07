@@ -89,10 +89,10 @@ public:
     ///
     /// Creates a PriceTableBuilder and axes from explicit vectors.
     /// Sorts and deduplicates each input vector.
-    /// Validates positivity for moneyness, maturity, volatility, K_ref.
+    /// Validates positivity for maturity, volatility, K_ref.
     /// Rates may be negative.
     ///
-    /// @param moneyness Moneyness values (spot/strike ratios, must be > 0)
+    /// @param log_moneyness Log-moneyness values (ln(S/K))
     /// @param maturity Time to expiration values in years (must be > 0)
     /// @param volatility Volatility values (must be > 0)
     /// @param rate Risk-free rate values (may be negative)
@@ -104,7 +104,7 @@ public:
     /// @return Pair of (builder, axes) or error
     static Setup
     from_vectors(
-        std::vector<double> moneyness,
+        std::vector<double> log_moneyness,
         std::vector<double> maturity,
         std::vector<double> volatility,
         std::vector<double> rate,
