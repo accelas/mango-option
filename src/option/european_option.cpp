@@ -34,20 +34,12 @@ double EuropeanOptionResult::compute_price(double S) const {
     if (tau <= 0.0 || sigma <= 0.0) {
         if (tau <= 0.0) {
             // At expiry: intrinsic value
-            if (params_.option_type == OptionType::PUT) {
-                return std::max(K - S, 0.0);
-            } else {
-                return std::max(S - K, 0.0);
-            }
+            return intrinsic_value(S, K, params_.option_type);
         }
         // Zero vol, positive maturity: discounted intrinsic
         double S_fwd = S * std::exp(-q * tau);
         double K_disc = K * std::exp(-r * tau);
-        if (params_.option_type == OptionType::PUT) {
-            return std::max(K_disc - S_fwd, 0.0);
-        } else {
-            return std::max(S_fwd - K_disc, 0.0);
-        }
+        return intrinsic_value(S_fwd, K_disc, params_.option_type);
     }
 
     auto [d1, d2] = compute_d1_d2(S);

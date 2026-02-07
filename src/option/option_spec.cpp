@@ -71,16 +71,8 @@ std::expected<void, ValidationError> validate_iv_query(const IVQuery& query) {
     }
 
     // Check for arbitrage violations
-    double intrinsic;
-    double upper_bound;
-
-    if (query.option_type == OptionType::CALL) {
-        intrinsic = std::max(query.spot - query.strike, 0.0);
-        upper_bound = query.spot;
-    } else {  // PUT
-        intrinsic = std::max(query.strike - query.spot, 0.0);
-        upper_bound = query.strike;
-    }
+    double intrinsic = intrinsic_value(query.spot, query.strike, query.option_type);
+    double upper_bound = (query.option_type == OptionType::CALL) ? query.spot : query.strike;
 
     if (query.market_price < intrinsic) {
         return std::unexpected(ValidationError(

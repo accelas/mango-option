@@ -292,13 +292,7 @@ template <PriceSurface Surface>
 std::pair<double, double>
 InterpolatedIVSolver<Surface>::adaptive_bounds(const IVQuery& query) const
 {
-    // Compute intrinsic value based on option type
-    double intrinsic;
-    if (query.option_type == OptionType::CALL) {
-        intrinsic = std::max(query.spot - query.strike, 0.0);
-    } else {  // PUT
-        intrinsic = std::max(query.strike - query.spot, 0.0);
-    }
+    double intrinsic = intrinsic_value(query.spot, query.strike, query.option_type);
 
     // Analyze time value to set adaptive bounds
     const double time_value = query.market_price - intrinsic;

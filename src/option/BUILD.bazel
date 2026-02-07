@@ -183,6 +183,7 @@ cc_library(
     hdrs = ["option_spec.hpp"],
     deps = [
         "//src/support:error_types",
+        "//src/support:parallel",
         "//src/math:yield_curve",
     ],
     visibility = ["//visibility:public"],

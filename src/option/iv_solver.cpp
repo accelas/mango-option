@@ -24,15 +24,10 @@ double IVSolver::estimate_upper_bound(const IVQuery& query) const {
     // Upper bound based on the relationship: V_market ≈ Intrinsic + Time Value
     // For deep ITM options, time value is small, so high vol is unlikely
 
-    double intrinsic_value;
-    if (query.option_type == OptionType::CALL) {
-        intrinsic_value = std::max(query.spot - query.strike, 0.0);
-    } else {
-        intrinsic_value = std::max(query.strike - query.spot, 0.0);
-    }
+    double intrinsic_val = intrinsic_value(query.spot, query.strike, query.option_type);
 
     // Time value = Market Price - Intrinsic Value
-    double time_value = query.market_price - intrinsic_value;
+    double time_value = query.market_price - intrinsic_val;
 
     // For ATM/OTM options (high time value), use higher upper bound
     // For ITM options (low time value), use lower upper bound
@@ -162,9 +157,7 @@ IVSolver::validate_query(const IVQuery& query) const {
 std::expected<IVSuccess, IVError>
 IVSolver::solve_brent(const IVQuery& query) const {
     // Adaptive bounds logic
-    double intrinsic = (query.option_type == OptionType::CALL)
-        ? std::max(0.0, query.spot - query.strike)
-        : std::max(0.0, query.strike - query.spot);
+    double intrinsic = intrinsic_value(query.spot, query.strike, query.option_type);
 
     double time_value = query.market_price - intrinsic;
     double time_value_ratio = time_value / query.market_price;

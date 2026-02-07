@@ -6,9 +6,12 @@
 
 #pragma once
 
+#include <cmath>
 #include <expected>
 #include "mango/support/error_types.hpp"
+#include "mango/support/parallel.hpp"
 #include "mango/math/yield_curve.hpp"
+#include <span>
 #include <string>
 #include <vector>
 #include <utility>
@@ -110,6 +113,43 @@ enum class OptionType {
     CALL,
     PUT
 };
+
+// ============================================================================
+// Log-moneyness payoff (x = ln(S/K)), i.e. payoff/K for the PDE solver
+// ============================================================================
+
+/// Log put payoff: max(1 - e^x, 0)
+inline void log_put_payoff(std::span<const double> x, std::span<double> out) {
+    MANGO_PRAGMA_SIMD
+    for (size_t i = 0; i < x.size(); ++i) {
+        out[i] = std::max(1.0 - std::exp(x[i]), 0.0);
+    }
+}
+
+/// Log call payoff: max(e^x - 1, 0)
+inline void log_call_payoff(std::span<const double> x, std::span<double> out) {
+    MANGO_PRAGMA_SIMD
+    for (size_t i = 0; i < x.size(); ++i) {
+        out[i] = std::max(std::exp(x[i]) - 1.0, 0.0);
+    }
+}
+
+/// Scalar log put payoff: max(1 - e^x, 0)
+inline double log_put_payoff(double x) {
+    return std::max(1.0 - std::exp(x), 0.0);
+}
+
+/// Scalar log call payoff: max(e^x - 1, 0)
+inline double log_call_payoff(double x) {
+    return std::max(std::exp(x) - 1.0, 0.0);
+}
+
+/// Intrinsic value in price space: max(S-K, 0) for calls, max(K-S, 0) for puts
+inline double intrinsic_value(double spot, double strike, OptionType type) {
+    return (type == OptionType::CALL)
+        ? std::max(spot - strike, 0.0)
+        : std::max(strike - spot, 0.0);
+}
 
 /// Discrete dividend event
 ///
